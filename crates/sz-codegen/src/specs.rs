@@ -8,6 +8,15 @@ use crate::spec::{
 /// W = 2^16: the limb base for all u16-limb SZ verifiers.
 const W: u64 = 1 << 16;
 
+/// Host-side shift added to every signed-carry coefficient so the landed felt is always a valid
+/// u32. The verifier subtracts the matching [`CarryTerm::offset`] polynomial inside the identity
+/// check.
+const CARRY_SHIFT: u32 = 1 << 31;
+
+/// Coefficients of the offset polynomial pinned alongside the modulus: 32 copies of
+/// [`CARRY_SHIFT`].
+const CARRY_OFFSET_VECTOR: &[u32; 32] = &[CARRY_SHIFT; 32];
+
 /// secp256k1 base-field prime `p_k1 = 2^256 - 2^32 - 977` as 16 u16 limbs in little-endian
 /// order. Must encode the same integer as `SECP256K1_BASE_PRIME_U16` in the matching witness
 /// handler (`crates/lib/core/src/handlers/u256_modmul_k1.rs`).
@@ -28,32 +37,30 @@ const SECP256K1_SCALAR_MODULUS: &[u16] = &[
 
 /// `modmul_k1_base(b: u256, a: u256) -> u256` computing `a * b mod (2^256 - 2^32 - 977)`.
 ///
-/// Identity: `a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha) - (W - alpha) * (e_pos(alpha)
-/// - e_neg(alpha)) = 0` over u16 limbs, where `p` is the fixed secp256k1 base-field modulus.
-/// - `a`, `b`: 16 u16 coefficients each (input, 8 u32 limbs). Caller must provide reduced inputs
-///   (a, b < p); the proc does not check this.
-/// - `q`, `c`: 16 coefficients each (witness). Honest witnesses use u16 coefficients; the VM
-///   accepts u32-bounded non-canonical coefficients. The aux check enforces `c(W) < p`, and for a
-///   valid identity `q(W) = floor(a*b / p) < p` follows from `a, b < p`.
-/// - `e_pos`, `e_neg`: 32 u32 carry coefficients each; the top two coefficients (`[30]` and `[31]`)
-///   are zero.
-/// - `p`: 16 u16 coefficients for the fixed modulus. The verifier advice-loads these coefficients
-///   to evaluate `p(alpha)`, but first checks them against a hardcoded Poseidon2 commitment.
+/// Identity: `a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha)
+///   - (W - alpha) * (e_shifted(alpha) - offset(alpha)) = 0` over u16 limbs.
+/// - `a`, `b`: inputs (16 u16 coefficients each = 8 u32 limbs). Caller must provide reduced inputs
+///   `a, b < p`; the proc does not check this.
+/// - `q`, `c`: 16-coefficient witness. Honest witnesses use u16 coefficients; the VM accepts
+///   u32-bounded non-canonical ones. The aux check enforces `c(W) < p`; with `a, b < p`, a valid
+///   identity then forces `q(W) = floor(a*b / p) < p`.
+/// - `e_shifted`: 32-coefficient signed-carry witness in shifted form (`signed_carry + 2^31`). Top
+///   two coefficients equal `2^31` (the shifted encoding of zero), pinned by aux checks.
+/// - `p`: fixed modulus.
+/// - `offset`: fixed `[2^31; 32]` vector. Absorbed alongside `p` in the same fixed-statement prefix
+///   and pinned by a single combined Poseidon2 digest.
 ///
-/// Soundness: with `a, b < p`, the SZ identity implies `a(W) * b(W) = q(W) * p(W) + c(W)`
-/// up to the Schwartz-Zippel failure probability. The `c(W) < p` check pins c as the
-/// canonical residue and forces `q(W) = floor(a*b / p) < p`.
+/// Soundness: with `a, b < p`, the SZ identity implies `a(W) * b(W) = q(W) * p(W) + c(W)` up to
+/// the Schwartz-Zippel failure probability. `c(W) < p` then pins c as the canonical residue.
 ///
 /// The witness `q` and `c` are not required to be canonical u16 digits, only u32-bounded
-/// coefficients. The identity carries an explicit `(W - x) * e(x)` term to absorb
-/// non-canonical coefficient representations (e.g., `c_0 = W, c_1 = 0` evaluates to the same
-/// integer at `x = W` as `c_0 = 0, c_1 = 1`). Soundness depends on the returned integer,
-/// which `c(W) < p` pins; per-coefficient canonicality is unnecessary.
+/// coefficients. The explicit `(W - x) * e(x)` term absorbs non-canonical representations
+/// (e.g., `c_0 = W, c_1 = 0` evaluates the same as `c_0 = 0, c_1 = 1` at `x = W`); soundness
+/// depends on the integer value, which `c(W) < p` pins.
 ///
-/// The u32 bound keeps all coefficient-level arithmetic far below the Goldilocks modulus
-/// (per-term products `q_i * p_j` sum to `< 2^52`, `W * e_i < 2^48`, `c_i < 2^32`), so
-/// Goldilocks wraparound cannot masquerade as an integer carry. Tightening to `< W` per
-/// limb would add range-check cycles without strengthening the soundness argument.
+/// The u32 bound on every coefficient (including the shifted carry) keeps coefficient-level
+/// arithmetic far below the Goldilocks modulus, so wraparound cannot masquerade as an integer
+/// carry.
 pub static MODMUL_K1_BASE: LinearRelation = LinearRelation {
     name: "modmul_k1_base",
     signature: "(b: u256, a: u256) -> u256",
@@ -83,14 +90,16 @@ pub static MODMUL_K1_BASE: LinearRelation = LinearRelation {
             storage: Storage::PerU16,
         },
         Poly {
-            name: "e_pos",
+            name: "e_shifted",
             role: PolyRole::Witness,
             u16_coeff_count: 32,
             storage: Storage::PerU16,
         },
+        // Placed directly after `e_shifted` so the two h-storage cells are word-adjacent;
+        // the identity check uses a single `loadw` to bring both ext2 values onto the stack.
         Poly {
-            name: "e_neg",
-            role: PolyRole::Witness,
+            name: "offset",
+            role: PolyRole::FixedU32Vector { u32_values: CARRY_OFFSET_VECTOR },
             u16_coeff_count: 32,
             storage: Storage::PerU16,
         },
@@ -116,16 +125,22 @@ pub static MODMUL_K1_BASE: LinearRelation = LinearRelation {
         ],
         linears: &[Linear { sign: Sign::Minus, poly: PolyRef("c") }],
         carry: CarryTerm {
-            pos: PolyRef("e_pos"),
-            neg: PolyRef("e_neg"),
+            shifted: PolyRef("e_shifted"),
+            offset: PolyRef("offset"),
             multiplier: W,
         },
     },
     aux_checks: &[
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 31 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 31 },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 30,
+            value: CARRY_SHIFT,
+        },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 31,
+            value: CARRY_SHIFT,
+        },
         AuxCheck::LessThan { lhs: PolyRef("c"), rhs: PolyRef("p") },
     ],
     expose: &[Output {
@@ -168,14 +183,16 @@ pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
             storage: Storage::PerU16,
         },
         Poly {
-            name: "e_pos",
+            name: "e_shifted",
             role: PolyRole::Witness,
             u16_coeff_count: 32,
             storage: Storage::PerU16,
         },
+        // Placed directly after `e_shifted` so the two h-storage cells are word-adjacent;
+        // the identity check uses a single `loadw` to bring both ext2 values onto the stack.
         Poly {
-            name: "e_neg",
-            role: PolyRole::Witness,
+            name: "offset",
+            role: PolyRole::FixedU32Vector { u32_values: CARRY_OFFSET_VECTOR },
             u16_coeff_count: 32,
             storage: Storage::PerU16,
         },
@@ -201,16 +218,22 @@ pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
         ],
         linears: &[Linear { sign: Sign::Minus, poly: PolyRef("c") }],
         carry: CarryTerm {
-            pos: PolyRef("e_pos"),
-            neg: PolyRef("e_neg"),
+            shifted: PolyRef("e_shifted"),
+            offset: PolyRef("offset"),
             multiplier: W,
         },
     },
     aux_checks: &[
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 31 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 31 },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 30,
+            value: CARRY_SHIFT,
+        },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 31,
+            value: CARRY_SHIFT,
+        },
         AuxCheck::LessThan { lhs: PolyRef("c"), rhs: PolyRef("n") },
     ],
     expose: &[Output {

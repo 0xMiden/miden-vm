@@ -5,12 +5,14 @@
 //! The checked-in verifiers prove identities of the form
 //!
 //!   `a(x) * b(x) - q(x) * m(x) - c(x)
-//!       - (W - x) * (e_pos(x) - e_neg(x))  =  0`
+//!       - (W - x) * (e_shifted(x) - offset(x))  =  0`
 //!
-//! where the signed carry polynomial `e = e_pos - e_neg` is provided as two non-negative
-//! halves (each component is u32-bounded). A [`spec::LinearRelation`] is the small internal IR
-//! used to describe that identity, witness layout, and auxiliary checks; [`emit_masm`] turns one
-//! into a fully-specialized MASM proc.
+//! where the signed carry is shifted by `2^31` per coefficient (so every landed felt is a valid
+//! u32) and `offset` is the fixed `[2^31; 32]` polynomial that undoes the shift inside the
+//! identity. Both `m` and `offset` are absorbed as the fixed-statement prefix and pinned under a
+//! single Poseidon2 digest. A [`spec::LinearRelation`] describes one such identity plus its
+//! witness layout and auxiliary checks; [`emit_masm`] turns one into a fully-specialized MASM
+//! proc.
 //!
 //! Emitted artifacts (`modmul_k1_base`, `modmul_k1_scalar`) are checked into source control.
 //! The `regen` binary regenerates them; CI runs it in `--check` mode and fails if the working
@@ -28,4 +30,4 @@ pub mod emit;
 pub mod spec;
 pub mod specs;
 
-pub use emit::{emit_masm, emit_module, modulus_seeded_initial_state};
+pub use emit::{emit_masm, emit_module, fixed_prefix_seeded_initial_state};

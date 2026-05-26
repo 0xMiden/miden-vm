@@ -9,15 +9,15 @@
 //!
 //! Advice payload layout (114 felts) for the generated SZ verifier:
 //!
-//! | index range | meaning                                                |
-//! |-------------|--------------------------------------------------------|
-//! | 0           | `alpha[1]`                                             |
-//! | 1           | `alpha[0]`                                             |
-//! | 2..18       | `p` reversed: `p[15]` at 2, `p[0]` at 17               |
-//! | 18..34      | `q` reversed: `q[15]` at 18, `q[0]` at 33              |
-//! | 34..50      | `c` reversed: `c[15]` at 34, `c[0]` at 49              |
-//! | 50..82      | `e_pos` reversed: `e_pos[31]` at 50, `e_pos[30]` at 51 |
-//! | 82..114     | `e_neg` reversed: `e_neg[31]` at 82, `e_neg[30]` at 83 |
+//! | index range | meaning                                                          |
+//! |-------------|------------------------------------------------------------------|
+//! | 0           | `alpha[1]`                                                       |
+//! | 1           | `alpha[0]`                                                       |
+//! | 2..18       | `p` reversed: `p[15]` at 2, `p[0]` at 17                         |
+//! | 18..50      | `offset` reversed: `offset[31]` at 18, `offset[0]` at 49         |
+//! | 50..66      | `q` reversed: `q[15]` at 50, `q[0]` at 65                        |
+//! | 66..82      | `c` reversed: `c[15]` at 66, `c[0]` at 81                        |
+//! | 82..114     | `e_shifted` reversed: `e_shifted[31]` at 82, `e_shifted[0]` at 113 |
 
 use alloc::vec::Vec;
 
@@ -26,7 +26,7 @@ use miden_core_lib::{
     CoreLibrary,
     handlers::{
         secp256k1_constants::{SECP256K1_BASE_PRIME_U16, SECP256K1_BASE_PRIME_U32},
-        u256_modmul::{compute_carry_polys, compute_modmul_witness, derive_alpha},
+        u256_modmul::{compute_carry_poly, compute_modmul_witness, derive_alpha},
         u256_modmul_k1::{U256_MODMUL_K1_BASE_EVENT_NAME, handle_u256_modmul_k1_base},
     },
 };
@@ -108,63 +108,59 @@ fn honest_advice_succeeds() {
 
 #[test]
 fn tampered_p_limb_traps_at_commitment_mismatch() {
-    // Index 17 is p[0] (lowest-degree limb). The fixed modulus is advice-loaded for batching,
-    // but it is checked against a hardcoded Poseidon commitment before the transcript continues.
+    // Index 17 is p[0] (lowest-degree limb). The combined pin covers both p and the offset
+    // vector, so any modulus felt change trips it.
     let test = build_tampered_test(17, Tamper::BumpModU16);
     test.execute()
         .expect_err("tampered fixed p limb must trap at commitment mismatch");
 }
 
 #[test]
+fn tampered_offset_limb_traps_at_commitment_mismatch() {
+    // Index 49 is offset[0]. Same combined pin as the modulus.
+    let test = build_tampered_test(49, Tamper::Set(0));
+    test.execute()
+        .expect_err("tampered offset limb must trap at commitment mismatch");
+}
+
+#[test]
 fn tampered_q_limb_traps_at_alpha_mismatch() {
-    // Index 33 is q[0] (lowest-degree limb). Bumping by 1 mod 2^16 keeps the felt u16-valid
-    // (so u32assertw passes) but changes the witness, so the FS hash disagrees with the
-    // claimed alpha.
-    let test = build_tampered_test(33, Tamper::BumpModU16);
+    // Index 65 is q[0]. Bumping by 1 mod 2^16 keeps the felt u16-valid (so u32assertw passes)
+    // but changes the witness, so the FS hash disagrees with the claimed alpha.
+    let test = build_tampered_test(65, Tamper::BumpModU16);
     test.execute().expect_err("tampered q limb must trap at FS alpha mismatch");
 }
 
 #[test]
 fn tampered_c_limb_traps_at_alpha_mismatch() {
-    // Index 49 is c[0] (lowest-degree limb).
-    let test = build_tampered_test(49, Tamper::BumpModU16);
+    // Index 81 is c[0].
+    let test = build_tampered_test(81, Tamper::BumpModU16);
     test.execute().expect_err("tampered c limb must trap at FS alpha mismatch");
 }
 
 #[test]
 fn non_u32_witness_felt_traps() {
-    // Index 49 is c[0]. Setting it to 2^32 (just past u32::MAX) must trip the `u32assertw`
-    // batch range-check that runs over every adv_pipe chunk before Horner evaluation.
-    let test = build_tampered_test(49, Tamper::Set(1u64 << 32));
+    // Index 81 is c[0]. Setting it to 2^32 (just past u32::MAX) trips `u32assertw` during the
+    // c absorb.
+    let test = build_tampered_test(81, Tamper::Set(1u64 << 32));
     test.execute().expect_err("non-u32 witness felt must trap at u32assertw");
 }
 
 #[test]
-fn nonzero_e_pos_31_traps() {
-    // Index 50 is e_pos[31] (first element after the p/q/c reversed blocks; e_pos starts here).
-    let test = build_tampered_test(50, Tamper::Set(1));
-    test.execute().expect_err("nonzero e_pos[31] must trap at top-carry assertion");
+fn tampered_e_shifted_31_traps_at_top_felt_check() {
+    // Index 82 is e_shifted[31]. The honest value is 2^31 (zero in shifted form); any other u32
+    // trips the top-felt assert.
+    let test = build_tampered_test(82, Tamper::Set(0));
+    test.execute()
+        .expect_err("tampered e_shifted[31] must trap at top-felt assertion");
 }
 
 #[test]
-fn nonzero_e_pos_30_traps() {
-    // Index 51 is e_pos[30].
-    let test = build_tampered_test(51, Tamper::Set(1));
-    test.execute().expect_err("nonzero e_pos[30] must trap at top-carry assertion");
-}
-
-#[test]
-fn nonzero_e_neg_31_traps() {
-    // Index 82 is e_neg[31].
-    let test = build_tampered_test(82, Tamper::Set(1));
-    test.execute().expect_err("nonzero e_neg[31] must trap at top-carry assertion");
-}
-
-#[test]
-fn nonzero_e_neg_30_traps() {
-    // Index 83 is e_neg[30].
-    let test = build_tampered_test(83, Tamper::Set(1));
-    test.execute().expect_err("nonzero e_neg[30] must trap at top-carry assertion");
+fn tampered_e_shifted_30_traps_at_top_felt_check() {
+    // Index 83 is e_shifted[30].
+    let test = build_tampered_test(83, Tamper::Set(0));
+    test.execute()
+        .expect_err("tampered e_shifted[30] must trap at top-felt assertion");
 }
 
 /// Synthetic-malicious-witness handler for the `c >= p` test. Computes the honest witness for
@@ -179,6 +175,12 @@ fn nonzero_e_neg_30_traps() {
 /// `synthetic_c_ge_p_traps_at_canonical_check` uses `a = 2, b = (p+1)/2`, giving `q = 1, c = 1`
 /// and therefore `c + p = p + 1 < 2^256`.
 struct CGePHandler;
+
+// Local copies of `handlers::u256_modmul::{CARRY_SHIFT, NUM_CARRY_COEFFS}`. The originals are
+// crate-private; any drift from production would trip either the fixed-prefix commitment check
+// (offset coefficients) or the FS alpha check (e_shifted layout).
+const CARRY_SHIFT: u32 = 1 << 31;
+const NUM_CARRY_COEFFS: usize = 32;
 
 impl EventHandler for CGePHandler {
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
@@ -203,29 +205,22 @@ impl EventHandler for CGePHandler {
         let b_u32 = read_a_b_as_u32(process, 1);
         let a_u16 = u32_to_u16_limbs(&a_u32);
         let b_u16 = u32_to_u16_limbs(&b_u32);
-        let (e_pos_new, e_neg_new) =
-            compute_carry_polys(&a_u16, &b_u16, &q_new, &c_new, &SECP256K1_BASE_PRIME_U16);
+        let e_shifted_new =
+            compute_carry_poly(&a_u16, &b_u16, &q_new, &c_new, &SECP256K1_BASE_PRIME_U16);
 
-        let alpha_new = derive_alpha(
-            &SECP256K1_BASE_PRIME_U16,
-            &a_u32,
-            &b_u32,
-            &q_new,
-            &c_new,
-            &e_pos_new,
-            &e_neg_new,
-        );
+        let alpha_new =
+            derive_alpha(&SECP256K1_BASE_PRIME_U16, &a_u32, &b_u32, &q_new, &c_new, &e_shifted_new);
 
         // Push the synthetic advice in the same shape as handle_modmul.
-        let capacity = 2 + 16 + 16 + 16 + 32 + 32;
+        let capacity = 2 + 16 + NUM_CARRY_COEFFS + 16 + 16 + NUM_CARRY_COEFFS;
         let mut advice: Vec<Felt> = Vec::with_capacity(capacity);
         advice.push(alpha_new[1]);
         advice.push(alpha_new[0]);
         advice.extend(SECP256K1_BASE_PRIME_U16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
+        advice.extend(core::iter::repeat_n(Felt::from_u32(CARRY_SHIFT), NUM_CARRY_COEFFS));
         advice.extend(q_new.iter().rev().map(|&v| Felt::from_u32(v as u32)));
         advice.extend(c_new.iter().rev().map(|&v| Felt::from_u32(v as u32)));
-        advice.extend(e_pos_new.iter().rev().map(|&v| Felt::from_u32(v)));
-        advice.extend(e_neg_new.iter().rev().map(|&v| Felt::from_u32(v)));
+        advice.extend(e_shifted_new.iter().rev().map(|&v| Felt::from_u32(v)));
         Ok(vec![AdviceMutation::extend_stack(advice)])
     }
 }
@@ -262,6 +257,64 @@ fn synthetic_c_ge_p_traps_at_canonical_check() {
 
     test.execute()
         .expect_err("synthetic c >= p witness must trap at c < p assertion");
+}
+
+/// Bumps one interior coefficient of `e_shifted` by 1 and re-derives alpha over the mutated
+/// transcript. The mutation is invisible to the fixed-prefix pin (offset unchanged), the
+/// u32assertw checks (value stays in u32), the top-felt asserts (index 0 is interior), and the
+/// FS alpha check (alpha recomputed). The only check left that can fire is the SZ identity, so
+/// this exercises the identity-check assertion path directly.
+struct TamperedEShiftedIdentityHandler;
+
+impl EventHandler for TamperedEShiftedIdentityHandler {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let w =
+            compute_modmul_witness(process, &SECP256K1_BASE_PRIME_U16, &SECP256K1_BASE_PRIME_U32)?;
+
+        // Mutate e_shifted[0] by +1. The honest value is near 2^31, so checked_add(1) cannot
+        // overflow u32; the explicit check makes the safety property obvious.
+        let mut e_shifted_new = w.e_shifted;
+        e_shifted_new[0] =
+            e_shifted_new[0].checked_add(1).expect("e_shifted[0] + 1 must fit in u32");
+
+        let a_u32 = read_a_b_as_u32(process, 9);
+        let b_u32 = read_a_b_as_u32(process, 1);
+        let alpha_new = derive_alpha(
+            &SECP256K1_BASE_PRIME_U16,
+            &a_u32,
+            &b_u32,
+            &w.q_u16,
+            &w.c_u16,
+            &e_shifted_new,
+        );
+
+        let capacity = 2 + 16 + NUM_CARRY_COEFFS + 16 + 16 + NUM_CARRY_COEFFS;
+        let mut advice: Vec<Felt> = Vec::with_capacity(capacity);
+        advice.push(alpha_new[1]);
+        advice.push(alpha_new[0]);
+        advice.extend(SECP256K1_BASE_PRIME_U16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
+        advice.extend(core::iter::repeat_n(Felt::from_u32(CARRY_SHIFT), NUM_CARRY_COEFFS));
+        advice.extend(w.q_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
+        advice.extend(w.c_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
+        advice.extend(e_shifted_new.iter().rev().map(|&v| Felt::from_u32(v)));
+        Ok(vec![AdviceMutation::extend_stack(advice)])
+    }
+}
+
+#[test]
+fn tampered_e_shifted_limb_traps_at_identity_check() {
+    let core_lib = CoreLibrary::default();
+    let mut handlers = core_lib.handlers();
+    handlers.retain(|(name, _)| name != &U256_MODMUL_K1_BASE_EVENT_NAME);
+
+    let test = miden_utils_testing::build_debug_test!(MODMUL_SOURCE, &[])
+        .with_library(core_lib.library().clone())
+        .with_event_handlers(handlers)
+        .with_event_handler(U256_MODMUL_K1_BASE_EVENT_NAME, TamperedEShiftedIdentityHandler);
+
+    test.execute().expect_err(
+        "e_shifted interior-limb tamper with re-derived alpha must trap at identity check",
+    );
 }
 
 // HELPERS

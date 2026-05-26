@@ -9,13 +9,13 @@ const U256_MODMUL_K1_SCALAR_EVENT = event("miden::core::math::u256::u256_modmul_
 
 #! Schwartz-Zippel-based modmul_k1_scalar modular-multiplication verifier.
 #! Main checked identity:
-#!   a(alpha) * b(alpha) - q(alpha) * n(alpha) - c(alpha) = (W - alpha) * (e_pos(alpha) - e_neg(alpha))
+#!   a(alpha) * b(alpha) - q(alpha) * n(alpha) - c(alpha) = (W - alpha) * (e_shifted(alpha) - offset(alpha))
 #! at a Fiat-Shamir-derived alpha in the Miden base-field extension (W = 2^16).
-@locals(130)
+@locals(98)
 pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     emit.U256_MODMUL_K1_SCALAR_EVENT
     # Store inputs to local memory; leave the last one (a) on stack as the
-    # initial rate for the first modulus absorb.
+    # initial rate for the first fixed-prefix absorb.
     loc_storew_le.12 dropw
     loc_storew_le.16 dropw
     loc_storew_le.4
@@ -38,10 +38,9 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     swapdw
     # => [a_hi(4), a_lo(4), R_pad(4), ptr, alpha_addr, acc(2), ...]
 
-    # ----- fixed modulus: advice load + commitment check + n(alpha) -----
-    # adv_pipe streams 8 n u16 limbs into the rate, mirrors them to mem[ptr..ptr+8],
-    # and advances ptr. horner_eval_base accumulates n(alpha) into acc at depths 14/15.
-    # permute mixes the state(12) at depths 0-11 for the FS commitment.
+    # ----- fixed-statement prefix: modulus || carry-shift offset vector -----
+    # Phase A: adv_pipe streams n in 2 rate chunks, mirrors those limbs
+    # to scratch memory, and advances ptr. horner_eval_base accumulates n(alpha).
     repeat.2
         adv_pipe
         horner_eval_base
@@ -49,16 +48,30 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     end
     # => [state(12), ptr, alpha_addr, n(alpha), ...]
 
-    # Assert the post-absorb state[0..4] equals the pinned digest of n.
-    push.17002576470566742061.17503554994589894002.2307714402018236846.13708550271415809132
-    assert_eqw.err="sz: fixed modulus commitment mismatch"
-    # => [state[4..12], ptr, alpha_addr, n(alpha), ...]  (popped 8: pinned + state[0..4])
+    # Snapshot n(alpha) and reset acc for Phase B.
+    movup.14 loc_store.96 push.0 movdn.14
+    movup.15 loc_store.97 push.0 movdn.15
+    # => [state(12), ptr, alpha_addr, 0, 0, ...]
 
-    # Snapshot n(alpha) to mem (now at depths 10/11 after assert_eqw's shift),
-    # reset depths 10/11, retarget ptr to the first input, and restore four zero rate
-    # lanes for the next absorb.
-    movup.10 loc_store.128 push.0 movdn.10
-    movup.11 loc_store.129 push.0 movdn.11
+    # Phase B: adv_pipe streams offset in 4 rate chunks, mirrors those values
+    # to scratch memory, and advances ptr. The combined `assert_eqw` below pins both
+    # n and offset; horner_eval_base accumulates offset(alpha).
+    repeat.4
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+    # => [state(12), ptr, alpha_addr, offset(alpha), ...]
+
+    # Assert the post-absorb state[0..4] equals the pinned digest of (n || offset).
+    push.4891251607816454439.2536250355074665265.5574107221015299247.14006641248973905368
+    assert_eqw.err="sz: fixed-statement commitment mismatch (modulus + offset)"
+    # => [state[4..12], ptr, alpha_addr, offset(alpha), ...]  (popped 8: pinned + state[0..4])
+
+    # Snapshot offset(alpha), reset the accumulator, retarget ptr to the first input,
+    # and restore four zero rate lanes for the next absorb.
+    movup.10 loc_store.94 push.0 movdn.10
+    movup.11 loc_store.95 push.0 movdn.11
     movup.8 drop locaddr.4 movdn.8
     padw
     # => [0(4), state[4..12], locaddr.4, alpha_addr, 0, 0, ...]
@@ -87,8 +100,8 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     # => [state(12), ptr, alpha_addr, q(alpha), ...]
 
     # Snapshot q(alpha) and reset depths 14/15 for c.
-    movup.14 loc_store.120 push.0 movdn.14
-    movup.15 loc_store.121 push.0 movdn.15
+    movup.14 loc_store.88 push.0 movdn.14
+    movup.15 loc_store.89 push.0 movdn.15
     # => [state(12), ptr, alpha_addr, 0, 0, ...]
 
     # ----- absorb witness c via adv_pipe -----
@@ -105,16 +118,16 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     end
     # => [state(12), ptr, alpha_addr, c(alpha), ...]
 
-    # Snapshot c(alpha) and reset depths 14/15 for e_pos.
-    movup.14 loc_store.122 push.0 movdn.14
-    movup.15 loc_store.123 push.0 movdn.15
+    # Snapshot c(alpha) and reset depths 14/15 for e_shifted.
+    movup.14 loc_store.90 push.0 movdn.14
+    movup.15 loc_store.91 push.0 movdn.15
     # => [state(12), ptr, alpha_addr, 0, 0, ...]
 
-    # ----- absorb witness e_pos via adv_pipe -----
-    # adv_pipe streams 8 e_pos coefficients into the rate, mirrors them to
+    # ----- absorb witness e_shifted via adv_pipe -----
+    # adv_pipe streams 8 e_shifted coefficients into the rate, mirrors them to
     # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
     # u32assertw range-checks both halves of the rate. horner_eval_base
-    # accumulates e_pos(alpha) into acc at depths 14/15.
+    # accumulates e_shifted(alpha) into acc at depths 14/15.
     repeat.4
         adv_pipe
         u32assertw
@@ -122,36 +135,15 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
         horner_eval_base
         exec.poseidon2::permute
     end
-    # => [state(12), ptr, alpha_addr, e_pos(alpha), ...]
+    # => [state(12), ptr, alpha_addr, e_shifted(alpha), ...]
 
-    # Snapshot e_pos(alpha) and reset depths 14/15 for e_neg.
-    movup.14 loc_store.124 push.0 movdn.14
-    movup.15 loc_store.125 push.0 movdn.15
-    # => [state(12), ptr, alpha_addr, 0, 0, ...]
+    # Snapshot e_shifted(alpha) via dup; acc stays in place (discarded by the FS-check teardown).
+    dup.14 loc_store.92
+    dup.15 loc_store.93
 
-    # ----- absorb witness e_neg via adv_pipe -----
-    # adv_pipe streams 8 e_neg coefficients into the rate, mirrors them to
-    # mem[ptr..ptr+8], and advances ptr. Coefficients are u32-bounded (not u16);
-    # u32assertw range-checks both halves of the rate. horner_eval_base
-    # accumulates e_neg(alpha) into acc at depths 14/15.
-    repeat.4
-        adv_pipe
-        u32assertw
-        swapw u32assertw swapw
-        horner_eval_base
-        exec.poseidon2::permute
-    end
-    # => [state(12), ptr, alpha_addr, e_neg(alpha), ...]
-
-    # Snapshot e_neg(alpha) via dup; acc stays in place (discarded by the FS-check teardown).
-    dup.14 loc_store.126
-    dup.15 loc_store.127
-
-    # ----- top-carry zero checks (each line is net-zero on the stack) -----
-    loc_load.53 assertz.err="sz: e_pos_30 must be 0 (top carry coefficient)"
-    loc_load.52 assertz.err="sz: e_pos_31 must be 0 (top carry coefficient)"
-    loc_load.85 assertz.err="sz: e_neg_30 must be 0 (top carry coefficient)"
-    loc_load.84 assertz.err="sz: e_neg_31 must be 0 (top carry coefficient)"
+    # ----- top-carry limb checks (each line is net-zero on the stack) -----
+    loc_load.53 push.2147483648 assert_eq.err="sz: e_shifted_30 must equal 2147483648 (top carry coefficient)"
+    loc_load.52 push.2147483648 assert_eq.err="sz: e_shifted_31 must equal 2147483648 (top carry coefficient)"
 
     # ----- Fiat-Shamir equality check -----
     loc_load.0
@@ -186,8 +178,8 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     # => [pad(5), alpha_addr, a(alpha), ...]
 
     # Snapshot a(alpha) and reset depths 6/7 for b.
-    movup.6 loc_store.116 push.0 movdn.6
-    movup.7 loc_store.117 push.0 movdn.7
+    movup.6 loc_store.84 push.0 movdn.6
+    movup.7 loc_store.85 push.0 movdn.7
     # => [pad(5), alpha_addr, 0, 0, ...]
 
     # ----- b(alpha) horner eval -----
@@ -212,21 +204,23 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     # => [pad(5), alpha_addr, b(alpha), ...]
 
     # Snapshot b(alpha) via dup; acc stays in place.
-    dup.6 loc_store.118
-    dup.7 loc_store.119
+    dup.6 loc_store.86
+    dup.7 loc_store.87
 
     # ----- extension-field identity check -----
-    loc_loadw_le.120
+    loc_loadw_le.88
     # => [q, c, residual(4), ...]
 
     # q*n first: this puts T1 directly above q*n (no movup needed for T2 = T1 + q*n).
-    loc_load.129
-    loc_load.128
+    loc_load.97
+    loc_load.96
     ext2mul
     # => [q*n, c, residual(4), ...]
 
-    # T1 = (alpha - W) * (e_neg - e_pos).
-    padw loc_loadw_le.124
+    # T1 = (W - alpha) * (e_shifted(alpha) - offset(alpha)), computed as the equivalent
+    # (alpha - W) * (offset(alpha) - e_shifted(alpha)) so a single loadw on the adjacent (e_shifted, offset)
+    # ext2 pair feeds ext2sub directly.
+    padw loc_loadw_le.92
     ext2sub
     loc_load.1
     loc_load.0 sub.65536
@@ -238,7 +232,7 @@ pub proc modmul_k1_scalar(b: u256, a: u256) -> u256
     # => [T3 = T1 + q*n + c, residual(4), ...]
 
     # LHS = a*b; identity is T3 - LHS == 0.
-    padw loc_loadw_le.116
+    padw loc_loadw_le.84
     ext2mul
     ext2sub
     assertz.err="sz: identity check failed at basis coord 0"

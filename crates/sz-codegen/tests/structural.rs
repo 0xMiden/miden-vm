@@ -16,14 +16,12 @@ use miden_sz_codegen::{
 // ----- MODMUL_K1_BASE -----------------------------------------------------------------------
 
 #[test]
-fn modmul_k1_base_emits_signed_carry() {
+fn modmul_k1_base_emits_signed_carry_top_checks() {
     let s = emit_masm(&specs::MODMUL_K1_BASE);
-    // Aux-check error messages name the limb being asserted; these are user-visible at trap
-    // time, so they get explicit coverage beyond the byte-for-byte snapshot.
-    assert!(s.contains("e_pos_30 must be 0"));
-    assert!(s.contains("e_pos_31 must be 0"));
-    assert!(s.contains("e_neg_30 must be 0"));
-    assert!(s.contains("e_neg_31 must be 0"));
+    // Aux-check error messages name the limb and the expected shifted-encoding value; these are
+    // user-visible at trap time, so they get explicit coverage beyond the byte-for-byte snapshot.
+    assert!(s.contains("e_shifted_30 must equal 2147483648"));
+    assert!(s.contains("e_shifted_31 must equal 2147483648"));
 }
 
 #[test]
@@ -51,10 +49,16 @@ fn modmul_k1_scalar_names_group_order_in_generated_masm() {
 #[should_panic(expected = "must declare exactly one LessThan aux check")]
 fn modmul_spec_without_canonical_check_is_rejected() {
     const AUX_WITHOUT_LT: &[AuxCheck] = &[
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_pos"), index: 31 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 30 },
-        AuxCheck::LimbIsZero { poly: PolyRef("e_neg"), index: 31 },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 30,
+            value: 1 << 31,
+        },
+        AuxCheck::LimbEquals {
+            poly: PolyRef("e_shifted"),
+            index: 31,
+            value: 1 << 31,
+        },
     ];
 
     let mut rel = specs::MODMUL_K1_BASE;
@@ -65,7 +69,7 @@ fn modmul_spec_without_canonical_check_is_rejected() {
 #[test]
 fn modmul_k1_base_emits_fs_check() {
     let s = emit_masm(&specs::MODMUL_K1_BASE);
-    assert!(s.contains("fixed modulus commitment mismatch"));
+    assert!(s.contains("fixed-statement commitment mismatch (modulus + offset)"));
     assert!(s.contains("alpha_0 mismatch (Fiat-Shamir failure)"));
     assert!(s.contains("alpha_1 mismatch (Fiat-Shamir failure)"));
 }

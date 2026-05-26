@@ -1,12 +1,13 @@
 //! Shared witness logic for the generated Schwartz-Zippel u256 modmul verifiers. The MASM
 //! verifier checks
-//! `a(x) * b(x) - q(x) * m(x) - c(x) - (W - x) * (e_pos(x) - e_neg(x)) = 0`
-//! at a Fiat-Shamir-derived point in the quadratic extension of the Miden base field, where
-//! `e_pos` and `e_neg` are the non-negative halves of the signed carry polynomial.
+//! `a(x) * b(x) - q(x) * m(x) - c(x) - (W - x) * (e_shifted(x) - offset(x)) = 0`
+//! at a Fiat-Shamir-derived point in the quadratic extension of the Miden base field. The carry
+//! polynomial is shifted (`e_shifted = signed_carry + CARRY_SHIFT` per coefficient) so every
+//! landed felt is a valid u32; the fixed `offset = [CARRY_SHIFT; NUM_CARRY_COEFFS]` polynomial,
+//! pinned alongside the modulus, undoes the shift inside the identity.
 //!
-//! This module derives the advice witness and Fiat-Shamir challenge consumed by the generated
-//! MASM verifiers. Per-curve event handlers in `u256_modmul_k1.rs` are thin wrappers that supply
-//! the modulus constants and delegate to [`handle_modmul`].
+//! Per-curve event handlers in `u256_modmul_k1.rs` are thin wrappers that supply the modulus
+//! constants and delegate to [`handle_modmul`].
 
 use alloc::{vec, vec::Vec};
 
@@ -14,20 +15,22 @@ use miden_core::{Felt, crypto::hash::Poseidon2};
 use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 pub(crate) const U16_LIMBS_PER_OPERAND: usize = 16;
-/// Each signed-carry half is stored in 32 slots; the VM asserts that the top two slots are zero.
+/// Slot count for the shifted carry polynomial. The verifier pins the top two slots to
+/// [`CARRY_SHIFT`] (the shifted encoding of zero).
 pub(crate) const NUM_CARRY_COEFFS: usize = 32;
 /// Limb base for the u16-limb Schwartz-Zippel modmul family.
 const W: i64 = 1 << 16;
+/// Host-side shift added to every signed-carry coefficient so the landed felt is always a valid
+/// u32. The verifier subtracts the fixed offset polynomial inside the identity.
+pub(crate) const CARRY_SHIFT: u32 = 1 << 31;
 
 /// Output of [`compute_modmul_witness`]: everything the SZ verifier needs to check
 /// `a * b = q * m + c`.
 ///
 /// Fields:
-/// - `q_u16`, `c_u16`: quotient and remainder of the division, as u16 limbs.
-/// - `e_pos`, `e_neg`: non-negative halves of the signed carry polynomial (verified carry is `e_pos
-///   - e_neg`).
-/// - `alpha`: Fiat-Shamir challenge in the quadratic extension of the Miden base field, stored as
-///   two base felts.
+/// - `q_u16`, `c_u16`: quotient and remainder, as u16 limbs.
+/// - `e_shifted`: signed carry polynomial in shifted form (`signed + CARRY_SHIFT` per coefficient).
+/// - `alpha`: Fiat-Shamir challenge in the quadratic extension, as two base felts.
 ///
 /// `#[doc(hidden)]`: exposed only for verifier-level negative tests
 /// (see `tests/math/u256_modmul_k1_traps.rs`). Not a stable public API.
@@ -35,8 +38,7 @@ const W: i64 = 1 << 16;
 pub struct ModmulWitness {
     pub q_u16: [u16; U16_LIMBS_PER_OPERAND],
     pub c_u16: [u16; U16_LIMBS_PER_OPERAND],
-    pub e_pos: [u32; NUM_CARRY_COEFFS],
-    pub e_neg: [u32; NUM_CARRY_COEFFS],
+    pub e_shifted: [u32; NUM_CARRY_COEFFS],
     pub alpha: [Felt; 2],
 }
 
@@ -59,32 +61,35 @@ pub fn compute_modmul_witness(
     let b_u16 = u32_to_u16_limbs(&b_u32);
     let q_u16 = u32_to_u16_limbs(&q_u32);
     let c_u16 = u32_to_u16_limbs(&c_u32);
-    let (e_pos, e_neg) = compute_carry_polys(&a_u16, &b_u16, &q_u16, &c_u16, modulus_u16);
-    let alpha = derive_alpha(modulus_u16, &a_u32, &b_u32, &q_u16, &c_u16, &e_pos, &e_neg);
-    Ok(ModmulWitness { q_u16, c_u16, e_pos, e_neg, alpha })
+    let e_shifted = compute_carry_poly(&a_u16, &b_u16, &q_u16, &c_u16, modulus_u16);
+    let alpha = derive_alpha(modulus_u16, &a_u32, &b_u32, &q_u16, &c_u16, &e_shifted);
+    Ok(ModmulWitness { q_u16, c_u16, e_shifted, alpha })
 }
 
-/// Poseidon2 sponge state after absorbing the fixed modulus in the same order the MASM verifier
-/// advice-loads it for `horner_eval_base`: high limb first, 8 limbs per chunk.
+/// Poseidon2 sponge state after the verifier absorbs the fixed-statement prefix: modulus
+/// followed by `[CARRY_SHIFT; NUM_CARRY_COEFFS]`. Both are absorbed high-limb first, 8 limbs
+/// per chunk, matching the MASM verifier's `adv_pipe` consumption.
 ///
-/// The Rust alpha derivation starts from this state. The MASM verifier reaches the same state
-/// by advice-loading the fixed modulus, running it through `adv_pipe` + `horner_eval_base` +
-/// `permute`, and asserting the resulting Poseidon2 digest equals a pinned commitment.
-///
-/// Mirrored by `sz-codegen`'s `modulus_seeded_initial_state`. Cross-crate agreement is
+/// Mirrored by `sz-codegen`'s `fixed_prefix_seeded_initial_state`; cross-crate agreement is
 /// pinned by `k1_{base,scalar}_precomputed_initial_state_pin`.
 #[doc(hidden)]
-pub fn modulus_seeded_initial_state(
+pub fn fixed_prefix_seeded_initial_state(
     modulus_u16: &[u16; U16_LIMBS_PER_OPERAND],
 ) -> [Felt; Poseidon2::STATE_WIDTH] {
     const RATE: usize = 8;
     const _: () = assert!(U16_LIMBS_PER_OPERAND.is_multiple_of(8));
-    let n_chunks = U16_LIMBS_PER_OPERAND / RATE;
+    const _: () = assert!(NUM_CARRY_COEFFS.is_multiple_of(8));
     let mut state = [Felt::ZERO; Poseidon2::STATE_WIDTH];
-    for chunk_idx in 0..n_chunks {
+    for chunk_idx in 0..(U16_LIMBS_PER_OPERAND / RATE) {
         for j in 0..RATE {
             state[j] =
                 Felt::from_u32(modulus_u16[modulus_u16.len() - 1 - (chunk_idx * RATE + j)] as u32);
+        }
+        Poseidon2::apply_permutation(&mut state);
+    }
+    for _ in 0..(NUM_CARRY_COEFFS / RATE) {
+        for cell in state.iter_mut().take(RATE) {
+            *cell = Felt::from_u32(CARRY_SHIFT);
         }
         Poseidon2::apply_permutation(&mut state);
     }
@@ -92,8 +97,10 @@ pub fn modulus_seeded_initial_state(
 }
 
 /// Witness handler for the generated SZ u256 modmul verifier. Pushes
-/// `[alpha_1, alpha_0, modulus_15..modulus_0, q_15..q_0, c_15..c_0, e_pos_31..e_pos_0,
-/// e_neg_31..e_neg_0]` for the MASM verifier in `u256_sz_modmul_*` to consume.
+/// `[alpha_1, alpha_0, modulus_15..modulus_0, offset_31..offset_0, q_15..q_0, c_15..c_0,
+/// e_shifted_31..e_shifted_0]` for the MASM verifier in `u256_sz_modmul_*` to consume. The
+/// offset block is the constant `[CARRY_SHIFT; NUM_CARRY_COEFFS]` vector pinned with the
+/// modulus, not a witness commitment.
 pub fn handle_modmul(
     process: &ProcessorState,
     modulus_u16: &[u16; U16_LIMBS_PER_OPERAND],
@@ -106,22 +113,20 @@ pub fn handle_modmul(
     advice.push(w.alpha[1]);
     advice.push(w.alpha[0]);
     advice.extend(modulus_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
+    advice.extend(core::iter::repeat_n(Felt::from_u32(CARRY_SHIFT), NUM_CARRY_COEFFS));
     advice.extend(w.q_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
     advice.extend(w.c_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
-    advice.extend(w.e_pos.iter().rev().map(|&v| Felt::from_u32(v)));
-    advice.extend(w.e_neg.iter().rev().map(|&v| Felt::from_u32(v)));
+    advice.extend(w.e_shifted.iter().rev().map(|&v| Felt::from_u32(v)));
 
     debug_assert_eq!(advice.len(), capacity);
     Ok(vec![AdviceMutation::extend_stack(advice)])
 }
 
-/// Derives the Fiat-Shamir challenge alpha by starting from [`modulus_seeded_initial_state`] and
-/// hashing the 112-felt transcript `a (8) || b (8) || q_reversed (16) || c_reversed (16)
-/// || e_pos_reversed (32) || e_neg_reversed (32)`.
-///
-/// The MASM verifier in `u256_sz_modmul_*` reaches the same seeded state by advice-loading the
-/// fixed modulus, checking its Poseidon2 commitment, then streaming `(a, b)` and the packed
-/// witness.
+/// Derives the Fiat-Shamir challenge alpha by starting from [`fixed_prefix_seeded_initial_state`]
+/// (the post-(modulus + offset) sponge state) and hashing the 80-felt transcript
+/// `a (8) || b (8) || q_reversed (16) || c_reversed (16) || e_shifted_reversed (32)`. The MASM
+/// verifier reaches the same seeded state via the combined-pin check and the same transcript
+/// order, so the two derivations agree.
 ///
 /// `#[doc(hidden)]`: exposed only so verifier-level negative tests can re-derive alpha for
 /// synthetic witnesses (see `tests/math/u256_modmul_k1_traps.rs`). Not a stable public API.
@@ -132,11 +137,10 @@ pub fn derive_alpha(
     b_u32: &[u32; 8],
     q_u16: &[u16; U16_LIMBS_PER_OPERAND],
     c_u16: &[u16; U16_LIMBS_PER_OPERAND],
-    e_pos: &[u32; NUM_CARRY_COEFFS],
-    e_neg: &[u32; NUM_CARRY_COEFFS],
+    e_shifted: &[u32; NUM_CARRY_COEFFS],
 ) -> [Felt; 2] {
     const HASH_INPUT_LEN: usize =
-        8 + 8 + U16_LIMBS_PER_OPERAND + U16_LIMBS_PER_OPERAND + 2 * NUM_CARRY_COEFFS;
+        8 + 8 + U16_LIMBS_PER_OPERAND + U16_LIMBS_PER_OPERAND + NUM_CARRY_COEFFS;
     const _: () = assert!(HASH_INPUT_LEN.is_multiple_of(8));
 
     let mut input: Vec<Felt> = Vec::with_capacity(HASH_INPUT_LEN);
@@ -144,11 +148,10 @@ pub fn derive_alpha(
     input.extend(b_u32.iter().map(|&v| Felt::from_u32(v)));
     input.extend(q_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
     input.extend(c_u16.iter().rev().map(|&v| Felt::from_u32(v as u32)));
-    input.extend(e_pos.iter().rev().map(|&v| Felt::from_u32(v)));
-    input.extend(e_neg.iter().rev().map(|&v| Felt::from_u32(v)));
+    input.extend(e_shifted.iter().rev().map(|&v| Felt::from_u32(v)));
     debug_assert_eq!(input.len(), HASH_INPUT_LEN);
 
-    let mut state = modulus_seeded_initial_state(modulus_u16);
+    let mut state = fixed_prefix_seeded_initial_state(modulus_u16);
     for chunk in input.chunks_exact(8) {
         state[..8].copy_from_slice(chunk);
         Poseidon2::apply_permutation(&mut state);
@@ -306,32 +309,28 @@ fn u32x8_from_u128_pair(lo: u128, hi: u128) -> [u32; 8] {
 // CARRY POLYNOMIALS
 // ================================================================================================
 
-/// Computes the split carry polynomials `(e_pos, e_neg)` for
-/// `a(x) * b(x) - q(x) * m(x) - c(x) = (W - x) * (e_pos(x) - e_neg(x))` over u16 limbs.
-/// The signed integer carry `e[k] = (conv_k(a,b) - conv_k(q,m) - c_k + e[k-1]) / W` is split
-/// into two non-negative parts: `e_pos[k] = max(e[k], 0)`, `e_neg[k] = max(-e[k], 0)`. Each
-/// is bounded by ~2^21 (well within u32).
+/// Computes the shifted carry polynomial `e_shifted` for the identity
+/// `a(x) * b(x) - q(x) * m(x) - c(x) = (W - x) * (e_shifted(x) - offset(x))` over u16 limbs.
 ///
-/// For 16-limb modmul, `a*b - q*m - c` has degree at most 30, so `(W - x) * e(x)` forces
-/// `deg(e) <= 29`. We still store each signed-carry half in 32 slots so each half occupies
-/// four rate-8 advice/Horner chunks; slots 30 and 31 are therefore zero and asserted by the
-/// MASM verifier.
+/// The signed integer carry `e[k] = (conv_k(a,b) - conv_k(q,m) - c_k + e[k-1]) / W` satisfies
+/// `|e[k]| < 2^21`; shifting by [`CARRY_SHIFT`] keeps each coefficient inside u32 while staying
+/// far from the wrap boundary. Because `(W - x) * e(x)` has degree 30, `deg(e) <= 29`, so
+/// `e_shifted[30] = e_shifted[31] = CARRY_SHIFT` always.
 ///
 /// `#[doc(hidden)]`: exposed only so verifier-level negative tests can recompute the carry
-/// polynomials for synthetic witnesses (see `tests/math/u256_modmul_k1_traps.rs`). Not a
+/// polynomial for synthetic witnesses (see `tests/math/u256_modmul_k1_traps.rs`). Not a
 /// stable public API.
 #[doc(hidden)]
-pub fn compute_carry_polys(
+pub fn compute_carry_poly(
     a: &[u16; U16_LIMBS_PER_OPERAND],
     b: &[u16; U16_LIMBS_PER_OPERAND],
     q: &[u16; U16_LIMBS_PER_OPERAND],
     c: &[u16; U16_LIMBS_PER_OPERAND],
     modulus: &[u16; U16_LIMBS_PER_OPERAND],
-) -> ([u32; NUM_CARRY_COEFFS], [u32; NUM_CARRY_COEFFS]) {
+) -> [u32; NUM_CARRY_COEFFS] {
     const N: usize = U16_LIMBS_PER_OPERAND;
     const CONV_LEN: usize = 2 * N - 1;
 
-    // conv_ab[k] = sum_{i+j=k} a_i * b_j; conv_qm[k] = sum_{i+j=k} q_i * m_j.
     let mut conv_ab = [0i64; CONV_LEN];
     let mut conv_qm = [0i64; CONV_LEN];
     for i in 0..N {
@@ -348,27 +347,17 @@ pub fn compute_carry_polys(
         let lhs = conv_ab[k] - conv_qm[k] - c_k + prev_carry;
         debug_assert!(lhs.rem_euclid(W) == 0, "carry recurrence not divisible by W");
         let next = lhs.div_euclid(W);
-        // Bound is ~2^21; soundness only needs the u32 check on the verifier side.
         debug_assert!(next.unsigned_abs() < 1 << 24, "|carry| larger than expected (got {next})");
         e_signed[k] = next;
         prev_carry = next;
     }
-    // `prev_carry` after the final iteration equals `e_signed[CONV_LEN - 1] = e_signed[30]`;
-    // zero means the carry recurrence closes. The Rust witness array is explicitly initialized
-    // to zero, and this loop never writes `e_signed[31]`, so the honest witness has slot 31 = 0.
-    // The generated MASM still asserts both top slots against the prover-supplied advice.
     debug_assert_eq!(prev_carry, 0, "final carry must be 0 (a*b = q*m + c as integers)");
 
-    let mut e_pos = [0u32; NUM_CARRY_COEFFS];
-    let mut e_neg = [0u32; NUM_CARRY_COEFFS];
+    let mut e_shifted = [CARRY_SHIFT; NUM_CARRY_COEFFS];
     for k in 0..NUM_CARRY_COEFFS {
-        if e_signed[k] >= 0 {
-            e_pos[k] = e_signed[k] as u32;
-        } else {
-            e_neg[k] = (-e_signed[k]) as u32;
-        }
+        e_shifted[k] = (e_signed[k] + CARRY_SHIFT as i64) as u32;
     }
-    (e_pos, e_neg)
+    e_shifted
 }
 
 // ERROR TYPES

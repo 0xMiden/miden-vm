@@ -75,10 +75,11 @@ impl Layout {
     }
 }
 
-/// Number of memory felts a polynomial occupies given its storage form. Constant polys reserve no
-/// coefficient cells in the local layout.
+/// Number of memory felts a polynomial occupies given its storage form. Constant polys and
+/// fixed-vector polys reserve no coefficient cells in the local layout (they are streamed
+/// through advice each call, never persisted past the absorb).
 fn felts_for(poly: &Poly) -> usize {
-    if matches!(poly.role, PolyRole::Constant { .. }) {
+    if matches!(poly.role, PolyRole::Constant { .. } | PolyRole::FixedU32Vector { .. },) {
         return 0;
     }
     match poly.storage {
@@ -215,7 +216,7 @@ fn emit_input_store(rel: &LinearRelation, layout: &Layout, out: &mut String) {
     out.push_str(&format!(
         "    # Store inputs to local memory; leave the last one ({last_name}) on stack as the\n"
     ));
-    out.push_str("    # initial rate for the first modulus absorb.\n");
+    out.push_str("    # initial rate for the first fixed-prefix absorb.\n");
     for (i, poly) in inputs.iter().enumerate() {
         assert!(matches!(poly.storage, Storage::PerU32));
         let off = layout.poly_offset(poly.name);
@@ -242,7 +243,7 @@ fn emit_alpha_pop(out: &mut String) {
 }
 
 /// Builds the FS transcript while Horner-evaluating advice-backed polynomials at alpha. The fixed
-/// modulus is advice-loaded and commitment-checked first. Input polys are absorbed via
+/// prefix is advice-loaded and commitment-checked first. Input polys are absorbed via
 /// `mem_stream`; their alpha-evaluation runs later in [`emit_input_horner`].
 fn emit_streaming(rel: &LinearRelation, layout: &Layout, out: &mut String) {
     let first_input_offset = rel
@@ -281,7 +282,7 @@ fn emit_streaming(rel: &LinearRelation, layout: &Layout, out: &mut String) {
     out.push_str("    push.0 push.0\n");
     out.push_str("    locaddr.0\n");
     out.push_str(&format!("    locaddr.{first_witness_offset}\n"));
-    emit_committed_modulus_prefix(rel, layout, first_input_offset, l, out);
+    emit_committed_fixed_prefix(rel, layout, first_input_offset, l, out);
 
     // Walk polys in order, consolidating consecutive operand-stack absorbs into a single
     // `repeat.N` block (no horner happens during these chunks, so chunks of the same shape can
@@ -362,8 +363,9 @@ fn emit_streaming(rel: &LinearRelation, layout: &Layout, out: &mut String) {
                 }
                 i += 1;
             },
-            PolyRole::Constant { .. } => {
-                // The fixed modulus was handled by `emit_committed_modulus_prefix`.
+            PolyRole::Constant { .. } | PolyRole::FixedU32Vector { .. } => {
+                // Fixed-statement polys (modulus + offset) were handled by
+                // `emit_committed_fixed_prefix`.
                 i += 1;
             },
         }
@@ -392,12 +394,14 @@ fn chunks_for(poly: &Poly) -> usize {
     felts / 8
 }
 
-/// Emits the advice-loaded fixed modulus prefix:
+/// Emits the advice-loaded fixed-statement prefix (modulus || offset_vector):
 /// - start from a zero Poseidon state,
-/// - stream the fixed modulus from advice while evaluating its value at alpha,
-/// - assert the resulting Poseidon digest against the hardcoded commitment,
-/// - reset the Horner accumulator and move the stream pointer to the first operand-stack input.
-fn emit_committed_modulus_prefix(
+/// - stream the fixed modulus from advice while evaluating `modulus(alpha)`,
+/// - snapshot `modulus(alpha)` and reset the Horner accumulator,
+/// - stream the fixed offset vector from advice while evaluating `offset(alpha)`,
+/// - assert the resulting Poseidon digest against the hardcoded combined commitment,
+/// - snapshot `offset(alpha)` to mem and retarget the stream pointer to the first input.
+fn emit_committed_fixed_prefix(
     rel: &LinearRelation,
     layout: &Layout,
     first_input_offset: usize,
@@ -405,10 +409,16 @@ fn emit_committed_modulus_prefix(
     out: &mut String,
 ) {
     let (modulus_poly, modulus) = fixed_modulus(rel);
+    let (offset_poly, offset) = fixed_offset(rel);
     let m = modulus_poly.name;
+    let o = offset_poly.name;
     let l = last_input;
-    let state = modulus_seeded_initial_state(modulus);
+    let state = fixed_prefix_seeded_initial_state(modulus, offset);
     let modulus_h = layout.h_offset(m);
+    let offset_h = layout.h_offset(o);
+    let modulus_chunks = modulus.len() / 8;
+    let offset_chunks = offset.len() / 8;
+
     // padw + swapdw shapes the stack into the [R(8), C(4), ptr, alpha_addr, acc(2), ...]
     // layout that adv_pipe / horner_eval_base / permute expect. After swapdw, the 8 operand-
     // stack-residual felts (last-input halves) sit at depths 0-7 as the initial rate, which
@@ -419,25 +429,43 @@ fn emit_committed_modulus_prefix(
         "    # => [{l}_hi(4), {l}_lo(4), R_pad(4), ptr, alpha_addr, acc(2), ...]\n"
     ));
     out.push('\n');
+    out.push_str(
+        "    # ----- fixed-statement prefix: modulus || carry-shift offset vector -----\n",
+    );
     out.push_str(&format!(
-        "    # ----- fixed modulus: advice load + commitment check + {m}(alpha) -----\n"
+        "    # Phase A: adv_pipe streams {m} in {modulus_chunks} rate chunks, mirrors those limbs\n"
     ));
     out.push_str(&format!(
-        "    # adv_pipe streams 8 {m} u16 limbs into the rate, mirrors them to mem[ptr..ptr+8],\n"
+        "    # to scratch memory, and advances ptr. horner_eval_base accumulates {m}(alpha).\n"
     ));
-    out.push_str(&format!(
-        "    # and advances ptr. horner_eval_base accumulates {m}(alpha) into acc at depths 14/15.\n"
-    ));
-    out.push_str("    # permute mixes the state(12) at depths 0-11 for the FS commitment.\n");
-    out.push_str("    repeat.2\n");
+    out.push_str(&format!("    repeat.{modulus_chunks}\n"));
     out.push_str("        adv_pipe\n");
     out.push_str("        horner_eval_base\n");
     out.push_str("        exec.poseidon2::permute\n");
     out.push_str("    end\n");
     out.push_str(&format!("    # => [state(12), ptr, alpha_addr, {m}(alpha), ...]\n"));
     out.push('\n');
+    out.push_str(&format!("    # Snapshot {m}(alpha) and reset acc for Phase B.\n"));
+    out.push_str(&format!("    movup.14 loc_store.{modulus_h} push.0 movdn.14\n"));
+    out.push_str(&format!("    movup.15 loc_store.{} push.0 movdn.15\n", modulus_h + 1));
+    out.push_str("    # => [state(12), ptr, alpha_addr, 0, 0, ...]\n");
+    out.push('\n');
     out.push_str(&format!(
-        "    # Assert the post-absorb state[0..4] equals the pinned digest of {m}.\n"
+        "    # Phase B: adv_pipe streams {o} in {offset_chunks} rate chunks, mirrors those values\n"
+    ));
+    out.push_str(
+        "    # to scratch memory, and advances ptr. The combined `assert_eqw` below pins both\n",
+    );
+    out.push_str(&format!("    # {m} and {o}; horner_eval_base accumulates {o}(alpha).\n"));
+    out.push_str(&format!("    repeat.{offset_chunks}\n"));
+    out.push_str("        adv_pipe\n");
+    out.push_str("        horner_eval_base\n");
+    out.push_str("        exec.poseidon2::permute\n");
+    out.push_str("    end\n");
+    out.push_str(&format!("    # => [state(12), ptr, alpha_addr, {o}(alpha), ...]\n"));
+    out.push('\n');
+    out.push_str(&format!(
+        "    # Assert the post-absorb state[0..4] equals the pinned digest of ({m} || {o}).\n"
     ));
     out.push_str(&format!(
         "    push.{}.{}.{}.{}\n",
@@ -446,20 +474,19 @@ fn emit_committed_modulus_prefix(
         state[1].as_canonical_u64(),
         state[0].as_canonical_u64(),
     ));
-    out.push_str("    assert_eqw.err=\"sz: fixed modulus commitment mismatch\"\n");
+    out.push_str(
+        "    assert_eqw.err=\"sz: fixed-statement commitment mismatch (modulus + offset)\"\n",
+    );
     out.push_str(&format!(
-        "    # => [state[4..12], ptr, alpha_addr, {m}(alpha), ...]  (popped 8: pinned + state[0..4])\n"
+        "    # => [state[4..12], ptr, alpha_addr, {o}(alpha), ...]  (popped 8: pinned + state[0..4])\n"
     ));
     out.push('\n');
     out.push_str(&format!(
-        "    # Snapshot {m}(alpha) to mem (now at depths 10/11 after assert_eqw's shift),\n"
+        "    # Snapshot {o}(alpha), reset the accumulator, retarget ptr to the first input,\n"
     ));
-    out.push_str(
-        "    # reset depths 10/11, retarget ptr to the first input, and restore four zero rate\n",
-    );
-    out.push_str("    # lanes for the next absorb.\n");
-    out.push_str(&format!("    movup.10 loc_store.{modulus_h} push.0 movdn.10\n"));
-    out.push_str(&format!("    movup.11 loc_store.{} push.0 movdn.11\n", modulus_h + 1));
+    out.push_str("    # and restore four zero rate lanes for the next absorb.\n");
+    out.push_str(&format!("    movup.10 loc_store.{offset_h} push.0 movdn.10\n"));
+    out.push_str(&format!("    movup.11 loc_store.{} push.0 movdn.11\n", offset_h + 1));
     out.push_str(&format!("    movup.8 drop locaddr.{first_input_offset} movdn.8\n"));
     out.push_str("    padw\n");
     out.push_str(&format!(
@@ -499,26 +526,77 @@ fn fixed_modulus(rel: &LinearRelation) -> (&Poly, &'static [u16]) {
         .unwrap_or_else(|| panic!("spec `{}` has no Constant poly for the fixed modulus", rel.name))
 }
 
-/// Poseidon2 sponge state after absorbing the modulus in the same order the MASM verifier
-/// advice-loads it for `horner_eval_base`: highest limb first, 8 limbs per chunk.
+/// Returns the fixed offset polynomial and its u32 values. The emitted modmul shape has exactly
+/// one `FixedU32Vector` polynomial (the carry-shift offset vector).
+fn fixed_offset(rel: &LinearRelation) -> (&Poly, &'static [u32]) {
+    let mut found = None;
+    for poly in rel.polys {
+        if let PolyRole::FixedU32Vector { u32_values } = poly.role {
+            assert!(
+                found.is_none(),
+                "spec `{}` has more than one FixedU32Vector poly; the emitter expects exactly one",
+                rel.name
+            );
+            assert_eq!(
+                poly.u16_coeff_count,
+                u32_values.len(),
+                "fixed-vector `{}` declares {} coefficients but provides {} values",
+                poly.name,
+                poly.u16_coeff_count,
+                u32_values.len()
+            );
+            assert!(
+                u32_values.len().is_multiple_of(8),
+                "fixed-vector `{}` length must be a multiple of 8 (rate); got {}",
+                poly.name,
+                u32_values.len()
+            );
+            found = Some((poly, u32_values));
+        }
+    }
+    found.unwrap_or_else(|| {
+        panic!("spec `{}` has no FixedU32Vector poly for the carry-shift offset", rel.name)
+    })
+}
+
+/// Poseidon2 sponge state after absorbing the fixed-statement prefix: modulus followed by the
+/// carry-shift offset vector. Both are absorbed in the same order the MASM verifier advice-loads
+/// them for `horner_eval_base`: highest limb first, 8 limbs per chunk.
 ///
-/// Mirrored by `miden_core_lib::handlers::u256_modmul::modulus_seeded_initial_state`.
+/// Mirrored by `miden_core_lib::handlers::u256_modmul::fixed_prefix_seeded_initial_state`.
 /// Cross-crate agreement is pinned by the `k1_{base,scalar}_precomputed_initial_state_pin`
 /// core-lib tests.
-pub fn modulus_seeded_initial_state(modulus_u16: &[u16]) -> [Felt; Poseidon2::STATE_WIDTH] {
+pub fn fixed_prefix_seeded_initial_state(
+    modulus_u16: &[u16],
+    offset_u32: &[u32],
+) -> [Felt; Poseidon2::STATE_WIDTH] {
     const RATE: usize = 8;
     assert_eq!(
         modulus_u16.len(),
         16,
-        "modulus_seeded_initial_state expects 16 u16 limbs (got {})",
+        "fixed_prefix_seeded_initial_state expects 16 u16 modulus limbs (got {})",
         modulus_u16.len(),
     );
-    let n_chunks = modulus_u16.len() / RATE;
+    assert!(
+        offset_u32.len().is_multiple_of(RATE),
+        "offset vector length must be a multiple of {RATE} (got {})",
+        offset_u32.len(),
+    );
     let mut state = [Felt::ZERO; Poseidon2::STATE_WIDTH];
-    for chunk_idx in 0..n_chunks {
+    // Phase A: modulus (highest u16 limb first, 8 limbs per chunk).
+    for chunk_idx in 0..(modulus_u16.len() / RATE) {
         for j in 0..RATE {
             state[j] =
                 Felt::from_u32(modulus_u16[modulus_u16.len() - 1 - (chunk_idx * RATE + j)] as u32);
+        }
+        Poseidon2::apply_permutation(&mut state);
+    }
+    // Phase B: offset (highest u32 value first, 8 values per chunk). For the canonical
+    // `[CARRY_SHIFT; 32]` vector this reversal has no observable effect, but the convention
+    // matches the adv_pipe consumption pattern for all other polys.
+    for chunk_idx in 0..(offset_u32.len() / RATE) {
+        for j in 0..RATE {
+            state[j] = Felt::from_u32(offset_u32[offset_u32.len() - 1 - (chunk_idx * RATE + j)]);
         }
         Poseidon2::apply_permutation(&mut state);
     }
@@ -537,26 +615,36 @@ fn is_last_witness(rel: &LinearRelation, name: &str) -> bool {
         == Some(name)
 }
 
-/// Emits `LimbIsZero` aux checks. Fires after the streaming load completes (so memory holds
-/// the witness data) but before the FS-equality check. `LessThan` aux checks need the
-/// polynomials in u32 limb form, which is produced during output emission, so they are emitted
-/// fused with the output recombination (see [`emit_outputs`]).
+/// Emits `LimbEquals` aux checks. Fires after the streaming load completes (so memory holds
+/// the witness data) but before the FS-equality check. For `value == 0` the emitter uses the
+/// cheaper `assertz` (2 cyc); for other values it uses `push.value assert_eq` (3 cyc) which is
+/// what the shifted-carry top checks need (top coefficients equal `2^31`, not 0). `LessThan`
+/// aux checks need the polynomials in u32 limb form, which is produced during output emission,
+/// so they are emitted fused with the output recombination (see [`emit_outputs`]).
 fn emit_aux_checks_after_stream(rel: &LinearRelation, layout: &Layout, out: &mut String) {
-    // Each check loads one mem felt and asserts it's zero (net-zero stack change).
     let mut first = true;
     for check in rel.aux_checks {
-        if let AuxCheck::LimbIsZero { poly, index } = check {
+        if let AuxCheck::LimbEquals { poly, index, value } = check {
             if first {
-                out.push_str("    # ----- top-carry zero checks (each line is net-zero on the stack) -----\n");
+                out.push_str(
+                    "    # ----- top-carry limb checks (each line is net-zero on the stack) -----\n",
+                );
                 first = false;
             }
             let p = resolve(rel, *poly);
             let off = layout.poly_offset(p.name);
             let mem_index = limb_to_mem_index(p, off, *index);
-            out.push_str(&format!(
-                "    loc_load.{mem_index} assertz.err=\"sz: {}_{index} must be 0 (top carry coefficient)\"\n",
-                p.name
-            ));
+            if *value == 0 {
+                out.push_str(&format!(
+                    "    loc_load.{mem_index} assertz.err=\"sz: {}_{index} must be 0 (top carry coefficient)\"\n",
+                    p.name
+                ));
+            } else {
+                out.push_str(&format!(
+                    "    loc_load.{mem_index} push.{value} assert_eq.err=\"sz: {}_{index} must equal {value} (top carry coefficient)\"\n",
+                    p.name
+                ));
+            }
         }
     }
 }
@@ -766,12 +854,12 @@ fn emit_u16_split_quad(out: &mut String) {
 }
 
 /// Emits the extension-field identity check, specialized to the modmul shape:
-/// `a*b - q*m - c = (W - alpha) * (pos - neg)`.
+/// `a*b - q*m - c = (W - alpha) * (shifted - offset)`.
 ///
-/// Computes `(alpha - W) * (neg - pos) + q*m + c - a*b` and asserts both extension-field
-/// coordinates are zero. The factor and operand sign-flips relative to the docstring
-/// identity are algebraically equivalent and let the emitted MASM use natural-order word
-/// loads for the e_pos/e_neg pair.
+/// Computes `(alpha - W) * (offset - shifted) + q*m + c - a*b` and asserts both
+/// extension-field coordinates are zero. The factor and operand sign-flips relative to the
+/// docstring identity are algebraically equivalent and let the emitted MASM use a single
+/// natural-order word load for the (shifted, offset) ext2 pair stored adjacently in mem.
 ///
 /// Panics if the spec is not the modmul shape (2 products, 1 linear, 1 carry term) or if
 /// the witness h-storage layout violates the word-load adjacency the emitted sequence
@@ -819,21 +907,24 @@ fn emit_identity_check(rel: &LinearRelation, layout: &Layout, out: &mut String) 
         "identity check expects the negative product RHS `{modulus_name}` to be the fixed modulus"
     );
     let h_modulus = layout.h_offset(modulus_name);
-    let h_e_pos = layout.h_offset(carry.pos.0);
-    let h_e_neg = layout.h_offset(carry.neg.0);
+    let h_shifted = layout.h_offset(carry.shifted.0);
+    let h_offset = layout.h_offset(carry.offset.0);
     assert_eq!(h_b, h_a + 2, "h_b must equal h_a + 2 (got h_a={h_a}, h_b={h_b})");
     assert_eq!(h_c, h_q + 2, "h_c must equal h_q + 2 (got h_q={h_q}, h_c={h_c})");
     assert_eq!(
-        h_e_neg,
-        h_e_pos + 2,
-        "h_e_neg must equal h_e_pos + 2 (got h_e_pos={h_e_pos}, h_e_neg={h_e_neg})"
+        h_offset,
+        h_shifted + 2,
+        "h_offset must equal h_shifted + 2 (got h_shifted={h_shifted}, h_offset={h_offset})"
     );
     assert!(
-        h_a.is_multiple_of(4) && h_q.is_multiple_of(4) && h_e_pos.is_multiple_of(4),
-        "h-offsets for (a, q, e_pos) must be word-aligned (got h_a={h_a}, h_q={h_q}, h_e_pos={h_e_pos})"
+        h_a.is_multiple_of(4) && h_q.is_multiple_of(4) && h_shifted.is_multiple_of(4),
+        "h-offsets for (a, q, shifted) must be word-aligned (got h_a={h_a}, h_q={h_q}, h_shifted={h_shifted})"
     );
 
     let w = carry.multiplier;
+    let m = modulus_name;
+    let s = carry.shifted.0;
+    let o = carry.offset.0;
     out.push_str("    # ----- extension-field identity check -----\n");
     // Entry has 8 residual felts on top (per emit_input_horner's last-input teardown).
     // The opening loc_loadw_le overwrites the first 4; the remaining 4 are carried below the
@@ -843,7 +934,6 @@ fn emit_identity_check(rel: &LinearRelation, layout: &Layout, out: &mut String) 
     // q*{modulus} is computed FIRST so T1 lands naturally on top of q*{modulus}; this skips
     // the movup.5 movup.5 that would otherwise be needed to align T1 above q*{modulus} for
     // ext2add.
-    let m = modulus_name;
     out.push_str(&format!("    loc_loadw_le.{h_q}\n"));
     out.push_str("    # => [q, c, residual(4), ...]\n");
     out.push('\n');
@@ -855,8 +945,14 @@ fn emit_identity_check(rel: &LinearRelation, layout: &Layout, out: &mut String) 
     out.push_str("    ext2mul\n");
     out.push_str(&format!("    # => [q*{m}, c, residual(4), ...]\n"));
     out.push('\n');
-    out.push_str("    # T1 = (alpha - W) * (e_neg - e_pos).\n");
-    out.push_str(&format!("    padw loc_loadw_le.{h_e_pos}\n"));
+    out.push_str(&format!(
+        "    # T1 = (W - alpha) * ({s}(alpha) - {o}(alpha)), computed as the equivalent\n"
+    ));
+    out.push_str(&format!(
+        "    # (alpha - W) * ({o}(alpha) - {s}(alpha)) so a single loadw on the adjacent ({s}, {o})\n"
+    ));
+    out.push_str("    # ext2 pair feeds ext2sub directly.\n");
+    out.push_str(&format!("    padw loc_loadw_le.{h_shifted}\n"));
     out.push_str("    ext2sub\n");
     out.push_str("    loc_load.1\n");
     out.push_str(&format!("    loc_load.0 sub.{w}\n"));
@@ -978,7 +1074,7 @@ fn emit_u32_recombine(poly: &Poly, layout: &Layout, out: &mut String) {
 
 /// Renders a human-readable identity equation, e.g. for `modmul_k1_base`:
 /// `a(alpha) * b(alpha) - q(alpha) * m(alpha) - c(alpha)
-///     = (W - alpha) * (e_pos(alpha) - e_neg(alpha))`.
+///     = (W - alpha) * (e_shifted(alpha) - offset(alpha))`.
 fn render_identity(rel: &LinearRelation) -> String {
     let mut s = String::new();
     let mut first = true;
@@ -994,6 +1090,9 @@ fn render_identity(rel: &LinearRelation) -> String {
         s.push_str(&format!("{}(alpha)", lin.poly.0));
     }
     let carry = &rel.identity.carry;
-    s.push_str(&format!(" = (W - alpha) * ({}(alpha) - {}(alpha))", carry.pos.0, carry.neg.0));
+    s.push_str(&format!(
+        " = (W - alpha) * ({}(alpha) - {}(alpha))",
+        carry.shifted.0, carry.offset.0,
+    ));
     s
 }

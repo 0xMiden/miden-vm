@@ -21,14 +21,12 @@
 #[derive(Clone, Copy, Debug)]
 pub struct Poly {
     /// Identifier used in the identity equation and the emitted MASM (e.g. `"a"`, `"c"`,
-    /// `"e_pos"`).
+    /// `"e_shifted"`).
     pub name: &'static str,
     /// Where the polynomial's coefficients come from.
     pub role: PolyRole,
-    /// Number of u16 coefficients in the polynomial as it enters the identity check. For inputs
-    /// a, b in the k1 modmul specs this is 16 (8 u32 limbs split into 16 u16). For the carry
-    /// polynomials it is 32 (with the top two coefficients of both signed halves enforced zero
-    /// via [`AuxCheck::LimbIsZero`]).
+    /// Number of u16 coefficients as the polynomial enters the identity check. Inputs `a, b`
+    /// declare 16 (8 u32 limbs split into 16 u16); the carry polynomial declares 32.
     pub u16_coeff_count: usize,
     /// On-disk storage and load pattern for this polynomial.
     pub storage: Storage,
@@ -47,10 +45,20 @@ pub enum PolyRole {
     /// `adv_pipe`. Each landed felt is range-checked as u32.
     Witness,
     /// Fixed modulus supplied by the spec. The emitter expects exactly one `Constant`; it is
-    /// advice-loaded and checked against a hardcoded Poseidon2 digest before use.
+    /// advice-loaded and pinned together with [`PolyRole::FixedU32Vector`] (if any) against a
+    /// single combined Poseidon2 digest before use.
     Constant {
         /// u16 limbs in little-endian order (limb 0 = least-significant).
         u16_limbs: &'static [u16],
+    },
+    /// Fixed u32-valued vector supplied by the spec. Absorbed via advice as the second phase of
+    /// the fixed-statement prefix (after the modulus) and pinned with it under a single combined
+    /// Poseidon2 digest. Used for the carry-shift offset polynomial.
+    FixedU32Vector {
+        /// Coefficients in low-to-high order: `u32_values[0]` is the constant term,
+        /// `u32_values[len-1]` is the highest-degree coefficient. The verifier absorbs them
+        /// high-first via the reversed-advice convention shared by all polys in the family.
+        u32_values: &'static [u32],
     },
 }
 
@@ -68,15 +76,14 @@ pub enum Storage {
 
 /// The polynomial identity the verifier checks. All terms are in the quadratic extension of the
 /// Miden base field; the identity is `sum(products) + sum(linears) - (W - alpha) *
-/// (carry.pos(alpha) - carry.neg(alpha)) = 0`.
+/// (carry.shifted(alpha) - carry.offset(alpha)) = 0`.
 #[derive(Clone, Copy, Debug)]
 pub struct Identity {
     /// Quadratic terms: `sign * Pa(alpha) * Pb(alpha)`. Modmul has `[+ a*b, - q*modulus]`.
     pub products: &'static [Product],
     /// Linear terms: `sign * P(alpha)`. Modmul has `[- c]`.
     pub linears: &'static [Linear],
-    /// The signed carry term `(W - alpha) * (pos(alpha) - neg(alpha))`; `multiplier` is the
-    /// limb base (W = 2^16).
+    /// The signed-carry term `(W - alpha) * (shifted(alpha) - offset(alpha))`.
     pub carry: CarryTerm,
 }
 
@@ -95,13 +102,13 @@ pub struct Linear {
 
 #[derive(Clone, Copy, Debug)]
 pub struct CarryTerm {
-    /// Non-negative carry polynomial. The verified signed carry is `pos - neg`, contributing
-    /// `(W - x) * (pos(x) - neg(x))` to the RHS of the identity.
-    pub pos: PolyRef,
-    /// Second non-negative carry polynomial. Splitting the signed carry into two non-negative
-    /// halves keeps each component u32-bounded; required for modular arithmetic where the
-    /// natural recurrence can yield negative carries.
-    pub neg: PolyRef,
+    /// Host-shifted signed carry polynomial. Each coefficient is `signed_carry + shift` where
+    /// `shift` is the constant value carried by every coefficient of [`Self::offset`]; the shift
+    /// keeps every landed coefficient a valid u32.
+    pub shifted: PolyRef,
+    /// Fixed offset polynomial whose coefficients all equal the host-side shift scalar (`2^31`
+    /// for the k1 modmul specs). Pinned alongside the modulus in the fixed-statement prefix.
+    pub offset: PolyRef,
     /// The limb base. Equal to 2^16 for the u16-limb SZ family.
     pub multiplier: u64,
 }
@@ -121,8 +128,9 @@ pub struct PolyRef(pub &'static str);
 /// probabilistic enforcement).
 #[derive(Clone, Copy, Debug)]
 pub enum AuxCheck {
-    /// Assert `poly[index] == 0`.
-    LimbIsZero { poly: PolyRef, index: usize },
+    /// Assert `poly[index] == value` (as a base-field felt). The shifted carry's top two
+    /// coefficients use this to pin their unwritten-and-shifted value (`shift`, e.g. `2^31`).
+    LimbEquals { poly: PolyRef, index: usize, value: u32 },
     /// Assert `lhs(W) < rhs(W)` interpreting both polynomials as integers in W-base.
     LessThan { lhs: PolyRef, rhs: PolyRef },
 }
