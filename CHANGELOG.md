@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+#### Features
+
+- Added authenticated rooted Merkle-frontier support to the core MMR (`mmr::root`, `mmr::root_with_len`, `mmr::unpack_frontier`) ([#3184](https://github.com/0xMiden/miden-vm/pull/3184)).
+
 ## v0.23.1 (2026-05-20)
 
 - Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
