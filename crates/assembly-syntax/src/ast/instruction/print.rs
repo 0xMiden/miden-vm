@@ -333,9 +333,6 @@ impl PrettyPrint for Instruction {
                 flatten(const_text("procref") + const_text(".") + display(path))
             },
 
-            // ----- debug decorators -------------------------------------------------------------
-            Self::Debug(options) => inst_with_imm("debug", options),
-
             // ----- event decorators -------------------------------------------------------------
             Self::Emit => const_text("emit"),
             Self::EmitImm(value) => inst_with_felt_imm("emit", value),

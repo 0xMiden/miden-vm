@@ -90,7 +90,7 @@ extern {
         "crypto_stream" => Token::CryptoStream,
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
-        "debug" => Token::Debug,
+
         "div" => Token::Div,
         "drop" => Token::Drop,
         "dropw" => Token::Dropw,
@@ -1117,33 +1117,6 @@ Call: Instruction = {
 
 #[inline]
 Debug: Instruction = {
-    "debug" "." "stack" <n:MaybeImm<U8>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::StackTop(n.map(|spanned| spanned.into_inner()))),
-            None => Instruction::Debug(DebugOptions::StackAll),
-        }
-    },
-    "debug" "." "mem" <n:Imm<U32>> <m:Imm<U32>> => Instruction::Debug(DebugOptions::MemInterval(n, m)),
-    "debug" "." "mem" <n:MaybeImm<U32>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::MemInterval(n.clone(), n)),
-            None => Instruction::Debug(DebugOptions::MemAll),
-        }
-    },
-    "debug" "." "local" <n:Imm<U16>> <m:Imm<U16>> => Instruction::Debug(DebugOptions::LocalInterval(n, m)),
-    "debug" "." "local" <n:MaybeImm<U16>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::LocalRangeFrom(n)),
-            None => Instruction::Debug(DebugOptions::LocalAll),
-        }
-    },
-    "debug" "." "adv_stack" <n:MaybeImm<U16>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::AdvStackTop(n)),
-            None => // length 0 means print the whole stack
-            Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
-        }
-    },
     "emit" => Instruction::Emit,
     // emit.EVENT_CONST  where EVENT_CONST is defined via const EVENT_CONST = event("...")
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
@@ -2148,7 +2121,6 @@ Opcode: &'static str = {
     "crypto_stream" => "crypto_stream",
     "cswap" => "cswap",
     "cswapw" => "cswapw",
-    "debug" => "debug",
     "div" => "div",
     "drop" => "drop",
     "dropw" => "dropw",
