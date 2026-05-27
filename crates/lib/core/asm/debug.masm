@@ -15,6 +15,7 @@
 
 const PRINT_STACK_EVENT = event("miden::core::debug::print_stack")
 const PRINT_MEM_EVENT = event("miden::core::debug::print_mem")
+const PRINT_MEM_ADDR_EVENT = event("miden::core::debug::print_mem_addr")
 const PRINT_MEM_ALL_EVENT = event("miden::core::debug::print_mem_all")
 const PRINT_ADV_STACK_EVENT = event("miden::core::debug::print_adv_stack")
 const PRINT_ADV_MAP_ALL_EVENT = event("miden::core::debug::print_adv_map_all")
@@ -51,6 +52,24 @@ pub proc print_mem
     emit.PRINT_MEM_EVENT
     # => [start, end, ...]
     drop drop
+end
+
+#! Prints the contents of the single memory cell at `addr` in the current context, consuming the
+#! address argument.
+#!
+#! Combine with `locaddr` to print a procedure local, e.g. `locaddr.0 exec.debug::print_mem_addr`.
+#!
+#! Inputs:  [addr, ...]
+#! Outputs: [...]
+#!
+#! Where:
+#! - addr is the address of the memory cell to print.
+#!
+#! Cycles: 4
+pub proc print_mem_addr
+    emit.PRINT_MEM_ADDR_EVENT
+    # => [addr, ...]
+    drop
 end
 
 #! Prints the full memory of the current context.
