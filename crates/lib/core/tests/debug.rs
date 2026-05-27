@@ -14,10 +14,9 @@ use miden_core::{Felt, Word};
 use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
-        DebugPrinter, PRINT_ADV_MAP_ALL_EVENT_NAME, PRINT_ADV_MAP_EVENT_NAME,
-        PRINT_ADV_MAP_ITEM_EVENT_NAME, PRINT_ADV_STACK_ALL_EVENT_NAME, PRINT_ADV_STACK_EVENT_NAME,
-        PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_STACK_EVENT_NAME,
-        noop_debug_handlers,
+        DebugPrinter, PRINT_ADV_MAP_ALL_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
+        PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME,
+        PRINT_STACK_EVENT_NAME, noop_debug_handlers,
     },
 };
 use miden_processor::{
@@ -49,8 +48,6 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
         (PRINT_MEM_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_STACK_ALL_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
@@ -284,31 +281,6 @@ fn print_adv_map_all_outputs_entries() {
 }
 
 #[test]
-fn print_adv_map_outputs_values() {
-    let key = Word::new([
-        Felt::new_unchecked(1),
-        Felt::new_unchecked(2),
-        Felt::new_unchecked(3),
-        Felt::new_unchecked(4),
-    ]);
-    let values = vec![Felt::new_unchecked(10), Felt::new_unchecked(20), Felt::new_unchecked(30)];
-    let advice = AdviceInputs::default().with_map([(key, values)]);
-    let source = "
-    use miden::core::debug
-    begin
-        push.4 push.3 push.2 push.1   # KEY = [1, 2, 3, 4]
-        exec.debug::print_adv_map
-    end
-    ";
-    let out = run_and_capture(source, advice);
-    assert!(out.contains("Advice map entry"), "missing header; got:\n{out}");
-    assert!(
-        out.contains(": 10") && out.contains(": 20") && out.contains(": 30"),
-        "missing advice map values; got:\n{out}"
-    );
-}
-
-#[test]
 fn print_adv_map_item_outputs_values() {
     let key = Word::new([
         Felt::new_unchecked(1),
@@ -381,8 +353,6 @@ fn default_core_handlers_include_debug_printers() {
 
     for debug_event in [
         PRINT_ADV_STACK_EVENT_NAME,
-        PRINT_ADV_STACK_ALL_EVENT_NAME,
-        PRINT_ADV_MAP_EVENT_NAME,
         PRINT_ADV_MAP_ALL_EVENT_NAME,
         PRINT_ADV_MAP_ITEM_EVENT_NAME,
     ] {
@@ -464,20 +434,6 @@ fn print_adv_map_all_is_stack_neutral() {
     use miden::core::debug
     begin
         exec.debug::print_adv_map_all
-    end
-    ";
-    let (_, output) = run(source, AdviceInputs::default());
-    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
-}
-
-#[test]
-fn print_adv_map_consumes_key() {
-    // Pushes exactly a 4-element key; clean termination proves the key is consumed.
-    let source = "
-    use miden::core::debug
-    begin
-        push.4 push.3 push.2 push.1   # KEY = [1, 2, 3, 4]
-        exec.debug::print_adv_map
     end
     ";
     let (_, output) = run(source, AdviceInputs::default());

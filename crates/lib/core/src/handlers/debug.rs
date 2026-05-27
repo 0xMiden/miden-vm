@@ -42,14 +42,6 @@ pub const PRINT_MEM_ALL_EVENT_NAME: EventName = EventName::new("miden::core::deb
 /// Prints the advice stack in the range `[start, end)`.
 pub const PRINT_ADV_STACK_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_stack");
-/// Prints the entire advice stack.
-///
-/// This legacy event name is kept as a host-side alias for already-assembled programs. The MASM
-/// `print_adv_stack_all` procedure emits [`PRINT_ADV_STACK_EVENT_NAME`] with an unbounded range.
-pub const PRINT_ADV_STACK_ALL_EVENT_NAME: EventName =
-    EventName::new("miden::core::debug::print_adv_stack_all");
-/// Looks up a WORD key in the advice map and prints the associated values.
-pub const PRINT_ADV_MAP_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_adv_map");
 /// Prints the full advice map.
 pub const PRINT_ADV_MAP_ALL_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_map_all");
@@ -81,8 +73,6 @@ pub fn noop_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (PRINT_MEM_EVENT_NAME, handler.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, handler.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, handler.clone()),
-        (PRINT_ADV_STACK_ALL_EVENT_NAME, handler.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, handler.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, handler.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, handler),
     ]
@@ -98,8 +88,6 @@ pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
         (PRINT_MEM_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_STACK_ALL_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
@@ -156,14 +144,9 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
             let adv_stack = process.advice_provider().stack();
             let slice = slice_range(&adv_stack, start, end);
             write_stack(w, slice, None, "Advice stack", process.clock())?;
-        } else if id == PRINT_ADV_STACK_ALL_EVENT_NAME.to_event_id() {
-            let adv_stack = process.advice_provider().stack();
-            write_stack(w, &adv_stack, None, "Advice stack", process.clock())?;
         } else if id == PRINT_ADV_MAP_ALL_EVENT_NAME.to_event_id() {
             write_adv_map(w, process)?;
-        } else if id == PRINT_ADV_MAP_EVENT_NAME.to_event_id()
-            || id == PRINT_ADV_MAP_ITEM_EVENT_NAME.to_event_id()
-        {
+        } else if id == PRINT_ADV_MAP_ITEM_EVENT_NAME.to_event_id() {
             write_adv_map_entry(w, process)?;
         }
         // Unknown ids are ignored: the handler is only registered for the events above.
