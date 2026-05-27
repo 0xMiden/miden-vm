@@ -22,6 +22,7 @@ use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
+    debug::default_debug_handlers,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
@@ -88,6 +89,11 @@ use crate::handlers::{
 /// // Register handlers with your host...
 /// ```
 ///
+/// Stack and memory print-style debug handlers are registered with stdout writers by default.
+/// These handlers can print private values if a program moves witness data onto the operand stack
+/// or into memory. Privacy-sensitive hosts should replace or unregister these handlers. Advice
+/// debug handlers can expose witness data directly, so hosts must opt into those explicitly.
+///
 /// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
 /// precompile verifiers required to validate core library precompile requests.
 ///
@@ -125,9 +131,15 @@ impl CoreLibrary {
         self.0.clone()
     }
 
-    /// List of all `EventHandlers` required to run all of the core library.
+    /// Returns the default event handlers required by the core library.
+    ///
+    /// Stack and memory print-style debug handlers write to stdout by default. These handlers can
+    /// print private values if a program moves witness data onto the operand stack or into memory.
+    /// Hosts can replace those handlers to route output to a UI, log, no-op handler, or other sink.
+    /// Advice debug handlers can expose witness data directly, so hosts must opt into those
+    /// explicitly.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
-        vec![
+        let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
@@ -140,7 +152,9 @@ impl CoreLibrary {
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
-        ]
+        ];
+        handlers.extend(default_debug_handlers());
+        handlers
     }
 
     /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
