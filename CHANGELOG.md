@@ -16,6 +16,7 @@
 - [BREAKING] Removed MASM `trace` decorators, remaining decorator execution scaffolding, the CLI `--trace` flag, trace-specific processor and host APIs, and decorator wire slots from the unreleased MAST format `0.0.4` ([#3208](https://github.com/0xMiden/miden-vm/pull/3208)).
 - [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
 - Removed the legacy LALRPOP parser backend
+- [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 
 #### Fixes
 

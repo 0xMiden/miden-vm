@@ -96,7 +96,7 @@ impl SystemState {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),
             fn_hash: processor.system().caller_hash(),
-            pc_transcript_state: processor.precompile_transcript_state(),
+            pc_transcript_state: processor.system().precompile_transcript_state(),
         }
     }
 }
