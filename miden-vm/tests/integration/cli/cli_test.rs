@@ -155,3 +155,31 @@ fn test_advmap_cli() {
     cmd.arg("run").arg("./tests/integration/cli/data/adv_map.masm");
     cmd.assert().success();
 }
+
+/// A program using a core precompile (`keccak256::hash_bytes`) must both run and prove. The
+/// `prove` path needs the same core-library precompile registry install as `run`; without it the
+/// deferred tag is rejected. Regression guard for the two CLI paths diverging.
+#[test]
+fn cli_run_and_prove_precompile() {
+    let program = "./tests/integration/cli/data/keccak256_precompile.masm";
+
+    let mut run = bin_under_test().command();
+    run.arg("run").arg(program);
+    run.assert().success();
+
+    let proof_file = std::env::temp_dir().join("cli_prove_precompile.proof");
+    let output_file = std::env::temp_dir().join("cli_prove_precompile.outputs");
+    let mut prove = bin_under_test().command();
+    prove
+        .arg("prove")
+        .arg(program)
+        .arg("-p")
+        .arg(&proof_file)
+        .arg("-o")
+        .arg(&output_file);
+    prove.assert().success();
+
+    assert!(proof_file.exists());
+    fs::remove_file(&proof_file).unwrap();
+    let _ = fs::remove_file(&output_file);
+}

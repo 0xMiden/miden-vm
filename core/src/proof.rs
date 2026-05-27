@@ -28,9 +28,9 @@ use crate::{
 ///
 /// The deferred-DAG state ships as [`DeferredStateWire`] — a passive value with no validated
 /// invariants. The verifier consumes it via `DeferredState::rehydrate` with the installed
-/// schema. All precompile semantics (keccak256, sha512, ecdsa, eddsa, plus any user app) live
-/// in the schema, so the proof no longer needs to carry a separate precompile-request list —
-/// the deferred state IS the precompile witness.
+/// precompiles. All precompile semantics (keccak256, sha512, ecdsa, eddsa, plus any user app) live
+/// in the precompile registry, so the proof no longer needs to carry a separate precompile-request
+/// list — the deferred state IS the precompile witness.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
@@ -67,7 +67,7 @@ impl ExecutionProof {
     }
 
     /// Returns the deferred-DAG state in wire form. To obtain a validated, in-memory
-    /// [`crate::deferred::DeferredState`], call `DeferredState::rehydrate(wire, schema)`.
+    /// [`crate::deferred::DeferredState`], call `DeferredState::rehydrate(wire, precompiles)`.
     pub fn deferred_state(&self) -> &DeferredStateWire {
         &self.deferred_state
     }

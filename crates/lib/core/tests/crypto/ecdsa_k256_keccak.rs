@@ -1,6 +1,6 @@
 //! Tests for the ECDSA secp256k1 / Keccak256 precompile MASM wrappers.
 //!
-//! ECDSA verification is performed entirely inside the `EcdsaK256KeccakPrecompile` schema's
+//! ECDSA verification is performed entirely inside the `EcdsaK256KeccakPrecompile` precompiles's
 //! `reduce` (no host-side event handler). The MASM wrappers register the chunk node, evaluate
 //! the predicate (which traps on signature failure), and fold the chunk digest into the
 //! precompile transcript.
@@ -30,7 +30,7 @@ const BUF_ADDR: u32 = 128;
 // VERIFY_PREHASH — single-buffer API
 // ================================================================================================
 
-/// Pack a (pk, digest, sig) triple into the schema's word-aligned 40-felt layout (160 bytes).
+/// Pack a (pk, digest, sig) triple into the precompiles's word-aligned 40-felt layout (160 bytes).
 fn pack_ecdsa_buffer(pk: &[u8], digest: &[u8; 32], sig: &[u8]) -> Vec<Felt> {
     assert_eq!(pk.len(), 33);
     assert_eq!(sig.len(), 65);

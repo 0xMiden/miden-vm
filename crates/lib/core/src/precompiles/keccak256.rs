@@ -18,7 +18,7 @@ use miden_core::{
 };
 use miden_crypto::hash::keccak::Keccak256;
 
-use super::codec::{chunks_to_bytes, n_chunks};
+use super::codec::{bytes_to_felts, chunks_to_bytes, n_chunks};
 
 /// Zero-sized handle for the `keccak256` precompile.
 #[derive(Debug, Default, Clone, Copy)]
@@ -131,7 +131,7 @@ fn reduce_preimage(args: [Felt; 3], payload: &Payload) -> Result<Node, Precompil
         .map_err(|_| PrecompileError::InvalidNode)? as usize;
     let bytes = chunks_to_bytes(payload.as_chunks()?, n_bytes)?;
     let digest_bytes = Keccak256::hash(&bytes);
-    Ok(Keccak256Precompile::digest_node(bytes32_to_felts(&digest_bytes)))
+    Ok(Keccak256Precompile::digest_node(bytes_to_felts::<8>(&digest_bytes)))
 }
 
 /// Reduce an `eq` binary predicate: resolve both children to their canonical forms, require both
@@ -148,17 +148,6 @@ fn reduce_eq(payload: &Payload, witness: &mut WitnessBuilder<'_>) -> Result<Node
         return Err(PrecompileError::AssertionFailed);
     }
     Ok(Node::TRUE)
-}
-
-/// Pack 32 contiguous bytes into 8 u32-packed-LE felts. Panics if `bytes.len() != 32` — used
-/// for keccak's fixed 256-bit digest.
-pub(super) fn bytes32_to_felts(bytes: &[u8]) -> [Felt; 8] {
-    assert_eq!(bytes.len(), 32, "keccak digest must be 32 bytes");
-    core::array::from_fn(|i| {
-        let mut limb = [0u8; 4];
-        limb.copy_from_slice(&bytes[i * 4..(i + 1) * 4]);
-        Felt::from_u32(u32::from_le_bytes(limb))
-    })
 }
 
 #[cfg(test)]
@@ -232,102 +221,103 @@ mod tests {
 
     fn keccak_known(input: &[u8]) -> Node {
         let digest_bytes = Keccak256::hash(input);
-        Keccak256Precompile::digest_node(bytes32_to_felts(&digest_bytes))
+        Keccak256Precompile::digest_node(bytes_to_felts::<8>(&digest_bytes))
     }
 
     #[test]
     fn preimage_reduces_to_digest_leaf_empty() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let expected = keccak_known(&[]);
         // Empty input still needs one chunk (empty chunk bodies are banned); a 0-byte preimage is
         // a single zero chunk.
         let node = Keccak256Precompile::preimage_node(0, vec![[ZERO; 8]]);
-        let canonical = state.evaluate(&schema, node).unwrap();
+        let canonical = state.evaluate(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
     #[test]
     fn preimage_reduces_to_digest_leaf_short() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let bytes = b"hello world";
         let expected = keccak_known(bytes);
         let chunks = pack_chunks(bytes);
         let node = Keccak256Precompile::preimage_node(bytes.len() as u32, chunks);
-        let canonical = state.evaluate(&schema, node).unwrap();
+        let canonical = state.evaluate(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
     #[test]
     fn preimage_reduces_to_digest_leaf_multi_chunk() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let bytes: Vec<u8> = (0u8..70).collect();
         let expected = keccak_known(&bytes);
         let chunks = pack_chunks(&bytes);
         assert_eq!(chunks.len(), 3, "70 bytes should pack into 3 chunks");
         let node = Keccak256Precompile::preimage_node(bytes.len() as u32, chunks);
-        let canonical = state.evaluate(&schema, node).unwrap();
+        let canonical = state.evaluate(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
     #[test]
     fn preimage_rejects_oversized_n_bytes_for_chunk_count() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let chunks = vec![[Felt::from_u32(0); 8]];
         let node = Keccak256Precompile::preimage_node(100, chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
     #[test]
     fn digest_leaf_is_self_evaluating() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let leaf = Keccak256Precompile::digest_node([Felt::from_u32(7); 8]);
-        let leaf_digest = state.register(&schema, leaf.clone()).unwrap();
-        let canonical = state.evaluate(&schema, state.get(&leaf_digest).unwrap().clone()).unwrap();
+        let leaf_digest = state.register(&precompiles, leaf.clone()).unwrap();
+        let canonical =
+            state.evaluate(&precompiles, state.get(&leaf_digest).unwrap().clone()).unwrap();
         assert_eq!(canonical, leaf);
     }
 
     #[test]
     fn eq_succeeds_on_matching_preimage_and_digest() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let bytes = b"test vector for eq";
         let chunks = pack_chunks(bytes);
         let preimage_digest = state
-            .register(&schema, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
+            .register(&precompiles, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
             .unwrap();
         let known_leaf = keccak_known(bytes);
-        let leaf_digest = state.register(&schema, known_leaf).unwrap();
+        let leaf_digest = state.register(&precompiles, known_leaf).unwrap();
         let eq = Keccak256Precompile::eq_node(preimage_digest, leaf_digest);
-        let result = state.evaluate(&schema, eq).unwrap();
+        let result = state.evaluate(&precompiles, eq).unwrap();
         assert!(result.is_true_node());
     }
 
     #[test]
     fn eq_fails_on_mismatched_digest_claim() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let bytes = b"data";
         let chunks = pack_chunks(bytes);
         let preimage_digest = state
-            .register(&schema, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
+            .register(&precompiles, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
             .unwrap();
         let wrong_leaf = Keccak256Precompile::digest_node([Felt::from_u32(0xdead); 8]);
-        let wrong_digest = state.register(&schema, wrong_leaf).unwrap();
+        let wrong_digest = state.register(&precompiles, wrong_leaf).unwrap();
         let eq = Keccak256Precompile::eq_node(preimage_digest, wrong_digest);
-        let err = state.evaluate(&schema, eq);
+        let err = state.evaluate(&precompiles, eq);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn eq_missing_child_surfaces() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let bytes = b"x";
         let chunks = pack_chunks(bytes);
         let preimage_digest = state
-            .register(&schema, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
+            .register(&precompiles, Keccak256Precompile::preimage_node(bytes.len() as u32, chunks))
             .unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
         let eq = Keccak256Precompile::eq_node(preimage_digest, dangling);
-        let err = state.evaluate(&schema, eq);
+        let err = state.evaluate(&precompiles, eq);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
 }

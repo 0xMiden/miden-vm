@@ -36,41 +36,41 @@ pub use exports::*;
 // VERIFIER
 // ================================================================================================
 
-/// Verifies a STARK proof of correct VM execution under the supplied deferred-DAG `schema`.
+/// Verifies a STARK proof of correct VM execution with an empty precompile registry.
 ///
-/// Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one.
-/// Stack outputs are expected in the order they appear at the top of the stack (reverse of inputs).
-///
-/// This is **L2** of the layered verifier API:
-/// 1. Rehydrate the proof's deferred-DAG wire under `schema`. This re-runs every reachable
-///    predicate's `reduce`, validates content-addressing, and walks the AND-chain. The hydrated
-///    state's `root` is the canonical *deferred commitment*.
-/// 2. Verify the STARK proof with that commitment as a public input (delegating to
-///    [`verify_stark`], the L1 raw-STARK entry-point).
-///
-/// Returns the security level (in bits) and the deferred commitment that the proof commits to.
-///
-/// # Errors
-/// Returns an error if the deferred-DAG wire fails any rehydration check
-/// ([`VerificationError::DeferredIntegrity`]) or if the STARK proof fails to verify under that
-/// commitment ([`VerificationError::StarkVerificationError`]). Rehydration runs first; a tampered
-/// wire fails fast before any STARK work happens.
+/// This preserves the precompile-free verifier API. Proofs carrying non-empty deferred state should
+/// be verified with [`verify_with_precompiles`].
 #[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    schema: &PrecompileRegistry,
+    proof: ExecutionProof,
+) -> Result<u32, VerificationError> {
+    let precompiles = PrecompileRegistry::new();
+    let (security_level, _deferred_commitment) =
+        verify_with_precompiles(program_info, stack_inputs, stack_outputs, &precompiles, proof)?;
+    Ok(security_level)
+}
+
+/// Verifies a STARK proof under the supplied precompile registry.
+///
+/// The proof's [`DeferredStateWire`](miden_core::deferred::DeferredStateWire) is rehydrated under
+/// `precompiles`; the resulting deferred commitment is used as a public input to the STARK
+/// verifier. Returns the security level and the deferred commitment.
+#[tracing::instrument("verify_program_with_precompiles", skip_all)]
+pub fn verify_with_precompiles(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    precompiles: &PrecompileRegistry,
     proof: ExecutionProof,
 ) -> Result<(u32, Word), VerificationError> {
     let security_level = proof.security_level();
 
     let (hash_fn, proof_bytes, deferred_wire) = proof.into_parts();
 
-    // Rehydrate the wire under the installed schema. This validates content-addressing, the
-    // AND-chain shape, AND re-evaluates every reachable predicate. The hydrated state's root
-    // is the canonical deferred commitment used as a public input to the STARK proof below.
-    let state = DeferredState::rehydrate(&deferred_wire, schema)
+    let state = DeferredState::rehydrate(&deferred_wire, precompiles)
         .map_err(VerificationError::DeferredIntegrity)?;
     let deferred_commitment = state.root();
 
@@ -89,16 +89,7 @@ pub fn verify(
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// **L1 of the layered verifier API.** Verifies a STARK proof against the supplied public inputs,
-/// including the `deferred_commitment` (the deferred-DAG root) as a verifier-supplied public
-/// input.
-///
-/// Pure STARK verification — no schema, no deferred-DAG walk. The caller is responsible for
-/// computing `deferred_commitment` honestly; typically by calling
-/// [`DeferredState::rehydrate`] on the proof's wire. The schema-aware [`verify`] does both
-/// steps; this entry-point is exposed for callers that derive the commitment by other means
-/// (e.g. a recursive precompile-VM proof that proves the wire's correctness independently).
-pub fn verify_stark(
+fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,

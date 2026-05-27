@@ -7,7 +7,7 @@ use miden::core::sys
 # - DIGEST_U32[16] = [d_0, ..., d_15] with d_i = u32::from_le_bytes([b_{4i}, ..., b_{4i+3}])
 # - SHA512 digest is represented as 16 u32 limbs
 
-# CONSTANTS — Sha512Precompile schema tag fields
+# CONSTANTS — Sha512Precompile precompile tag fields
 # ================================================================================================
 # Pinned to the Rust-side Sha512Precompile constants. PRECOMPILE_ID is the Blake3-derived
 # `precompile_id(&Sha512Precompile)` over NAME ("sha512"); changing the NAME in Rust must update
@@ -32,7 +32,7 @@ const EQ_TAG_ID = 2
 #! - DIGEST_U32[16] = SHA-512(INPUT_U8[len_bytes])
 #!
 #! Local memory layout (element addresses):
-#!   loc[0..16]   DIGEST  (16 felts, used as both schema-output buffer and caller-return)
+#!   loc[0..16]   DIGEST  (16 felts, used as both precompile-output buffer and caller-return)
 #!   loc[16..20]  PREIMAGE_DIGEST
 #!   loc[20..24]  LEAF_DIGEST
 #!

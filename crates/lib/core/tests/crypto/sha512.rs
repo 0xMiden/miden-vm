@@ -1,7 +1,7 @@
 //! Tests for the SHA-512 precompile MASM wrappers.
 //!
 //! `crypto/hashes/sha512.masm` drives the deferred-DAG sys events directly, and the installed
-//! `Sha512Precompile` schema's `reduce` runs `Sha512::hash` at evaluation time.
+//! `Sha512Precompile` precompiles's `reduce` runs `Sha512::hash` at evaluation time.
 
 use core::array;
 

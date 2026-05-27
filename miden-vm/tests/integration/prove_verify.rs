@@ -10,7 +10,7 @@ use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
-use miden_verifier::verify;
+use miden_verifier::verify_with_precompiles;
 use miden_vm::{DefaultHost, HashFunction};
 use serde_wincode::SerdeCompat;
 
@@ -55,9 +55,9 @@ fn assert_prove_verify(
     }
 
     println!("Verifying proof...");
-    let schema = CoreLibrary::default().precompile_schema();
+    let precompiles = CoreLibrary::default().precompiles();
     let (security_level, _deferred_commitment) =
-        verify(program.into(), stack_inputs, stack_outputs, &schema, proof)
+        verify_with_precompiles(program.into(), stack_inputs, stack_outputs, &precompiles, proof)
             .expect("Verification failed");
 
     println!("Verification successful! Security level: {security_level}");
@@ -188,7 +188,7 @@ fn test_equal_heights_recursive() {
 /// keccak256 precompile — producing a non-trivial deferred root — and checks the MASM recursive
 /// verifier accepts the proof against that public input. `prove_sync` builds its processor
 /// without precompiles, so the test drives the manual `execute_trace_inputs_sync` +
-/// `prove_from_trace_sync` path with the schema installed.
+/// `prove_from_trace_sync` path with the precompile registry installed.
 #[test]
 fn test_poseidon2_recursive_verify_with_deferred_root() {
     use miden_processor::FastProcessor;
@@ -220,7 +220,6 @@ fn test_poseidon2_recursive_verify_with_deferred_root() {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
-    .with_precompiles(Arc::new(core_lib.precompile_schema()))
     .execute_trace_inputs_sync(&program, &mut host)
     .expect("keccak execution");
 
@@ -232,10 +231,15 @@ fn test_poseidon2_recursive_verify_with_deferred_root() {
 
     // Host-verify to obtain the deferred commitment, and assert it is non-empty so the recursive
     // check below genuinely exercises a non-trivial `pc_transcript_state`.
-    let schema = core_lib.precompile_schema();
-    let (_security_level, deferred_commitment) =
-        verify(program.to_info(), stack_inputs, stack_outputs, &schema, proof.clone())
-            .expect("host verification failed");
+    let precompiles = core_lib.precompiles();
+    let (_security_level, deferred_commitment) = verify_with_precompiles(
+        program.to_info(),
+        stack_inputs,
+        stack_outputs,
+        &precompiles,
+        proof.clone(),
+    )
+    .expect("host verification failed");
     assert_ne!(deferred_commitment, Word::empty(), "keccak program must yield a deferred root");
 
     assert_recursive_verify(
@@ -248,8 +252,8 @@ fn test_poseidon2_recursive_verify_with_deferred_root() {
 }
 
 /// Soundness regression: a proof whose deferred-DAG wire fails rehydration must be rejected by
-/// `miden_verifier::verify` BEFORE any STARK work happens. Tampers a valid proof's wire to
-/// include an entry with an unrecognized tag, then asserts the verifier surfaces
+/// `miden_verifier::verify_with_precompiles` BEFORE any STARK work happens. Tampers a valid proof's
+/// wire to include an entry with an unrecognized tag, then asserts the verifier surfaces
 /// `DeferredIntegrity(UnknownTag)`.
 #[test]
 fn test_verify_rejects_tampered_deferred_wire() {
@@ -282,7 +286,7 @@ fn test_verify_rejects_tampered_deferred_wire() {
     .expect("prove failed");
 
     // Tamper: replace the deferred wire with one containing an entry whose tag has an unknown
-    // precompile id. `CoreLibrary::default().precompile_schema()` rejects unknown ids in
+    // precompile id. `CoreLibrary::default().precompiles()` rejects unknown ids in
     // `PrecompileRegistry::decode` → rehydrate surfaces an `IntegrityError` →
     // `VerificationError::DeferredIntegrity`.
     let bogus_tag = Tag {
@@ -296,8 +300,9 @@ fn test_verify_rejects_tampered_deferred_wire() {
         }],
     };
 
-    let schema = CoreLibrary::default().precompile_schema();
-    let result = verify(program.into(), stack_inputs, stack_outputs, &schema, proof);
+    let precompiles = CoreLibrary::default().precompiles();
+    let result =
+        verify_with_precompiles(program.into(), stack_inputs, stack_outputs, &precompiles, proof);
     assert!(
         matches!(result, Err(VerificationError::DeferredIntegrity(_))),
         "expected DeferredIntegrity rejection, got {result:?}"
@@ -336,8 +341,14 @@ fn rejects_non_canonical_air_order() {
         proof.deferred_state().clone(),
     );
 
-    let schema = CoreLibrary::default().precompile_schema();
-    let result = verify(program.into(), stack_inputs, stack_outputs, &schema, tampered_proof);
+    let precompiles = CoreLibrary::default().precompiles();
+    let result = verify_with_precompiles(
+        program.into(),
+        stack_inputs,
+        stack_outputs,
+        &precompiles,
+        tampered_proof,
+    );
     assert!(result.is_err(), "non-canonical air_order must be rejected");
 }
 
@@ -426,7 +437,7 @@ mod fast_parallel {
     use miden_prover::{
         ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync, prove_stark,
     };
-    use miden_verifier::verify;
+    use miden_verifier::verify_with_precompiles;
     use miden_vm::{Program, TraceBuildInputs};
 
     /// Default fragment size for parallel trace generation
@@ -510,9 +521,15 @@ mod fast_parallel {
             ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_state.to_wire());
 
         // Verify the proof
-        let schema = CoreLibrary::default().precompile_schema();
-        verify(program.into(), stack_inputs, fast_stack_outputs, &schema, proof)
-            .expect("Verification failed");
+        let precompiles = CoreLibrary::default().precompiles();
+        verify_with_precompiles(
+            program.into(),
+            stack_inputs,
+            fast_stack_outputs,
+            &precompiles,
+            proof,
+        )
+        .expect("Verification failed");
     }
 
     #[test]
@@ -538,8 +555,8 @@ mod fast_parallel {
         ))
         .expect("prove_from_trace_sync failed");
 
-        let schema = CoreLibrary::default().precompile_schema();
-        verify(program.into(), stack_inputs, stack_outputs, &schema, proof)
+        let precompiles = CoreLibrary::default().precompiles();
+        verify_with_precompiles(program.into(), stack_inputs, stack_outputs, &precompiles, proof)
             .expect("Verification failed");
     }
 

@@ -8,7 +8,7 @@ macro_rules! build_test {
         miden_utils_testing::build_test_by_mode!(false, $($params)+)
             .with_library(core_lib.library().clone())
             .with_event_handlers(core_lib.handlers())
-            .with_schema(alloc::sync::Arc::new(core_lib.precompile_schema()))
+            .with_precompiles(alloc::sync::Arc::new(core_lib.precompiles()))
     }}
 }
 
@@ -20,7 +20,7 @@ macro_rules! build_debug_test {
         miden_utils_testing::build_test_by_mode!(true, $($params)+)
             .with_library(core_lib.library().clone())
             .with_event_handlers(core_lib.handlers())
-            .with_schema(alloc::sync::Arc::new(core_lib.precompile_schema()))
+            .with_precompiles(alloc::sync::Arc::new(core_lib.precompiles()))
     }}
 }
 

@@ -121,8 +121,7 @@ impl TraceBuildInputs {
 /// The trace consists of the following components:
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state, deferred precompile requests, and the final
-///   deferred-DAG state).
+/// - Information about execution outputs (stack state and the final deferred-DAG state).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {

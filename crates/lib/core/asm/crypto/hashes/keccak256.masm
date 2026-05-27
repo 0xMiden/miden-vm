@@ -10,7 +10,7 @@ use miden::core::sys
 # - Fixed-size examples: DIGEST_U32[8] = [d_0, ..., d_7], INPUT_U8[32] = [b_0, ..., b_31]
 # - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
 
-# CONSTANTS — Keccak256Precompile schema tag fields
+# CONSTANTS — Keccak256Precompile precompile tag fields
 # ================================================================================================
 # Pinned to the Rust-side Keccak256Precompile constants. PRECOMPILE_ID is the Blake3-derived
 # `precompile_id(&Keccak256Precompile)` over NAME ("keccak256"); changing the NAME in Rust must
@@ -37,8 +37,8 @@ const EQ_TAG_ID = 2
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 #!
 #! Local memory layout (element addresses):
-#!   loc[0..4]   DIGEST_LO  (computed by schema, returned to caller)
-#!   loc[4..8]   DIGEST_HI  (computed by schema, returned to caller)
+#!   loc[0..4]   DIGEST_LO  (computed by precompile, returned to caller)
+#!   loc[4..8]   DIGEST_HI  (computed by precompile, returned to caller)
 #!   loc[8..12]  PREIMAGE_DIGEST  (held until eq node construction)
 #!   loc[12..16] LEAF_DIGEST      (held until eq node construction)
 #!
@@ -47,7 +47,7 @@ const EQ_TAG_ID = 2
 #!      in memory at `ptr`. `register_chunk` derives PREIMAGE_DIGEST in-circuit (a linear hash of the
 #!      `8*n_chunks` felts), binding it to the caller's memory. `n_chunks = max(1, ceil(len_bytes/32))`
 #!      — empty input is one zero chunk (empty chunk bodies are banned).
-#!   2. `adv.evaluate_deferred` runs the schema's Keccak256::hash host-side, interns the canonical
+#!   2. `adv.evaluate_deferred` runs Keccak256::hash via the precompile host-side, interns the canonical
 #!      Digest leaf, and pushes its `LEAF_TAG || DIGEST_LO || DIGEST_HI` onto the advice stack
 #!      (TAG first). The advice digest is untrusted; it is bound by step 4.
 #!   3. Save DIGEST_LO/HI to locals (caller return) and register the Digest leaf in-circuit
@@ -59,8 +59,8 @@ const EQ_TAG_ID = 2
 #!
 #! In-circuit hashing per call: the node digests are derived in-circuit by the `register_*` helpers
 #! (`n_chunks` permutations for the preimage chunk, one each for the digest leaf and the eq node),
-#! plus the `log_precompile` fold. The Keccak256 preimage hash itself runs only inside the schema's
-#! reduce (host-side).
+#! plus the `log_precompile` fold. The Keccak256 preimage hash itself runs only inside the
+#! precompile's reduce (host-side).
 @locals(16)
 pub proc hash_bytes
     # ---- Step 1: Register preimage chunk → PREIMAGE_DIGEST ----

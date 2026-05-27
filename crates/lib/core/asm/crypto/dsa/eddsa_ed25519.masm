@@ -11,7 +11,7 @@ use miden::core::word
 # - Unused bytes in the final u32 must be zero
 # - Memory addresses supplied to this module must be word-aligned (divisible by 4)
 
-# CONSTANTS — EddsaEd25519Precompile schema tag fields
+# CONSTANTS — EddsaEd25519Precompile precompile tag fields
 # ================================================================================================
 
 const PRECOMPILE_ID = 7694585564767061637
@@ -25,7 +25,7 @@ const PK_LEN_FELTS = 8        # 32.div_ceil(4)
 #! Verifies an Ed25519 EdDSA signature compatible with `miden-crypto::eddsa_25519_sha512`.
 #!
 #! Given a public key commitment and the original message, reconstructs the calldata expected by
-#! the EddsaEd25519Precompile schema's verify chunk (pk, SHA512(R || PK || MSG), signature) into
+#! the EddsaEd25519Precompile precompile's verify chunk (pk, SHA512(R || PK || MSG), signature) into
 #! a single 40-felt local-memory buffer at locaddr.0, then dispatches to `verify_prehash`.
 #!
 #! Inputs:
@@ -50,7 +50,7 @@ const PK_LEN_FELTS = 8        # 32.div_ceil(4)
 #!   locaddr[48..72]  sha512 input scratch (24 felts = R || PK || MSG)
 #!
 #! Traps if the public key does not hash to `PK_COMM`, or if signature verification fails
-#! inside the schema kernel.
+#! inside the precompile.
 @locals(72)
 pub proc verify
     # Load the public key (8 felts) into locaddr[0..8]
@@ -102,7 +102,7 @@ end
 #! Verifies an EdDSA (Ed25519) signature with a pre-computed nonce digest via the deferred-DAG
 #! framework.
 #!
-#! The caller provides a single pointer to a contiguous 40-felt buffer with the schema layout:
+#! The caller provides a single pointer to a contiguous 40-felt buffer with the precompile layout:
 #!
 #!   bytes[0..32]    pk
 #!   bytes[32..96]   k_digest = SHA-512(R || A || message)

@@ -1087,11 +1087,6 @@ fn test_build_trace_returns_err_on_invalid_mast_forest_id(
     );
 }
 
-// (test_build_trace_rejects_mismatched_precompile_requests removed: precompile requests are no
-// longer carried alongside the trace inputs — the deferred-DAG state is the sole precompile
-// witness, and its mismatch detection happens at proof verification time via
-// DeferredState::rehydrate.)
-
 /// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
 /// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
 /// appended by `build_trace_with_max_len`.

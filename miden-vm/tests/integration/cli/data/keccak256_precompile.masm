@@ -1,0 +1,19 @@
+# Exercises the Keccak256 deferred precompile end-to-end through the CLI.
+#
+# `keccak256::hash_bytes` emits a deferred-DAG precompile tag, so executing this program requires
+# the core-library precompile registry to be installed on the host. It is a regression guard for
+# both `miden run` and `miden prove`.
+use miden::core::sys
+use miden::core::crypto::hashes::keccak256
+
+begin
+    # Store a 5-byte preimage ([1,2,3,4,5], u32-packed-LE) at word-aligned address 256.
+    push.67305985 push.256 mem_store
+    push.5 push.257 mem_store
+
+    # [len_bytes=5, ptr=256] -> Keccak256 digest (8 u32 limbs).
+    push.5.256
+    exec.keccak256::hash_bytes
+
+    exec.sys::truncate_stack
+end

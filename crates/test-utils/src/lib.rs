@@ -46,7 +46,7 @@ use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::verify;
+pub use miden_verifier::{verify, verify_with_precompiles};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
@@ -220,7 +220,7 @@ pub struct Test {
     pub libraries: Vec<Library>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
-    pub schema: Arc<PrecompileRegistry>,
+    pub precompiles: Arc<PrecompileRegistry>,
 }
 
 // BUFFER WRITER FOR TESTING
@@ -257,7 +257,7 @@ impl Test {
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
-            schema: Arc::new(PrecompileRegistry::default()),
+            precompiles: Arc::new(PrecompileRegistry::default()),
         }
     }
 
@@ -297,11 +297,11 @@ impl Test {
         self
     }
 
-    /// Installs the deferred-DAG [`PrecompileRegistry`] used by the test's `FastProcessor`.
+    /// Installs the deferred-DAG [`PrecompileRegistry`] used by the test host.
     /// Defaults to the empty registry — programs that emit precompile tags must install one
-    /// (e.g. `miden_core_lib::CoreLibrary::precompile_schema()`).
-    pub fn with_schema(mut self, schema: Arc<PrecompileRegistry>) -> Self {
-        self.schema = schema;
+    /// (e.g. `miden_core_lib::CoreLibrary::precompiles()`).
+    pub fn with_precompiles(mut self, precompiles: Arc<PrecompileRegistry>) -> Self {
+        self.precompiles = precompiles;
         self
     }
 
@@ -354,11 +354,11 @@ impl Test {
     // TEST METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Builds a [`FastProcessor`] wired with this test's advice inputs and the deferred-DAG
-    /// [`PrecompileRegistry`], the same way every `FastProcessor::new` execution path needs.
-    /// Centralised so a new path can't silently forget `.with_precompiles(...)`. Returns the
-    /// advice-setup error so callers keep their prior behaviour — propagate via `?` or panic via
-    /// `.expect`.
+    /// Builds a [`FastProcessor`] wired with this test's advice inputs.
+    ///
+    /// The deferred-DAG [`PrecompileRegistry`] is installed on the test host instead of the
+    /// processor. Returns the advice-setup error so callers keep their prior behaviour — propagate
+    /// via `?` or panic via `.expect`.
     #[cfg(not(target_family = "wasm"))]
     fn build_processor(
         &self,
@@ -369,8 +369,7 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?
             .with_debugging(debug)
-            .with_tracing(debug)
-            .with_precompiles(self.schema.clone()))
+            .with_tracing(debug))
     }
 
     /// Builds a final stack from the provided stack-ordered array and asserts that executing the
@@ -578,8 +577,7 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_precompiles(self.schema.clone());
+            .map_err(ExecutionError::advice_error_no_context)?;
             fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
@@ -643,7 +641,7 @@ impl Test {
     /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
     /// much faster and provides better error diagnostics. Use this method only when you need to
     /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
-    /// verifier logic, or precompile request handling).
+    /// verifier logic, or deferred precompile handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
@@ -662,10 +660,23 @@ impl Test {
         if test_fail {
             stack_outputs.as_mut()[0] += ONE;
             assert!(
-                verify(program_info, stack_inputs, stack_outputs, &self.schema, proof).is_err()
+                verify_with_precompiles(
+                    program_info,
+                    stack_inputs,
+                    stack_outputs,
+                    &self.precompiles,
+                    proof,
+                )
+                .is_err()
             );
         } else {
-            let result = verify(program_info, stack_inputs, stack_outputs, &self.schema, proof);
+            let result = verify_with_precompiles(
+                program_info,
+                stack_inputs,
+                stack_outputs,
+                &self.precompiles,
+                proof,
+            );
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
@@ -719,7 +730,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     fn get_program_and_host(&self) -> (Program, DefaultHost) {
         let (program, kernel) = self.compile().expect("Failed to compile test source.");
-        let mut host = DefaultHost::default();
+        let mut host = DefaultHost::default().with_precompiles(self.precompiles.clone());
         if let Some(kernel) = kernel {
             host.load_library(kernel.mast_forest()).unwrap();
         }

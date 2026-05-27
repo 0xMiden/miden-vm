@@ -203,43 +203,43 @@ mod tests {
 
     #[test]
     fn verify_succeeds_on_valid_signature() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
         let chunks = pack_ecdsa(&pk_bytes, &digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let result = state.evaluate(&schema, node).unwrap();
+        let result = state.evaluate(&precompiles, node).unwrap();
         assert!(result.is_true_node());
     }
 
     #[test]
     fn verify_fails_on_tampered_signature() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, mut sig_bytes) = ecdsa_keypair_and_sig(digest);
         sig_bytes[0] ^= 0xff;
         let chunks = pack_ecdsa(&pk_bytes, &digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn verify_fails_on_tampered_digest() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
         let mut wrong_digest = digest;
         wrong_digest[0] ^= 0xff;
         let chunks = pack_ecdsa(&pk_bytes, &wrong_digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn verify_rejects_nonzero_padding_after_pk() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
         let mut buf = vec![0u8; 160];
@@ -249,13 +249,13 @@ mod tests {
         buf[80..145].copy_from_slice(&sig_bytes);
         let chunks = pack_chunks(&buf);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
     #[test]
     fn verify_rejects_nonzero_trailing_padding() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let digest = [7u8; 32];
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
         let mut buf = vec![0u8; 160];
@@ -265,7 +265,7 @@ mod tests {
         buf[150] = 0xaa;
         let chunks = pack_chunks(&buf);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 }

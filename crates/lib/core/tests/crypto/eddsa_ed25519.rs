@@ -1,6 +1,6 @@
 //! Tests for the EdDSA Ed25519 / SHA-512 precompile MASM wrappers.
 //!
-//! EdDSA verification runs entirely inside the `EddsaEd25519Precompile` schema's `reduce` (no
+//! EdDSA verification runs entirely inside the `EddsaEd25519Precompile` precompiles's `reduce` (no
 //! host-side event handler). The MASM wrappers register the chunk node, evaluate the predicate
 //! (which traps on signature failure), and fold the chunk digest into the precompile
 //! transcript.
@@ -30,7 +30,7 @@ const BUF_ADDR: u32 = 128;
 // VERIFY_PREHASH — single-buffer API
 // ================================================================================================
 
-/// Pack a (pk, k_digest, sig) triple into the schema's 40-felt chunk buffer (no padding —
+/// Pack a (pk, k_digest, sig) triple into the precompiles's 40-felt chunk buffer (no padding —
 /// 32 + 64 + 64 = 160 bytes naturally word-aligned at every boundary).
 fn pack_eddsa_buffer(pk: &[u8], k_digest: &[u8; 64], sig: &[u8]) -> Vec<Felt> {
     assert_eq!(pk.len(), 32);

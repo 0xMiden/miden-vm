@@ -40,3 +40,13 @@ pub fn chunks_to_bytes(chunks: &[[Felt; 8]], n_bytes: usize) -> Result<Vec<u8>, 
     bytes.truncate(n_bytes);
     Ok(bytes)
 }
+
+/// Pack `N * 4` contiguous bytes into `N` u32-packed-LE felts.
+pub fn bytes_to_felts<const N: usize>(bytes: &[u8]) -> [Felt; N] {
+    assert_eq!(bytes.len(), N * 4, "byte length must match the felt count");
+    core::array::from_fn(|i| {
+        let mut limb = [0u8; 4];
+        limb.copy_from_slice(&bytes[i * 4..(i + 1) * 4]);
+        Felt::from_u32(u32::from_le_bytes(limb))
+    })
+}

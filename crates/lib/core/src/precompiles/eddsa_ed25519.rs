@@ -191,33 +191,33 @@ mod tests {
 
     #[test]
     fn verify_succeeds_on_valid_triple() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let (pk, k_digest, sig) = eddsa_valid_triple_for_word(eddsa_test_word(1));
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let result = state.evaluate(&schema, node).unwrap();
+        let result = state.evaluate(&precompiles, node).unwrap();
         assert!(result.is_true_node());
     }
 
     #[test]
     fn verify_fails_on_tampered_signature() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let (pk, k_digest, mut sig) = eddsa_valid_triple_for_word(eddsa_test_word(11));
         sig[0] ^= 0xff;
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
     fn verify_fails_on_tampered_k_digest() {
-        let (schema, mut state) = fresh_state();
+        let (precompiles, mut state) = fresh_state();
         let (pk, mut k_digest, sig) = eddsa_valid_triple_for_word(eddsa_test_word(22));
         k_digest[0] ^= 0xff;
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let err = state.evaluate(&schema, node);
+        let err = state.evaluate(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 }
