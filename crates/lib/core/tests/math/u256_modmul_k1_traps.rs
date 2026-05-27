@@ -90,7 +90,7 @@ fn install_handler<H: EventHandler + 'static>(handler: H) -> Test {
     handlers.retain(|(name, _)| name != &U256_MODMUL_K1_BASE_EVENT_NAME);
 
     miden_utils_testing::build_debug_test!(MODMUL_SOURCE, &[])
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handlers(handlers)
         .with_event_handler(U256_MODMUL_K1_BASE_EVENT_NAME, handler)
 }
@@ -251,7 +251,7 @@ fn synthetic_c_ge_p_traps_at_canonical_check() {
     handlers.retain(|(name, _)| name != &U256_MODMUL_K1_BASE_EVENT_NAME);
 
     let test = miden_utils_testing::build_debug_test!(C_GE_P_SOURCE, &[])
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handlers(handlers)
         .with_event_handler(U256_MODMUL_K1_BASE_EVENT_NAME, CGePHandler);
 
@@ -308,7 +308,7 @@ fn tampered_e_shifted_limb_traps_at_identity_check() {
     handlers.retain(|(name, _)| name != &U256_MODMUL_K1_BASE_EVENT_NAME);
 
     let test = miden_utils_testing::build_debug_test!(MODMUL_SOURCE, &[])
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handlers(handlers)
         .with_event_handler(U256_MODMUL_K1_BASE_EVENT_NAME, TamperedEShiftedIdentityHandler);
 
