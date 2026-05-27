@@ -3275,7 +3275,7 @@ fn invalid_repeat_count_zero() {
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() {
+fn invalid_repeat_count_zero_in_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,

@@ -63,13 +63,14 @@
 //! - Advice map (`AdviceMap`)
 //!
 //! (DebugInfo section - omitted if FLAGS bit 0 is set)
-//! - Decorator data (raw bytes for decorator payloads)
-//! - String table (deduplicated strings)
-//! - Decorator infos (`Vec<DecoratorInfo>`)
 //! - Error codes map (`BTreeMap<u64, String>`)
-//! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
-//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
 //! - Procedure names map (`BTreeMap<Word, String>`)
+//! - Assembly operation data (raw bytes for AssemblyOp payloads)
+//! - Assembly operation string table (deduplicated strings)
+//! - Assembly operation infos (`Vec<AsmOpInfo>`)
+//! - OpToAsmOpId CSR (operation-indexed AssemblyOp metadata)
+//! - Debug variables (`Vec<DebugVarInfo>`)
+//! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
 //! In stripped format, the `DebugInfo` section is omitted and readers materialize an empty
 //! `DebugInfo`.
@@ -112,8 +113,6 @@ use crate::{
 
 pub(crate) mod asm_op;
 use asm_op::AsmOpInfo;
-pub(crate) mod decorator;
-use decorator::DecoratorInfo;
 
 mod info;
 pub use info::{MastNodeEntry, MastNodeInfo};
@@ -146,9 +145,6 @@ mod tests;
 
 /// Specifies an offset into the `node_data` section of an encoded [`MastForest`].
 type NodeDataOffset = u32;
-
-/// Specifies an offset into the `decorator_data` section of an encoded [`MastForest`].
-type DecoratorDataOffset = u32;
 
 /// Specifies an offset into the `strings_data` section of an encoded [`MastForest`].
 type StringDataOffset = usize;
@@ -232,8 +228,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Dropped the serialized decorator-count field because it was not used by the wire layout or
 ///   deserializers. Before any public release on this branch, the same unreleased wire version also
 ///   grew explicit internal/external node counts in the header.
-/// - [0, 0, 4]: Removed debug decorator variants from serialized decorators. Trace decorators keep
-///   discriminant 6.
+/// - [0, 0, 4]: Removed debug and trace decorator variants from serialized decorators, then dropped
+///   the unreleased decorator wire slots entirely.
 const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -609,13 +605,7 @@ fn check_ignored_debug_payload(
 }
 
 fn skip_debug_info<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_len_prefixed_bytes(source)?; // decorator_data
-    skip_string_table(source)?;
-    skip_fixed_vec(source, DecoratorInfo::min_serialized_size())?;
     skip_btree_map_u64_string(source)?;
-    skip_op_to_u32_ids(source)?;
-    skip_csr_u32_data(source)?;
-    skip_csr_u32_data(source)?;
     skip_btree_map_word_string(source)?;
     skip_len_prefixed_bytes(source)?; // asm_op_data
     skip_string_table(source)?;
@@ -663,11 +653,6 @@ fn skip_btree_map_word_string<R: ByteReader>(source: &mut R) -> Result<(), Deser
 fn skip_op_to_u32_ids<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
     skip_u32_vec(source)?;
     skip_usize_vec(source)?;
-    skip_usize_vec(source)
-}
-
-fn skip_csr_u32_data<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_u32_vec(source)?;
     skip_usize_vec(source)
 }
 

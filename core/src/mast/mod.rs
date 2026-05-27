@@ -1089,8 +1089,7 @@ impl Iterator for SubtreeIterator<'_> {
 
 /// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
 ///
-/// Unlike decorators (which are executed at runtime), AssemblyOps are metadata
-/// used only for error context and debugging tools.
+/// AssemblyOps are metadata used only for error context and debugging tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]

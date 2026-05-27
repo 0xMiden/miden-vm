@@ -392,8 +392,8 @@ pub struct MerklePathVerificationFailedInner {
 /// Computes the label and source file for error context.
 ///
 /// This function is called by the extension traits to compute source location
-/// only when an error occurs. Since errors are rare, the cost of decorator
-/// traversal is acceptable.
+/// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
+/// acceptable.
 fn get_label_and_source_file<F>(
     op_idx: Option<usize>,
     mast_forest: &F,

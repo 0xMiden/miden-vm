@@ -63,7 +63,7 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Debug information including decorators and error codes.
+    /// Debug information, including source metadata and error codes.
     debug_info: DebugInfo,
 
     /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).

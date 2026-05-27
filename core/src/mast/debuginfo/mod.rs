@@ -33,7 +33,6 @@ use crate::{
     mast::serialization::{
         StringTable,
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
-        decorator::DecoratorInfo,
     },
     operations::{AssemblyOp, DebugVarInfo},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -380,28 +379,17 @@ impl DebugInfo {
 
 impl Serializable for DebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // 1. Serialize empty legacy decorator sections.
-        Vec::<u8>::new().write_into(target);
-        StringTable::new(Vec::new(), Vec::new()).write_into(target);
-        Vec::<DecoratorInfo>::new().write_into(target);
-
-        // 2. Serialize error codes
+        // 1. Serialize error codes
         let error_codes: BTreeMap<u64, String> =
             self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
-        // 3. Serialize empty legacy OpToDecoratorIds CSR.
-        write_empty_legacy_op_decorator_storage(target);
-
-        // 4. Serialize empty legacy NodeToDecoratorIds CSR.
-        write_empty_legacy_node_decorator_storage(target);
-
-        // 5. Serialize procedure names
+        // 2. Serialize procedure names
         let procedure_names: BTreeMap<Word, String> =
             self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
         procedure_names.write_into(target);
 
-        // 6. Serialize AssemblyOps (data, string table, infos)
+        // 3. Serialize AssemblyOps (data, string table, infos)
         let mut asm_op_data_builder = AsmOpDataBuilder::new();
         for asm_op in self.asm_ops.iter() {
             asm_op_data_builder.add_asm_op(asm_op);
@@ -412,50 +400,25 @@ impl Serializable for DebugInfo {
         asm_op_string_table.write_into(target);
         asm_op_infos.write_into(target);
 
-        // 7. Serialize OpToAsmOpId CSR (dense representation)
+        // 4. Serialize OpToAsmOpId CSR (dense representation)
         self.asm_op_storage.write_into(target);
 
-        // 8. Serialize debug variables
+        // 5. Serialize debug variables
         self.debug_vars.write_into(target);
 
-        // 9. Serialize OpToDebugVarIds CSR
+        // 6. Serialize OpToDebugVarIds CSR
         self.op_debug_var_storage.write_into(target);
     }
 }
 
 impl Deserializable for DebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // 1. Read and reject legacy decorator data.
-        let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
-        let string_table: StringTable = Deserializable::read_from(source)?;
-        let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
-        if !decorator_data.is_empty() || !decorator_infos.is_empty() {
-            return Err(DeserializationError::InvalidValue(
-                "decorators are no longer supported".into(),
-            ));
-        }
-        let _ = string_table;
-
-        // 3. Read error codes
+        // 1. Read error codes
         let error_codes_raw: BTreeMap<u64, String> = Deserializable::read_from(source)?;
         let error_codes: BTreeMap<u64, Arc<str>> =
             error_codes_raw.into_iter().map(|(k, v)| (k, Arc::from(v.as_str()))).collect();
 
-        // 4. Read OpToDecoratorIds CSR (dense representation)
-        if !read_empty_legacy_op_decorator_storage(source)? {
-            return Err(DeserializationError::InvalidValue(
-                "operation-indexed decorators are no longer supported".into(),
-            ));
-        }
-
-        // 5. Read NodeToDecoratorIds CSR (dense representation)
-        if !read_empty_legacy_node_decorator_storage(source)? {
-            return Err(DeserializationError::InvalidValue(
-                "node decorators are no longer supported".into(),
-            ));
-        }
-
-        // 6. Read procedure names
+        // 2. Read procedure names
         // Note: Procedure name digests are validated at the MastForest level (in
         // MastForest::validate) to ensure they reference actual procedures in the forest.
         let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
@@ -464,12 +427,12 @@ impl Deserializable for DebugInfo {
             .map(|(k, v)| (k, Arc::from(v.as_str())))
             .collect();
 
-        // 7. Read AssemblyOps (data, string table, infos)
+        // 3. Read AssemblyOps (data, string table, infos)
         let asm_op_data: Vec<u8> = Deserializable::read_from(source)?;
         let asm_op_string_table: StringTable = Deserializable::read_from(source)?;
         let asm_op_infos: Vec<AsmOpInfo> = Deserializable::read_from(source)?;
 
-        // 8. Reconstruct AssemblyOps
+        // 4. Reconstruct AssemblyOps
         let mut asm_ops = IndexVec::new();
         for asm_op_info in asm_op_infos {
             let asm_op = asm_op_info.try_into_asm_op(&asm_op_string_table, &asm_op_data)?;
@@ -480,16 +443,16 @@ impl Deserializable for DebugInfo {
             })?;
         }
 
-        // 9. Read OpToAsmOpId CSR (dense representation)
+        // 5. Read OpToAsmOpId CSR (dense representation)
         let asm_op_storage = OpToAsmOpId::read_from(source, asm_ops.len())?;
 
-        // 10. Read debug variables
+        // 6. Read debug variables
         let debug_vars: IndexVec<DebugVarId, DebugVarInfo> = Deserializable::read_from(source)?;
 
-        // 11. Read OpToDebugVarIds CSR
+        // 7. Read OpToDebugVarIds CSR
         let op_debug_var_storage = OpToDebugVarIds::read_from(source, debug_vars.len())?;
 
-        // 12. Construct and validate DebugInfo
+        // 8. Construct and validate DebugInfo
         let debug_info = DebugInfo {
             asm_ops,
             asm_op_storage,
@@ -510,87 +473,5 @@ impl Deserializable for DebugInfo {
 impl Default for DebugInfo {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn write_empty_legacy_op_decorator_storage<W: ByteWriter>(target: &mut W) {
-    Vec::<u32>::new().write_into(target);
-    Vec::<usize>::new().write_into(target);
-    Vec::<usize>::new().write_into(target);
-}
-
-fn read_empty_legacy_op_decorator_storage<R: ByteReader>(
-    source: &mut R,
-) -> Result<bool, DeserializationError> {
-    let decorator_ids: Vec<u32> = Deserializable::read_from(source)?;
-    let op_indptr_for_decorator_ids: Vec<usize> = Deserializable::read_from(source)?;
-    let node_indptr_for_op_idx: Vec<usize> = Deserializable::read_from(source)?;
-
-    Ok(decorator_ids.is_empty()
-        && is_all_zero(&op_indptr_for_decorator_ids)
-        && is_all_zero(&node_indptr_for_op_idx))
-}
-
-fn write_empty_legacy_node_decorator_storage<W: ByteWriter>(target: &mut W) {
-    write_empty_legacy_csr_u32(target);
-    write_empty_legacy_csr_u32(target);
-}
-
-fn read_empty_legacy_node_decorator_storage<R: ByteReader>(
-    source: &mut R,
-) -> Result<bool, DeserializationError> {
-    Ok(read_empty_legacy_csr_u32(source)? && read_empty_legacy_csr_u32(source)?)
-}
-
-fn write_empty_legacy_csr_u32<W: ByteWriter>(target: &mut W) {
-    Vec::<u32>::new().write_into(target);
-    Vec::<usize>::new().write_into(target);
-}
-
-fn read_empty_legacy_csr_u32<R: ByteReader>(source: &mut R) -> Result<bool, DeserializationError> {
-    let data: Vec<u32> = Deserializable::read_from(source)?;
-    let indptr: Vec<usize> = Deserializable::read_from(source)?;
-
-    Ok(data.is_empty() && is_all_zero(&indptr))
-}
-
-fn is_all_zero(values: &[usize]) -> bool {
-    values.iter().all(|value| *value == 0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::serde::SliceReader;
-
-    #[test]
-    fn legacy_empty_decorator_storage_accepts_all_zero_pointer_rows() {
-        let mut op_storage = Vec::new();
-        Vec::<u32>::new().write_into(&mut op_storage);
-        vec![0usize, 0, 0].write_into(&mut op_storage);
-        vec![0usize, 0].write_into(&mut op_storage);
-
-        let mut reader = SliceReader::new(&op_storage);
-        assert!(read_empty_legacy_op_decorator_storage(&mut reader).unwrap());
-
-        let mut node_storage = Vec::new();
-        Vec::<u32>::new().write_into(&mut node_storage);
-        vec![0usize, 0].write_into(&mut node_storage);
-        Vec::<u32>::new().write_into(&mut node_storage);
-        vec![0usize, 0, 0].write_into(&mut node_storage);
-
-        let mut reader = SliceReader::new(&node_storage);
-        assert!(read_empty_legacy_node_decorator_storage(&mut reader).unwrap());
-    }
-
-    #[test]
-    fn legacy_empty_decorator_storage_rejects_nonzero_pointers() {
-        let mut op_storage = Vec::new();
-        Vec::<u32>::new().write_into(&mut op_storage);
-        vec![0usize, 1].write_into(&mut op_storage);
-        vec![0usize].write_into(&mut op_storage);
-
-        let mut reader = SliceReader::new(&op_storage);
-        assert!(!read_empty_legacy_op_decorator_storage(&mut reader).unwrap());
     }
 }

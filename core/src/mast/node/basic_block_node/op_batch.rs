@@ -417,9 +417,8 @@ impl OpBatchAccumulator {
     }
 
     /// Adds the specified operation to this accumulator. It is expected that the specified
-    /// operation is not a decorator and that (can_accept_op())[OpBatchAccumulator::can_accept_op]
-    /// is called before this function to make sure that the specified operation can be added to
-    /// the accumulator.
+    /// operation can be added to the accumulator. Call
+    /// [`can_accept_op`](OpBatchAccumulator::can_accept_op) before this function.
     pub fn add_op(&mut self, op: Operation) {
         // if the group is full, finalize it and start a new group
         if self.op_idx == GROUP_SIZE {

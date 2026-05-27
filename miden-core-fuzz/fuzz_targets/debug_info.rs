@@ -1,13 +1,11 @@
 //! Fuzz target for DebugInfo deserialization.
 //!
 //! DebugInfo contains:
-//! - Decorator data (variable-length payloads)
-//! - String table (deduplicated strings)
-//! - Decorator infos
 //! - Error codes map
-//! - CSR structures (OpToDecoratorIds, NodeToDecoratorIds)
 //! - Procedure names map
-//!
+//! - Assembly operation metadata
+//! - Debug variable metadata
+//! 
 //! Run with: cargo +nightly fuzz run debug_info --fuzz-dir miden-core-fuzz
 
 #![no_main]

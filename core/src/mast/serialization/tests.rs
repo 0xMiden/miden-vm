@@ -62,7 +62,7 @@ fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, 
 /// was added, make sure that you add it in the vector of operations in
 /// [`serialize_deserialize_all_nodes`].
 #[test]
-fn confirm_operation_and_decorator_structure() {
+fn confirm_operation_structure() {
     match Operation::Noop {
         Operation::Noop => (),
         Operation::Assert(_) => (),
@@ -939,7 +939,7 @@ fn test_multi_batch_roundtrip() {
     assert_eq!(original.op_batches(), deserialized.op_batches());
 }
 
-/// Tests that decorator indices remain correct after round-trip with padded operations.
+/// Tests that operation batches preserve their digest across serialization.
 #[test]
 fn test_raw_batched_digest_equivalence() {
     let operations = vec![
@@ -1361,10 +1361,10 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
 /// Test that untrusted hashless deserialization accepts external nodes at parse time.
 #[test]
 fn test_debuginfo_serialization_empty() {
-    // Create forest with no decorators
+    // Create forest with no debug metadata.
     let mut forest = MastForest::new();
 
-    // Add a simple basic block with no decorators
+    // Add a simple basic block with no debug metadata.
     let ops = vec![Operation::Noop; 4];
     let block_id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
@@ -1379,7 +1379,7 @@ fn test_debuginfo_serialization_empty() {
     assert!(deserialized.debug_info().is_empty());
 }
 
-/// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
+/// Test that untrusted forest validation rejects forward node references.
 #[test]
 fn test_untrusted_forest_detects_forward_reference() {
     // Create a forest with forward references by swapping node order
