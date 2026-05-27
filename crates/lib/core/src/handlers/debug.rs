@@ -35,6 +35,9 @@ use miden_utils_sync::RwLock;
 pub const PRINT_STACK_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_stack");
 /// Prints memory in the range `[start, end)` of the current context.
 pub const PRINT_MEM_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem");
+/// Prints the value of a single memory cell of the current context.
+pub const PRINT_MEM_ADDR_EVENT_NAME: EventName =
+    EventName::new("miden::core::debug::print_mem_addr");
 /// Prints the entire memory of the current context.
 pub const PRINT_MEM_ALL_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem_all");
 /// Prints the advice stack in the range `[start, end)`.
@@ -58,6 +61,7 @@ pub fn default_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     vec![
         (PRINT_STACK_EVENT_NAME, printer.clone()),
         (PRINT_MEM_EVENT_NAME, printer.clone()),
+        (PRINT_MEM_ADDR_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer),
     ]
 }
@@ -71,6 +75,7 @@ pub fn noop_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     vec![
         (PRINT_STACK_EVENT_NAME, handler.clone()),
         (PRINT_MEM_EVENT_NAME, handler.clone()),
+        (PRINT_MEM_ADDR_EVENT_NAME, handler.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, handler.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, handler.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, handler.clone()),
@@ -86,6 +91,7 @@ pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     vec![
         (PRINT_STACK_EVENT_NAME, printer.clone()),
         (PRINT_MEM_EVENT_NAME, printer.clone()),
+        (PRINT_MEM_ADDR_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
@@ -158,6 +164,9 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
                 .into());
             }
             write_mem_range(w, process, range)?;
+        } else if id == PRINT_MEM_ADDR_EVENT_NAME.to_event_id() {
+            let addr = process.get_mem_addr_range(1, 1)?.start;
+            write_mem_addr(w, process, addr)?;
         } else if id == PRINT_MEM_ALL_EVENT_NAME.to_event_id() {
             write_mem_all(w, process)?;
         } else if id == PRINT_ADV_STACK_EVENT_NAME.to_event_id() {
@@ -227,6 +236,20 @@ fn write_mem_range<W: fmt::Write>(
         })
         .collect();
     write_interval(w, items, None)
+}
+
+/// Prints the value of the single memory cell at `addr` in the current context.
+fn write_mem_addr<W: fmt::Write>(w: &mut W, process: &ProcessorState, addr: u32) -> fmt::Result {
+    let (ctx, clk) = (process.ctx(), process.clock());
+    match process.get_mem_value(ctx, addr) {
+        Some(value) => {
+            writeln!(w, "Memory value at {addr:#010x} before step {clk} for context {ctx}: {value}")
+        },
+        None => writeln!(
+            w,
+            "Memory at {addr:#010x} before step {clk} for context {ctx} is uninitialized."
+        ),
+    }
 }
 
 /// Prints the full memory of the current context.

@@ -15,8 +15,9 @@ use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
         DebugPrinter, PRINT_ADV_MAP_ALL_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
-        PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME,
-        PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
+        PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ADDR_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME,
+        PRINT_MEM_EVENT_NAME, PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers,
+        noop_debug_handlers,
     },
 };
 use miden_processor::{
@@ -46,6 +47,7 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
     vec![
         (PRINT_STACK_EVENT_NAME, printer.clone()),
         (PRINT_MEM_EVENT_NAME, printer.clone()),
+        (PRINT_MEM_ADDR_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
@@ -149,6 +151,40 @@ fn print_mem_outputs_range() {
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("Memory state"), "missing header; got:\n{out}");
     assert!(out.contains("42") && out.contains("43"), "missing memory values; got:\n{out}");
+}
+
+#[test]
+fn print_mem_addr_outputs_procedure_local() {
+    // Exercises the intended use case: `locaddr` turns a procedure local into an absolute
+    // address that `print_mem_addr` can print.
+    let source = "
+    use miden::core::debug
+    @locals(1)
+    proc with_local
+        push.42 loc_store.0
+        locaddr.0
+        exec.debug::print_mem_addr
+    end
+    begin
+        exec.with_local
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory value at"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value; got:\n{out}");
+}
+
+#[test]
+fn print_mem_addr_reports_uninitialized_cell() {
+    let source = "
+    use miden::core::debug
+    begin
+        push.100
+        exec.debug::print_mem_addr
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("uninitialized"), "expected uninitialized message; got:\n{out}");
 }
 
 #[test]
@@ -383,7 +419,12 @@ fn default_core_handlers_include_debug_printers() {
     let core_lib = CoreLibrary::default();
     let handlers = core_lib.handlers();
 
-    for debug_event in [PRINT_STACK_EVENT_NAME, PRINT_MEM_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME] {
+    for debug_event in [
+        PRINT_STACK_EVENT_NAME,
+        PRINT_MEM_EVENT_NAME,
+        PRINT_MEM_ADDR_EVENT_NAME,
+        PRINT_MEM_ALL_EVENT_NAME,
+    ] {
         assert!(
             handlers.iter().any(|(event, _)| event == &debug_event),
             "{debug_event:?} should be registered by default"
@@ -518,6 +559,20 @@ fn print_mem_consumes_range_args() {
     begin
         push.8 push.0   # [start=0, end=8, ...]
         exec.debug::print_mem
+    end
+    ";
+    let (_, output) = run(source, AdviceInputs::default());
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
+}
+
+#[test]
+fn print_mem_addr_consumes_addr_arg() {
+    // Pushes exactly one address arg; clean termination proves it is consumed.
+    let source = "
+    use miden::core::debug
+    begin
+        push.0   # [addr=0, ...]
+        exec.debug::print_mem_addr
     end
     ";
     let (_, output) = run(source, AdviceInputs::default());
