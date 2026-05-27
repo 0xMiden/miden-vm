@@ -188,7 +188,7 @@ impl Debug for EventHandlerRegistry {
 // ================================================================================================
 
 /// Handler for trace operations
-pub trait DebugHandler: Sync {
+pub trait TraceHandler: Sync {
     /// This function is invoked when the `Trace` decorator is executed.
     ///
     /// The default implementation is a no-op.

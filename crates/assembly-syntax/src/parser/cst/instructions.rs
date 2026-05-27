@@ -1748,31 +1748,6 @@ fn lower_error_msg(
     }
 }
 
-/// Lowers a token that must represent a `u8` immediate or constant reference.
-#[allow(dead_code)]
-fn lower_u8_immediate(
-    context: &mut LoweringContext<'_>,
-    token: &SyntaxToken,
-) -> Result<Option<ast::ImmU8>, ParsingError> {
-    let span = context.parse().span_for_token(token);
-    match token.kind() {
-        SyntaxKind::Ident => {
-            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
-        },
-        SyntaxKind::Number => {
-            let Some(value) = parse_decimal_u64(token.text()) else {
-                return Ok(None);
-            };
-            let value = u8::try_from(value).map_err(|_| ParsingError::ImmediateOutOfRange {
-                span,
-                range: 0..(u8::MAX as usize + 1),
-            })?;
-            Ok(Some(Immediate::Value(Span::new(span, value))))
-        },
-        _ => Ok(None),
-    }
-}
-
 /// Returns the span covering the first through last token in `tokens`.
 fn span_for_tokens(context: &LoweringContext<'_>, tokens: &[SyntaxToken]) -> SourceSpan {
     let first = tokens.first().expect("instruction operands should be non-empty");

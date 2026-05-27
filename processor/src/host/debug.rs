@@ -6,7 +6,7 @@ use core::fmt;
 
 use miden_core::Felt;
 
-use crate::{ProcessorState, TraceError, host::handlers::DebugHandler};
+use crate::{ProcessorState, TraceError, host::handlers::TraceHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -26,20 +26,19 @@ impl fmt::Write for StdoutWriter {
 // DEFAULT TRACE HANDLER IMPLEMENTATION
 // ================================================================================================
 
-/// Default implementation of [`DebugHandler`] that writes trace information to `stdout` when
-/// available.
-pub struct DefaultDebugHandler<W: fmt::Write + Sync = StdoutWriter> {
+/// Default trace handler that ignores trace events.
+pub struct DefaultTraceHandler<W: fmt::Write + Sync = StdoutWriter> {
     writer: W,
 }
 
-impl Default for DefaultDebugHandler<StdoutWriter> {
+impl Default for DefaultTraceHandler<StdoutWriter> {
     fn default() -> Self {
         Self { writer: StdoutWriter }
     }
 }
 
-impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
-    /// Creates a new [`DefaultDebugHandler`] with the specified writer.
+impl<W: fmt::Write + Sync> DefaultTraceHandler<W> {
+    /// Creates a new [`DefaultTraceHandler`] with the specified writer.
     pub fn new(writer: W) -> Self {
         Self { writer }
     }
@@ -50,7 +49,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 }
 
-impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
+impl<W: fmt::Write + Sync> TraceHandler for DefaultTraceHandler<W> {
     fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
         Ok(())
     }

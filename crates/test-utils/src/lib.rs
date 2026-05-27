@@ -38,11 +38,11 @@ pub use miden_processor::{
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
     trace::ExecutionTrace,
 };
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::{DefaultDebugHandler, trace::build_trace};
 use miden_processor::{
     DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::{DefaultTraceHandler, trace::build_trace};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
@@ -587,17 +587,17 @@ impl Test {
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
-    /// the [`StackOutputs`] and a [`String`] containing all debug output.
+    /// the [`StackOutputs`] and a [`String`] containing all trace output.
     ///
     /// If the execution fails, the output is printed `stderr`.
     #[cfg(not(target_family = "wasm"))]
-    pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
-        let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
+    pub fn execute_with_trace_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
+        let trace_handler = DefaultTraceHandler::new(BufferWriter::default());
 
         let (program, host) = self.get_program_and_host();
         let mut host = host
             .with_source_manager(self.source_manager.clone())
-            .with_debug_handler(debug_handler);
+            .with_trace_handler(trace_handler);
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
@@ -606,14 +606,14 @@ impl Test {
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
-        let debug_output = host.debug_handler().writer().buffer.clone();
+        let trace_output = host.trace_handler().writer().buffer.clone();
 
         match stack_result {
-            Ok(exec_output) => Ok((exec_output.stack, debug_output)),
+            Ok(exec_output) => Ok((exec_output.stack, trace_output)),
             Err(err) => {
                 // If we get an error, we print the output as an error
                 #[cfg(feature = "std")]
-                std::eprintln!("{debug_output}");
+                std::eprintln!("{trace_output}");
                 Err(err)
             },
         }

@@ -20,7 +20,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{DebugHandler, EventError};
+use handlers::{EventError, TraceHandler};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -62,7 +62,7 @@ impl AdviceMutation {
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
 /// 2. handling VM events (which can mutate the process' advice provider), and
-/// 3. handling debug and trace events.
+/// 3. handling trace events.
 pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ pub trait BaseHost {
 
     /// Handles the trace emitted from the VM.
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        let mut handler = debug::DefaultDebugHandler::default();
+        let mut handler = debug::DefaultTraceHandler::default();
         handler.on_trace(process, trace_id)
     }
 
