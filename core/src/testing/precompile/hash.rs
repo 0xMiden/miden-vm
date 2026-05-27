@@ -1,16 +1,8 @@
-//! `Hash` — chunk-bodied preimage → expression-bodied digest leaf reference precompile.
+//! Mock hash precompile for exercising chunk-bodied deferred nodes.
 //!
-//! Exercises chunk-bodied inputs and the chunk-to-expression reduction shape. The "hash" is a
-//! coordinate-wise sum of all preimage chunks into an 8-felt accumulator.
-//!
-//! Tag layout (`Hash`-specific, opaque to the framework) — `Tag { id, args: [node_disc, n_bytes,
-//! ZERO] }`:
-//!
-//! - `preimage` (disc 0) — chunk-bodied; `args[1] = n_bytes` (must be `≥ 1`); body is
-//!   `Chunk(ceil(n_bytes / 32))`. A zero-byte preimage decodes to zero chunks and is rejected.
-//!   Reduces to a `digest` leaf.
-//! - `digest`   (disc 1) — expression-bodied (8-felt digest); self-evaluating.
-//! - `eq`       (disc 2) — expression-bodied predicate over two child digests.
+//! A `preimage` chunk node reduces to a `digest` leaf by summing chunks coordinate-wise. The
+//! intentionally simple hash keeps tests focused on framework behavior: chunk arity, reduction,
+//! and equality predicates.
 
 use alloc::sync::Arc;
 use core::num::NonZeroU32;
@@ -26,7 +18,7 @@ use crate::{
 // PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Hash` precompile.
+/// Zero-sized handle for the mock hash precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Hash;
 
@@ -37,14 +29,14 @@ impl Hash {
     pub const DIGEST_TAG_ID: u32 = 1;
     pub const EQ_TAG_ID: u32 = 2;
 
-    /// Bytes packed per 8-felt chunk: each felt carries a u32 (4 bytes) little-endian limb.
+    /// Bytes represented by one 8-felt chunk in this fixture.
     pub const BYTES_PER_CHUNK: u32 = 32;
 
     pub fn id() -> Felt {
         precompile_id(&Hash)
     }
 
-    /// Tag of a `preimage` chunk node for a `n_bytes`-byte payload.
+    /// Tag for a preimage whose byte length determines its chunk count.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
         Tag {
             id: Self::id(),
@@ -52,7 +44,7 @@ impl Hash {
         }
     }
 
-    /// Tag of a canonical `digest` leaf.
+    /// Tag for a canonical digest leaf.
     pub fn digest_tag() -> Tag {
         Tag {
             id: Self::id(),
@@ -60,7 +52,7 @@ impl Hash {
         }
     }
 
-    /// Tag of an `eq` predicate node.
+    /// Tag for a digest-equality predicate.
     pub fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
@@ -68,25 +60,22 @@ impl Hash {
         }
     }
 
-    /// Build a `preimage` chunk node from caller-supplied 8-felt chunks. The caller is
-    /// responsible for zero-padding the last chunk to `BYTES_PER_CHUNK` and for matching
-    /// `chunks.len() == ceil(n_bytes / BYTES_PER_CHUNK)`.
+    /// Builds a preimage node from chunks whose count must match `n_bytes`.
     pub fn preimage_node(n_bytes: u32, chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
         Node::chunk(Self::preimage_tag(n_bytes), chunks)
     }
 
-    /// Build a canonical `digest` leaf from 8 felts.
+    /// Builds a canonical digest leaf.
     pub fn digest_node(felts: [Felt; 8]) -> Node {
         Node::leaf(Self::digest_tag(), felts)
     }
 
-    /// Build an `eq` predicate over two child digests.
+    /// Builds a predicate comparing two digest-producing nodes.
     pub fn eq_node(h_lhs: Digest, h_rhs: Digest) -> Node {
         Node::join(Self::eq_tag(), h_lhs, h_rhs)
     }
 
-    /// Decode `[Felt; 8]` digest contents from a canonical `digest` leaf. Errors if `node`
-    /// isn't tagged as a `Hash` digest leaf.
+    /// Extracts digest felts from a canonical digest leaf.
     pub fn digest_felts(node: &Node) -> Result<[Felt; 8], DeferredError> {
         if node.tag != Self::digest_tag() {
             return Err(DeferredError::InvalidPayload);
@@ -94,7 +83,7 @@ impl Hash {
         Ok(*node.payload.as_felts()?)
     }
 
-    /// Mock hash kernel: coordinate-wise sum of all chunks.
+    /// Deterministic mock hash used by tests instead of real cryptography.
     pub fn hash(chunks: &[[Felt; 8]]) -> [Felt; 8] {
         let mut acc = [ZERO; 8];
         for c in chunks {
@@ -105,7 +94,7 @@ impl Hash {
         acc
     }
 
-    /// Number of 8-felt chunks needed to encode `n_bytes` of input.
+    /// Returns the chunk count implied by a byte length.
     pub fn n_chunks(n_bytes: u32) -> u32 {
         n_bytes.div_ceil(Self::BYTES_PER_CHUNK)
     }

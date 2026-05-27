@@ -143,16 +143,10 @@ pub struct FastProcessor {
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
 
-    /// The deferred-DAG state accumulated during execution. Nodes are interned by the
-    /// `SystemEvent::DeferredRegister{,Chunk}` handlers; AND-chain steps are interned by
-    /// `DeferredState::log`. Threaded out through [`ExecutionOutput`] for the verifier to walk.
+    /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
 
-    /// The deferred-DAG precompile registry installed at processor construction. Owns the
-    /// entire semantic layer (tag recognition, validation, recursive evaluation, equality).
-    /// Defaults to an empty [`PrecompileRegistry`] — any precompile tag is rejected. Callers
-    /// running programs that emit precompile tags install the precompiles they need via
-    /// [`Self::with_precompile`].
+    /// Precompile registry used by deferred system events; empty by default, rejecting all tags.
     deferred_precompiles: Arc<PrecompileRegistry>,
 
     /// Tracks decorator retrieval calls for testing.
@@ -275,14 +269,11 @@ impl FastProcessor {
         self
     }
 
-    /// Installs a [`Precompile`] for the deferred-DAG system events, chainable
-    /// (`FastProcessor::new(...).with_precompile(a).with_precompile(b)`).
+    /// Installs a [`Precompile`] needed by deferred system events.
     ///
-    /// The default registry is empty — any precompile tag is rejected. Install the precompiles a
-    /// program needs before running it.
-    ///
-    /// Panics if the precompile is misconfigured (an id inconsistent with its name derivation,
-    /// the framework-reserved `ZERO` id, or a duplicate id) — a setup-time programming error.
+    /// The registry is empty by default, so programs using deferred precompile tags must install
+    /// their precompiles before execution. Setup mistakes, such as id drift or duplicate ids,
+    /// panic immediately.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         let registry = Arc::try_unwrap(self.deferred_precompiles)
             .expect("configure precompiles before running the program");
@@ -356,15 +347,13 @@ impl FastProcessor {
         self.options.enable_debugging()
     }
 
-    /// Returns the deferred-DAG state and precompile registry as a disjoint borrow pair so the
-    /// deferred system-event handlers can borrow both simultaneously without running into the
-    /// borrow checker.
+    /// Returns disjoint deferred state and registry borrows for system-event handlers.
     #[inline(always)]
     pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &PrecompileRegistry) {
         (&mut self.deferred_state, &self.deferred_precompiles)
     }
 
-    /// Returns a reference to the deferred-DAG state accumulated during execution.
+    /// Returns the deferred witness accumulated during execution.
     #[inline(always)]
     pub fn deferred_state(&self) -> &DeferredState {
         &self.deferred_state

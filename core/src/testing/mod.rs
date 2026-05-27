@@ -1,7 +1,5 @@
-//! Test-support surface, gated behind the `testing` feature (and always available under
-//! `cfg(test)`).
+//! Test-support APIs for crates that need deferred precompile fixtures.
 //!
-//! Reusable across crates: enable `miden-core/testing` in a consumer's dev-dependencies to pull
-//! these in.
+//! Enable the `testing` feature in dev-dependencies to use these outside `miden-core` tests.
 
 pub mod precompile;
