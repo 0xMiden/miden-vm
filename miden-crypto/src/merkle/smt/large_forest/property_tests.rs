@@ -9,9 +9,8 @@ use proptest::prelude::*;
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        Backend, ForestConfig, ForestInMemoryBackend, ForestOperation, LargeSmtForest,
-        LargeSmtForestError, LineageId, RootInfo, Smt, SmtForestUpdateBatch, SmtUpdateBatch,
-        TreeId,
+        ForestConfig, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LargeSmtForestError,
+        LineageId, RootInfo, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeId,
         large_forest::test_utils::{
             apply_batch, arbitrary_batch, arbitrary_distinct_lineages, arbitrary_lineage,
             arbitrary_non_empty_word, arbitrary_version, arbitrary_word, assert_lineage_metadata,

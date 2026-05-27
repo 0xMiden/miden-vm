@@ -15,8 +15,9 @@ use super::{PersistentBackend, Result};
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        Backend, BackendError, BackendReader, LineageId, Smt, SmtForestUpdateBatch, SmtUpdateBatch,
-        TreeEntry, TreeWithRoot, VersionId, large_forest::backend::persistent::config::Config,
+        Backend, BackendError, BackendReader, LargeSmtForest, LineageId, Smt, SmtForestUpdateBatch,
+        SmtUpdateBatch, TreeEntry, TreeWithRoot, VersionId,
+        large_forest::backend::persistent::config::Config,
     },
     rand::test_utils::ContinuousRng,
 };
@@ -819,6 +820,63 @@ fn update_forest() -> Result<()> {
     assert_eq!(backend.trees()?.count(), 2);
     assert!(backend.trees()?.any(|e| e.root() == tree_1.root()));
     assert!(backend.trees()?.any(|e| e.root() == tree_2.root()));
+
+    Ok(())
+}
+
+#[test]
+fn forest_apply_noop_update_tree_does_not_panic() {
+    let (_dir, backend) = default_backend().unwrap();
+    let mut forest = LargeSmtForest::new(backend).unwrap();
+    let mut rng = ContinuousRng::new([0x99; 32]);
+
+    let lineage: LineageId = rng.value();
+    let key: Word = rng.value();
+    let value: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key, value);
+    forest.add_lineage(lineage, 1, initial).unwrap();
+
+    let mut noop = SmtUpdateBatch::default();
+    noop.add_insert(key, value);
+    let mutations = forest.compute_update_tree_mutations(lineage, 2, noop).unwrap();
+    let roots = forest.apply_mutations(mutations).unwrap();
+
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].version(), 1);
+}
+
+#[test]
+fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
+    let (_dir, mut backend) = default_backend()?;
+    let mut rng = ContinuousRng::new([0xa5; 32]);
+
+    let lineage: LineageId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key_1, value_1);
+    backend.add_lineage(lineage, 1, initial)?;
+
+    let mut stale_updates = SmtUpdateBatch::default();
+    stale_updates.add_insert(key_2, value_2);
+    let (_visible, stale_prepared) =
+        backend.compute_update_tree_mutations(lineage, 2, stale_updates)?;
+
+    let mut intervening_updates = SmtUpdateBatch::default();
+    intervening_updates.add_insert(key_3, value_3);
+    backend.update_tree(lineage, 2, intervening_updates)?;
+
+    assert!(
+        backend.apply_mutations(stale_prepared).is_err(),
+        "stale prepared mutations must not apply after the lineage root changes"
+    );
 
     Ok(())
 }

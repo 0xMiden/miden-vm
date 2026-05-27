@@ -1161,6 +1161,90 @@ fn update_tree() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn compute_and_apply_update_tree_mutations() -> Result<()> {
+    let backend = ForestInMemoryBackend::new();
+    let mut forest = Forest::new(backend)?;
+    let mut rng = ContinuousRng::new([0x71; 32]);
+
+    let lineage: LineageId = rng.value();
+    let version_1: VersionId = 10;
+    let version_2: VersionId = 11;
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key_1, value_1);
+    let original = forest.add_lineage(lineage, version_1, initial)?;
+
+    let mut updates = SmtUpdateBatch::default();
+    updates.add_insert(key_2, value_2);
+    let mutations = forest.compute_update_tree_mutations(lineage, version_2, updates)?;
+    let proposed_roots = mutations.roots().collect::<Vec<_>>();
+    assert_eq!(proposed_roots.len(), 1);
+    assert_eq!(proposed_roots[0].lineage(), lineage);
+    assert_eq!(proposed_roots[0].version(), version_2);
+    assert_ne!(proposed_roots[0].root(), original.root());
+
+    assert_eq!(
+        forest.root_info(TreeId::new(lineage, version_1)),
+        RootInfo::LatestVersion(original.root())
+    );
+    assert_eq!(forest.get(TreeId::new(lineage, version_1), key_2)?, None);
+    assert_eq!(forest.get_history(lineage).num_versions(), 0);
+
+    let applied_roots = forest.apply_mutations(mutations)?;
+    assert_eq!(applied_roots, proposed_roots);
+    assert_eq!(
+        forest.root_info(TreeId::new(lineage, version_2)),
+        RootInfo::LatestVersion(proposed_roots[0].root())
+    );
+    assert_eq!(forest.get(TreeId::new(lineage, version_2), key_2)?, Some(value_2));
+    assert_eq!(forest.get_history(lineage).num_versions(), 1);
+
+    Ok(())
+}
+
+#[test]
+fn apply_update_tree_mutations_rejects_stale_state() -> Result<()> {
+    let backend = ForestInMemoryBackend::new();
+    let mut forest = Forest::new(backend)?;
+    let mut rng = ContinuousRng::new([0x72; 32]);
+
+    let lineage: LineageId = rng.value();
+    let version_1: VersionId = 20;
+    let version_2: VersionId = 21;
+    let version_3: VersionId = 22;
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    forest.add_lineage(lineage, version_1, SmtUpdateBatch::default())?;
+
+    let mut pending_updates = SmtUpdateBatch::default();
+    pending_updates.add_insert(key_1, value_1);
+    let pending = forest.compute_update_tree_mutations(lineage, version_2, pending_updates)?;
+
+    let mut intervening_updates = SmtUpdateBatch::default();
+    intervening_updates.add_insert(key_2, value_2);
+    forest.update_tree(lineage, version_2, intervening_updates)?;
+
+    let stale_result = forest.apply_mutations(pending);
+    assert!(stale_result.is_err());
+
+    let mut fresh_updates = SmtUpdateBatch::default();
+    fresh_updates.add_insert(key_3, value_3);
+    let fresh = forest.compute_update_tree_mutations(lineage, version_3, fresh_updates)?;
+    assert!(forest.apply_mutations(fresh).is_ok());
+
+    Ok(())
+}
+
 // MULTI-TREE MODIFIER TESTS
 // ================================================================================================
 

@@ -327,6 +327,7 @@ pub use config::{Config, DEFAULT_MAX_HISTORY_VERSIONS, MIN_HISTORY_VERSIONS};
 pub use error::{LargeSmtForestError, Result};
 pub use operation::{ForestOperation, SmtForestUpdateBatch, SmtUpdateBatch};
 pub use root::{LineageId, RootInfo, TreeEntry, TreeId, TreeWithRoot, VersionId};
+pub use utils::{AppliedLineageMutation, ForestMutationSet, LineageMutation, LineageMutationKind};
 
 use crate::{
     EMPTY_WORD, Map, Set, Word,
@@ -802,8 +803,105 @@ impl<B: BackendReader> LargeSmtForest<B> {
 /// Where anything more specific can be said about performance, the method documentation will
 /// contain more detail.
 impl<B: Backend> LargeSmtForest<B> {
-    /// Adds a new `lineage` to the tree, creating an empty tree and modifying it as specified by
+    /// Computes the mutations required to add a new `lineage`, without applying them.
+    ///
+    /// This is the first phase of [`Self::add_lineage`]. It creates a [`ForestMutationSet`] that
+    /// contains the proposed root commitment for the new lineage and backend-specific prepared
+    /// data that can later be committed with [`Self::apply_mutations`].
+    ///
+    /// The forest and backend are not modified by this method. Callers can inspect the returned
+    /// mutation set, especially via [`ForestMutationSet::roots`] or
+    /// [`ForestMutationSet::lineage_mutations`], before deciding whether to commit it.
+    ///
+    /// If the provided `updates` batch is empty, the returned mutation set still represents adding
+    /// the empty tree as the first version of the lineage.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::DuplicateLineage`] if `lineage` is already known by the forest.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing prepared data.
+    /// - [`LargeSmtForestError::Merkle`] if the provided `updates` cannot be applied to the empty
+    ///   tree.
+    ///
+    /// # Applying the Result
+    ///
+    /// The returned mutation set is valid only for the forest state against which it was computed.
+    /// Passing it to [`Self::apply_mutations`] after the same lineage has been added by another
+    /// operation will return an error.
+    pub fn compute_add_lineage_mutations(
+        &self,
+        lineage: LineageId,
+        new_version: VersionId,
+        updates: SmtUpdateBatch,
+    ) -> Result<ForestMutationSet<B>> {
+        if self.lineage_data.contains_key(&lineage) {
+            return Err(LargeSmtForestError::DuplicateLineage(lineage));
+        }
+
+        let (entries, prepared) =
+            self.backend.compute_add_lineage_mutations(lineage, new_version, updates)?;
+        Ok(ForestMutationSet::new(entries, prepared))
+    }
+
+    /// Computes the mutations required to update the latest tree in `lineage`, without applying
+    /// them.
+    ///
+    /// This is the first phase of [`Self::update_tree`]. It computes the proposed new root for the
+    /// lineage and the backend-specific data needed to commit the update later via
+    /// [`Self::apply_mutations`]. Reverse mutations needed for history are returned by the backend
+    /// during the apply phase.
+    ///
+    /// The forest and backend are not modified by this method. Callers can inspect the returned
+    /// mutation set before committing it, which is useful when root commitments must be published,
+    /// checked, or combined with other data before the backend write occurs.
+    ///
+    /// If applying `updates` would not change the tree, the returned mutation set represents a
+    /// no-op. Applying it will not advance the lineage version or allocate a new tree version, and
+    /// [`ForestMutationSet::roots`] will report the current latest version/root.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::UnknownLineage`] if `lineage` is not known by the forest.
+    /// - [`LargeSmtForestError::BadVersion`] if `new_version` is not newer than the latest version
+    ///   for `lineage`.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing prepared data.
+    /// - [`LargeSmtForestError::Merkle`] if the provided `updates` cannot be applied to the latest
+    ///   tree.
+    ///
+    /// # Applying the Result
+    ///
+    /// The returned mutation set is valid only while the lineage remains at the same latest
+    /// version and root. [`Self::apply_mutations`] rejects stale mutation sets if the lineage has
+    /// changed since this method was called.
+    pub fn compute_update_tree_mutations(
+        &self,
+        lineage: LineageId,
+        new_version: VersionId,
+        updates: SmtUpdateBatch,
+    ) -> Result<ForestMutationSet<B>> {
+        let Some(lineage_data) = self.lineage_data.get(&lineage) else {
+            return Err(LargeSmtForestError::UnknownLineage(lineage));
+        };
+
+        if lineage_data.latest_version >= new_version {
+            return Err(LargeSmtForestError::BadVersion {
+                provided: new_version,
+                latest: lineage_data.latest_version,
+            });
+        }
+
+        let (entries, prepared) =
+            self.backend.compute_update_tree_mutations(lineage, new_version, updates)?;
+        Ok(ForestMutationSet::new(entries, prepared))
+    }
+
+    /// Adds a new `lineage` to the forest, creating an empty tree and modifying it as specified by
     /// `updates`, with the result taking the provided `new_version`.
+    ///
+    /// This is the one-phase convenience API. It is equivalent to calling
+    /// [`Self::compute_add_lineage_mutations`] followed immediately by [`Self::apply_mutations`].
+    /// Use the two-phase API directly when the proposed root commitment must be inspected before
+    /// committing the backend changes.
     ///
     /// If the provided `updates` batch is empty, then the **empty tree will be added** as the first
     /// version in the lineage.
@@ -812,35 +910,29 @@ impl<B: Backend> LargeSmtForest<B> {
     ///
     /// - [`LargeSmtForestError::DuplicateLineage`] if the provided `lineage` is the same as an
     ///   already-known lineage.
-    /// - [`LargeSmtForestError::Fatal`] if the backend fails while being accessed.
-    /// - [`BackendError::Merkle`] if the provided `updates` cannot be applied to the empty tree.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing or applying the
+    ///   mutation.
+    /// - [`LargeSmtForestError::Merkle`] if the provided `updates` cannot be applied to the empty
+    ///   tree.
     pub fn add_lineage(
         &mut self,
         lineage: LineageId,
         new_version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<TreeWithRoot> {
-        // We can immediately add lineage in the backend, as by its contract it should return
-        // `DuplicateLineage` if the new lineage is a duplicate. We forward that, and any other
-        // errors, as this is the correct behavior for correctly-implemented backends.
-        let tree_info = self.backend.add_lineage(lineage, new_version, updates)?;
-
-        // We then construct the lineage tracking data and shove it into the corresponding map. The
-        // history is guaranteed to be empty here, so we do not need to put an entry in the
-        // non-empty histories set.
-        let lineage_data = LineageData {
-            history: History::empty(self.config.max_history_versions()),
-            latest_version: tree_info.version(),
-            latest_root: tree_info.root(),
-        };
-        self.lineage_data.insert(lineage, lineage_data);
-
-        Ok(tree_info)
+        let mutations = self.compute_add_lineage_mutations(lineage, new_version, updates)?;
+        let mut roots = self.apply_mutations(mutations)?;
+        Ok(roots.pop().expect("single lineage mutation returns one root"))
     }
 
     /// Performs the provided `updates` on the latest tree in the specified `lineage`, adding a
     /// single new root to the forest (corresponding to `new_version`) for the entire batch, and
     /// returning the data for the new root of the tree.
+    ///
+    /// This is the one-phase convenience API. It is equivalent to calling
+    /// [`Self::compute_update_tree_mutations`] followed immediately by
+    /// [`Self::apply_mutations`]. Use the two-phase API directly when the proposed root commitment
+    /// must be inspected before committing the backend changes.
     ///
     /// If applying the provided `operations` results in no changes to the tree, then the root data
     /// will be returned unchanged and no new tree will be allocated. It will retain its original
@@ -848,84 +940,22 @@ impl<B: Backend> LargeSmtForest<B> {
     ///
     /// # Errors
     ///
-    /// - [`LargeSmtForestError::BadVersion`] if the `new_version` is older than the latest version
+    /// - [`LargeSmtForestError::BadVersion`] if `new_version` is not newer than the latest version
     ///   for the provided `lineage`.
-    /// - [`LargeSmtForestError::Fatal`] if the backend fails while being accessed.
-    /// - [`LargeSmtForestError::UnknownLineage`] if the provided `tree` specifies a lineage that is
-    ///   not one known by the forest.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing or applying the
+    ///   mutation.
+    /// - [`LargeSmtForestError::Merkle`] if the provided `updates` cannot be applied to the latest
+    ///   tree.
+    /// - [`LargeSmtForestError::UnknownLineage`] if `lineage` is not known by the forest.
     pub fn update_tree(
         &mut self,
         lineage: LineageId,
         new_version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<TreeWithRoot> {
-        // We initially check that the lineage is known and that the version is greater than the
-        // last known version for that lineage.
-        let lineage_data = if let Some(lineage_data) = self.lineage_data.get_mut(&lineage) {
-            if lineage_data.latest_version < new_version {
-                lineage_data
-            } else {
-                return Err(LargeSmtForestError::BadVersion {
-                    provided: new_version,
-                    latest: lineage_data.latest_version,
-                });
-            }
-        } else {
-            return Err(LargeSmtForestError::UnknownLineage(lineage));
-        };
-
-        // We capture the entry count before the backend update, as this is the count for the
-        // version being pushed into history. This must precede `update_tree` because the backend
-        // entry count changes after that call.
-        //
-        // By the contract of the `Backend` trait, `entry_count` is expected to be extremely cheap,
-        // and only fail if the lineage in question is missing. Versions of this method that are
-        // expensive to call, or that can fail due to I/O or other such reasons, are considered
-        // non-conformant.
-        let old_entry_count = self.backend.entry_count(lineage)?;
-
-        // We now know that we have a valid lineage and a valid version, so we perform the update in
-        // the backend.
-        let reversion_set = self.backend.update_tree(lineage, new_version, updates)?;
-
-        // We do not want to actually change anything if the tree would not change.
-        if reversion_set.is_empty() {
-            return Ok(TreeWithRoot::new(
-                lineage,
-                lineage_data.latest_version,
-                lineage_data.latest_root,
-            ));
-        }
-
-        // The new root of the latest tree is actually given by the **old root** in our reverse
-        // mutation set.
-        let updated_root = reversion_set.old_root;
-
-        // The call to `add_version_from_mutation_set` should only yield an error if the
-        // provided version does not pass the version check. This check has already been
-        // performed as a precondition for reaching this point of the tree update, and
-        // hence should only ever fail due to a programmer bug so we panic if it does fail.
-        lineage_data
-            .history
-            .add_version_from_mutation_set(
-                lineage_data.latest_version,
-                reversion_set,
-                old_entry_count,
-            )
-            .unwrap_or_else(|_| {
-                panic!("Unable to add valid version {} to history", lineage_data.latest_version)
-            });
-
-        // At this point we now have a historical version added, so we track that the lineage has a
-        // non-empty history.
-        self.non_empty_histories.insert(lineage);
-
-        // Now we just have to update the other portions of the lineage data in place...
-        lineage_data.latest_root = updated_root;
-        lineage_data.latest_version = new_version;
-
-        // ...and return the correct value.
-        Ok(TreeWithRoot::new(lineage, new_version, updated_root))
+        let mutations = self.compute_update_tree_mutations(lineage, new_version, updates)?;
+        let mut roots = self.apply_mutations(mutations)?;
+        Ok(roots.pop().expect("single lineage mutation returns one root"))
     }
 }
 
@@ -944,10 +974,15 @@ impl<B: Backend> LargeSmtForest<B> {
 /// Where anything more specific can be said about performance, the method documentation will
 /// contain more detail.
 impl<B: Backend> LargeSmtForest<B> {
-    /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
+    /// Adds multiple new `lineages` to the forest, creating an empty tree for each and applying the
     /// provided modifications to it, with the result being given the specified `version`.
     ///
-    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
+    /// This is the one-phase convenience API. It is equivalent to calling
+    /// [`Self::compute_add_lineages_mutations`] followed immediately by
+    /// [`Self::apply_mutations`]. Use the two-phase API directly when the proposed root
+    /// commitments must be inspected before committing the backend changes.
+    ///
+    /// If the provided batch of modifications is empty for any given lineage, then the **empty tree
     /// will be added** as the first version in that lineage.
     ///
     /// # Performance
@@ -957,51 +992,72 @@ impl<B: Backend> LargeSmtForest<B> {
     /// [`Self::add_lineage`] in a loop, but in some cases it may be significantly more performant.
     ///
     /// The exact scope of any speed-up is determined by the backend in use, so it is worth reading
-    /// the documentation for the Backend's `add_lineages` method.
+    /// the documentation for the backend's [`Backend::compute_add_lineages_mutations`] method.
     ///
     /// # Errors
     ///
     /// - [`LargeSmtForestError::DuplicateLineage`] if any of the provided lineages share an ID with
     ///   an already-known lineage.
-    /// - [`LargeSmtForestError::Fatal`] if the backend fails while being accessed.
-    /// - [`BackendError::Merkle`] if the provided `updates` cannot be applied to the empty tree.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing or applying the
+    ///   mutations.
+    /// - [`LargeSmtForestError::Merkle`] if any provided updates cannot be applied to an empty
+    ///   tree.
     pub fn add_lineages(
         &mut self,
         version: VersionId,
         lineages: SmtForestUpdateBatch,
     ) -> Result<Vec<TreeWithRoot>> {
-        // We start by performing our precondition checks: none of the lineages in the batch should
-        // already exist in the forest.
+        let mutations = self.compute_add_lineages_mutations(version, lineages)?;
+        self.apply_mutations(mutations)
+    }
+
+    /// Computes mutations that would add multiple new lineages without applying them.
+    ///
+    /// This is the first phase of [`Self::add_lineages`]. It returns a [`ForestMutationSet`]
+    /// containing one proposed result per lineage in `lineages`, plus backend-specific prepared
+    /// data that can later be committed with [`Self::apply_mutations`].
+    ///
+    /// The forest and backend are not modified by this method. Callers can inspect the returned
+    /// roots before committing the batch. This is useful when a higher-level transaction must know
+    /// all new root commitments before the forest backend is updated.
+    ///
+    /// Empty per-lineage operation batches still produce new empty lineages in the mutation set.
+    ///
+    /// # Performance
+    ///
+    /// Backends may compute the per-lineage mutations in parallel and may prepare a batched apply
+    /// representation. This method should generally be preferred over repeated
+    /// [`Self::compute_add_lineage_mutations`] calls when adding multiple lineages.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::DuplicateLineage`] if any provided lineage is already known by the
+    ///   forest.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing prepared data.
+    /// - [`LargeSmtForestError::Merkle`] if any provided updates cannot be applied to an empty
+    ///   tree.
+    pub fn compute_add_lineages_mutations(
+        &self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<ForestMutationSet<B>> {
         for lineage in lineages.lineages() {
             if self.lineage_data.contains_key(lineage) {
                 return Err(LargeSmtForestError::DuplicateLineage(*lineage));
             }
         }
 
-        // With the preconditions checked we can call into the backend to perform the additions, and
-        // we forward all errors as this will be correct for conformant backend implementations.
-        let results = self.backend.add_lineages(version, lineages)?;
-
-        // Now we have to update the lineage data for each newly-added lineage. New lineages have
-        // empty histories, so we do not need to insert into `non_empty_histories`.
-        results
-            .into_iter()
-            .map(|(lineage, tree_info)| {
-                let lineage_data = LineageData {
-                    history: History::empty(self.config.max_history_versions()),
-                    latest_version: tree_info.version(),
-                    latest_root: tree_info.root(),
-                };
-                self.lineage_data.insert(lineage, lineage_data);
-
-                Ok(tree_info)
-            })
-            .collect()
+        let (entries, prepared) = self.backend.compute_add_lineages_mutations(version, lineages)?;
+        Ok(ForestMutationSet::new(entries, prepared))
     }
 
     /// Performs the provided `updates` on the forest, adding at most one new root with version
-    /// `new_version` to the forest for each target root in `updates` and returning a mapping
-    /// from old root to the new root data.
+    /// `new_version` for each targeted lineage and returning the resulting root data.
+    ///
+    /// This is the one-phase convenience API. It is equivalent to calling
+    /// [`Self::compute_update_forest_mutations`] followed immediately by
+    /// [`Self::apply_mutations`]. Use the two-phase API directly when the proposed root
+    /// commitments must be inspected before committing the backend changes.
     ///
     /// If applying the associated batch to any given lineage in the forest results in no changes to
     /// that tree, the initial root for that lineage will be returned and no new tree will be
@@ -1009,20 +1065,58 @@ impl<B: Backend> LargeSmtForest<B> {
     ///
     /// # Errors
     ///
-    /// - [`LargeSmtForestError::UnknownLineage`] If any lineage in the batch of modifications is
+    /// - [`LargeSmtForestError::UnknownLineage`] if any lineage in the batch of modifications is
     ///   one that is not known by the forest.
-    /// - [`LargeSmtForestError::Fatal`] if any error occurs to leave the forest in an inconsistent
-    ///   state.
-    /// - [`LargeSmtForestError::BadVersion`] if the `new_version` is older than the latest version
-    ///   for the provided `lineage`.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing or applying the
+    ///   mutations.
+    /// - [`LargeSmtForestError::BadVersion`] if `new_version` is not newer than the latest version
+    ///   for any targeted lineage.
+    /// - [`LargeSmtForestError::Merkle`] if any provided updates cannot be applied to the relevant
+    ///   latest tree.
     pub fn update_forest(
         &mut self,
         new_version: VersionId,
         updates: SmtForestUpdateBatch,
     ) -> Result<Vec<TreeWithRoot>> {
-        // We start by performing our precondition checks on the lineages and versions. We have to
-        // ensure both that all the lineages exist, and that the specified version transition is
-        // valid for all of those lineages.
+        let mutations = self.compute_update_forest_mutations(new_version, updates)?;
+        self.apply_mutations(mutations)
+    }
+
+    /// Computes mutations that would update multiple existing lineages without applying them.
+    ///
+    /// This is the first phase of [`Self::update_forest`]. It returns a [`ForestMutationSet`]
+    /// containing one proposed result per lineage in `updates`, plus backend-specific prepared data
+    /// that can later be committed with [`Self::apply_mutations`].
+    ///
+    /// The forest and backend are not modified by this method. Callers can inspect all proposed
+    /// root commitments before committing the batch. This is useful when the forest update is only
+    /// one part of a larger transaction or when root commitments must be signed, checked, or stored
+    /// elsewhere before the backend write occurs.
+    ///
+    /// If a per-lineage update would not change the tree, the corresponding mutation is a no-op.
+    /// Applying the mutation set will not advance that lineage's version or allocate a new tree
+    /// version for it.
+    ///
+    /// # Performance
+    ///
+    /// Backends may compute per-lineage mutations in parallel and may prepare a batched apply
+    /// representation. This method should generally be preferred over repeated
+    /// [`Self::compute_update_tree_mutations`] calls when updating multiple lineages.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::UnknownLineage`] if any targeted lineage is not known by the
+    ///   forest.
+    /// - [`LargeSmtForestError::BadVersion`] if `new_version` is not newer than the latest version
+    ///   for any targeted lineage.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while computing prepared data.
+    /// - [`LargeSmtForestError::Merkle`] if any provided updates cannot be applied to the relevant
+    ///   latest tree.
+    pub fn compute_update_forest_mutations(
+        &self,
+        new_version: VersionId,
+        updates: SmtForestUpdateBatch,
+    ) -> Result<ForestMutationSet<B>> {
         updates
             .lineages()
             .map(|lineage| {
@@ -1041,77 +1135,108 @@ impl<B: Backend> LargeSmtForest<B> {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        // We capture the entry counts before the backend update, as these are the counts for the
-        // versions being pushed into history. This must precede `update_forest` because the
-        // backend entry counts change after that call. We capture for all lineages eagerly
-        // (including those that may produce no-op updates) to keep the logic simple and consistent
-        // with `update_tree`, and use a map to eliminate any accidental dependencies on iteration
-        // order.
-        //
-        // By the contract of the `Backend` trait, `entry_count` is expected to be extremely cheap,
-        // and only fail if the lineage in question is missing. Versions of this method that are
-        // expensive to call, or that can fail due to I/O or other such reasons, are considered
-        // non-conformant.
-        let old_entry_counts: Map<LineageId, usize> = updates
-            .lineages()
-            .map(|lineage| Ok((*lineage, self.backend.entry_count(*lineage)?)))
-            .collect::<Result<_>>()?;
+        let (entries, prepared) =
+            self.backend.compute_update_forest_mutations(new_version, updates)?;
+        Ok(ForestMutationSet::new(entries, prepared))
+    }
 
-        // With the preconditions checked we can call into the backend to perform the updates, and
-        // we forward all errors as this will be correct for conformant backend implementations.
-        let reversion_sets = self.backend.update_forest(new_version, updates)?;
+    /// Applies mutations previously computed by one of the forest compute methods.
+    ///
+    /// This is the second phase of the two-phase update API. It consumes a [`ForestMutationSet`]
+    /// returned by one of:
+    ///
+    /// - [`Self::compute_add_lineage_mutations`],
+    /// - [`Self::compute_update_tree_mutations`],
+    /// - [`Self::compute_add_lineages_mutations`], or
+    /// - [`Self::compute_update_forest_mutations`].
+    ///
+    /// The backend validates that the mutation set is still applicable before committing anything.
+    /// For update mutations, the latest version and root of every affected lineage must still match
+    /// the version/root captured during the compute phase. For new-lineage mutations, the lineage
+    /// must still be absent. These checks prevent stale mutation sets from being applied after
+    /// intervening forest changes.
+    ///
+    /// If backend validation succeeds, the opaque backend-prepared data is committed first. Only
+    /// after the backend apply succeeds does the forest update its in-memory lineage metadata and
+    /// history. This ordering keeps the forest consistent if the backend reports an error.
+    ///
+    /// The returned roots match [`ForestMutationSet::roots`] for the applied mutation set. No-op
+    /// update mutations return the existing latest version/root for their lineages.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::DuplicateLineage`] if a mutation set attempts to add a lineage that
+    ///   is now already known.
+    /// - [`LargeSmtForestError::UnknownLineage`] if a mutation set attempts to update a lineage
+    ///   that is no longer known.
+    /// - [`LargeSmtForestError::BadVersion`] if an update mutation was computed against a version
+    ///   that is no longer the latest version.
+    /// - [`LargeSmtForestError::Merkle`] if an update mutation was computed against a root that is
+    ///   no longer the latest root.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while applying its prepared data.
+    pub fn apply_mutations(
+        &mut self,
+        mutations: ForestMutationSet<B>,
+    ) -> Result<Vec<TreeWithRoot>> {
+        let (entries, prepared) = mutations.into_parts();
 
-        // Now we have to update the lineage data (including the history) to ensure that the state
-        // remains consistent, and we build our return values while doing so.
-        reversion_sets
-            .into_iter()
-            .map(|(lineage, reversion)| {
-                // Known to exist by construction, so the bare index is safe.
-                let old_entry_count = old_entry_counts[&lineage];
-                let lineage_data = self
-                    .lineage_data
-                    .get_mut(&lineage)
-                    .expect("Lineage has been checked to be present");
+        let applied_entries = self.backend.apply_mutations(prepared)?;
 
-                // If the operations change nothing we want to short-circuit for that tree.
-                if reversion.is_empty() {
-                    return Ok(TreeWithRoot::new(
-                        lineage,
-                        lineage_data.latest_version,
-                        lineage_data.latest_root,
-                    ));
-                }
+        assert_eq!(
+            entries.len(),
+            applied_entries.len(),
+            "backend returned an unexpected number of applied mutations"
+        );
+        let mut roots = Vec::with_capacity(applied_entries.len());
+        for (entry, applied) in entries.into_iter().zip(applied_entries) {
+            assert_eq!(entry.lineage(), applied.lineage());
+            assert_eq!(entry.old_version(), applied.old_version());
+            assert_eq!(entry.new_version(), applied.new_version());
+            assert_eq!(entry.old_root(), applied.old_root());
+            assert_eq!(entry.new_root(), applied.new_root());
+            assert_eq!(entry.kind(), applied.kind());
 
-                let updated_root = reversion.old_root;
+            let root = applied.result();
+            match entry.kind() {
+                LineageMutationKind::AddLineage => {
+                    let lineage_data = LineageData {
+                        history: History::empty(self.config.max_history_versions()),
+                        latest_version: root.version(),
+                        latest_root: root.root(),
+                    };
+                    self.lineage_data.insert(entry.lineage(), lineage_data);
+                },
+                LineageMutationKind::UpdateTree => {
+                    if entry.old_root() != entry.new_root() {
+                        let lineage_data = self
+                            .lineage_data
+                            .get_mut(&entry.lineage())
+                            .expect("Lineage has been checked to be present");
 
-                // The call to `add_version_from_mutation_set` should only yield an error if the
-                // provided version does not pass the version check. This check has already been
-                // performed as a precondition for reaching this point of the forest update, and
-                // hence should only ever fail due to a programmer bug so we panic if it does fail.
-                lineage_data
-                    .history
-                    .add_version_from_mutation_set(
-                        lineage_data.latest_version,
-                        reversion,
-                        old_entry_count,
-                    )
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Unable to add valid version {} to history",
-                            lineage_data.latest_version
-                        )
-                    });
+                        let old_version =
+                            entry.old_version().expect("update mutations have old versions");
+                        let old_entry_count = applied.old_entry_count();
+                        lineage_data
+                            .history
+                            .add_version_from_mutation_set(
+                                old_version,
+                                applied.into_reverse(),
+                                old_entry_count,
+                            )
+                            .unwrap_or_else(|_| {
+                                panic!("Unable to add valid version {} to history", old_version)
+                            });
 
-                // At this point we know that we have a historical version for that tree, so we
-                // should track it as having a non-empty history.
-                self.non_empty_histories.insert(lineage);
+                        self.non_empty_histories.insert(entry.lineage());
+                        lineage_data.latest_root = entry.new_root();
+                        lineage_data.latest_version = entry.new_version();
+                    }
+                },
+            }
+            roots.push(root);
+        }
 
-                lineage_data.latest_root = updated_root;
-                lineage_data.latest_version = new_version;
-
-                Ok(TreeWithRoot::new(lineage, new_version, updated_root))
-            })
-            .collect::<Result<Vec<_>>>()
+        Ok(roots)
     }
 }
 

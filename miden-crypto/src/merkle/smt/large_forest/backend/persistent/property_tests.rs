@@ -10,7 +10,7 @@ use super::tests::default_backend;
 use crate::{
     EMPTY_WORD,
     merkle::smt::{
-        Backend, BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeWithRoot,
+        BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeWithRoot,
         large_forest::test_utils::{
             arbitrary_batch, arbitrary_lineage, arbitrary_version, arbitrary_word,
         },
