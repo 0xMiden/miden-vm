@@ -1,10 +1,7 @@
-//! `Sig` — single chunk-bodied predicate reference precompile that mirrors the legacy
-//! "signature is an opaque chunk that evaluates to TRUE" pattern in the smallest possible form.
+//! Mock signature precompile for exercising fixed-size chunk predicates.
 //!
-//! A `verify` node is a chunk-bodied predicate carrying a fixed-size opaque payload
-//! (`SIG_CHUNKS = 3` chunks, conceptually `sig || pk || msg`). The chunk count is hardcoded per
-//! discriminant. Reduce performs a stub check: succeeds iff the first felt of the first chunk is
-//! non-zero.
+//! `verify` treats its chunks as an opaque signature blob and succeeds only when the first felt is
+//! non-zero. The stub keeps tests focused on chunk predicate plumbing, not signature math.
 
 use alloc::sync::Arc;
 use core::num::NonZeroU32;
@@ -19,7 +16,7 @@ use crate::{
 // PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Sig` precompile.
+/// Zero-sized handle for the mock signature precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Sig;
 
@@ -28,8 +25,7 @@ impl Sig {
 
     pub const VERIFY_TAG_ID: u32 = 0;
 
-    /// Number of 8-felt chunks in a mock signature blob. Hardcoded — there is no immediate, so
-    /// the framework derives the chunk count from this constant at `decode` time.
+    /// Fixed chunk count for the opaque signature blob.
     pub const SIG_CHUNKS: u32 = 3;
 
     pub fn id() -> Felt {
@@ -43,7 +39,7 @@ impl Sig {
         }
     }
 
-    /// Build a `verify` predicate node from `SIG_CHUNKS` 8-felt chunks.
+    /// Builds a signature-verification predicate from fixed-size chunks.
     pub fn verify_node(chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
         Node::chunk(Self::verify_tag(), chunks)
     }

@@ -1,8 +1,7 @@
-//! Shared scaffolding for the deferred-DAG precompile integration tests.
+//! Shared helpers for deferred precompile integration tests.
 //!
-//! The reference precompiles (`Uint`, `Group`, `Hash`, `Sig`) live in
-//! [`miden_core::testing::precompile`]; this module holds the round-trip helpers each
-//! `core/tests/precompile_*.rs` test pulls in via `mod common;`.
+//! These keep each suite focused on the precompile behavior it is proving, while centralizing the
+//! wire round-trip checks that guard transcript verification.
 #![allow(dead_code, unused_imports)]
 
 use miden_core::{
@@ -10,7 +9,7 @@ use miden_core::{
     testing::precompile::Uint,
 };
 
-/// A `Uint` value leaf carrying `low` in its bottom two 32-bit limbs.
+/// Builds a uint leaf carrying `low` in its least-significant limbs.
 pub fn leaf(low: u64) -> Node {
     let mut limbs = [0u32; 8];
     limbs[0] = low as u32;
@@ -18,16 +17,11 @@ pub fn leaf(low: u64) -> Node {
     Uint::leaf_node(limbs)
 }
 
-/// Round-trip helper for the `precompile_*` suites.
-///
-/// Drives the precompile lifecycle — register `predicate`, evaluate it (it must reduce to the TRUE
-/// sentinel), and log it as a transcript step — then asserts via [`assert_round_trips`] that the
-/// accumulated state survives `to_wire` + `rehydrate` (which re-evaluates the predicate through
-/// the precompile's own `reduce`).
+/// Registers, verifies, logs, and round-trips a predicate expected to reduce to TRUE.
 pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
     let stmt_digest = state.register(schema, predicate.clone()).unwrap();
     assert!(
-        state.evaluate(schema, predicate).unwrap().is_true_node(),
+        state.evaluate_node(schema, predicate).unwrap().is_true_node(),
         "log_and_verify expects a predicate that reduces to the TRUE node",
     );
     let new_root = Node::and(state.root(), stmt_digest).digest();
@@ -35,9 +29,7 @@ pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, pr
     assert_round_trips(state, schema);
 }
 
-/// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and every
-/// reproduced node agrees with the source. `rehydrate` already rejects danglers and re-evaluates
-/// each predicate, so a dropped reachable node fails inside it before we compare.
+/// Asserts that wire round-tripping preserves the verified transcript root and nodes.
 pub fn assert_round_trips(state: &DeferredState, schema: &PrecompileRegistry) {
     let rehydrated = DeferredState::rehydrate(&state.to_wire(), schema).unwrap();
     assert_eq!(rehydrated.root(), state.root());

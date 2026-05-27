@@ -1,17 +1,11 @@
-//! A precompile VM, content-addressed.
+//! Content-addressed deferred computation for precompile-backed VM hints.
 //!
-//! Each [`Precompile`] is a small interpreter for a slice of tag space — a specific hash,
-//! signature, or non-native arithmetic. The VM emits `DeferredRegister` /
-//! `DeferredRegisterChunk` / `DeferredEvaluate` system events to build a DAG of [`Node`]s, each
-//! addressed by its 4-felt Poseidon2 digest. The [`PrecompileRegistry`] dispatches every
-//! [`Tag::id`] to the right precompile, which decodes the immediate felts and reduces the node
-//! to its canonical form. [`DeferredState::log`] extends a rolling AND-chain whose head — the
-//! transcript root — is the verifier's single fixed point: reduce the root to TRUE and every
-//! logged statement holds.
+//! Deferred events let programs commit opaque statements during execution and leave their
+//! semantic checks to installed [`Precompile`]s. The framework stores those commitments as a DAG
+//! of [`Node`]s and a transcript root that verifies by reducing every logged statement to TRUE.
 //!
-//! The framework data model + [`DeferredState`] + [`PrecompileRegistry`] live here in
-//! `miden-core`; the processor only contributes the system-event glue. Reference precompiles
-//! that exercise the public surface live in `crate::testing::precompile`.
+//! `miden-core` owns the data model, registry, state, and wire validation; the processor only
+//! provides system-event plumbing. Reference precompiles live in `crate::testing::precompile`.
 
 mod node;
 mod precompile;
@@ -30,20 +24,14 @@ pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntr
 
 use crate::{Felt, Word};
 
-/// Content-addressed digest of a [`Node`]. A 4-felt Poseidon2 output.
+/// Stable address of a deferred [`Node`], computed as a 4-felt Poseidon2 digest.
 pub type Digest = Word;
 
-/// A tag identifying a deferred node: a precompile `id` plus three precompile-local immediate
-/// felts.
+/// Identifies the precompile that owns a node and carries its local immediates.
 ///
-/// `id == ZERO` is reserved for the framework — it tags the canonical TRUE node and the AND
-/// (transcript-step) nodes. No [`Precompile`] may derive id `ZERO`;
-/// [`PrecompileRegistry::with_precompile`] rejects one that does. The [`Tag::args`] felts are
-/// opaque to `miden-core` and the processor: each
-/// precompile decodes whatever structure (discriminant, chunk length, …) it needs out of them.
-///
-/// Laid out as `[id, arg0, arg1, arg2]` in the Poseidon2 capacity and on the wire — see
-/// [`Tag::as_word`].
+/// `id == ZERO` is framework-owned for TRUE and transcript AND nodes. The remaining three felts
+/// are opaque to the framework and are decoded only by the owning [`Precompile`]. The canonical
+/// layout is `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     pub id: Felt,
@@ -51,60 +39,43 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Reserved framework-level tag carried by the canonical [`Node::TRUE`] and by AND nodes
-    /// (transcript-step nodes). No precompile may claim id `ZERO` — the framework owns it.
-    ///
-    /// Paired with [`TRUE_DIGEST`].
+    /// Framework-owned tag for TRUE and transcript AND nodes; no precompile may use id `ZERO`.
     pub const TRUE: Tag = Tag { id: ZERO, args: [ZERO; 3] };
 
-    /// Build a tag from a precompile id and its three immediate felts.
+    /// Creates a tag from a precompile id and its three local immediates.
     pub const fn new(id: Felt, args: [Felt; 3]) -> Self {
         Self { id, args }
     }
 
-    /// The 4-felt word `[id, arg0, arg1, arg2]` — the layout fed to the Poseidon2 capacity and
-    /// written to the wire.
+    /// Returns the canonical layout used by hashing and wire encoding.
     pub const fn as_word(&self) -> [Felt; 4] {
         [self.id, self.args[0], self.args[1], self.args[2]]
     }
 
-    /// Inverse of [`Self::as_word`]: split a 4-felt word into `id` and `args`. Used by the
-    /// processor (operand-stack reads) and the wire decoder.
+    /// Restores a tag from the canonical 4-felt layout.
     pub const fn from_word(w: [Felt; 4]) -> Self {
         Self { id: w[0], args: [w[1], w[2], w[3]] }
     }
 }
 
-/// An 8-felt block — the Poseidon2 rate, and the bulk-data unit of a chunk node. A `ChunkNode`
-/// carries `n ≥ 1` chunks; its digest is the linear hash of those `8n` felts with the tag as the
-/// IV (capacity).
+/// One Poseidon2 rate block, used as the unit of chunk-bodied deferred leaves.
 pub type Chunk = [Felt; 8];
 
-/// Verifier-side sentinel for "trivial transcript" / "empty AND" — the zero word.
+/// Virtual root for an empty transcript and the terminal of the AND-chain.
 ///
-/// This is the initial value of `DeferredState::root`, and the terminal the verifier
-/// short-circuits on when reducing the root. It is *not* the `.digest()` of any concrete
-/// [`Node`]: [`Node::digest`] always runs Poseidon2 (which does not fix zero), so a [`Node::TRUE`]
-/// hashes to a non-zero word. The framework distinguishes "TRUE the result" (structural — see
-/// [`Node::is_true_node`]) from "TRUE the transcript-terminal" (digest comparison against this
-/// sentinel) at different points in the verifier walk.
+/// This is not the digest of [`Node::TRUE`]: nodes always hash through Poseidon2, while this zero
+/// word is only the verifier's sentinel for "no prior statements." Use [`Node::is_true_node`] for
+/// predicate results and compare against this value only for transcript-chain terminals.
 pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 
 // PAYLOAD
 // ================================================================================================
 
-/// The body of a [`Node`], in one of two shapes:
+/// In-memory body of a deferred node.
 ///
-/// - [`Expression`](Payload::Expression) — exactly 8 felts (one Poseidon2 rate block): value
-///   leaves, binary ops, predicates, AND-nodes. For a leaf the 8 felts are raw value data; for a
-///   binary op / assertion they are `lhs_digest || rhs_digest` (see [`Payload::join`]).
-/// - [`Chunk`](Payload::Chunk) — bulk-data leaves: `n ≥ 1` 8-felt blocks. `n = chunks.len()` is
-///   also encoded in the tag, so the digest binds it. An empty chunk body is forbidden.
-///   `Arc`-shared so cloning a chunk node (when interning or resolving children) is a ref-count
-///   bump, not a deep copy.
-///
-/// Accessors that only make sense for one shape return [`DeferredError::InvalidPayload`] when
-/// called on the other.
+/// Expressions carry one rate block, either as raw value data or as `lhs_digest || rhs_digest`.
+/// Chunks carry one or more rate blocks for bulk data; the tag also records the expected count so
+/// the digest binds the shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Payload {
     Expression([Felt; 8]),
@@ -112,13 +83,12 @@ pub enum Payload {
 }
 
 impl Payload {
-    /// An [`Expression`](Payload::Expression) payload from 8 raw felts.
+    /// Creates an expression payload from one 8-felt rate block.
     pub const fn new(felts: [Felt; 8]) -> Self {
         Self::Expression(felts)
     }
 
-    /// An [`Expression`](Payload::Expression) payload packing two child digests as `lhs || rhs`.
-    /// Reused by assertion nodes, which encode `lhs_digest || rhs_digest` the same way.
+    /// Creates an expression payload that references two child digests.
     pub fn join(lhs: Digest, rhs: Digest) -> Self {
         let mut felts = [ZERO; 8];
         felts[0..4].copy_from_slice(lhs.as_elements());
@@ -126,21 +96,18 @@ impl Payload {
         Self::Expression(felts)
     }
 
-    /// A [`Chunk`](Payload::Chunk) payload from `n ≥ 1` rate-sized blocks of bulk data.
+    /// Creates a chunk payload for bulk data committed by a tag-declared non-zero length.
     ///
     /// # Panics
-    /// In debug builds, if `chunks` is empty — an empty chunk body is forbidden (its digest would
-    /// not bind the tag). Callers reconstructing nodes from untrusted bytes
-    /// ([`DeferredState::rehydrate`](DeferredState::rehydrate)) reject the empty case before
-    /// reaching this constructor; in-VM construction derives the non-zero count from the tag.
+    /// In debug builds, if `chunks` is empty. Untrusted wire input is rejected before reaching
+    /// this constructor.
     pub fn chunks(chunks: impl Into<Arc<[Chunk]>>) -> Self {
         let chunks = chunks.into();
         debug_assert!(!chunks.is_empty(), "chunk node must carry at least one chunk");
         Self::Chunk(chunks)
     }
 
-    /// The 8 felts of an [`Expression`](Payload::Expression) payload. Errors with
-    /// [`DeferredError::InvalidPayload`] on a [`Chunk`](Payload::Chunk) payload.
+    /// Returns the expression block, or [`DeferredError::InvalidPayload`] for chunk bodies.
     pub fn as_felts(&self) -> Result<&[Felt; 8], DeferredError> {
         match self {
             Self::Expression(felts) => Ok(felts),
@@ -148,8 +115,7 @@ impl Payload {
         }
     }
 
-    /// The bulk blocks of a [`Chunk`](Payload::Chunk) payload. Errors with
-    /// [`DeferredError::InvalidPayload`] on an [`Expression`](Payload::Expression) payload.
+    /// Returns the chunk blocks, or [`DeferredError::InvalidPayload`] for expression bodies.
     pub fn as_chunks(&self) -> Result<&[Chunk], DeferredError> {
         match self {
             Self::Chunk(chunks) => Ok(chunks),
@@ -157,9 +123,7 @@ impl Payload {
         }
     }
 
-    /// Splits an [`Expression`](Payload::Expression) payload into its two child digests in
-    /// `(lhs, rhs)` order — inverse of [`Self::join`]. Errors with
-    /// [`DeferredError::InvalidPayload`] on a [`Chunk`](Payload::Chunk) payload.
+    /// Splits a join-shaped expression into `(lhs, rhs)` child digests.
     pub fn join_children(&self) -> Result<(Digest, Digest), DeferredError> {
         let f = self.as_felts()?;
         let lhs = Word::new([f[0], f[1], f[2], f[3]]);
@@ -171,16 +135,11 @@ impl Payload {
 // NODE
 // ================================================================================================
 
-/// A DAG node: a [`Tag`] and a [`Payload`], addressed by its Poseidon2 [`Digest`].
+/// A deferred DAG entry whose meaning is supplied by its tag's precompile.
 ///
-/// What a node *means* (value leaf? binary op? predicate? AND-step?) is up to the precompile
-/// that owns its `tag.id` — the precompile decodes the immediate felts via
-/// [`Precompile::decode`] and `reduce`s the payload via [`Precompile::reduce`]. The framework
-/// only enforces the structural shape declared by [`NodeType`].
-///
-/// Predicate nodes have no distinguished shape: a precompile signals "predicate verified" by
-/// returning [`Node::TRUE`] from `reduce`. The framework detects this via [`Node::is_true_node`]
-/// on the canonical and skips the advice-stack push that non-predicate canonicals get.
+/// The framework validates only the declared [`NodeType`]. Value semantics, producing ops, and
+/// predicates all live in the owning [`Precompile`]. A predicate succeeds by reducing to
+/// [`Node::TRUE`], so callers can handle every canonical result as an ordinary node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     pub tag: Tag,
@@ -188,82 +147,56 @@ pub struct Node {
 }
 
 impl Node {
-    /// Canonical TRUE node: zero tag, zero expression payload. Predicate-tag precompiles return
-    /// this from `reduce` on success; framework code checks the result structurally via
-    /// [`Node::is_true_node`], not by digest comparison.
+    /// Canonical TRUE node returned by predicates that verify successfully.
     pub const TRUE: Node = Node {
         tag: Tag::TRUE,
         payload: Payload::Expression([ZERO; 8]),
     };
 
-    /// Build a node from an 8-felt [`Expression`](Payload::Expression) body (leaf, op-node,
-    /// predicate, or AND-node). Takes the [`Payload`] directly — callers typically pass
-    /// `Payload::new(..)` or `Payload::join(..)`.
+    /// Creates an expression-bodied node from an already-shaped payload.
     pub fn expression(tag: Tag, payload: Payload) -> Self {
         Self { tag, payload }
     }
 
-    /// Build an expression-bodied leaf node from raw 8-felt payload data.
+    /// Creates an expression-bodied leaf from raw payload data.
     pub fn leaf(tag: Tag, felts: [Felt; 8]) -> Self {
         Self::expression(tag, Payload::new(felts))
     }
 
-    /// Build an expression-bodied binary node with joined child digests.
+    /// Creates a join-shaped node that references two child digests.
     pub fn join(tag: Tag, lhs: Digest, rhs: Digest) -> Self {
         Self::expression(tag, Payload::join(lhs, rhs))
     }
 
-    /// Build an AND-chain step node `{ tag: TRUE, payload: lhs || rhs }`.
+    /// Creates a transcript AND step from the previous root and statement digest.
     pub fn and(lhs: Digest, rhs: Digest) -> Self {
         Self::join(Tag::TRUE, lhs, rhs)
     }
 
-    /// Build a chunk node from `n = chunks.len() ≥ 1` rate-sized blocks of bulk data. Accepts
-    /// anything that converts into `Arc<[Chunk]>` — typically a `Vec<Chunk>` from the processor
-    /// handler, or a slice literal in tests.
+    /// Creates a chunk-bodied node from one or more rate blocks.
     ///
     /// # Panics
-    /// In debug builds, if `chunks` is empty — an empty chunk body is forbidden (its digest would
-    /// not bind the tag). The processor handler derives the non-zero count from the tag, and
-    /// [`DeferredState::rehydrate`](DeferredState::rehydrate) rejects an empty wire chunk body
-    /// before reaching this constructor, so neither in-VM execution nor untrusted bytes can trip
-    /// it; only a direct caller passing an empty slice can.
+    /// In debug builds, if `chunks` is empty. Processor and wire paths reject zero-length chunks
+    /// before constructing a node.
     pub fn chunk(tag: Tag, chunks: impl Into<Arc<[Chunk]>>) -> Self {
         let chunks = chunks.into();
         debug_assert!(!chunks.is_empty(), "chunk node must carry at least one chunk");
         Self { tag, payload: Payload::Chunk(chunks) }
     }
 
-    /// Returns `true` iff this node has the structural shape of [`Node::TRUE`]: zero tag and zero
-    /// expression payload. Used by the verifier to accept a predicate `reduce` result as
-    /// "verified."
+    /// Returns whether this node is structurally the canonical TRUE result.
     ///
-    /// Note this shape is also the shape of an AND-node both of whose children are
-    /// [`TRUE_DIGEST`] — the two are structurally identical and logically equivalent (AND of two
-    /// TRUEs *is* TRUE). The framework relies on contextual dispatch (predicate `reduce` results
-    /// vs. AND-node DAG walks) rather than on byte-level distinction.
+    /// This checks the zero tag and zero expression body, not the digest. That keeps predicate
+    /// success distinct from the virtual [`TRUE_DIGEST`] transcript terminal.
     pub fn is_true_node(&self) -> bool {
         self.tag == Tag::TRUE && matches!(&self.payload, Payload::Expression(f) if *f == [ZERO; 8])
     }
 
-    /// Canonical 4-felt Poseidon2 digest of this node.
+    /// Computes the canonical digest used by both host code and in-circuit wrappers.
     ///
-    /// Sponge state is laid out as `[rate || tag]` — the tag occupies the 4-felt capacity. For
-    /// expression and assertion nodes, the 8-felt payload fills the rate and a single permutation
-    /// produces the digest. For chunk nodes, each of the `n ≥ 1` 8-felt chunks overwrites the rate
-    /// and the permutation iterates `n` times (linear hash). Empty chunk bodies are forbidden
-    /// (see [`NodeType::Chunks`]), so the loop always runs at least one permutation — no `n == 0`
-    /// carve-out, and the in-circuit chunk hasher needs none either.
-    ///
-    /// For `n == 1` the chunk digest is byte-identical to the equivalent Expression digest with
-    /// the same tag and payload.
-    ///
-    /// **TRUE-node digest.** [`Node::TRUE`] hashes through Poseidon2 like any other node — its
-    /// digest is *not* [`TRUE_DIGEST`]. That sentinel is purely a verifier-side handle for the
-    /// "trivial transcript" / "empty AND" terminal; it is never the `.digest()` of any concrete
-    /// `Node`. This keeps `Node::digest` honest to the in-circuit hasher, so AND-nodes interned
-    /// by [`DeferredState::log`] (whose digest is computed by the in-circuit permute) match what
-    /// callers compute here.
+    /// Expression nodes hash one `[payload || tag]` Poseidon2 state; chunk nodes stream each
+    /// 8-felt chunk with the same tag capacity. [`Node::TRUE`] hashes normally, so its digest is
+    /// not [`TRUE_DIGEST`], which is only the virtual transcript terminal.
     pub fn digest(&self) -> Digest {
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag.as_word());
@@ -286,8 +219,7 @@ impl Node {
 // ERROR
 // ================================================================================================
 
-/// Errors raised by the deferred subsystem. Intentionally coarse for v1; refine as concrete
-/// failure modes accumulate.
+/// Coarse deferred-framework failures shared by state and reference precompiles.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeferredError {
     #[error("invalid or unknown deferred tag")]

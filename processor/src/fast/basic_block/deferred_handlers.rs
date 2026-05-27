@@ -1,8 +1,7 @@
-//! System-event glue for the deferred-DAG subsystem.
+//! Processor glue for deferred-DAG system events.
 //!
-//! Reads operand-stack inputs for `DeferredRegister`, `DeferredEvaluate` and
-//! `DeferredRegisterChunk` (see [`miden_core::events::sys_events`]) and dispatches into the
-//! installed [`miden_core::deferred::PrecompileRegistry`].
+//! These handlers keep the processor agnostic to precompile semantics: they read VM inputs,
+//! update deferred state, and delegate validation/reduction to the installed registry.
 
 use alloc::vec::Vec;
 
@@ -19,11 +18,11 @@ use crate::{MemoryError, advice::AdviceError, fast::FastProcessor};
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
 // 12 felts directly into one `hperm` to compute the node's digest.
 
-/// Stack offset of the payload's low half — the topmost word below the event ID.
+/// Stack offset of the payload's low half below the event id.
 const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
-/// Stack offset of the payload's high half (next word below the low half).
+/// Stack offset of the payload's high half.
 const DEFERRED_PAYLOAD_HI_OFFSET: usize = 5;
-/// Stack offset of the deferred tag — the third word below the event ID.
+/// Stack offset of the deferred tag word.
 const DEFERRED_TAG_OFFSET: usize = 9;
 
 // STACK LAYOUT — `DeferredEvaluate`
@@ -32,7 +31,7 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // handler looks it up by digest, reduces it via the precompile registry, interns the canonical,
 // and pushes the canonical's `tag || payload` felts onto the advice stack.
 
-/// Stack offset of the node digest (4-felt word at positions 1..5).
+/// Stack offset of the committed node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 
 // STACK LAYOUT — `DeferredRegisterChunk`
@@ -40,12 +39,12 @@ const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 // `[event_id, TAG, ptr, ...]` — no payload (`n` is decoded out of the tag, so the chunk's bulk
 // content size is fully determined by the precompile's tag layout).
 
-/// Stack offset of the chunk tag (4-felt word at positions 1..5).
+/// Stack offset of the chunk tag word.
 const CHUNK_TAG_OFFSET: usize = 1;
-/// Stack offset of the chunk pointer (single felt at position 5).
+/// Stack offset of the memory pointer for chunk data.
 const CHUNK_PTR_OFFSET: usize = 5;
 
-/// Reads `(tag, payload)` from the operand stack at the `DeferredRegister` layout.
+/// Reads the expression node described by the deferred-register stack layout.
 fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
@@ -54,14 +53,11 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     (tag, payload)
 }
 
-/// Handles `SystemEvent::DeferredRegister`. Reads `(tag, payload)` off the operand stack and
-/// registers an expression node; `register` validates the tag via the precompile registry and
-/// rejects chunk-bodied tags (those go through `adv.register_deferred_chunk`).
+/// Handles expression-node registration for deferred computation.
 ///
-/// Host-side intern only: the event mutates `DeferredState` and produces no operand-stack or
-/// advice output. The node's digest is derived *in-circuit* by the `sys::register_expr` wrapper
-/// (one `hperm` over `[PAYLOAD, TAG]`), so the digest folded into the transcript is constrained
-/// to the operand-stack payload rather than handed over as unconstrained advice.
+/// The event only commits the node; predicate truth is checked later by evaluation or transcript
+/// rehydration. The MASM wrapper binds the digest in-circuit, so the host cannot supply an
+/// unconstrained commitment through advice.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -71,25 +67,12 @@ pub(super) fn handle_deferred_register(
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredEvaluate`. Reads a node digest off the operand stack, looks
-/// the node up in `DeferredState`, reduces it via the precompile registry, and returns the
-/// canonical's `tag || payload` felts on the advice stack. The canonical is interned into
-/// `DeferredState` by `evaluate`, so the caller never has to re-register it.
+/// Handles deferred-node evaluation and returns the canonical node as advice.
 ///
-/// The referenced digest must resolve in deferred state (registered node or memoized prior
-/// evaluation input).
-///
-/// Advice contract — uniform across every node shape:
-/// - **Advice stack**: the canonical serialized as `tag || payload`, in natural (felt-index) order,
-///   laid out so successive `adv_pushw` reads yield `TAG`, then the payload words in hash order:
-///   - **Expression canonicals**: 4 tag felts followed by the 8 payload felts (12 total).
-///   - **Chunk canonicals**: 4 tag felts followed by every chunk's 8 felts (`8n + 4` total).
-/// - **No advice map entry, no digest push.** The output is an *unbound host hint*: a caller that
-///   consumes it must re-hash the felts in-circuit and log a predicate that `rehydrate` re-checks,
-///   which is why this event is wrapped per-precompile rather than exposed as a safe `sys` proc.
-/// - **Predicates** are not special-cased: the canonical is the TRUE node, which serializes to the
-///   12 felts of `Node::TRUE` like any other expression. A failed predicate has already surfaced as
-///   `PrecompileError::AssertionFailed` before this point.
+/// The digest must already be committed in deferred state; memo hits are allowed only after that
+/// membership check. The advice output is `tag || payload` in felt-index order and is intentionally
+/// unbound: callers that depend on it must re-hash it in-circuit and log a predicate that
+/// rehydration will verify.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -118,23 +101,11 @@ pub(super) fn handle_deferred_evaluate(
     Ok(())
 }
 
-/// Handles `SystemEvent::DeferredRegisterChunk`. Reads `(tag, ptr)` off the operand stack, asks
-/// the precompile registry to decode `n` from the tag, reads `8n` felts from memory at `ptr`,
-/// and registers a chunk node carrying that bulk data.
+/// Handles chunk-node registration for deferred computation.
 ///
-/// Host-side intern only: the event mutates `DeferredState` and produces no operand-stack or
-/// advice output. The node's digest is derived *in-circuit* by the `sys::register_chunk` wrapper
-/// (a `mem_stream` linear hash over the same `8n` felts), so the digest folded into the transcript
-/// is constrained to the memory at `ptr` rather than handed over as unconstrained advice. (The
-/// wrapper takes the chunk count `n` as an operand; the handler still derives `n` from the tag and
-/// ignores that operand.)
-///
-/// Validation:
-/// - `ptr` must fit in `u32`.
-/// - `ptr` must be word-aligned (`ptr % 4 == 0`).
-/// - `ptr + 8n` must not overflow `u32`.
-/// - `8n` must not exceed the processor's `max_adv_map_value_size` (re-used as the bulk-data cap,
-///   sized for the same "do not let a single event explode memory" concern).
+/// The tag, not the stack, is the source of truth for chunk count. The same memory range is hashed
+/// by the MASM wrapper in-circuit, binding the commitment to memory contents while this handler
+/// enforces alignment, bounds, and bulk-data limits.
 pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {

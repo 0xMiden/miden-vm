@@ -1,10 +1,7 @@
-//! `Uint` — 256-bit wrapping integer arithmetic as a first reference precompile.
+//! Mock 256-bit integer precompile for exercising value, op, and predicate nodes.
 //!
-//! Semantics: operations are mod 2^256, limbs are u32 little-endian. Tags route through
-//! [`PrecompileRegistry`] by id; a `sub` op joins `add`/`mul`, and the precompile pre-registers
-//! `ZERO` / `ONE` / `P_MINUS_1` (`[u32::MAX; 8]`) leaves via [`Precompile::init`].
-//!
-//! [`PrecompileRegistry`]: crate::deferred::PrecompileRegistry
+//! Values are little-endian u32 limbs and arithmetic wraps mod `2^256`. The fixture also
+//! contributes common constants through [`Precompile::init`] so registry bootstrapping is covered.
 
 use alloc::{vec, vec::Vec};
 
@@ -19,55 +16,55 @@ use crate::{
 // PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Uint` precompile.
+/// Zero-sized handle for the mock uint precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Uint;
 
 impl Uint {
-    /// Precompile name — hashed into the id.
+    /// Stable precompile name used to derive the tag id.
     pub const NAME: &'static str = "uint256";
 
-    /// Discriminant indices.
+    /// Tag discriminants owned by this fixture.
     pub const LEAF_TAG_ID: u32 = 0;
     pub const ADD_TAG_ID: u32 = 1;
     pub const SUB_TAG_ID: u32 = 2;
     pub const MUL_TAG_ID: u32 = 3;
     pub const EQ_TAG_ID: u32 = 4;
 
-    /// Derive the precompile id. Pure function over `Uint`'s metadata.
+    /// Stable precompile id derived from the fixture name.
     pub fn id() -> Felt {
         precompile_id(&Uint)
     }
 
-    /// Tag for a canonical Uint leaf.
+    /// Tag for a canonical uint leaf.
     pub fn leaf_tag() -> Tag {
         Tag {
             id: Self::id(),
             args: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
         }
     }
-    /// Tag for an `add` op node.
+    /// Tag for a wrapping-add op node.
     pub fn add_tag() -> Tag {
         Tag {
             id: Self::id(),
             args: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
         }
     }
-    /// Tag for a `sub` op node.
+    /// Tag for a wrapping-sub op node.
     pub fn sub_tag() -> Tag {
         Tag {
             id: Self::id(),
             args: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
         }
     }
-    /// Tag for a `mul` op node.
+    /// Tag for a wrapping-mul op node.
     pub fn mul_tag() -> Tag {
         Tag {
             id: Self::id(),
             args: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
         }
     }
-    /// Tag for an equality predicate.
+    /// Tag for a uint equality predicate.
     pub fn eq_tag() -> Tag {
         Tag {
             id: Self::id(),
@@ -75,13 +72,12 @@ impl Uint {
         }
     }
 
-    /// Build a canonical leaf node from u32 limbs (little-endian).
+    /// Builds a canonical uint leaf from little-endian limbs.
     pub fn leaf_node(limbs: [u32; 8]) -> Node {
         Node::leaf(Self::leaf_tag(), limbs.map(Felt::from_u32))
     }
 
-    /// Extract `[u32; 8]` limbs from a canonical leaf node, erroring if it isn't a `Uint` leaf
-    /// or if any limb is non-canonical (felt > `u32::MAX`).
+    /// Extracts canonical little-endian limbs from a uint leaf.
     pub fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
         if node.tag != Self::leaf_tag() {
             return Err(DeferredError::InvalidPayload);
@@ -89,8 +85,7 @@ impl Uint {
         decode_limbs(node.payload.as_felts()?)
     }
 
-    /// 256-bit wrapping add (mod 2^256). Limbs are little-endian u32. Exposed for consumers
-    /// (e.g. [`super::Group`]) that want to perform arithmetic without going through `reduce`.
+    /// Adds two little-endian uints modulo `2^256` for fixtures that share uint semantics.
     pub fn wrap_add(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
         let mut out = [0u32; 8];
         let mut carry: u64 = 0;
@@ -102,7 +97,7 @@ impl Uint {
         out
     }
 
-    /// 256-bit wrapping sub (mod 2^256). Limbs are little-endian u32.
+    /// Subtracts two little-endian uints modulo `2^256`.
     pub fn wrap_sub(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
         let mut out = [0u32; 8];
         let mut borrow: i64 = 0;
@@ -114,7 +109,7 @@ impl Uint {
         out
     }
 
-    /// 256-bit schoolbook mul keeping the low 256 bits (mod 2^256). Limbs are little-endian u32.
+    /// Multiplies two little-endian uints modulo `2^256`.
     pub fn wrap_mul(a: [u32; 8], b: [u32; 8]) -> [u32; 8] {
         let mut out = [0u32; 8];
         for i in 0..8 {
@@ -182,7 +177,7 @@ impl Precompile for Uint {
 // TYPED TAG / NODE
 // ================================================================================================
 
-/// Decoded view of a recognised `Uint` tag.
+/// Recognized local uint operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Discriminant {
     Leaf,
@@ -220,7 +215,7 @@ impl BinaryOp {
     }
 }
 
-/// A `Uint` node with both tag and payload decoded.
+/// Parsed uint node ready for reduction.
 enum UintNode {
     Leaf,
     BinaryOp { op: BinaryOp, lhs: Digest, rhs: Digest },
@@ -228,8 +223,7 @@ enum UintNode {
 }
 
 impl UintNode {
-    /// `args[0]` is the discriminant; the registry already matched `Uint`'s id, and `Uint`
-    /// ignores `args[1..3]`.
+    /// Parses a uint-owned tag and payload into the operation it represents.
     fn parse(args: [Felt; 3], payload: &Payload) -> Result<Self, PrecompileError> {
         let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
         Ok(match kind {

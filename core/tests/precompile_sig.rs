@@ -1,5 +1,4 @@
-//! Integration coverage for the `Sig` reference precompile: single chunk-bodied predicate,
-//! standalone and inside a multi-precompile `PrecompileRegistry` (alongside `Uint` and `Hash`).
+//! Integration coverage for fixed-size chunk predicates in the mock signature precompile.
 
 mod common;
 
@@ -26,7 +25,7 @@ fn verify_passes_in_multi_precompile_schema() {
     schema.init(&mut state).unwrap();
 
     let node = Sig::verify_node(three_chunks(Felt::from_u32(7)));
-    let result = state.evaluate(&schema, node).unwrap();
+    let result = state.evaluate_node(&schema, node).unwrap();
     assert!(result.is_true_node());
 
     // Log the proven signature predicate and round-trip the transcript.
@@ -38,7 +37,7 @@ fn verify_fails_for_zeroed_placeholder_sig() {
     let schema = PrecompileRegistry::default().with_precompile(Sig);
     let mut state = DeferredState::new();
     let node = Sig::verify_node(three_chunks(ZERO));
-    let err = state.evaluate(&schema, node);
+    let err = state.evaluate_node(&schema, node);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -55,9 +54,7 @@ fn decode_unknown_discriminant_rejected() {
 }
 
 proptest! {
-    /// `Sig::verify` is a stub predicate: it succeeds iff the very first felt of the first
-    /// chunk is non-zero. The property holds over arbitrary 3-chunk content and subsumes the
-    /// old concrete nonzero/zero pair.
+    /// The mock verifier accepts exactly the non-zero first-felt cases across arbitrary blobs.
     #[test]
     fn verify_succeeds_iff_first_felt_nonzero(
         f0 in any::<u32>(),
@@ -75,7 +72,7 @@ proptest! {
         ];
         let schema = PrecompileRegistry::default().with_precompile(Sig);
         let mut state = DeferredState::new();
-        let result = state.evaluate(&schema, Sig::verify_node(chunks));
+        let result = state.evaluate_node(&schema, Sig::verify_node(chunks));
         if f0 != 0 {
             prop_assert!(result.unwrap().is_true_node());
         } else {
@@ -83,9 +80,7 @@ proptest! {
         }
     }
 
-    /// Any non-empty chunk count other than the fixed `SIG_CHUNKS = 3` is rejected at
-    /// register-time by the framework's `payload_matches_type` gate, before reduce runs. (The
-    /// empty body, `n == 0`, is forbidden outright and unconstructible — covered separately.)
+    /// Wrong non-empty chunk counts are rejected before reducer logic can observe them.
     #[test]
     fn verify_rejects_wrong_chunk_count(
         n in (1usize..=8).prop_filter("must differ from SIG_CHUNKS", |n| *n != 3),

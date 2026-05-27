@@ -1,5 +1,4 @@
-//! Integration coverage for the `Hash` reference precompile: chunk-bodied preimage → digest
-//! leaf, the `eq` predicate, and multi-precompile composition with `Uint`.
+//! Integration coverage for chunk reduction and digest equality in the mock hash precompile.
 
 mod common;
 
@@ -38,7 +37,7 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     assert_eq!(canonical, expected_digest);
 
     // eq predicate ties the preimage's hash to the pre-registered expected digest.
-    let result = state.evaluate(&schema, Hash::eq_node(h_preimage, h_expected)).unwrap();
+    let result = state.evaluate_node(&schema, Hash::eq_node(h_preimage, h_expected)).unwrap();
     assert!(result.is_true_node());
 
     // Log the proven equality and round-trip the transcript (chunk-bodied preimage included).
@@ -54,7 +53,7 @@ fn preimage_with_partial_last_chunk_is_handled_by_caller_padding() {
         [Felt::from_u32(0xab), Felt::from_u32(0xcd), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
     let preimage_chunks = vec![[Felt::from_u32(1); 8], last_chunk];
     let expected = Hash::digest_node(Hash::hash(&preimage_chunks));
-    let canonical = state.evaluate(&schema, Hash::preimage_node(40, preimage_chunks)).unwrap();
+    let canonical = state.evaluate_node(&schema, Hash::preimage_node(40, preimage_chunks)).unwrap();
     assert_eq!(canonical, expected);
 }
 
@@ -93,7 +92,7 @@ fn preimage_reduces_to_digest_leaf() {
     let data = chunks(2);
     let expected = Hash::digest_node(Hash::hash(&data));
     let node = Hash::preimage_node(64, data);
-    let canonical = state.evaluate(&schema, node).unwrap();
+    let canonical = state.evaluate_node(&schema, node).unwrap();
     assert_eq!(canonical, expected);
 }
 
@@ -113,7 +112,7 @@ fn eq_predicate_matches_preimage_against_known_digest() {
     let known = Hash::digest_node(Hash::hash(&data));
     let h_known = state.register(&schema, known).unwrap();
     let h_preimage = state.register(&schema, Hash::preimage_node(64, data)).unwrap();
-    let result = state.evaluate(&schema, Hash::eq_node(h_preimage, h_known)).unwrap();
+    let result = state.evaluate_node(&schema, Hash::eq_node(h_preimage, h_known)).unwrap();
     assert!(result.is_true_node());
 }
 
@@ -124,7 +123,7 @@ fn eq_predicate_errors_on_mismatch() {
     let wrong = Hash::digest_node([Felt::from_u32(0xdead); 8]);
     let h_wrong = state.register(&schema, wrong).unwrap();
     let h_preimage = state.register(&schema, Hash::preimage_node(32, data)).unwrap();
-    let err = state.evaluate(&schema, Hash::eq_node(h_preimage, h_wrong));
+    let err = state.evaluate_node(&schema, Hash::eq_node(h_preimage, h_wrong));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -141,6 +140,6 @@ fn composite_with_hash_dispatches() {
     let schema = PrecompileRegistry::default().with_precompile(Hash);
     let mut state = DeferredState::new();
     let data = chunks(1);
-    let canonical = state.evaluate(&schema, Hash::preimage_node(32, data.clone())).unwrap();
+    let canonical = state.evaluate_node(&schema, Hash::preimage_node(32, data.clone())).unwrap();
     assert_eq!(canonical, Hash::digest_node(Hash::hash(&data)));
 }
