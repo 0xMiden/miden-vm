@@ -506,7 +506,6 @@ pub enum Token<'input> {
     CryptoStream,
     Cswap,
     Cswapw,
-    Debug,
     Div,
     Drop,
     Dropw,
@@ -735,7 +734,7 @@ impl fmt::Display for Token<'_> {
             Token::CryptoStream => write!(f, "crypto_stream"),
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
-            Token::Debug => write!(f, "debug"),
+
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
             Token::Dropw => write!(f, "dropw"),
@@ -967,7 +966,6 @@ impl<'input> Token<'input> {
                 | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
-                | Token::Debug
                 | Token::Div
                 | Token::Drop
                 | Token::Dropw
@@ -1157,7 +1155,6 @@ impl<'input> Token<'input> {
         ("crypto_stream", Token::CryptoStream),
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
-        ("debug", Token::Debug),
         ("div", Token::Div),
         ("drop", Token::Drop),
         ("dropw", Token::Dropw),

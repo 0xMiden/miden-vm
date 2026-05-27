@@ -6,9 +6,8 @@
 #! Each procedure emits a well-known event which the host handles by printing the requested piece
 #! of VM state (operand stack, memory, advice stack, or advice map). Range-based procedures share
 #! events with their full-state variants when the full-state behavior can be represented as an
-#! unbounded range. Unlike the `debug.*` decorators, these are ordinary `emit` events and carry no
-#! MAST/decorator cost, and they print whenever invoked regardless of whether the program was
-#! assembled in debug mode.
+#! unbounded range. These are ordinary `emit` events and carry no MAST/decorator cost, and they
+#! print whenever invoked.
 
 # CONSTANTS
 # ================================================================================================
@@ -25,8 +24,6 @@ const MAX_FELT_VALUE = 18446744069414584320
 # ================================================================================================
 
 #! Prints the entire operand stack.
-#!
-#! This is a drop-in replacement for the `debug.stack` decorator.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]

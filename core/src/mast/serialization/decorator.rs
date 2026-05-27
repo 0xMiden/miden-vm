@@ -10,7 +10,7 @@ use super::{
     string_table::{StringTable, StringTableBuilder},
 };
 use crate::{
-    operations::{DebugOptions, Decorator},
+    operations::Decorator,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
@@ -55,38 +55,10 @@ impl DecoratorInfo {
         }
         let mut data_reader = SliceReader::new(&decorator_data[offset..]);
         match self.variant {
-            EncodedDecoratorVariant::DebugOptionsStackAll => {
-                Ok(Decorator::Debug(DebugOptions::StackAll))
-            },
-            EncodedDecoratorVariant::DebugOptionsStackTop => {
-                let value = data_reader.read_u8()?;
-
-                Ok(Decorator::Debug(DebugOptions::StackTop(value)))
-            },
-            EncodedDecoratorVariant::DebugOptionsMemAll => {
-                Ok(Decorator::Debug(DebugOptions::MemAll))
-            },
-            EncodedDecoratorVariant::DebugOptionsMemInterval => {
-                let start = data_reader.read_u32()?;
-                let end = data_reader.read_u32()?;
-
-                Ok(Decorator::Debug(DebugOptions::MemInterval(start, end)))
-            },
-            EncodedDecoratorVariant::DebugOptionsLocalInterval => {
-                let start = data_reader.read_u16()?;
-                let second = data_reader.read_u16()?;
-                let end = data_reader.read_u16()?;
-
-                Ok(Decorator::Debug(DebugOptions::LocalInterval(start, second, end)))
-            },
             EncodedDecoratorVariant::Trace => {
                 let value = data_reader.read_u32()?;
 
                 Ok(Decorator::Trace(value))
-            },
-            EncodedDecoratorVariant::DebugOptionsAdvStackTop => {
-                let value = data_reader.read_u16()?;
-                Ok(Decorator::Debug(DebugOptions::AdvStackTop(value)))
             },
         }
     }
@@ -131,12 +103,6 @@ impl Deserializable for DecoratorInfo {
 #[repr(u8)]
 pub enum EncodedDecoratorVariant {
     // Note: AssemblyOp removed in version [0, 0, 2] - now stored separately in DebugInfo
-    DebugOptionsStackAll = 0,
-    DebugOptionsStackTop = 1,
-    DebugOptionsMemAll = 2,
-    DebugOptionsMemInterval = 3,
-    DebugOptionsLocalInterval = 4,
-    DebugOptionsAdvStackTop = 5,
     Trace = 6,
 }
 
@@ -158,14 +124,6 @@ impl EncodedDecoratorVariant {
 impl From<&Decorator> for EncodedDecoratorVariant {
     fn from(decorator: &Decorator) -> Self {
         match decorator {
-            Decorator::Debug(debug_options) => match debug_options {
-                DebugOptions::StackAll => Self::DebugOptionsStackAll,
-                DebugOptions::StackTop(_) => Self::DebugOptionsStackTop,
-                DebugOptions::MemAll => Self::DebugOptionsMemAll,
-                DebugOptions::MemInterval(..) => Self::DebugOptionsMemInterval,
-                DebugOptions::LocalInterval(..) => Self::DebugOptionsLocalInterval,
-                DebugOptions::AdvStackTop(_) => Self::DebugOptionsAdvStackTop,
-            },
             Decorator::Trace(_) => Self::Trace,
         }
     }
@@ -215,45 +173,21 @@ impl DecoratorDataBuilder {
 /// Mutators
 impl DecoratorDataBuilder {
     pub fn add_decorator(&mut self, decorator: &Decorator) {
-        let decorator_data_offset = self.encode_decorator_data(decorator).unwrap_or(0);
+        let decorator_data_offset = self.encode_decorator_data(decorator);
         self.decorator_infos
             .push(DecoratorInfo::from_decorator(decorator, decorator_data_offset));
     }
 
-    /// If a decorator has extra data to store, encode it in internal data buffer, and return the
-    /// offset of the newly added data. If not, return `None`.
-    pub fn encode_decorator_data(&mut self, decorator: &Decorator) -> Option<DecoratorDataOffset> {
+    /// Encodes the decorator's extra data in the internal data buffer, and returns the offset of
+    /// the newly added data.
+    pub fn encode_decorator_data(&mut self, decorator: &Decorator) -> DecoratorDataOffset {
         let data_offset = self.decorator_data.len() as DecoratorDataOffset;
 
         match decorator {
-            Decorator::Debug(debug_options) => match debug_options {
-                DebugOptions::StackTop(value) => {
-                    self.decorator_data.push(*value);
-                    Some(data_offset)
-                },
-                DebugOptions::AdvStackTop(value) => {
-                    self.decorator_data.extend(value.to_le_bytes());
-                    Some(data_offset)
-                },
-                DebugOptions::MemInterval(start, end) => {
-                    self.decorator_data.extend(start.to_le_bytes());
-                    self.decorator_data.extend(end.to_le_bytes());
-
-                    Some(data_offset)
-                },
-                DebugOptions::LocalInterval(start, second, end) => {
-                    self.decorator_data.extend(start.to_le_bytes());
-                    self.decorator_data.extend(second.to_le_bytes());
-                    self.decorator_data.extend(end.to_le_bytes());
-
-                    Some(data_offset)
-                },
-                DebugOptions::StackAll | DebugOptions::MemAll => None,
-            },
             Decorator::Trace(value) => {
                 self.decorator_data.extend(value.to_le_bytes());
 
-                Some(data_offset)
+                data_offset
             },
         }
     }
@@ -275,7 +209,7 @@ mod tests {
     #[test]
     fn test_decorator_data_offset_out_of_bounds() {
         let info = DecoratorInfo {
-            variant: EncodedDecoratorVariant::DebugOptionsStackTop,
+            variant: EncodedDecoratorVariant::Trace,
             decorator_data_offset: 99,
         };
         let data: Vec<u8> = vec![1, 2, 3];

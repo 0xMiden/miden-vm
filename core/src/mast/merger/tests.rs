@@ -8,7 +8,7 @@ use crate::{
         LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
-    operations::{AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, Operation},
+    operations::{AssemblyOp, DebugVarInfo, DebugVarLocation, Decorator, Operation},
     utils::Idx,
 };
 
@@ -236,7 +236,7 @@ fn mast_forest_merge_remap() {
 #[test]
 fn mast_forest_merge_duplicate() {
     let mut forest_a = MastForest::new();
-    forest_a.add_decorator(Decorator::Debug(DebugOptions::MemAll)).unwrap();
+    forest_a.add_decorator(Decorator::Trace(1)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
     let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();
@@ -1079,11 +1079,8 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
             .iter()
             .enumerate()
             .find_map(|(id, deco)| {
-                if let Decorator::Trace(v) = deco {
-                    if *v == trace_value { Some(id) } else { None }
-                } else {
-                    None
-                }
+                let Decorator::Trace(v) = deco;
+                if *v == trace_value { Some(id) } else { None }
             })
             .expect("decorator not found");
         DecoratorId::from_u32_safe(idx as u32, &merged).unwrap()
@@ -1108,10 +1105,9 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
             .iter()
             .enumerate()
             .find_map(|(i, deco)| {
-                if let Decorator::Trace(v) = deco
-                    && i > merged_shared.0 as usize
-                {
-                    if *v == 99 { Some(i) } else { None }
+                let Decorator::Trace(v) = deco;
+                if *v == 99 && i > merged_shared.0 as usize {
+                    Some(i)
                 } else {
                     None
                 }

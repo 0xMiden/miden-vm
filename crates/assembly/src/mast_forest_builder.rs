@@ -1245,7 +1245,6 @@ mod tests {
                         panic!("Operation index {op_idx} is out of bounds");
                     }
                 },
-                _ => panic!("Expected Trace decorator"),
             }
         }
 

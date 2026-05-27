@@ -10,7 +10,7 @@ use crate::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
-    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
+    operations::{AssemblyOp, Decorator, Operation},
     program::{Kernel, ProgramInfo},
     serde::{Deserializable, Serializable},
 };
@@ -54,7 +54,7 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     // Create decorators
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
-    let deco3 = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(42))).unwrap();
+    let deco3 = forest.add_decorator(Decorator::Trace(42)).unwrap();
 
     // Create operations
     let operations = vec![
@@ -188,7 +188,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
         .unwrap();
 
     // Create decorator for second block
-    let deco3 = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(99))).unwrap();
+    let deco3 = forest.add_decorator(Decorator::Trace(99)).unwrap();
 
     // Create second block
     let operations2 = vec![Operation::Push(Felt::new_unchecked(2)), Operation::Mul];
@@ -745,7 +745,7 @@ fn test_mast_forest_compaction_comprehensive() {
 
     // Create common decorators
     let trace_deco = forest.add_decorator(Decorator::Trace(42)).unwrap();
-    let debug_deco = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(10))).unwrap();
+    let debug_deco = forest.add_decorator(Decorator::Trace(10)).unwrap();
 
     // === BasicBlock nodes with operation-indexed decorators ===
     let bb_no_deco = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())

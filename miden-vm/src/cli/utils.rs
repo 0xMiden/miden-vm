@@ -23,7 +23,6 @@ pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
 pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
-    _debug_on: bool,
     kernel_file: Option<&Path>,
 ) -> Result<(Program, Arc<DefaultSourceManager>), Report> {
     // Assembler debug mode is always enabled (issue #1821)

@@ -1,18 +1,13 @@
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
-use miden_core::{Felt, operations::DebugOptions};
+use miden_core::Felt;
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
 use crate::{
-    BaseHost, DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState,
-    SyncHost, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, MastForestStore, MemMastForestStore, ProcessorState, SyncHost, TraceError,
+    TraceHandler, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -42,7 +37,7 @@ impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     }
 }
 
-/// A debug handler that collects and counts trace events from decorators.
+/// A trace handler that collects and counts trace events from decorators.
 #[derive(Default, Debug, Clone)]
 pub struct TraceCollector {
     /// Counts of each trace ID that has been emitted
@@ -68,7 +63,7 @@ impl TraceCollector {
     }
 }
 
-impl DebugHandler for TraceCollector {
+impl TraceHandler for TraceCollector {
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         // Count the trace event
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
@@ -81,7 +76,7 @@ impl DebugHandler for TraceCollector {
 }
 
 /// A unified testing host that combines trace collection, event handling,
-/// debug handling, and process state consistency checking.
+/// trace handling, and process state consistency checking.
 #[derive(Debug, Clone)]
 pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// Trace collection functionality (counts and execution order)
@@ -90,8 +85,8 @@ pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
 
-    /// List of debug command strings that have been received
-    pub debug_handler: Vec<String>,
+    /// List of trace command strings that have been received
+    pub trace_handler: Vec<String>,
 
     /// Process state snapshots for consistency checking
     snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
@@ -109,7 +104,7 @@ impl TestHost {
         Self {
             trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            debug_handler: Vec::new(),
+            trace_handler: Vec::new(),
             snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
@@ -123,7 +118,7 @@ impl TestHost {
         Self {
             trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            debug_handler: Vec::new(),
+            trace_handler: Vec::new(),
             snapshots: BTreeMap::new(),
             store,
             source_manager: Arc::new(DefaultSourceManager::default()),
@@ -163,15 +158,6 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
-    }
-
-    fn on_debug(
-        &mut self,
-        _process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.push(options.to_string());
-        Ok(())
     }
 
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
