@@ -1,25 +1,203 @@
 name: Publish workspace to crates.io
 
+# Keep this workflow file and name stable: crates.io trusted publishing is
+# configured against the GitHub workflow identity. The manual path below is the
+# canonical release path because it stages assets on a draft before anything is
+# public; the release.published path is only a guarded fallback for releases
+# whose assets were already staged by another trusted operator action. Tag
+# rulesets may require deployment to the release environment and may make tags
+# immutable, so failures below print recovery commands instead of suggesting
+# force-pushing, deleting, or moving a tag.
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for the release (e.g. v0.12.0)'
+        required: true
+        type: string
   release:
     types: [published]
 
-permissions:
-  contents: read
-  id-token: write  # Required for OIDC token exchange
+permissions: {}
 
 jobs:
-  publish:
+  prepare-release:
+    name: prepare release metadata
     if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and validate release commit
+        id: prepare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          ./scripts/prepare-release.sh
+
+  create-draft:
+    name: create draft release
+    needs: prepare-release
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Create or validate draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare-release.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          is_draft="$( { gh release view "${RELEASE_TAG}" --json isDraft -q .isDraft; } 2>/dev/null || echo "release not found" )"
+          case "${is_draft}" in
+            true)
+              draft_sha="$(gh release view "${RELEASE_TAG}" --json targetCommitish -q .targetCommitish)"
+              if [[ "${draft_sha}" != "${RELEASE_SHA}" ]]; then
+                echo "::error::Draft ${RELEASE_TAG} targets ${draft_sha}, expected ${RELEASE_SHA}."
+                echo "::error::Do not retarget the tag or draft to recover. Use a new tag once main points at the intended release commit."
+                echo "::error::Recovery: gh workflow run workspace-publish.yml --ref main -f tag=<new-tag>"
+                exit 1
+              fi
+              ;;
+            false)
+              echo "::error::Release ${RELEASE_TAG} is already published. Refusing to mutate public release assets."
+              echo "::error::If all required assets are already present, the release.published fallback can publish crates."
+              echo "::error::If assets are missing and this release can still be converted back to draft, do that first, then rerun: gh workflow run workspace-publish.yml --ref main -f tag=${RELEASE_TAG}"
+              echo "::error::If release/tag immutability prevents making it draft again, leave this release alone and cut a new tag with: gh workflow run workspace-publish.yml --ref main -f tag=<new-tag>"
+              exit 1
+              ;;
+            "release not found")
+              # This can create the git tag as a side effect. Keep this job in
+              # the release environment so tag rulesets with required
+              # deployments can be satisfied before the immutable tag exists.
+              gh release create "${RELEASE_TAG}" \
+                --draft \
+                --target "${RELEASE_SHA}" \
+                --title "${RELEASE_TAG}"
+              ;;
+            *)
+              echo "::error::Unexpected draft state for ${RELEASE_TAG}: ${is_draft}"
+              echo "::error::Retry after checking the release manually: gh release view ${RELEASE_TAG} --repo ${GH_REPO}"
+              echo "::error::If no release exists, rerun the canonical path: gh workflow run workspace-publish.yml --ref main -f tag=${RELEASE_TAG}"
+              exit 1
+              ;;
+          esac
+
+  upload-artifacts:
+    name: upload pre-built miden-vm executable artifacts
+    needs: [prepare-release, create-draft]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        target: [aarch64-apple-darwin, x86_64-unknown-linux-gnu]
+        exclude:
+          - os: macos-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare-release.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/cleanup-runner
+      - name: Install Rust
+        run: |
+          rustup update --no-self-update
+          rustc --version
+      - name: Add target
+        run: |
+          rustup target add ${{ matrix.target }}
+      - name: Build miden-vm
+        run: |
+          BUILD_TARGET=${{ matrix.target }} make exec-dist
+      - name: Prepare artifact
+        run: |
+          mv target/${{ matrix.target }}/optimized/miden-vm miden-vm-${{ matrix.target }}
+      - name: Attest miden-vm
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: miden-vm-${{ matrix.target }}
+      - name: Upload
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Reruns are safe after partial artifact upload: --clobber replaces
+          # existing draft assets instead of failing on "already exists".
+          gh release upload --clobber "${RELEASE_TAG}" miden-vm-${{ matrix.target }}
+      # Since the core.masp package is triplet independent, we only build it once.
+      - name: Install nightly
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          rustup update --no-self-update nightly
+      - name: Build core.masp
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          make packages
+      - name: Prepare artifact
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          mv target/packages/miden-core.masp core.masp
+      - name: Attest core.masp
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: core.masp
+      - name: Upload core.masp
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Reruns are safe after partial artifact upload: --clobber replaces
+          # existing draft assets instead of failing on "already exists".
+          gh release upload --clobber "${RELEASE_TAG}" core.masp
+
+  publish:
+    name: publish workspace crates
+    needs: [prepare-release, upload-artifacts]
+    if: ${{ always() && github.repository_owner == '0xMiden' && needs.prepare-release.result == 'success' && (github.event_name == 'release' || needs.upload-artifacts.result == 'success') }}
     runs-on: warp-ubuntu-latest-x64-8x
-    environment: release  # Optional: for enhanced security
+    environment: release
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC token exchange with crates.io
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ needs.prepare-release.outputs.sha }}
           persist-credentials: false
 
       - name: Authenticate with crates.io
@@ -33,3 +211,26 @@ jobs:
           verify-main-head: "true"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  publish-github-release:
+    name: publish GitHub release
+    needs: [prepare-release, publish]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          release_id="$(gh release view "${RELEASE_TAG}" --json databaseId -q .databaseId)"
+          gh api \
+            --method PATCH \
+            "repos/${GH_REPO}/releases/${release_id}" \
+            -F draft=false
