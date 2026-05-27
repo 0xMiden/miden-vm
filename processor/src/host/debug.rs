@@ -2,9 +2,9 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt, ops::RangeInclusive};
+use core::fmt;
 
-use miden_core::{FMP_ADDR, Felt};
+use miden_core::Felt;
 
 use crate::{ProcessorState, TraceError, host::handlers::DebugHandler};
 
@@ -56,151 +56,11 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
     }
 }
 
-#[allow(dead_code)]
-impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
-    /// Generic stack printing.
-    #[allow(dead_code)]
-    fn print_stack(
-        &mut self,
-        stack: &[Felt],
-        n: Option<usize>,
-        stack_type: &str,
-        process: &ProcessorState,
-    ) -> fmt::Result {
-        write_stack(&mut self.writer, stack, n, stack_type, process.clock())
-    }
-
-    /// Writes the whole memory state at the cycle `clk` in context `ctx`.
-    #[allow(dead_code)]
-    fn print_mem_all(&mut self, process: &ProcessorState) -> fmt::Result {
-        let mem = process.get_mem_state(process.ctx());
-
-        writeln!(
-            self.writer,
-            "Memory state before step {} for the context {}:",
-            process.clock(),
-            process.ctx()
-        )?;
-
-        let mem_items: Vec<_> = mem
-            .into_iter()
-            .map(|(addr, value)| (format!("{addr:#010x}"), Some(value.to_string())))
-            .collect();
-
-        self.print_interval(mem_items, None)?;
-        Ok(())
-    }
-
-    /// Writes memory values in the provided addresses interval.
-    #[allow(dead_code)]
-    fn print_mem_interval(
-        &mut self,
-        process: &ProcessorState,
-        range: RangeInclusive<u32>,
-    ) -> fmt::Result {
-        let start = *range.start();
-        let end = *range.end();
-
-        if start == end {
-            let value = process.get_mem_value(process.ctx(), start);
-            let value_str = format_value(value);
-            writeln!(
-                self.writer,
-                "Memory state before step {} for the context {} at address {:#010x}: {value_str}",
-                process.clock(),
-                process.ctx(),
-                start
-            )
-        } else {
-            writeln!(
-                self.writer,
-                "Memory state before step {} for the context {} in the interval [{}, {}]:",
-                process.clock(),
-                process.ctx(),
-                start,
-                end
-            )?;
-            let mem_items: Vec<_> = range
-                .map(|addr| {
-                    let value = process.get_mem_value(process.ctx(), addr);
-                    let addr_str = format!("{addr:#010x}");
-                    let value_str = value.map(|v| v.to_string());
-                    (addr_str, value_str)
-                })
-                .collect();
-
-            self.print_interval(mem_items, None)
-        }
-    }
-
-    /// Writes locals in provided indexes interval.
-    ///
-    /// The interval given is inclusive on *both* ends.
-    #[allow(dead_code)]
-    fn print_local_interval(
-        &mut self,
-        process: &ProcessorState,
-        range: RangeInclusive<u16>,
-        num_locals: u32,
-    ) -> fmt::Result {
-        let local_memory_offset = {
-            let fmp = process
-                .get_mem_value(process.ctx(), FMP_ADDR.as_canonical_u64() as u32)
-                .expect("FMP address is empty");
-
-            fmp.as_canonical_u64() as u32 - num_locals
-        };
-
-        let start = *range.start() as u32;
-        let end = *range.end() as u32;
-
-        if start == end {
-            let addr = local_memory_offset + start;
-            let value = process.get_mem_value(process.ctx(), addr);
-            let value_str = format_value(value);
-
-            writeln!(
-                self.writer,
-                "State of procedure local {start} before step {}: {value_str}",
-                process.clock(),
-            )
-        } else {
-            writeln!(
-                self.writer,
-                "State of procedure locals [{start}, {end}] before step {}:",
-                process.clock()
-            )?;
-            let local_items: Vec<_> = range
-                .map(|local_idx| {
-                    let addr = local_memory_offset + local_idx as u32;
-                    let value = process.get_mem_value(process.ctx(), addr);
-                    let addr_str = local_idx.to_string();
-                    let value_str = value.map(|v| v.to_string());
-                    (addr_str, value_str)
-                })
-                .collect();
-
-            self.print_interval(local_items, None)
-        }
-    }
-
-    /// Writes a generic interval with proper alignment and optional remaining count.
-    #[allow(dead_code)]
-    fn print_interval(
-        &mut self,
-        items: Vec<(String, Option<String>)>,
-        remaining: Option<usize>,
-    ) -> fmt::Result {
-        write_interval(&mut self.writer, items, remaining)
-    }
-}
-
 // SHARED PRINTING HELPERS
 // ================================================================================================
 //
 // These functions implement the VM's tree-style debug formatting independently of any host or
-// handler, so that both [`DefaultDebugHandler`] and event-based
-// debugging procedures (e.g. `miden::core::debug`) produce identical output.
+// handler, so event-based debugging procedures (e.g. `miden::core::debug`) can reuse it.
 
 /// Writes a stack-like list of elements (operand or advice stack) in the VM's debug format.
 ///

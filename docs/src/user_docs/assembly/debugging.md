@@ -17,7 +17,7 @@ The `core::debug` module provides the following procedures:
 - `print_adv_map_all` prints the full advice map (3 cycles).
 - `print_adv_map_item` looks up a WORD key in the advice map and prints the associated list of field elements (7 cycles). Consumes the key from the stack.
 
-These procedures emit ordinary events and print whenever invoked, regardless of whether the program was assembled in debug mode. Because they are regular procedure calls, adding them changes the program being executed. Only stack-neutral procedures preserve the operand stack; procedures that consume stack inputs change VM state by removing those inputs.
+These procedures emit ordinary events and print whenever invoked, regardless of whether the program was assembled in debug mode. Because they are regular procedure calls, adding them changes the program being executed. Only stack-neutral procedures preserve the operand stack; procedures that consume stack inputs change VM state by removing those inputs. Remove these calls from production programs.
 
 Default core handlers print stack and memory state. Advice stack and advice map printers require hosts to register `advice_debug_handlers()`, because they can reveal witness data.
 

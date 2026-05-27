@@ -332,7 +332,7 @@ Instructions for communicating with the host through events and tracing.
 
 ## Debugging Operations
 
-Procedures for inspecting VM state during execution. These are ordinary `core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs.
+Procedures for inspecting VM state during execution. These are ordinary `core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs. Remove these calls from production programs.
 
 ### `core::debug`
 
