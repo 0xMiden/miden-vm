@@ -53,7 +53,7 @@ pub use host::{
     BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
     debug::{DefaultDebugHandler, StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
-    handlers::{DebugError, DebugHandler, TraceError},
+    handlers::{DebugHandler, TraceError},
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,

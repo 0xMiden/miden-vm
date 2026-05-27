@@ -216,7 +216,7 @@ pub struct Test {
     pub kernel_source: Option<Arc<SourceFile>>,
     pub stack_inputs: StackInputs,
     pub advice_inputs: AdviceInputs,
-    pub in_debug_mode: bool,
+    pub in_tracing_mode: bool,
     pub libraries: Vec<Arc<Package>>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
@@ -243,7 +243,7 @@ impl Test {
     // --------------------------------------------------------------------------------------------
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
-    pub fn new(name: &str, source: &str, in_debug_mode: bool) -> Self {
+    pub fn new(name: &str, source: &str, in_tracing_mode: bool) -> Self {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
         Self {
@@ -252,7 +252,7 @@ impl Test {
             kernel_source: None,
             stack_inputs: StackInputs::default(),
             advice_inputs: AdviceInputs::default(),
-            in_debug_mode,
+            in_tracing_mode,
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
@@ -373,8 +373,7 @@ impl Test {
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .expect("test advice inputs should fit default advice map limits")
-            .with_debugging(self.in_debug_mode)
-            .with_tracing(self.in_debug_mode);
+            .with_tracing(self.in_tracing_mode);
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -552,7 +551,7 @@ impl Test {
                 stack_inputs,
                 self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
-                    .with_debugging(self.in_debug_mode)
+                    .with_tracing(self.in_tracing_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
@@ -582,7 +581,6 @@ impl Test {
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
             .with_tracing(true);
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
@@ -604,7 +602,6 @@ impl Test {
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
             .with_tracing(true);
 
         let stack_result = processor.execute_sync(&program, &mut host);
@@ -770,8 +767,7 @@ impl Test {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
                 .expect("test advice inputs should fit default advice map limits")
-                .with_debugging(self.in_debug_mode)
-                .with_tracing(self.in_debug_mode);
+                .with_tracing(self.in_tracing_mode);
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

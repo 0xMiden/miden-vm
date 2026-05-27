@@ -1,18 +1,13 @@
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
-use miden_core::{Felt, operations::DebugOptions};
+use miden_core::Felt;
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
 use crate::{
-    BaseHost, DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState,
-    SyncHost, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
+    TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -163,15 +158,6 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
-    }
-
-    fn on_debug(
-        &mut self,
-        _process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.push(options.to_string());
-        Ok(())
     }
 
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {

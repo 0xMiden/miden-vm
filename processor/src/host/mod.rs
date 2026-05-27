@@ -7,12 +7,11 @@ use miden_core::{
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, ProcessorState, TraceError};
+use crate::{ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -76,16 +75,6 @@ pub trait BaseHost {
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
-
-    /// Handles the debug request from the VM.
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
-    }
 
     /// Handles the trace emitted from the VM.
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {

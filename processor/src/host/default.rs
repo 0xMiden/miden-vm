@@ -4,7 +4,6 @@ use miden_core::{
     Word,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
@@ -13,8 +12,8 @@ use super::{
     handlers::{EventError, EventHandler, EventHandlerRegistry},
 };
 use crate::{
-    BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
+    BaseHost, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState,
+    SyncHost, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -136,14 +135,6 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
-    }
-
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.on_debug(process, options)
     }
 
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {

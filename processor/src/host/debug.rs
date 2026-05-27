@@ -4,9 +4,9 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::{FMP_ADDR, Felt, operations::DebugOptions};
+use miden_core::{FMP_ADDR, Felt};
 
-use crate::{DebugError, ProcessorState, host::handlers::DebugHandler};
+use crate::{ProcessorState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -23,10 +23,10 @@ impl fmt::Write for StdoutWriter {
     }
 }
 
-// DEFAULT DEBUG HANDLER IMPLEMENTATION
+// DEFAULT TRACE HANDLER IMPLEMENTATION
 // ================================================================================================
 
-/// Default implementation of [`DebugHandler`] that writes debug information to `stdout` when
+/// Default implementation of [`DebugHandler`] that writes trace information to `stdout` when
 /// available.
 pub struct DefaultDebugHandler<W: fmt::Write + Sync = StdoutWriter> {
     writer: W,
@@ -51,39 +51,15 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 }
 
 impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        match *options {
-            DebugOptions::StackAll => {
-                let stack = process.get_stack_state();
-                self.print_stack(&stack, None, "Stack", process)
-            },
-            DebugOptions::StackTop(n) => {
-                let stack = process.get_stack_state();
-                let count = if n == 0 { None } else { Some(n as usize) };
-                self.print_stack(&stack, count, "Stack", process)
-            },
-            DebugOptions::MemAll => self.print_mem_all(process),
-            DebugOptions::MemInterval(n, m) => self.print_mem_interval(process, n..=m),
-            DebugOptions::LocalInterval(n, m, num_locals) => {
-                self.print_local_interval(process, n..=m, num_locals as u32)
-            },
-            DebugOptions::AdvStackTop(n) => {
-                // .stack() already returns elements from top (index 0) to bottom
-                let stack = process.advice_provider().stack();
-                let count = if n == 0 { None } else { Some(n as usize) };
-                self.print_stack(&stack, count, "Advice stack", process)
-            },
-        }
-        .map_err(DebugError::from)
+    fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
+        Ok(())
     }
 }
 
+#[allow(dead_code)]
 impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Generic stack printing.
+    #[allow(dead_code)]
     fn print_stack(
         &mut self,
         stack: &[Felt],
@@ -95,6 +71,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
+    #[allow(dead_code)]
     fn print_mem_all(&mut self, process: &ProcessorState) -> fmt::Result {
         let mem = process.get_mem_state(process.ctx());
 
@@ -115,6 +92,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes memory values in the provided addresses interval.
+    #[allow(dead_code)]
     fn print_mem_interval(
         &mut self,
         process: &ProcessorState,
@@ -158,6 +136,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Writes locals in provided indexes interval.
     ///
     /// The interval given is inclusive on *both* ends.
+    #[allow(dead_code)]
     fn print_local_interval(
         &mut self,
         process: &ProcessorState,
@@ -206,6 +185,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes a generic interval with proper alignment and optional remaining count.
+    #[allow(dead_code)]
     fn print_interval(
         &mut self,
         items: Vec<(String, Option<String>)>,
@@ -219,7 +199,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 // ================================================================================================
 //
 // These functions implement the VM's tree-style debug formatting independently of any host or
-// handler, so that both [`DefaultDebugHandler`] (for `debug.*` decorators) and event-based
+// handler, so that both [`DefaultDebugHandler`] and event-based
 // debugging procedures (e.g. `miden::core::debug`) produce identical output.
 
 /// Writes a stack-like list of elements (operand or advice stack) in the VM's debug format.

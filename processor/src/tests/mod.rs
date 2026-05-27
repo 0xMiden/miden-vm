@@ -11,7 +11,7 @@ use miden_core::{
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
-    build_debug_test, build_test, build_test_by_mode,
+    build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
 };
 
@@ -23,8 +23,7 @@ use crate::{
     operation::Operation,
 };
 
-mod debug;
-mod debug_mode_decorator_tests;
+mod trace_decorator_tests;
 
 #[derive(Debug, thiserror::Error)]
 #[error("dummy host event failure")]
@@ -1317,43 +1316,4 @@ fn test_assert_messages() {
         "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
-}
-
-// Test the original issue with debug.stack.12 to see if it shows all items
-//
-// Updated in 2296: removed the 4 initial instructions, which are now inserted by the assembler for
-// initializing the FMP.
-#[test]
-fn test_debug_stack_issue_2295_original_repeat() {
-    let source = "
-    begin
-        repeat.12
-            push.42
-        end
-
-        debug.stack.12  # <=== should show first 12 elements as 42
-        dropw dropw dropw dropw
-    end";
-
-    // Execute with debug buffer
-    let test = build_debug_test!(source);
-    let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
-
-    // Test if debug.stack.12 shows all 12 push.42 items correctly
-    insta::assert_snapshot!(output, @r"
-    Stack state in interval [0, 11] before step 22:
-    ├──  0: 42
-    ├──  1: 42
-    ├──  2: 42
-    ├──  3: 42
-    ├──  4: 42
-    ├──  5: 42
-    ├──  6: 42
-    ├──  7: 42
-    ├──  8: 42
-    ├──  9: 42
-    ├── 10: 42
-    ├── 11: 42
-    └── (16 more items)
-    ");
 }

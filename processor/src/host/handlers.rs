@@ -6,10 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{
-    events::{EventId, EventName, SystemEvent},
-    operations::DebugOptions,
-};
+use miden_core::events::{EventId, EventName, SystemEvent};
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
@@ -73,14 +70,8 @@ impl EventHandler for NoopEventHandler {
 /// ```
 pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
-// DEBUG AND TRACE ERRORS
+// TRACE ERRORS
 // ================================================================================================
-
-/// A generic [`Error`] wrapper for debug handler errors.
-///
-/// Debug handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
 
 /// A generic [`Error`] wrapper for trace handler errors.
 ///
@@ -193,22 +184,11 @@ impl Debug for EventHandlerRegistry {
     }
 }
 
-// DEBUG HANDLER
+// TRACE HANDLER
 // ================================================================================================
 
-/// Handler for debug and trace operations
+/// Handler for trace operations
 pub trait DebugHandler: Sync {
-    /// This function is invoked when the `Debug` decorator is executed.
-    ///
-    /// The default implementation is a no-op.
-    fn on_debug(
-        &mut self,
-        _process: &ProcessorState,
-        _options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        Ok(())
-    }
-
     /// This function is invoked when the `Trace` decorator is executed.
     ///
     /// The default implementation is a no-op.
