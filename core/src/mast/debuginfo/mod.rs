@@ -527,8 +527,8 @@ fn read_empty_legacy_op_decorator_storage<R: ByteReader>(
     let node_indptr_for_op_idx: Vec<usize> = Deserializable::read_from(source)?;
 
     Ok(decorator_ids.is_empty()
-        && op_indptr_for_decorator_ids.is_empty()
-        && node_indptr_for_op_idx.is_empty())
+        && is_all_zero(&op_indptr_for_decorator_ids)
+        && is_all_zero(&node_indptr_for_op_idx))
 }
 
 fn write_empty_legacy_node_decorator_storage<W: ByteWriter>(target: &mut W) {
@@ -551,5 +551,46 @@ fn read_empty_legacy_csr_u32<R: ByteReader>(source: &mut R) -> Result<bool, Dese
     let data: Vec<u32> = Deserializable::read_from(source)?;
     let indptr: Vec<usize> = Deserializable::read_from(source)?;
 
-    Ok(data.is_empty() && indptr.is_empty())
+    Ok(data.is_empty() && is_all_zero(&indptr))
+}
+
+fn is_all_zero(values: &[usize]) -> bool {
+    values.iter().all(|value| *value == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::serde::SliceReader;
+
+    #[test]
+    fn legacy_empty_decorator_storage_accepts_all_zero_pointer_rows() {
+        let mut op_storage = Vec::new();
+        Vec::<u32>::new().write_into(&mut op_storage);
+        vec![0usize, 0, 0].write_into(&mut op_storage);
+        vec![0usize, 0].write_into(&mut op_storage);
+
+        let mut reader = SliceReader::new(&op_storage);
+        assert!(read_empty_legacy_op_decorator_storage(&mut reader).unwrap());
+
+        let mut node_storage = Vec::new();
+        Vec::<u32>::new().write_into(&mut node_storage);
+        vec![0usize, 0].write_into(&mut node_storage);
+        Vec::<u32>::new().write_into(&mut node_storage);
+        vec![0usize, 0, 0].write_into(&mut node_storage);
+
+        let mut reader = SliceReader::new(&node_storage);
+        assert!(read_empty_legacy_node_decorator_storage(&mut reader).unwrap());
+    }
+
+    #[test]
+    fn legacy_empty_decorator_storage_rejects_nonzero_pointers() {
+        let mut op_storage = Vec::new();
+        Vec::<u32>::new().write_into(&mut op_storage);
+        vec![0usize, 1].write_into(&mut op_storage);
+        vec![0usize].write_into(&mut op_storage);
+
+        let mut reader = SliceReader::new(&op_storage);
+        assert!(!read_empty_legacy_op_decorator_storage(&mut reader).unwrap());
+    }
 }
