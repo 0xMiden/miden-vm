@@ -59,10 +59,6 @@ pub struct ProveCmd {
     #[arg(short = 't', long = "trace")]
     trace: bool,
 
-    /// Disable debug instructions (release mode)
-    #[arg(long = "release")]
-    release: bool,
-
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
@@ -75,7 +71,7 @@ impl ProveCmd {
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             self.trace,
-            !self.release,
+            true,
         )
         .map_err(|err| Report::msg(format!("{err}")))
     }
@@ -126,12 +122,8 @@ impl ProveCmd {
         let (program, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
-                let (program, source_manager) = get_masm_program(
-                    &self.program_file,
-                    &libraries,
-                    !self.release,
-                    self.kernel_file.as_deref(),
-                )?;
+                let (program, source_manager) =
+                    get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),

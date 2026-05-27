@@ -52,7 +52,6 @@ fn test_before_enter_decorator_executed_once_fast() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
@@ -106,7 +105,6 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
@@ -153,7 +151,6 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
@@ -206,7 +203,6 @@ fn test_decorator_execution_order_fast() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
@@ -257,7 +253,6 @@ fn test_processor_decorator_execution() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     let execution_result = processor.execute_sync(&program, &mut host);
@@ -301,7 +296,6 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
 
     // Execute the program
@@ -376,17 +370,16 @@ fn test_decorator_bypass_in_release_mode() {
 }
 
 #[test]
-fn test_decorator_bypass_in_debug_mode() {
+fn test_decorator_bypass_in_tracing_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
         .with_tracing(true);
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
     processor.execute_sync(&program, &mut host).unwrap();
-    assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
+    assert!(counter.get() > 0, "decorators should be retrieved in tracing mode");
 }

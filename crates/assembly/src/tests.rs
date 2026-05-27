@@ -1822,7 +1822,6 @@ fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
         .filter_map(|(op_idx, decorator_id)| {
             (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
                 Decorator::Trace(value) => Some(*value),
-                _ => None,
             })?
         })
         .collect::<Vec<_>>();
@@ -1837,7 +1836,6 @@ fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
         .iter()
         .map(|decorator_id| match &forest[*decorator_id] {
             Decorator::Trace(value) => *value,
-            decorator => panic!("expected trace decorator in after_exit, got {decorator:?}"),
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -3300,6 +3298,19 @@ fn invalid_program_invalid_top_level_token() {
 }
 
 #[test]
+fn removed_debug_instructions_are_rejected_by_assembler() {
+    let context = TestContext::default();
+
+    for spelling in ["debug.stack.4", "debug.mem", "debug.local.0.2", "debug.adv_stack.4"] {
+        let source = source_file!(&context, format!("begin {spelling} end"));
+        let error = context
+            .assemble(source)
+            .expect_err("removed debug.* instruction should be rejected");
+        assert_diagnostic!(&error, "invalid instruction");
+    }
+}
+
+#[test]
 fn invalid_proc_missing_end_unexpected_begin() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
@@ -4064,15 +4075,12 @@ fn test_program_serde_with_decorators() {
 
     proc foo
         push.1.2 add
-        debug.stack.8
     end
 
     begin
         emit.EVENT_CONST
 
         exec.foo
-
-        debug.stack.4
 
         drop
 
@@ -4108,7 +4116,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
 
                 begin
                     push.1 push.2 add
-                    debug.stack.4
                     emit.EVT
                     trace.7
                 end
@@ -4149,7 +4156,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 end
 
                 proc decorated
-                    debug.stack.8
                     trace.44
                     push.0 drop
                 end
@@ -4181,7 +4187,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             end
 
             pub proc inspect
-                debug.stack.4
                 push.0 drop
             end
             "#
@@ -5253,17 +5258,15 @@ fn test_issue_2181_locaddr_bug_assembly() -> TestResult {
         &context,
         r#"
 proc some_proc
-    debug.stack.4
     nop
 end
 
 @locals(4)
 proc main
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
+    locaddr.0
+    locaddr.0
+    locaddr.0
     exec.some_proc
-    debug.stack.4
     dropw
 end
 

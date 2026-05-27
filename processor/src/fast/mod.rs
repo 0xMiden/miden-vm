@@ -247,7 +247,8 @@ impl FastProcessor {
 
     /// Enables or disables debugging mode.
     ///
-    /// When debugging is enabled, debug decorators will be executed during program execution.
+    /// This is kept for backwards compatibility but no longer affects decorator execution
+    /// since the `Decorator::Debug` variant has been removed.
     pub fn with_debugging(mut self, enabled: bool) -> Self {
         self.options = self.options.with_debugging(enabled);
         self
@@ -327,11 +328,13 @@ impl FastProcessor {
 
     /// Returns true if decorators should be executed.
     ///
-    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
-    /// enabled (for trace decorators).
+    /// This corresponds to having tracing enabled (for trace decorators).
+    ///
+    /// Note: `enable_debugging()` is no longer used for decorator execution
+    /// because the `Decorator::Debug` variant has been removed.
     #[inline(always)]
     fn should_execute_decorators(&self) -> bool {
-        self.in_debug_mode() || self.options.enable_tracing()
+        self.options.enable_tracing()
     }
 
     #[cfg(test)]
@@ -585,16 +588,6 @@ impl FastProcessor {
         host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason<F>> {
         match decorator {
-            Decorator::Debug(options) => {
-                if self.in_debug_mode() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_debug(&processor_state, options) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::DebugHandlerError { err }.into(),
-                        ));
-                    }
-                }
-            },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
                     let processor_state = self.state();

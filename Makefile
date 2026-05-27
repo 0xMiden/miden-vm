@@ -286,47 +286,49 @@ bench: ## Runs benchmarks
 
 .PHONY: fuzz-mast-forest
 fuzz-mast-forest: fuzz-seeds ## Run fuzzing for MastForest deserialization
-	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
+	@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-mast-validate
 fuzz-mast-validate: fuzz-seeds ## Run fuzzing for UntrustedMastForest validation
-	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
+	@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-mast-node-info
 fuzz-mast-node-info: fuzz-seeds ## Run fuzzing for SerializedMastForest node metadata access
-	-@cargo +nightly fuzz run mast_node_info --release --fuzz-dir miden-core-fuzz
+	@cargo +nightly fuzz run mast_node_info --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-mast-forest-wire-view
 fuzz-mast-forest-wire-view: fuzz-seeds ## Run fuzzing for MastForestWireView structural inspection
-	-@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir miden-core-fuzz
+	@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-all
 fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
-	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run mast_forest_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run mast_node_info --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run basic_block_data --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run debug_info --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run program_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run program_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run kernel_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run advice_map_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run operation_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run precompile_request_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run project_toml_parse --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run project_load --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	-@cargo +nightly fuzz run project_assemble --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	FAILED=0; \
+	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run mast_forest_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run mast_node_info --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run mast_forest_wire_view_new --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run basic_block_data --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run debug_info --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run program_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run program_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run kernel_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run advice_map_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run operation_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run precompile_request_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run package_semantic_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run project_toml_parse --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run project_load --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	cargo +nightly fuzz run project_assemble --release --fuzz-dir miden-core-fuzz -- -max_total_time=300 || FAILED=1; \
+	exit $$FAILED
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets

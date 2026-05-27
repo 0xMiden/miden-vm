@@ -179,6 +179,10 @@ impl VerifyInvokeTargets<'_> {
             self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
             return None;
         };
+        if !Self::invoke_path_tail_is_valid(rest) {
+            self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
+            return None;
+        }
         log::debug!(target: "verify-invoke", "attempting to resolve '{module}' to local import");
         if let Some(import) = self.module.get_import_mut(module) {
             log::debug!(target: "verify-invoke", "found import '{}'", import.target());
@@ -200,9 +204,13 @@ impl VerifyInvokeTargets<'_> {
                 // In the future we may need to support exclusions from import resolution to allow
                 // chasing through shadowed imports, but we do not do that for now.
                 AliasTarget::Path(shadowed) if shadowed.as_deref() == path => {
-                    Some(InvocationTarget::Path(
-                        shadowed.as_deref().map(|p| p.to_absolute().join(rest).into()),
-                    ))
+                    match shadowed.to_absolute() {
+                        Ok(abs) => {
+                            let joined = abs.join(rest);
+                            Some(InvocationTarget::Path(Span::new(shadowed.span(), joined.into())))
+                        },
+                        Err(_) => None,
+                    }
                 },
                 AliasTarget::Path(path) => {
                     let path = path.clone();
@@ -223,9 +231,16 @@ impl VerifyInvokeTargets<'_> {
                         },
                         // We can consider this path fully-resolved, and mark it absolute, if it is
                         // not already
-                        InvocationTarget::Path(resolved) => Some(InvocationTarget::Path(
-                            resolved.with_span(span).map(|p| p.to_absolute().join(rest).into()),
-                        )),
+                        InvocationTarget::Path(resolved) => {
+                            let spanned = resolved.with_span(span);
+                            match spanned.to_absolute() {
+                                Ok(absolute) => Some(InvocationTarget::Path(Span::new(
+                                    spanned.span(),
+                                    absolute.join(rest).into(),
+                                ))),
+                                Err(_) => None,
+                            }
+                        },
                         InvocationTarget::Symbol(_) => {
                             panic!("unexpected local target resolution for alias")
                         },
@@ -234,9 +249,15 @@ impl VerifyInvokeTargets<'_> {
             }
         } else {
             // We can consider this path fully-resolved, and mark it absolute, if it is not already
-            Some(InvocationTarget::Path(Span::new(span, path.to_absolute().into_owned().into())))
+            let abs = path.to_absolute().ok()?;
+            Some(InvocationTarget::Path(Span::new(span, abs.into_owned().into())))
         }
     }
+
+    fn invoke_path_tail_is_valid(path: &Path) -> bool {
+        path.components().all(|component| component.is_ok())
+    }
+
     fn track_used_alias(&mut self, name: &Ident) {
         self.track_used_alias_name(name.as_str());
     }

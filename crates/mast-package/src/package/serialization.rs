@@ -619,7 +619,7 @@ mod tests {
 
     fn absolute_path(name: &str) -> Arc<AstPath> {
         let path = PathBuf::new(name).expect("invalid path");
-        let path = path.as_path().to_absolute().into_owned();
+        let path = path.as_path().to_absolute().unwrap().into_owned();
         Arc::from(path.into_boxed_path())
     }
 

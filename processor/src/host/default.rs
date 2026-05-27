@@ -4,17 +4,16 @@ use miden_core::{
     Word,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use super::{
-    debug::DefaultDebugHandler,
+    debug::DefaultTraceHandler,
     handlers::{EventError, EventHandler, EventHandlerRegistry},
 };
 use crate::{
-    BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
+    BaseHost, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
+    TraceError, TraceHandler, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -23,12 +22,12 @@ use crate::{
 /// A default SyncHost implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
 pub struct DefaultHost<
-    D: DebugHandler = DefaultDebugHandler,
+    D: TraceHandler = DefaultTraceHandler,
     S: SourceManager = DefaultSourceManager,
 > {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
-    debug_handler: D,
+    trace_handler: D,
     source_manager: Arc<S>,
 }
 
@@ -37,7 +36,7 @@ impl Default for DefaultHost {
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
-            debug_handler: DefaultDebugHandler::default(),
+            trace_handler: DefaultTraceHandler::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
@@ -45,7 +44,7 @@ impl Default for DefaultHost {
 
 impl<D, S> DefaultHost<D, S>
 where
-    D: DebugHandler,
+    D: TraceHandler,
     S: SourceManager,
 {
     /// Use the given source manager implementation instead of the default one
@@ -57,7 +56,7 @@ where
         DefaultHost::<D, O> {
             store: self.store,
             event_handlers: self.event_handlers,
-            debug_handler: self.debug_handler,
+            trace_handler: self.trace_handler,
             source_manager,
         }
     }
@@ -107,26 +106,26 @@ where
         existed
     }
 
-    /// Replace the current [`DebugHandler`] with a custom one.
-    pub fn with_debug_handler<H: DebugHandler>(self, handler: H) -> DefaultHost<H, S> {
+    /// Replace the current [`TraceHandler`] with a custom one.
+    pub fn with_trace_handler<H: TraceHandler>(self, handler: H) -> DefaultHost<H, S> {
         DefaultHost::<H, S> {
             store: self.store,
             event_handlers: self.event_handlers,
-            debug_handler: handler,
+            trace_handler: handler,
             source_manager: self.source_manager,
         }
     }
 
-    /// Returns a reference to the [`DebugHandler`], useful for recovering debug information
+    /// Returns a reference to the [`TraceHandler`], useful for recovering trace information
     /// emitted during a program execution.
-    pub fn debug_handler(&self) -> &D {
-        &self.debug_handler
+    pub fn trace_handler(&self) -> &D {
+        &self.trace_handler
     }
 }
 
 impl<D, S> BaseHost for DefaultHost<D, S>
 where
-    D: DebugHandler,
+    D: TraceHandler,
     S: SourceManager,
 {
     fn get_label_and_source_file(
@@ -138,16 +137,8 @@ where
         (span, maybe_file)
     }
 
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.on_debug(process, options)
-    }
-
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        self.debug_handler.on_trace(process, trace_id)
+        self.trace_handler.on_trace(process, trace_id)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
@@ -157,7 +148,7 @@ where
 
 impl<D, S> SyncHost for DefaultHost<D, S>
 where
-    D: DebugHandler,
+    D: TraceHandler,
     S: SourceManager,
 {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {

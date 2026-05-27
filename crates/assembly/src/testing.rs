@@ -154,11 +154,12 @@ impl TestContext {
         path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<Box<Module>, Report> {
+        let path = path.as_ref().to_absolute().map_err(Report::msg)?;
         source.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
-                ..ParseOptions::new(ModuleKind::Library, path.as_ref().to_absolute())
+                ..ParseOptions::new(ModuleKind::Library, path)
             },
         )
     }
@@ -181,10 +182,11 @@ impl TestContext {
         path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<(), Report> {
+        let path = path.as_ref().to_absolute().map_err(Report::msg)?;
         let module = source.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
-                path: Some(path.as_ref().to_absolute().into_owned().into()),
+                path: Some(path.into_owned().into()),
                 ..ParseOptions::for_library()
             },
         )?;

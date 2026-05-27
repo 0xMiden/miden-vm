@@ -137,7 +137,8 @@ impl CoreLibrary {
     /// print private values if a program moves witness data onto the operand stack or into memory.
     /// Hosts can replace those handlers to route output to a UI, log, no-op handler, or other sink.
     /// Advice debug handlers can expose witness data directly, so hosts must opt into those
-    /// explicitly.
+    /// explicitly by extending this handler set with
+    /// [`crate::handlers::debug::advice_debug_handlers`].
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
