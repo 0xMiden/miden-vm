@@ -22,6 +22,10 @@ use crate::{
 /// Validated per-proof inputs over a [`MultiAir`]: `air_inputs` and `aux_inputs`.
 ///
 /// Holding one guarantees the input-length checks in [`Statement::new`] passed.
+/// The `MultiAir` itself is trusted application code; run
+/// [`crate::debug::assert_multi_air_valid`] in tests/setup to check structural
+/// invariants such as non-empty `airs()`, shared public-value counts, and
+/// periodic-column shape.
 pub struct Statement<F, EF, MA>
 where
     F: Field,
@@ -42,6 +46,10 @@ where
 {
     /// Construct a [`Statement`], validating `air_inputs` and `aux_inputs` lengths
     /// against `multi_air`.
+    ///
+    /// This assumes `multi_air` satisfies the structural contract checked by
+    /// [`crate::debug::assert_multi_air_valid`]; malformed AIRs may panic in
+    /// trusted helper methods such as [`MultiAir::num_air_inputs`].
     pub fn new(
         multi_air: MA,
         air_inputs: Vec<F>,
@@ -136,6 +144,9 @@ where
 {
     /// Construct a [`ProverStatement`], validating each trace's count, height, and
     /// width against its AIR.
+    ///
+    /// This assumes the underlying [`MultiAir`] satisfies the structural contract
+    /// checked by [`crate::debug::assert_multi_air_valid`].
     pub fn new(
         statement: Statement<F, EF, MA>,
         traces: Vec<RowMajorMatrix<F>>,

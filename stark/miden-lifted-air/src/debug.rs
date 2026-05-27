@@ -10,15 +10,20 @@ use p3_field::{ExtensionField, Field};
 
 use crate::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 
-/// Assert a [`MultiAir`] is structurally well-formed: per AIR no preprocessed
-/// trace, positive auxiliary width, and positive-power-of-two periodic columns;
-/// across AIRs a shared `num_public_values`. The overridable
-/// [`MultiAir::num_air_inputs`] / [`LiftedAir::max_periodic_length`] are
-/// cross-checked against the raw AIR data, so a lying override is caught here.
+/// Assert a [`MultiAir`] is structurally well-formed.
 ///
-/// Panics on an empty `airs()` or any violation. A degenerate AIR whose
-/// constraints all vanish under `Z_H` is supported, not rejected — the
-/// prover/verifier clamp the quotient degree to `D = 2`.
+/// This checks the structural invariants that prover/verifier hot paths trust:
+/// - [`MultiAir::airs`] is non-empty.
+/// - All AIRs agree on [`BaseAir::num_public_values`].
+/// - [`MultiAir::num_air_inputs`] agrees with the per-AIR public value count.
+/// - Each AIR has no preprocessed trace.
+/// - Each AIR has positive auxiliary width.
+/// - Each periodic column is non-empty and has power-of-two length.
+/// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.
+///
+/// Panics on any violation. A degenerate AIR whose constraints all vanish under
+/// `Z_H` is supported, not rejected — the prover/verifier clamp the quotient
+/// degree to `D = 2`.
 pub fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
 where
     F: Field,

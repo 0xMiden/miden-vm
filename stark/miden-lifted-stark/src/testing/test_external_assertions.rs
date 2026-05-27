@@ -167,7 +167,7 @@ fn external_assertion_holds() {
 }
 
 #[test]
-fn missing_external_input_fails_verification() {
+fn missing_external_input_fails_proving() {
     let config = test_config();
 
     let input = Felt::from_u64(42);
@@ -176,16 +176,16 @@ fn missing_external_input_fails_verification() {
     let trace = generate_pow4_trace(start, 8);
 
     // Empty `aux_inputs`: `eval_external` runs out of inputs and surfaces a
-    // ReductionError. Using the same (empty) inputs on both sides keeps
-    // Fiat-Shamir consistent so the failure surfaces at the assertion path.
+    // ReductionError. The prover mirrors the verifier's external assertion
+    // evaluation after aux values are available, so malformed statements fail
+    // early; this could become a debug assertion if proving needs to skip this
+    // verifier-side sanity check.
     let broken = external_prover_statement(input, trace, vec![start], vec![]);
 
-    let output = prove(&config, &broken, test_challenger()).expect("proving should succeed");
-
-    let err = verify(&config, broken.statement(), &output.proof, test_challenger())
-        .expect_err("missing external input should fail verification");
+    let err = prove(&config, &broken, test_challenger())
+        .expect_err("missing external input should fail proving");
     assert!(
-        matches!(err, crate::VerifierError::Reduction(_)),
+        matches!(err, crate::ProverError::Reduction(_)),
         "expected Reduction, got {err:?}"
     );
 }

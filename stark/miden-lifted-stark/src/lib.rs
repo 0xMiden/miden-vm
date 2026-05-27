@@ -27,8 +27,8 @@
 //! inline `log_quotient_degree(air) ≤ log_blowup` compat check, plus the internal trace-order
 //! reconstruction from the proof's log heights, all run before any cryptographic work begins:
 //!
-//! - **Shape well-formedness** — non-empty, ≤ 256 instances, each log trace height within the
-//!   host's `usize` width.
+//! - **Shape well-formedness** — ≤ 256 instances, with the maximum LDE order `log_trace_height +
+//!   log_blowup` bounded by the field's two-adicity and the host's `usize` width.
 //! - **Compat** — `log_quotient_degree(air) ≤ log_blowup`, per AIR.
 //! - **Per-AIR instance dimensions** — public values length matches `num_public_values()`, trace
 //!   height ≥ max periodic column length, trace width matches `width()` (prover-only), height is a
@@ -40,8 +40,9 @@
 //! responsibility. Run [`debug::assert_prover_setup`] (or its components)
 //! from your test harness to enforce them in debug builds:
 //!
-//! 1. **AIR structural contract** — no preprocessed trace, positive aux width, power-of-two
-//!    periodic column lengths. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`].
+//! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, no
+//!    preprocessed trace, positive aux width, power-of-two periodic column lengths, and matching
+//!    override helpers. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`].
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.

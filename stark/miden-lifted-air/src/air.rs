@@ -237,6 +237,13 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 /// The framework defines instance order as the position of an AIR within
 /// [`Self::airs`]. Every per-AIR slice elsewhere on [`Statement`](crate::Statement) /
 /// [`ProverStatement`](crate::ProverStatement) uses the same ordering.
+///
+/// # Structural contract
+///
+/// Prover/verifier hot paths assume the structural invariants checked by
+/// [`crate::debug::assert_multi_air_valid`]. In particular, `airs()` must be
+/// non-empty, all AIRs must agree on their public value count, and overridable
+/// helpers such as [`Self::num_air_inputs`] must agree with the raw AIR data.
 pub trait MultiAir<F, EF>
 where
     F: Field,
@@ -252,8 +259,9 @@ where
     ///
     /// All AIRs read the same `air_inputs`, so they must agree on
     /// [`num_public_values`](p3_air::BaseAir::num_public_values). The default
-    /// returns that shared count (panicking on an empty `airs()`); override to
-    /// return it directly, cross-checked by [`crate::debug::assert_multi_air_valid`].
+    /// returns that shared count. It assumes the structural contract checked by
+    /// [`crate::debug::assert_multi_air_valid`], including non-empty `airs()`;
+    /// override to return it directly when known statically.
     /// [`Statement::new`](crate::Statement::new) checks `air_inputs.len()` against it.
     fn num_air_inputs(&self) -> usize {
         let airs = self.airs();

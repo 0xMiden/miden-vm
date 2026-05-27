@@ -70,7 +70,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{InstanceError, LiftedAir, MultiAir, ProverStatement};
+use miden_lifted_air::{InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -219,6 +219,21 @@ where
     // output is caught downstream by the LDE/commit or by verification.
     let (mut aux_traces_ef, mut all_aux_values) =
         info_span!("build aux traces").in_scope(|| prover_statement.build_aux_traces(&randomness));
+
+    // Mirror the verifier's external assertion evaluation while aux values are
+    // still in instance order. This is cheap and catches malformed statements
+    // early; it could become a debug assertion if proving needs to skip this
+    // verifier-side sanity check.
+    let aux_views: Vec<&[EF]> = all_aux_values.iter().map(Vec::as_slice).collect();
+    let assertions = statement
+        .eval_external(&randomness, &aux_views, trace_order.log_heights_instance())
+        .map_err(ProverError::Reduction)?;
+    for (k, assertion) in assertions.iter().enumerate() {
+        if *assertion != EF::ZERO {
+            return Err(ProverError::ExternalAssertionFailed { assertion: k });
+        }
+    }
+
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
     trace_order.reorder_to_proof_in_place(&mut all_aux_values);
 
@@ -385,4 +400,12 @@ pub enum ProverError {
     Instance(#[from] InstanceError),
     #[error(transparent)]
     Domain(#[from] DomainError),
+    #[error("external assertion evaluation failed: {0}")]
+    Reduction(ReductionError),
+    #[error("external assertion {assertion} is non-zero")]
+    ExternalAssertionFailed {
+        /// Index into the assertions vector returned by
+        /// [`Statement::eval_external`](miden_lifted_air::Statement::eval_external).
+        assertion: usize,
+    },
 }
