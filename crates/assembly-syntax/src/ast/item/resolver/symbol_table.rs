@@ -329,7 +329,11 @@ impl LocalSymbolTable {
         expansion_stack.push(Arc::from(path_ref));
 
         let result = {
-            let (module_name, rest) = path.split_first().unwrap();
+            let Some((module_name, rest)) = path.split_first() else {
+                expansion_stack.pop();
+                return Err(SymbolResolutionError::undefined(path.span(), source_manager));
+            };
+            let requested_span = path.span();
             if let Some(target) = get_import(module_name) {
                 match target {
                     AliasTarget::MastRoot(digest) if rest.is_empty() => {
@@ -375,9 +379,26 @@ impl LocalSymbolTable {
                             SymbolResolution::External(resolved) => {
                                 // We can consider this path fully-resolved, and mark it absolute,
                                 // if it is not already
-                                Ok(SymbolResolution::External(
-                                    resolved.map(|p| p.to_absolute().join(rest).into()),
-                                ))
+                                match resolved.to_absolute() {
+                                    Ok(abs) => {
+                                        for component in rest.components() {
+                                            component.map_err(|_| {
+                                                SymbolResolutionError::undefined(
+                                                    requested_span,
+                                                    source_manager,
+                                                )
+                                            })?;
+                                        }
+                                        Ok(SymbolResolution::External(Span::new(
+                                            resolved.span(),
+                                            abs.join(rest).into(),
+                                        )))
+                                    },
+                                    Err(_) => Err(SymbolResolutionError::undefined(
+                                        resolved.span(),
+                                        source_manager,
+                                    )),
+                                }
                             },
                             res @ (SymbolResolution::MastRoot(_)
                             | SymbolResolution::Local(_)
@@ -413,7 +434,13 @@ impl LocalSymbolTable {
             } else {
                 // We can consider this path fully-resolved, and mark it absolute, if it is not
                 // already
-                Ok(SymbolResolution::External(path.map(|p| p.to_absolute().into_owned().into())))
+                match path.to_absolute() {
+                    Ok(abs) => Ok(SymbolResolution::External(Span::new(
+                        path.span(),
+                        abs.into_owned().into(),
+                    ))),
+                    Err(_) => Err(SymbolResolutionError::undefined(path.span(), source_manager)),
+                }
             }
         };
 
@@ -481,7 +508,7 @@ mod tests {
             SymbolResolution::External(resolved) => {
                 let expected = format!("a{max_depth}");
                 let expected = PathBuf::from_str(&expected).expect("valid path");
-                let expected = expected.as_path().to_absolute().into_owned();
+                let expected = expected.as_path().to_absolute().unwrap().into_owned();
                 assert_eq!(resolved.as_deref(), expected.as_path());
             },
             other => panic!("expected external resolution, got {other:?}"),
@@ -532,6 +559,54 @@ mod tests {
             },
             other => panic!("expected external resolution, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn alias_expansion_rejects_invalid_expanded_path_with_rest() {
+        let source_manager = DefaultSourceManager::default();
+        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
+        let invalid_path: Arc<Path> =
+            Arc::from(Path::new(&invalid_component).to_path_buf().into_boxed_path());
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(invalid_path)));
+
+        let path = PathBuf::from_str("lib::entry").expect("valid path");
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(path.as_path()),
+            &source_manager,
+        );
+
+        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
+    }
+
+    #[test]
+    fn alias_expansion_rejects_invalid_rest_after_valid_import() {
+        let source_manager = DefaultSourceManager::default();
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(path_arc("pkg"))));
+        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
+        let path = alloc::format!("lib::{invalid_component}");
+
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(Path::new(&path)),
+            &source_manager,
+        );
+
+        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
+    }
+
+    #[test]
+    fn alias_expansion_rejects_invalid_no_import_path() {
+        let source_manager = DefaultSourceManager::default();
+        let invalid_component = "a".repeat(Path::MAX_COMPONENT_LENGTH + 1);
+        let path = alloc::format!("lib::{invalid_component}");
+
+        let result =
+            LocalSymbolTable::expand(|_| None, Span::unknown(Path::new(&path)), &source_manager);
+
+        assert!(matches!(result, Err(SymbolResolutionError::UndefinedSymbol { .. })));
     }
 
     #[test]

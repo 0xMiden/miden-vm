@@ -267,14 +267,28 @@ impl Path {
     /// Make this path absolute, if not already
     ///
     /// NOTE: This does not _resolve_ the path, it simply ensures the path has the root prefix
-    pub fn to_absolute(&self) -> Cow<'_, Path> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path contains invalid components (e.g., identifiers with
+    /// invalid characters or exceeding maximum length).
+    pub fn to_absolute(&self) -> Result<Cow<'_, Path>, PathError> {
         if self.is_absolute() {
-            Cow::Borrowed(self)
+            for component in self.components() {
+                component?;
+            }
+            if self.byte_len() > u16::MAX as usize {
+                return Err(PathError::TooLong { max: u16::MAX as usize });
+            }
+            Ok(Cow::Borrowed(self))
         } else {
             let mut buf = PathBuf::with_capacity(self.byte_len() + 2);
             buf.push_component("::");
-            buf.extend_with_components(self.components()).expect("invalid path");
-            Cow::Owned(buf)
+            buf.extend_with_components(self.components())?;
+            if buf.byte_len() > u16::MAX as usize {
+                return Err(PathError::TooLong { max: u16::MAX as usize });
+            }
+            Ok(Cow::Owned(buf))
         }
     }
 
@@ -655,6 +669,31 @@ mod tests {
         let expected = Path::new("::$exec::$main");
         assert_eq!(canonicalized.as_path(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_to_absolute_rejects_invalid_absolute_path_component() {
+        let source = alloc::format!("::{}", "a".repeat(Path::MAX_COMPONENT_LENGTH + 1));
+        let err = Path::new(&source)
+            .to_absolute()
+            .expect_err("absolute paths must still validate their components");
+
+        assert!(matches!(
+            err,
+            PathError::InvalidComponent(crate::ast::IdentError::InvalidLength { .. })
+        ));
+    }
+
+    #[test]
+    fn test_to_absolute_rejects_oversized_absolute_result() {
+        let source = alloc::format!("{}aa", "a::".repeat(21_844));
+        assert_eq!(source.len(), (u16::MAX as usize) - 1);
+
+        let err = Path::new(&source)
+            .to_absolute()
+            .expect_err("adding the absolute path prefix must preserve the path length bound");
+
+        assert!(matches!(err, PathError::TooLong { max } if max == u16::MAX as usize));
     }
 
     #[test]

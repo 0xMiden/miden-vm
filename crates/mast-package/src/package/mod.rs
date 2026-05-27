@@ -286,7 +286,7 @@ impl Package {
     ///
     /// Panics if the specified procedure is not exported from this package.
     pub fn get_export_node_id(&self, path: impl AsRef<Path>) -> MastNodeId {
-        let path = path.as_ref().to_absolute();
+        let path = path.as_ref().to_absolute().unwrap();
         self.manifest
             .get_export(path)
             .and_then(PackageExport::as_procedure)
@@ -296,7 +296,9 @@ impl Package {
 
     /// Returns true if the specified exported procedure is re-exported from a dependency.
     pub fn is_reexport(&self, path: impl AsRef<Path>) -> bool {
-        let path = path.as_ref().to_absolute();
+        let Ok(path) = path.as_ref().to_absolute() else {
+            return false;
+        };
         self.manifest
             .get_export(path.as_ref())
             .and_then(PackageExport::as_procedure)
@@ -308,7 +310,7 @@ impl Package {
     /// Returns the digest of the procedure with the specified name, or `None` if it was not found
     /// in the library or its library path is malformed.
     pub fn get_procedure_root_by_path(&self, path: impl AsRef<Path>) -> Option<Word> {
-        let path = path.as_ref().to_absolute();
+        let path = path.as_ref().to_absolute().ok()?;
         self.manifest
             .get_export(path)
             .and_then(PackageExport::as_procedure)
@@ -317,7 +319,7 @@ impl Package {
 
     /// Returns the exact procedure node for the specified path, if it is present.
     pub fn get_procedure_node_by_path(&self, path: impl AsRef<Path>) -> Option<MastNodeId> {
-        let path = path.as_ref().to_absolute();
+        let path = path.as_ref().to_absolute().ok()?;
         self.manifest
             .get_export(path.as_ref())
             .and_then(PackageExport::as_procedure)
@@ -545,7 +547,7 @@ impl Package {
             return Err(Report::msg("expected library but got an executable"));
         }
 
-        let entrypoint_namespace = entrypoint.namespace().to_absolute();
+        let entrypoint_namespace = entrypoint.namespace().to_absolute().map_err(Report::msg)?;
         let module = self
             .module_infos()
             .find(|info| info.path() == entrypoint_namespace.as_ref())
@@ -671,7 +673,7 @@ mod tests {
 
     fn absolute_path(name: &str) -> Arc<AstPath> {
         let path = PathBuf::new(name).expect("invalid path");
-        let path = path.as_path().to_absolute().into_owned();
+        let path = path.as_path().to_absolute().unwrap().into_owned();
         Arc::from(path.into_boxed_path())
     }
 
@@ -809,6 +811,17 @@ mod tests {
             .expect_err("multiple kernel runtime dependencies should be rejected");
 
         assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+
+    #[test]
+    fn malformed_procedure_lookup_paths_are_not_exported() {
+        let package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let invalid_path = alloc::format!("::{}", "a".repeat(AstPath::MAX_COMPONENT_LENGTH + 1));
+        let invalid_path = AstPath::new(&invalid_path);
+
+        assert_eq!(package.get_procedure_root_by_path(invalid_path), None);
+        assert_eq!(package.get_procedure_node_by_path(invalid_path), None);
+        assert!(!package.is_reexport(invalid_path));
     }
 
     #[test]
