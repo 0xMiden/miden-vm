@@ -2913,8 +2913,7 @@ begin adv.has_mapkey assert end"
     Ok(())
 }
 
-/// Smoke-test that the `adv.register_deferred` keyword parses and assembles. Semantics
-/// are exercised end-to-end in `processor/tests/deferred_e2e.rs`.
+/// Ensures the expression deferred-registration keyword remains accepted by the assembler.
 #[test]
 fn test_deferred_keywords_assemble() -> TestResult {
     let context = TestContext::default();
@@ -2931,9 +2930,7 @@ end"
     Ok(())
 }
 
-/// Smoke-test that the `adv.register_deferred_chunk` keyword parses and assembles. Stack layout
-/// is `[TAG, ptr]` — 5 felts under the event ID. End-to-end semantics live in
-/// `processor/tests/deferred_e2e.rs`.
+/// Ensures the chunk deferred-registration keyword remains accepted by the assembler.
 #[test]
 fn test_register_deferred_chunk_keyword_assembles() -> TestResult {
     let context = TestContext::default();

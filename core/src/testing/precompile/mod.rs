@@ -1,9 +1,7 @@
-//! Reference precompile implementations exercising the [`crate::deferred`] public surface.
+//! Reference precompiles used to exercise the deferred framework.
 //!
-//! - [`uint`] — `Uint`: 256-bit wrapping integer arithmetic.
-//! - [`group`] — `Group`: compound-canonical mock group over `Uint` (mid-`reduce` minting).
-//! - [`hash`] — `Hash`: chunk-bodied preimage → digest-leaf precompile.
-//! - [`sig`] — `Sig`: single chunk-bodied predicate precompile.
+//! They cover value leaves, join nodes, chunk bodies, predicates, and compound canonicals without
+//! depending on production cryptographic implementations.
 
 pub mod group;
 pub mod hash;

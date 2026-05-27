@@ -1,6 +1,4 @@
-//! Canary integration test for the chunk-node variant of the deferred-DAG public API, driven
-//! through the [`Hash`] reference precompile (chunk-bodied preimage → digest leaf, plus an `eq`
-//! predicate over two digests).
+//! Canary coverage for chunk-bodied deferred nodes through the mock hash precompile.
 
 use miden_core::{
     Felt,
@@ -11,8 +9,7 @@ use miden_core::{
 // HASH-PRECOMPILE TAG HELPERS
 // ================================================================================================
 
-/// Tag for an `n`-chunk preimage. `Hash` derives the chunk count from a byte length, so a chunk
-/// count of `n` is requested as `n * BYTES_PER_CHUNK` bytes.
+/// Builds a hash preimage tag whose byte length implies `n` chunks.
 fn preimage_tag(n: u32) -> Tag {
     Hash::preimage_tag(n * Hash::BYTES_PER_CHUNK)
 }
@@ -78,7 +75,7 @@ fn predicate_preimage_equals_digest_succeeds() {
     // and compares against the precomputed leaf, returning the TRUE node on match.
     let assertion = Node::join(Hash::eq_tag(), preimage_digest, digest_leaf_digest);
     state.register(&schema, assertion.clone()).unwrap();
-    let result = state.evaluate(&schema, assertion).unwrap();
+    let result = state.evaluate_node(&schema, assertion).unwrap();
     assert!(result.is_true_node());
 }
 
@@ -98,7 +95,7 @@ fn predicate_preimage_mismatch_fails_on_evaluate() {
     let assertion = Node::join(Hash::eq_tag(), preimage_digest, wrong_leaf_digest);
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
-    let err = state.evaluate(&schema, assertion);
+    let err = state.evaluate_node(&schema, assertion);
     // The registry name-wraps the precompile's failure; assert the root cause.
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }

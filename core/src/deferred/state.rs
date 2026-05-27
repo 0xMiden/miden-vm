@@ -8,25 +8,12 @@ use super::{
     PrecompileError, PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 
-/// In-memory deferred-DAG state — the verifier's witness.
+/// In-memory witness for deferred-DAG verification.
 ///
-/// State fields:
-/// - `nodes`: in-memory node store, written by `register`/`register_chunk`/`log` (user-declared),
-///   by [`WitnessBuilder::intern`] (precompile-minted children), and by evaluation (computed
-///   canonicals). Not every node is necessarily reachable from `root`. [`Self::to_wire`] emits only
-///   the root-reachable closure.
-/// - `evals`: host-side evaluation memo mapping `input_digest -> canonical`. Seeded with
-///   `TRUE_DIGEST -> Node::TRUE` (terminal sentinel) and reused across evaluate calls. Not
-///   serialized to wire.
-/// - `root`: the transcript root pointer. Initial value [`super::TRUE_DIGEST`]; advanced by
-///   [`Self::log`], which interns an AND-node `{tag: Tag::TRUE, payload: prev_root || stmnt}` and
-///   updates the root pointer. Reducing root to TRUE is the verifier's single check.
-///
-/// This in-memory form does **not** travel in the proof. [`Self::to_wire`] lowers it to the
-/// passive [`DeferredStateWire`] (index-encoded, root derived from the last entry); that wire is
-/// what ships, and the verifier reconstructs a validated `DeferredState` from it via
-/// [`Self::rehydrate`]. Untrusted bytes therefore only ever become a state through the
-/// schema-checked, chain-walked rehydrate path.
+/// The state keeps committed nodes, host-side reduction memos, and the current transcript root.
+/// It is intentionally not serialized directly: proofs carry [`DeferredStateWire`], and
+/// [`Self::rehydrate`] rebuilds this state only after schema checks, reachability checks, and
+/// transcript re-evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
@@ -51,27 +38,23 @@ impl DeferredState {
         Self::default()
     }
 
-    /// Returns the node stored under `digest`, or [`PrecompileError::MissingNode`] if no such
-    /// node has been registered. Returning a `Result` lets precompile reducers propagate the
-    /// missing-node case with `?` instead of unwrapping an `Option`.
+    /// Returns a committed node, or [`PrecompileError::MissingNode`] for an unknown digest.
     pub fn get(&self, digest: &Digest) -> Result<&Node, PrecompileError> {
         self.nodes.get(digest).ok_or(PrecompileError::MissingNode)
     }
 
-    /// Returns whether `digest` names a wire-committed node — i.e. one that ships in `to_wire`.
-    /// [`TRUE_DIGEST`] is the framework sentinel and is never materialized in `nodes`, so this
-    /// returns `false` for it; call sites that need to treat TRUE as a virtual member explicitly
-    /// short-circuit on `d == TRUE_DIGEST` first.
+    /// Returns whether a digest is materialized in the DAG store.
+    ///
+    /// [`TRUE_DIGEST`] is virtual and is never stored as a node, so callers that accept it must
+    /// handle it explicitly.
     pub fn contains(&self, digest: &Digest) -> bool {
         self.nodes.contains_key(digest)
     }
 
-    /// Inserts `node` into the wire-committed DAG keyed by its Poseidon2 digest. Returns the
-    /// digest. Idempotent on identical `(digest, node)` pairs.
+    /// Interns a node by digest without schema checks.
     ///
-    /// Internal: external callers go through the schema-aware [`Self::register`] /
-    /// [`Self::evaluate`] / [`Self::log`] entry points, which preserve the type invariants. Raw
-    /// `intern` bypasses tag-validation and root-shape checks.
+    /// Use only after the caller has established the relevant invariants. The wire encoder emits
+    /// an interned node only if it is reachable from the transcript root.
     pub(crate) fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.nodes.insert(digest, node);
@@ -86,30 +69,22 @@ impl DeferredState {
         self.evals.get(digest)
     }
 
-    /// Memoize `input_digest -> canonical` in `evals` and intern the canonical into `nodes` so it
-    /// is addressable as a child. Orphan canonicals are trimmed by [`Self::to_wire`].
+    /// Caches a reduction result and materializes its canonical node for downstream references.
     fn record_eval(&mut self, input_digest: Digest, canonical: Node) {
         self.evals.insert(input_digest, canonical.clone());
         self.intern(canonical);
     }
 
-    /// Returns the current transcript root pointer. Initial value is [`super::TRUE_DIGEST`].
-    /// Advanced exclusively by [`Self::log`] — no external API mutates this field directly.
+    /// Returns the current transcript root; [`super::TRUE_DIGEST`] means no statements are logged.
     pub fn root(&self) -> Digest {
         self.root
     }
 
-    /// Advance the transcript root by one AND-step.
+    /// Appends a statement commitment to the transcript.
     ///
-    /// Interns `AND(self.root, stmt_digest)` and updates `root` to its digest. The caller passes
-    /// `expected_new_root` so the host-side and in-circuit hashers can be cross-checked: if they
-    /// disagree the call fails with [`super::DeferredError::InvalidPayload`] and the state is
-    /// left untouched (no node interned, root unchanged).
-    ///
-    /// The caller is responsible for having previously `evaluate`-d the statement (the prover does
-    /// this via `DeferredEvaluate`); this method does not re-run reduce. Statement-validity is
-    /// re-established on the verifier side by `DeferredState::rehydrate` (introduced in a later
-    /// step), which walks the chain and evaluates each statement.
+    /// `expected_new_root` lets the host check that its digest agrees with the in-circuit hash.
+    /// This method records the commitment only; semantic validity is re-established during
+    /// [`DeferredState::rehydrate`] by re-evaluating each logged statement.
     pub fn log(
         &mut self,
         stmt_digest: Digest,
@@ -125,23 +100,11 @@ impl DeferredState {
         Ok(())
     }
 
-    /// Register an opaque node, asking `precompiles` to decode its tag.
+    /// Commits a schema-valid node to the DAG without reducing it.
     ///
-    /// The node's payload variant must match `decode(tag).body`, otherwise
-    /// [`PrecompileError::InvalidNode`] is surfaced. The node is interned into the DAG by its
-    /// Poseidon2 digest. Re-registering an identical `(digest, node)` pair is silently
-    /// idempotent.
-    ///
-    /// Paired with [`Self::evaluate`] — together they back the `DeferredRegister` and
-    /// `DeferredEvaluate` system events. `register` is the cheap "commit this node to the wire"
-    /// step that returns a digest the caller can chain into downstream nodes (as an operand of
-    /// a Join op, or as a statement passed to [`Self::log`]); `evaluate` is the recursive
-    /// reduce on an already-registered node. Splitting them lets the caller declare children
-    /// without forcing a reduce, and lets the verifier re-run identical paths during rehydrate.
-    ///
-    /// Predicate tags are *not* verified at registration — register is a pure host hint that
-    /// only populates the DAG. Verification is explicit: either host-side via [`Self::evaluate`],
-    /// or constrained via [`Self::log`].
+    /// Registration lets later nodes reference this digest and lets predicates be logged, but it
+    /// does not prove predicate truth. Verification happens only through evaluation or through
+    /// the rehydration check of a logged transcript.
     pub fn register(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -156,20 +119,12 @@ impl DeferredState {
         Ok(digest)
     }
 
-    /// Evaluate an opaque node via the precompile registry.
+    /// Reduces a concrete node through the precompile registry and caches its canonical form.
     ///
-    /// Reduces to canonical form per `PrecompileRegistry::reduce`. Computed canonicals are
-    /// memoized in `evals` and interned into `nodes` (see `record_eval`).
-    ///
-    /// For a predicate tag, success returns [`Node::TRUE`] (detectable via
-    /// [`Node::is_true_node`]) and a mismatch surfaces as [`PrecompileError::AssertionFailed`].
-    ///
-    /// Transitively-referenced child digests must resolve through `nodes` (registered upstream)
-    /// or the state `evals` memo (cached from this or earlier evaluate calls) — an unknown
-    /// child digest surfaces as [`PrecompileError::MissingNode`]. The processor-side handler
-    /// returns the canonical's `tag || payload` felts on the advice stack for the caller to
-    /// re-hash in-circuit.
-    pub fn evaluate(
+    /// Child digests must already be committed in the DAG, so the same witness can be serialized
+    /// and rehydrated. Predicate success returns [`Node::TRUE`]; mismatch returns
+    /// [`PrecompileError::AssertionFailed`].
+    pub fn evaluate_node(
         &mut self,
         precompiles: &PrecompileRegistry,
         node: Node,
@@ -178,42 +133,35 @@ impl DeferredState {
         if !payload_matches_type(node_type, &node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
-        WitnessBuilder::new(self, precompiles).eval(node)
+        let input_digest = node.digest();
+        WitnessBuilder::new(self, precompiles).reduce_and_record_eval(node, input_digest)
     }
 
-    /// Evaluate a node addressed by digest.
+    /// Reduces a committed node addressed by digest.
     ///
-    /// Lookup order is `evals` first, then `nodes`:
-    /// - if `digest` exists in `evals`, returns the cached canonical directly;
-    /// - otherwise, loads the input node from `nodes` and reduces it via [`Self::evaluate`].
-    ///
-    /// Returns [`PrecompileError::MissingNode`] when the digest is unknown to both stores.
+    /// The memo is used only after the digest is proven present in `nodes`; memo entries alone do
+    /// not create durable DAG membership.
     pub fn evaluate_digest(
         &mut self,
         precompiles: &PrecompileRegistry,
         digest: Digest,
     ) -> Result<Node, PrecompileError> {
+        if !self.contains(&digest) {
+            return Err(PrecompileError::MissingNode);
+        }
         if let Some(canonical) = self.get_eval(&digest) {
             return Ok(canonical.clone());
         }
         let node = self.get(&digest)?.clone();
-        self.evaluate(precompiles, node)
+        self.evaluate_node(precompiles, node)
     }
 
-    /// Serialize this state to its wire form. Walks reachable nodes from `root` in DFS
-    /// post-order, assigning each visited node a `u32` index in emission order. `Join`-shape
-    /// entries encode their children as indices into the earlier wire entries (or
-    /// [`crate::deferred::TRUE_INDEX`] for the [`TRUE_DIGEST`] terminal). Any nodes outside the
-    /// root-reachable closure (e.g. registered or evaluation-interned orphans) are dropped.
+    /// Serializes the transcript-reachable DAG into compact wire form.
     ///
-    /// Reachability is computed *structurally*, without consulting the schema: for any node
-    /// with an `Expression` payload, interpret the 8 felts as `(lhs_digest, rhs_digest)`. If
-    /// both digests resolve in `self.nodes` (or are [`TRUE_DIGEST`]), the encoder treats the
-    /// node as Join and emits indices; otherwise it falls back to `Value` (raw felts). Real
-    /// Join children are always registered (the user pre-registers operands before logging),
-    /// so the heuristic never misses one. False positives — a `Value` leaf whose 8 payload felts
-    /// happen to coincide with the digests of two registered nodes — round-trip safely because
-    /// the reconstructed payload bytes are byte-identical.
+    /// Only nodes reachable from `root` are emitted; registered or memoized orphans are dropped.
+    /// Join-shaped expressions use earlier-entry indices, with [`crate::deferred::TRUE_INDEX`]
+    /// for the virtual [`TRUE_DIGEST`] terminal. Value-looking payloads that coincidentally match
+    /// child digests still round-trip because their reconstructed bytes are identical.
     pub fn to_wire(&self) -> DeferredStateWire {
         let mut by_digest = BTreeMap::<Digest, u32>::new();
         let mut entries = Vec::<super::WireEntry>::new();
@@ -224,9 +172,7 @@ impl DeferredState {
         DeferredStateWire { entries }
     }
 
-    /// Internal DFS post-order helper for [`Self::to_wire`]. Recursive; for the DAG shapes
-    /// produced by `register`/`evaluate`/`log` this is bounded by the depth of the expression
-    /// tree, which is well within Rust's default stack budget.
+    /// Emits the root-reachable closure in child-before-parent order for index encoding.
     fn dfs_post_order(
         &self,
         d: Digest,
@@ -280,26 +226,11 @@ impl DeferredState {
         entries.push(super::WireEntry { tag: node.tag, body });
     }
 
-    /// Construct a verified [`DeferredState`] from a wire-format value under the supplied
-    /// `precompiles`. Re-runs the prover's validation, content-addressing, and AND-chain walk;
-    /// the returned state therefore satisfies the invariants documented at the top of this
-    /// module.
+    /// Rebuilds and verifies a deferred state from untrusted wire data.
     ///
-    /// The two phases:
-    /// - **Phase 1 (structural):** read each wire entry in order, reconstruct the digest-form
-    ///   [`Node`] (translating `Join` indices to the digests of earlier entries),
-    ///   `precompiles.decode` the tag, and intern. Index bounds and chunk arities are validated;
-    ///   `payload_matches_type` confirms the decoded [`NodeType`] is compatible with the in-memory
-    ///   shape.
-    /// - **Reachability:** between the phases, reject any interned entry that is not in the
-    ///   structural closure of the root ([`IntegrityError::DanglingNode`]). `to_wire` emits exactly
-    ///   that closure, so a faithful wire passes; this rejects bloat / hidden-data entries an
-    ///   adversarial wire might smuggle in. Phase 2 may extend state `evals` only, so the `nodes`
-    ///   set checked here matches the post-rehydrate state exactly.
-    /// - **Phase 2 (semantic):** walk the AND-chain from `wire.root` down to
-    ///   [`super::TRUE_DIGEST`], asserting each step has `tag == Tag::TRUE` and re-evaluating each
-    ///   predicate statement via [`Self::evaluate`]. The walk surfaces tampered AND-payloads,
-    ///   missing statements, non-predicate statements, and failed equalities.
+    /// Rehydration first reconstructs digest-addressed nodes under schema and shape checks, then
+    /// rejects entries outside the transcript root's reachable closure, and finally walks the
+    /// AND-chain while re-evaluating every logged statement.
     pub fn rehydrate(
         wire: &DeferredStateWire,
         precompiles: &PrecompileRegistry,
@@ -371,7 +302,7 @@ impl DeferredState {
                 and_node.payload.join_children().map_err(|_| IntegrityError::BadAndPayload)?;
             let stmt =
                 state.nodes.get(&stmt_digest).ok_or(IntegrityError::MissingStatement)?.clone();
-            let canonical = state.evaluate(precompiles, stmt)?;
+            let canonical = state.evaluate_node(precompiles, stmt)?;
             if !canonical.is_true_node() {
                 return Err(IntegrityError::PredicateNotTrue);
             }
@@ -381,13 +312,10 @@ impl DeferredState {
         Ok(state)
     }
 
-    /// Walk the AND-chain from `self.root` down to [`super::TRUE_DIGEST`] and return each
-    /// statement digest in execution order (oldest first). Assumes the state's chain integrity
-    /// has already been established (e.g. by `rehydrate`); panics on a missing or non-AND node
-    /// because that situation can't arise on a value produced by the supported constructors.
+    /// Returns logged statement digests in execution order for already-verified test states.
     ///
-    /// Test-only: the chain walk currently has no production caller (the verifier consumes the
-    /// rehydrated state directly). Gated so it isn't dead public surface.
+    /// Panics if the chain is malformed; production callers should obtain states through
+    /// [`Self::rehydrate`], which validates the chain first.
     #[cfg(test)]
     pub fn statements(&self) -> Vec<Digest> {
         let mut out = Vec::new();
@@ -421,9 +349,7 @@ impl DeferredState {
 // `DeferredState::rehydrate(&wire, schema)`. This keeps the only path from untrusted bytes to
 // an in-memory state through the schema-validated, chain-walked rehydrate constructor.
 
-/// Resolve a wire `Join` child index against the digest table built so far during phase 1 of
-/// rehydrate. [`super::TRUE_INDEX`] maps to [`TRUE_DIGEST`]; any other value must be a valid
-/// position strictly less than the current entry (topological invariant).
+/// Resolves a wire child index to the digest it references during rehydration.
 fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest, IntegrityError> {
     if idx == super::TRUE_INDEX {
         return Ok(TRUE_DIGEST);
@@ -435,9 +361,7 @@ fn resolve_index(idx: u32, current: usize, digests: &[Digest]) -> Result<Digest,
     Ok(digests[i])
 }
 
-/// Decode a node's [`NodeType`] for `rehydrate`. Framework-owned `Tag::TRUE` AND-nodes are
-/// classified as `Join` directly (no precompile claims id `ZERO`); everything else routes
-/// through `precompiles.decode`.
+/// Decodes a node shape during rehydration, treating framework TRUE/AND nodes as joins.
 fn decode_node_type(
     precompiles: &PrecompileRegistry,
     node: &Node,
@@ -448,13 +372,10 @@ fn decode_node_type(
     precompiles.decode(node.tag).map_err(|_| IntegrityError::UnknownTag)
 }
 
-/// Returns `true` when the variant of `payload` agrees with the [`NodeType`] the schema decoded
-/// for the node's tag. Construction-time invariant — handlers always build the matching variant,
-/// but a hand-constructed `Node` may disagree.
+/// Returns whether the payload variant matches the shape declared for a tag.
 ///
-/// `Value` and `Join` both map to `Payload::Expression` at the in-memory level — the tag is
-/// the source of truth for whether the 8 felts encode raw data or two child digests, and the
-/// precompile rejects payload-semantic violations inside `reduce`.
+/// `Value` and `Join` both use expression payloads in memory; the tag decides how the owning
+/// precompile interprets those eight felts.
 fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
     match (nt, payload) {
         (NodeType::Value | NodeType::Join, Payload::Expression(_)) => true,
@@ -463,15 +384,11 @@ fn payload_matches_type(nt: NodeType, payload: &Payload) -> bool {
     }
 }
 
-/// Digests structurally reachable from `root` in `nodes`, using the *same* heuristic as
-/// [`DeferredState::to_wire`]'s `dfs_post_order`: an Expression payload is treated as
-/// `(lhs, rhs)` child digests iff both resolve in `nodes` (or are [`TRUE_DIGEST`]). AND-chain
-/// links (`prev_root || stmt`) fall out of this since AND-nodes are Expression-bodied. Used by
-/// [`DeferredState::rehydrate`] to reject wire entries outside the root's closure.
+/// Returns the structural closure reachable from a transcript root.
 ///
-/// [`TRUE_DIGEST`] is treated as a virtual edge terminal — reachable but not materialized — so
-/// the closure size matches `nodes.len()` for a faithful wire (no TRUE entry is ever emitted by
-/// `to_wire`, so rehydrate must not require one in `nodes`).
+/// This mirrors wire encoding: expression payloads are followed only when both child digests are
+/// present or are the virtual [`TRUE_DIGEST`]. Rehydration uses the closure to reject hidden or
+/// bloated wire entries.
 fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<Digest> {
     let mut seen = BTreeSet::new();
     let mut stack = alloc::vec![root];
@@ -496,62 +413,30 @@ fn reachable_closure(nodes: &BTreeMap<Digest, Node>, root: Digest) -> BTreeSet<D
 // WITNESS BUILDER
 // ================================================================================================
 
-/// Drives the recursive reduce of a node while a
-/// [`Precompile::reduce`](crate::deferred::Precompile::reduce) runs.
+/// Capability object passed to precompiles during recursive reduction.
 ///
-/// A precompile only supplies *per-node* semantics; it does not own the DAG. This handle is what
-/// threads the [`DeferredState`] and the [`PrecompileRegistry`] registry through that call — the
-/// registry by shared reference, the state by exclusive reference, bundled together so
-/// [`resolve`](Self::resolve) can recurse back through `PrecompileRegistry::reduce` without an
-/// aliasing-borrow problem. A precompile's `reduce` therefore reads as a depth-first recursive
-/// function: "resolve lhs, resolve rhs, combine."
-///
-/// Three capabilities:
-///
-/// - [`eval`](Self::eval) reduces a concrete input node (top-level entrypoint).
-/// - [`resolve`](Self::resolve) reduces a child by digest, memo-first via `state.evals`.
-/// - [`intern`](Self::intern) writes a node straight to `state.nodes`.
-///
-/// `eval` and `resolve` go through `record_eval`, which both memoizes in
-/// `evals` and interns the canonical into `nodes`. `intern` is the nodes-only primitive
-/// precompiles use to mint canonical children.
-///
-/// The verifier re-runs the same code path during [`DeferredState::rehydrate`]'s phase 2.
-/// `evals` is host-side only and never serialized.
-///
-/// There is exactly one of these: the prover builds the witness through it, and the verifier's
-/// [`DeferredState::rehydrate`] re-runs the identical path to re-establish it — so no trait
-/// abstraction over "kinds of builder" is warranted. Construction is crate-private; a precompile
-/// only ever receives a `&mut WitnessBuilder` from the framework and cannot fabricate one.
+/// Precompiles do not own the DAG; they receive this handle to resolve committed children and to
+/// intern helper nodes referenced by compound canonicals. The verifier reuses the same path during
+/// [`DeferredState::rehydrate`], so prover and verifier agree on how witnesses are reconstructed.
 pub struct WitnessBuilder<'a> {
     state: &'a mut DeferredState,
     precompiles: &'a PrecompileRegistry,
 }
 
 impl<'a> WitnessBuilder<'a> {
-    /// Bind a state and the precompile registry into a witness builder. Crate-private; the
-    /// public entry point is [`DeferredState::evaluate`], which hands the resulting
-    /// `&mut WitnessBuilder` to `PrecompileRegistry::reduce`.
+    /// Binds state and registry for one framework-driven reduction.
     pub(crate) fn new(state: &'a mut DeferredState, precompiles: &'a PrecompileRegistry) -> Self {
         Self { state, precompiles }
     }
 
-    /// Top-level evaluation path for a concrete input node.
+    /// Resolves a committed child digest to its canonical form.
     ///
-    /// Reduces `node` to canonical form via the precompile registry and records
-    /// `input_digest -> canonical` in state `evals` for cross-call reuse.
-    pub fn eval(&mut self, node: Node) -> Result<Node, PrecompileError> {
-        let input_digest = node.digest();
-        self.reduce_and_record_eval(node, input_digest)
-    }
-
-    /// Walk `digest` to its canonical form, recursively reducing it via the precompile registry.
-    /// Errors with [`PrecompileError::MissingNode`] if the digest is unknown to both state `evals`
-    /// and `nodes`.
-    ///
-    /// Memo-first: a hit in `state.evals` returns the canonical directly. On miss, looks up the
-    /// input in `state.nodes`, reduces it, and records the result (see `record_eval`).
+    /// The committed-node check keeps local evaluation reproducible by `to_wire` and rehydration;
+    /// memo hits are used only after that membership is established.
     pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
+        if !self.state.contains(&digest) {
+            return Err(PrecompileError::MissingNode);
+        }
         if let Some(canonical) = self.state.get_eval(&digest) {
             return Ok(canonical.clone());
         }
@@ -559,27 +444,18 @@ impl<'a> WitnessBuilder<'a> {
         self.reduce_and_record_eval(child, digest)
     }
 
-    /// Register a freshly-minted canonical child and return its digest. Used by compound
-    /// canonicals whose payload references just-computed child digests (e.g. `Group::Add`
-    /// minting coordinate leaves).
+    /// Commits a freshly minted helper node and returns its digest.
     ///
-    /// Writes only to `state.nodes` — the `nodes` entry makes the child wire-committed so a
-    /// later registered node whose payload references this child's digest will resolve cleanly
-    /// on the verifier side, regardless of evaluation order across statements. The memo fills
-    /// lazily on first `resolve(digest)`.
+    /// Use this when a compound canonical needs stable child commitments that were created during
+    /// reduction.
     pub fn intern(&mut self, node: Node) -> Digest {
         let digest = node.digest();
         self.state.nodes.insert(digest, node);
         digest
     }
 
-    /// Reduce `node` to canonical form, write `input_digest → canonical` into state `evals`,
-    /// and intern the canonical node into `state.nodes`.
-    ///
-    /// The `input_digest` is passed by the caller (rather than recomputed via `node.digest()`)
-    /// so the memo write skips a redundant Poseidon2 — `resolve` already has the digest as its
-    /// argument, and `evaluate` computes it once at the top of the call.
-    pub(crate) fn reduce_and_record_eval(
+    /// Reduces a node, memoizes the canonical form, and commits the canonical node.
+    fn reduce_and_record_eval(
         &mut self,
         node: Node,
         input_digest: Digest,
@@ -600,7 +476,7 @@ mod tests {
         testing::precompile::Uint,
     };
 
-    /// The single-precompile registry every engine test runs against.
+    /// Single-precompile registry used by deferred-state unit tests.
     fn precompiles() -> PrecompileRegistry {
         PrecompileRegistry::default().with_precompile(Uint)
     }
@@ -629,7 +505,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::join(Uint::eq_tag(), a, a);
-        let stmt = state.evaluate(&schema, pred).unwrap();
+        let stmt = state.evaluate_node(&schema, pred).unwrap();
         // The canonical of an `eq` predicate is `Node::TRUE`. Use the predicate's *digest* —
         // which we recover from the original node — as `stmt_digest`.
         let _ = stmt; // canonical, discarded
@@ -723,7 +599,7 @@ mod tests {
         let bad_digest = state.register(&schema, bad.clone()).unwrap();
         assert!(state.contains(&bad_digest), "predicate interned even when it doesn't hold");
         // Verification surfaces the mismatch only when explicitly invoked.
-        let err = state.evaluate(&schema, bad);
+        let err = state.evaluate_node(&schema, bad);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
@@ -733,7 +609,7 @@ mod tests {
         let schema = precompiles();
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let assertion = Node::join(Uint::eq_tag(), a, a);
-        let result = state.evaluate(&schema, assertion).unwrap();
+        let result = state.evaluate_node(&schema, assertion).unwrap();
         assert!(result.is_true_node(), "predicate success returns the canonical TRUE node");
     }
 
@@ -744,7 +620,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(3)).unwrap();
         let b = state.register(&schema, test_leaf(4)).unwrap();
         let mismatch = Node::join(Uint::eq_tag(), a, b);
-        let err = state.evaluate(&schema, mismatch);
+        let err = state.evaluate_node(&schema, mismatch);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
@@ -755,7 +631,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(1)).unwrap();
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
         let assertion = Node::join(Uint::eq_tag(), a, dangling);
-        let err = state.evaluate(&schema, assertion);
+        let err = state.evaluate_node(&schema, assertion);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
 
@@ -771,7 +647,7 @@ mod tests {
         let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
         let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
         let assertion = Node::join(Uint::eq_tag(), mul, expected);
-        let result = state.evaluate(&schema, assertion).unwrap();
+        let result = state.evaluate_node(&schema, assertion).unwrap();
         assert!(result.is_true_node());
     }
 
@@ -790,7 +666,7 @@ mod tests {
         let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
         let assertion = Node::join(Uint::eq_tag(), mul, expected);
         let assertion_digest = assertion.digest();
-        state.evaluate(&schema, assertion).unwrap();
+        state.evaluate_node(&schema, assertion).unwrap();
 
         // Newly interned canonicals: leaf(7) for add, and TRUE for the predicate result.
         assert_eq!(state.nodes().len(), 9);
@@ -815,29 +691,30 @@ mod tests {
         let mul = Node::join(Uint::mul_tag(), add_digest, c);
         let mul_digest = mul.digest();
 
-        let canonical = state.evaluate(&schema, mul).unwrap();
+        let canonical = state.evaluate_node(&schema, mul).unwrap();
         assert_eq!(canonical, test_leaf(35));
         assert!(!state.contains(&mul_digest), "input op stays out of nodes");
         assert!(state.contains(&test_leaf(35).digest()), "computed canonical is interned");
+
+        let err = state.evaluate_digest(&schema, mul_digest).unwrap_err();
+        assert!(matches!(err, PrecompileError::MissingNode));
     }
 
     #[test]
-    fn resolve_of_true_digest_returns_true_node() {
-        // TRUE is never interned; the seeded `evals` entry is what lets `resolve` return it
-        // instead of erroring on `state.get(&TRUE_DIGEST)`.
+    fn resolve_requires_committed_node_even_for_memo_entries() {
+        // TRUE is seeded in `evals`, but it is not an interned DAG node. `resolve` is for payload
+        // child references, so it requires committed DAG membership before consulting the memo.
         let mut state = DeferredState::new();
         let schema = precompiles();
         let mut witness = WitnessBuilder::new(&mut state, &schema);
-        let resolved = witness.resolve(TRUE_DIGEST).unwrap();
-        assert!(resolved.is_true_node());
+        let err = witness.resolve(TRUE_DIGEST).unwrap_err();
+        assert!(matches!(err, PrecompileError::MissingNode));
     }
 
     // REHYDRATE TESTS
     // ============================================================================================
 
-    /// Assert that `state` survives a `to_wire` → `rehydrate` round-trip: the root matches and
-    /// every reproduced node agrees with the source. `rehydrate` already rejects danglers and
-    /// re-evaluates each predicate, so a dropped reachable node fails inside it before we compare.
+    /// Asserts that wire round-tripping preserves the verified transcript root and nodes.
     fn assert_round_trips(state: &DeferredState, precompiles: &PrecompileRegistry) {
         let rehydrated = DeferredState::rehydrate(&state.to_wire(), precompiles).unwrap();
         assert_eq!(rehydrated.root(), state.root());
@@ -847,8 +724,7 @@ mod tests {
         );
     }
 
-    /// Build a fresh state that logs `(a+b)*c == 35` as a transcript step. Returns the populated
-    /// state for round-trip tests.
+    /// Builds a logged `(a+b)*c == 35` transcript used by round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
         let mut state = DeferredState::new();
         let schema = precompiles();
@@ -862,7 +738,7 @@ mod tests {
         // `log` references the predicate node by digest; pre-register so the wire embeds it as
         // a Join entry rather than a bare-commitment Value.
         let stmt_digest = state.register(&schema, assertion.clone()).unwrap();
-        state.evaluate(&schema, assertion).unwrap();
+        state.evaluate_node(&schema, assertion).unwrap();
         let new_root = Node::and(state.root(), stmt_digest).digest();
         state.log(stmt_digest, new_root).unwrap();
         // Defense-in-depth: every fixture consumer inherits a wire round-trip self-check, so any
@@ -947,7 +823,7 @@ mod tests {
         let a = state.register(&schema, test_leaf(7)).unwrap();
         let pred = Node::join(Uint::eq_tag(), a, a);
         let stmt_digest = state.register(&schema, pred.clone()).unwrap();
-        state.evaluate(&schema, pred).unwrap();
+        state.evaluate_node(&schema, pred).unwrap();
         let new_root = Node::and(state.root(), stmt_digest).digest();
         state.log(stmt_digest, new_root).unwrap();
         // Defense-in-depth: orphan-trimmed wire must still round-trip cleanly.

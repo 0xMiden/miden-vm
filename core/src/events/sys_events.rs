@@ -295,76 +295,51 @@ pub enum SystemEvent {
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
-    /// Registers an opaque node `(tag, payload)` in the deferred-computation DAG.
+    /// Commits an expression-bodied deferred node to the DAG.
     ///
-    /// The installed schema validates the node's tag and shape; the node is interned into the
-    /// DAG keyed by its Poseidon2 digest. Registration only interns the node; verification
-    /// happens via `DeferredEvaluate`.
+    /// Registration gives later nodes and transcript steps a stable digest to reference, but it
+    /// does not verify predicate truth. The MASM wrapper derives the digest in-circuit from the
+    /// operand-stack payload so the commitment is bound to program data rather than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
-    ///     where PAYLOAD_LO || PAYLOAD_HI is an 8-felt payload at positions 1..9,
-    ///     and TAG is a 4-felt tag at positions 9..13.
-    ///
-    /// This layout matches the `[rate_lo, rate_hi, capacity]` Poseidon2 sponge state, so the
-    /// `sys::register_expr` wrapper feeds the 12 felts under `event_id` directly into one `hperm`
-    /// to derive the node's digest *in-circuit* — binding it to the operand-stack payload rather
-    /// than trusting an advice value.
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...] (unchanged)
-    ///   Advice stack:  unchanged (the event produces no advice output)
+    ///   Operand stack: unchanged
+    ///   Advice stack:  unchanged
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     DeferredRegister,
 
-    /// Evaluates a node identified by its 4-felt digest via the installed schema, interns the
-    /// canonical, and returns the canonical's `tag || payload` felts on the advice stack.
+    /// Reduces a committed node and exposes its canonical form as advice.
     ///
-    /// The node digest must resolve in deferred state — either as a previously registered node
-    /// or as a previously memoized evaluation input.
+    /// The digest must already be committed in deferred state; memo hits are accepted only after
+    /// that membership check. Predicate nodes verify here by reducing to
+    /// [`crate::deferred::Node::TRUE`] or failing with the precompile's assertion error.
     ///
-    /// For expression nodes the canonical is the reduced form; for predicate tags whose
-    /// `reduce` returns [`crate::deferred::Node::TRUE`] on success, the precompile verifies
-    /// the assertion (returning [`crate::deferred::PrecompileError::AssertionFailed`] on
-    /// mismatch). Children referenced in the payload must already be registered in the DAG.
-    ///
-    /// The advice-stack output is an *unbound host hint*: a caller that consumes it must re-hash
-    /// the felts in-circuit and log a predicate the verifier re-checks. The output is uniform
-    /// across every node shape — including predicates, whose canonical is the TRUE node and so
-    /// serializes to the 12 felts of `Node::TRUE` like any other expression.
+    /// The advice output is an unbound host hint. Callers that rely on it must re-hash the
+    /// returned felts in-circuit and log a predicate so the verifier re-checks the claim.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
-    ///     where NODE_DIGEST is a 4-felt word at positions 1..5.
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, NODE_DIGEST, ...] (unchanged)
-    ///   Advice stack:  the canonical serialized in natural (felt-index) order as `tag || payload`,
-    ///     laid out so successive `adv_pushw` reads yield `TAG`, then the payload words:
-    ///     - expression: the 4 tag felts followed by the 8 payload felts (12 felts)
-    ///     - chunk:      the 4 tag felts followed by every chunk's 8 felts (8n + 4)
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical `tag || payload` in felt-index order
     DeferredEvaluate,
 
-    /// Registers a chunk node in the deferred-computation DAG.
+    /// Commits a chunk-bodied deferred node to the DAG.
     ///
-    /// A chunk is a leaf carrying `n` blocks of 8 field elements (the Poseidon2 rate). The
-    /// installed schema decodes `n` from the tag (no `n` on the stack — the tag is the
-    /// length's source of truth, which means the digest binds `n` for free). The processor
-    /// reads `8n` felts from memory at `ptr` (word-aligned, `ptr % 4 == 0`), constructs the
-    /// chunk node, and registers it.
+    /// The tag declares the chunk count, making length part of the commitment. The MASM wrapper
+    /// hashes the same memory range in-circuit, so the registered digest is bound to memory
+    /// contents rather than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, ...]
-    ///     where TAG is 4 felts at positions 1..5 and `ptr` is a single felt at position 5.
     ///
     /// Outputs:
-    ///   Operand stack: [event_id, TAG, ptr, ...] (unchanged)
-    ///   Advice stack:  unchanged (the event produces no advice output)
+    ///   Operand stack: unchanged
+    ///   Advice stack:  unchanged
     ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
-    ///
-    /// The chunk's digest is derived *in-circuit* by the `sys::register_chunk` wrapper — a
-    /// `mem_stream` linear hash over the same `8n` felts — so it is bound to memory rather than
-    /// trusting an advice value.
     DeferredRegisterChunk,
 }
 

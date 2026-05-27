@@ -1,4 +1,4 @@
-//! The [`PrecompileRegistry`] — dispatches each deferred [`Tag`] to a [`Precompile`].
+//! Registry that routes deferred tags to their owning precompile.
 
 use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
@@ -10,15 +10,10 @@ use crate::{
     },
 };
 
-/// A registry that dispatches each [`Tag`] to the [`Precompile`] selected by its
-/// [`Tag::id`](crate::deferred::Tag).
+/// Installed set of precompiles for deferred-node validation and reduction.
 ///
-/// Precompiles are held in a `BTreeMap<id, Box<dyn Precompile>>`. Order is irrelevant — the id
-/// is the only thing that decides routing. This is the single concrete driver of the
-/// deferred-DAG semantic layer.
-///
-/// Build it with [`Default`] + [`with_precompile`](Self::with_precompile); the default empty
-/// registry rejects every tag.
+/// Routing is entirely id-based. The empty registry is valid but rejects every precompile-owned
+/// tag, which is useful for programs that do not use deferred precompiles.
 #[derive(Default)]
 pub struct PrecompileRegistry {
     precompiles: BTreeMap<Felt, Box<dyn Precompile>>,
@@ -36,13 +31,9 @@ impl core::fmt::Debug for PrecompileRegistry {
 }
 
 impl PrecompileRegistry {
-    /// Add a precompile, returning `self` for chaining
-    /// (`PrecompileRegistry::default().with_precompile(a).with_precompile(b)`).
+    /// Adds a precompile to the registry and returns `self` for chaining.
     ///
-    /// Panics if the precompile is misconfigured: its declared [`Precompile::id`] is
-    /// inconsistent with the [`precompile_id`] derivation, it derives the framework-reserved
-    /// `ZERO` id, or its id is already present. These are setup-time programming errors, not
-    /// runtime conditions.
+    /// Panics on setup errors: id drift, the framework-reserved `ZERO` id, or a duplicate id.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         let p: Box<dyn Precompile> = Box::new(precompile);
         let id = p.id();
@@ -62,13 +53,10 @@ impl PrecompileRegistry {
         self
     }
 
-    /// Collect every precompile's canonical constant leaves ([`Precompile::init`]) and intern
-    /// them into `state`. Errors with [`DeferredError::ConflictingNode`] if two *different*
-    /// precompiles contribute the same node digest (ambiguous canonical-leaf ownership).
+    /// Boots a state with constants contributed by installed precompiles.
     ///
-    /// Caller is responsible for invoking this — it is not implicit in the builder because
-    /// callers may want to build the registry before the state, or to skip it in tests where
-    /// determinism of node counts matters.
+    /// This is explicit so callers can choose when constants affect node counts. A digest
+    /// collision between different precompiles is rejected as ambiguous ownership.
     pub fn init(&self, state: &mut DeferredState) -> Result<(), PrecompileError> {
         let mut seen: Vec<Digest> = Vec::new();
         for p in self.precompiles.values() {
@@ -87,9 +75,10 @@ impl PrecompileRegistry {
         Ok(())
     }
 
-    /// Decode `tag` to its [`NodeType`] by routing [`Tag::args`](crate::deferred::Tag) to the
-    /// precompile owning [`Tag::id`](crate::deferred::Tag). An unknown id is rejected by the
-    /// registry itself (not name-wrapped); a precompile's own rejection is name-wrapped.
+    /// Decodes a tag by routing its local arguments to the owning precompile.
+    ///
+    /// Unknown ids are registry failures; recognized ids whose arguments are invalid are
+    /// attributed to the owning precompile.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         let p = self.precompiles.get(&tag.id).ok_or(PrecompileError::InvalidNode)?;
         p.decode(tag.args).ok_or_else(|| PrecompileError::Precompile {
@@ -98,10 +87,10 @@ impl PrecompileRegistry {
         })
     }
 
-    /// Reduce `node` via the precompile owning its [`Tag::id`](crate::deferred::Tag). The
-    /// registry is the adapter: it hands the precompile only `node.tag.args` and `node.payload`
-    /// (the precompile never re-checks the id), and name-wraps the precompile's failure so
-    /// dispatch errors are attributable. See [`Precompile::reduce`] for the per-kind contract.
+    /// Reduces a node through the precompile selected by its tag id.
+    ///
+    /// Failures are wrapped with the owning precompile's name so callers can distinguish routing
+    /// from precompile-local validation.
     pub fn reduce(
         &self,
         node: &Node,
@@ -119,10 +108,10 @@ mod tests {
     use super::*;
     use crate::deferred::Payload;
 
-    /// An honest minimal precompile fixture — its `id()` *is* its `precompile_id`, so it always
-    /// passes the builder validator. Distinct `name`s yield distinct ids; identical names
-    /// collide (exercises the duplicate-id panic). It *chooses* to reject any non-zero
-    /// immediate — a fixture's own decision, not a framework rule.
+    /// Minimal honest precompile fixture for registry-routing tests.
+    ///
+    /// Names control ids, so duplicate names exercise duplicate-id handling. Non-zero arguments
+    /// are rejected by the fixture, not by the framework.
     #[derive(Debug, Clone, Copy)]
     struct Fixture {
         name: &'static str,
@@ -211,7 +200,7 @@ mod tests {
         let node = Node::leaf(tag, [ZERO; 8]);
         let mut state = DeferredState::new();
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
-        let canonical = state.evaluate(&registry, node.clone()).unwrap();
+        let canonical = state.evaluate_node(&registry, node.clone()).unwrap();
         assert_eq!(canonical, node);
     }
 }

@@ -1,7 +1,7 @@
-//! End-to-end test: drive the `adv.register_deferred` keyword through a real `FastProcessor`
-//! run, then inspect the `DeferredState` accumulated on the advice provider and the extracted
-//! witness. Includes a legacy-smoke check that an unrelated `EventHandler` registered on the
-//! host still fires alongside the deferred infrastructure.
+//! End-to-end coverage for deferred advice events on a real `FastProcessor`.
+//!
+//! The tests prove that registration, evaluation, in-circuit digest binding, chunk registration,
+//! and legacy event handlers coexist without bypassing deferred-state verification.
 
 use alloc::vec::Vec;
 use std::sync::Arc;
@@ -22,8 +22,7 @@ extern crate alloc;
 // PROCESSOR FACTORY
 // ================================================================================================
 
-/// Builds a `FastProcessor` configured for the deferred-DAG tests with [`Uint`] installed. The
-/// processor consumes itself when running the program.
+/// Builds a processor with the uint precompile installed for deferred tests.
 fn build_processor() -> FastProcessor {
     FastProcessor::new_with_options(
         StackInputs::default(),
@@ -37,10 +36,7 @@ fn build_processor() -> FastProcessor {
 // MASM BUILDERS
 // ================================================================================================
 
-/// Build a MASM block that pushes the 4-felt tag then the 8-felt payload, invokes the
-/// `adv.register_deferred` keyword, and cleans up the 12 felts left on the operand stack. The
-/// event interns the node host-side and produces no advice output (the digest is derived
-/// in-circuit by `sys::register_expr`); tests that want the digest build their MASM inline.
+/// Emits MASM that registers an expression node and restores the operand stack.
 fn emit_register(src: &mut String, node: Node) {
     push_node(src, node);
     src.push_str("    adv.register_deferred\n");
@@ -49,13 +45,7 @@ fn emit_register(src: &mut String, node: Node) {
     }
 }
 
-/// Build a MASM block that pushes the node's digest and invokes `adv.evaluate_deferred`, then
-/// drops the input digest. `evaluate_deferred` interns the canonical and pushes its
-/// `tag || payload` felts onto the advice stack; this helper just drives the evaluation for its
-/// side effects (verifying a predicate / surfacing an error) and leaves those felts unconsumed on
-/// the advice stack, which is harmless.
-///
-/// The node MUST already be interned in `DeferredState`.
+/// Emits MASM that evaluates an already-registered node for its side effects.
 fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
     push_digest(src, node.digest());
     src.push_str("    adv.evaluate_deferred\n");
@@ -64,7 +54,7 @@ fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
     }
 }
 
-/// Push a 4-felt digest onto the operand stack, deepest felt first so the top is `digest[0]`.
+/// Pushes a digest in VM stack order.
 fn push_digest(src: &mut String, digest: miden_core::Word) {
     use core::fmt::Write;
     for f in digest.as_elements().iter().rev() {
@@ -168,9 +158,7 @@ fn deferred_end_to_end_register_eval_assert() {
 // E2E: adv.evaluate_deferred returns the canonical (tag || payload) on the advice stack.
 // ================================================================================================
 
-/// Append MASM that, immediately after `adv.evaluate_deferred` has run and the input digest sits
-/// on top of the operand stack, drops that digest and stashes the canonical's three advice words
-/// (`TAG`, `PAYLOAD_LO`, `PAYLOAD_HI`, read TAG-first) into `memory[0..12]`.
+/// Captures the canonical expression returned by `adv.evaluate_deferred` into memory.
 fn emit_capture_canonical_value(src: &mut String) {
     src.push_str("    dropw\n"); // drop the input NODE_DIGEST
     src.push_str("    adv_pushw mem_storew_le.0 dropw\n"); // TAG       -> mem[0..4]
@@ -178,7 +166,7 @@ fn emit_capture_canonical_value(src: &mut String) {
     src.push_str("    adv_pushw mem_storew_le.8 dropw\n"); // PAYLOAD_HI -> mem[8..12]
 }
 
-/// Read `memory[0..12]` back as the captured `tag || payload` felts.
+/// Reads the captured canonical `tag || payload` from memory.
 fn read_canonical_value(output: &miden_processor::ExecutionOutput) -> Vec<Felt> {
     let ctx = 0u32.into();
     (0..12)
@@ -482,8 +470,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
 //
 // Drives `adv.register_deferred_chunk` against the [`Hash`] chunk precompile.
 
-/// Tag for an `n`-chunk `Hash` preimage. `Hash` derives the chunk count from a byte length, so a
-/// chunk count of `n` is requested as `n * BYTES_PER_CHUNK` bytes.
+/// Builds a hash preimage tag whose byte length implies `n` chunks.
 fn preimage_tag(n: u32) -> Tag {
     Hash::preimage_tag(n * Hash::BYTES_PER_CHUNK)
 }
@@ -498,8 +485,7 @@ fn build_chunk_processor() -> FastProcessor {
     .with_precompile(Hash)
 }
 
-/// Push `(ptr, TAG)` (tag deepest-first, so `TAG[0]` ends up on top under `event_id`) and invoke
-/// `adv.register_deferred_chunk`.
+/// Emits MASM that registers a chunk node from memory.
 fn emit_register_chunk(src: &mut String, tag: Tag, ptr: u32) {
     use core::fmt::Write;
     writeln!(src, "    push.{ptr}").unwrap();

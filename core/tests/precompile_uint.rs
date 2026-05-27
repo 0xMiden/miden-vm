@@ -1,5 +1,4 @@
-//! Integration coverage for the `Uint` reference precompile: building a real precompile on
-//! `miden_core::deferred`'s public surface and driving register/evaluate/assert.
+//! Integration coverage for value, op, and predicate flows in the mock uint precompile.
 
 mod common;
 
@@ -30,7 +29,7 @@ fn end_to_end_register_evaluate_assert_extract() {
     // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
     let assertion = Node::join(Uint::eq_tag(), mul, expected);
     state.register(&schema, assertion.clone()).unwrap();
-    let result = state.evaluate(&schema, assertion).unwrap();
+    let result = state.evaluate_node(&schema, assertion).unwrap();
     assert!(result.is_true_node());
 
     // 6 registered expression nodes + 1 registered eq predicate, plus canonicals interned by
@@ -52,7 +51,7 @@ fn predicate_mismatch_surfaces_as_error_on_evaluate() {
     // Register is a pure hint — succeeds even when the predicate doesn't hold.
     state.register(&schema, assertion.clone()).unwrap();
     // The mismatch surfaces only when we explicitly verify.
-    let err = state.evaluate(&schema, assertion);
+    let err = state.evaluate_node(&schema, assertion);
     // The registry wraps the precompile's error with its name; assert the root cause.
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }

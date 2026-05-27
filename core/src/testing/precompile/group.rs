@@ -1,11 +1,8 @@
-//! `Group` — compound-canonical reference precompile, demonstrating mid-`reduce` minting.
+//! Mock group precompile for exercising compound canonical nodes.
 //!
-//! A mock group over [`Uint`]. A group element is a self-evaluating
-//! `new` bin-op node whose payload is two `Uint` field-leaf digests `(h_x, h_y)`. The two
-//! **producing** ops (`add`, `sub`) reduce by pulling limbs from both operands' coordinates,
-//! performing coordinate-wise wrapping arithmetic, minting new field leaves for the resulting
-//! `(x3, y3)` via [`WitnessBuilder::intern`], and returning a `new` leaf referencing those
-//! minted digests.
+//! Group elements preserve committed coordinate expressions, while `add` and `sub` mint new
+//! `Uint` leaves during reduction. This stresses the witness path where a canonical result
+//! references helper nodes created by the precompile itself.
 
 use super::uint::Uint;
 use crate::{
@@ -19,20 +16,20 @@ use crate::{
 // PUBLIC PRECOMPILE TYPE
 // ================================================================================================
 
-/// Zero-sized handle for the `Group` precompile (mock group over [`Uint`]).
+/// Zero-sized handle for the mock group precompile.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Group;
 
 impl Group {
     pub const NAME: &'static str = "mock_group";
 
-    /// Discriminant indices.
+    /// Tag discriminants owned by this fixture.
     pub const NEW_TAG_ID: u32 = 0;
     pub const ADD_TAG_ID: u32 = 1;
     pub const SUB_TAG_ID: u32 = 2;
     pub const EQ_TAG_ID: u32 = 3;
 
-    /// Derive the precompile id. Pure function over `Group`'s metadata.
+    /// Stable precompile id derived from the fixture name.
     pub fn id() -> Felt {
         precompile_id(&Group)
     }
@@ -62,19 +59,19 @@ impl Group {
         }
     }
 
-    /// Build a `new` node referencing two field-leaf digests.
+    /// Builds a group element from committed coordinate-expression digests.
     pub fn new_node(h_x: Digest, h_y: Digest) -> Node {
         Node::join(Self::new_tag(), h_x, h_y)
     }
-    /// Build an `add` op node referencing two group-element digests.
+    /// Builds a group-add node over two group-element digests.
     pub fn add_node(h_g1: Digest, h_g2: Digest) -> Node {
         Node::join(Self::add_tag(), h_g1, h_g2)
     }
-    /// Build a `sub` op node referencing two group-element digests.
+    /// Builds a group-sub node over two group-element digests.
     pub fn sub_node(h_g1: Digest, h_g2: Digest) -> Node {
         Node::join(Self::sub_tag(), h_g1, h_g2)
     }
-    /// Build an `eq` predicate referencing two group-element digests.
+    /// Builds a predicate comparing two group elements by value.
     pub fn eq_node(h_g1: Digest, h_g2: Digest) -> Node {
         Node::join(Self::eq_tag(), h_g1, h_g2)
     }
@@ -90,9 +87,9 @@ impl Precompile for Group {
     }
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-        // All Group nodes pack two child digests in their payload — `new` references the
-        // coordinate leaves, `add`/`sub` reference the group operands, `eq` references the two
-        // compared group elements. So every tag is `NodeType::Join`.
+        // All Group nodes pack two child digests in their payload — `new` references committed
+        // coordinate-expression digests, `add`/`sub` reference the group operands, and `eq`
+        // references the two compared group elements. So every tag is `NodeType::Join`.
         Discriminant::classify(args[0])?;
         Some(NodeType::Join)
     }
@@ -108,13 +105,13 @@ impl Precompile for Group {
 
         match kind {
             Discriminant::New => {
-                // Canonicalise the two coordinates to field leaves; reject if either child
-                // resolves to something that isn't a `Uint` field leaf.
+                // Validate that both committed coordinate expressions resolve to field leaves,
+                // but preserve their original commitments in the canonical group element.
                 let x_leaf = witness.resolve(h_lhs)?;
                 let y_leaf = witness.resolve(h_rhs)?;
                 Uint::limbs_of(&x_leaf).map_err(PrecompileError::from)?;
                 Uint::limbs_of(&y_leaf).map_err(PrecompileError::from)?;
-                Ok(Self::new_node(x_leaf.digest(), y_leaf.digest()))
+                Ok(Self::new_node(h_lhs, h_rhs))
             },
             Discriminant::Add | Discriminant::Sub => {
                 let op = match kind {
@@ -140,7 +137,14 @@ impl Precompile for Group {
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
-                if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
+                let g1 = witness.resolve(h_lhs)?;
+                let g2 = witness.resolve(h_rhs)?;
+                let (h_x1, h_y1) = new_coords(&g1)?;
+                let (h_x2, h_y2) = new_coords(&g2)?;
+
+                if witness.resolve(h_x1)? != witness.resolve(h_x2)?
+                    || witness.resolve(h_y1)? != witness.resolve(h_y2)?
+                {
                     return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(Node::TRUE)
@@ -152,8 +156,7 @@ impl Precompile for Group {
 // HELPERS
 // ================================================================================================
 
-/// Extract the two field-leaf child digests from a canonical `new` node. Errors if `node`
-/// isn't tagged as `Group::new_tag()`.
+/// Extracts coordinate-expression digests from a canonical group element.
 fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
     if node.tag != Group::new_tag() {
         return Err(PrecompileError::InvalidNode);
