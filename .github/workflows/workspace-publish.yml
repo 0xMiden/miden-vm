@@ -31,11 +31,15 @@ jobs:
       tag: ${{ steps.prepare.outputs.tag }}
       sha: ${{ steps.prepare.outputs.sha }}
     steps:
-      - name: Checkout repository
+      - name: Checkout release tooling
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-          ref: main
+          # Check out the workflow/tooling revision so scripts/prepare-release.sh
+          # comes from the same commit as this workflow. That script only
+          # resolves metadata; build, artifact, and publish jobs still checkout
+          # needs.prepare-release.outputs.sha from origin/main.
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
 
       - name: Resolve and validate release commit
