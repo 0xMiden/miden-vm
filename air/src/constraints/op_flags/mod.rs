@@ -284,7 +284,6 @@ where
     /// operation flags whose stack impact matches that shift at depth `d`. These are
     /// built incrementally: each depth adds or removes operations relative to the
     /// previous depth.
-    #[allow(clippy::too_many_arguments)]
     fn compute_composite_flags<V>(
         bits: &OpBits<E>,
         deg7: &[E; NUM_DEGREE_7_OPS],
