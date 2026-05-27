@@ -17,7 +17,7 @@ use super::{EventId, EventName};
 /// System event IDs are derived from blake3-hashing their names (prefixed with "sys::").
 ///
 /// The enum variant order matches the indices in SYSTEM_EVENT_LOOKUP, allowing efficient const
-/// lookup via `to_event_id()`. The discriminants are implicitly 0, 1, 2, ... 15.
+/// lookup via `to_event_id()`. The discriminants are implicitly 0, 1, 2, ... `COUNT - 1`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum SystemEvent {
