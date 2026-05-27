@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, Word};
 use miden_core_lib::{
     CoreLibrary,
@@ -62,9 +62,12 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
 fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
-    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
 
     let buf = Arc::new(Mutex::new(String::new()));
     let host_lib = HostLibrary {
@@ -99,9 +102,12 @@ fn run_and_capture(source: &str, advice: AdviceInputs) -> String {
 fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> ExecutionOutput {
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
-    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
     let mut host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("failed to load core library handlers");
@@ -174,9 +180,12 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
-    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
         handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
@@ -411,9 +420,12 @@ fn noop_debug_handlers_run_print_stack_without_output() {
 
     let core_lib = CoreLibrary::default();
     let assembler = Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
-    let program = assembler.assemble_program(source).expect("failed to assemble program");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
         handlers: noop_debug_handlers(),
