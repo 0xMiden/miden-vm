@@ -244,7 +244,11 @@ where
         }
         let mut product = match target.ty {
             TargetType::Executable => {
-                assembler.assemble_executable_modules(package_id.clone(), root, support)?
+                assembler.assemble_executable_modules(
+                    package_id.clone(),
+                    root,
+                    support.into_iter().map(Box::new).collect::<Vec<_>>(),
+                )?
             },
             TargetType::Kernel => {
                 if !support.is_empty() {
@@ -253,9 +257,9 @@ where
                 assembler.assemble_kernel_module(package_id.clone(), root)?
             },
             _ if target.ty.is_library() => {
-                let mut modules = Vec::with_capacity(support.len() + 1);
+                let mut modules: Vec<Box<Module>> = Vec::with_capacity(support.len() + 1);
                 modules.push(root);
-                modules.extend(support);
+                modules.extend(support.into_iter().map(Box::new));
                 assembler.assemble_library_modules(package_id.clone(), modules, target.ty)?
             },
             _ => unreachable!("non-exhaustive target type"),
@@ -602,7 +606,8 @@ where
         let support = sources
             .support
             .into_iter()
-            .map(|mut module| {
+            .map(|module| {
+                let mut module = *module;
                 module.set_kind(ModuleKind::Library);
                 Ok(module)
             })
@@ -634,6 +639,7 @@ where
                 })?;
                 let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
                 self.parse_module_file(path, ModuleKind::Library, module_path.as_ref())
+                    .map(|m| *m)
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
@@ -668,8 +674,7 @@ enum RegisteredSourcePackage {
 
 struct LoadedTargetSources {
     root: Box<Module>,
-    #[allow(clippy::vec_box)]
-    support: Vec<Box<Module>>,
+    support: Vec<Module>,
 }
 
 #[derive(Debug)]
