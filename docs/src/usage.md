@@ -101,12 +101,13 @@ MIDEN_LOG=trace ./target/optimized/miden-vm [subcommand] [parameters]
 
 If the level is not specified, `warn` level is set as default.
 
-#### Enable Debugging features
+#### Debugging procedures
 
-You can use the run command with `--debug` parameter to enable debugging with the [debug instruction](./user_docs/assembly/debugging.md) such as `debug.stack`:
+You can inspect VM state by importing the [`core::debug`](./user_docs/assembly/debugging.md)
+module and calling its print procedures from a MASM program.
 
 ```shell
-./target/optimized/miden-vm run [path_to.masm] --debug
+./target/optimized/miden-vm run [path_to.masm]
 ```
 
 If trace building would exceed the VM trace row limit, `run` returns a trace length error instead of trying to build a larger trace.
@@ -149,12 +150,26 @@ If you want the output of the program in a file, you can use the `--output` or `
 
 This will dump the output of the program into the `fib.out` file. The output file will contain the state of the stack at the end of the program execution.
 
-### Running with debug instruction enabled
+### Running with `core::debug` procedures
 
-Inside `miden-vm/masm-examples/fib/fib.masm`, insert `debug.stack` instruction anywhere between `begin` and `end`. Then run:
+Inside `miden-vm/masm-examples/fib/fib.masm`, import the `core::debug` module before
+`begin`, then call one of its procedures, such as `exec.debug::print_stack`, anywhere
+between `begin` and `end`:
+
+```masm
+use miden::core::debug
+
+begin
+    # ...
+    exec.debug::print_stack
+    # ...
+end
+```
+
+Then run:
 
 ```shell
-./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1 --debug
+./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm
 ```
 
 You should see output similar to "Stack state before step ..."
