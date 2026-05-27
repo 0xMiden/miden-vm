@@ -50,10 +50,6 @@ pub struct RunCmd {
     #[arg(short = 't', long = "trace")]
     trace: bool,
 
-    /// Disable debug instructions (release mode)
-    #[arg(short = 'r', long = "release")]
-    release: bool,
-
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
@@ -148,7 +144,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         params.trace,
-        !params.release,
+        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
@@ -186,12 +182,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     }
 
     // load program from file and compile
-    let (program, source_manager) = get_masm_program(
-        &params.program_file,
-        &libraries,
-        !params.release,
-        params.kernel_file.as_deref(),
-    )?;
+    let (program, source_manager) =
+        get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
@@ -214,7 +206,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         params.trace,
-        !params.release,
+        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 

@@ -1,37 +1,33 @@
 //! Debug information management for MAST forests.
 //!
-//! This module provides the [`DebugInfo`] struct which consolidates all debug-related information
-//! for a MAST forest in a single location. This includes:
+//! This module provides the [`DebugInfo`] struct which consolidates all debug-related metadata for
+//! a MAST forest in a single location. This includes:
 //!
-//! - All decorators (debug, trace, and assembly operation metadata)
+//! - Trace decorators
 //! - Operation-indexed decorator mappings for efficient lookup
 //! - Node-level decorator storage (before_enter/after_exit)
 //! - Error code mappings for descriptive error messages
 //!
 //! The debug info is always available at the `MastForest` level (as per issue 1821), but may be
-//! conditionally included during assembly to maintain backward compatibility. Decorators are only
-//! executed when the processor is running in debug mode, allowing debug information to be available
-//! for debugging and error reporting without impacting performance in production execution.
+//! conditionally included during assembly to maintain backward compatibility. Trace decorators are
+//! only executed when tracing is enabled. Assembly operation metadata remains available for
+//! debugging and error reporting.
 //!
-//! # Debug Mode Semantics
+//! # Trace Decorator Semantics
 //!
-//! Debug mode is controlled via [`ExecutionOptions`](air::options::ExecutionOptions):
-//! - `with_debugging(true)` enables debug mode explicitly
-//! - `with_tracing()` automatically enables debug mode (tracing requires debug info)
-//! - By default, debug mode is disabled for maximum performance
+//! Trace decorator execution is controlled via
+//! [`ExecutionOptions`](air::options::ExecutionOptions):
+//! - `with_tracing(true)` enables trace decorators
+//! - By default, tracing is disabled
 //!
-//! When debug mode is disabled:
-//! - Debug decorators are not executed
+//! When tracing is disabled:
 //! - Trace decorators are not executed
-//! - Assembly operation decorators are not recorded
-//! - before_enter/after_exit decorators are not executed
+//! - before_enter/after_exit trace decorators are not executed
 //!
-//! When debug mode is enabled:
-//! - All decorator types are executed according to their semantics
-//! - Debug decorators trigger host callbacks for breakpoints
-//! - Trace decorators trigger host callbacks for tracing
-//! - Assembly operation decorators provide source mapping information
-//! - before_enter/after_exit decorators execute around node execution
+//! When tracing is enabled:
+//! - Trace decorators trigger host callbacks
+//! - before_enter/after_exit trace decorators execute around node execution
+//! - Assembly operation metadata provides source mapping information
 //!
 //! # Production Builds
 //!
@@ -84,7 +80,7 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
-    /// All decorators in the MAST forest (Debug and Trace only, no AsmOp).
+    /// All trace decorators in the MAST forest (no AsmOp).
     decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Efficient access to decorators per operation per node.

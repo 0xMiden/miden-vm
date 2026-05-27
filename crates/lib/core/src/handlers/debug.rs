@@ -3,14 +3,12 @@
 //! Each `miden::core::debug::print_*` procedure emits a well-known event. This module registers a
 //! single [`DebugPrinter`] handler for all of those events; when one fires, the handler reads the
 //! requested piece of VM state (operand stack, memory, advice stack, or advice map) and prints it
-//! using the VM's tree-style debug formatting (shared with the `debug.*` decorators via
-//! [`miden_processor::write_stack`] / [`miden_processor::write_interval`]). Range-based procedures
-//! may share events with their full-state variants when the full-state behavior can be represented
-//! as an unbounded range.
+//! using the VM's tree-style debug formatting via [`miden_processor::write_stack`] /
+//! [`miden_processor::write_interval`]. Range-based procedures may share events with their
+//! full-state variants when the full-state behavior can be represented as an unbounded range.
 //!
-//! Unlike the `debug.*` decorators, these are ordinary `emit` events: they carry no MAST/decorator
-//! cost and print whenever the procedure is executed, regardless of whether the program was
-//! assembled in debug mode.
+//! These are ordinary `emit` events: they carry no MAST/decorator cost and print whenever the
+//! procedure is executed.
 
 use alloc::{
     format,
@@ -33,7 +31,7 @@ use miden_utils_sync::RwLock;
 // EVENT NAMES
 // ================================================================================================
 
-/// Prints the entire operand stack (drop-in replacement for the `debug.stack` decorator).
+/// Prints the entire operand stack.
 pub const PRINT_STACK_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_stack");
 /// Prints memory in the range `[start, end)` of the current context.
 pub const PRINT_MEM_EVENT_NAME: EventName = EventName::new("miden::core::debug::print_mem");
@@ -48,6 +46,8 @@ pub const PRINT_ADV_MAP_ALL_EVENT_NAME: EventName =
 /// Looks up a WORD key in the advice map and prints the associated values.
 pub const PRINT_ADV_MAP_ITEM_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_map_item");
+
+const MAX_PRINT_MEM_RANGE: u32 = 1024;
 
 /// Returns the default `(EventName, handler)` pairs for print-style debugging.
 ///
@@ -93,6 +93,22 @@ pub fn debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
     ]
 }
 
+/// Returns the opt-in `(EventName, handler)` pairs for advice-backed debug events.
+///
+/// [`CoreLibrary::handlers`](crate::CoreLibrary::handlers) registers stack and memory debug
+/// handlers by default. This helper returns only the advice-stack and advice-map handlers so hosts
+/// can extend the core library handlers without duplicate event registrations.
+///
+/// All returned events share a single [`DebugPrinter`] instance writing to stdout.
+pub fn advice_debug_handlers() -> Vec<(EventName, Arc<dyn EventHandler>)> {
+    let printer: Arc<dyn EventHandler> = Arc::new(DebugPrinter::default());
+    vec![
+        (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
+    ]
+}
+
 // DEBUG PRINTER
 // ================================================================================================
 
@@ -128,13 +144,19 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
 
         if id == PRINT_STACK_EVENT_NAME.to_event_id() {
             // Skip position 0 (the event id) so only the user's operand stack is shown. Print the
-            // entire stack (no cap) to mirror the `debug.stack` decorator
-            // (`DebugOptions::StackAll`).
+            // entire stack (no cap).
             let stack = process.get_stack_state();
             let operand_stack = stack.get(1..).unwrap_or(&[]);
             write_stack(w, operand_stack, None, "Stack", process.clock())?;
         } else if id == PRINT_MEM_EVENT_NAME.to_event_id() {
             let range = process.get_mem_addr_range(1, 2)?;
+            let len = range.end - range.start;
+            if len > MAX_PRINT_MEM_RANGE {
+                return Err(format!(
+                    "print_mem range length {len} exceeds maximum of {MAX_PRINT_MEM_RANGE}"
+                )
+                .into());
+            }
             write_mem_range(w, process, range)?;
         } else if id == PRINT_MEM_ALL_EVENT_NAME.to_event_id() {
             write_mem_all(w, process)?;

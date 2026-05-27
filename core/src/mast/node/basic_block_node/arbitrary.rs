@@ -11,7 +11,7 @@ use crate::{
         CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         LoopNodeBuilder, SplitNodeBuilder,
     },
-    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
+    operations::{AssemblyOp, Decorator, Operation},
     program::{Kernel, Program},
 };
 
@@ -577,26 +577,6 @@ impl Arbitrary for MastForest {
 
 // ---------- Arbitrary implementations for missing types ----------
 
-impl Arbitrary for DebugOptions {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![
-            Just(DebugOptions::StackAll),
-            any::<u8>().prop_map(DebugOptions::StackTop),
-            Just(DebugOptions::MemAll),
-            (any::<u32>(), any::<u32>())
-                .prop_map(|(start, end)| DebugOptions::MemInterval(start, end)),
-            (any::<u16>(), any::<u16>(), any::<u16>()).prop_map(|(start, end, num_locals)| {
-                DebugOptions::LocalInterval(start, end, num_locals)
-            }),
-            any::<u16>().prop_map(DebugOptions::AdvStackTop),
-        ]
-        .boxed()
-    }
-}
-
 impl Arbitrary for AssemblyOp {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
@@ -630,11 +610,7 @@ impl Arbitrary for Decorator {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![
-            any_with::<DebugOptions>(()).prop_map(Decorator::Debug),
-            any::<u32>().prop_map(Decorator::Trace),
-        ]
-        .boxed()
+        any::<u32>().prop_map(Decorator::Trace).boxed()
     }
 }
 

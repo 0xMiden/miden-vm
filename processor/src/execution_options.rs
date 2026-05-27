@@ -171,10 +171,8 @@ impl ExecutionOptions {
     /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
     /// otherwise, debug mode is disabled.
     ///
-    /// In debug mode the VM does the following:
-    /// - Executes `debug` instructions (these are ignored in regular mode).
-    /// - Records additional info about program execution (e.g., keeps track of stack state at every
-    ///   cycle of the VM) which enables stepping through the program forward and backward.
+    /// This flag is kept for backwards compatibility but no longer affects decorator execution
+    /// since the `Decorator::Debug` variant has been removed.
     pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
         self.enable_debugging = enable_debugging;
         self

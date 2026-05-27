@@ -133,9 +133,7 @@ pub trait Visit<T = ()> {
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         visit_system_event(self, sys_event)
     }
-    fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
-        visit_debug_options(self, options)
-    }
+
     fn visit_exec(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_exec(self, target)
     }
@@ -232,9 +230,7 @@ where
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_system_event(sys_event)
     }
-    fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
-        (**self).visit_debug_options(options)
-    }
+
     fn visit_exec(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         (**self).visit_exec(target)
     }
@@ -490,7 +486,7 @@ where
         Call(target) => visitor.visit_call(target),
         SysCall(target) => visitor.visit_syscall(target),
         ProcRef(target) => visitor.visit_procref(target),
-        Debug(options) => visitor.visit_debug_options(Span::new(span, options)),
+
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
@@ -522,28 +518,6 @@ where
     V: ?Sized + Visit<T>,
 {
     ControlFlow::Continue(())
-}
-
-pub fn visit_debug_options<V, T>(visitor: &mut V, options: Span<&DebugOptions>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    match options.into_inner() {
-        DebugOptions::StackTop(imm) => visitor.visit_immediate_u8(imm),
-        DebugOptions::AdvStackTop(imm) => visitor.visit_immediate_u16(imm),
-        DebugOptions::LocalRangeFrom(imm) => visitor.visit_immediate_u16(imm),
-        DebugOptions::MemInterval(imm1, imm2) => {
-            visitor.visit_immediate_u32(imm1)?;
-            visitor.visit_immediate_u32(imm2)
-        },
-        DebugOptions::LocalInterval(imm1, imm2) => {
-            visitor.visit_immediate_u16(imm1)?;
-            visitor.visit_immediate_u16(imm2)
-        },
-        DebugOptions::StackAll | DebugOptions::MemAll | DebugOptions::LocalAll => {
-            ControlFlow::Continue(())
-        },
-    }
 }
 
 #[inline]
@@ -731,9 +705,7 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         visit_mut_system_event(self, sys_event)
     }
-    fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
-        visit_mut_debug_options(self, options)
-    }
+
     fn visit_mut_exec(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_exec(self, target)
     }
@@ -830,9 +802,7 @@ where
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_mut_system_event(sys_event)
     }
-    fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
-        (**self).visit_mut_debug_options(options)
-    }
+
     fn visit_mut_exec(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         (**self).visit_mut_exec(target)
     }
@@ -1092,7 +1062,7 @@ where
         Call(target) => visitor.visit_mut_call(target),
         SysCall(target) => visitor.visit_mut_syscall(target),
         ProcRef(target) => visitor.visit_mut_procref(target),
-        Debug(options) => visitor.visit_mut_debug_options(Span::new(span, options)),
+
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
@@ -1127,31 +1097,6 @@ where
     V: ?Sized + VisitMut<T>,
 {
     ControlFlow::Continue(())
-}
-
-pub fn visit_mut_debug_options<V, T>(
-    visitor: &mut V,
-    options: Span<&mut DebugOptions>,
-) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    match options.into_inner() {
-        DebugOptions::StackTop(imm) => visitor.visit_mut_immediate_u8(imm),
-        DebugOptions::AdvStackTop(imm) => visitor.visit_mut_immediate_u16(imm),
-        DebugOptions::LocalRangeFrom(imm) => visitor.visit_mut_immediate_u16(imm),
-        DebugOptions::MemInterval(imm1, imm2) => {
-            visitor.visit_mut_immediate_u32(imm1)?;
-            visitor.visit_mut_immediate_u32(imm2)
-        },
-        DebugOptions::LocalInterval(imm1, imm2) => {
-            visitor.visit_mut_immediate_u16(imm1)?;
-            visitor.visit_mut_immediate_u16(imm2)
-        },
-        DebugOptions::StackAll | DebugOptions::MemAll | DebugOptions::LocalAll => {
-            ControlFlow::Continue(())
-        },
-    }
 }
 
 #[inline]

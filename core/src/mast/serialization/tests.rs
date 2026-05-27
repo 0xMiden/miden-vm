@@ -13,7 +13,7 @@ use crate::{
         MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
         UntrustedMastForestReadOptions,
     },
-    operations::{DebugOptions, Decorator, Operation},
+    operations::{Decorator, Operation},
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
     utils::Idx,
 };
@@ -153,14 +153,6 @@ fn confirm_operation_and_decorator_structure() {
 
     // Decorator variants - exhaustiveness check to ensure serialization coverage.
     match Decorator::Trace(0) {
-        Decorator::Debug(debug_options) => match debug_options {
-            DebugOptions::StackAll => (),
-            DebugOptions::StackTop(_) => (),
-            DebugOptions::MemAll => (),
-            DebugOptions::MemInterval(..) => (),
-            DebugOptions::LocalInterval(..) => (),
-            DebugOptions::AdvStackTop(_) => (),
-        },
         Decorator::Trace(_) => (),
     };
 }
@@ -353,12 +345,12 @@ fn serialize_deserialize_all_nodes() {
         // Note: AssemblyOps are now stored separately in DebugInfo's asm_op storage,
         // not as decorators. See the asm_op module tests for AssemblyOp serialization.
         let decorators = vec![
-            (0, Decorator::Debug(DebugOptions::StackAll)),
-            (15, Decorator::Debug(DebugOptions::StackTop(255))),
-            (15, Decorator::Debug(DebugOptions::MemAll)),
-            (15, Decorator::Debug(DebugOptions::MemInterval(0, 16))),
-            (17, Decorator::Debug(DebugOptions::LocalInterval(1, 2, 3))),
-            (19, Decorator::Debug(DebugOptions::AdvStackTop(255))),
+            (0, Decorator::Trace(10)),
+            (15, Decorator::Trace(11)),
+            (15, Decorator::Trace(12)),
+            (15, Decorator::Trace(13)),
+            (17, Decorator::Trace(14)),
+            (19, Decorator::Trace(15)),
         ];
         let after_exit_decorator = Decorator::Trace(55);
 
@@ -1413,7 +1405,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
+    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
 }
 
 fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
@@ -1469,7 +1461,7 @@ fn test_legacy_version_is_rejected() {
     forest.make_root(block_id);
 
     let mut bytes = forest.to_bytes();
-    bytes[5..8].copy_from_slice(&[0, 0, 2]);
+    bytes[5..8].copy_from_slice(&[0, 0, 3]);
 
     let result = MastForest::read_from_bytes(&bytes);
     assert_matches!(

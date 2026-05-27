@@ -232,7 +232,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Dropped the serialized decorator-count field because it was not used by the wire layout or
 ///   deserializers. Before any public release on this branch, the same unreleased wire version also
 ///   grew explicit internal/external node counts in the header.
-const VERSION: [u8; 3] = [0, 0, 3];
+/// - [0, 0, 4]: Removed debug decorator variants from serialized decorators. Trace decorators keep
+///   discriminant 6.
+const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
