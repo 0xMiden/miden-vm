@@ -1913,11 +1913,12 @@ fn test_untrusted_hashless_external_parse_and_validate() {
 }
 
 mod proptests {
+    use arbitrary::MastForestParams;
     use proptest::{prelude::*, strategy::Just};
 
     use super::*;
     use crate::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
+        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary},
         operations::Decorator,
     };
 
@@ -1935,6 +1936,8 @@ mod proptests {
                 max_syscalls: 0, // Avoid syscalls in roundtrip tests
                 max_externals: 1,
                 max_dyns: 1,
+                mode: arbitrary::GenerationMode::StructureOnly,
+                ..Default::default()
             })
         ) {
             // Serialize
@@ -2167,6 +2170,8 @@ mod proptests {
                 max_syscalls: 0,
                 max_externals: 1,
                 max_dyns: 1,
+                mode: arbitrary::GenerationMode::StructureOnly,
+                ..Default::default()
             })
         ) {
             // Stripped serialization

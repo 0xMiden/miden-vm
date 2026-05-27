@@ -1144,3 +1144,96 @@ proptest! {
         prop_assert_eq!(linked_node.digest, roundtrip2.digest);
     }
 }
+
+// ARBITRARY HELPER TESTS
+// ================================================================================================
+//
+// These helpers back the executable MAST forest generation pipeline.
+
+#[cfg(test)]
+mod arbitrary_helpers {
+    use super::{
+        super::arbitrary::{KernelPool, RootPool},
+        *,
+    };
+
+    /// Builds a small basic block from a single operation, helper for the tests below.
+    fn block(op: Operation) -> BasicBlockNode {
+        BasicBlockNode::new_owned_with_decorators(alloc::vec![op], alloc::vec![]).unwrap()
+    }
+
+    #[test]
+    fn root_pool_push_and_iter_preserve_insertion_order() {
+        let mut forest = MastForest::new();
+
+        let id1 = block(Operation::Add).to_builder(&forest).add_to_forest(&mut forest).unwrap();
+        let id2 = block(Operation::Mul).to_builder(&forest).add_to_forest(&mut forest).unwrap();
+        let id3 = block(Operation::Neg).to_builder(&forest).add_to_forest(&mut forest).unwrap();
+
+        let mut pool = RootPool::new();
+        assert!(pool.is_empty());
+
+        pool.push(id1);
+        pool.push(id2);
+        pool.push(id3);
+        assert!(!pool.is_empty());
+
+        let roots: Vec<_> = pool.iter().collect();
+        assert_eq!(roots, vec![id1, id2, id3]);
+    }
+
+    #[test]
+    fn kernel_pool_free_accepts_inserts_and_reports_membership() {
+        let pool = KernelPool::new();
+        assert!(pool.hashes().is_empty());
+        assert!(!pool.is_frozen());
+
+        let mut pool = KernelPool::new();
+        let hash1 = Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]);
+        let hash2 = Word::from([
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]);
+
+        pool.insert(hash1);
+        assert!(pool.contains(hash1));
+        assert!(!pool.contains(hash2));
+
+        pool.insert(hash2);
+        assert_eq!(pool.hashes().len(), 2);
+        assert!(pool.contains(hash1));
+        assert!(pool.contains(hash2));
+    }
+
+    #[test]
+    fn kernel_pool_frozen_ignores_inserts() {
+        let hash1 = Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]);
+        let hash2 = Word::from([
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]);
+
+        let mut pool = KernelPool::new_frozen(alloc::vec![hash1]);
+        assert!(pool.is_frozen());
+        assert!(pool.contains(hash1));
+
+        pool.insert(hash2);
+        assert_eq!(pool.hashes().len(), 1);
+        assert!(pool.contains(hash1));
+        assert!(!pool.contains(hash2));
+    }
+}
