@@ -2006,7 +2006,13 @@ MaybeQualifiedProcedureOrTypePath: Span<Arc<Path>> = {
         path.push_component(&name);
 
         let path = if is_absolute {
-            path.to_absolute().into_owned()
+            let abs = path.to_absolute().map_err(|e| ParseError::User {
+                error: ParsingError::InvalidSyntax {
+                    span,
+                    message: format!("invalid path component: {e:?}"),
+                },
+            })?;
+            abs.into_owned()
         } else {
             path
         };
@@ -2033,7 +2039,13 @@ MaybeQualifiedConstantPath: Span<Arc<Path>> = {
         path.push_component(&name);
 
         let path = if is_absolute {
-            path.to_absolute().into_owned()
+            let abs = path.to_absolute().map_err(|e| ParseError::User {
+                error: ParsingError::InvalidSyntax {
+                    span,
+                    message: format!("invalid path component: {e:?}"),
+                },
+            })?;
+            abs.into_owned()
         } else {
             path
         };

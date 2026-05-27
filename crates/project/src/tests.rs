@@ -105,6 +105,32 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
 }
 
 #[test]
+fn invalid_library_namespace_returns_error() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    let invalid_namespace = "a".repeat(MasmPath::MAX_COMPONENT_LENGTH + 1);
+    fs::write(
+        &manifest_path,
+        format!(
+            r#"[package]
+name = "mylib"
+version = "1.0.0"
+
+[lib]
+namespace = "{invalid_namespace}"
+"#
+        ),
+    )
+    .unwrap();
+
+    let context = TestContext::default();
+    let err = Project::load(&manifest_path, &context.source_manager)
+        .expect_err("invalid namespace must be reported instead of panicking");
+
+    assert!(format!("{err}").contains("invalid item path component"));
+}
+
+#[test]
 fn workspace_dev_override_is_used_for_child_profile_inheritance() -> Result<(), Report> {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace-profile");
