@@ -88,7 +88,6 @@ fn core_air_dag_rejects_mismatched_layout() {
 }
 
 #[test]
-#[allow(clippy::print_stdout)]
 fn chiplets_air_ace_rows() {
     let air = MidenAir::CHIPLETS;
     let config = AceConfig {
@@ -104,7 +103,7 @@ fn chiplets_air_ace_rows() {
     let eval_rows = encoded.num_eval_rows();
     let total_rows = read_rows + eval_rows;
 
-    println!(
+    eprintln!(
         "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,

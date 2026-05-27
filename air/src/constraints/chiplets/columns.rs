@@ -531,7 +531,12 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-#[allow(clippy::new_without_default)]
+impl Default for HasherPeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HasherPeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the Poseidon2 hasher chiplet.
     ///
@@ -623,7 +628,12 @@ impl HasherPeriodicCols<Vec<Felt>> {
     }
 }
 
-#[allow(clippy::new_without_default)]
+impl Default for BitwisePeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitwisePeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the bitwise chiplet.
     pub fn new() -> Self {

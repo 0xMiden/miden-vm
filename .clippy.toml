@@ -1,2 +1,12 @@
 # Allow up to 11 arguments in functions
+# Composite flag computation genuinely needs many parameters to avoid
+# creating a struct just for passing them around.
 too-many-arguments-threshold = 11
+
+# Functions in the AIR constraint system are inherently long due to the
+# mathematical constraints being expressed inline. Refactoring would harm
+# readability by splitting coherent constraint groups.
+too-many-lines-threshold = 200
+
+# Type complexity in crypto tests and dependency specs is genuine.
+type-complexity-threshold = 300
