@@ -47,8 +47,9 @@ fn stack_get_word_out_of_bounds_read() {
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
-        .assemble_program(program_source)
-        .expect("program should assemble");
+        .assemble_program("program", program_source)
+        .expect("program should assemble")
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default());

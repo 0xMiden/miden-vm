@@ -1,4 +1,4 @@
-use std::array;
+use std::{array, sync::Arc};
 
 use miden_air::PublicInputs;
 use miden_assembly::Assembler;
@@ -8,6 +8,7 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
+use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, prove_sync,
@@ -81,15 +82,21 @@ pub fn generate_recursive_verifier_data(
         match kernel {
             Some(kernel) => {
                 let context = miden_assembly::testing::TestContext::new();
-                let kernel_lib =
-                    Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
+                let kernel_lib = Assembler::new(context.source_manager())
+                    .assemble_kernel("kernel", kernel)
+                    .map(Arc::<Package>::from)
+                    .unwrap();
                 let assembler =
-                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone());
-                let program: Program = assembler.assemble_program(source).unwrap();
+                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
+                let program: Program =
+                    assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
-                let program: Program = Assembler::default().assemble_program(source).unwrap();
+                let program: Program = Assembler::default()
+                    .assemble_program("program", source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }

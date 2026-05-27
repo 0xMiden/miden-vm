@@ -282,18 +282,14 @@ impl PackageStore for NoPackageStore {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeMap, vec, vec::Vec};
+    use alloc::{vec, vec::Vec};
 
-    use miden_assembly_syntax::{
-        Library,
-        ast::{Path as AstPath, PathBuf},
-        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
-    };
+    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
         operations::Operation,
     };
-    use miden_mast_package::{Package, TargetType};
+    use miden_mast_package::{Package, PackageExport, ProcedureExport, TargetType};
 
     use super::*;
 
@@ -312,27 +308,29 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
-    fn build_library(export: &str) -> Arc<Library> {
+    fn build_package_exports(export: &str) -> (Arc<MastForest>, Vec<PackageExport>) {
         let (forest, node_id) = build_forest();
         let path = absolute_path(export);
-        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+        let export =
+            ProcedureExport::new(Arc::clone(&path), Some(node_id), forest[node_id].digest(), None);
 
-        let mut exports = BTreeMap::new();
-        exports.insert(path, LibraryExport::Procedure(export));
-
-        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+        (Arc::new(forest), vec![PackageExport::Procedure(export)])
     }
 
     #[test]
     fn no_package_store_cache_package_is_noop() {
-        let package: Arc<MastPackage> = Package::from_library(
-            PackageId::from("pkg"),
-            "1.0.0".parse().unwrap(),
-            TargetType::Library,
-            build_library("test::pkg::entry"),
-            [],
-        )
-        .into();
+        let (mast, exports) = build_package_exports("test::pkg::entry");
+        let package = Arc::new(
+            Package::create(
+                PackageId::from("pkg"),
+                "1.0.0".parse().unwrap(),
+                TargetType::Library,
+                mast,
+                exports,
+                [],
+            )
+            .expect("test package should be valid"),
+        );
         let expected = Version::new(package.version.clone(), package.digest());
 
         let mut store = NoPackageStore;

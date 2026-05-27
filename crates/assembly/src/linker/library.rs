@@ -1,20 +1,14 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 
-use miden_assembly_syntax::{Library, library::ModuleInfo};
-use miden_core::mast::MastForest;
-use miden_mast_package::Package;
-use miden_project::Linkage;
-/// Prefer to use [`miden_project::Linkage`], as this will be removed in a future release
-pub use miden_project::Linkage as LinkLibraryKind;
+use miden_assembly_syntax::module::ModuleInfo;
+use miden_mast_package::{MastForest, Package};
+pub use miden_project::Linkage;
 
 /// Represents an assembled module or modules to use when resolving references while linking,
 /// as well as the method by which referenced symbols will be linked into the assembled MAST.
 #[derive(Clone)]
 pub struct LinkLibrary {
-    /// The MAST of this library
-    pub mast: Arc<MastForest>,
-    /// Metadata about the modules and symbols available in the linked forest
-    pub module_infos: Vec<ModuleInfo>,
+    pub package: Arc<Package>,
     /// How to link against this library
     pub linkage: Linkage,
 }
@@ -22,35 +16,22 @@ pub struct LinkLibrary {
 impl LinkLibrary {
     /// Construct a [LinkLibrary] from a [miden_mast_package::Package]
     pub fn from_package(package: Arc<Package>) -> Self {
-        let mast = package.mast.mast_forest().clone();
-        let module_infos = package
-            .mast
-            .module_infos()
-            .map(|mut mi| {
-                mi.set_version(package.version.clone());
-                mi
-            })
-            .collect();
-        Self {
-            mast,
-            module_infos,
-            linkage: Linkage::Dynamic,
-        }
-    }
-
-    pub(crate) fn from_library(library: &Library) -> Self {
-        let mast = library.mast_forest().clone();
-        let module_infos = library.module_infos().collect();
-        Self {
-            mast,
-            module_infos,
-            linkage: Linkage::Dynamic,
-        }
+        Self { package, linkage: Linkage::Dynamic }
     }
 
     /// Modify the linkage of this library
     pub fn with_linkage(mut self, linkage: Linkage) -> Self {
         self.linkage = linkage;
         self
+    }
+
+    #[inline(always)]
+    pub fn mast(&self) -> &Arc<MastForest> {
+        self.package.mast_forest()
+    }
+
+    #[inline]
+    pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
+        self.package.module_infos()
     }
 }

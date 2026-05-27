@@ -178,20 +178,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "library_deserialize"
-path = "fuzz_targets/library_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "library_serde_deserialize"
-path = "fuzz_targets/library_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "package_deserialize"
 path = "fuzz_targets/package_deserialize.rs"
 test = false
@@ -201,13 +187,6 @@ bench = false
 [[bin]]
 name = "package_semantic_deserialize"
 path = "fuzz_targets/package_semantic_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "package_serde_deserialize"
-path = "fuzz_targets/package_serde_deserialize.rs"
 test = false
 doc = false
 bench = false
