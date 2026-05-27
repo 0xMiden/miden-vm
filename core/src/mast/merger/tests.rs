@@ -555,9 +555,6 @@ fn mast_forest_merge_advice_maps_collision() {
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
 }
 
-// Forest A:
-//   - Block with op-indexed decorators at operations [0, 1]
-//   - Before-enter and after-exit decorators
 #[test]
 fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
     let mut forest_without_asm = MastForest::new();

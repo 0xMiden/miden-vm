@@ -1,7 +1,7 @@
 #! Consumes a null-terminated byte string pointer.
 #!
-#! This example syscall used to emit a trace decorator when debug tracing was enabled. Trace
-#! decorators have been removed, so the default example behavior is now a no-op.
+#! This example syscall used to emit a decorator when debug tracing was enabled. That behavior has
+#! been removed, so the default example behavior is now a no-op.
 pub proc println(message: ptr<u8, addrspace(byte)>)
     drop
 end
