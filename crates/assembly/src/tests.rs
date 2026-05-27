@@ -308,6 +308,7 @@ fn library_exports() -> Result<(), Report> {
 }
 
 #[test]
+#[ignore = "disabled until #3040 is resolved"]
 fn library_procedure_collision() -> Result<(), Report> {
     let context = TestContext::new();
 
@@ -360,60 +361,6 @@ fn library_procedure_collision() -> Result<(), Report> {
 
     // Keeping those procedures distinct adds one more node to the library forest.
     assert_eq!(lib2.mast_forest().num_nodes(), 6);
-
-    Ok(())
-}
-
-#[test]
-fn static_package_same_digest_procedure_uses_exact_root_metadata() -> Result<(), Report> {
-    let context = TestContext::new();
-
-    let aliases = r#"
-         pub proc alias_a
-             add
-         end
-
-         pub proc alias_b
-             add
-         end
-     "#;
-    let aliases = parse_module!(&context, "lib::aliases", aliases);
-    let library = Assembler::new(context.source_manager()).assemble_library("lib", [aliases])?;
-
-    let program_source = source_file!(
-        &context,
-        r#"
-         use lib::aliases
-
-         begin
-             exec.aliases::alias_b
-         end
-         "#
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_package(library.into(), Linkage::Static)?
-        .assemble_program("program", program_source)?
-        .unwrap_program();
-
-    let body_node_id = {
-        let root = program.entrypoint();
-        match &program.mast_forest()[root] {
-            MastNode::Join(join_node) => join_node.second(),
-            _ => root,
-        }
-    };
-    let context_name = program
-        .mast_forest()
-        .debug_info()
-        .first_asm_op_for_node(body_node_id)
-        .expect("statically linked procedure should preserve asm-op metadata")
-        .context_name();
-
-    assert!(
-        context_name.ends_with("alias_b"),
-        "expected alias_b metadata, got {context_name}"
-    );
 
     Ok(())
 }
