@@ -12,7 +12,7 @@ use miden_assembly_syntax::{
     },
     debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
     diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
-    library::ItemInfo,
+    module::ItemInfo,
 };
 use smallvec::SmallVec;
 

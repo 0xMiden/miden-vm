@@ -227,6 +227,15 @@ pub struct HostLibrary {
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
+impl From<Arc<miden_mast_package::Package>> for HostLibrary {
+    fn from(package: Arc<miden_mast_package::Package>) -> Self {
+        Self {
+            mast_forest: package.mast_forest().clone(),
+            handlers: vec![],
+        }
+    }
+}
+
 impl From<Arc<MastForest>> for HostLibrary {
     fn from(mast_forest: Arc<MastForest>) -> Self {
         Self { mast_forest, handlers: vec![] }

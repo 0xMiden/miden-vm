@@ -39,7 +39,7 @@ pub trait SymbolTable {
     }
 }
 
-impl SymbolTable for &crate::library::ModuleInfo {
+impl SymbolTable for &crate::module::ModuleInfo {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
     fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {

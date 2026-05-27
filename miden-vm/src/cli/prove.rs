@@ -26,7 +26,7 @@ pub struct ProveCmd {
     #[arg(short = 'i', long = "input", value_parser)]
     input_file: Option<PathBuf>,
 
-    /// Paths to .masl library files
+    /// Paths to .masp library files
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
 

@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -32,6 +32,7 @@ use miden_core::{
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
 };
+use miden_mast_package::Package;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
@@ -116,7 +117,7 @@ struct SourceCacheKey {
 }
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
-type CompileCacheValue = (Program, Option<KernelLibrary>);
+type CompileCacheValue = (Program, Option<Arc<Package>>);
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 type CompileCache = std::collections::HashMap<CompileCacheKey, CompileCacheValue>;
@@ -216,7 +217,7 @@ pub struct Test {
     pub stack_inputs: StackInputs,
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
-    pub libraries: Vec<Library>,
+    pub libraries: Vec<Arc<Package>>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
@@ -289,8 +290,8 @@ impl Test {
     }
 
     /// Adds a library to link in during assembly.
-    pub fn with_library(mut self, library: impl Into<Library>) -> Self {
-        self.libraries.push(library.into());
+    pub fn with_library(mut self, package: Arc<Package>) -> Self {
+        self.libraries.push(package);
         self
     }
 
@@ -441,7 +442,7 @@ impl Test {
     ///
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
-    pub fn compile(&self) -> Result<(Program, Option<KernelLibrary>), Report> {
+    pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
         use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
@@ -463,11 +464,13 @@ impl Test {
         }
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
-            let kernel_lib =
-                Assembler::new(self.source_manager.clone()).assemble_kernel(kernel).unwrap();
+            let kernel_lib = Assembler::new(self.source_manager.clone())
+                .assemble_kernel("kernel", kernel)
+                .map(Arc::<Package>::from)
+                .unwrap();
 
             (
-                Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone()),
+                Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
                 Some(kernel_lib),
             )
         } else {
@@ -486,11 +489,14 @@ impl Test {
                 assembler
             });
         // Debug mode is now always enabled
-        for library in &self.libraries {
-            assembler.link_dynamic_library(library).unwrap();
+        for package in &self.libraries {
+            assembler.link_package(package.clone(), Linkage::Dynamic).unwrap();
         }
 
-        let result = (assembler.assemble_program(self.source.clone())?, kernel_lib);
+        let result = (
+            assembler.assemble_program("program", self.source.clone())?.unwrap_program(),
+            kernel_lib,
+        );
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
@@ -788,7 +794,7 @@ impl Test {
                 .iter()
                 .map(|(path, source)| (path.to_string(), source.clone()))
                 .collect(),
-            library_digests: self.libraries.iter().map(|library| *library.digest()).collect(),
+            library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
         }
     }
 }

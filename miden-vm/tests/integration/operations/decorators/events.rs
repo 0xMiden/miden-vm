@@ -17,7 +17,10 @@ fn test_event_handling() {
     end";
 
     // compile and execute program
-    let program: Program = Assembler::default().assemble_program(source).unwrap();
+    let program: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = TestHost::default();
     miden_processor::execute_sync(
         &program,
@@ -45,7 +48,10 @@ fn test_trace_handling() {
     end";
 
     // compile program
-    let program: Program = Assembler::default().assemble_program(source).unwrap();
+    let program: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = TestHost::default();
 
     // execute program with disabled tracing
@@ -85,7 +91,10 @@ fn test_debug_with_debugging() {
     end";
 
     // compile and execute program
-    let program: Program = Assembler::default().assemble_program(source).unwrap();
+    let program: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = TestHost::default();
     miden_processor::execute_sync(
         &program,
@@ -112,7 +121,10 @@ fn test_debug_without_debugging() {
     end";
 
     // compile and execute program
-    let program: Program = Assembler::default().assemble_program(source).unwrap();
+    let program: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = TestHost::default();
     miden_processor::execute_sync(
         &program,
@@ -140,7 +152,10 @@ fn test_parsing_debug_advice_stack() {
     end";
 
     // compile and execute program
-    let program: Program = Assembler::default().assemble_program(source).unwrap();
+    let program: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = TestHost::default();
     miden_processor::execute_sync(
         &program,

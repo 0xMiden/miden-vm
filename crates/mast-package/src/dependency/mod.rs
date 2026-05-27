@@ -10,7 +10,7 @@ use crate::{PackageId, TargetType, Version, Word};
 
 /// A package dependency
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
@@ -22,11 +22,11 @@ pub struct Dependency {
     /// The type of package depended on.
     pub kind: TargetType,
     /// The semantic version of the dependency.
-    #[cfg_attr(feature = "arbitrary", proptest(value = "Version::new(0, 0, 0)"))]
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Version::new(0, 0, 0)"))]
     pub version: Version,
     /// The digest of the dependency.
     /// Serves as an ultimate source of truth for identifying the dependency.
-    #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Word::default()"))]
     pub digest: Word,
 }
 

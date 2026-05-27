@@ -83,15 +83,12 @@ fn test_diagnostic_advice_map_key_already_present() {
     let (lib_1, lib_2) = {
         let dummy_library_source = source_file!(&test_context, "pub proc foo add end");
         let module = test_context.parse_module_with_path("foo::bar", dummy_library_source).unwrap();
-        let mut lib_2 = test_context.assemble_library(std::iter::once(module)).unwrap();
-        let lib_1 = Arc::new(
-            lib_2
-                .as_ref()
-                .clone()
-                .with_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])])),
-        );
-        Arc::make_mut(&mut lib_2)
-            .extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
+        let mut lib_2 =
+            test_context.assemble_library("lib2", None, std::iter::once(module)).unwrap();
+        lib_2.extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])]));
+        let mut lib_1 = lib_2.clone();
+        lib_1.name = "lib1".into();
+        lib_1.extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
 
         (lib_1, lib_2)
     };
@@ -177,7 +174,10 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone()).assemble_program(source).unwrap();
+    let program = Assembler::new(source_manager.clone())
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
@@ -211,7 +211,10 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone()).assemble_program(source).unwrap();
+    let program = Assembler::new(source_manager.clone())
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
@@ -829,13 +832,16 @@ fn test_diagnostic_procedure_not_found_call() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+    let library = Assembler::new(source_manager.clone())
+        .assemble_library("lib", [lib_module])
+        .unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_dynamic_library(&library)
+        .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program(program_source)
-        .unwrap();
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
@@ -889,13 +895,16 @@ fn test_diagnostic_procedure_not_found_join() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+    let library = Assembler::new(source_manager.clone())
+        .assemble_library("library", [lib_module])
+        .unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_dynamic_library(&library)
+        .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program(program_source)
-        .unwrap();
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
@@ -953,13 +962,16 @@ fn test_diagnostic_procedure_not_found_loop() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+    let library = Assembler::new(source_manager.clone())
+        .assemble_library("library", [lib_module])
+        .unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_dynamic_library(&library)
+        .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program(program_source)
-        .unwrap();
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
@@ -1018,13 +1030,16 @@ fn test_diagnostic_procedure_not_found_split() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+    let library = Assembler::new(source_manager.clone())
+        .assemble_library("library", [lib_module])
+        .unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_dynamic_library(&library)
+        .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program(program_source)
-        .unwrap();
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
@@ -1242,13 +1257,16 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         end
     ";
 
-    let kernel_library =
-        Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
+    let kernel_library = Assembler::new(source_manager.clone())
+        .assemble_kernel("kernel", kernel_source)
+        .unwrap();
 
     let program = {
-        let program = Assembler::with_kernel(source_manager.clone(), kernel_library)
-            .assemble_program(program_source)
-            .unwrap();
+        let program = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
+            .unwrap()
+            .assemble_program("program", program_source)
+            .unwrap()
+            .unwrap_program();
 
         // Note: we do not provide the kernel to trigger the error
         Program::with_kernel(program.mast_forest().clone(), program.entrypoint(), Kernel::default())

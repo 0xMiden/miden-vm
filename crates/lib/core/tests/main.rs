@@ -6,7 +6,7 @@ macro_rules! build_test {
     ($($params:tt)+) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
         miden_utils_testing::build_test_by_mode!(false, $($params)+)
-            .with_library(core_lib.library().clone())
+            .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}
 }
@@ -17,7 +17,7 @@ macro_rules! build_debug_test {
     ($($params:tt)+) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
         miden_utils_testing::build_test_by_mode!(true, $($params)+)
-            .with_library(core_lib.library().clone())
+            .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}
 }
@@ -71,11 +71,10 @@ macro_rules! expect_assert_error_message {
 
 #[test]
 fn core_library_does_not_export_precompile_impl_helpers() {
-    use miden_assembly::Path;
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
-    let library = core_lib.library();
+    let package = core_lib.package();
 
     let public_paths = [
         "::miden::core::crypto::hashes::keccak256::hash_bytes",
@@ -85,7 +84,7 @@ fn core_library_does_not_export_precompile_impl_helpers() {
     ];
     for path in public_paths {
         assert!(
-            library.get_procedure_root_by_path(Path::new(path)).is_some(),
+            package.get_procedure_root_by_path(path).is_some(),
             "expected public wrapper to be exported: {path}",
         );
     }
@@ -98,7 +97,7 @@ fn core_library_does_not_export_precompile_impl_helpers() {
     ];
     for path in internal_paths {
         assert!(
-            library.get_procedure_root_by_path(Path::new(path)).is_none(),
+            package.get_procedure_root_by_path(path).is_none(),
             "internal precompile helper must not be exported: {path}",
         );
     }

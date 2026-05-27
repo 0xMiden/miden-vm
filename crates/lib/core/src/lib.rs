@@ -12,10 +12,11 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_assembly::{Library, mast::MastForest};
 use miden_core::{
-    events::EventName, precompile::PrecompileVerifierRegistry, serde::Deserializable,
+    events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry,
+    serde::Deserializable,
 };
+use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
@@ -41,7 +42,7 @@ use crate::handlers::{
 
 /// The Miden core library, providing a set of optimized procedures for Miden programs.
 ///
-/// This library wraps a [`Library`] containing highly-optimized and battle-tested implementations
+/// This library wraps a [`Package`] containing highly-optimized and battle-tested implementations
 /// of commonly-used primitives. When the core library is dynamically linked during assembly time,
 /// procedures can be called from any Miden program and are serialized as 32 bytes, reducing the
 /// amount of code that needs to be shared between parties for proving and verifying program
@@ -66,22 +67,23 @@ use crate::handlers::{
 ///
 /// # Usage
 ///
-/// The core library is typically used with an [`Assembler`] to enable core library procedures
+/// The core library is typically used with the assembler to enable core library procedures
 /// in compiled programs:
 ///
 /// ```rust,ignore
-/// use miden_assembly::Assembler;
+/// use miden_assembly::{Assembler, Linkage};
 /// use miden_core_lib::CoreLibrary;
 ///
+/// let core_lib = CoreLibrary::default();
 /// let assembler = Assembler::new(source_manager)
-///     .with_dynamic_library(&CoreLibrary::default())
+///     .with_package(core_lib.package(), Linkage::Dynamic)
 ///     .unwrap();
 /// ```
 ///
 /// For program execution, you'll also need to register the event handlers:
 ///
 /// ```rust,ignore
-/// let core_lib = CoreLibrary::default();
+/// # let core_lib = CoreLibrary::default();
 /// let handlers = core_lib.handlers();
 /// // Register handlers with your host...
 /// ```
@@ -89,20 +91,13 @@ use crate::handlers::{
 /// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
 /// precompile verifiers required to validate core library precompile requests.
 ///
-/// [`Library`]: miden_assembly::Library
-/// [`Assembler`]: miden_assembly::Assembler
+/// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
-pub struct CoreLibrary(Library);
+pub struct CoreLibrary(Arc<Package>);
 
-impl AsRef<Library> for CoreLibrary {
-    fn as_ref(&self) -> &Library {
+impl AsRef<Package> for CoreLibrary {
+    fn as_ref(&self) -> &Package {
         &self.0
-    }
-}
-
-impl From<CoreLibrary> for Library {
-    fn from(value: CoreLibrary) -> Self {
-        value.0
     }
 }
 
@@ -116,18 +111,18 @@ impl From<&CoreLibrary> for HostLibrary {
 }
 
 impl CoreLibrary {
-    /// Serialized representation of the Miden core library.
+    /// Serialized representation of the Miden `core` package.
     pub const SERIALIZED: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/assets/core.masl"));
+        include_bytes!(concat!(env!("OUT_DIR"), "/assets/miden-core.masp"));
 
     /// Returns a reference to the [MastForest] underlying the Miden core library.
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         self.0.mast_forest()
     }
 
-    /// Returns a reference to the underlying [`Library`].
-    pub fn library(&self) -> &Library {
-        &self.0
+    /// Returns a reference to the underlying [`Arc<Package>`].
+    pub fn package(&self) -> Arc<Package> {
+        self.0.clone()
     }
 
     /// List of all `EventHandlers` required to run all of the core library.
@@ -162,9 +157,9 @@ impl CoreLibrary {
 impl Default for CoreLibrary {
     fn default() -> Self {
         static CORELIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
-            let contents = Library::read_from_bytes(CoreLibrary::SERIALIZED)
-                .expect("failed to read core masl!");
-            CoreLibrary(contents)
+            let contents = Package::read_from_bytes(CoreLibrary::SERIALIZED)
+                .expect("failed to read core package!");
+            CoreLibrary(Arc::new(contents))
         });
         CORELIB.clone()
     }
@@ -175,17 +170,15 @@ impl Default for CoreLibrary {
 
 #[cfg(test)]
 mod tests {
-    use miden_assembly::Path;
-
     use super::*;
 
     #[test]
     fn test_compile() {
-        let path = Path::new("::miden::core::math::u64::overflowing_add");
         let core_lib = CoreLibrary::default();
-        let exists = core_lib.0.module_infos().any(|module| {
-            module.procedures().any(|(_, proc)| &module.path().join(&proc.name) == path)
-        });
+        let exists = core_lib
+            .0
+            .get_procedure_root_by_path("::miden::core::math::u64::overflowing_add")
+            .is_some();
 
         assert!(exists);
     }

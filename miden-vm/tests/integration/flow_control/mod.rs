@@ -453,7 +453,7 @@ fn dynexec_with_procref() {
     end";
 
     let test = build_test!(program_source, &[])
-        .with_library(CoreLibrary::default().library().clone())
+        .with_library(CoreLibrary::default().package())
         .with_module(
             "external::module",
             "\
@@ -514,7 +514,7 @@ fn simple_dyncall() {
     let core_lib = CoreLibrary::default();
     let test = build_test!(program_source)
         .with_stack_inputs(stack_init)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handlers(core_lib.handlers());
 
     test.expect_stack(&[6]);
@@ -599,9 +599,9 @@ fn procref() -> Result<(), Report> {
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, source_manager.clone())?;
         let library = Assembler::new(source_manager)
-            .with_dynamic_library(CoreLibrary::default())
+            .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .unwrap()
-            .assemble_library([module])
+            .assemble_library("test", [module])
             .unwrap();
 
         let module_info = library.module_infos().next().unwrap();
@@ -628,7 +628,7 @@ fn procref() -> Result<(), Report> {
 
     let core_lib = CoreLibrary::default();
     let test = build_test!(source, &[])
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handlers(core_lib.handlers());
 
     // procref pushes element[0] on top

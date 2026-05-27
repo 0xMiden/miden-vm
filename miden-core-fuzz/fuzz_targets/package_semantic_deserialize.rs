@@ -32,7 +32,6 @@ fuzz_target!(|data: &[u8]| {
         TargetType::Kernel => {
             let _ = package.kernel_module_info();
             let _ = package.to_kernel();
-            let _ = package.try_into_kernel_library();
         },
         _ => (),
     }

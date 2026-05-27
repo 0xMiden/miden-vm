@@ -87,6 +87,8 @@
 
 #### Changes
 
+- [BREAKING] The `Library` struct was removed, along with related APIs, in favor of `Package` and `Package`-oriented APIs ([#3106](https://github.com/0xMiden/miden-vm/pull/3106))
+- [BREAKING] The `Package` struct no longer implements `serde`-based deserialization
 - [BREAKING] Refactored MAST forest serialization around fixed-layout full, stripped, and hashless sections, and bumped the MAST wire format to `0.0.3` ([#2765](https://github.com/0xMiden/miden-vm/pull/2765)).
 - Optimized call graph topological sort from O(V\*E) to O(V + E) by pre-computing in-degrees ([#2830](https://github.com/0xMiden/miden-vm/pull/2830)).
 - [BREAKING] Cleaned up the unreleased MAST forest wire format, with stable node IDs and stricter untrusted validation ([#3055](https://github.com/0xMiden/miden-vm/pull/3055)).
