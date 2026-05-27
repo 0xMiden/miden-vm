@@ -95,7 +95,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(basic_block_id);

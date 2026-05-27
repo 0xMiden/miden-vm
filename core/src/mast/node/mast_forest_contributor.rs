@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use miden_utils_core_derive::MastForestContributor;
 
 use super::{
@@ -7,7 +5,7 @@ use super::{
     LoopNodeBuilder, SplitNodeBuilder,
 };
 use crate::{
-    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
+    mast::{MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
     utils::LookupByIdx,
 };
 
@@ -28,24 +26,6 @@ pub trait MastForestContributor {
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self;
-
-    /// Adds decorators to be executed before this node.
-    fn with_before_enter(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
-
-    /// Adds decorators to be executed after this node.
-    fn with_after_exit(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
-
-    /// Appends decorators to be executed before this node.
-    ///
-    /// Unlike `with_before_enter`, this method adds to the existing list of decorators
-    /// rather than replacing them.
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
-
-    /// Appends decorators to be executed after this node.
-    ///
-    /// Unlike `with_after_exit`, this method adds to the existing list of decorators
-    /// rather than replacing them.
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
 
     /// Sets a digest to be forced into the built node.
     ///
@@ -88,9 +68,8 @@ impl MastNodeBuilder {
     /// Adds the node from this builder to the forest without validation, used during
     /// deserialization.
     ///
-    /// This method bypasses normal validation and directly creates nodes with
-    /// `DecoratorStore::Linked`. It should only be used during deserialization where the forest
-    /// structure is being reconstructed.
+    /// This method bypasses normal validation. It should only be used during deserialization where
+    /// the forest structure is being reconstructed.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         mast_forest: &mut MastForest,
@@ -130,7 +109,7 @@ impl proptest::prelude::Arbitrary for MastNodeBuilder {
 
 #[cfg(test)]
 mod fingerprint_invariant_tests {
-    use alloc::{collections::BTreeMap, vec::Vec};
+    use alloc::collections::BTreeMap;
 
     use proptest::prelude::*;
 
@@ -154,8 +133,8 @@ mod fingerprint_invariant_tests {
             let felt_1 = Felt::new_unchecked(error_code_1);
             let felt_2 = Felt::new_unchecked(error_code_2);
 
-            let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)], Vec::new());
-            let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)], Vec::new());
+            let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)]);
+            let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)]);
 
             let empty_map = BTreeMap::new();
             let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
@@ -183,10 +162,10 @@ mod round_trip_tests {
     fn test_mast_node_builder_enum_digest_forcing() {
         let mut forest = MastForest::new();
 
-        let mast_builder1 = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
-            vec![Operation::Push(Felt::new_unchecked(10))],
-            vec![],
-        ));
+        let mast_builder1 =
+            MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Push(
+                Felt::new_unchecked(10),
+            )]));
         let mast_node_id1 = mast_builder1
             .add_to_forest(&mut forest)
             .expect("Failed to add mast node1 to forest");
@@ -200,7 +179,7 @@ mod round_trip_tests {
             Felt::new_unchecked(12),
         ]);
         let mast_builder2 = MastNodeBuilder::BasicBlock(
-            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))], vec![])
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(10))])
                 .with_digest(forced_mast_digest),
         );
         let mast_node_id2 = mast_builder2

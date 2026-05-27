@@ -1,23 +1,17 @@
-#[cfg(test)]
-use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-#[cfg(test)]
-use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    mast::{ExecutableMastForest, MastForest, MastNodeExt, MastNodeId},
-    operations::Decorator,
+    mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -141,10 +135,6 @@ pub struct FastProcessor {
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
-
-    /// Tracks decorator retrieval calls for testing.
-    #[cfg(test)]
-    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
@@ -246,8 +236,7 @@ impl FastProcessor {
 
     /// Enables or disables debugging mode.
     ///
-    /// This is kept for backwards compatibility but no longer affects decorator execution
-    /// since the `Decorator::Debug` variant has been removed.
+    /// This is kept for backwards compatibility but no longer affects runtime execution.
     pub fn with_debugging(mut self, enabled: bool) -> Self {
         self.options = self.options.with_debugging(enabled);
         self
@@ -287,8 +276,6 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
-            #[cfg(test)]
-            decorator_retrieval_count: Rc::new(Cell::new(0)),
         })
     }
 
@@ -315,21 +302,6 @@ impl FastProcessor {
     #[inline(always)]
     pub fn in_debug_mode(&self) -> bool {
         self.options.enable_debugging()
-    }
-
-    /// Returns true if decorators should be executed.
-    ///
-    /// All executable decorators have been removed, so decorator lists are never retrieved during
-    /// execution.
-    #[inline(always)]
-    fn should_execute_decorators(&self) -> bool {
-        false
-    }
-
-    #[cfg(test)]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {
-        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
     }
 
     /// Returns the size of the stack.
@@ -509,75 +481,6 @@ impl FastProcessor {
         let b = self.stack_get(idx2);
         self.stack_write(idx1, b);
         self.stack_write(idx2, a);
-    }
-
-    // DECORATOR EXECUTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.before_enter(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.after_exit(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the specified decorator
-    fn execute_decorator<F>(
-        &self,
-        decorator: &Decorator,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>> {
-        let _ = (decorator, host);
-        ControlFlow::Continue(())
     }
 
     /// Increments the stack top pointer by 1.

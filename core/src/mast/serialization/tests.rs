@@ -377,13 +377,14 @@ fn assert_serialized_view_matches_forest(forest: &MastForest) {
 fn test_mast_forest_view_trait_matches_serialized_view() {
     let mut forest = MastForest::new();
 
-    let block1 = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(Felt::new_unchecked(7)), Operation::Add, Operation::Mul],
-        Vec::new(),
-    )
+    let block1 = BasicBlockNodeBuilder::new(vec![
+        Operation::Push(Felt::new_unchecked(7)),
+        Operation::Add,
+        Operation::Mul,
+    ])
     .add_to_forest(&mut forest)
     .unwrap();
-    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
@@ -449,10 +450,9 @@ fn test_mast_forest_view_trait_matches_serialized_view() {
 #[test]
 fn test_mast_forest_read_view_modes_match() {
     let mut forest = MastForest::new();
-    let block =
-        BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(3))], Vec::new())
-            .add_to_forest(&mut forest)
-            .unwrap();
+    let block = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(3))])
+        .add_to_forest(&mut forest)
+        .unwrap();
     forest.make_root(block);
 
     let advice_key = Word::new([
@@ -494,7 +494,7 @@ fn test_mast_forest_read_view_modes_match() {
 fn test_mast_forest_wire_view_random_access_all_node_types() {
     let mut forest = MastForest::new();
 
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
@@ -523,7 +523,7 @@ fn test_mast_forest_wire_view_large_counts() {
     let mut roots = Vec::new();
 
     for _ in 0..300 {
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         roots.push(block_id);
@@ -584,10 +584,10 @@ fn rewrite_debug_info_procedure_name_digest(
 #[test]
 fn test_mast_forest_wire_view_rejects_hashless() {
     let mut forest = MastForest::new();
-    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
-    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
@@ -691,7 +691,7 @@ fn test_untrusted_hashless_keeps_external_digests_by_node_index() {
         Felt::new_unchecked(0),
     ]);
 
-    let _block = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let _block = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     let high_id = ExternalNodeBuilder::new(external_high).add_to_forest(&mut forest).unwrap();
@@ -714,26 +714,26 @@ fn test_untrusted_hashless_keeps_external_digests_by_node_index() {
 fn mast_forest_invalid_node_id() {
     // Hydrate a forest smaller than the second
     let mut forest = MastForest::new();
-    let first = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
 
     // Hydrate a forest larger than the first to get an overflow MastNodeId
     let mut overflow_forest = MastForest::new();
 
-    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut overflow_forest)
         .unwrap();
-    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut overflow_forest)
         .unwrap();
-    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut overflow_forest)
         .unwrap();
-    let overflow = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let overflow = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut overflow_forest)
         .unwrap();
 
@@ -773,7 +773,7 @@ fn mast_forest_invalid_node_id() {
 #[test]
 fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -840,7 +840,7 @@ fn mast_forest_read_from_bytes_rejects_fuzzed_overflow_payload() {
 fn mast_forest_serialize_deserialize_procedure_names() {
     let mut forest = MastForest::new();
 
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -863,13 +863,13 @@ fn mast_forest_serialize_deserialize_procedure_names() {
 fn mast_forest_serialize_deserialize_multiple_procedure_names() {
     let mut forest = MastForest::new();
 
-    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
-    let block3_id = BasicBlockNodeBuilder::new(vec![Operation::U32sub], Vec::new())
+    let block3_id = BasicBlockNodeBuilder::new(vec![Operation::U32sub])
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -913,9 +913,7 @@ fn test_opbatch_roundtrip_preservation() {
         Operation::Mul,
     ];
 
-    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     let original = forest[block_id].unwrap_basic_block();
     let deserialized_forest = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
@@ -930,9 +928,7 @@ fn test_multi_batch_roundtrip() {
     let mut forest = MastForest::new();
     let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new_unchecked(i))).collect();
 
-    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     let original = forest[block_id].unwrap_basic_block();
     assert!(original.op_batches().len() > 1, "Should have multiple batches");
@@ -956,9 +952,7 @@ fn test_raw_batched_digest_equivalence() {
 
     // Construct via Raw path
     let mut forest1 = MastForest::new();
-    let block_id1 = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest1)
-        .unwrap();
+    let block_id1 = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest1).unwrap();
     let digest1 = forest1[block_id1].unwrap_basic_block().digest();
 
     // Construct via Batched path (via serialization round-trip)
@@ -983,9 +977,7 @@ fn test_batched_construction_preserves_structure() {
         Operation::Push(Felt::new_unchecked(200)),
     ];
 
-    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     // Get the OpBatches from the original node
     let original_node = forest[block_id].unwrap_basic_block();
@@ -994,13 +986,10 @@ fn test_batched_construction_preserves_structure() {
 
     // Construct a new node using the Batched path
     let mut forest2 = MastForest::new();
-    let block_id2 = BasicBlockNodeBuilder::from_op_batches(
-        original_batches.clone(),
-        Vec::new(),
-        original_digest,
-    )
-    .add_to_forest(&mut forest2)
-    .unwrap();
+    let block_id2 =
+        BasicBlockNodeBuilder::from_op_batches(original_batches.clone(), original_digest)
+            .add_to_forest(&mut forest2)
+            .unwrap();
 
     // Verify the OpBatch structure is exactly preserved
     let new_node = forest2[block_id2].unwrap_basic_block();
@@ -1030,7 +1019,7 @@ fn read_header_counts(bytes: &[u8]) -> (usize, usize) {
 #[test]
 fn test_header_flags_for_all_serialization_modes() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1049,7 +1038,7 @@ fn test_header_flags_for_all_serialization_modes() {
 #[test]
 fn test_header_counts_match_node_kinds() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
@@ -1067,7 +1056,7 @@ fn test_header_counts_match_node_kinds() {
 #[test]
 fn test_legacy_version_is_rejected() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1085,7 +1074,7 @@ fn test_legacy_version_is_rejected() {
 #[test]
 fn test_deserialization_rejects_mismatched_header_counts() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1122,9 +1111,7 @@ fn test_serialization_sizes_shrink_from_full_to_stripped_to_hashless() {
     let mut forest = MastForest::new();
 
     let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
-    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
 
     let digest = forest[block_id].digest();
@@ -1164,16 +1151,14 @@ fn assert_stripped_size_hint_matches_serialized_len(forest: &MastForest) {
 fn test_stripped_size_hint_matches_serialized_len() {
     let mut small_forest = MastForest::new();
 
-    let block1 = BasicBlockNodeBuilder::new(
-        vec![Operation::Add, Operation::Push(Felt::new_unchecked(3))],
-        Vec::new(),
-    )
-    .add_to_forest(&mut small_forest)
-    .unwrap();
-    let block2 = BasicBlockNodeBuilder::new(
-        vec![Operation::U32div, Operation::Assert(Felt::new_unchecked(1))],
-        Vec::new(),
-    )
+    let block1 =
+        BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Push(Felt::new_unchecked(3))])
+            .add_to_forest(&mut small_forest)
+            .unwrap();
+    let block2 = BasicBlockNodeBuilder::new(vec![
+        Operation::U32div,
+        Operation::Assert(Felt::new_unchecked(1)),
+    ])
     .add_to_forest(&mut small_forest)
     .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut small_forest).unwrap();
@@ -1194,9 +1179,7 @@ fn test_stripped_size_hint_matches_serialized_len() {
     operations.push(Operation::U32assert2(Felt::new_unchecked(11)));
     operations.push(Operation::MpVerify(Felt::new_unchecked(13)));
 
-    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
 
     let key_a = Word::new([
@@ -1212,8 +1195,8 @@ fn test_stripped_size_hint_matches_serialized_len() {
         Felt::new_unchecked(8),
     ]);
 
-    let values_a: Vec<Felt> = (0..200).map(|i| Felt::new_unchecked(i as u64)).collect();
-    let values_b: Vec<Felt> = (0..5).map(|i| Felt::new_unchecked((i + 10) as u64)).collect();
+    let values_a: Vec<Felt> = (0u64..200).map(Felt::new_unchecked).collect();
+    let values_b: Vec<Felt> = (10u64..15).map(Felt::new_unchecked).collect();
 
     forest.advice_map_mut().insert(key_a, values_a);
     forest.advice_map_mut().insert(key_b, values_b);
@@ -1225,7 +1208,7 @@ fn test_stripped_size_hint_matches_serialized_len() {
 #[test]
 fn test_deserialize_rejects_unknown_flags() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1246,7 +1229,7 @@ fn test_deserialize_rejects_unknown_flags() {
 #[test]
 fn test_trusted_rejects_hashless() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1264,7 +1247,7 @@ fn test_trusted_rejects_hashless() {
 #[test]
 fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1284,7 +1267,7 @@ fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
 #[test]
 fn test_hashless_requires_stripped() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1325,7 +1308,7 @@ fn assert_untrusted_overspec_logging(
 #[test]
 fn test_untrusted_overspecification_logging_matches_wire_mode() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1352,10 +1335,10 @@ fn test_untrusted_overspecification_logging_matches_wire_mode() {
 #[test]
 fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
     let mut forest = MastForest::new();
-    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
-    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
@@ -1383,7 +1366,7 @@ fn test_debuginfo_serialization_empty() {
 
     // Add a simple basic block with no decorators
     let ops = vec![Operation::Noop; 4];
-    let block_id = BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
 
     // Serialize and deserialize
@@ -1392,8 +1375,8 @@ fn test_debuginfo_serialization_empty() {
 
     // Verify
     assert_eq!(forest.num_nodes(), deserialized.num_nodes());
-    assert_eq!(forest.decorators().len(), 0);
-    assert_eq!(deserialized.decorators().len(), 0);
+    assert!(forest.debug_info().is_empty());
+    assert!(deserialized.debug_info().is_empty());
 }
 
 /// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
@@ -1401,13 +1384,13 @@ fn test_debuginfo_serialization_empty() {
 fn test_untrusted_forest_detects_forward_reference() {
     // Create a forest with forward references by swapping node order
     let mut forest = MastForest::new();
-    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div])
         .add_to_forest(&mut forest)
         .unwrap();
-    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], Vec::new())
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and])
         .add_to_forest(&mut forest)
         .unwrap();
     JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
@@ -1430,7 +1413,7 @@ fn test_untrusted_forest_detects_forward_reference() {
 #[test]
 fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1470,7 +1453,7 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
 #[test]
 fn test_untrusted_forest_rejects_invalid_procedure_name_digest_without_remapping() {
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1497,10 +1480,10 @@ fn test_untrusted_forest_rejects_invalid_procedure_name_digest_without_remapping
 #[test]
 fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let mut forest = MastForest::new();
-    let left_root = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let left_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let right_root = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let right_root = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(left_root);
@@ -1571,10 +1554,11 @@ fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
 fn build_malicious_single_block_forest_bytes(push_imm: Felt) -> Vec<u8> {
     // Build a minimal forest containing a single basic-block procedure root.
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(push_imm), Operation::Noop, Operation::Add],
-        Vec::new(),
-    )
+    let block_id = BasicBlockNodeBuilder::new(vec![
+        Operation::Push(push_imm),
+        Operation::Noop,
+        Operation::Add,
+    ])
     .add_to_forest(&mut forest)
     .unwrap();
     forest.make_root(block_id);
@@ -1737,7 +1721,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
     let digest = hasher::hash_elements(&op_groups);
 
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1758,7 +1742,7 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
     let digest = hasher::hash_elements(&op_groups);
 
     let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -1860,10 +1844,10 @@ fn test_untrusted_forest_validates_all_node_types() {
     let mut forest = MastForest::new();
 
     // Create basic blocks
-    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -1967,10 +1951,10 @@ fn test_untrusted_deserialization_rejects_node_count_above_budget_bound() {
 #[test]
 fn test_untrusted_hashless_validation_respects_custom_allocation_budget() {
     let mut forest = MastForest::new();
-    let left = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     let root = JoinNodeBuilder::new([left, right]).add_to_forest(&mut forest).unwrap();
@@ -2000,10 +1984,10 @@ fn test_untrusted_hashless_validation_respects_custom_allocation_budget() {
 #[test]
 fn test_untrusted_stripped_debug_info_budget_uses_usize_slots() {
     let mut forest = MastForest::new();
-    let left = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     let root = JoinNodeBuilder::new([left, right]).add_to_forest(&mut forest).unwrap();

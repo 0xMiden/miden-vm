@@ -161,8 +161,7 @@ impl ExecutionOptions {
     /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
     /// otherwise, debug mode is disabled.
     ///
-    /// This flag is kept for backwards compatibility but no longer affects decorator execution
-    /// since the `Decorator::Debug` variant has been removed.
+    /// This flag is kept for backwards compatibility but no longer affects runtime execution.
     pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
         self.enable_debugging = enable_debugging;
         self

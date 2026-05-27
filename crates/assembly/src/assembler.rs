@@ -17,10 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    mast::{
-        DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
-    },
+    mast::{LoopNodeBuilder, MastNodeExt, MastNodeId, SplitNodeBuilder},
     operations::{AssemblyOp, Operation},
     program::Kernel,
     serde::Serializable,
@@ -35,7 +32,7 @@ use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
-    basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
+    basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
     mast_forest_builder::MastForestBuilder,
@@ -1134,8 +1131,8 @@ impl Assembler {
         Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_id))
     }
 
-    /// Creates an assembly operation decorator for control flow nodes.
-    fn create_asmop_decorator(
+    /// Creates assembly operation metadata for control flow nodes.
+    fn create_asm_op(
         &self,
         span: &SourceSpan,
         op_name: &str,
@@ -1171,11 +1168,6 @@ impl Assembler {
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
                             body_node_ids.push(basic_block_id);
-                        } else if let Some(decorator_ids) = block_builder.drain_decorators() {
-                            block_builder
-                                .mast_forest_builder_mut()
-                                .append_before_enter(node_id, decorator_ids)
-                                .into_diagnostic()?;
                         }
 
                         body_node_ids.push(node_id);
@@ -1211,11 +1203,8 @@ impl Assembler {
                         next_depth,
                     )?;
 
-                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        split_builder.append_before_enter(decorator_ids);
-                    }
+                    let asm_op = self.create_asm_op(span, "if.true", proc_ctx);
+                    let split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
 
                     let split_node_id = block_builder
                         .mast_forest_builder_mut()
@@ -1271,48 +1260,8 @@ impl Assembler {
                             .into());
                     }
 
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        // Attach decorators before the first iteration. We must carry the
-                        // original node's external metadata into the dedup fingerprint,
-                        // otherwise structurally identical nodes with different source mappings
-                        // can alias.
-                        let first_repeat_builder = block_builder.mast_forest_builder()
-                            [repeat_node_id]
-                            .clone()
-                            .to_builder(block_builder.mast_forest_builder().mast_forest())
-                            .with_before_enter(decorator_ids);
-                        let first_repeat_node_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_node_preserving_debug_vars(
-                                first_repeat_builder,
-                                repeat_node_id,
-                            )?;
-
-                        body_node_ids.push(first_repeat_node_id);
-                        let remaining_iterations =
-                            iteration_count.checked_sub(1).ok_or_else(|| {
-                                Report::new(
-                                    RelatedLabel::error("invalid repeat count")
-                                        .with_help("repeat count must be greater than 0")
-                                        .with_labeled_span(
-                                            count.span(),
-                                            "repeat count must be at least 1",
-                                        )
-                                        .with_source_file(
-                                            proc_ctx
-                                                .source_manager()
-                                                .get(proc_ctx.span().source_id())
-                                                .ok(),
-                                        ),
-                                )
-                            })?;
-                        for _ in 0..remaining_iterations {
-                            body_node_ids.push(repeat_node_id);
-                        }
-                    } else {
-                        for _ in 0..iteration_count {
-                            body_node_ids.push(repeat_node_id);
-                        }
+                    for _ in 0..iteration_count {
+                        body_node_ids.push(repeat_node_id);
                     }
                 },
 
@@ -1337,12 +1286,9 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        loop_builder.append_before_enter(decorator_ids);
-                    }
+                    let loop_builder = LoopNodeBuilder::new(loop_body_node_id);
 
-                    let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
+                    let asm_op = self.create_asm_op(span, "while.true", proc_ctx);
                     let loop_node_id = block_builder
                         .mast_forest_builder_mut()
                         .ensure_node_with_asm_op(loop_builder, asm_op)?;
@@ -1352,55 +1298,16 @@ impl Assembler {
             }
         }
 
-        let maybe_post_decorators: Option<Vec<DecoratorId>> =
-            match block_builder.try_into_basic_block()? {
-                BasicBlockOrDecorators::BasicBlock(basic_block_id) => {
-                    body_node_ids.push(basic_block_id);
-                    None
-                },
-                BasicBlockOrDecorators::Decorators(decorator_ids) => {
-                    // the procedure body ends with a list of decorators
-                    Some(decorator_ids)
-                },
-                BasicBlockOrDecorators::Nothing => None,
-            };
+        if let Some(basic_block_id) = block_builder.try_into_basic_block()? {
+            body_node_ids.push(basic_block_id);
+        }
 
         let procedure_body_id = if body_node_ids.is_empty() {
-            // We cannot allow only decorators in a procedure body, since decorators don't change
-            // the MAST digest of a node. Hence, two empty procedures with different decorators
-            // would look the same to the `MastForestBuilder`.
-            if maybe_post_decorators.is_some() {
-                return Err(Report::new(
-                    RelatedLabel::error("invalid procedure")
-                        .with_labeled_span(
-                            proc_ctx.span(),
-                            "body must contain at least one instruction if it has decorators",
-                        )
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        ),
-                ));
-            }
-
-            mast_forest_builder.ensure_block(
-                vec![Operation::Noop],
-                Vec::new(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            )?
+            mast_forest_builder.ensure_block(vec![Operation::Noop], vec![], vec![])?
         } else {
-            let asm_op = self.create_asmop_decorator(&proc_ctx.span(), "begin", proc_ctx);
+            let asm_op = self.create_asm_op(&proc_ctx.span(), "begin", proc_ctx);
             mast_forest_builder.join_nodes(body_node_ids, Some(asm_op))?
         };
-
-        // Make sure that any post decorators are added at the end of the procedure body
-        if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder
-                .append_after_exit(procedure_body_id, post_decorator_ids)
-                .into_diagnostic()?;
-        }
 
         Ok(procedure_body_id)
     }

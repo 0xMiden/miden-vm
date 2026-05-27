@@ -13,18 +13,15 @@ use crate::{
 };
 
 fn block_foo() -> BasicBlockNodeBuilder {
-    BasicBlockNodeBuilder::new(vec![Operation::Mul, Operation::Add], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::Mul, Operation::Add])
 }
 
 fn block_bar() -> BasicBlockNodeBuilder {
-    BasicBlockNodeBuilder::new(vec![Operation::And, Operation::Eq], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::And, Operation::Eq])
 }
 
 fn block_qux() -> BasicBlockNodeBuilder {
-    BasicBlockNodeBuilder::new(
-        vec![Operation::Swap, Operation::Push(ONE), Operation::Eq],
-        Vec::new(),
-    )
+    BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq])
 }
 
 fn register_asm_ops_for_node(
@@ -130,7 +127,7 @@ fn mast_forest_merge_preserves_padded_basic_block_batches() {
     let mut forest = MastForest::new();
 
     let operations = vec![Operation::Add, Operation::Push(Felt::new_unchecked(100))];
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), Vec::new())
+    let block_id = BasicBlockNodeBuilder::new(operations.clone())
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
@@ -232,10 +229,6 @@ fn mast_forest_merge_duplicate() {
 
     for merged_node in merged.nodes().iter().map(MastNode::digest) {
         forest_a.nodes.iter().find(|node| node.digest() == merged_node).unwrap();
-    }
-
-    for merged_decorator in merged.decorators().iter() {
-        assert!(forest_a.decorators().contains(merged_decorator));
     }
 
     assert_child_id_lt_parent_id(&merged);

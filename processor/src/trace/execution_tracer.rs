@@ -251,7 +251,6 @@ impl ExecutionTracer {
                 },
                 Continuation::FinishCall(id) => Continuation::FinishCall(id),
                 Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
-                Continuation::FinishExternal(id) => Continuation::FinishExternal(id),
                 Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                     Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
                 },
@@ -259,7 +258,6 @@ impl ExecutionTracer {
                     Continuation::Respan { node_id, batch_index }
                 },
                 Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
-                Continuation::AfterExitDecorators(id) => Continuation::AfterExitDecorators(id),
             };
             translated.push_continuation(translated_cont);
         }
@@ -715,12 +713,8 @@ impl Tracer for ExecutionTracer {
                     self.pending_restore_context = true;
                 }
             },
-            Continuation::FinishExternal(_)
-            | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_) => {
-                panic!(
-                    "FinishExternal, EnterForest, and AfterExitDecorators continuations are guaranteed not to be passed here"
-                )
+            Continuation::EnterForest(_) => {
+                panic!("EnterForest continuations are guaranteed not to be passed here")
             },
         }
     }
@@ -995,9 +989,7 @@ fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
         Continuation::FinishLoop { node_id, .. }
         | Continuation::ResumeBasicBlock { node_id, .. }
         | Continuation::Respan { node_id, .. } => Some(node_id),
-        Continuation::FinishExternal(_)
-        | Continuation::EnterForest(_)
-        | Continuation::AfterExitDecorators(_) => None,
+        Continuation::EnterForest(_) => None,
     }
 }
 

@@ -1,20 +1,10 @@
-use alloc::vec::Vec;
-
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 #[cfg(all(feature = "arbitrary", feature = "std"))]
 use proptest_derive::Arbitrary;
 
-use super::{
-    DecoratorDataOffset,
-    string_table::{StringTable, StringTableBuilder},
-};
-use crate::{
-    operations::Decorator,
-    serde::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    },
-};
+use super::DecoratorDataOffset;
+use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// Represents a serialized [`Decorator`].
 ///
@@ -30,38 +20,6 @@ use crate::{
 pub struct DecoratorInfo {
     variant: EncodedDecoratorVariant,
     decorator_data_offset: DecoratorDataOffset,
-}
-
-impl DecoratorInfo {
-    pub fn try_into_decorator(
-        &self,
-        _string_table: &StringTable,
-        decorator_data: &[u8],
-    ) -> Result<Decorator, DeserializationError> {
-        let offset = self.decorator_data_offset as usize;
-        if offset > decorator_data.len() {
-            return Err(DeserializationError::InvalidValue(format!(
-                "decorator data offset {offset} is out of bounds (data length: {})",
-                decorator_data.len()
-            )));
-        }
-        let _data_reader = SliceReader::new(&decorator_data[offset..]);
-        match self.variant {
-            EncodedDecoratorVariant::DebugOptionsStackAll
-            | EncodedDecoratorVariant::DebugOptionsStackTop
-            | EncodedDecoratorVariant::DebugOptionsMemAll
-            | EncodedDecoratorVariant::DebugOptionsMemInterval
-            | EncodedDecoratorVariant::DebugOptionsLocalInterval
-            | EncodedDecoratorVariant::DebugOptionsAdvStackTop => {
-                Err(DeserializationError::InvalidValue(
-                    "debug decorators are no longer supported".into(),
-                ))
-            },
-            EncodedDecoratorVariant::TraceDecorator => Err(DeserializationError::InvalidValue(
-                "trace decorators are no longer supported".into(),
-            )),
-        }
-    }
 }
 
 impl Serializable for DecoratorInfo {
@@ -90,7 +48,7 @@ impl Deserializable for DecoratorInfo {
 // ENCODED DATA VARIANT
 // ===============================================================================================
 
-/// Stores all the possible [`Decorator`] variants, without any associated data.
+/// Stores all legacy executable decorator variants, without any associated data.
 ///
 /// This is effectively equivalent to a set of constants, and designed to convert between variant
 /// discriminant and enum variant conveniently.
@@ -129,12 +87,6 @@ impl EncodedDecoratorVariant {
     }
 }
 
-impl From<&Decorator> for EncodedDecoratorVariant {
-    fn from(decorator: &Decorator) -> Self {
-        match *decorator {}
-    }
-}
-
 impl Serializable for EncodedDecoratorVariant {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.discriminant().write_into(target);
@@ -155,60 +107,5 @@ impl Deserializable for EncodedDecoratorVariant {
     /// Returns the fixed serialized size: 1 byte discriminant.
     fn min_serialized_size() -> usize {
         1
-    }
-}
-
-// DECORATOR DATA BUILDER
-// ===============================================================================================
-
-/// Builds the decorator `data` section of a serialized [`crate::mast::MastForest`].
-#[derive(Debug, Default)]
-pub struct DecoratorDataBuilder {
-    decorator_data: Vec<u8>,
-    decorator_infos: Vec<DecoratorInfo>,
-    string_table_builder: StringTableBuilder,
-}
-
-/// Constructors
-impl DecoratorDataBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-/// Mutators
-impl DecoratorDataBuilder {
-    pub fn add_decorator(&mut self, decorator: &Decorator) {
-        let _ = decorator;
-    }
-
-    /// Returns the serialized [`crate::mast::MastForest`] decorator data field.
-    pub fn finalize(self) -> (Vec<u8>, Vec<DecoratorInfo>, StringTable) {
-        (
-            self.decorator_data,
-            self.decorator_infos,
-            self.string_table_builder.into_table(),
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn removed_trace_decorator_discriminant_is_rejected_explicitly() {
-        let info = DecoratorInfo {
-            variant: EncodedDecoratorVariant::TraceDecorator,
-            decorator_data_offset: 0,
-        };
-        let string_table = StringTable::new(vec![], vec![]);
-        let result = info.try_into_decorator(&string_table, &[]);
-
-        assert!(matches!(
-            result,
-            Err(DeserializationError::InvalidValue(message))
-                if message.contains("trace decorators are no longer supported")
-        ));
     }
 }

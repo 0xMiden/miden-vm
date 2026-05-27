@@ -15,7 +15,7 @@ use crate::{
 
 /// Debug information for tracking a source-level variable.
 ///
-/// This decorator provides debuggers with information about where a variable's
+/// This record provides debuggers with information about where a variable's
 /// value can be found at a particular point in the program execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -28,8 +28,8 @@ pub struct DebugVarInfo {
     /// If this is a function parameter, its 1-based index.
     arg_index: Option<NonZeroU32>,
     /// Source file location (file:line:column).
-    /// This should only be set when the location differs from the AssemblyOp decorator
-    /// location associated with the same instruction, to avoid package bloat.
+    /// This should only be set when the location differs from the AssemblyOp location associated
+    /// with the same instruction, to avoid package bloat.
     location: Option<FileLineCol>,
     /// Where to find the variable's value at this point
     value_location: DebugVarLocation,
@@ -78,13 +78,13 @@ impl DebugVarInfo {
     }
 
     /// Returns the source location if set.
-    /// This is only set when the location differs from the AssemblyOp decorator location.
+    /// This is only set when the location differs from the AssemblyOp location.
     pub fn location(&self) -> Option<&FileLineCol> {
         self.location.as_ref()
     }
 
     /// Sets the source location for this variable.
-    /// Only set this when the location differs from the AssemblyOp decorator location
+    /// Only set this when the location differs from the AssemblyOp location
     /// to avoid package bloat.
     pub fn set_location(&mut self, location: FileLineCol) {
         self.location = Some(location);

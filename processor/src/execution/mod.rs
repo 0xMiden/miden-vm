@@ -181,13 +181,9 @@ where
                             .map_break(InternalBreakReason::from)?
                     },
                     MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
-                    MastNode::External(_) => external::execute_external_node(
-                        state.processor,
-                        node_id,
-                        current_forest,
-                        state.host,
-                        state.tracer,
-                    )?,
+                    MastNode::External(_) => {
+                        external::execute_external_node(node_id, current_forest, state.tracer)?
+                    },
                 }
             },
             Continuation::FinishJoin(node_id) => {
@@ -209,14 +205,6 @@ where
             Continuation::FinishDyn(node_id) => {
                 r#dyn::finish_dyn_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
-            },
-            Continuation::FinishExternal(node_id) => {
-                // Execute after_exit decorators when returning from an external node
-                // Note: current_forest should already be restored by EnterForest continuation
-                state
-                    .processor
-                    .execute_after_exit_decorators(node_id, current_forest, state.host)
-                    .map_break(InternalBreakReason::from)?;
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let basic_block_node =
@@ -251,10 +239,6 @@ where
                 // Restore the previous forest
                 *current_forest = previous_forest;
             },
-            Continuation::AfterExitDecorators(node_id) => state
-                .processor
-                .execute_after_exit_decorators(node_id, current_forest, state.host)
-                .map_break(InternalBreakReason::from)?,
         }
     }
 

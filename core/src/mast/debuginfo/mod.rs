@@ -3,28 +3,18 @@
 //! This module provides the [`DebugInfo`] struct which consolidates all debug-related metadata for
 //! a MAST forest in a single location. This includes:
 //!
-//! - An empty decorator table retained for wire-format structure
-//! - Operation-indexed decorator mappings for efficient lookup
-//! - Node-level decorator storage (before_enter/after_exit)
+//! - Assembly operation source mappings
+//! - Debug variable locations
 //! - Error code mappings for descriptive error messages
+//! - Procedure names
 //!
-//! The debug info is always available at the `MastForest` level (as per issue 1821), but may be
-//! conditionally included during assembly to maintain backward compatibility. Executable
-//! decorators have been removed. Assembly operation metadata remains available for debugging and
-//! error reporting.
-//!
-//! # Decorator Semantics
-//!
-//! Debug and trace decorators are no longer accepted by the assembler, no longer deserialize from
-//! MAST, and are never executed by the processor.
-//!
-//! Assembly operation metadata still provides source mapping information.
+//! Executable decorators have been removed. Assembly operation metadata remains available for
+//! debugging and error reporting.
 //!
 //! # Production Builds
 //!
 //! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear) method,
-//! which removes decorators while preserving critical information. This allows backward
-//! compatibility while enabling size optimization for deployment.
+//! which removes debug metadata while preserving executable structure.
 
 use alloc::{
     collections::BTreeMap,
@@ -37,32 +27,24 @@ use miden_debug_types::{FileLineCol, Location};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
+use super::{AsmOpId, MastForestError, MastNodeId};
 use crate::{
     Word,
     mast::serialization::{
         StringTable,
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
-        decorator::{DecoratorDataBuilder, DecoratorInfo},
+        decorator::DecoratorInfo,
     },
     operations::{AssemblyOp, DebugVarInfo},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-    utils::{Idx, IndexVec},
+    utils::IndexVec,
 };
 
 mod asm_op_storage;
 pub use asm_op_storage::{AsmOpIndexError, OpToAsmOpId};
 
-mod decorator_storage;
-pub use decorator_storage::{
-    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, OpToDecoratorIds,
-};
-
 mod debug_var_storage;
-pub use debug_var_storage::{DebugVarId, OpToDebugVarIds};
-
-mod node_decorator_storage;
-pub use node_decorator_storage::NodeToDecoratorIds;
+pub use debug_var_storage::{DebugInfoIndexError, DebugVarId, OpToDebugVarIds};
 
 // DEBUG INFO
 // ================================================================================================
@@ -71,15 +53,6 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
-    /// Decorator table for the MAST forest. This is empty for newly assembled programs.
-    decorators: IndexVec<DecoratorId, Decorator>,
-
-    /// Efficient access to decorators per operation per node.
-    op_decorator_storage: OpToDecoratorIds,
-
-    /// Efficient storage for node-level decorators (before_enter and after_exit).
-    node_decorator_storage: NodeToDecoratorIds,
-
     /// All AssemblyOps in the MAST forest.
     asm_ops: IndexVec<AsmOpId, AssemblyOp>,
 
@@ -107,9 +80,6 @@ impl DebugInfo {
     /// Creates a new empty [DebugInfo].
     pub fn new() -> Self {
         Self {
-            decorators: IndexVec::new(),
-            op_decorator_storage: OpToDecoratorIds::new(),
-            node_decorator_storage: NodeToDecoratorIds::new(),
             asm_ops: IndexVec::new(),
             asm_op_storage: OpToAsmOpId::new(),
             debug_vars: IndexVec::new(),
@@ -121,124 +91,53 @@ impl DebugInfo {
 
     /// Creates an empty [DebugInfo] with specified capacities.
     pub fn with_capacity(
-        decorators_capacity: usize,
         nodes_capacity: usize,
         operations_capacity: usize,
-        decorator_ids_capacity: usize,
+        asm_ops_capacity: usize,
+        debug_vars_capacity: usize,
     ) -> Self {
         Self {
-            decorators: IndexVec::with_capacity(decorators_capacity),
-            op_decorator_storage: OpToDecoratorIds::with_capacity(
+            asm_ops: IndexVec::with_capacity(asm_ops_capacity),
+            asm_op_storage: OpToAsmOpId::with_capacity(nodes_capacity, operations_capacity),
+            debug_vars: IndexVec::with_capacity(debug_vars_capacity),
+            op_debug_var_storage: OpToDebugVarIds::with_capacity(
                 nodes_capacity,
                 operations_capacity,
-                decorator_ids_capacity,
+                debug_vars_capacity,
             ),
-            node_decorator_storage: NodeToDecoratorIds::with_capacity(nodes_capacity, 0, 0),
-            asm_ops: IndexVec::new(),
-            asm_op_storage: OpToAsmOpId::new(),
-            debug_vars: IndexVec::new(),
-            op_debug_var_storage: OpToDebugVarIds::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
     }
 
     /// Creates an empty [DebugInfo] with valid CSR structures for N nodes.
-    pub fn empty_for_nodes(num_nodes: usize) -> Self {
-        let node_indptr_for_op_idx = IndexVec::try_from(vec![0; num_nodes + 1])
-            .expect("num_nodes should not exceed u32::MAX");
-
-        let op_decorator_storage =
-            OpToDecoratorIds::from_components(Vec::new(), Vec::new(), node_indptr_for_op_idx)
-                .expect("Empty CSR structure should be valid");
-
-        Self {
-            decorators: IndexVec::new(),
-            op_decorator_storage,
-            node_decorator_storage: NodeToDecoratorIds::new(),
-            asm_ops: IndexVec::new(),
-            asm_op_storage: OpToAsmOpId::new(),
-            debug_vars: IndexVec::new(),
-            op_debug_var_storage: OpToDebugVarIds::new(),
-            error_codes: BTreeMap::new(),
-            procedure_names: BTreeMap::new(),
-        }
+    pub fn empty_for_nodes(_num_nodes: usize) -> Self {
+        Self::new()
     }
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators, asm_ops, debug vars, error codes, or
-    /// procedure names.
+    /// Returns true if this [DebugInfo] has no asm_ops, debug vars, error codes, or procedure
+    /// names.
     pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty()
-            && self.asm_ops.is_empty()
+        self.asm_ops.is_empty()
             && self.debug_vars.is_empty()
             && self.error_codes.is_empty()
             && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators, asm_ops, debug vars, error codes, and
-    /// procedure
+    /// Strips all debug information, removing asm_ops, debug vars, error codes, and procedure
     /// names.
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn clear(&mut self) {
-        self.clear_mappings();
-        self.decorators = IndexVec::new();
         self.asm_ops = IndexVec::new();
         self.asm_op_storage = OpToAsmOpId::new();
         self.debug_vars = IndexVec::new();
         self.op_debug_var_storage.clear();
         self.error_codes.clear();
         self.procedure_names.clear();
-    }
-
-    // DECORATOR ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the number of decorators.
-    pub fn num_decorators(&self) -> usize {
-        self.decorators.len()
-    }
-
-    /// Returns all decorators as a slice.
-    pub fn decorators(&self) -> &[Decorator] {
-        self.decorators.as_slice()
-    }
-
-    /// Returns the decorator with the given ID, if it exists.
-    pub fn decorator(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
-        self.decorators.get(decorator_id)
-    }
-
-    /// Returns the before-enter decorators for the given node.
-    pub fn before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
-        self.node_decorator_storage.get_before_decorators(node_id)
-    }
-
-    /// Returns the after-exit decorators for the given node.
-    pub fn after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
-        self.node_decorator_storage.get_after_decorators(node_id)
-    }
-
-    /// Returns decorators for a specific operation within a node.
-    pub fn decorators_for_operation(
-        &self,
-        node_id: MastNodeId,
-        local_op_idx: usize,
-    ) -> &[DecoratorId] {
-        self.op_decorator_storage
-            .decorator_ids_for_operation(node_id, local_op_idx)
-            .unwrap_or(&[])
-    }
-
-    /// Returns decorator links for a node, including operation indices.
-    pub(super) fn decorator_links_for_node(
-        &self,
-        node_id: MastNodeId,
-    ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
-        self.op_decorator_storage.decorator_links_for_node(node_id)
     }
 
     // DEBUG VARIABLE ACCESSORS
@@ -274,57 +173,6 @@ impl DebugInfo {
         self.op_debug_var_storage
             .debug_var_ids_for_operation(node_id, local_op_idx)
             .unwrap_or(&[])
-    }
-
-    // DECORATOR MUTATORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Adds a decorator and returns its ID.
-    pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
-        self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
-    }
-
-    /// Returns a mutable reference the decorator with the given ID, if it exists.
-    pub(super) fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
-        if decorator_id.to_usize() < self.decorators.len() {
-            Some(&mut self.decorators[decorator_id])
-        } else {
-            None
-        }
-    }
-
-    /// Adds node-level decorators (before_enter and after_exit) for the given node.
-    ///
-    /// # Note
-    /// This method does not validate decorator IDs immediately. Validation occurs during
-    /// operations that need to access the actual decorator data (e.g., merging, serialization).
-    pub(super) fn register_node_decorators(
-        &mut self,
-        node_id: MastNodeId,
-        before_enter: &[DecoratorId],
-        after_exit: &[DecoratorId],
-    ) {
-        self.node_decorator_storage
-            .add_node_decorators(node_id, before_enter, after_exit);
-    }
-
-    /// Registers operation-indexed decorators for a node.
-    ///
-    /// This associates already-added decorators with specific operations within a node.
-    pub(crate) fn register_op_indexed_decorators(
-        &mut self,
-        node_id: MastNodeId,
-        decorators_info: Vec<(usize, DecoratorId)>,
-    ) -> Result<(), DecoratorIndexError> {
-        self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
-    }
-
-    /// Clears all decorator information while preserving error codes.
-    ///
-    /// This is used when rebuilding decorator information from nodes.
-    pub fn clear_mappings(&mut self) {
-        self.op_decorator_storage = OpToDecoratorIds::new();
-        self.node_decorator_storage.clear();
     }
 
     // ASSEMBLY OP ACCESSORS
@@ -367,7 +215,7 @@ impl DebugInfo {
 
     /// Adds an AssemblyOp and returns its ID.
     pub fn add_asm_op(&mut self, asm_op: AssemblyOp) -> Result<AsmOpId, MastForestError> {
-        self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDecorators)
+        self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDebugInfoEntries)
     }
 
     /// Rewrites the source-backed locations stored in this debug info.
@@ -419,7 +267,9 @@ impl DebugInfo {
         &mut self,
         debug_var: DebugVarInfo,
     ) -> Result<DebugVarId, MastForestError> {
-        self.debug_vars.push(debug_var).map_err(|_| MastForestError::TooManyDecorators)
+        self.debug_vars
+            .push(debug_var)
+            .map_err(|_| MastForestError::TooManyDebugInfoEntries)
     }
 
     /// Registers operation-indexed debug variables for a node.
@@ -429,7 +279,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         debug_vars_info: Vec<(usize, DebugVarId)>,
-    ) -> Result<(), DecoratorIndexError> {
+    ) -> Result<(), DebugInfoIndexError> {
         self.op_debug_var_storage.add_debug_var_info_for_node(node_id, debug_vars_info)
     }
 
@@ -510,22 +360,12 @@ impl DebugInfo {
     /// Validate the integrity of the DebugInfo structure.
     ///
     /// This validates:
-    /// - All CSR structures in op_decorator_storage
-    /// - All CSR structures in node_decorator_storage
     /// - All CSR structures in asm_op_storage
     /// - All CSR structures in op_debug_var_storage
-    /// - All decorator IDs reference valid decorators
     /// - All AsmOpIds reference valid AssemblyOps
     /// - All debug var IDs reference valid debug vars
     pub(super) fn validate(&self) -> Result<(), String> {
-        let decorator_count = self.decorators.len();
         let asm_op_count = self.asm_ops.len();
-
-        // Validate OpToDecoratorIds CSR
-        self.op_decorator_storage.validate_csr(decorator_count)?;
-
-        // Validate NodeToDecoratorIds CSR
-        self.node_decorator_storage.validate_csr(decorator_count)?;
 
         // Validate OpToAsmOpId CSR
         self.asm_op_storage.validate_csr(asm_op_count)?;
@@ -536,49 +376,25 @@ impl DebugInfo {
 
         Ok(())
     }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the operation decorator storage.
-    #[cfg(test)]
-    pub(crate) fn op_decorator_storage(&self) -> &OpToDecoratorIds {
-        &self.op_decorator_storage
-    }
-
-    /// Returns the node decorator storage.
-    #[cfg(test)]
-    pub(crate) fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
-        &self.node_decorator_storage
-    }
 }
 
 impl Serializable for DebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // 1. Serialize decorators (data, string table, infos)
-        let mut decorator_data_builder = DecoratorDataBuilder::new();
-        for decorator in self.decorators.iter() {
-            decorator_data_builder.add_decorator(decorator);
-        }
-        let (decorator_data, decorator_infos, string_table) = decorator_data_builder.finalize();
-
-        decorator_data.write_into(target);
-        string_table.write_into(target);
-        decorator_infos.write_into(target);
+        // 1. Serialize empty legacy decorator sections.
+        Vec::<u8>::new().write_into(target);
+        StringTable::new(Vec::new(), Vec::new()).write_into(target);
+        Vec::<DecoratorInfo>::new().write_into(target);
 
         // 2. Serialize error codes
         let error_codes: BTreeMap<u64, String> =
             self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
-        // 3. Serialize OpToDecoratorIds CSR (dense representation)
-        // Dense representation: serialize indptr arrays as-is (no sparse encoding).
-        // Analysis shows sparse saves <1KB even with 90% empty nodes, not worth complexity.
-        // See measurement: https://gist.github.com/huitseeker/7379e2eecffd7020ae577e986057a400
-        self.op_decorator_storage.write_into(target);
+        // 3. Serialize empty legacy OpToDecoratorIds CSR.
+        write_empty_legacy_op_decorator_storage(target);
 
-        // 4. Serialize NodeToDecoratorIds CSR (dense representation)
-        self.node_decorator_storage.write_into(target);
+        // 4. Serialize empty legacy NodeToDecoratorIds CSR.
+        write_empty_legacy_node_decorator_storage(target);
 
         // 5. Serialize procedure names
         let procedure_names: BTreeMap<Word, String> =
@@ -609,21 +425,16 @@ impl Serializable for DebugInfo {
 
 impl Deserializable for DebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // 1. Read decorator data and string table
+        // 1. Read and reject legacy decorator data.
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
         let string_table: StringTable = Deserializable::read_from(source)?;
         let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
-
-        // 2. Reconstruct decorators
-        let mut decorators = IndexVec::new();
-        for decorator_info in decorator_infos {
-            let decorator = decorator_info.try_into_decorator(&string_table, &decorator_data)?;
-            decorators.push(decorator).map_err(|_| {
-                DeserializationError::InvalidValue(
-                    "Failed to add decorator to IndexVec".to_string(),
-                )
-            })?;
+        if !decorator_data.is_empty() || !decorator_infos.is_empty() {
+            return Err(DeserializationError::InvalidValue(
+                "decorators are no longer supported".into(),
+            ));
         }
+        let _ = string_table;
 
         // 3. Read error codes
         let error_codes_raw: BTreeMap<u64, String> = Deserializable::read_from(source)?;
@@ -631,10 +442,18 @@ impl Deserializable for DebugInfo {
             error_codes_raw.into_iter().map(|(k, v)| (k, Arc::from(v.as_str()))).collect();
 
         // 4. Read OpToDecoratorIds CSR (dense representation)
-        let op_decorator_storage = OpToDecoratorIds::read_from(source, decorators.len())?;
+        if !read_empty_legacy_op_decorator_storage(source)? {
+            return Err(DeserializationError::InvalidValue(
+                "operation-indexed decorators are no longer supported".into(),
+            ));
+        }
 
         // 5. Read NodeToDecoratorIds CSR (dense representation)
-        let node_decorator_storage = NodeToDecoratorIds::read_from(source, decorators.len())?;
+        if !read_empty_legacy_node_decorator_storage(source)? {
+            return Err(DeserializationError::InvalidValue(
+                "node decorators are no longer supported".into(),
+            ));
+        }
 
         // 6. Read procedure names
         // Note: Procedure name digests are validated at the MastForest level (in
@@ -672,9 +491,6 @@ impl Deserializable for DebugInfo {
 
         // 12. Construct and validate DebugInfo
         let debug_info = DebugInfo {
-            decorators,
-            op_decorator_storage,
-            node_decorator_storage,
             asm_ops,
             asm_op_storage,
             debug_vars,
@@ -695,4 +511,45 @@ impl Default for DebugInfo {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn write_empty_legacy_op_decorator_storage<W: ByteWriter>(target: &mut W) {
+    Vec::<u32>::new().write_into(target);
+    Vec::<usize>::new().write_into(target);
+    Vec::<usize>::new().write_into(target);
+}
+
+fn read_empty_legacy_op_decorator_storage<R: ByteReader>(
+    source: &mut R,
+) -> Result<bool, DeserializationError> {
+    let decorator_ids: Vec<u32> = Deserializable::read_from(source)?;
+    let op_indptr_for_decorator_ids: Vec<usize> = Deserializable::read_from(source)?;
+    let node_indptr_for_op_idx: Vec<usize> = Deserializable::read_from(source)?;
+
+    Ok(decorator_ids.is_empty()
+        && op_indptr_for_decorator_ids.is_empty()
+        && node_indptr_for_op_idx.is_empty())
+}
+
+fn write_empty_legacy_node_decorator_storage<W: ByteWriter>(target: &mut W) {
+    write_empty_legacy_csr_u32(target);
+    write_empty_legacy_csr_u32(target);
+}
+
+fn read_empty_legacy_node_decorator_storage<R: ByteReader>(
+    source: &mut R,
+) -> Result<bool, DeserializationError> {
+    Ok(read_empty_legacy_csr_u32(source)? && read_empty_legacy_csr_u32(source)?)
+}
+
+fn write_empty_legacy_csr_u32<W: ByteWriter>(target: &mut W) {
+    Vec::<u32>::new().write_into(target);
+    Vec::<usize>::new().write_into(target);
+}
+
+fn read_empty_legacy_csr_u32<R: ByteReader>(source: &mut R) -> Result<bool, DeserializationError> {
+    let data: Vec<u32> = Deserializable::read_from(source)?;
+    let indptr: Vec<usize> = Deserializable::read_from(source)?;
+
+    Ok(data.is_empty() && indptr.is_empty())
 }

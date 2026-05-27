@@ -286,21 +286,13 @@ fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]>
 
 fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
     let digest = hasher::hash_elements(batch.groups());
-    BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+    BasicBlockNodeBuilder::from_op_batches(vec![batch], digest)
         .build()
         .expect("basic block should build")
 }
 
 fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
-    BasicBlockNode {
-        op_batches,
-        digest: Word::default(),
-        decorators: DecoratorStore::Owned {
-            decorators: DecoratorList::new(),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        },
-    }
+    BasicBlockNode { op_batches, digest: Word::default() }
 }
 
 proptest! {
@@ -548,7 +540,7 @@ fn validate_padding_semantics_rejects_num_groups_overflow_without_panicking() {
 fn test_basic_block_node_digest_forcing() {
     let operations = vec![Operation::Add, Operation::Mul];
     let mut forest = MastForest::new();
-    let builder1 = BasicBlockNodeBuilder::new(operations.clone(), vec![]);
+    let builder1 = BasicBlockNodeBuilder::new(operations.clone());
 
     // Build normally
     let node_id1 = builder1
@@ -564,7 +556,7 @@ fn test_basic_block_node_digest_forcing() {
         Felt::new_unchecked(3),
         Felt::new_unchecked(4),
     ]);
-    let builder2 = BasicBlockNodeBuilder::new(operations, vec![]).with_digest(forced_digest);
+    let builder2 = BasicBlockNodeBuilder::new(operations).with_digest(forced_digest);
     let node_id2 = builder2
         .add_to_forest(&mut forest)
         .expect("Failed to add basic block node to forest with forced digest");

@@ -12,8 +12,8 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
     },
     operations::Operation,
     program::Program,
@@ -3904,19 +3904,13 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
 
     writeln!(
         output,
-        "debug_counts=decorators:{} asm_ops:{} debug_vars:{} procedure_names:{}",
-        debug_info.num_decorators(),
+        "debug_counts=asm_ops:{} debug_vars:{} procedure_names:{}",
         debug_info.num_asm_ops(),
         debug_info.num_debug_vars(),
         debug_info.num_procedure_names(),
     )
     .unwrap();
 
-    let decorators = debug_info
-        .decorators()
-        .iter()
-        .map(|decorator| format!("{decorator:?}"))
-        .collect::<Vec<_>>();
     let asm_ops = debug_info
         .asm_ops()
         .iter()
@@ -3931,29 +3925,11 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
         })
         .collect::<Vec<_>>();
     let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
-    writeln!(output, "decorators={decorators:?}").unwrap();
     writeln!(output, "asm_ops={asm_ops:?}").unwrap();
     writeln!(output, "debug_vars={debug_vars:?}").unwrap();
 
     for node_idx in 0..forest.num_nodes() {
         let node_id = MastNodeId::new_unchecked(node_idx);
-        let before_enter = forest
-            .before_enter_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let after_exit = forest
-            .after_exit_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let indexed_decorators = match &forest[node_id] {
-            MastNode::Block(block) => block
-                .indexed_decorator_iter(forest)
-                .map(|(op_idx, decorator_id)| (op_idx, u32::from(decorator_id)))
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
         let asm_op_links = debug_info
             .asm_ops_for_node(node_id)
             .into_iter()
@@ -3965,17 +3941,9 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
             .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
             .collect::<Vec<_>>();
 
-        if !before_enter.is_empty()
-            || !after_exit.is_empty()
-            || !indexed_decorators.is_empty()
-            || !asm_op_links.is_empty()
-            || !debug_var_links.is_empty()
-        {
-            writeln!(
-                output,
-                "node[{node_idx}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
-            )
-            .unwrap();
+        if !asm_op_links.is_empty() || !debug_var_links.is_empty() {
+            writeln!(output, "node[{node_idx}]=asm:{asm_op_links:?} debug:{debug_var_links:?}",)
+                .unwrap();
         }
     }
 }
@@ -4152,15 +4120,11 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .ensure_block(vec![Operation::Add], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                CallNodeBuilder::new_syscall(kernel_foo_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(CallNodeBuilder::new_syscall(kernel_foo_node_id))
             .unwrap()
     };
 
@@ -4204,85 +4168,35 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(29))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(2))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(3))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(5))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true1, r#false1])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true1, r#false1]))
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(7))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(11))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true3, r#false3])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true3, r#false3]))
         .unwrap();
 
     let r#while = {
@@ -4293,46 +4207,24 @@ fn nested_blocks() -> Result<(), Report> {
                     Operation::Push(Felt::from_u32(19)),
                     Operation::Push(Felt::from_u32(23)),
                 ],
-                Vec::new(),
-                vec![],
-                vec![],
                 vec![],
                 vec![],
             )
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                LoopNodeBuilder::new(body_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(LoopNodeBuilder::new(body_node_id))
             .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(13))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_node(
-            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(JoinNodeBuilder::new([push_13_basic_block_id, r#while]))
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true2, r#false2])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true2, r#false2]))
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
@@ -4966,7 +4858,7 @@ fn test_assembler_debug_info_present() {
     let mast_forest = library.mast_forest();
 
     // Debug info should be present since debug mode is always enabled.
-    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    // AssemblyOps are stored separately in DebugInfo.
     let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
     assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }

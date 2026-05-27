@@ -664,7 +664,7 @@ mod tests {
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .expect("failed to build basic block");
         forest.make_root(node_id);
@@ -697,7 +697,7 @@ mod tests {
                 .debug_info_mut()
                 .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
                 .expect("failed to add asm op");
-            let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
                 .add_to_forest(&mut forest)
                 .expect("failed to build basic block");
             let num_ops = forest[node_id].get_basic_block().unwrap().num_operations() as usize;

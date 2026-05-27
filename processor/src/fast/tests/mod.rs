@@ -170,7 +170,7 @@ fn test_syscall_fail() {
     let stack_inputs = StackInputs::new(&[Felt::from_u32(5)]).unwrap();
     let program = {
         let mut program = MastForest::new();
-        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut program)
             .unwrap();
         let root_id = CallNodeBuilder::new_syscall(basic_block_id)
@@ -413,25 +413,27 @@ fn test_call_node_preserves_stack_overflow_table() {
     let program = {
         let mut program = MastForest::new();
         // foo proc
-        let foo_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let foo_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut program)
             .unwrap();
 
         // before call
-        let push10_push20_id = BasicBlockNodeBuilder::new(
-            vec![Operation::Push(Felt::from_u32(10)), Operation::Push(Felt::from_u32(20))],
-            Vec::new(),
-        )
+        let push10_push20_id = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(Felt::from_u32(10)),
+            Operation::Push(Felt::from_u32(20)),
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
         // call
         let call_node_id = CallNodeBuilder::new(foo_id).add_to_forest(&mut program).unwrap();
         // after call
-        let swap_drop_swap_drop = BasicBlockNodeBuilder::new(
-            vec![Operation::Swap, Operation::Drop, Operation::Swap, Operation::Drop],
-            Vec::new(),
-        )
+        let swap_drop_swap_drop = BasicBlockNodeBuilder::new(vec![
+            Operation::Swap,
+            Operation::Drop,
+            Operation::Swap,
+            Operation::Drop,
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
@@ -905,7 +907,7 @@ fn test_continuation_stack_limit_exceeded() {
         let mut forest = MastForest::new();
 
         // Create a simple leaf basic block (just a noop).
-        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
 
@@ -940,7 +942,7 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
     let program = {
         let mut forest = MastForest::new();
 
-        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
 
@@ -966,8 +968,7 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
 fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     let program: Program = {
         let mut program = MastForest::new();
-        let root_id =
-            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut program).unwrap();
+        let root_id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut program).unwrap();
         program.make_root(root_id);
 
         Program::new(program.into(), root_id)

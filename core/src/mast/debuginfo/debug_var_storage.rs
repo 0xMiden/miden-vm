@@ -1,8 +1,7 @@
-//! Dedicated storage for DebugVar decorators in a compressed sparse row (CSR) format.
+//! Dedicated storage for DebugVar metadata in a compressed sparse row (CSR) format.
 //!
 //! This module provides efficient storage and access for debug variable information,
-//! separate from the main decorator storage. This allows debuggers to efficiently
-//! query variable information without iterating through all decorators.
+//! allowing debuggers to query variable information by node and operation.
 
 use alloc::{
     string::{String, ToString},
@@ -15,19 +14,34 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::DecoratorIndexError;
 use crate::{
     mast::MastNodeId,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+
+// DEBUG INFO INDEX ERROR
+// ================================================================================================
+
+/// Error type for debug-info index mapping operations.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum DebugInfoIndexError {
+    /// Node index is invalid (either out of sequence or already added).
+    #[error("invalid node index {0:?}")]
+    NodeIndex(MastNodeId),
+    /// Operation index is invalid for the node.
+    #[error("invalid operation index {operation} for node {node:?}")]
+    OperationIndex { node: MastNodeId, operation: usize },
+    /// Internal CSR structure is invalid.
+    #[error("internal CSR structure is invalid")]
+    InternalStructure,
+}
 
 // DEBUG VAR ID
 // ================================================================================================
 
 /// An identifier for a debug variable stored in [DebugInfo](super::DebugInfo).
 ///
-/// This is analogous to [DecoratorId](crate::mast::DecoratorId) but specifically for debug
-/// variable information.
+/// This indexes the debug variable table in [`DebugInfo`](super::DebugInfo).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -103,9 +117,7 @@ impl Deserializable for DebugVarId {
 /// A two-level compressed sparse row (CSR) representation for indexing debug variable IDs
 /// per operation per node.
 ///
-/// This structure is analogous to [OpToDecoratorIds](super::OpToDecoratorIds) but specifically for
-/// debug variable information. It provides efficient access to debug variables in a hierarchical
-/// manner:
+/// This structure provides efficient access to debug variables in a hierarchical manner:
 /// 1. First level: Node -> Operations
 /// 2. Second level: Operation -> DebugVarIds
 ///
@@ -146,7 +158,7 @@ impl OpToDebugVarIds {
         debug_var_ids: Vec<DebugVarId>,
         op_indptr_for_var_ids: Vec<usize>,
         node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
-    ) -> Result<Self, DecoratorIndexError> {
+    ) -> Result<Self, DebugInfoIndexError> {
         // Completely empty structures are valid
         if debug_var_ids.is_empty()
             && op_indptr_for_var_ids.is_empty()
@@ -168,53 +180,53 @@ impl OpToDebugVarIds {
                     node_indptr_for_op_idx,
                 });
             } else {
-                return Err(DecoratorIndexError::InternalStructure);
+                return Err(DebugInfoIndexError::InternalStructure);
             }
         }
 
         // Validate the structure
         if op_indptr_for_var_ids.is_empty() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         if op_indptr_for_var_ids[0] != 0 {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         let Some(&last_op_ptr) = op_indptr_for_var_ids.last() else {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         };
         if last_op_ptr > debug_var_ids.len() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         if node_indptr_for_op_idx.is_empty() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         let node_slice = node_indptr_for_op_idx.as_slice();
 
         if node_slice[0] != 0 {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         let Some(&last_node_ptr) = node_slice.last() else {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         };
         if last_node_ptr > op_indptr_for_var_ids.len() - 1 {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         // Ensure monotonicity
         for window in op_indptr_for_var_ids.windows(2) {
             if window[0] > window[1] {
-                return Err(DecoratorIndexError::InternalStructure);
+                return Err(DebugInfoIndexError::InternalStructure);
             }
         }
 
         for window in node_slice.windows(2) {
             if window[0] > window[1] {
-                return Err(DecoratorIndexError::InternalStructure);
+                return Err(DebugInfoIndexError::InternalStructure);
             }
         }
 
@@ -343,11 +355,11 @@ impl OpToDebugVarIds {
         &mut self,
         node: MastNodeId,
         debug_vars_info: Vec<(usize, DebugVarId)>,
-    ) -> Result<(), DecoratorIndexError> {
+    ) -> Result<(), DebugInfoIndexError> {
         // Enforce sequential node ids
         let expected = MastNodeId::new_unchecked(self.num_nodes() as u32);
         if node < expected {
-            return Err(DecoratorIndexError::NodeIndex(node));
+            return Err(DebugInfoIndexError::NodeIndex(node));
         }
         // Create empty nodes for gaps
         for idx in expected.0..node.0 {
@@ -359,7 +371,7 @@ impl OpToDebugVarIds {
         if self.node_indptr_for_op_idx.is_empty() {
             self.node_indptr_for_op_idx
                 .push(op_start)
-                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
+                .map_err(|_| DebugInfoIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             let last = MastNodeId::new_unchecked((self.node_indptr_for_op_idx.len() - 1) as u32);
             self.node_indptr_for_op_idx[last] = op_start;
@@ -374,17 +386,17 @@ impl OpToDebugVarIds {
 
             self.node_indptr_for_op_idx
                 .push(op_start)
-                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
+                .map_err(|_| DebugInfoIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             let max_op_idx =
-                debug_vars_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0;
+                debug_vars_info.last().ok_or(DebugInfoIndexError::InternalStructure)?.0;
             let mut it = debug_vars_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
                 self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
                     self.debug_var_ids
-                        .push(it.next().ok_or(DecoratorIndexError::InternalStructure)?.1);
+                        .push(it.next().ok_or(DebugInfoIndexError::InternalStructure)?.1);
                 }
             }
             self.op_indptr_for_var_ids.push(self.debug_var_ids.len());
@@ -392,7 +404,7 @@ impl OpToDebugVarIds {
             let end_ops = self.op_indptr_for_var_ids.len() - 1;
             self.node_indptr_for_op_idx
                 .push(end_ops)
-                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: end_ops })?;
+                .map_err(|_| DebugInfoIndexError::OperationIndex { node, operation: end_ops })?;
         }
 
         Ok(())
@@ -403,7 +415,7 @@ impl OpToDebugVarIds {
         &self,
         node: MastNodeId,
         operation: usize,
-    ) -> Result<&[DebugVarId], DecoratorIndexError> {
+    ) -> Result<&[DebugVarId], DebugInfoIndexError> {
         let op_range = self.operation_range_for_node(node)?;
         if operation >= op_range.len() {
             return Ok(&[]);
@@ -411,14 +423,14 @@ impl OpToDebugVarIds {
 
         let op_start_idx = op_range.start + operation;
         if op_start_idx + 1 >= self.op_indptr_for_var_ids.len() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         let var_start = self.op_indptr_for_var_ids[op_start_idx];
         let var_end = self.op_indptr_for_var_ids[op_start_idx + 1];
 
         if var_start > var_end || var_end > self.debug_var_ids.len() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         Ok(&self.debug_var_ids[var_start..var_end])
@@ -428,19 +440,19 @@ impl OpToDebugVarIds {
     pub fn operation_range_for_node(
         &self,
         node: MastNodeId,
-    ) -> Result<core::ops::Range<usize>, DecoratorIndexError> {
+    ) -> Result<core::ops::Range<usize>, DebugInfoIndexError> {
         let node_slice = self.node_indptr_for_op_idx.as_slice();
         let node_idx = node.to_usize();
 
         if node_idx + 1 >= node_slice.len() {
-            return Err(DecoratorIndexError::NodeIndex(node));
+            return Err(DebugInfoIndexError::NodeIndex(node));
         }
 
         let start = node_slice[node_idx];
         let end = node_slice[node_idx + 1];
 
         if start > end || end > self.op_indptr_for_var_ids.len() {
-            return Err(DecoratorIndexError::InternalStructure);
+            return Err(DebugInfoIndexError::InternalStructure);
         }
 
         Ok(start..end)
@@ -645,7 +657,7 @@ mod tests {
             vec![0, 5], // points past end
             IndexVec::new(),
         );
-        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
+        assert_eq!(result, Err(DebugInfoIndexError::InternalStructure));
     }
 
     #[test]

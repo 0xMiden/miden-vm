@@ -3,17 +3,17 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::ops::{Index, IndexMut};
+use core::ops::Index;
 
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
     mast::{
-        AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorId, ExternalNodeBuilder,
-        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNode,
-        MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
+        AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+        MastForest, MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt,
+        MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
-    operations::{AssemblyOp, Decorator, DecoratorList, Operation},
+    operations::{AssemblyOp, Operation},
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -35,9 +35,9 @@ const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 ///
 /// The purpose of the builder is to ensure that the underlying MAST forest contains as little
 /// information as possible needed to adequately describe the logical MAST forest. Specifically:
-/// - The builder ensures that only one copy of nodes that have the same MAST root and decorators is
-///   added to the MAST forest (i.e., two nodes that have the same MAST root and decorators will
-///   have the same [`MastNodeId`]).
+/// - The builder ensures that only one copy of nodes that have the same MAST root and metadata is
+///   added to the MAST forest (i.e., two nodes that have the same MAST root and metadata will have
+///   the same [`MastNodeId`]).
 /// - The builder tries to merge adjacent basic blocks and eliminate the source block whenever this
 ///   does not have an impact on other nodes in the forest.
 #[derive(Clone, Debug, Default)]
@@ -70,9 +70,6 @@ pub struct MastForestBuilder {
     /// Keeps track of the new ids assigned to nodes that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_mast_remapping: Remapping,
-    /// Keeps track of the new ids assigned to decorators that are copied from the MAST of
-    /// statically-linked libraries.
-    statically_linked_decorator_remapping: BTreeMap<DecoratorId, DecoratorId>,
     /// Pending AssemblyOp mappings to be registered at build time.
     ///
     /// These are collected during assembly and registered all at once in sorted node order
@@ -118,11 +115,6 @@ impl MastForestBuilder {
 
     /// The builder keeps node identity independent from debug metadata.
     pub fn set_emit_debug_info(&mut self, _emit: bool) {}
-
-    /// Returns a reference to the underlying [`MastForest`].
-    pub fn mast_forest(&self) -> &MastForest {
-        &self.mast_forest
-    }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
     /// resulting MAST forest.
@@ -371,9 +363,7 @@ impl MastForestBuilder {
             while let (Some(left), Some(right)) =
                 (source_mast_node_iter.next(), source_mast_node_iter.next())
             {
-                let join_builder = JoinNodeBuilder::new([left, right])
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]);
+                let join_builder = JoinNodeBuilder::new([left, right]);
                 let join_mast_node_id = if let Some(ref asm_op) = asm_op {
                     self.ensure_node_with_asm_op(join_builder, asm_op.clone())?
                 } else {
@@ -415,7 +405,7 @@ impl MastForestBuilder {
         Ok(merged_node_ids)
     }
 
-    /// Creates a new basic block by appending all operations and decorators in the provided list of
+    /// Creates a new basic block by appending all operations in the provided list of
     /// basic blocks (which are assumed to be contiguous).
     ///
     /// # Panics
@@ -432,8 +422,6 @@ impl MastForestBuilder {
         }
 
         let mut operations: Vec<Operation> = Vec::new();
-        let mut decorators = DecoratorList::new();
-        let mut pending_after_exit = Vec::new();
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpId)> = Vec::new();
         let mut merged_debug_vars: Vec<(usize, miden_core::mast::DebugVarId)> = Vec::new();
@@ -449,31 +437,18 @@ impl MastForestBuilder {
                     .expect("merge_basic_blocks: expected BasicBlockNode")
                     .num_op_batches(),
             ) {
-                // Collect decorators and operations from the block (while still borrowing)
+                // Collect operations from the block while still borrowing.
                 // We need owned copies so we can drop the borrow before mutating self
-                let (block_decorators, block_before_enter, block_after_exit, block_ops) = {
+                let block_ops = {
                     let basic_block_node =
                         self.mast_forest[basic_block_id].get_basic_block().unwrap();
-                    let block_decorators =
-                        basic_block_node.raw_op_indexed_decorators(&self.mast_forest);
-                    let block_before_enter =
-                        basic_block_node.before_enter(&self.mast_forest).to_vec();
-                    let block_after_exit = basic_block_node.after_exit(&self.mast_forest).to_vec();
-                    let block_ops: Vec<Operation> = basic_block_node
+                    basic_block_node
                         .op_batches()
                         .iter()
                         .flat_map(|b| b.raw_ops().copied())
-                        .collect();
-                    (block_decorators, block_before_enter, block_after_exit, block_ops)
+                        .collect::<Vec<Operation>>()
                 };
                 let ops_offset = operations.len();
-
-                for decorator in core::mem::take(&mut pending_after_exit) {
-                    decorators.push((ops_offset, decorator));
-                }
-                for decorator in block_before_enter {
-                    decorators.push((ops_offset, decorator));
-                }
 
                 // Transfer any pending asm_ops and debug_vars for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
@@ -483,28 +458,18 @@ impl MastForestBuilder {
                     &mut merged_debug_vars,
                 );
 
-                // Add operation-indexed decorators with adjusted indices.
-                for (op_idx, decorator) in block_decorators {
-                    decorators.push((op_idx + ops_offset, decorator));
-                }
-                pending_after_exit.extend(block_after_exit);
                 operations.extend(block_ops);
             } else {
                 // If we don't want to merge this block, flush the buffer of operations into a
                 // new block, and add the un-merged block after it.
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
-                    let block_decorators = core::mem::take(&mut decorators);
-                    let block_after_exit = core::mem::take(&mut pending_after_exit);
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
                     let block_debug_vars = core::mem::take(&mut merged_debug_vars);
                     let merged_basic_block_id = self.ensure_block_with_asm_op_and_debug_var_ids(
                         block_ops,
-                        block_decorators,
                         block_asm_ops,
                         block_debug_vars,
-                        vec![],
-                        block_after_exit,
                     )?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
@@ -516,14 +481,11 @@ impl MastForestBuilder {
         // Mark the removed basic blocks as merged
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
-        if !operations.is_empty() || !decorators.is_empty() || !pending_after_exit.is_empty() {
+        if !operations.is_empty() {
             let merged_basic_block = self.ensure_block_with_asm_op_and_debug_var_ids(
                 operations,
-                decorators,
                 merged_asm_ops,
                 merged_debug_vars,
-                vec![],
-                pending_after_exit,
             )?;
             merged_basic_blocks.push(merged_basic_block);
         }
@@ -575,15 +537,10 @@ impl MastForestBuilder {
     fn ensure_block_with_asm_op_and_debug_var_ids(
         &mut self,
         operations: Vec<Operation>,
-        decorators: DecoratorList,
         asm_op_ids: Vec<(usize, AsmOpId)>,
         debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
-        before_enter: Vec<DecoratorId>,
-        after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let block = BasicBlockNodeBuilder::new(operations, decorators)
-            .with_before_enter(before_enter)
-            .with_after_exit(after_exit);
+        let block = BasicBlockNodeBuilder::new(operations);
 
         let (node_id, is_new) = self.ensure_node_exists(block)?;
 
@@ -603,9 +560,8 @@ impl MastForestBuilder {
 impl MastForestBuilder {
     /// Adds a debug variable to the forest, and returns the [`DebugVarId`] associated with it.
     ///
-    /// Unlike decorators, debug variables are not deduplicated since each occurrence
-    /// represents a specific point in program execution where the variable's location
-    /// is being tracked.
+    /// Debug variables are not deduplicated since each occurrence represents a specific point in
+    /// program execution where the variable's location is being tracked.
     pub fn add_debug_var(
         &mut self,
         debug_var: miden_core::operations::DebugVarInfo,
@@ -618,9 +574,7 @@ impl MastForestBuilder {
 
     /// Adds a node to the forest, and returns the [`MastNodeId`] associated with it.
     ///
-    /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
-    /// MAST forest; two nodes that have the same MAST root and decorators will have the same
-    /// [`MastNodeId`].
+    /// Note that only one copy of nodes with the same fingerprint is added to the MAST forest.
     pub(crate) fn ensure_node(
         &mut self,
         builder: impl MastForestContributor,
@@ -645,42 +599,6 @@ impl MastForestBuilder {
                 .into_diagnostic()
                 .wrap_err("failed to add AssemblyOp for control flow node")?;
             self.pending_asm_op_mappings.push((node_id, vec![(0, asm_op_id)]));
-        }
-        Ok(node_id)
-    }
-
-    /// Like [`Self::ensure_node`], but copies external metadata from `source_node_id` when a new
-    /// node is created.
-    pub(crate) fn ensure_node_preserving_debug_vars(
-        &mut self,
-        builder: impl MastForestContributor,
-        source_node_id: MastNodeId,
-    ) -> Result<MastNodeId, Report> {
-        let (node_id, is_new) = self.ensure_node_exists(builder)?;
-        if is_new {
-            // Carry over AssemblyOp registration from the source node.
-            let asm_ops: Option<Vec<_>> = self
-                .pending_asm_op_mappings
-                .iter()
-                .find(|(id, _)| *id == source_node_id)
-                .map(|(_, asm_ops)| asm_ops.clone());
-            if let Some(asm_ops) = asm_ops
-                && !asm_ops.is_empty()
-            {
-                self.pending_asm_op_mappings.push((node_id, asm_ops));
-            }
-
-            // Carry over debug var registration from the source node.
-            let debug_vars: Option<Vec<_>> = self
-                .pending_debug_var_mappings
-                .iter()
-                .find(|(id, _)| *id == source_node_id)
-                .map(|(_, vars)| vars.clone());
-            if let Some(vars) = debug_vars
-                && !vars.is_empty()
-            {
-                self.pending_debug_var_mappings.push((node_id, vars));
-            }
         }
         Ok(node_id)
     }
@@ -788,15 +706,10 @@ impl MastForestBuilder {
     pub fn ensure_block(
         &mut self,
         operations: Vec<Operation>,
-        decorators: DecoratorList,
         asm_ops: Vec<(usize, AssemblyOp)>,
         debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
-        before_enter: Vec<DecoratorId>,
-        after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let block = BasicBlockNodeBuilder::new(operations, decorators)
-            .with_before_enter(before_enter)
-            .with_after_exit(after_exit);
+        let block = BasicBlockNodeBuilder::new(operations);
 
         let (node_id, is_new) = self.ensure_node_exists(block)?;
 
@@ -826,55 +739,7 @@ impl MastForestBuilder {
         Ok(node_id)
     }
 
-    /// Collects all decorators from a subtree in the statically linked forest and copies them
-    /// to the target forest, populating the decorator remapping.
-    ///
-    /// This must be called before copying nodes from the subtree to ensure all decorator IDs
-    /// can be properly remapped.
-    fn collect_decorators_from_subtree(&mut self, root_id: MastNodeId) -> Result<(), Report> {
-        // Clear the decorator remapping for this subtree
-        self.statically_linked_decorator_remapping.clear();
-
-        // Iterate through all nodes in the subtree
-        for node_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-            // Get all decorator IDs used by this node
-            let decorator_ids: Vec<DecoratorId> = {
-                let mut ids = Vec::new();
-
-                // Collect before_enter decorators
-                ids.extend(self.statically_linked_mast.before_enter_decorators(node_id));
-
-                // Collect after_exit decorators
-                ids.extend(self.statically_linked_mast.after_exit_decorators(node_id));
-
-                // For BasicBlockNode, also collect op-indexed decorators
-                if let MastNode::Block(block_node) = &self.statically_linked_mast[node_id] {
-                    for (_idx, decorator_id) in
-                        block_node.indexed_decorator_iter(&self.statically_linked_mast)
-                    {
-                        ids.push(decorator_id);
-                    }
-                }
-
-                ids
-            };
-
-            // Copy each decorator to the target forest if not already copied
-            for old_decorator_id in decorator_ids {
-                if !self.statically_linked_decorator_remapping.contains_key(&old_decorator_id) {
-                    return Err(report!(
-                        "statically linked MAST contains removed decorator id {}",
-                        old_decorator_id
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Builds a node builder with remapped children and decorators for copying from statically
-    /// linked libraries.
+    /// Builds a node builder with remapped children for copying from statically linked libraries.
     ///
     /// Delegates to the generic `build_node_with_remapped_ids` helper to avoid code duplication
     /// with `MastForestMerger`.
@@ -888,7 +753,6 @@ impl MastForestBuilder {
             node,
             &self.statically_linked_mast,
             &self.statically_linked_mast_remapping,
-            &self.statically_linked_decorator_remapping,
         )
         .into_diagnostic()
     }
@@ -915,8 +779,6 @@ impl MastForestBuilder {
         &mut self,
         root_id: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        self.collect_decorators_from_subtree(root_id)?;
-
         for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
             let node = self.statically_linked_mast[old_id].clone();
             let builder = self.build_with_remapped_ids(old_id, node)?;
@@ -924,46 +786,6 @@ impl MastForestBuilder {
             self.statically_linked_mast_remapping.insert(old_id, new_id);
         }
         Ok(root_id.remap(&self.statically_linked_mast_remapping))
-    }
-
-    /// Adds a list of decorators to the provided node to be executed before the node executes.
-    ///
-    /// If other decorators are already present, the new decorators are added to the end of the
-    /// list.
-    pub fn append_before_enter(
-        &mut self,
-        node_id: MastNodeId,
-        decorator_ids: Vec<DecoratorId>,
-    ) -> Result<(), MastForestError> {
-        // Extract the existing node and convert it to a builder
-        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
-        decorated_builder.append_before_enter(decorator_ids);
-        let new_node_fingerprint =
-            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
-
-        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
-
-        self.hash_by_node_id.insert(node_id, new_node_fingerprint);
-        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
-        Ok(())
-    }
-
-    pub fn append_after_exit(
-        &mut self,
-        node_id: MastNodeId,
-        decorator_ids: Vec<DecoratorId>,
-    ) -> Result<(), MastForestError> {
-        // Extract the existing node and convert it to a builder
-        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
-        decorated_builder.append_after_exit(decorator_ids);
-        let new_node_fingerprint =
-            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
-
-        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
-
-        self.hash_by_node_id.insert(node_id, new_node_fingerprint);
-        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
-        Ok(())
     }
 }
 
@@ -981,22 +803,6 @@ impl Index<MastNodeId> for MastForestBuilder {
     #[inline(always)]
     fn index(&self, node_id: MastNodeId) -> &Self::Output {
         &self.mast_forest[node_id]
-    }
-}
-
-impl Index<DecoratorId> for MastForestBuilder {
-    type Output = Decorator;
-
-    #[inline(always)]
-    fn index(&self, decorator_id: DecoratorId) -> &Self::Output {
-        &self.mast_forest[decorator_id]
-    }
-}
-
-impl IndexMut<DecoratorId> for MastForestBuilder {
-    #[inline(always)]
-    fn index_mut(&mut self, decorator_id: DecoratorId) -> &mut Self::Output {
-        &mut self.mast_forest[decorator_id]
     }
 }
 
@@ -1055,14 +861,10 @@ mod tests {
 
         let num_ops = PROCEDURE_INLINING_THRESHOLD * 1024;
         let large_ops = vec![Operation::Add; num_ops];
-        let large_block_id = builder
-            .ensure_block(large_ops, Vec::new(), vec![], vec![], vec![], vec![])
-            .unwrap();
+        let large_block_id = builder.ensure_block(large_ops, vec![], vec![]).unwrap();
         builder.mast_forest.make_root(large_block_id);
 
-        let small_block_id = builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
-            .unwrap();
+        let small_block_id = builder.ensure_block(vec![Operation::Add], vec![], vec![]).unwrap();
 
         let merged_blocks = builder.merge_basic_blocks(&[large_block_id, small_block_id]).unwrap();
 
@@ -1084,26 +886,8 @@ mod tests {
             .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
             .unwrap();
 
-        let block_a = builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![],
-                vec![(0, var_a)],
-                vec![],
-                vec![],
-            )
-            .unwrap();
-        let block_b = builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![],
-                vec![(0, var_b)],
-                vec![],
-                vec![],
-            )
-            .unwrap();
+        let block_a = builder.ensure_block(vec![Operation::Add], vec![], vec![(0, var_a)]).unwrap();
+        let block_b = builder.ensure_block(vec![Operation::Add], vec![], vec![(0, var_b)]).unwrap();
 
         assert_eq!(
             block_a, block_b,
@@ -1119,20 +903,14 @@ mod tests {
         let block_a = builder
             .ensure_block(
                 vec![Operation::Add],
-                Vec::new(),
                 vec![(0, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()))],
-                vec![],
-                vec![],
                 vec![],
             )
             .unwrap();
         let block_b = builder
             .ensure_block(
                 vec![Operation::Add],
-                Vec::new(),
                 vec![(0, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()))],
-                vec![],
-                vec![],
                 vec![],
             )
             .unwrap();
@@ -1161,21 +939,12 @@ mod tests {
         // Small block that will be a procedure root -- should_merge returns true for
         // small roots, so it will be folded into the merged block.
         let root_block = builder
-            .ensure_block(
-                vec![Operation::Add],
-                Vec::new(),
-                vec![(0, asm_op)],
-                vec![(0, var_id)],
-                vec![],
-                vec![],
-            )
+            .ensure_block(vec![Operation::Add], vec![(0, asm_op)], vec![(0, var_id)])
             .unwrap();
         builder.mast_forest.make_root(root_block);
 
         // Second block to merge with.
-        let other_block = builder
-            .ensure_block(vec![Operation::Mul], Vec::new(), vec![], vec![], vec![], vec![])
-            .unwrap();
+        let other_block = builder.ensure_block(vec![Operation::Mul], vec![], vec![]).unwrap();
 
         let merged = builder.merge_basic_blocks(&[root_block, other_block]).unwrap();
         // Root was small enough to merge, so we get one merged block.

@@ -196,10 +196,10 @@ fn respan_hasher_bus() {
 fn merge_hasher_bus() {
     let program = {
         let mut mast_forest = MastForest::new();
-        let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let split_id = SplitNodeBuilder::new([t_branch, f_branch])
@@ -569,9 +569,7 @@ fn mrupdate_hasher_bus() {
 
 fn single_block_program(ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
-    let id = BasicBlockNodeBuilder::new(ops, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(id);
     Program::new(mast_forest.into(), id)
 }

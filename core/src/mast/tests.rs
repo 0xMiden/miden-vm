@@ -8,7 +8,7 @@ use crate::{
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
-        MastForest, MastForestContributor, MastNodeExt, SplitNodeBuilder,
+        MastForest, MastForestContributor, MastNodeExt,
     },
     operations::{AssemblyOp, Operation},
     program::{Kernel, ProgramInfo},
@@ -47,252 +47,18 @@ proptest! {
     }
 }
 
-#[test]
-fn test_decorator_storage_consistency_with_block_iterator() {
-    let mut forest = MastForest::new();
-
-    // Create operations
-    let operations = vec![
-        Operation::Push(Felt::new_unchecked(1)),
-        Operation::Add,
-        Operation::Push(Felt::new_unchecked(2)),
-        Operation::Mul,
-    ];
-
-    // Add block to forest using BasicBlockNodeBuilder
-    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    // Verify the block was created and get the actual block
-    let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
-        block
-    } else {
-        panic!("Expected a block node");
-    };
-
-    // Test 1: Compare decorators from forest storage vs block iterator
-    let forest_decorators: Vec<_> = forest
-        .debug_info
-        .op_decorator_storage()
-        .decorator_ids_for_node(block_id)
-        .unwrap()
-        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
-        .collect();
-
-    let block_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
-
-    assert_eq!(
-        forest_decorators, block_decorators,
-        "Decorators from forest storage should match block iterator"
-    );
-
-    // Test 2: Verify all operations return empty decorator lists.
-    for op_idx in 0..4 {
-        let forest_decos = forest
-            .debug_info
-            .op_decorator_storage()
-            .decorator_ids_for_operation(block_id, op_idx)
-            .unwrap();
-        let block_decos: Vec<_> = block
-            .indexed_decorator_iter(&forest)
-            .filter(|(idx, _)| *idx == op_idx)
-            .map(|(_, id)| id)
-            .collect();
-
-        assert_eq!(forest_decos, [], "Operation {op_idx} should have no decorators");
-        assert_eq!(block_decos, [], "Operation {op_idx} should have no decorators");
-    }
-}
-
-#[test]
-fn test_decorator_storage_consistency_with_empty_block() {
-    let mut forest = MastForest::new();
-
-    // Create operations without decorators
-    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-
-    // Add block to forest using BasicBlockNodeBuilder with no decorators
-    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    // Verify the block was created
-    let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
-        block
-    } else {
-        panic!("Expected a block node");
-    };
-
-    // Both should have no indexed decorators
-    let forest_decorators: Vec<_> = forest
-        .debug_info
-        .op_decorator_storage()
-        .decorator_ids_for_node(block_id)
-        .unwrap()
-        .collect();
-
-    let block_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
-
-    assert_eq!(forest_decorators, []);
-    assert_eq!(block_decorators, []);
-}
-
-#[test]
-fn test_decorator_storage_consistency_with_multiple_blocks() {
-    let mut forest = MastForest::new();
-
-    // Create first block
-    let operations1 = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let block_id1 = BasicBlockNodeBuilder::new(operations1, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    // Create second block
-    let operations2 = vec![Operation::Push(Felt::new_unchecked(2)), Operation::Mul];
-    let block_id2 = BasicBlockNodeBuilder::new(operations2, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    // Verify first block consistency
-    let forest_decorators1: Vec<_> = forest
-        .debug_info
-        .op_decorator_storage()
-        .decorator_ids_for_node(block_id1)
-        .unwrap()
-        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
-        .collect();
-
-    let block1 = if let crate::mast::MastNode::Block(block) = &forest[block_id1] {
-        block
-    } else {
-        panic!("Expected a block node");
-    };
-    let block_decorators1: Vec<_> = block1.indexed_decorator_iter(&forest).collect();
-
-    assert_eq!(forest_decorators1, block_decorators1);
-
-    // Verify second block consistency
-    let forest_decorators2: Vec<_> = forest
-        .debug_info
-        .op_decorator_storage()
-        .decorator_ids_for_node(block_id2)
-        .unwrap()
-        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
-        .collect();
-
-    let block2 = if let crate::mast::MastNode::Block(block) = &forest[block_id2] {
-        block
-    } else {
-        panic!("Expected a block node");
-    };
-    let block_decorators2: Vec<_> = block2.indexed_decorator_iter(&forest).collect();
-
-    assert_eq!(forest_decorators2, block_decorators2);
-
-    // Verify the decorator storage has the correct number of nodes
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 2);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 0);
-}
-
-#[test]
-fn test_decorator_storage_after_clear_debug_info() {
-    let mut forest = MastForest::new();
-
-    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    assert_eq!(forest.debug_info.num_decorators(), 0);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 0);
-
-    forest.clear_debug_info();
-
-    assert_eq!(forest.debug_info.num_decorators(), 0);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
-    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
-}
-
-#[test]
-fn test_clear_debug_info_edge_cases() {
-    // Empty forest
-    let mut forest = MastForest::new();
-    forest.clear_debug_info();
-    assert_eq!(forest.debug_info.num_decorators(), 0);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
-
-    // Idempotent: clearing twice should be safe
-    let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.clear_debug_info();
-    forest.clear_debug_info();
-    assert_eq!(forest.debug_info.num_decorators(), 0);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
-    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
-}
-
-#[test]
-fn test_clear_debug_info_multiple_node_types() {
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add],
-        vec![],
-    )
-    .add_to_forest(&mut forest)
-    .unwrap();
-
-    JoinNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
-    SplitNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
-
-    forest.clear_debug_info();
-
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 3);
-    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
-}
-
-#[test]
-fn test_compact_after_clear_debug_info_does_not_materialize_empty_node_decorators() {
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add],
-        vec![],
-    )
-    .add_to_forest(&mut forest)
-    .unwrap();
-    let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
-    forest.make_root(call_id);
-
-    forest.clear_debug_info();
-    let (compacted, _) = forest.compact();
-
-    assert!(compacted.debug_info.node_decorator_storage().is_empty());
-    for node_idx in 0..compacted.nodes().len() {
-        let node_id = crate::mast::MastNodeId::new_unchecked(node_idx as u32);
-        assert!(compacted.before_enter_decorators(node_id).is_empty());
-        assert!(compacted.after_exit_decorators(node_id).is_empty());
-    }
-}
-
 // MAST FOREST COMPACTION TESTS
 // ================================================================================================
 
-/// Tests comprehensive mast forest compaction across all node types and decorator categories.
-///
-/// This test creates pairs of identical nodes for each of the 7 MAST node types, where each pair
-/// differs only by decorators (operation-indexed, before-enter, or after-exit). After compaction,
-/// each pair should be merged into a single node, demonstrating that the compaction correctly
-/// identifies identical nodes regardless of decorator differences.
+/// Tests comprehensive mast forest compaction across duplicate nodes.
 #[test]
 fn test_mast_forest_compaction_comprehensive() {
     let mut forest = MastForest::new();
 
-    let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
-    let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(bb1);
@@ -319,9 +85,7 @@ fn test_mast_forest_get_assembly_op_basic_block() {
 
     // Add a basic block node
     let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let node_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     // Register the AssemblyOp for operation index 0 (node has 2 operations)
     forest.debug_info.register_asm_ops(node_id, 2, vec![(0, asm_op_id)]).unwrap();
@@ -353,9 +117,7 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
         Operation::Add,
         Operation::Drop,
     ];
-    let node_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     // Register the AssemblyOp at operation indices 2, 3, 4 (3 cycles)
     // Node has 5 operations (indices 0-4)
@@ -387,9 +149,8 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
 
 #[test]
 fn test_mast_forest_get_assembly_op_all_node_types() {
-    // Note: AssemblyOps are now stored separately from decorators in DebugInfo's asm_op storage.
-    // This storage is indexed by (node_id, operation_index), so AssemblyOps are associated
-    // with specific operations within basic block nodes.
+    // This storage is indexed by (node_id, operation_index), so AssemblyOps are associated with
+    // specific operations within basic block nodes.
     //
     // For non-basic-block node types (Call, Join, Split, Loop, Dyn, External), AssemblyOps
     // are typically associated via the child basic block's operations.
@@ -403,9 +164,7 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
 
     // Create a basic block with an AssemblyOp registered for its operations
     let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let bb_node_id = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let bb_node_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
 
     // Register AssemblyOp for operation 0 in the basic block (node has 2 operations)
     forest.debug_info.register_asm_ops(bb_node_id, 2, vec![(0, asm_op_id)]).unwrap();
@@ -417,10 +176,9 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
 
     // Create some control flow nodes using this basic block
     let call_node = CallNodeBuilder::new(bb_node_id).add_to_forest(&mut forest).unwrap();
-    let join_child2 =
-        BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(2))], vec![])
-            .add_to_forest(&mut forest)
-            .unwrap();
+    let join_child2 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new_unchecked(2))])
+        .add_to_forest(&mut forest)
+        .unwrap();
     let _join_node = JoinNodeBuilder::new([bb_node_id, join_child2])
         .add_to_forest(&mut forest)
         .unwrap();
@@ -445,7 +203,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
 
     // Test 1: Node with no AssemblyOps registered should return None
     let operations = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add];
-    let node_id = BasicBlockNodeBuilder::new(operations.clone(), vec![])
+    let node_id = BasicBlockNodeBuilder::new(operations.clone())
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -456,9 +214,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let asm_op1 = AssemblyOp::new(None, "context1".into(), 1, "op1".into());
     let asm_op_id1 = forest.debug_info.add_asm_op(asm_op1.clone()).unwrap();
 
-    let node_id2 = BasicBlockNodeBuilder::new(operations, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id2 = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
     forest.debug_info.register_asm_ops(node_id2, 2, vec![(0, asm_op_id1)]).unwrap();
 
     let result2 = forest.get_assembly_op(node_id2, None);
@@ -472,9 +228,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let asm_op_id3 = forest.debug_info.add_asm_op(asm_op3.clone()).unwrap();
 
     let ops_multi = vec![Operation::Push(Felt::new_unchecked(1)), Operation::Add, Operation::Mul];
-    let node_id3 = BasicBlockNodeBuilder::new(ops_multi, vec![])
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id3 = BasicBlockNodeBuilder::new(ops_multi).add_to_forest(&mut forest).unwrap();
     forest
         .debug_info
         .register_asm_ops(node_id3, 3, vec![(0, asm_op_id2), (2, asm_op_id3)])
@@ -514,7 +268,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
         Operation::Mul,
         Operation::Neg,
     ];
-    let node_id4 = BasicBlockNodeBuilder::new(ops4, vec![]).add_to_forest(&mut forest).unwrap();
+    let node_id4 = BasicBlockNodeBuilder::new(ops4).add_to_forest(&mut forest).unwrap();
     forest
         .debug_info
         .register_asm_ops(
@@ -540,13 +294,12 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
 fn test_clear_debug_info_independent() {
     let mut forest = MastForest::new();
 
-    let node = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![])
+    let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(node);
 
     assert!(forest.debug_info.is_empty());
-    assert_eq!(forest.decorators().len(), 0);
 
     // Clear debug info only
     forest.clear_debug_info();
@@ -561,11 +314,11 @@ fn test_clear_debug_info_independent() {
 fn test_compaction_independent() {
     let mut forest = MastForest::new();
 
-    // Create two identical nodes without decorators
-    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    // Create two identical nodes.
+    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
-    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(node1);
@@ -574,7 +327,7 @@ fn test_compaction_independent() {
     // Verify initial state has duplicate nodes
     assert_eq!(forest.num_nodes(), 2);
     assert_eq!(forest.num_procedures(), 2);
-    assert!(forest.debug_info.is_empty()); // No decorators from start
+    assert!(forest.debug_info.is_empty());
 
     // Compact only (should merge the two identical nodes)
     let (forest, _root_map) = forest.compact();
@@ -590,10 +343,10 @@ fn test_commitment_caching() {
     let mut forest = MastForest::new();
 
     // Create some nodes
-    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![])
+    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .unwrap();
-    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![])
+    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut forest)
         .unwrap();
 

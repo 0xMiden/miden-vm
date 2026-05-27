@@ -677,8 +677,7 @@ impl Linker {
 
     /// Returns a procedure index which corresponds to the provided procedure digest.
     ///
-    /// Note that there can be many procedures with the same digest - due to having the same code,
-    /// and/or using different decorators which don't affect the MAST root. This method returns an
+    /// Note that there can be many procedures with the same digest. This method returns an
     /// arbitrary one.
     pub fn get_procedure_index_by_digest(
         &self,

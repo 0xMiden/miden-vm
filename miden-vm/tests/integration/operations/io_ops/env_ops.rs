@@ -195,7 +195,7 @@ fn caller() {
 fn build_bar_hash() -> [u64; 4] {
     let mut mast_forest = MastForest::new();
 
-    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Caller], Vec::new())
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Caller])
         .add_to_forest(&mut mast_forest)
         .unwrap();
 
