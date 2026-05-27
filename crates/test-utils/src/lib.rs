@@ -33,6 +33,8 @@ use miden_core::{
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::Package;
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
@@ -41,8 +43,6 @@ pub use miden_processor::{
 use miden_processor::{
     DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::trace::build_trace;
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};

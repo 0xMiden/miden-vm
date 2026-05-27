@@ -8,7 +8,6 @@ use core::cmp::Ordering;
 use miden_debug_types::Location;
 
 use crate::{
-    crypto::hash::Blake3Digest,
     mast::{
         AsmOpId, DebugVarId, DecoratorId, MastForest, MastForestContributor, MastForestError,
         MastNode, MastNodeBuilder, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
@@ -35,7 +34,6 @@ pub(crate) struct MastForestMerger {
     // `mast_forest` are also added to the indices.
     node_id_by_hash: BTreeMap<MastNodeFingerprint, MastNodeId>,
     hash_by_node_id: IndexVec<MastNodeId, MastNodeFingerprint>,
-    decorators_by_hash: BTreeMap<Blake3Digest<32>, DecoratorId>,
     asm_op_id_by_value: BTreeMap<AssemblyOpKey, AsmOpId>,
     asm_op_value_by_id: BTreeMap<AsmOpId, AssemblyOpKey>,
     /// Mappings from old decorator and node ids to their new ids.
@@ -79,7 +77,6 @@ impl MastForestMerger {
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
             hash_by_node_id: IndexVec::new(),
-            decorators_by_hash: BTreeMap::new(),
             asm_op_id_by_value: BTreeMap::new(),
             asm_op_value_by_id: BTreeMap::new(),
             mast_forest: MastForest::new(),
@@ -197,26 +194,11 @@ impl MastForestMerger {
     }
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        let mut decorator_id_remapping =
-            DenseIdMap::with_len(other_forest.debug_info.num_decorators());
-
-        for (merging_id, merging_decorator) in
-            other_forest.debug_info.decorators().iter().enumerate()
-        {
-            let merging_decorator_hash = merging_decorator.fingerprint();
-            let new_decorator_id = if let Some(existing_decorator) =
-                self.decorators_by_hash.get(&merging_decorator_hash)
-            {
-                *existing_decorator
-            } else {
-                let new_decorator_id = self.mast_forest.add_decorator(merging_decorator.clone())?;
-                self.decorators_by_hash.insert(merging_decorator_hash, new_decorator_id);
-                new_decorator_id
-            };
-
-            decorator_id_remapping
-                .insert(DecoratorId::new_unchecked(merging_id as u32), new_decorator_id);
+        if other_forest.debug_info.num_decorators() != 0 {
+            return Err(MastForestError::DecoratorIdOverflow(DecoratorId(0), 0));
         }
+
+        let decorator_id_remapping = DenseIdMap::with_len(other_forest.debug_info.num_decorators());
 
         self.decorator_id_mappings.push(decorator_id_remapping);
 

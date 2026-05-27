@@ -44,10 +44,6 @@ fn with_captured_error_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
     with_captured_logs(log::LevelFilter::Error, f)
 }
 
-fn with_captured_warning_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
-    with_captured_logs(log::LevelFilter::Warn, f)
-}
-
 fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, Vec<String>) {
     TEST_LOGGER_INIT.call_once(|| {
         log::set_logger(&TEST_LOGGER).expect("test logger should be installed once");

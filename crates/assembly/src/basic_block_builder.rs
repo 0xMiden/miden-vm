@@ -14,7 +14,7 @@ use miden_core::{
     Felt,
     events::SystemEvent,
     mast::{DebugVarId, DecoratorId, MastNodeId},
-    operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
+    operations::{AssemblyOp, DebugVarInfo, DecoratorList, Operation},
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
@@ -143,16 +143,8 @@ impl BasicBlockBuilder<'_> {
     }
 }
 
-/// Decorators
+/// Assembly metadata
 impl BasicBlockBuilder<'_> {
-    /// Add the specified decorator to the list of basic block decorators.
-    pub fn push_decorator(&mut self, decorator: Decorator) -> Result<(), Report> {
-        let decorator_id = self.mast_forest_builder.ensure_decorator(decorator)?;
-        self.decorators.push((self.ops.len(), decorator_id));
-
-        Ok(())
-    }
-
     /// Tracks an instruction for AssemblyOp metadata collection.
     ///
     /// This stores the instruction's metadata in a pending state. The cycle count will be

@@ -136,13 +136,9 @@ mod fingerprint_invariant_tests {
 
     use crate::{
         Felt,
-        mast::{
-            BasicBlockNodeBuilder, MastForest, MastForestContributor, arbitrary::op_non_control_strategy,
-        },
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
         operations::Operation,
     };
-
-
 
     proptest! {
 
@@ -177,12 +173,11 @@ mod round_trip_tests {
     use crate::{
         Word,
         mast::{
-            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
-            MastNodeExt, node::mast_forest_contributor::MastForestContributor,
+            BasicBlockNodeBuilder, MastForest, MastNodeBuilder, MastNodeExt,
+            node::mast_forest_contributor::MastForestContributor,
         },
         operations::Operation,
     };
-
 
     #[test]
     fn test_mast_node_builder_enum_digest_forcing() {

@@ -9,10 +9,9 @@ use miden_core::{
     Felt, Word,
     advice::AdviceMap,
     mast::{
-        AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorFingerprint, DecoratorId,
-        ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
-        SubtreeIterator,
+        AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, DecoratorId, ExternalNodeBuilder,
+        JoinNodeBuilder, MastForest, MastForestContributor, MastForestError, MastNode,
+        MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
 };
@@ -61,8 +60,6 @@ pub struct MastForestBuilder {
     /// The reverse mapping of `node_id_by_fingerprint`. This map caches the fingerprints of all
     /// nodes (for performance reasons).
     hash_by_node_id: BTreeMap<MastNodeId, MastNodeFingerprint>,
-    /// A map of decorator fingerprints to their corresponding positions in the MAST forest.
-    decorator_id_by_fingerprint: BTreeMap<DecoratorFingerprint, DecoratorId>,
     /// A set of IDs for basic blocks which have been merged into a bigger basic blocks. This is
     /// used as a candidate set of nodes that may be eliminated if the are not referenced by any
     /// other node in the forest and are not a root of any procedure.
@@ -604,25 +601,6 @@ impl MastForestBuilder {
 // ------------------------------------------------------------------------------------------------
 /// Node inserters
 impl MastForestBuilder {
-    /// Adds a decorator to the forest, and returns the [`Decorator`] associated with it.
-    pub fn ensure_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, Report> {
-        let decorator_hash = decorator.fingerprint();
-
-        if let Some(decorator_id) = self.decorator_id_by_fingerprint.get(&decorator_hash) {
-            // decorator already exists in the forest; return previously assigned id
-            Ok(*decorator_id)
-        } else {
-            let new_decorator_id = self
-                .mast_forest
-                .add_decorator(decorator)
-                .into_diagnostic()
-                .wrap_err("assembler failed to add new decorator")?;
-            self.decorator_id_by_fingerprint.insert(decorator_hash, new_decorator_id);
-
-            Ok(new_decorator_id)
-        }
-    }
-
     /// Adds a debug variable to the forest, and returns the [`DebugVarId`] associated with it.
     ///
     /// Unlike decorators, debug variables are not deduplicated since each occurrence
@@ -884,10 +862,10 @@ impl MastForestBuilder {
             // Copy each decorator to the target forest if not already copied
             for old_decorator_id in decorator_ids {
                 if !self.statically_linked_decorator_remapping.contains_key(&old_decorator_id) {
-                    let decorator = self.statically_linked_mast[old_decorator_id].clone();
-                    let new_decorator_id = self.ensure_decorator(decorator)?;
-                    self.statically_linked_decorator_remapping
-                        .insert(old_decorator_id, new_decorator_id);
+                    return Err(report!(
+                        "statically linked MAST contains removed decorator id {}",
+                        old_decorator_id
+                    ));
                 }
             }
         }
@@ -1071,7 +1049,6 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_merge_basic_blocks_keeps_non_mergeable_block_standalone() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
@@ -1093,9 +1070,6 @@ mod tests {
         assert_eq!(merged_blocks[0], large_block_id);
         assert_eq!(merged_blocks[1], small_block_id);
     }
-
-
-
 
     #[test]
     fn test_ensure_block_dedups_identical_debug_var_payloads() {

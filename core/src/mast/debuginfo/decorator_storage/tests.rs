@@ -1,11 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use super::*;
-use crate::{
-    mast::debuginfo::{DebugInfo, NodeToDecoratorIds},
-    serde::{Deserializable, Serializable},
-    utils::IndexVec,
-};
+use crate::utils::IndexVec;
 
 /// Helper function to create a test DecoratorId
 fn test_decorator_id(value: u32) -> DecoratorId {

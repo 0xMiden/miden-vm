@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
     mast::MastNodeId,
-    operations::{AssemblyOp, Decorator, Operation},
+    operations::{AssemblyOp, Operation},
 };
 
 use crate::{

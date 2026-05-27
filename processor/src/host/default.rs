@@ -95,7 +95,6 @@ where
         self.register_handler(event, handler).unwrap();
         existed
     }
-
 }
 
 impl<S> BaseHost for DefaultHost<S>

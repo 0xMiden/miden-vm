@@ -21,7 +21,6 @@ use crate::mast::{DecoratedOpLink, DecoratorFingerprint};
 /// storage can represent an empty decorator table and reject old serialized decorator variants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub enum Decorator {}
 
 impl Decorator {
@@ -37,7 +36,7 @@ impl crate::prettier::PrettyPrint for Decorator {
 }
 
 impl fmt::Display for Decorator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {}
     }
 }

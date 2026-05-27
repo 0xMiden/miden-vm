@@ -6,7 +6,6 @@ use super::*;
 use crate::{
     Felt, ONE, Word,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
-    utils::IndexVec,
 };
 
 #[test]
@@ -271,6 +270,37 @@ fn batch_ops_9() {
 
     let all_groups = [batch0_groups, batch1_groups].concat();
     assert_eq!(hasher::hash_elements(&all_groups), hash);
+}
+
+fn build_group(ops: &[Operation]) -> Felt {
+    let mut group = 0u64;
+    for (i, op) in ops.iter().enumerate() {
+        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
+    }
+    Felt::new_unchecked(group)
+}
+
+fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]> {
+    batches.iter().flat_map(OpBatch::group_chunks)
+}
+
+fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
+    let digest = hasher::hash_elements(batch.groups());
+    BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+        .build()
+        .expect("basic block should build")
+}
+
+fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
+    BasicBlockNode {
+        op_batches,
+        digest: Word::default(),
+        decorators: DecoratorStore::Owned {
+            decorators: DecoratorList::new(),
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        },
+    }
 }
 
 proptest! {

@@ -576,8 +576,8 @@ impl FastProcessor {
         decorator: &Decorator,
         host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason<F>> {
-        let _ = host;
-        match decorator {}
+        let _ = (decorator, host);
+        ControlFlow::Continue(())
     }
 
     /// Increments the stack top pointer by 1.

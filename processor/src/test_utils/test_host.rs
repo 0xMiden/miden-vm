@@ -91,7 +91,6 @@ where
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
     }
-
 }
 
 impl<S> SyncHost for TestHost<S>

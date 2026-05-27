@@ -125,8 +125,8 @@ impl Default for BasicBlockNodeParams {
     fn default() -> Self {
         Self {
             max_ops_len: 8,
-            max_pairs: 2,
-            max_decorator_id_u32: 3,
+            max_pairs: 0,
+            max_decorator_id_u32: 0,
         }
     }
 }
@@ -144,18 +144,11 @@ pub fn decorator_id_strategy(max_id: u32) -> impl Strategy<Value = DecoratorId> 
 
 /// Strategy for generating decorator pairs (usize, DecoratorId)
 pub fn decorator_pairs_strategy(
-    ops_len: usize,
-    max_id: u32,
-    max_pairs: usize,
+    _ops_len: usize,
+    _max_id: u32,
+    _max_pairs: usize,
 ) -> impl Strategy<Value = Vec<(usize, DecoratorId)>> {
-    // indices in [0, ops_len); size 0..=max_pairs
-    // Generate, then sort by index to match validation expectations
-    prop::collection::vec((0..ops_len, decorator_id_strategy(max_id)), 0..=max_pairs).prop_map(
-        |mut v| {
-            v.sort_by_key(|(i, _)| *i);
-            v
-        },
-    )
+    Just(Vec::new())
 }
 
 // ---------- Arbitrary for BasicBlockNode ----------
@@ -311,6 +304,7 @@ impl Arbitrary for MastForest {
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         // BasicBlockNode generation must reference decorator IDs in [0, decorators)
         let bb_params = BasicBlockNodeParams {
+            max_pairs: 0,
             max_decorator_id_u32: 0,
             ..Default::default()
         };

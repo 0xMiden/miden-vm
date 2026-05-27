@@ -33,14 +33,6 @@ pub struct DecoratorInfo {
 }
 
 impl DecoratorInfo {
-    pub fn from_decorator(
-        decorator: &Decorator,
-        decorator_data_offset: DecoratorDataOffset,
-    ) -> Self {
-        let variant = EncodedDecoratorVariant::from(decorator);
-        Self { variant, decorator_data_offset }
-    }
-
     pub fn try_into_decorator(
         &self,
         _string_table: &StringTable,
@@ -55,21 +47,19 @@ impl DecoratorInfo {
         }
         let _data_reader = SliceReader::new(&decorator_data[offset..]);
         match self.variant {
-            EncodedDecoratorVariant::UnsupportedDebugOptionsStackAll
-            | EncodedDecoratorVariant::UnsupportedDebugOptionsStackTop
-            | EncodedDecoratorVariant::UnsupportedDebugOptionsMemAll
-            | EncodedDecoratorVariant::UnsupportedDebugOptionsMemInterval
-            | EncodedDecoratorVariant::UnsupportedDebugOptionsLocalInterval
-            | EncodedDecoratorVariant::UnsupportedDebugOptionsAdvStackTop => {
+            EncodedDecoratorVariant::DebugOptionsStackAll
+            | EncodedDecoratorVariant::DebugOptionsStackTop
+            | EncodedDecoratorVariant::DebugOptionsMemAll
+            | EncodedDecoratorVariant::DebugOptionsMemInterval
+            | EncodedDecoratorVariant::DebugOptionsLocalInterval
+            | EncodedDecoratorVariant::DebugOptionsAdvStackTop => {
                 Err(DeserializationError::InvalidValue(
                     "debug decorators are no longer supported".into(),
                 ))
             },
-            EncodedDecoratorVariant::UnsupportedTraceDecorator => {
-                Err(DeserializationError::InvalidValue(
-                    "trace decorators are no longer supported".into(),
-                ))
-            },
+            EncodedDecoratorVariant::TraceDecorator => Err(DeserializationError::InvalidValue(
+                "trace decorators are no longer supported".into(),
+            )),
         }
     }
 }
@@ -114,14 +104,14 @@ impl Deserializable for DecoratorInfo {
 pub enum EncodedDecoratorVariant {
     // Note: AssemblyOp removed in version [0, 0, 2] - now stored separately in DebugInfo
     // Reserved: these used to encode the removed `debug` decorators.
-    UnsupportedDebugOptionsStackAll = 0,
-    UnsupportedDebugOptionsStackTop = 1,
-    UnsupportedDebugOptionsMemAll = 2,
-    UnsupportedDebugOptionsMemInterval = 3,
-    UnsupportedDebugOptionsLocalInterval = 4,
-    UnsupportedDebugOptionsAdvStackTop = 5,
+    DebugOptionsStackAll = 0,
+    DebugOptionsStackTop = 1,
+    DebugOptionsMemAll = 2,
+    DebugOptionsMemInterval = 3,
+    DebugOptionsLocalInterval = 4,
+    DebugOptionsAdvStackTop = 5,
     // Reserved: this used to encode the removed `trace` decorator.
-    UnsupportedTraceDecorator = 6,
+    TraceDecorator = 6,
 }
 
 impl EncodedDecoratorVariant {
@@ -189,19 +179,7 @@ impl DecoratorDataBuilder {
 /// Mutators
 impl DecoratorDataBuilder {
     pub fn add_decorator(&mut self, decorator: &Decorator) {
-        let decorator_data_offset = self.encode_decorator_data(decorator);
-        self.decorator_infos
-            .push(DecoratorInfo::from_decorator(decorator, decorator_data_offset));
-    }
-
-    /// Encodes the decorator's extra data in the internal data buffer, and returns the offset of
-    /// the newly added data.
-    pub fn encode_decorator_data(&mut self, decorator: &Decorator) -> DecoratorDataOffset {
-        let data_offset = self.decorator_data.len() as DecoratorDataOffset;
-
-        match *decorator {}
-
-        data_offset
+        let _ = decorator;
     }
 
     /// Returns the serialized [`crate::mast::MastForest`] decorator data field.
@@ -219,21 +197,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_decorator_data_offset_out_of_bounds() {
-        let info = DecoratorInfo {
-            variant: EncodedDecoratorVariant::Trace,
-            decorator_data_offset: 99,
-        };
-        let data: Vec<u8> = vec![1, 2, 3];
-        let string_table = StringTable::new(vec![], vec![]);
-        let result = info.try_into_decorator(&string_table, &data);
-        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
-    }
-
-    #[test]
     fn removed_trace_decorator_discriminant_is_rejected_explicitly() {
         let info = DecoratorInfo {
-            variant: EncodedDecoratorVariant::UnsupportedTraceDecorator,
+            variant: EncodedDecoratorVariant::TraceDecorator,
             decorator_data_offset: 0,
         };
         let string_table = StringTable::new(vec![], vec![]);

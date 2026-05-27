@@ -3290,9 +3290,7 @@ begin
     call.foo
 end"
     );
-    let error = context
-        .assemble(source)
-        .expect_err("expected repeat.0 to be rejected");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
