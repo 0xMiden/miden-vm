@@ -557,7 +557,6 @@ impl HasherPeriodicCols<Vec<Felt>> {
     /// 12-14 ext6-ext8              is_ext
     /// 15   boundary                (none)
     /// ```
-    #[allow(clippy::needless_range_loop)]
     pub fn new() -> Self {
         // -------------------------------------------------------------------------
         // Selectors
