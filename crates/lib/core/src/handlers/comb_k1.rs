@@ -722,14 +722,12 @@ pub fn build_left_aligned_padded_tree(
     depth: u8,
     empty_leaf: Word,
 ) -> (Word, Vec<InnerNodeInfo>) {
-    assert!(depth < 64, "depth = {} must be < 64 to fit tree capacity in u64", depth);
+    assert!(depth < 64, "depth = {depth} must be < 64 to fit tree capacity in u64");
     let total = 1u64 << depth;
     assert!(
         real_leaves.len() as u64 <= total,
-        "real_leaves.len() = {} exceeds tree capacity 2^{} = {}",
-        real_leaves.len(),
-        depth,
-        total
+        "real_leaves.len() = {} exceeds tree capacity 2^{depth} = {total}",
+        real_leaves.len()
     );
 
     // Precompute empty_subtree[h] = root of a height-h all-empty subtree.
@@ -790,7 +788,7 @@ pub fn build_left_aligned_padded_tree(
 
 fn build_internal_levels_from_leaf_parents(leaf_parents: Vec<Word>, depth: u8) -> Vec<Vec<Word>> {
     assert!(depth > 0, "depth must be non-zero");
-    assert!(depth < usize::BITS as u8, "depth = {} is too large for usize", depth);
+    assert!(depth < usize::BITS as u8, "depth = {depth} is too large for usize");
     assert!(
         STORED_INTERNAL_LEVEL_START < depth as usize,
         "at least the root level must be stored"
@@ -1370,17 +1368,17 @@ mod tests {
         let advice = t_advice.elapsed();
 
         eprintln!("per-PK build timing (release mode):");
-        eprintln!("  comb + leaf parents      : {:?}", t_comb);
+        eprintln!("  comb + leaf parents      : {t_comb:?}");
         eprintln!("  upper Merkle levels      : {:?}", t_cache - t_comb);
-        eprintln!("  cache build total        : {:?}", t_cache);
-        eprintln!("  advice for one signature : {:?}", advice);
+        eprintln!("  cache build total        : {t_cache:?}");
+        eprintln!("  advice for one signature : {advice:?}");
         let axis_bytes = (cache.axis_p1.len() + cache.axis_p2.len())
             * U32S_PER_COMPACT_ENTRY
-            * core::mem::size_of::<u32>();
+            * size_of::<u32>();
         let internal_level_bytes = cache
             .merkle_internal_levels
             .iter()
-            .map(|level| level.len() * core::mem::size_of::<Word>())
+            .map(|level| level.len() * size_of::<Word>())
             .sum::<usize>();
         eprintln!("  compact axis tables (bytes): {axis_bytes}");
         eprintln!("  internal levels (bytes): {internal_level_bytes}");
