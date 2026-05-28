@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::Felt;
 use miden_debug_types::{
@@ -37,12 +37,43 @@ impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     }
 }
 
+impl ProcessorStateSnapshot {
+    /// Captures the user-visible state at an `emit` checkpoint.
+    ///
+    /// The checkpoint pattern used by tests is `push.<event> emit drop`, so the host observes the
+    /// event ID at the top of the stack. The checkpoint snapshot skips that synthetic stack item to
+    /// match the state after the trailing `drop`, and to preserve the old trace-decorator test
+    /// shape.
+    fn from_emit_checkpoint(state: &ProcessorState) -> Self {
+        let mut stack_state = state.get_stack_state();
+        if !stack_state.is_empty() {
+            stack_state.remove(0);
+        }
+
+        ProcessorStateSnapshot {
+            clk: state.clock().into(),
+            ctx: state.ctx().into(),
+            stack_state,
+            stack_words: [
+                state.get_stack_word(1),
+                state.get_stack_word(5),
+                state.get_stack_word(9),
+                state.get_stack_word(13),
+            ],
+            mem_state: state.get_mem_state(state.ctx()),
+        }
+    }
+}
+
 /// A unified testing host that combines event handling, debug handling, and external node
 /// resolution.
 #[derive(Debug, Clone)]
 pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
+
+    /// Process state snapshots captured at emitted test checkpoints.
+    snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
@@ -56,6 +87,7 @@ impl TestHost {
     pub fn new() -> Self {
         Self {
             event_handler: Vec::new(),
+            snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
@@ -67,9 +99,15 @@ impl TestHost {
         store.insert(kernel_forest);
         Self {
             event_handler: Vec::new(),
+            snapshots: BTreeMap::new(),
             store,
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
+    }
+
+    /// Gets the processor state snapshots captured by emitted test checkpoints.
+    pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
+        &self.snapshots
     }
 }
 
@@ -104,6 +142,10 @@ where
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
+        self.snapshots
+            .entry(event_id)
+            .or_default()
+            .push(ProcessorStateSnapshot::from_emit_checkpoint(process));
         Ok(Vec::new())
     }
 }
