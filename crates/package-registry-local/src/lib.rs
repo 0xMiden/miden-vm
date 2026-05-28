@@ -171,7 +171,6 @@ impl LocalPackageRegistry {
         let index_checksum: [u8; 32];
         let index = if index_path.exists() {
             let mut contents = String::with_capacity(4 * 1024);
-            #[allow(clippy::verbose_file_reads)]
             {
                 let mut file =
                     fs::File::open(&index_path).map_err(LocalRegistryError::IndexRead)?;
@@ -378,7 +377,6 @@ impl LocalPackageRegistry {
 
         // Validate that the contents of the persisted index have not changed under us, by
         // recomputing the checksum of its contents and comparing to when we last loaded the index.
-        #[allow(clippy::verbose_file_reads)]
         {
             let mut prev_contents = Vec::with_capacity(1024);
             file.read_to_end(&mut prev_contents).map_err(LocalRegistryError::IndexRead)?;
