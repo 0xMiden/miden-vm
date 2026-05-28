@@ -100,9 +100,6 @@ pub use merger::MastForestRootMap;
 mod multi_forest_node_iterator;
 pub(crate) use multi_forest_node_iterator::*;
 
-mod node_fingerprint;
-pub use node_fingerprint::{MastNodeFingerprint, MetadataFingerprint};
-
 mod node_builder_utils;
 pub use node_builder_utils::build_node_with_remapped_ids;
 
@@ -1170,8 +1167,6 @@ pub enum MastForestError {
     NodeIdOverflow(MastNodeId, usize),
     #[error("basic block cannot be created from an empty list of operations")]
     EmptyBasicBlock,
-    #[error("metadata root of child with node id {0} is missing for fingerprint computation")]
-    ChildFingerprintMissing(MastNodeId),
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
     #[error("assembly op storage error: {0}")]

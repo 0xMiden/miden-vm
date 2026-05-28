@@ -1931,8 +1931,8 @@ fn u32assertw_with_code() -> TestResult {
     Ok(())
 }
 
-/// Ensure that there is no collision between `Assert`, `U32assert2`, and `MpVerify`
-/// instructions with different inner values (which all don't contribute to the MAST root).
+/// Ensure that assertion and `mtree_verify` error codes are preserved after assembly, including
+/// through duplicate procedures with metadata-neutral MAST roots.
 #[test]
 fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     let context = TestContext::default();

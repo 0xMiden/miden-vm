@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Felt, Word,
-    mast::{MastForest, MastForestError, MastNodeFingerprint, MastNodeId},
+    mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     prettier::{Document, PrettyPrint, const_text},
     utils::LookupByIdx,
@@ -74,26 +74,21 @@ impl DynNode {
 // ================================================================================================
 
 impl DynNode {
-    pub(super) fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        DynNodePrettyPrint { node: self, _mast_forest: mast_forest }
+    pub(super) fn to_display<'a>(&'a self, _mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
+        self.clone()
     }
 
     pub(super) fn to_pretty_print<'a>(
         &'a self,
-        mast_forest: &'a MastForest,
+        _mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
-        DynNodePrettyPrint { node: self, _mast_forest: mast_forest }
+        self.clone()
     }
 }
 
-struct DynNodePrettyPrint<'a> {
-    node: &'a DynNode,
-    _mast_forest: &'a MastForest,
-}
-
-impl PrettyPrint for DynNodePrettyPrint<'_> {
+impl PrettyPrint for DynNode {
     fn render(&self) -> Document {
-        if self.node.is_dyncall() {
+        if self.is_dyncall() {
             const_text("dyncall")
         } else {
             const_text("dyn")
@@ -101,7 +96,7 @@ impl PrettyPrint for DynNodePrettyPrint<'_> {
     }
 }
 
-impl fmt::Display for DynNodePrettyPrint<'_> {
+impl fmt::Display for DynNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pretty_print(f)
     }
@@ -245,22 +240,15 @@ impl MastForestContributor for DynNodeBuilder {
     fn fingerprint_for_node(
         &self,
         _forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // DynNode has no children, so we don't need hash_by_node_id
-        // Use the fingerprint_from_parts helper function with empty children array
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            _hash_by_node_id,
-            &[], // DynNode has no children
-            // Use the forced digest if available, otherwise use the default digest values
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else if self.is_dyncall {
-                DynNode::DYNCALL_DEFAULT_DIGEST
-            } else {
-                DynNode::DYN_DEFAULT_DIGEST
-            },
-        )
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        Ok(if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else if self.is_dyncall {
+            DynNode::DYNCALL_DEFAULT_DIGEST
+        } else {
+            DynNode::DYN_DEFAULT_DIGEST
+        })
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {

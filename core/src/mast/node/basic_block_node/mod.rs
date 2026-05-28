@@ -4,11 +4,7 @@ use core::{fmt, iter::repeat_n};
 use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
-    crypto::hash::Blake3_256,
-    mast::{
-        ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
-    },
+    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeId},
     operations::Operation,
     prettier::PrettyPrint,
     utils::LookupByIdx,
@@ -908,51 +904,20 @@ impl MastForestContributor for BasicBlockNodeBuilder {
     fn fingerprint_for_node(
         &self,
         _forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Process based on operation data type
-        let (op_batches, digest) = match &self.operation_data {
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let digest = match &self.operation_data {
             OperationData::Raw { operations } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                (op_batches, digest)
+                let (_, computed_digest) = batch_and_hash_ops(operations);
+                self.digest.unwrap_or(computed_digest)
             },
-            OperationData::Batched { op_batches } => {
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                (op_batches.clone(), digest)
+            OperationData::Batched { .. } => {
+                self.digest.expect("digest must be set for batched operations")
             },
         };
 
-        // Collect assert operation data
-        let mut assert_data = Vec::new();
-        for (op_idx, op) in op_batches.iter().flat_map(OpBatch::ops).enumerate() {
-            if let Operation::U32assert2(inner_value)
-            | Operation::Assert(inner_value)
-            | Operation::MpVerify(inner_value) = op
-            {
-                let op_idx: u32 = op_idx
-                    .try_into()
-                    .expect("there are more than 2^{32}-1 operations in basic block");
-
-                // we include the opcode to differentiate between `Assert` and `U32assert2`
-                assert_data.push(op.op_code());
-                // we include the operation index to distinguish between basic blocks that
-                // would have the same assert instructions, but in a different order
-                assert_data.extend_from_slice(&op_idx.to_le_bytes());
-                let inner_value = inner_value.as_canonical_u64();
-                assert_data.extend_from_slice(&inner_value.to_le_bytes());
-            }
-        }
-
-        if assert_data.is_empty() {
-            Ok(MastNodeFingerprint::new(digest))
-        } else {
-            let metadata_root = Blake3_256::hash_iter(core::iter::once(assert_data.as_slice()));
-            Ok(MastNodeFingerprint::with_metadata_root(digest, metadata_root))
-        }
+        Ok(digest)
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {

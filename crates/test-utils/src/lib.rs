@@ -356,8 +356,7 @@ impl Test {
         // execute the test
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_debugging(self.in_tracing_mode);
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -535,7 +534,6 @@ impl Test {
                 stack_inputs,
                 self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
-                    .with_debugging(self.in_tracing_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
@@ -564,8 +562,7 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true);
+            .map_err(ExecutionError::advice_error_no_context)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -717,8 +714,7 @@ impl Test {
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_debugging(self.in_tracing_mode);
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

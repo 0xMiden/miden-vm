@@ -8,7 +8,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Felt, Word,
     chiplets::hasher,
-    mast::{MastForest, MastForestError, MastNodeFingerprint, MastNodeId},
+    mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
@@ -218,21 +218,15 @@ impl MastForestContributor for LoopNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Use the fingerprint_from_parts helper function
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            hash_by_node_id,
-            &[self.body],
-            // Use the forced digest if available, otherwise compute the digest
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else {
-                let body_hash = forest[self.body].digest();
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        Ok(if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
+            let body_hash = forest[self.body].digest();
 
-                hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
-            },
-        )
+            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+        })
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {

@@ -139,7 +139,6 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
@@ -200,7 +199,6 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 

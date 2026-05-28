@@ -10,8 +10,8 @@ use miden_core::{
     advice::AdviceMap,
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-        MastForest, MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt,
-        MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
+        MastForest, MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, MastNodeId,
+        Remapping, SubtreeIterator,
     },
     operations::{AssemblyOp, Operation},
 };
@@ -35,9 +35,8 @@ const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 ///
 /// The purpose of the builder is to ensure that the underlying MAST forest contains as little
 /// information as possible needed to adequately describe the logical MAST forest. Specifically:
-/// - The builder ensures that only one copy of nodes that have the same MAST root and metadata is
-///   added to the MAST forest (i.e., two nodes that have the same MAST root and metadata will have
-///   the same [`MastNodeId`]).
+/// - The builder ensures that only one copy of nodes that have the same MAST root is added to the
+///   MAST forest (i.e., two nodes that have the same MAST root will have the same [`MastNodeId`]).
 /// - The builder tries to merge adjacent basic blocks and eliminate the source block whenever this
 ///   does not have an impact on other nodes in the forest.
 #[derive(Clone, Debug, Default)]
@@ -56,10 +55,10 @@ pub struct MastForestBuilder {
     /// root.
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// A map of MAST node fingerprints to their corresponding positions in the MAST forest.
-    node_id_by_fingerprint: BTreeMap<MastNodeFingerprint, MastNodeId>,
+    node_id_by_fingerprint: BTreeMap<Word, MastNodeId>,
     /// The reverse mapping of `node_id_by_fingerprint`. This map caches the fingerprints of all
     /// nodes (for performance reasons).
-    hash_by_node_id: BTreeMap<MastNodeId, MastNodeFingerprint>,
+    hash_by_node_id: BTreeMap<MastNodeId, Word>,
     /// A set of IDs for basic blocks which have been merged into a bigger basic blocks. This is
     /// used as a candidate set of nodes that may be eliminated if the are not referenced by any
     /// other node in the forest and are not a root of any procedure.

@@ -66,7 +66,6 @@ impl ProveCmd {
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            true,
         )
         .map_err(|err| Report::msg(format!("{err}")))
     }

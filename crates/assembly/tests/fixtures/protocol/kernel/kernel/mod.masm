@@ -1,8 +1,7 @@
 const SYSCALL_TABLE_ADDR = 0
-const NUM_SYSCALLS = 3
+const NUM_SYSCALLS = 2
 
 const PANIC_ADDR = SYSCALL_TABLE_ADDR + 1
-const PRINTLN_ADDR = SYSCALL_TABLE_ADDR + 2
 
 #! Initializes the kernel environment
 pub proc init
@@ -10,8 +9,6 @@ pub proc init
     mem_storew_le.SYSCALL_TABLE_ADDR
     procref.$kernel::sys::panic
     mem_storew_le.PANIC_ADDR
-    procref.$kernel::io::println
-    mem_storew_le.PRINTLN_ADDR
 end
 
 #! Execute one of this kernel's syscalls

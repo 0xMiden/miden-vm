@@ -128,8 +128,8 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Options for execution, including but not limited to whether debug or tracing is enabled,
-    /// the size of core trace fragments during execution, etc.
+    /// Options for execution, including cycle limits, stack limits, advice map limits, and the
+    /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
@@ -190,8 +190,7 @@ impl FastProcessor {
 
     /// Creates a new `FastProcessor` instance with the given stack inputs.
     ///
-    /// By default, advice inputs are empty and execution options use their defaults
-    /// (debugging disabled).
+    /// By default, advice inputs are empty and execution options use their defaults.
     ///
     /// # Example
     /// ```ignore
@@ -199,8 +198,7 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
-    ///     .expect("advice inputs should fit advice map limits")
-    ///     .with_debugging(true);
+    ///     .expect("advice inputs should fit advice map limits");
     /// ```
     ///
     /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
@@ -223,8 +221,6 @@ impl FastProcessor {
 
     /// Sets the execution options for the processor.
     ///
-    /// This will override any previously set debugging settings.
-    ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
@@ -232,15 +228,6 @@ impl FastProcessor {
         self.advice.set_options(&options)?;
         self.options = options;
         Ok(self)
-    }
-
-    /// Enables or disables debugging mode.
-    ///
-    /// This records the debugging flag exposed by [`Self::in_debug_mode`]. No runtime behavior
-    /// currently consumes the flag; it is retained as temporary compatibility.
-    pub fn with_debugging(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_debugging(enabled);
-        self
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -298,12 +285,6 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Returns whether the processor is executing in debug mode.
-    #[inline(always)]
-    pub fn in_debug_mode(&self) -> bool {
-        self.options.enable_debugging()
-    }
 
     /// Returns the size of the stack.
     #[inline(always)]

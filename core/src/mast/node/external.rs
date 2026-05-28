@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Felt, Word,
-    mast::{MastForest, MastForestError, MastNodeFingerprint, MastNodeId},
+    mast::{MastForest, MastForestError, MastNodeId},
     utils::LookupByIdx,
 };
 
@@ -37,32 +37,25 @@ pub struct ExternalNode {
 // ================================================================================================
 
 impl ExternalNode {
-    pub(super) fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        ExternalNodePrettyPrint { node: self, _mast_forest: mast_forest }
+    pub(super) fn to_display<'a>(&'a self, _mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
+        self.clone()
     }
 
     pub(super) fn to_pretty_print<'a>(
         &'a self,
-        mast_forest: &'a MastForest,
+        _mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
-        ExternalNodePrettyPrint { node: self, _mast_forest: mast_forest }
+        self.clone()
     }
 }
 
-struct ExternalNodePrettyPrint<'a> {
-    node: &'a ExternalNode,
-    _mast_forest: &'a MastForest,
-}
-
-impl PrettyPrint for ExternalNodePrettyPrint<'_> {
+impl PrettyPrint for ExternalNode {
     fn render(&self) -> Document {
-        const_text("external")
-            + const_text(".")
-            + text(self.node.digest.as_bytes().to_hex_with_prefix())
+        const_text("external") + const_text(".") + text(self.digest.as_bytes().to_hex_with_prefix())
     }
 }
 
-impl fmt::Display for ExternalNodePrettyPrint<'_> {
+impl fmt::Display for ExternalNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
@@ -182,15 +175,9 @@ impl MastForestContributor for ExternalNodeBuilder {
     fn fingerprint_for_node(
         &self,
         _forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // ExternalNode has no children, so we don't need hash_by_node_id
-        // Use the fingerprint_from_parts helper function with empty children array
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            _hash_by_node_id,
-            &[],         // ExternalNode has no children
-            self.digest, // ExternalNodeBuilder stores the digest directly
-        )
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        Ok(self.digest)
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {

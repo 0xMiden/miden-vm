@@ -5,7 +5,8 @@ use super::{
     LoopNodeBuilder, SplitNodeBuilder,
 };
 use crate::{
-    mast::{MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
+    Word,
+    mast::{MastForest, MastForestError, MastNode, MastNodeId},
     utils::LookupByIdx,
 };
 
@@ -20,8 +21,8 @@ pub trait MastForestContributor {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError>;
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
@@ -31,7 +32,7 @@ pub trait MastForestContributor {
     ///
     /// When a digest is set, the builder will use this digest instead of computing
     /// the normal digest for the node during the build() operation.
-    fn with_digest(self, digest: crate::Word) -> Self;
+    fn with_digest(self, digest: Word) -> Self;
 }
 
 /// Enum of all MAST node builders that can be added to a forest.
@@ -109,39 +110,28 @@ impl proptest::prelude::Arbitrary for MastNodeBuilder {
 
 #[cfg(test)]
 mod fingerprint_invariant_tests {
-    use alloc::collections::BTreeMap;
-
-    use proptest::prelude::*;
-
     use crate::{
         Felt,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
         operations::Operation,
     };
 
-    proptest! {
+    #[test]
+    fn basic_block_fingerprint_ignores_assert_error_codes() {
+        let forest = MastForest::new();
+        let builder_assert_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(1))]);
+        let builder_assert_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(2))]);
 
+        let empty_map = alloc::collections::BTreeMap::new();
+        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-        #[test]
-        fn prop_basic_block_fingerprint_different_assert_values(
-            error_code_1 in any::<u64>(),
-            error_code_2 in any::<u64>(),
-        ) {
-            prop_assume!(error_code_1 != error_code_2); // Ensure different error codes
-
-            let forest = MastForest::new();
-            let felt_1 = Felt::new_unchecked(error_code_1);
-            let felt_2 = Felt::new_unchecked(error_code_2);
-
-            let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)]);
-            let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)]);
-
-            let empty_map = BTreeMap::new();
-            let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
-            let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
-
-            assert_ne!(fp_assert_1, fp_assert_2, "Basic blocks with Assert operations with different error codes should have different fingerprints");
-        }
+        assert_eq!(
+            fp_assert_1, fp_assert_2,
+            "assert error codes are debug metadata and should not affect MAST node identity"
+        );
     }
 }
 

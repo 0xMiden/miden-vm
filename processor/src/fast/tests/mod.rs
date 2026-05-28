@@ -219,7 +219,6 @@ fn test_cycle_limit_exceeded() {
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        false,
     )
     .unwrap();
 
@@ -256,7 +255,6 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
         Some(2048),
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        false,
     )
     .unwrap();
 
