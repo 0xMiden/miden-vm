@@ -21,7 +21,10 @@
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 
 #### Enhancements
+
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
+- Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
+
 ## v0.23.3 (2026-05-26)
 
 - Pure version bump to attach build artifacts to the release.

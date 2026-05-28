@@ -33,6 +33,7 @@ use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
 use miden_utils_diagnostics::Report;
 
 pub use self::{
+    cst::parse_inline_masm,
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     lexer::Lexer,
     scanner::Scanner,
