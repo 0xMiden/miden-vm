@@ -22,6 +22,9 @@
 
 #### Enhancements
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
+## v0.23.3 (2026-05-26)
+
+- Pure version bump to attach build artifacts to the release.
 
 ## v0.23.2 (2026-05-26)
 
