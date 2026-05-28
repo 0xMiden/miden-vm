@@ -90,9 +90,9 @@ pub struct MastForestBuilder {
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
-    /// Maps each statically linked source forest commitment to its position in the merged forest
+    /// Maps each statically linked source forest commitment to its positions in the merged forest
     /// root map.
-    statically_linked_forest_indices_by_commitment: BTreeMap<Word, usize>,
+    statically_linked_forest_indices_by_commitment: BTreeMap<Word, Vec<usize>>,
     /// Maps procedure roots from each source static library to their new root ID in the merged
     /// static forest.
     statically_linked_root_map: MastForestRootMap,
@@ -110,15 +110,13 @@ impl MastForestBuilder {
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
         let forests = static_libraries.into_iter().collect::<Vec<_>>();
-        // TODO(#3067): `MastForest::commitment()` only hashes procedure root digests, so two
-        // forests with identical roots but different debug metadata share the same commitment.
-        // Using that commitment as a lookup key can point provenance from one static library at
-        // another library's root map and still select the wrong diagnostics metadata.
-        let statically_linked_forest_indices_by_commitment = forests
-            .iter()
-            .enumerate()
-            .map(|(idx, forest)| (forest.commitment(), idx))
-            .collect();
+        let mut statically_linked_forest_indices_by_commitment = BTreeMap::new();
+        for (idx, forest) in forests.iter().enumerate() {
+            statically_linked_forest_indices_by_commitment
+                .entry(forest.commitment())
+                .or_insert_with(Vec::new)
+                .push(idx);
+        }
         let (statically_linked_mast, statically_linked_root_map) =
             MastForest::merge(forests.iter().copied()).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
@@ -1712,6 +1710,54 @@ mod tests {
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(final_linked).unwrap().context_name(),
             "alias_a",
+        );
+    }
+
+    #[test]
+    fn test_static_link_ambiguous_same_commitment_source_root_stays_external() {
+        let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_a_asm_op = add_test_asm_op(
+            &mut source_a_builder,
+            AssemblyOp::new(None, "source_a".into(), 1, "add".into()),
+        );
+        let source_a_ref = source_a_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_a_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_a_builder, source_a_ref);
+        let (source_a_forest, source_a_remapping) = source_a_builder.build().unwrap().into_parts();
+        let source_a_root = source_a_remapping[&source_a_ref];
+
+        let mut source_b_builder = MastForestBuilder::new(&[]).unwrap();
+        let source_b_asm_op = add_test_asm_op(
+            &mut source_b_builder,
+            AssemblyOp::new(None, "source_b".into(), 1, "add".into()),
+        );
+        let source_b_ref = source_b_builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, source_b_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut source_b_builder, source_b_ref);
+        let (source_b_forest, source_b_remapping) = source_b_builder.build().unwrap().into_parts();
+        let source_b_root = source_b_remapping[&source_b_ref];
+
+        assert_eq!(source_a_root, source_b_root);
+        assert_eq!(source_a_forest.commitment(), source_b_forest.commitment());
+        assert_eq!(
+            source_a_forest[source_a_root].digest(),
+            source_b_forest[source_b_root].digest()
+        );
+
+        let mut builder = MastForestBuilder::new([&source_a_forest, &source_b_forest]).unwrap();
+        let linked_ref = builder
+            .ensure_external_link_with_source_ref(
+                source_a_forest[source_a_root].digest(),
+                Some(source_a_forest.commitment()),
+                Some(source_a_root),
+            )
+            .unwrap();
+
+        assert!(
+            builder.nodes[linked_ref].kind.is_external(),
+            "ambiguous same-commitment provenance must not import the wrong source metadata"
         );
     }
 
