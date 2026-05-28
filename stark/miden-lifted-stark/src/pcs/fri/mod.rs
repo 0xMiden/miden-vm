@@ -73,7 +73,9 @@ impl FriParams {
     /// degree is at most `2^log_final_degree`.
     ///
     /// Uses `div_ceil` to round up, ensuring we always reach the target degree even if
-    /// the domain size doesn't divide evenly by the folding factor.
+    /// the domain size doesn't divide evenly by the folding factor. `PcsParams::new`
+    /// rejects parameter sets whose target final domain is too small to be reachable by
+    /// fixed-arity folding for all valid domains.
     #[inline]
     pub fn num_rounds<F: TwoAdicField>(&self, domain: &LiftedDomain<F>) -> usize {
         // Maximum domain size needed to accommodate a degree-`2^log_final_degree` polynomial

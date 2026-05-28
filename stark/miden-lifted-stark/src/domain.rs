@@ -64,9 +64,7 @@ pub enum DomainError {
     /// Heights are not in non-decreasing order.
     #[error("trace heights are not in non-decreasing order")]
     HeightsNotAscending,
-    /// Max trace height is 1 (`log_h == 0`): no 2-row transition window.
-    #[error("max trace log height is 0; at least one trace must have height ≥ 2")]
-    MaxHeightTooSmall,
+
     /// Some AIR's `log_quotient_degree` exceeds the PCS blowup, so its
     /// quotient polynomial would not fit the committed LDE. The recoverable
     /// twin of the invariant `EvaluationDomain::new` asserts; the prover and
@@ -255,8 +253,8 @@ impl<F: TwoAdicField> Coset<F> for TwoAdicSubgroup<F> {
 /// the type system can express "no shift" without runtime checks. Both
 /// implement [`Coset`].
 ///
-/// The shift's multiplicative inverse is computed once at construction and
-/// stored, so repeated `vanishing_at` / `contains` calls don't re-invert.
+/// The shift must be non-zero. The constructor panics on zero shift because a
+/// zero-shifted set is not a multiplicative coset.
 #[derive(Copy, Clone, Debug)]
 pub struct TwoAdicCoset<F: TwoAdicField> {
     subgroup: TwoAdicSubgroup<F>,
@@ -266,8 +264,11 @@ pub struct TwoAdicCoset<F: TwoAdicField> {
 
 impl<F: TwoAdicField> TwoAdicCoset<F> {
     /// Create a coset `shift · subgroup`. Computes and caches `shift⁻¹`.
+    ///
+    /// Panics if `shift` is zero.
     #[inline]
     pub fn new(subgroup: TwoAdicSubgroup<F>, shift: F) -> Self {
+        assert!(shift != F::ZERO, "coset shift must be non-zero");
         Self {
             subgroup,
             shift,

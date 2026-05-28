@@ -22,8 +22,7 @@
 //! The verifier accepts whatever trace heights the proof carries; it never
 //! compares them against a caller-supplied expectation. If your statement
 //! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with
-//! [`StarkProof::from_data`](crate::proof::StarkProof::from_data)
+//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data)
 //! and check `proof.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)
