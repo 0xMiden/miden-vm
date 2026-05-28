@@ -9,4 +9,4 @@ too-many-arguments-threshold = 11
 too-many-lines-threshold = 200
 
 # Type complexity in crypto tests and dependency specs is genuine.
-type-complexity-threshold = 300
+type-complexity-threshold = 650

@@ -572,8 +572,8 @@ impl HasherPeriodicCols<Vec<Felt>> {
             is_ext[r] = Felt::ONE;
         }
 
-        for r in 4..=10 {
-            is_packed_int[r] = Felt::ONE;
+        for v in is_packed_int.iter_mut().skip(4).take(7) {
+            *v = Felt::ONE;
         }
 
         is_int_ext[11] = Felt::ONE;
@@ -592,8 +592,8 @@ impl HasherPeriodicCols<Vec<Felt>> {
             col[0] = Hasher::ARK_EXT_INITIAL[0][lane];
 
             // Rows 1-3 (ext2, ext3, ext4): remaining initial external round constants
-            for r in 1..=3 {
-                col[r] = Hasher::ARK_EXT_INITIAL[r][lane];
+            for (r, v) in col.iter_mut().enumerate().take(4).skip(1) {
+                *v = Hasher::ARK_EXT_INITIAL[r][lane];
             }
 
             // Rows 4-10 (packed internal): internal constants in lanes 0-2 only
@@ -610,8 +610,8 @@ impl HasherPeriodicCols<Vec<Felt>> {
             col[11] = Hasher::ARK_EXT_TERMINAL[0][lane];
 
             // Rows 12-14 (ext6, ext7, ext8): remaining terminal external round constants
-            for r in 12..=14 {
-                col[r] = Hasher::ARK_EXT_TERMINAL[r - 11][lane];
+            for (r, v) in col.iter_mut().enumerate().take(15).skip(12) {
+                *v = Hasher::ARK_EXT_TERMINAL[r - 11][lane];
             }
 
             col

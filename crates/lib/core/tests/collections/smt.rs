@@ -843,7 +843,6 @@ fn test_smt_multi_leaf_hash_differs_from_domain_zero() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[expect(clippy::type_complexity)]
 fn prepare_insert_or_set(
     key: Word,
     value: Word,

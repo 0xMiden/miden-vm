@@ -59,7 +59,7 @@ where
         Operation::Assert(err_code) => sys_ops::op_assert(processor, *err_code, current_forest)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::SDepth => sys_ops::op_sdepth(processor)?,
-        Operation::Caller => sys_ops::op_caller(processor)?,
+        Operation::Caller => sys_ops::op_caller(processor),
         Operation::Clk => sys_ops::op_clk(processor)?,
         Operation::Emit => {
             panic!("emit instruction requires async, so is not supported by execute_op()")
