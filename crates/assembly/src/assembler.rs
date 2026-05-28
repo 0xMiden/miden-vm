@@ -549,7 +549,6 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
-        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
         let exports = {
             let mut exports = BTreeMap::new();
 
@@ -830,7 +829,6 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
-        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
 
         if let Some(advice_map) = self.linker[module_index].advice_map() {
             mast_forest_builder.merge_advice_map(advice_map)?;

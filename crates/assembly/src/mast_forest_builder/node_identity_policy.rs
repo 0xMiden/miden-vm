@@ -35,7 +35,7 @@ impl FinalForestLayout {
         // procedure root even though no static child edge points to it.
         //
         // The builder already knows which refs were made obsolete by local rewrites, such as
-        // basic-block merging or decorator cloning. Finalization removes only those candidates,
+        // basic-block merging. Finalization removes only those candidates,
         // and only after filtering out candidates that are still procedure roots or children of
         // another retained node.
         let mut nodes_to_remove: BTreeSet<MastNodeRef> = candidate_node_refs

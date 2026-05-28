@@ -59,7 +59,7 @@ impl Assembler {
             None
         };
 
-        // Compile the instruction (decorators are now always empty for this path).
+        // Compile the instruction.
         let opt_new_node_id = self.compile_instruction_impl(
             instruction,
             block_builder,

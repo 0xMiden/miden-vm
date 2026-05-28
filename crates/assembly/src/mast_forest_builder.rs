@@ -505,9 +505,6 @@ impl MastForestBuilder {
         })
     }
 
-    /// The builder keeps node identity independent from debug metadata.
-    pub fn set_emit_debug_info(&mut self, _emit: bool) {}
-
     fn push_pending_node_record_ref(
         &mut self,
         fingerprint: MastNodeFingerprint,
