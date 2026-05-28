@@ -14,10 +14,8 @@
 
 const PRINT_STACK_EVENT = event("miden::core::debug::print_stack")
 const PRINT_MEM_EVENT = event("miden::core::debug::print_mem")
-const PRINT_MEM_ADDR_EVENT = event("miden::core::debug::print_mem_addr")
-const PRINT_MEM_ALL_EVENT = event("miden::core::debug::print_mem_all")
 const PRINT_ADV_STACK_EVENT = event("miden::core::debug::print_adv_stack")
-const PRINT_ADV_MAP_ALL_EVENT = event("miden::core::debug::print_adv_map_all")
+const PRINT_ADV_MAP_EVENT = event("miden::core::debug::print_adv_map")
 const PRINT_ADV_MAP_ITEM_EVENT = event("miden::core::debug::print_adv_map_item")
 const MAX_FELT_VALUE = 18446744069414584320
 
@@ -60,11 +58,12 @@ end
 #! Where:
 #! - addr is the address of the memory cell to print.
 #!
-#! Cycles: 4
+#! Cycles: 6
 pub proc print_mem_addr
-    emit.PRINT_MEM_ADDR_EVENT
-    # => [addr, ...]
-    drop
+    dup add.1 swap
+    # => [addr, addr+1, ...]
+    emit.PRINT_MEM_EVENT
+    drop drop
 end
 
 #! Prints the full memory of the current context.
@@ -72,9 +71,12 @@ end
 #! Inputs:  [...]
 #! Outputs: [...]
 #!
-#! Cycles: 3
+#! Cycles: 7
 pub proc print_mem_all
-    emit.PRINT_MEM_ALL_EVENT
+    push.4294967295 push.0
+    emit.PRINT_MEM_EVENT
+    # => [0, 4294967295, ...]
+    drop drop
 end
 
 #! Prints the advice stack in the range `[start, end)`, consuming the two range arguments.
@@ -113,7 +115,7 @@ end
 #!
 #! Cycles: 3
 pub proc print_adv_map_all
-    emit.PRINT_ADV_MAP_ALL_EVENT
+    emit.PRINT_ADV_MAP_EVENT
 end
 
 #! Looks up the WORD key in the advice map and prints the associated list of field elements,
