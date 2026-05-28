@@ -161,7 +161,8 @@ impl ExecutionOptions {
     /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
     /// otherwise, debug mode is disabled.
     ///
-    /// This flag is kept for backwards compatibility but no longer affects runtime execution.
+    /// This records the flag returned by [`Self::enable_debugging`]. No runtime behavior currently
+    /// consumes the flag; it is retained as temporary compatibility.
     pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
         self.enable_debugging = enable_debugging;
         self

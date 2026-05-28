@@ -133,7 +133,7 @@ impl Arbitrary for BasicBlockNode {
         // ensure at least 1 op to satisfy BasicBlockNode::new
         op_non_control_sequence_strategy(p.max_ops_len)
             .prop_filter_map("non-empty ops", |ops| if ops.is_empty() { None } else { Some(ops) })
-            .prop_map(|ops| BasicBlockNode::new_owned(ops).expect("non-empty ops"))
+            .prop_map(|ops| BasicBlockNode::new(ops).expect("non-empty ops"))
             .boxed()
     }
 }

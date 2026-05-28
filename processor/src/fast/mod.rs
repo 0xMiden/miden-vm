@@ -236,7 +236,8 @@ impl FastProcessor {
 
     /// Enables or disables debugging mode.
     ///
-    /// This is kept for backwards compatibility but no longer affects runtime execution.
+    /// This records the debugging flag exposed by [`Self::in_debug_mode`]. No runtime behavior
+    /// currently consumes the flag; it is retained as temporary compatibility.
     pub fn with_debugging(mut self, enabled: bool) -> Self {
         self.options = self.options.with_debugging(enabled);
         self

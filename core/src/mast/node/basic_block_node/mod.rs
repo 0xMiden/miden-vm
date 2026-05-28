@@ -97,7 +97,7 @@ impl BasicBlockNode {
 impl BasicBlockNode {
     /// Returns a new [`BasicBlockNode`] instantiated with the specified operations.
     #[cfg(any(test, feature = "arbitrary"))]
-    pub(crate) fn new_owned(operations: Vec<Operation>) -> Result<Self, MastForestError> {
+    pub(crate) fn new(operations: Vec<Operation>) -> Result<Self, MastForestError> {
         if operations.is_empty() {
             return Err(MastForestError::EmptyBasicBlock);
         }
@@ -189,7 +189,7 @@ impl BasicBlockNode {
     /// This method compares two blocks for logical equality by comparing:
     /// - Operations (exact equality)
     #[cfg(test)]
-    pub fn semantic_eq(&self, other: &BasicBlockNode, _forest: &MastForest) -> bool {
+    pub fn semantic_eq(&self, other: &BasicBlockNode) -> bool {
         // Compare operations by collecting and comparing
         let self_ops: Vec<_> = self.operations().collect();
         let other_ops: Vec<_> = other.operations().collect();

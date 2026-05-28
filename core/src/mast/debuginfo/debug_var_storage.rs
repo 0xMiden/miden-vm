@@ -14,27 +14,11 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::DebugInfoIndexError;
 use crate::{
     mast::MastNodeId,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-
-// DEBUG INFO INDEX ERROR
-// ================================================================================================
-
-/// Error type for debug-info index mapping operations.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum DebugInfoIndexError {
-    /// Node index is invalid (either out of sequence or already added).
-    #[error("invalid node index {0:?}")]
-    NodeIndex(MastNodeId),
-    /// Operation index is invalid for the node.
-    #[error("invalid operation index {operation} for node {node:?}")]
-    OperationIndex { node: MastNodeId, operation: usize },
-    /// Internal CSR structure is invalid.
-    #[error("internal CSR structure is invalid")]
-    InternalStructure,
-}
 
 // DEBUG VAR ID
 // ================================================================================================

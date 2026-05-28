@@ -853,6 +853,8 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use miden_core::mast::CallNodeBuilder;
+
     use super::*;
 
     #[test]
@@ -895,6 +897,34 @@ mod tests {
         );
     }
 
+    /// Same-ops blocks with different debug vars still alias. The first node's metadata wins.
+    #[test]
+    fn test_ensure_block_dedups_different_debug_vars() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_x_id = builder
+            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let var_y_id = builder
+            .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+            .unwrap();
+
+        let block_a =
+            builder.ensure_block(vec![Operation::Add], vec![], vec![(0, var_x_id)]).unwrap();
+        let block_b =
+            builder.ensure_block(vec![Operation::Add], vec![], vec![(0, var_y_id)]).unwrap();
+
+        assert_eq!(block_a, block_b, "debug vars must not prevent dedup");
+
+        let (forest, _remapping) = builder.build();
+        let vars = forest.debug_info().debug_vars_for_node(block_a);
+
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0].1, var_x_id, "deduped node should keep first var");
+    }
+
     /// Same-ops blocks with different AssemblyOps alias during assembly.
     #[test]
     fn test_ensure_block_dedups_different_asm_ops() {
@@ -925,6 +955,36 @@ mod tests {
     }
 
     /// Non-block nodes with different AssemblyOps alias during assembly.
+    #[test]
+    fn test_non_block_nodes_dedup_different_asm_ops() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let callee = builder.ensure_block(vec![Operation::Add], vec![], vec![]).unwrap();
+        let call_a = builder
+            .ensure_node_with_asm_op(
+                CallNodeBuilder::new(callee),
+                AssemblyOp::new(None, "ctx_a".into(), 1, "call.foo".into()),
+            )
+            .unwrap();
+        let call_b = builder
+            .ensure_node_with_asm_op(
+                CallNodeBuilder::new(callee),
+                AssemblyOp::new(None, "ctx_b".into(), 1, "call.foo".into()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            call_a, call_b,
+            "same-structure non-block nodes with different AssemblyOps must dedup"
+        );
+
+        let (forest, _remapping) = builder.build();
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(call_a).unwrap().context_name(),
+            "ctx_a"
+        );
+    }
+
     #[test]
     fn test_merged_root_block_keeps_metadata() {
         use miden_core::operations::{AssemblyOp, DebugVarInfo, DebugVarLocation};
