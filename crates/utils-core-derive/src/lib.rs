@@ -284,7 +284,6 @@ fn generate_mast_forest_contributor_impl(
 
     quote! {
         impl #generics crate::mast::MastForestContributor for #enum_name #generics {
-            #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
             fn add_to_forest(self, forest: &mut crate::mast::MastForest) -> Result<crate::mast::MastNodeId, crate::mast::MastForestError> {
                 match self {
                     #(#add_to_forest_arms),*

@@ -252,7 +252,7 @@ impl MastForest {
         stripped: bool,
         hashless: bool,
     ) {
-        let layout = InMemorySerializedForestLayout::new(self);
+        let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
         target.write_bytes(MAGIC);
@@ -263,9 +263,52 @@ impl MastForest {
         // version
         target.write_bytes(&VERSION);
 
-        layout.write_counts(target);
-        layout.write_roots(target);
-        layout.write_node_sections(target, hashless);
+        // header counts
+        let node_count = self.nodes.len();
+        let external_node_count = self.nodes.iter().filter(|node| node.is_external()).count();
+        let internal_node_count = node_count - external_node_count;
+        target.write_usize(internal_node_count);
+        target.write_usize(external_node_count);
+
+        // roots
+        let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
+        roots.write_into(target);
+
+        let mut mast_node_entries = Vec::with_capacity(self.nodes.len());
+        let mut external_digests = Vec::with_capacity(external_node_count);
+        let mut node_hashes = Vec::new();
+
+        for mast_node in self.nodes.iter() {
+            let ops_offset = if let MastNode::Block(basic_block) = mast_node {
+                basic_block_data_builder.encode_basic_block(basic_block)
+            } else {
+                0
+            };
+
+            mast_node_entries.push(MastNodeEntry::new(mast_node, ops_offset));
+            if mast_node.is_external() {
+                external_digests.push(mast_node.digest());
+            } else if !hashless {
+                node_hashes.push(mast_node.digest());
+            }
+        }
+
+        let basic_block_data = basic_block_data_builder.finalize();
+        basic_block_data.write_into(target);
+
+        for mast_node_entry in mast_node_entries {
+            mast_node_entry.write_into(target);
+        }
+
+        for digest in external_digests {
+            digest.write_into(target);
+        }
+
+        if !hashless {
+            for digest in node_hashes {
+                digest.write_into(target);
+            }
+        }
 
         self.advice_map.write_into(target);
 
@@ -289,121 +332,37 @@ pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
 }
 
 fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> usize {
-    InMemorySerializedForestLayout::new(forest).serialized_size_hint(stripped, hashless)
-}
+    let node_count = forest.nodes.len();
+    let external_count = forest.nodes.iter().filter(|node| node.is_external()).count();
+    let non_external_count = node_count - external_count;
 
-#[derive(Debug)]
-struct InMemorySerializedForestLayout<'a> {
-    forest: &'a MastForest,
-    node_count: usize,
-    internal_node_count: usize,
-    external_node_count: usize,
-    basic_block_len: usize,
-}
+    let mut size = MAGIC.len() + 1 + VERSION.len();
+    size += non_external_count.get_size_hint();
+    size += external_count.get_size_hint();
 
-impl<'a> InMemorySerializedForestLayout<'a> {
-    fn new(forest: &'a MastForest) -> Self {
-        let mut external_node_count = 0usize;
-        let mut basic_block_len = 0usize;
+    let roots_len = forest.roots.len();
+    size += roots_len.get_size_hint();
+    size += roots_len * size_of::<u32>();
 
-        for node in forest.nodes.iter() {
-            if node.is_external() {
-                external_node_count += 1;
-            }
-            if let MastNode::Block(block) = node {
-                basic_block_len += basic_block_data_len(block);
-            }
-        }
-
-        let node_count = forest.nodes.len();
-        let internal_node_count = node_count - external_node_count;
-
-        Self {
-            forest,
-            node_count,
-            internal_node_count,
-            external_node_count,
-            basic_block_len,
+    let mut basic_block_len = 0usize;
+    for node in forest.nodes.iter() {
+        if let MastNode::Block(block) = node {
+            basic_block_len += basic_block_data_len(block);
         }
     }
+    size += basic_block_len.get_size_hint() + basic_block_len;
 
-    fn write_counts<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.internal_node_count);
-        target.write_usize(self.external_node_count);
+    size += node_count * MastNodeEntry::SERIALIZED_SIZE;
+    size += external_count * Word::min_serialized_size();
+    if !hashless {
+        size += non_external_count * Word::min_serialized_size();
+    }
+    size += forest.advice_map.serialized_size_hint();
+    if !stripped {
+        size += forest.debug_info.get_size_hint();
     }
 
-    fn write_roots<W: ByteWriter>(&self, target: &mut W) {
-        let roots: Vec<u32> = self.forest.roots.iter().copied().map(u32::from).collect();
-        roots.write_into(target);
-    }
-
-    fn write_node_sections<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
-        let mut basic_block_data_builder = BasicBlockDataBuilder::new();
-        let mut mast_node_entries = Vec::with_capacity(self.node_count);
-        let mut external_digests = Vec::with_capacity(self.external_node_count);
-        let mut node_hashes = if hashless {
-            Vec::new()
-        } else {
-            Vec::with_capacity(self.internal_node_count)
-        };
-
-        for mast_node in self.forest.nodes.iter() {
-            let ops_offset = if let MastNode::Block(basic_block) = mast_node {
-                basic_block_data_builder.encode_basic_block(basic_block)
-            } else {
-                0
-            };
-
-            mast_node_entries.push(MastNodeEntry::new(mast_node, ops_offset));
-            if mast_node.is_external() {
-                external_digests.push(mast_node.digest());
-            } else if !hashless {
-                node_hashes.push(mast_node.digest());
-            }
-        }
-
-        let basic_block_data = basic_block_data_builder.finalize();
-        debug_assert_eq!(basic_block_data.len(), self.basic_block_len);
-        basic_block_data.write_into(target);
-
-        for mast_node_entry in mast_node_entries {
-            mast_node_entry.write_into(target);
-        }
-
-        for digest in external_digests {
-            digest.write_into(target);
-        }
-
-        if !hashless {
-            for digest in node_hashes {
-                digest.write_into(target);
-            }
-        }
-    }
-
-    fn serialized_size_hint(&self, stripped: bool, hashless: bool) -> usize {
-        let mut size = MAGIC.len() + 1 + VERSION.len();
-        size += self.internal_node_count.get_size_hint();
-        size += self.external_node_count.get_size_hint();
-
-        let roots_len = self.forest.roots.len();
-        size += roots_len.get_size_hint();
-        size += roots_len * size_of::<u32>();
-
-        size += self.basic_block_len.get_size_hint() + self.basic_block_len;
-
-        size += self.node_count * MastNodeEntry::SERIALIZED_SIZE;
-        size += self.external_node_count * Word::min_serialized_size();
-        if !hashless {
-            size += self.internal_node_count * Word::min_serialized_size();
-        }
-        size += self.forest.advice_map.serialized_size_hint();
-        if !stripped {
-            size += self.forest.debug_info.get_size_hint();
-        }
-
-        size
-    }
+    size
 }
 
 /// Trusted read backing mode for read-only MAST forest access.

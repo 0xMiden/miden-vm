@@ -5,12 +5,13 @@ use super::{
     reserve_allocation,
 };
 use crate::{
+    Felt,
+    chiplets::hasher,
     mast::{
-        DebugInfo, MastForestParts, digest,
+        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
-    utils::IndexVec,
 };
 
 /// Digest sources for a parsed serialized forest.
@@ -136,53 +137,31 @@ impl<'a> ResolvedSerializedForest<'a> {
             self.layout.basic_block_offset(),
             self.layout.basic_block_len(),
         )?);
-        let mut nodes = IndexVec::with_capacity(self.node_count());
+        let mut mast_forest = MastForest::new();
+        mast_forest.debug_info = debug_info;
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
             let digest = self.node_digest_for_entry(index, entry)?;
-            let node_id = MastNodeId::new_unchecked(index.try_into().map_err(|_| {
-                DeserializationError::InvalidValue(format!(
-                    "too many MAST nodes while deserializing: {}",
-                    self.node_count()
-                ))
-            })?);
 
             let mast_node_builder = entry.try_into_mast_node_builder(
                 self.node_count(),
                 &basic_block_data_decoder,
                 digest,
             )?;
-            let node = mast_node_builder.build_linked(node_id).map_err(|e| {
+            mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
                 DeserializationError::InvalidValue(format!(
-                    "failed to build MAST node while deserializing: {e}",
+                    "failed to add node to MAST forest while deserializing: {e}",
                 ))
             })?;
-            let inserted_id = nodes.push(node).map_err(|_| {
-                DeserializationError::InvalidValue(format!(
-                    "too many MAST nodes while deserializing: {}",
-                    self.node_count()
-                ))
-            })?;
-            debug_assert_eq!(inserted_id, node_id);
         }
 
-        let mut roots = Vec::with_capacity(self.procedure_root_count());
         for index in 0..self.procedure_root_count() {
-            roots.push(self.procedure_root_at(index)?);
+            mast_forest.make_root(self.procedure_root_at(index)?);
         }
 
-        MastForest::from_trusted_deserialization_parts(MastForestParts {
-            nodes,
-            roots,
-            advice_map,
-            debug_info,
-        })
-        .map_err(|e| {
-            DeserializationError::InvalidValue(format!(
-                "failed to finalize MAST forest while deserializing: {e}",
-            ))
-        })
+        mast_forest.advice_map = advice_map;
+        Ok(mast_forest)
     }
 
     pub(super) fn node_count(&self) -> usize {
@@ -325,32 +304,40 @@ fn recompute_hash_table(
         let computed = match entry {
             MastNodeEntry::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
-                digest::basic_block_digest(&op_batches)
+                let op_groups: Vec<Felt> =
+                    op_batches.iter().flat_map(|batch| *batch.groups()).collect();
+                hasher::hash_elements(&op_groups)
             },
             MastNodeEntry::Join { left_child_id, right_child_id } => {
                 let left = checked_child_index(index, left_child_id, layout.node_count)?;
                 let right = checked_child_index(index, right_child_id, layout.node_count)?;
-                digest::join_digest(digests[left], digests[right])
+                hasher::merge_in_domain(&[digests[left], digests[right]], JoinNode::DOMAIN)
             },
             MastNodeEntry::Split { if_branch_id, else_branch_id } => {
                 let on_true = checked_child_index(index, if_branch_id, layout.node_count)?;
                 let on_false = checked_child_index(index, else_branch_id, layout.node_count)?;
-                digest::split_digest(digests[on_true], digests[on_false])
+                hasher::merge_in_domain(&[digests[on_true], digests[on_false]], SplitNode::DOMAIN)
             },
             MastNodeEntry::Loop { body_id } => {
                 let body = checked_child_index(index, body_id, layout.node_count)?;
-                digest::loop_digest(digests[body])
+                hasher::merge_in_domain(&[digests[body], crate::Word::default()], LoopNode::DOMAIN)
             },
             MastNodeEntry::Call { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                digest::call_digest(digests[callee], false)
+                hasher::merge_in_domain(
+                    &[digests[callee], crate::Word::default()],
+                    CallNode::CALL_DOMAIN,
+                )
             },
             MastNodeEntry::SysCall { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
-                digest::call_digest(digests[callee], true)
+                hasher::merge_in_domain(
+                    &[digests[callee], crate::Word::default()],
+                    CallNode::SYSCALL_DOMAIN,
+                )
             },
-            MastNodeEntry::Dyn => digest::dyn_digest(false),
-            MastNodeEntry::Dyncall => digest::dyn_digest(true),
+            MastNodeEntry::Dyn => DynNode::DYN_DEFAULT_DIGEST,
+            MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeEntry::External => {
                 let digest =
                     read_digest_entry(bytes, layout.external_digest_offset(), external_slot)?;

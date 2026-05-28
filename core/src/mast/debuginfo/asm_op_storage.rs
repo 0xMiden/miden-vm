@@ -22,7 +22,7 @@
 //! indptr: [0, 1, 3]  // Node 0: [0,1), Node 1: [1,3)
 //! ```
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -202,6 +202,49 @@ impl OpToAsmOpId {
         self.inner
             .validate_with(|(_op_idx, asm_op_id)| (u32::from(*asm_op_id) as usize) < asm_op_count)
             .map_err(|e| format_validation_error(e, asm_op_count))
+    }
+
+    /// Creates a new [`OpToAsmOpId`] with remapped node IDs.
+    ///
+    /// This is used when nodes are removed from a MastForest and the remaining nodes are
+    /// renumbered. The remapping maps old node IDs to new node IDs.
+    ///
+    /// Nodes that are not in the remapping are considered removed and their asm_op data is
+    /// discarded.
+    pub fn remap_nodes(&self, remapping: &BTreeMap<MastNodeId, MastNodeId>) -> Self {
+        if self.is_empty() || remapping.is_empty() {
+            return Self::new();
+        }
+
+        // Find the max new node ID to determine the size of the new structure
+        let max_new_id = remapping.values().map(|id| u32::from(*id)).max().unwrap_or(0) as usize;
+        let num_new_nodes = max_new_id + 1;
+
+        // Collect the data for each new node ID
+        let mut new_node_data: BTreeMap<usize, Vec<(usize, AsmOpId)>> = BTreeMap::new();
+
+        for (old_id, new_id) in remapping {
+            let new_idx = u32::from(*new_id) as usize;
+
+            if let Some(entries) = self.inner.row(*old_id)
+                && !entries.is_empty()
+            {
+                new_node_data.insert(new_idx, entries.to_vec());
+            }
+        }
+
+        // Build the new CSR structure
+        let mut new_inner = CsrMatrix::with_capacity(num_new_nodes, self.inner.num_elements());
+
+        for new_idx in 0..num_new_nodes {
+            if let Some(data) = new_node_data.get(&new_idx) {
+                new_inner.push_row(data.iter().copied()).expect("node count should fit in u32");
+            } else {
+                new_inner.push_empty_row().expect("node count should fit in u32");
+            }
+        }
+
+        Self { inner: new_inner }
     }
 
     /// Serializes this [`OpToAsmOpId`] into the target writer.
@@ -452,6 +495,19 @@ mod tests {
         // Nodes 0 and 2 should have their ops
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(0), 0), Some(test_asm_op_id(0)));
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(2), 0), Some(test_asm_op_id(1)));
+    }
+
+    #[test]
+    fn test_remap_nodes_empty_remapping_removes_all_asm_ops() {
+        let mut storage = OpToAsmOpId::new();
+        storage
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
+            .unwrap();
+
+        let remapped = storage.remap_nodes(&BTreeMap::new());
+
+        assert!(remapped.is_empty());
+        assert_eq!(remapped.num_nodes(), 0);
     }
 
     // ============================================================================================

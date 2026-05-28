@@ -4,8 +4,8 @@ use super::*;
 use crate::{
     Felt, ONE, Word,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        LoopNodeBuilder,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
+        ExternalNodeBuilder, LoopNodeBuilder, OpBatch,
         node::{MastForestContributor, MastNodeExt},
     },
     operations::{AssemblyOp, DebugVarInfo, DebugVarLocation, Operation},
@@ -22,6 +22,20 @@ fn block_bar() -> BasicBlockNodeBuilder {
 
 fn block_qux() -> BasicBlockNodeBuilder {
     BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq])
+}
+
+fn first_error_code(block: &BasicBlockNode) -> Felt {
+    let op = block
+        .op_batches()
+        .iter()
+        .flat_map(OpBatch::raw_ops)
+        .next()
+        .expect("expected a basic block operation");
+
+    match op {
+        Operation::Assert(code) | Operation::U32assert2(code) | Operation::MpVerify(code) => *code,
+        other => panic!("expected error-code-bearing operation, got {other:?}"),
+    }
 }
 
 fn register_asm_ops_for_node(
@@ -496,7 +510,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a.clone())]));
+    forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -509,7 +523,7 @@ fn mast_forest_merge_advice_maps_merged() {
         Felt::new_unchecked(1),
     ]);
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b.clone())]));
+    forest_b.advice_map_mut().insert(key_b, value_b.clone());
 
     let (merged, _root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
@@ -533,7 +547,7 @@ fn mast_forest_merge_advice_maps_collision() {
         Felt::new_unchecked(4),
     ]);
     let value_a = vec![ONE, ONE];
-    forest_a = forest_a.with_advice_map(AdviceMap::from_iter([(key_a, value_a)]));
+    forest_a.advice_map_mut().insert(key_a, value_a);
 
     let mut forest_b = MastForest::new();
     let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
@@ -542,7 +556,7 @@ fn mast_forest_merge_advice_maps_collision() {
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
     let value_b = vec![Felt::new_unchecked(2), Felt::new_unchecked(2)];
-    forest_b = forest_b.with_advice_map(AdviceMap::from_iter([(key_b, value_b)]));
+    forest_b.advice_map_mut().insert(key_b, value_b);
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
@@ -1091,6 +1105,65 @@ fn compact_deduplicates_blocks_with_different_debug_vars() {
         .debug_var(compacted.debug_info().debug_vars_for_node(new_a)[0].1)
         .unwrap();
     assert_eq!(info_a.name(), "x");
+}
+
+#[test]
+fn compact_keeps_error_code_bearing_basic_blocks_distinct() {
+    let mut forest = MastForest::new();
+    let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block_b = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(2))])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_a);
+    forest.make_root(block_b);
+
+    assert_eq!(forest[block_a].digest(), forest[block_b].digest());
+
+    let (compacted, root_map) = forest.compact();
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(0, &block_b).unwrap();
+
+    assert_ne!(
+        new_a, new_b,
+        "same-digest blocks with different runtime error codes must not compact together",
+    );
+    assert_eq!(first_error_code(compacted[new_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(compacted[new_b].unwrap_basic_block()), Felt::from_u32(2),);
+}
+
+#[test]
+fn compact_propagates_error_code_fingerprints_through_control_nodes() {
+    let mut forest = MastForest::new();
+    let block_a = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(1))])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_a = CallNodeBuilder::new(block_a).add_to_forest(&mut forest).unwrap();
+
+    let block_b = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(2))])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_b = CallNodeBuilder::new(block_b).add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(call_a);
+    forest.make_root(call_b);
+
+    assert_eq!(forest[call_a].digest(), forest[call_b].digest());
+
+    let (compacted, root_map) = forest.compact();
+    let new_call_a = root_map.map_root(0, &call_a).unwrap();
+    let new_call_b = root_map.map_root(0, &call_b).unwrap();
+
+    assert_ne!(
+        new_call_a, new_call_b,
+        "same-digest control nodes must stay distinct when their children differ by runtime error code",
+    );
+
+    let new_block_a = compacted[new_call_a].unwrap_call().callee();
+    let new_block_b = compacted[new_call_b].unwrap_call().callee();
+    assert_eq!(first_error_code(compacted[new_block_a].unwrap_basic_block()), Felt::from_u32(1),);
+    assert_eq!(first_error_code(compacted[new_block_b].unwrap_basic_block()), Felt::from_u32(2),);
 }
 
 /// Procedure names survive compact.

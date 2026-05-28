@@ -6,7 +6,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    operations::{AssemblyOp, Decorator, Operation},
+    operations::{AssemblyOp, Operation},
 };
 
 use crate::{
@@ -15,7 +15,6 @@ use crate::{
 };
 
 mod crypto_ops;
-mod debug;
 mod env_ops;
 mod ext2_ops;
 mod field_ops;
@@ -588,12 +587,6 @@ impl Assembler {
             },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
-            // ----- debug decorators -------------------------------------------------------------
-            Instruction::Debug(options) => {
-                block_builder
-                    .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)))?;
-            },
-
             Instruction::DebugVar(debug_var_info) => {
                 block_builder.push_debug_var(debug_var_info.clone())?;
             },
@@ -607,11 +600,6 @@ impl Assembler {
             Instruction::EmitImm(event_id) => {
                 let event_id_value = event_id.expect_value();
                 block_builder.push_ops([Push(event_id_value), Emit, Drop]);
-            },
-
-            // ----- trace instruction ------------------------------------------------------------
-            Instruction::Trace(trace_id) => {
-                block_builder.push_decorator(Decorator::Trace(trace_id.expect_value()))?;
             },
         }
 

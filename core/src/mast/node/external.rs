@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_formatting::{
     hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, nl, text},
+    prettier::{Document, PrettyPrint, const_text, text},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -11,10 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Felt, Word,
-    mast::{
-        DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
-        MastNodeFingerprint, MastNodeId,
-    },
+    mast::{MastForest, MastForestError, MastNodeId},
     utils::LookupByIdx,
 };
 
@@ -34,105 +31,31 @@ use crate::{
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ExternalNode {
     digest: Word,
-    decorator_store: DecoratorStore,
-}
-
-impl ExternalNode {
-    pub(super) fn into_linked_decorator_store(mut self, node_id: MastNodeId) -> Self {
-        self.decorator_store = DecoratorStore::Linked { id: node_id };
-        self
-    }
-
-    pub(crate) fn linked_decorator_store_id(&self) -> Option<MastNodeId> {
-        self.decorator_store.linked_id()
-    }
 }
 
 // PRETTY PRINTING
 // ================================================================================================
 
 impl ExternalNode {
-    pub(super) fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        ExternalNodePrettyPrint { node: self, mast_forest }
+    pub(super) fn to_display<'a>(&'a self, _mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
+        self.clone()
     }
 
     pub(super) fn to_pretty_print<'a>(
         &'a self,
-        mast_forest: &'a MastForest,
+        _mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
-        ExternalNodePrettyPrint { node: self, mast_forest }
+        self.clone()
     }
 }
 
-struct ExternalNodePrettyPrint<'a> {
-    node: &'a ExternalNode,
-    mast_forest: &'a MastForest,
-}
-
-impl ExternalNodePrettyPrint<'_> {
-    /// Concatenates the provided decorators in a single line. If the list of decorators is not
-    /// empty, prepends `prepend` and appends `append` to the decorator document.
-    fn concatenate_decorators(
-        &self,
-        decorator_ids: &[DecoratorId],
-        prepend: Document,
-        append: Document,
-    ) -> Document {
-        let decorators = decorator_ids
-            .iter()
-            .map(|&decorator_id| self.mast_forest[decorator_id].render())
-            .reduce(|acc, doc| acc + const_text(" ") + doc)
-            .unwrap_or_default();
-
-        if decorators.is_empty() {
-            decorators
-        } else {
-            prepend + decorators + append
-        }
-    }
-
-    fn single_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.before_enter(self.mast_forest),
-            Document::Empty,
-            const_text(" "),
-        )
-    }
-
-    fn single_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.after_exit(self.mast_forest),
-            const_text(" "),
-            Document::Empty,
-        )
-    }
-
-    fn multi_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.before_enter(self.mast_forest), Document::Empty, nl())
-    }
-
-    fn multi_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.after_exit(self.mast_forest), nl(), Document::Empty)
-    }
-}
-
-impl PrettyPrint for ExternalNodePrettyPrint<'_> {
+impl PrettyPrint for ExternalNode {
     fn render(&self) -> Document {
-        let external = const_text("external")
-            + const_text(".")
-            + text(self.node.digest.as_bytes().to_hex_with_prefix());
-
-        let single_line = self.single_line_pre_decorators()
-            + external.clone()
-            + self.single_line_post_decorators();
-        let multi_line =
-            self.multi_line_pre_decorators() + external + self.multi_line_post_decorators();
-
-        single_line | multi_line
+        const_text("external") + const_text(".") + text(self.digest.as_bytes().to_hex_with_prefix())
     }
 }
 
-impl fmt::Display for ExternalNodePrettyPrint<'_> {
+impl fmt::Display for ExternalNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
@@ -150,22 +73,6 @@ impl MastNodeExt for ExternalNode {
     /// the MAST root.
     fn digest(&self) -> Word {
         self.digest
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        self.decorator_store.before_enter(forest)
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        self.decorator_store.after_exit(forest)
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -197,47 +104,15 @@ impl MastNodeExt for ExternalNode {
 
     type Builder = ExternalNodeBuilder;
 
-    fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = ExternalNodeBuilder::new(self.digest);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = ExternalNodeBuilder::new(self.digest);
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-        }
+    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
+        ExternalNodeBuilder::new(self.digest)
     }
 
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
+    fn verify_node_in_forest<F>(&self, _forest: &F)
     where
-        F: ExecutableMastForest + ?Sized,
+        F: crate::mast::ExecutableMastForest + ?Sized,
     {
-        if let Some(id) = self.decorator_store.linked_id() {
-            // Verify that this node is the one stored at the given ID in the forest
-            let self_ptr = self as *const Self;
-            let forest_node =
-                forest.get_node_by_id(id).expect("linked node id must be present in forest");
-            let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::External(external) => {
-                    external as *const ExternalNode as *const ()
-                },
-                _ => panic!("Node type mismatch at {id:?}"),
-            };
-            let self_as_void = self_ptr as *const ();
-            debug_assert_eq!(
-                self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {id:?} to be self"
-            );
-        }
     }
 }
 
@@ -267,56 +142,31 @@ impl proptest::prelude::Arbitrary for ExternalNode {
 }
 
 // ------------------------------------------------------------------------------------------------
-/// Builder for creating [`ExternalNode`] instances with decorators.
+/// Builder for creating [`ExternalNode`] instances.
 #[derive(Debug)]
 pub struct ExternalNodeBuilder {
     digest: Word,
-    before_enter: Vec<DecoratorId>,
-    after_exit: Vec<DecoratorId>,
 }
 
 impl ExternalNodeBuilder {
     /// Creates a new builder for an ExternalNode with the specified procedure hash.
     pub fn new(digest: Word) -> Self {
-        Self {
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
+        Self { digest }
     }
 
-    /// Builds the ExternalNode with the specified decorators.
+    /// Builds the ExternalNode.
     pub fn build(self) -> ExternalNode {
-        ExternalNode {
-            digest: self.digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        }
+        ExternalNode { digest: self.digest }
     }
 }
 
 impl MastForestContributor for ExternalNodeBuilder {
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
-            .push(
-                ExternalNode {
-                    digest: self.digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
+            .push(ExternalNode { digest: self.digest }.into())
             .map_err(|_| MastForestError::TooManyNodes)?;
 
         Ok(node_id)
@@ -324,19 +174,10 @@ impl MastForestContributor for ExternalNodeBuilder {
 
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // ExternalNode has no children, so we don't need hash_by_node_id
-        // Use the fingerprint_from_parts helper function with empty children array
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            forest,
-            _hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
-            &[],         // ExternalNode has no children
-            self.digest, // ExternalNodeBuilder stores the digest directly
-        )
+        _forest: &MastForest,
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        Ok(self.digest)
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -344,27 +185,34 @@ impl MastForestContributor for ExternalNodeBuilder {
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.before_enter.extend(decorators);
-    }
-
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.after_exit.extend(decorators);
-    }
-
     fn with_digest(mut self, digest: Word) -> Self {
         self.digest = digest;
         self
+    }
+}
+
+impl ExternalNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
+            .nodes
+            .push(ExternalNode { digest: self.digest }.into())
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 }
 
@@ -376,45 +224,22 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        (
-            any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
+        let _ = params;
+        any::<[u64; 4]>()
+            .prop_map(|[a, b, c, d]| {
                 Word::new([
                     Felt::new_unchecked(a),
                     Felt::new_unchecked(b),
                     Felt::new_unchecked(c),
                     Felt::new_unchecked(d),
                 ])
-            }),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-        )
-            .prop_map(|(digest, before_enter, after_exit)| {
-                Self::new(digest).with_before_enter(before_enter).with_after_exit(after_exit)
             })
+            .prop_map(Self::new)
             .boxed()
     }
 }
 
 /// Parameters for generating ExternalNodeBuilder instances
 #[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug)]
-pub struct ExternalNodeBuilderParams {
-    pub max_decorators: usize,
-    pub max_decorator_id_u32: u32,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl Default for ExternalNodeBuilderParams {
-    fn default() -> Self {
-        Self {
-            max_decorators: 4,
-            max_decorator_id_u32: 10,
-        }
-    }
-}
+#[derive(Clone, Debug, Default)]
+pub struct ExternalNodeBuilderParams {}

@@ -2,13 +2,12 @@ use alloc::{collections::BTreeSet, vec::Vec};
 
 use miden_core::utils::IndexVec;
 
-use super::{DecoratorRef, MastNodeRef, PendingMastNode};
+use super::{MastNodeRef, PendingMastNode};
 
 /// Finalization plan that decides which builder-local records become final forest nodes.
 pub(super) struct FinalForestLayout {
     pub(super) procedure_root_refs: Vec<MastNodeRef>,
     pub(super) live_node_refs: Vec<MastNodeRef>,
-    pub(super) live_decorator_refs: BTreeSet<DecoratorRef>,
 }
 
 impl FinalForestLayout {
@@ -20,13 +19,7 @@ impl FinalForestLayout {
         let node_refs_to_remove =
             Self::node_refs_to_remove(removable_node_refs, &procedure_root_refs, nodes);
         let live_node_refs = Self::live_node_refs_in_final_order(nodes, &node_refs_to_remove);
-        let live_decorator_refs = Self::live_decorator_refs(&live_node_refs, nodes);
-
-        Self {
-            procedure_root_refs,
-            live_node_refs,
-            live_decorator_refs,
-        }
+        Self { procedure_root_refs, live_node_refs }
     }
 
     fn node_refs_to_remove(
@@ -112,15 +105,5 @@ impl FinalForestLayout {
         }
 
         final_order
-    }
-
-    fn live_decorator_refs(
-        live_node_refs: &[MastNodeRef],
-        nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-    ) -> BTreeSet<DecoratorRef> {
-        live_node_refs
-            .iter()
-            .flat_map(|node_ref| nodes[*node_ref].decorator_refs.refs())
-            .collect()
     }
 }

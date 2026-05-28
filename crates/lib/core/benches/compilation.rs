@@ -33,7 +33,7 @@ fn generated_programs(c: &mut Criterion) {
         &[
             ("deep_control_flow", 16, deep_control_flow_program(16)),
             ("repeated_subtrees", 96, repeated_subtree_program(96)),
-            ("metadata_heavy", 160, metadata_heavy_program(160)),
+            ("error_code_heavy", 160, error_code_heavy_program(160)),
         ],
     );
 
@@ -54,7 +54,7 @@ fn bench_generated_programs(c: &mut Criterion, group_name: &str, cases: &[(&str,
         group.bench_with_input(BenchmarkId::new(*name, *size), source, |bench, source| {
             bench.iter(|| {
                 let assembler = Assembler::default();
-                black_box(assembler.assemble_program(source.as_str()).unwrap());
+                black_box(assembler.assemble_program("bench", source.as_str()).unwrap());
             });
         });
     }
@@ -89,10 +89,10 @@ fn repeated_subtree_program(num_procedures: usize) -> String {
     source
 }
 
-fn metadata_heavy_program(num_ops: usize) -> String {
+fn error_code_heavy_program(num_ops: usize) -> String {
     let mut source = String::from("begin\n    push.0\n");
     for idx in 0..num_ops {
-        writeln!(source, "    trace.{idx}\n    debug.stack.0\n    push.1 add").unwrap();
+        writeln!(source, "    push.1\n    assert.err=\"bench-{idx}\"\n    push.1 add").unwrap();
     }
     source.push_str("end\n");
     source

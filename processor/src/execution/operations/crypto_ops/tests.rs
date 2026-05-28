@@ -25,10 +25,6 @@ use crate::{
 // The memory address where alpha is stored
 const ALPHA_ADDR: u64 = 1000;
 
-fn felt(value: u64) -> Felt {
-    Felt::new_unchecked(value % Felt::ORDER)
-}
-
 // HASHING TESTS
 // --------------------------------------------------------------------------------------------
 
@@ -807,6 +803,11 @@ fn test_op_mrupdate_merge_subtree() {
 
 // HELPER FUNCTIONS
 // --------------------------------------------------------------------------------------------
+
+/// Creates a canonical Felt from an arbitrary u64 value.
+fn felt(value: u64) -> Felt {
+    Felt::new_unchecked(value % Felt::ORDER)
+}
 
 /// Creates a Word from a u64 value (used for Merkle tree leaves).
 fn init_node(value: u64) -> Word {

@@ -1,12 +1,12 @@
 use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
 
 use miden_core::{
-    mast::{DebugInfo, DebugVarId, MastNodeId},
+    mast::{DebugInfo, DebugVarId, MastNode, MastNodeId},
     operations::DebugVarInfo,
     utils::IndexVec,
 };
 
-use super::{DebugVarRef, MastForestBuilderError};
+use super::{DebugVarRef, MastForestBuilderError, compute_operations_and_adjust_mappings};
 use crate::diagnostics::Report;
 
 /// Registers live debug-variable metadata while preserving ref-level deduplication.
@@ -26,11 +26,14 @@ impl<'a> DebugMetadataMergePolicy<'a> {
     pub(super) fn register_node(
         &mut self,
         debug_info: &mut DebugInfo,
+        node: &MastNode,
         node_id: MastNodeId,
         pending_debug_vars: &[(usize, DebugVarRef)],
     ) -> Result<(), Report> {
+        let (_, pending_debug_vars) =
+            compute_operations_and_adjust_mappings(node, pending_debug_vars.to_vec());
         let mut debug_var_ids = Vec::with_capacity(pending_debug_vars.len());
-        for &(op_idx, debug_var_ref) in pending_debug_vars {
+        for (op_idx, debug_var_ref) in pending_debug_vars {
             let debug_var_id = self.debug_var_id(debug_info, node_id, debug_var_ref)?;
             debug_var_ids.push((op_idx, debug_var_id));
         }
