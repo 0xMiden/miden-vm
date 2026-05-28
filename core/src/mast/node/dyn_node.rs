@@ -298,13 +298,12 @@ impl DynNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for DynNodeBuilder {
-    type Parameters = DynNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        let _ = params;
         any::<bool>()
             .prop_map(|is_dyncall| {
                 if is_dyncall {
@@ -316,11 +315,6 @@ impl proptest::prelude::Arbitrary for DynNodeBuilder {
             .boxed()
     }
 }
-
-/// Parameters for generating DynNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug, Default)]
-pub struct DynNodeBuilderParams {}
 
 #[cfg(test)]
 mod tests {

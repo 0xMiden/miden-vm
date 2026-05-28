@@ -8,9 +8,6 @@
 //! - Error code mappings for descriptive error messages
 //! - Procedure names
 //!
-//! Executable decorators have been removed. Assembly operation metadata remains available for
-//! debugging and error reporting.
-//!
 //! # Production Builds
 //!
 //! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear) method,

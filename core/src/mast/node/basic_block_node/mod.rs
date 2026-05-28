@@ -447,21 +447,15 @@ impl BasicBlockNode {
 // ================================================================================================
 
 impl BasicBlockNode {
-    pub(super) fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        BasicBlockNodePrettyPrint {
-            block_node: self,
-            _mast_forest: mast_forest,
-        }
+    pub(super) fn to_display<'a>(&'a self, _mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
+        self.clone()
     }
 
     pub(super) fn to_pretty_print<'a>(
         &'a self,
-        mast_forest: &'a MastForest,
+        _mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
-        BasicBlockNodePrettyPrint {
-            block_node: self,
-            _mast_forest: mast_forest,
-        }
+        self.clone()
     }
 }
 
@@ -517,12 +511,7 @@ impl MastNodeExt for BasicBlockNode {
     }
 }
 
-struct BasicBlockNodePrettyPrint<'a> {
-    block_node: &'a BasicBlockNode,
-    _mast_forest: &'a MastForest,
-}
-
-impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
+impl PrettyPrint for BasicBlockNode {
     #[rustfmt::skip]
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
@@ -530,8 +519,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
         // e.g. `basic_block a b c end`
         let single_line = const_text("basic_block")
             + const_text(" ")
-            + self.
-                block_node
+            + self
                 .operations()
                 .map(PrettyPrint::render)
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -552,7 +540,6 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
             const_text("basic_block")
                 + nl()
                 + self
-                    .block_node
                     .operations()
                     .map(PrettyPrint::render)
                     .reduce(|acc, doc| acc + nl() + doc)
@@ -564,7 +551,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
     }
 }
 
-impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
+impl fmt::Display for BasicBlockNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pretty_print(f)
     }
