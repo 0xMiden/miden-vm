@@ -16,8 +16,8 @@ use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement};
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
-use p3_challenger::CanFinalizeDigest;
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_challenger::{CanFinalizeDigest, CanObserve};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -224,9 +224,12 @@ where
         let log_blowup = config.pcs().log_blowup();
         let log_max_trace_height = trace_order.max_log_height();
         let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
-        // Absorb the statement (the default observe also covers the proof's
-        // log trace heights). Mirrors prove/verify.
+        // Absorb statement data first. Then the protocol binds the proof's log
+        // trace heights. Mirrors prove/verify.
         statement.observe(&mut challenger, trace_order.log_heights_instance());
+        for &log_h in trace_order.log_heights_instance() {
+            challenger.observe(L::F::from_u8(log_h));
+        }
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 

@@ -31,9 +31,10 @@ where
     MA: MultiAir<F, EF>,
 {
     let airs = multi_air.airs();
+    assert!(!airs.is_empty(), "MultiAir::airs() must be non-empty");
 
-    // Derive the shared count from the raw AIRs (panics on empty `airs()`) and
-    // confirm the overridable `num_air_inputs` agrees.
+    // Derive the shared count from the raw AIRs and confirm the overridable
+    // `num_air_inputs` agrees.
     let num_air_inputs = airs[0].num_public_values();
     assert!(
         airs.iter().all(|air| air.num_public_values() == num_air_inputs),
@@ -87,7 +88,7 @@ where
 /// Guards the invariant that makes [`LiftedAir::eval`] panic-free: if symbolic
 /// evaluation in `constraint_degree` succeeds and this check passes, `eval()`
 /// cannot panic from out-of-bounds accessor access.
-pub fn check_builder_shape<F, EF, A, AB>(idx: usize, air: &A, builder: &AB)
+pub fn check_builder_shape<F, EF, A, AB>(air: &A, builder: &AB)
 where
     F: Field,
     A: LiftedAir<F, EF>,
@@ -96,7 +97,7 @@ where
     let check = |part: &str, expected: usize, actual: usize| {
         assert!(
             actual == expected,
-            "AIR {idx}: {part} dimension mismatch: expected {expected}, got {actual}"
+            "{part} dimension mismatch: expected {expected}, got {actual}"
         );
     };
 

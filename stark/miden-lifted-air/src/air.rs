@@ -116,8 +116,8 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 
     /// Build this AIR's auxiliary trace and aux values.
     ///
-    /// `challenges` is the shared challenge pool; consume the prefix matching
-    /// [`num_randomness`](Self::num_randomness). The returned `aux_trace` has width
+    /// `challenges` contains exactly [`num_randomness`](Self::num_randomness)
+    /// extension-field elements for this AIR. The returned `aux_trace` has width
     /// [`aux_width`](Self::aux_width) and the same height as `main`; `aux_values` has
     /// length [`num_aux_values`](Self::num_aux_values).
     fn build_aux_trace(
@@ -165,7 +165,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     where
         Self: Sized,
     {
-        raw_constraint_degree::<F, EF, Self>(self)
+        ConstraintDegrees::from_air::<F, EF, Self>(self)
     }
 }
 
@@ -185,39 +185,35 @@ pub struct ConstraintDegrees {
 }
 
 impl ConstraintDegrees {
+    /// Compute symbolic constraint degree multiples from an AIR.
+    pub fn from_air<F, EF, A>(air: &A) -> Self
+    where
+        F: Field,
+        A: LiftedAir<F, EF>,
+    {
+        let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
+        air.eval(&mut builder);
+
+        let base = builder
+            .base_constraints()
+            .iter()
+            .map(SymbolicExpression::degree_multiple)
+            .max()
+            .unwrap_or(0);
+        let ext = builder
+            .extension_constraints()
+            .iter()
+            .map(SymbolicExpressionExt::degree_multiple)
+            .max()
+            .unwrap_or(0);
+        Self { base, ext }
+    }
+
     /// The combined degree multiple: the larger of [`base`](Self::base) and
     /// [`ext`](Self::ext).
     pub fn max(&self) -> usize {
         self.base.max(self.ext)
     }
-}
-
-/// Raw constraint degree multiples from symbolic evaluation, before any
-/// clamping. A combined value `< 2` (`base.max(ext) < 2`) means every
-/// constraint is constant or linear in the trace variables, which forces the
-/// constraint polynomial to zero after division by `Z_H` — i.e. the AIR
-/// encodes no information about the trace.
-fn raw_constraint_degree<F, EF, A>(air: &A) -> ConstraintDegrees
-where
-    F: Field,
-    A: LiftedAir<F, EF>,
-{
-    let mut builder = SymbolicAirBuilder::<F>::new(air.air_layout());
-    air.eval(&mut builder);
-
-    let base = builder
-        .base_constraints()
-        .iter()
-        .map(SymbolicExpression::degree_multiple)
-        .max()
-        .unwrap_or(0);
-    let ext = builder
-        .extension_constraints()
-        .iter()
-        .map(SymbolicExpressionExt::degree_multiple)
-        .max()
-        .unwrap_or(0);
-    ConstraintDegrees { base, ext }
 }
 
 /// Boxed error returned by [`MultiAir::eval_external`].
@@ -321,20 +317,21 @@ where
         Ok(Vec::new())
     }
 
-    /// Absorb per-proof state into the Fiat-Shamir challenger.
+    /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// Default order: `air_inputs`, then `aux_inputs`, then each log trace
-    /// height in instance order. Overrides must preserve this ordering unless
-    /// they account for the change on both prover and verifier.
+    /// The default order is `air_inputs`, then `aux_inputs`. The protocol
+    /// observes `log_trace_heights` separately after this hook, but passes them
+    /// here so custom bindings can include AIR metadata that depends on the
+    /// prover-chosen trace ordering or heights.
     ///
     /// # Soundness gap (TODO)
     ///
-    /// The default binds inputs and trace heights but does NOT canonically
-    /// bind the `MultiAir` itself — neither its AIR collection nor
-    /// `eval_external` — into Fiat-Shamir. Until the symbolic-graph binding
-    /// lands (tracked in <https://github.com/0xMiden/crypto/issues/970>),
-    /// callers MUST observe the `MultiAir`'s AIR configurations into the
-    /// challenger before calling the prover or verifier.
+    /// The default binds inputs but does NOT canonically bind the `MultiAir`
+    /// itself — neither its AIR collection nor `eval_external` — into
+    /// Fiat-Shamir. Until the symbolic-graph binding lands (tracked in
+    /// <https://github.com/0xMiden/crypto/issues/970>), callers MUST observe the
+    /// `MultiAir`'s AIR configurations into the challenger before calling the
+    /// prover or verifier.
     fn observe<C: CanObserve<F>>(
         &self,
         challenger: &mut C,
@@ -348,8 +345,6 @@ where
         for &v in aux_inputs {
             challenger.observe(v);
         }
-        for &h in log_trace_heights {
-            challenger.observe(F::from_u8(h));
-        }
+        let _ = log_trace_heights;
     }
 }

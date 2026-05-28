@@ -40,7 +40,7 @@ impl TraceOrder {
     /// Build from raw (non-log) trace heights in instance order, validated
     /// against `airs`.
     ///
-    /// Validates that every height is a non-zero power of two, that the
+    /// Validates that every height is a power of two and at least 2, that the
     /// log-height fits in `u8` and within the host's `usize` width, that the
     /// number of instances fits in `u8`, and (via [`Self::from_log_heights`])
     /// that the heights match the AIRs.
@@ -74,10 +74,11 @@ impl TraceOrder {
     ///
     /// Used on the verifier side, where heights are read straight off the
     /// (untrusted) proof as `u8`s. Power-of-two-ness is automatic (heights are
-    /// stored as log₂). Checks: non-emptiness, host-`usize` bound, the u8
-    /// instance-count limit, `airs.len()` matches the height count, and per AIR
-    /// `(1 << log_h) >= air.max_periodic_length()`. Holding a `TraceOrder` thus
-    /// guarantees the proof's heights are feasible for the AIRs.
+    /// stored as log₂). Checks: non-emptiness, at least 2 rows per trace,
+    /// host-`usize` bound, the u8 instance-count limit, `airs.len()` matches the
+    /// height count, and per AIR `(1 << log_h) >= air.max_periodic_length()`.
+    /// Holding a `TraceOrder` thus guarantees the proof's heights are feasible
+    /// for the AIRs.
     pub(crate) fn from_log_heights<F, EF, A>(
         airs: &[A],
         log_heights_instance: Vec<u8>,
@@ -93,7 +94,10 @@ impl TraceOrder {
             return Err(ShapeError::TooManyInstances { count: log_heights_instance.len() });
         }
         let max_log = (usize::BITS - 1) as u8;
-        for &h in &log_heights_instance {
+        for (idx, &h) in log_heights_instance.iter().enumerate() {
+            if h == 0 {
+                return Err(ShapeError::TraceHeightTooSmall { air: idx });
+            }
             if h > max_log {
                 return Err(ShapeError::LogTraceHeightTooLarge { log_h: h, max: max_log });
             }
@@ -226,6 +230,8 @@ pub enum ShapeError {
     Empty,
     #[error("trace height {height} is not a power of two")]
     InvalidTraceHeight { height: usize },
+    #[error("AIR {air}: trace height must be at least 2 rows")]
+    TraceHeightTooSmall { air: usize },
     #[error("log trace height {log_h} exceeds {max} (would overflow usize on this target)")]
     LogTraceHeightTooLarge { log_h: u8, max: u8 },
     #[error("more than 256 instances ({count}) — exceeds the u8 caller-index limit")]
@@ -341,7 +347,7 @@ mod tests {
         // The boundary n == 256 (= u8::MAX + 1) is the largest accepted count;
         // index construction must not wrap `256 as u8` to an empty range.
         let n = 256;
-        let order = TraceOrder::from_log_heights::<TF, TF, _>(&airs(n), vec![0; n]).unwrap();
+        let order = TraceOrder::from_log_heights::<TF, TF, _>(&airs(n), vec![1; n]).unwrap();
         assert_eq!(order.instance_indices().len(), n);
         let mut seen = order.instance_indices().to_vec();
         seen.sort_unstable();

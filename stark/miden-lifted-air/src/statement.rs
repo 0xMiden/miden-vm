@@ -66,18 +66,12 @@ where
         if aux_inputs.len() > max {
             return Err(InstanceError::AuxInputsTooLong { actual: aux_inputs.len(), max });
         }
-        Ok(Self::new_unchecked(multi_air, air_inputs, aux_inputs))
-    }
-
-    /// Construct without validating. Use only when the inputs are already known to be valid
-    /// (replay, deserialization of trusted state).
-    pub fn new_unchecked(multi_air: MA, air_inputs: Vec<F>, aux_inputs: Vec<F>) -> Self {
-        Self {
+        Ok(Self {
             multi_air,
             air_inputs,
             aux_inputs,
             _ef: PhantomData,
-        }
+        })
     }
 
     pub fn multi_air(&self) -> &MA {
@@ -112,7 +106,11 @@ where
         )
     }
 
-    /// Absorb this statement into the Fiat-Shamir challenger via [`MultiAir::observe`].
+    /// Absorb statement-owned data into the Fiat-Shamir challenger via [`MultiAir::observe`].
+    ///
+    /// The protocol observes `log_trace_heights` separately after this call, but
+    /// passes them through so custom `MultiAir` bindings can depend on trace
+    /// heights or prover-selected trace ordering when needed.
     pub fn observe<C: CanObserve<F>>(&self, challenger: &mut C, log_trace_heights: &[u8]) {
         self.multi_air
             .observe(challenger, &self.air_inputs, &self.aux_inputs, log_trace_heights);
@@ -186,12 +184,7 @@ where
                 });
             }
         }
-        Ok(Self::new_unchecked(statement, traces))
-    }
-
-    /// Construct without validating.
-    pub fn new_unchecked(statement: Statement<F, EF, MA>, traces: Vec<RowMajorMatrix<F>>) -> Self {
-        Self { statement, traces }
+        Ok(Self { statement, traces })
     }
 
     pub fn statement(&self) -> &Statement<F, EF, MA> {
@@ -208,12 +201,20 @@ where
         let mut aux_traces = Vec::with_capacity(airs.len());
         let mut aux_values = Vec::with_capacity(airs.len());
         for (air, main) in airs.iter().zip(self.traces.iter()) {
+            let num_randomness = air.num_randomness();
+            debug_assert!(
+                challenges.len() >= num_randomness,
+                "AIR requested more aux randomness than the shared challenge pool contains",
+            );
             let (trace, values) = air.build_aux_trace(
                 main,
                 &self.statement.air_inputs,
                 &self.statement.aux_inputs,
-                challenges,
+                &challenges[..num_randomness],
             );
+            debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
+            debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
+            debug_assert_eq!(values.len(), air.num_aux_values(), "aux values length mismatch");
             aux_traces.push(trace);
             aux_values.push(values);
         }

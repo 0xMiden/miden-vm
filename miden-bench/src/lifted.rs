@@ -112,7 +112,7 @@ impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
 pub(crate) fn run_lifted<SC>(
     config: &SC,
     specs: &[TraceSpec],
-    traces: &[RowMajorMatrix<Felt>],
+    traces: Vec<RowMajorMatrix<Felt>>,
     constants: &Option<GlRoundConstants>,
     cli: &Cli,
 ) -> RunResult
@@ -135,10 +135,9 @@ where
         })
         .collect();
 
-    let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
     let statement =
         Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
-    let prover_statement = ProverStatement::new(statement, traces_owned).expect("prover statement");
+    let prover_statement = ProverStatement::new(statement, traces).expect("prover statement");
 
     let output = info_span!("prove").in_scope(|| {
         prove(config, &prover_statement, config.challenger()).expect("proving failed")

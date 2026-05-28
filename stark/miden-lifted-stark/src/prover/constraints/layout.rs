@@ -32,7 +32,7 @@ where
 {
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
     #[cfg(debug_assertions)]
-    miden_lifted_air::debug::check_builder_shape(0, air, &builder);
+    miden_lifted_air::debug::check_builder_shape(air, &builder);
     air.eval(&mut builder);
     builder.into_layout()
 }

@@ -14,8 +14,8 @@
 //! pattern.
 //!
 //! The proof's per-AIR log trace heights are carried on [`StarkProof`] (in
-//! instance order) and observed into the challenger by [`verify`]. Callers
-//! must not pre-observe them.
+//! instance order) and observed into the challenger by [`verify`] at the
+//! protocol layer. Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
 //!
@@ -49,6 +49,7 @@ use miden_lifted_air::{
     BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
+use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use periodic::PeriodicPolys;
@@ -154,10 +155,13 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb the statement (the default observe also covers each AIR's log
-    // trace height in instance order). Both prover and verifier mirror this
-    // call.
+    // Absorb statement data first. Then the protocol binds each AIR's log trace
+    // height in instance order so this metadata is committed uniformly even if
+    // `MultiAir::observe` is overridden.
     statement.observe(&mut challenger, trace_order.log_heights_instance());
+    for &log_h in trace_order.log_heights_instance() {
+        challenger.observe(F::from_u8(log_h));
+    }
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
@@ -308,7 +312,7 @@ where
         };
 
         #[cfg(debug_assertions)]
-        miden_lifted_air::debug::check_builder_shape(j, *air, &folder);
+        miden_lifted_air::debug::check_builder_shape(*air, &folder);
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j

@@ -51,9 +51,10 @@ where
 /// Constraints are checked row-by-row using the trace + aux trace built by
 /// [`ProverStatement`]. All AIRs see the same `air_inputs` from `statement`.
 ///
-/// Derives auxiliary-trace challenges from the supplied challenger by
-/// observing the statement first, mirroring how the prover's challenger is
-/// seeded — so tests don't need to keep a separate RNG handle in sync.
+/// Derives auxiliary-trace challenges from the supplied challenger after
+/// observing statement data and trace heights. This is a local constraint
+/// debugger, not a full prover transcript replay: it intentionally skips main
+/// commitments, so sampled challenges need not match [`prove`](crate::prove).
 ///
 /// # Panics
 ///
@@ -75,10 +76,14 @@ pub fn check_constraints<F, EF, MA, Ch>(
     assert!(!airs.is_empty(), "no instances provided");
     assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
 
-    // Mirror the prover's Fiat-Shamir seeding so challenges line up with what
-    // `prove` would produce for the same statement.
+    // Seed debug challenges from statement data and protocol-owned trace heights.
+    // This deliberately does not try to replay the full prover transcript, which
+    // would require committing the main traces first.
     let log_heights: Vec<u8> = traces.iter().map(|t| log2_strict_u8(t.height())).collect();
     statement.observe(&mut challenger, &log_heights);
+    for &log_h in &log_heights {
+        challenger.observe(F::from_u8(log_h));
+    }
     let max_num_randomness = airs.iter().map(LiftedAir::num_randomness).max().unwrap_or(0);
     let challenges: Vec<EF> = (0..max_num_randomness)
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
@@ -159,7 +164,7 @@ fn check_single_trace<F, EF, A>(
         };
 
         #[cfg(debug_assertions)]
-        miden_lifted_air::debug::check_builder_shape(instance_index, air, &builder);
+        miden_lifted_air::debug::check_builder_shape(air, &builder);
 
         air.eval(&mut builder);
     }

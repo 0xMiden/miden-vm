@@ -11,7 +11,7 @@
 //!    the AIR implementer's responsibility to satisfy the structural contract below.
 //!    [`miden_lifted_air::debug::assert_multi_air_valid`] / [`debug::assert_prover_setup`] are
 //!    panic-based helpers that check the statically-verifiable subset; passing a malformed AIR to
-//!    the prover or verifier is undefined behaviour.
+//!    the prover or verifier may panic or produce invalid proofs.
 //!
 //! 2. **Statement = validated** — The prover validates that its witness matches the AIR spec. The
 //!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return typed
@@ -47,9 +47,9 @@
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
 //! 4. **[`ProverStatement::build_aux_traces`] output** — per AIR, an aux trace of width
-//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values. A
-//!    malformed output is caught by the prover (LDE/commit panic) or by verification, since the
-//!    verifier re-derives these shapes from the AIR contract.
+//!    `aux_width()`, height matching the main trace, and exactly `num_aux_values()` aux values.
+//!    Debug builds assert these postconditions; release builds trust the AIR contract, and
+//!    malformed output may panic later or produce invalid proofs.
 //! 5. **Sound [`Statement::eval_external`]** — Returns external assertions that are satisfied
 //!    (equal zero) iff the proof's cross-AIR interactions are well-formed for the given aux values
 //!    and public inputs.

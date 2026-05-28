@@ -23,8 +23,9 @@
 //!    commit to it separately as long as they commit to the AIR list and trace heights match.
 //!
 //! The proof's `air_inputs` and `aux_inputs` are absorbed automatically by
-//! [`Statement::observe`](crate::Statement::observe), followed by each AIR's
-//! log trace height in instance order. Callers do not bind these themselves.
+//! [`Statement::observe`](crate::Statement::observe), followed by protocol-level
+//! absorption of each AIR's log trace height in instance order. Callers do not
+//! bind these themselves.
 //!
 //! ## Recommended pattern
 //!
@@ -72,6 +73,7 @@ use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
 use miden_lifted_air::{InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
+use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use periodic::PeriodicLde;
@@ -149,9 +151,13 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb the statement (the default observe also covers each AIR's log
-    // trace height in instance order). Verifier mirrors the same call.
+    // Absorb statement data first. Then the protocol binds each AIR's log trace
+    // height in instance order so this metadata is committed uniformly even if
+    // `MultiAir::observe` is overridden.
     statement.observe(&mut challenger, trace_order.log_heights_instance());
+    for &log_h in trace_order.log_heights_instance() {
+        challenger.observe(F::from_u8(log_h));
+    }
 
     let mut channel = ProverTranscript::new(challenger);
 
