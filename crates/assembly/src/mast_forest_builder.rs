@@ -56,9 +56,6 @@ pub struct MastForestBuilder {
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// A map of MAST node digests to their corresponding positions in the MAST forest.
     node_id_by_digest: BTreeMap<Word, MastNodeId>,
-    /// The reverse mapping of `node_id_by_digest`. This map caches the digests of all nodes
-    /// for performance reasons.
-    digest_by_node_id: BTreeMap<MastNodeId, Word>,
     /// A set of IDs for basic blocks which have been merged into a bigger basic blocks. This is
     /// used as a candidate set of nodes that may be eliminated if the are not referenced by any
     /// other node in the forest and are not a root of any procedure.
@@ -667,7 +664,7 @@ impl MastForestBuilder {
         builder: impl MastForestContributor,
     ) -> Result<(MastNodeId, bool), Report> {
         let node_digest = builder
-            .fingerprint_for_node(&self.mast_forest, &self.digest_by_node_id)
+            .fingerprint_for_node(&self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to compute node digest")?;
 
@@ -680,7 +677,6 @@ impl MastForestBuilder {
                 .into_diagnostic()
                 .wrap_err("assembler failed to add new node")?;
             self.node_id_by_digest.insert(node_digest, new_node_id);
-            self.digest_by_node_id.insert(new_node_id, node_digest);
 
             Ok((new_node_id, true))
         }

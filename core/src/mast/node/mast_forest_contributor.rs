@@ -18,11 +18,7 @@ pub trait MastForestContributor {
     /// This method computes the fingerprint for a node directly from the builder data
     /// without first constructing a MastNode, providing the same result as the
     /// traditional fingerprint computation approach.
-    fn fingerprint_for_node(
-        &self,
-        forest: &MastForest,
-        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
-    ) -> Result<Word, MastForestError>;
+    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
@@ -124,9 +120,8 @@ mod fingerprint_invariant_tests {
         let builder_assert_2 =
             BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new_unchecked(2))]);
 
-        let empty_map = alloc::collections::BTreeMap::new();
-        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
-        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest).unwrap();
+        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest).unwrap();
 
         assert_eq!(
             fp_assert_1, fp_assert_2,

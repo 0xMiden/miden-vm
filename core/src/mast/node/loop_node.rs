@@ -215,11 +215,7 @@ impl MastForestContributor for LoopNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(
-        &self,
-        forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
-    ) -> Result<Word, MastForestError> {
+    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
         Ok(if let Some(forced_digest) = self.digest {
             forced_digest
         } else {

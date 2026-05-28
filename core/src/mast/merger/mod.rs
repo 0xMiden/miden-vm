@@ -14,7 +14,7 @@ use crate::{
         MastNodeBuilder, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     operations::AssemblyOp,
-    utils::{DenseIdMap, IndexVec},
+    utils::DenseIdMap,
 };
 
 #[cfg(test)]
@@ -32,7 +32,6 @@ pub(crate) struct MastForestMerger {
     // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
     // `mast_forest` are also added to the indices.
     node_id_by_hash: BTreeMap<Word, MastNodeId>,
-    hash_by_node_id: IndexVec<MastNodeId, Word>,
     asm_op_id_by_value: BTreeMap<AssemblyOpKey, AsmOpId>,
     asm_op_value_by_id: BTreeMap<AsmOpId, AssemblyOpKey>,
     /// Mappings from previous `MastNodeId`s to their new ids.
@@ -70,7 +69,6 @@ impl MastForestMerger {
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
-            hash_by_node_id: IndexVec::new(),
             asm_op_id_by_value: BTreeMap::new(),
             asm_op_value_by_id: BTreeMap::new(),
             mast_forest: MastForest::new(),
@@ -200,13 +198,10 @@ impl MastForestMerger {
         node: MastNode,
         original_forests: &[&MastForest],
     ) -> Result<(), MastForestError> {
-        // We need to remap the node prior to computing the node fingerprint.
+        // We need to remap the node prior to computing the node fingerprint since child IDs may
+        // have changed in the merged forest.
         //
-        // This is because fingerprint computation looks up descendants in the remapped forest.
-        // If we were to pass the original node to that computation, it would look up the incorrect
-        // descendants since the descendant indices may have changed.
-        //
-        // Remapping at this point is guaranteed to be "complete", meaning all ids of children
+        // Remapping at this point is guaranteed to be "complete", meaning all IDs of children
         // will be present in the node id mapping since the DFS iteration guarantees
         // that all children of this `node` have been processed before this node and
         // their indices have been added to the mappings.
@@ -217,8 +212,7 @@ impl MastForestMerger {
             &self.node_id_mappings[forest_idx],
         )?;
 
-        let node_fingerprint =
-            remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+        let node_fingerprint = remapped_builder.fingerprint_for_node(&self.mast_forest)?;
 
         let mapped_node_id = match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -233,20 +227,7 @@ impl MastForestMerger {
                 let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
-                // We need to update the indices with the newly inserted nodes
-                // since fingerprint computation requires all descendants of a node
-                // to be in this index. Hence when we encounter a node in the merging forest
-                // which has descendants (Call, Loop, Split, ...), then their descendants need to be
-                // in the indices.
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
-                let returned_id = self
-                    .hash_by_node_id
-                    .push(node_fingerprint)
-                    .map_err(|_| MastForestError::TooManyNodes)?;
-                debug_assert_eq!(
-                    returned_id, new_node_id,
-                    "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
-                );
                 new_node_id
             },
         };

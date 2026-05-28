@@ -888,11 +888,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(
-        &self,
-        _forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
-    ) -> Result<Word, MastForestError> {
+    fn fingerprint_for_node(&self, _forest: &MastForest) -> Result<Word, MastForestError> {
         let digest = match &self.operation_data {
             OperationData::Raw { operations } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
