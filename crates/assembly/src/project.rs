@@ -246,7 +246,7 @@ where
             TargetType::Executable => assembler.assemble_executable_modules(
                 package_id.clone(),
                 root,
-                support.into_iter().map(Box::new).collect::<Vec<_>>(),
+                support.into_iter().map(Box::new),
             )?,
             TargetType::Kernel => {
                 if !support.is_empty() {
