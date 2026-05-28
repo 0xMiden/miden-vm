@@ -90,19 +90,20 @@ pub trait BaseHost {
         handler.on_trace(process, trace_id)
     }
 
+    /// Returns the deferred precompile registry installed in this host.
+    ///
+    /// Hosts that do not support deferred precompiles can rely on the default empty registry,
+    /// which rejects all precompile tags.
+    fn precompiles(&self) -> &PrecompileRegistry {
+        &EMPTY_PRECOMPILES
+    }
+
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///
     /// Hosts that maintain an event registry can override this method to surface human-readable
     /// names for diagnostics. The default implementation returns `None`.
     fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
         None
-    }
-
-    /// Returns the deferred precompile registry installed on this host.
-    ///
-    /// Hosts that do not support deferred precompiles can use the default empty registry.
-    fn precompiles(&self) -> &PrecompileRegistry {
-        &EMPTY_PRECOMPILES
     }
 }
 

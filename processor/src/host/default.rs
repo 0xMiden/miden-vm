@@ -66,18 +66,23 @@ where
         }
     }
 
-    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its event handlers and deferred
+    /// Loads a [`HostLibrary`] containing a [`MastForest`], event handlers, and deferred
     /// precompiles.
+    ///
+    /// Library precompiles are merged into the host's existing registry rather than replacing it.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
         let HostLibrary { mast_forest, handlers, precompiles } = library.into();
+
         self.store.insert(mast_forest);
 
         for (event, handler) in handlers {
             self.event_handlers.register(event, handler)?;
         }
+
         if !precompiles.is_empty() {
             Arc::make_mut(&mut self.precompiles).merge(precompiles);
         }
+
         Ok(())
     }
 
@@ -88,7 +93,7 @@ where
         Ok(self)
     }
 
-    /// Installs the deferred precompile registry used by system-event handlers.
+    /// Replaces the deferred precompile registry installed in this host.
     pub fn with_precompiles(mut self, precompiles: Arc<PrecompileRegistry>) -> Self {
         self.precompiles = precompiles;
         self
@@ -165,12 +170,12 @@ where
         self.debug_handler.on_trace(process, trace_id)
     }
 
-    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
-        self.event_handlers.resolve_event(event_id)
-    }
-
     fn precompiles(&self) -> &PrecompileRegistry {
         &self.precompiles
+    }
+
+    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
+        self.event_handlers.resolve_event(event_id)
     }
 }
 
@@ -237,15 +242,15 @@ impl SyncHost for NoopHost {
 // HOST LIBRARY
 // ================================================================================================
 
-/// A rich library representing a [`MastForest`] which also exports
-/// a list of handlers for events it may call.
+/// A rich library representing a [`MastForest`] which also exports event handlers and deferred
+/// precompiles required by procedures in that forest.
 #[derive(Default)]
 pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
     /// List of handlers along with their event names to call them with `emit`.
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
-    /// Deferred precompiles exported by this library.
+    /// Deferred precompile registry required by this library's system-event wrappers.
     pub precompiles: PrecompileRegistry,
 }
 
@@ -272,26 +277,76 @@ impl From<&Arc<MastForest>> for HostLibrary {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        deferred::PrecompileError,
-        testing::precompile::{Hash, Uint},
+        Felt, ZERO,
+        deferred::{Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder},
     };
 
     use super::*;
 
+    #[derive(Debug, Clone, Copy)]
+    struct Fixture {
+        name: &'static str,
+    }
+
+    impl Fixture {
+        fn new(name: &'static str) -> Self {
+            Self { name }
+        }
+
+        fn tag(&self) -> Tag {
+            Tag { id: self.id(), args: [ZERO; 3] }
+        }
+    }
+
+    impl Precompile for Fixture {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn id(&self) -> Felt {
+            miden_core::deferred::precompile_id(self)
+        }
+
+        fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
+            if args != [ZERO; 3] {
+                return None;
+            }
+            Some(NodeType::Value)
+        }
+
+        fn reduce(
+            &self,
+            args: [Felt; 3],
+            payload: &Payload,
+            _witness: &mut WitnessBuilder<'_>,
+        ) -> Result<Node, PrecompileError> {
+            let felts = payload.as_felts()?;
+            Ok(Node::leaf(Tag::new(self.id(), args), *felts))
+        }
+    }
+
+    fn library_with_precompile(precompile: Fixture) -> HostLibrary {
+        HostLibrary {
+            mast_forest: Arc::new(MastForest::new()),
+            handlers: vec![],
+            precompiles: PrecompileRegistry::default().with_precompile(precompile),
+        }
+    }
+
     #[test]
     fn load_library_extends_existing_precompiles() {
-        let original = Arc::new(PrecompileRegistry::default().with_precompile(Uint));
-        let mut host = DefaultHost::default().with_precompiles(original.clone());
-        let library = HostLibrary {
-            mast_forest: Arc::new(MastForest::new()),
-            handlers: Vec::new(),
-            precompiles: PrecompileRegistry::default().with_precompile(Hash),
-        };
+        let a = Fixture::new("host-a");
+        let b = Fixture::new("host-b");
+        let tag_a = a.tag();
+        let tag_b = b.tag();
+        let installed = Arc::new(PrecompileRegistry::default().with_precompile(a));
+        let mut host = DefaultHost::default().with_precompiles(installed.clone());
 
-        host.load_library(library).unwrap();
+        host.load_library(library_with_precompile(b)).unwrap();
 
-        assert!(host.precompiles().decode(Uint::leaf_tag()).is_ok());
-        assert!(host.precompiles().decode(Hash::digest_tag()).is_ok());
-        assert!(matches!(original.decode(Hash::digest_tag()), Err(PrecompileError::InvalidNode)));
+        let host_precompiles = BaseHost::precompiles(&host);
+        assert!(matches!(host_precompiles.decode(tag_a).unwrap(), NodeType::Value));
+        assert!(matches!(host_precompiles.decode(tag_b).unwrap(), NodeType::Value));
+        assert!(matches!(installed.decode(tag_b), Err(PrecompileError::InvalidNode)));
     }
 }

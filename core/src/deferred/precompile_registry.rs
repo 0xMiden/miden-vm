@@ -64,9 +64,10 @@ impl PrecompileRegistry {
         let id = p.id();
         validate_precompile_id(p.name(), id, precompile_id(&*p));
         let name = p.name();
-        if let Some(prev) = self.precompiles.insert(id, p) {
+        if let Some(prev) = self.precompiles.get(&id) {
             panic!("duplicate precompile id in registry (`{}` and `{name}`)", prev.name());
         }
+        self.precompiles.insert(id, p);
     }
 
     /// Boots a state with constants contributed by installed precompiles.
