@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Type, parse_macro_input};
+use syn::{Data, DeriveInput, Fields, PathArguments, Type, parse_macro_input};
 
 // SILENT DEBUG MACRO
 // ================================================================================================
@@ -169,19 +169,16 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
         },
     };
 
-    // Verify that the field type is 'Word' (or a path ending in 'Word')
-    if let Type::Path(type_path) = field_type {
-        let last_segment = type_path.path.segments.last();
-        if let Some(segment) = last_segment {
-            if segment.ident != "Word" {
-                return syn::Error::new_spanned(
-                    field_type,
-                    "WordWrapper can only be derived for types wrapping a 'Word' field",
-                )
-                .to_compile_error()
-                .into();
-            }
-        } else {
+    let word_type = if let Type::Path(type_path) = field_type {
+        let Some(segment) = type_path.path.segments.last() else {
+            return syn::Error::new_spanned(
+                field_type,
+                "WordWrapper can only be derived for types wrapping a 'Word' field",
+            )
+            .to_compile_error()
+            .into();
+        };
+        if segment.ident != "Word" {
             return syn::Error::new_spanned(
                 field_type,
                 "WordWrapper can only be derived for types wrapping a 'Word' field",
@@ -189,6 +186,16 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
             .to_compile_error()
             .into();
         }
+        if !matches!(segment.arguments, PathArguments::None) {
+            return syn::Error::new_spanned(
+                field_type,
+                "WordWrapper can only be derived for types wrapping a 'Word' field",
+            )
+            .to_compile_error()
+            .into();
+        }
+
+        field_type
     } else {
         return syn::Error::new_spanned(
             field_type,
@@ -196,7 +203,7 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
         )
         .to_compile_error()
         .into();
-    }
+    };
 
     let expanded = quote! {
         impl #impl_generics #name #ty_generics #where_clause {
@@ -206,12 +213,12 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
             ///
             /// This requires the caller to uphold the guarantees/invariants of this type (if any).
             /// Check the type-level documentation for guarantees/invariants.
-            pub fn from_raw(word: Word) -> Self {
+            pub fn from_raw(word: #word_type) -> Self {
                 Self(word)
             }
 
             /// Returns the elements representation of this value.
-            pub fn as_elements(&self) -> &[Felt] {
+            pub fn as_elements(&self) -> &[<#word_type as ::core::ops::Index<usize>>::Output] {
                 self.0.as_elements()
             }
 
@@ -226,7 +233,7 @@ pub fn word_wrapper_derive(input: TokenStream) -> TokenStream {
             }
 
             /// Returns the underlying word of this value.
-            pub fn as_word(&self) -> Word {
+            pub fn as_word(&self) -> #word_type {
                 self.0
             }
         }

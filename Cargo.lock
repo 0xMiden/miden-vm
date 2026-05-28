@@ -1144,6 +1144,7 @@ dependencies = [
 name = "miden-crypto-derive"
 version = "0.26.0"
 dependencies = [
+ "miden-field",
  "quote",
  "syn",
 ]

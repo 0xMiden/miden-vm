@@ -5,6 +5,7 @@
 - perf: fuse per-group accumulator and defer allocations ([#1008](https://github.com/0xMiden/crypto/pull/1008))
 - [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
+- [BREAKING] Fixed RocksDB CLI safety, non-canonical serde input handling, and qualified `WordWrapper` derive paths ([#1022](https://github.com/0xMiden/crypto/pull/1022)).
 - [BREAKING] Refactored `miden-lifted-stark::domain` around a uniform `Coset` trait shared by `TwoAdicSubgroup` and `TwoAdicCoset`, slimmed the `LiftedDomain` surface (drops dead getters, removes silently-dispatched `points`/`bit_reversed_points`/`vanishing_at` in favour of explicit `trace_subgroup()` / `lde_coset()` access), made `LiftedDomain` constructors fallible, moved selector logic onto `LiftedDomain`, and changed `log_blowup` to return `u8` ([#993](https://github.com/0xMiden/crypto/pull/993)).
 - [BREAKING] Implemented two-phase commit_mutations() / apply_mutations()-style API for `LargeSmtForest` ([#1018](https://github.com/0xMiden/crypto/pull/1018)).
 

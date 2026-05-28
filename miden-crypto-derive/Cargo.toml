@@ -20,5 +20,8 @@ test       = false
 quote = { workspace = true }
 syn   = { features = ["full"], workspace = true }
 
+[dev-dependencies]
+miden-field = { workspace = true }
+
 [lints]
 workspace = true
