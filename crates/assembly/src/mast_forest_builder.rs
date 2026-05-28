@@ -1,21 +1,16 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
-    string::String,
     sync::Arc,
     vec::Vec,
 };
-use core::fmt;
 
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
     chiplets::hasher,
     mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DebugInfo, DynNode,
-        DynNodeBuilder, ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-        MastForest, MastForestContributor, MastForestError, MastForestRootMap, MastNode,
-        MastNodeBuilder, MastNodeExt, MastNodeId, OpBatch, SplitNode, SplitNodeBuilder,
-        SubtreeIterator, error_code_from_msg,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, JoinNode, LoopNode, MastForest,
+        MastForestRootMap, MastNode, MastNodeExt, OpBatch, SplitNode, error_code_from_msg,
     },
     operations::{AssemblyOp, DebugVarInfo, Operation},
     serde::Serializable,
@@ -24,7 +19,7 @@ use miden_core::{
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
-    diagnostics::{Diagnostic, IntoDiagnostic, Report, WrapErr, miette},
+    diagnostics::{IntoDiagnostic, Report, WrapErr},
     report,
 };
 
@@ -32,8 +27,14 @@ mod asm_op_merge_policy;
 use asm_op_merge_policy::AsmOpMergePolicy;
 mod debug_metadata_merge_policy;
 use debug_metadata_merge_policy::DebugMetadataMergePolicy;
+mod finalizer;
+use finalizer::{BuiltMastForest, MastForestBuilderError, MastForestFinalizer};
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
+mod pending_record;
+pub(crate) use pending_record::{AsmOpRef, DebugVarRef, MastNodeRef};
+use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind};
+mod static_import;
 
 // CONSTANTS
 // ================================================================================================
@@ -41,384 +42,13 @@ use node_identity_policy::FinalForestLayout;
 /// Constant that decides how many operation batches disqualify a procedure from inlining.
 const PROCEDURE_INLINING_THRESHOLD: usize = 32;
 
-/// Content-equivalence key used while interning pending MAST nodes.
-///
-/// In the decorator-free model this is the MAST root. It remains distinct from [`MastNodeRef`],
-/// which is a builder-local handle, and [`MastNodeId`], which is a final forest position.
-type MastNodeFingerprint = Word;
-
-/// Domain used when basic-block interning must include execution-visible error codes.
-const BASIC_BLOCK_ERROR_CODE_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0001);
-/// Domain used when control-node interning must include child fingerprints.
-const CHILD_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
+/// Domain used when basic-block interning keys must include execution-visible error codes.
+const BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0001);
+/// Domain used when control-node interning keys must include child keys.
+const CHILD_KEY_DOMAIN: Felt = Felt::new_unchecked(0x2473_0002);
 
 // MAST FOREST BUILDER
 // ================================================================================================
-
-/// Stable assembly-time reference to a MAST node.
-///
-/// This is a builder-local dense arena handle, not a positional [`MastNodeId`] in the final
-/// [`MastForest`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct MastNodeRef(u32);
-
-impl From<u32> for MastNodeRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<MastNodeRef> for u32 {
-    fn from(value: MastNodeRef) -> Self {
-        value.0
-    }
-}
-
-impl fmt::Display for MastNodeRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MastNodeRef({})", self.0)
-    }
-}
-
-impl Idx for MastNodeRef {}
-
-/// Stable assembly-time reference to assembly operation metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct AsmOpRef(u32);
-
-impl From<u32> for AsmOpRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<AsmOpRef> for u32 {
-    fn from(value: AsmOpRef) -> Self {
-        value.0
-    }
-}
-
-impl Idx for AsmOpRef {}
-
-/// Stable assembly-time reference to debug variable metadata.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct DebugVarRef(u32);
-
-impl From<u32> for DebugVarRef {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<DebugVarRef> for u32 {
-    fn from(value: DebugVarRef) -> Self {
-        value.0
-    }
-}
-
-impl Idx for DebugVarRef {}
-
-/// Result of finalizing a [`MastForestBuilder`].
-pub(crate) struct BuiltMastForest {
-    mast_forest: MastForest,
-    /// Final node IDs for builder refs retained in the finalized forest.
-    node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
-}
-
-impl BuiltMastForest {
-    pub(crate) fn into_parts(self) -> (MastForest, BTreeMap<MastNodeRef, MastNodeId>) {
-        (self.mast_forest, self.node_id_by_ref)
-    }
-}
-
-/// Errors raised while converting builder-owned records into a finalized [`MastForest`].
-#[derive(Debug, thiserror::Error, Diagnostic)]
-enum MastForestBuilderError {
-    #[error("pending {node_kind} node {node_ref} has {actual} children, expected {expected}")]
-    InvalidChildCount {
-        node_ref: MastNodeRef,
-        node_kind: &'static str,
-        expected: usize,
-        actual: usize,
-    },
-    #[error(
-        "pending {node_kind} node {node_ref} references child {child_ref} before the child was finalized"
-    )]
-    MissingFinalChild {
-        node_ref: MastNodeRef,
-        node_kind: &'static str,
-        child_ref: MastNodeRef,
-    },
-    #[error("failed to build pending {node_kind} node {node_ref}: {source}")]
-    BuildNode {
-        node_ref: MastNodeRef,
-        node_kind: &'static str,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to add finalized MAST node for pending node {node_ref}: {source}")]
-    AddNode {
-        node_ref: MastNodeRef,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to add assembly op metadata for node {node_id:?}: {source}")]
-    AddAsmOp {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register assembly op metadata for node {node_id:?}: {source_msg}")]
-    RegisterAsmOps { node_id: MastNodeId, source_msg: String },
-    #[error("failed to add debug variable metadata for node {node_id:?}: {source}")]
-    AddDebugVar {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register debug variable metadata for node {node_id:?}: {source_msg}")]
-    RegisterDebugVars { node_id: MastNodeId, source_msg: String },
-    #[error("procedure root {root_ref} was not retained in final MAST forest")]
-    MissingProcedureRoot { root_ref: MastNodeRef },
-    #[error("failed to finalize MAST forest: {source}")]
-    FinalizeForest {
-        #[source]
-        source: MastForestError,
-    },
-}
-
-/// Builder-owned node record used before final [`MastNodeId`]s exist.
-///
-/// The record keeps the node content, child refs, and debug metadata refs together so
-/// cloning, merging, and finalization do not need to coordinate side tables.
-#[derive(Clone, Debug)]
-struct PendingMastNode {
-    fingerprint: MastNodeFingerprint,
-    digest: Word,
-    kind: PendingMastNodeKind,
-    child_refs: Vec<MastNodeRef>,
-    asm_ops: Vec<(usize, AsmOpRef)>,
-    debug_vars: Vec<(usize, DebugVarRef)>,
-}
-
-/// Compact representation of a pending node's structural variant.
-///
-/// Child and metadata references live on [`PendingMastNode`]; this enum stores only the data
-/// needed to materialize the final node variant.
-#[derive(Clone, Debug)]
-enum PendingMastNodeKind {
-    BasicBlock { op_batches: Vec<OpBatch> },
-    Join,
-    Split,
-    Loop,
-    Call { is_syscall: bool },
-    Dyn { is_dyncall: bool },
-    External,
-}
-
-impl PendingMastNodeKind {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::BasicBlock { .. } => "basic block",
-            Self::Join => "join",
-            Self::Split => "split",
-            Self::Loop => "loop",
-            Self::Call { .. } => "call",
-            Self::Dyn { .. } => "dyn",
-            Self::External => "external",
-        }
-    }
-
-    fn from_node(node: MastNode) -> Self {
-        match node {
-            MastNode::Block(node) => Self::BasicBlock { op_batches: node.op_batches().to_vec() },
-            MastNode::Join(_) => Self::Join,
-            MastNode::Split(_) => Self::Split,
-            MastNode::Loop(_) => Self::Loop,
-            MastNode::Call(node) => Self::Call { is_syscall: node.is_syscall() },
-            MastNode::Dyn(node) => Self::Dyn { is_dyncall: node.is_dyncall() },
-            MastNode::External(_) => Self::External,
-        }
-    }
-
-    fn basic_block_op_batches(&self) -> Option<&[OpBatch]> {
-        match self {
-            Self::BasicBlock { op_batches } => Some(op_batches),
-            _ => None,
-        }
-    }
-
-    fn is_basic_block(&self) -> bool {
-        matches!(self, Self::BasicBlock { .. })
-    }
-
-    fn is_external(&self) -> bool {
-        matches!(self, Self::External)
-    }
-}
-
-/// Mutable node record used while deriving a new pending node from an existing one.
-///
-/// A draft becomes immutable once it is interned as a [`PendingMastNode`].
-struct PendingMastNodeDraft {
-    digest: Word,
-    kind: PendingMastNodeKind,
-    child_refs: Vec<MastNodeRef>,
-    asm_ops: Vec<(usize, AsmOpRef)>,
-    debug_vars: Vec<(usize, DebugVarRef)>,
-}
-
-impl PendingMastNodeDraft {
-    fn new(kind: PendingMastNodeKind, digest: Word, child_refs: Vec<MastNodeRef>) -> Self {
-        Self {
-            digest,
-            kind,
-            child_refs,
-            asm_ops: Vec::new(),
-            debug_vars: Vec::new(),
-        }
-    }
-}
-
-/// Stateful finalization helper for converting live builder records into a [`MastForest`].
-///
-/// Methods are called in finalization order:
-/// 1. materialize live nodes;
-/// 2. register asm-op and debug-variable metadata for materialized node IDs;
-/// 3. assemble the final forest.
-///
-/// The helper is private to finalization; keeping the order documented is sufficient because it is
-/// not exposed as a reusable API.
-struct MastForestFinalizer {
-    debug_info: DebugInfo,
-    nodes: IndexVec<MastNodeId, MastNode>,
-    node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
-}
-
-impl MastForestFinalizer {
-    fn new() -> Self {
-        Self {
-            debug_info: DebugInfo::new(),
-            nodes: IndexVec::new(),
-            node_id_by_ref: BTreeMap::new(),
-        }
-    }
-
-    fn materialize_live_nodes(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-    ) -> Result<(), Report> {
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            let builder =
-                build_pending_node_with_final_ids(pending_node, node_ref, &self.node_id_by_ref)
-                    .map_err(Report::new)?;
-
-            let final_node_id =
-                MastNodeId::new_unchecked(self.nodes.len().try_into().map_err(|_| {
-                    Report::new(MastForestBuilderError::FinalizeForest {
-                        source: MastForestError::TooManyNodes,
-                    })
-                })?);
-            let node = builder.build_linked(final_node_id).map_err(|source| {
-                Report::new(MastForestBuilderError::BuildNode {
-                    node_ref,
-                    node_kind: pending_node.kind.name(),
-                    source,
-                })
-            })?;
-            let inserted_node_id = self.nodes.push(node).map_err(|_| {
-                Report::new(MastForestBuilderError::AddNode {
-                    node_ref,
-                    source: MastForestError::TooManyNodes,
-                })
-            })?;
-            debug_assert_eq!(inserted_node_id, final_node_id);
-            self.node_id_by_ref.insert(node_ref, final_node_id);
-        }
-
-        Ok(())
-    }
-
-    fn register_live_asm_ops(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
-    ) -> Result<(), Report> {
-        let mut asm_op_policy = AsmOpMergePolicy::new(asm_op_by_ref);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.asm_ops.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            asm_op_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.asm_ops,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn register_live_debug_vars(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
-    ) -> Result<(), Report> {
-        let mut debug_metadata_policy = DebugMetadataMergePolicy::new(debug_vars);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.debug_vars.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            debug_metadata_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.debug_vars,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    fn into_built_forest(
-        mut self,
-        procedure_root_refs: &[MastNodeRef],
-        advice_map: AdviceMap,
-        error_codes: BTreeMap<u64, Arc<str>>,
-    ) -> Result<BuiltMastForest, Report> {
-        let mut roots = Vec::with_capacity(procedure_root_refs.len());
-        for &root_ref in procedure_root_refs {
-            let root_id = *self.node_id_by_ref.get(&root_ref).ok_or_else(|| {
-                Report::new(MastForestBuilderError::MissingProcedureRoot { root_ref })
-            })?;
-            roots.push(root_id);
-        }
-
-        self.debug_info.extend_error_codes(error_codes);
-        let mast_forest =
-            MastForest::from_raw_parts(self.nodes, roots, advice_map, self.debug_info)
-                .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
-
-        Ok(BuiltMastForest {
-            mast_forest,
-            node_id_by_ref: self.node_id_by_ref,
-        })
-    }
-}
 
 /// Builder for a [`MastForest`].
 ///
@@ -443,8 +73,8 @@ pub struct MastForestBuilder {
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
-    /// A map of MAST node fingerprints to their corresponding builder-local node refs.
-    node_ref_by_fingerprint: BTreeMap<MastNodeFingerprint, MastNodeRef>,
+    /// A map of MAST node interning keys to their corresponding builder-local node refs.
+    node_ref_by_key: BTreeMap<MastNodeKey, MastNodeRef>,
     /// Builder-owned dense storage for node refs.
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Builder-owned dense storage for assembly op refs.
@@ -507,13 +137,13 @@ impl MastForestBuilder {
 
     fn push_pending_node_record_ref(
         &mut self,
-        fingerprint: MastNodeFingerprint,
+        key: MastNodeKey,
         draft: PendingMastNodeDraft,
     ) -> Result<MastNodeRef, Report> {
         let node_ref = self
             .nodes
             .push(PendingMastNode {
-                fingerprint,
+                key,
                 digest: draft.digest,
                 kind: draft.kind,
                 child_refs: draft.child_refs,
@@ -526,33 +156,41 @@ impl MastForestBuilder {
         Ok(node_ref)
     }
 
-    fn dedup_fingerprint_for_pending_data(
-        &self,
-        draft: &PendingMastNodeDraft,
-    ) -> MastNodeFingerprint {
-        self.fingerprint_for_pending_record(draft.digest, &draft.kind, &draft.child_refs)
+    fn insert_pending_node_record_ref(
+        &mut self,
+        key: MastNodeKey,
+        draft: PendingMastNodeDraft,
+    ) -> Result<MastNodeRef, Report> {
+        let node_ref = self.push_pending_node_record_ref(key, draft)?;
+
+        self.node_ref_by_key.insert(key, node_ref);
+        Ok(node_ref)
+    }
+
+    fn dedup_key_for_pending_data(&self, draft: &PendingMastNodeDraft) -> MastNodeKey {
+        self.key_for_pending_record(draft.digest, &draft.kind, &draft.child_refs)
     }
 
     fn intern_pending_node(&mut self, draft: PendingMastNodeDraft) -> Result<MastNodeRef, Report> {
-        let dedup_fingerprint = self.dedup_fingerprint_for_pending_data(&draft);
-        if let Some(node_ref) = self.find_node_ref_by_fingerprint(&dedup_fingerprint) {
+        let dedup_key = self.dedup_key_for_pending_data(&draft);
+        if let Some(node_ref) = self.find_node_ref_by_key(&dedup_key) {
             if self.should_replace_pending_node(node_ref, &draft) {
-                self.replace_pending_node_record_ref(node_ref, dedup_fingerprint, draft);
+                self.replace_pending_node_record_ref(node_ref, dedup_key, draft);
             }
             Ok(node_ref)
         } else {
-            self.insert_pending_node_record_ref(dedup_fingerprint, draft)
+            self.insert_pending_node_record_ref(dedup_key, draft)
         }
     }
 
     fn insert_pending_node_with_allocated_metadata_refs(
         &mut self,
-        dedup_fingerprint: MastNodeFingerprint,
+        dedup_key: MastNodeKey,
         draft: PendingMastNodeDraft,
         asm_op_checkpoint: usize,
         debug_var_checkpoint: usize,
     ) -> Result<MastNodeRef, Report> {
-        match self.insert_or_replace_pending_node_record_ref(dedup_fingerprint, draft) {
+        match self.insert_or_replace_pending_node_record_ref(dedup_key, draft) {
             Ok(node_ref) => Ok(node_ref),
             Err(err) => {
                 truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
@@ -562,19 +200,16 @@ impl MastForestBuilder {
         }
     }
 
-    fn find_node_ref_by_fingerprint(
-        &self,
-        fingerprint: &MastNodeFingerprint,
-    ) -> Option<MastNodeRef> {
-        self.node_ref_by_fingerprint.get(fingerprint).copied()
+    fn find_node_ref_by_key(&self, key: &MastNodeKey) -> Option<MastNodeRef> {
+        self.node_ref_by_key.get(key).copied()
     }
 
-    fn find_reusable_node_ref_by_fingerprint(
+    fn find_reusable_node_ref_by_key(
         &self,
-        fingerprint: &MastNodeFingerprint,
+        key: &MastNodeKey,
         draft: &PendingMastNodeDraft,
     ) -> Option<MastNodeRef> {
-        self.find_node_ref_by_fingerprint(fingerprint)
+        self.find_node_ref_by_key(key)
             .filter(|&node_ref| !self.should_replace_pending_node(node_ref, draft))
     }
 
@@ -589,49 +224,45 @@ impl MastForestBuilder {
     fn replace_pending_node_record_ref(
         &mut self,
         node_ref: MastNodeRef,
-        fingerprint: MastNodeFingerprint,
+        key: MastNodeKey,
         draft: PendingMastNodeDraft,
     ) {
         self.nodes[node_ref] = PendingMastNode {
-            fingerprint,
+            key,
             digest: draft.digest,
             kind: draft.kind,
             child_refs: draft.child_refs,
             asm_ops: draft.asm_ops,
             debug_vars: draft.debug_vars,
         };
-        self.node_ref_by_fingerprint.insert(fingerprint, node_ref);
+        self.node_ref_by_key.insert(key, node_ref);
     }
 
     fn insert_or_replace_pending_node_record_ref(
         &mut self,
-        fingerprint: MastNodeFingerprint,
+        key: MastNodeKey,
         draft: PendingMastNodeDraft,
     ) -> Result<MastNodeRef, Report> {
-        if let Some(node_ref) = self.find_node_ref_by_fingerprint(&fingerprint) {
+        if let Some(node_ref) = self.find_node_ref_by_key(&key) {
             if self.should_replace_pending_node(node_ref, &draft) {
-                self.replace_pending_node_record_ref(node_ref, fingerprint, draft);
+                self.replace_pending_node_record_ref(node_ref, key, draft);
             }
             Ok(node_ref)
         } else {
-            self.insert_pending_node_record_ref(fingerprint, draft)
+            self.insert_pending_node_record_ref(key, draft)
         }
     }
 
-    fn fingerprint_from_pending_refs(
-        &self,
-        node_digest: Word,
-        child_refs: &[MastNodeRef],
-    ) -> MastNodeFingerprint {
+    fn key_from_pending_refs(&self, node_digest: Word, child_refs: &[MastNodeRef]) -> MastNodeKey {
         let mut has_non_digest_child = false;
         let mut elements = Vec::with_capacity(1 + 4 + child_refs.len() * 4);
-        elements.push(CHILD_FINGERPRINT_DOMAIN);
+        elements.push(CHILD_KEY_DOMAIN);
         elements.extend_from_slice(node_digest.as_elements());
 
         for &child_ref in child_refs {
             let child = &self.nodes[child_ref];
-            has_non_digest_child |= child.fingerprint != child.digest;
-            elements.extend_from_slice(child.fingerprint.as_elements());
+            has_non_digest_child |= child.key != child.digest;
+            elements.extend_from_slice(child.key.as_elements());
         }
 
         if has_non_digest_child {
@@ -641,24 +272,24 @@ impl MastForestBuilder {
         }
     }
 
-    fn fingerprint_for_pending_record(
+    fn key_for_pending_record(
         &self,
         digest: Word,
         kind: &PendingMastNodeKind,
         child_refs: &[MastNodeRef],
-    ) -> MastNodeFingerprint {
+    ) -> MastNodeKey {
         if let Some(op_batches) = kind.basic_block_op_batches() {
-            self.fingerprint_for_pending_basic_block(digest, op_batches)
+            self.key_for_pending_basic_block(digest, op_batches)
         } else {
-            self.fingerprint_from_pending_refs(digest, child_refs)
+            self.key_from_pending_refs(digest, child_refs)
         }
     }
 
-    fn fingerprint_for_pending_basic_block(
+    fn key_for_pending_basic_block(
         &self,
         block_digest: Word,
         op_batches: &[OpBatch],
-    ) -> MastNodeFingerprint {
+    ) -> MastNodeKey {
         debug_assert!(!op_batches.is_empty());
         let error_code_data = serialize_basic_block_error_codes(op_batches);
         if error_code_data.is_empty() {
@@ -667,7 +298,7 @@ impl MastForestBuilder {
 
         let data_len = error_code_data.len() as u64;
         let mut elements = Vec::with_capacity(7 + error_code_data.len().div_ceil(4));
-        elements.push(BASIC_BLOCK_ERROR_CODE_FINGERPRINT_DOMAIN);
+        elements.push(BASIC_BLOCK_ERROR_CODE_KEY_DOMAIN);
         elements.extend_from_slice(block_digest.as_elements());
         elements.push(Felt::from_u32(data_len as u32));
         elements.push(Felt::from_u32((data_len >> 32) as u32));
@@ -716,10 +347,8 @@ impl MastForestBuilder {
         mut draft: PendingMastNodeDraft,
         asm_op: AssemblyOp,
     ) -> Result<MastNodeRef, Report> {
-        let dedup_fingerprint = self.dedup_fingerprint_for_pending_data(&draft);
-        if let Some(node_ref) =
-            self.find_reusable_node_ref_by_fingerprint(&dedup_fingerprint, &draft)
-        {
+        let dedup_key = self.dedup_key_for_pending_data(&draft);
+        if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
             return Ok(node_ref);
         }
 
@@ -727,7 +356,7 @@ impl MastForestBuilder {
         let debug_var_checkpoint = self.debug_vars.len();
         draft.asm_ops = self.indexed_asm_op_refs(vec![(0, asm_op)])?;
         self.insert_pending_node_with_allocated_metadata_refs(
-            dedup_fingerprint,
+            dedup_key,
             draft,
             asm_op_checkpoint,
             debug_var_checkpoint,
@@ -803,108 +432,6 @@ fn batch_basic_block_operations(
         .into_diagnostic()
         .wrap_err("assembler failed to build new basic block")?;
     Ok((block.op_batches().to_vec(), block.digest()))
-}
-
-fn build_pending_node_with_final_ids(
-    pending_node: &PendingMastNode,
-    node_ref: MastNodeRef,
-    final_node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-) -> Result<MastNodeBuilder, MastForestBuilderError> {
-    let builder = match &pending_node.kind {
-        PendingMastNodeKind::BasicBlock { op_batches } => {
-            ensure_child_count(node_ref, pending_node, 0)?;
-            MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::from_op_batches_preserving_digest(
-                op_batches.clone(),
-                pending_node.digest,
-            ))
-        },
-        PendingMastNodeKind::Join => {
-            ensure_child_count(node_ref, pending_node, 2)?;
-            let children = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
-            MastNodeBuilder::Join(JoinNodeBuilder::new(children).with_digest(pending_node.digest))
-        },
-        PendingMastNodeKind::Split => {
-            ensure_child_count(node_ref, pending_node, 2)?;
-            let branches = final_child_ids::<2>(node_ref, pending_node, final_node_id_by_ref)?;
-            MastNodeBuilder::Split(SplitNodeBuilder::new(branches).with_digest(pending_node.digest))
-        },
-        PendingMastNodeKind::Loop => {
-            ensure_child_count(node_ref, pending_node, 1)?;
-            let [body] = final_child_ids::<1>(node_ref, pending_node, final_node_id_by_ref)?;
-            MastNodeBuilder::Loop(LoopNodeBuilder::new(body).with_digest(pending_node.digest))
-        },
-        PendingMastNodeKind::Call { is_syscall } => {
-            ensure_child_count(node_ref, pending_node, 1)?;
-            let [callee] = final_child_ids::<1>(node_ref, pending_node, final_node_id_by_ref)?;
-            let builder = if *is_syscall {
-                CallNodeBuilder::new_syscall(callee)
-            } else {
-                CallNodeBuilder::new(callee)
-            };
-            MastNodeBuilder::Call(builder.with_digest(pending_node.digest))
-        },
-        PendingMastNodeKind::Dyn { is_dyncall } => {
-            ensure_child_count(node_ref, pending_node, 0)?;
-            let builder = if *is_dyncall {
-                DynNodeBuilder::new_dyncall()
-            } else {
-                DynNodeBuilder::new_dyn()
-            };
-            MastNodeBuilder::Dyn(builder.with_digest(pending_node.digest))
-        },
-        PendingMastNodeKind::External => {
-            ensure_child_count(node_ref, pending_node, 0)?;
-            MastNodeBuilder::External(ExternalNodeBuilder::new(pending_node.digest))
-        },
-    };
-
-    Ok(builder)
-}
-
-fn ensure_child_count(
-    node_ref: MastNodeRef,
-    pending_node: &PendingMastNode,
-    expected: usize,
-) -> Result<(), MastForestBuilderError> {
-    let actual = pending_node.child_refs.len();
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(MastForestBuilderError::InvalidChildCount {
-            node_ref,
-            node_kind: pending_node.kind.name(),
-            expected,
-            actual,
-        })
-    }
-}
-
-fn final_child_ids<const N: usize>(
-    node_ref: MastNodeRef,
-    pending_node: &PendingMastNode,
-    final_node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-) -> Result<[MastNodeId; N], MastForestBuilderError> {
-    let node_kind = pending_node.kind.name();
-    pending_node
-        .child_refs
-        .iter()
-        .map(|child_ref| {
-            final_node_id_by_ref.get(child_ref).copied().ok_or(
-                MastForestBuilderError::MissingFinalChild {
-                    node_ref,
-                    node_kind,
-                    child_ref: *child_ref,
-                },
-            )
-        })
-        .collect::<Result<Vec<_>, MastForestBuilderError>>()?
-        .try_into()
-        .map_err(|values: Vec<_>| MastForestBuilderError::InvalidChildCount {
-            node_ref,
-            node_kind,
-            expected: N,
-            actual: values.len(),
-        })
 }
 
 fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
@@ -1294,176 +821,6 @@ impl MastForestBuilder {
     ) -> Result<DebugVarRef, Report> {
         self.push_debug_var_ref(debug_var)
     }
-
-    /// Copies a statically linked node into this builder while keeping source metadata in the
-    /// dedup fingerprint and remapping it into the target forest when a new node is created.
-    fn ensure_node_from_statically_linked_source_ref(
-        &mut self,
-        source_node_id: MastNodeId,
-        source_node: MastNode,
-        child_refs: Vec<MastNodeRef>,
-    ) -> Result<MastNodeRef, Report> {
-        let digest = source_node.digest();
-        let kind = PendingMastNodeKind::from_node(source_node);
-        let mut asm_ops = self.statically_linked_mast.debug_info().asm_ops_for_node(source_node_id);
-        if let MastNode::Block(block) = &self.statically_linked_mast[source_node_id] {
-            asm_ops = BasicBlockNode::unadjust_asm_op_indices(asm_ops, block.op_batches());
-        }
-        let statically_linked_mast = Arc::clone(&self.statically_linked_mast);
-        let pending_asm_ops = asm_ops
-            .into_iter()
-            .filter_map(|(op_idx, asm_op_id)| {
-                statically_linked_mast
-                    .debug_info()
-                    .asm_op(asm_op_id)
-                    .cloned()
-                    .map(|asm_op| (op_idx, asm_op))
-            })
-            .collect::<Vec<_>>();
-
-        let mut debug_vars =
-            self.statically_linked_mast.debug_info().debug_vars_for_node(source_node_id);
-        if let MastNode::Block(block) = &self.statically_linked_mast[source_node_id] {
-            debug_vars = BasicBlockNode::unadjust_asm_op_indices(debug_vars, block.op_batches());
-        }
-        let statically_linked_mast = Arc::clone(&self.statically_linked_mast);
-        let pending_debug_vars = debug_vars
-            .into_iter()
-            .filter_map(|(op_idx, var_id)| {
-                statically_linked_mast
-                    .debug_info()
-                    .debug_var(var_id)
-                    .cloned()
-                    .map(|debug_var| (op_idx, debug_var))
-            })
-            .collect::<Vec<_>>();
-
-        let mut draft = PendingMastNodeDraft {
-            kind,
-            digest,
-            child_refs,
-            asm_ops: Vec::new(),
-            debug_vars: Vec::new(),
-        };
-        let dedup_fingerprint = self.dedup_fingerprint_for_pending_data(&draft);
-        if let Some(node_ref) =
-            self.find_reusable_node_ref_by_fingerprint(&dedup_fingerprint, &draft)
-        {
-            return Ok(node_ref);
-        }
-
-        let asm_op_checkpoint = self.asm_op_by_ref.len();
-        let debug_var_checkpoint = self.debug_vars.len();
-        draft.asm_ops = self.indexed_asm_op_refs(pending_asm_ops)?;
-        draft.debug_vars = match self.indexed_debug_var_refs(pending_debug_vars) {
-            Ok(debug_vars) => debug_vars,
-            Err(err) => {
-                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
-                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
-                return Err(err);
-            },
-        };
-
-        self.insert_pending_node_with_allocated_metadata_refs(
-            dedup_fingerprint,
-            draft,
-            asm_op_checkpoint,
-            debug_var_checkpoint,
-        )
-    }
-
-    fn insert_pending_node_record_ref(
-        &mut self,
-        fingerprint: MastNodeFingerprint,
-        draft: PendingMastNodeDraft,
-    ) -> Result<MastNodeRef, Report> {
-        let node_ref = self.push_pending_node_record_ref(fingerprint, draft)?;
-
-        self.node_ref_by_fingerprint.insert(fingerprint, node_ref);
-        Ok(node_ref)
-    }
-
-    /// Collects builder-local refs for a statically linked source node.
-    fn pending_refs_for_statically_linked_source(
-        &self,
-        node: &MastNode,
-        node_refs_by_source_id: &BTreeMap<MastNodeId, MastNodeRef>,
-    ) -> Vec<MastNodeRef> {
-        let mut child_refs = Vec::new();
-        node.for_each_child(|source_child_id| {
-            let child_ref = *node_refs_by_source_id
-                .get(&source_child_id)
-                .expect("statically linked child must be copied before its parent");
-            child_refs.push(child_ref);
-        });
-
-        child_refs
-    }
-
-    /// Adds an externally-linked procedure root and returns its builder-local [`MastNodeRef`].
-    pub(crate) fn ensure_external_link_with_source_ref(
-        &mut self,
-        mast_root: Word,
-        source_library_commitment: Option<Word>,
-        source_root_id: Option<MastNodeId>,
-    ) -> Result<MastNodeRef, Report> {
-        if let Some(root_id) =
-            self.find_statically_linked_root(source_library_commitment, source_root_id, mast_root)
-        {
-            return self.copy_statically_linked_subtree_ref(root_id);
-        }
-
-        self.intern_pending_node(PendingMastNodeDraft::new(
-            PendingMastNodeKind::External,
-            mast_root,
-            Vec::new(),
-        ))
-    }
-
-    fn find_statically_linked_root(
-        &self,
-        source_library_commitment: Option<Word>,
-        source_root_id: Option<MastNodeId>,
-        mast_root: Word,
-    ) -> Option<MastNodeId> {
-        if let (Some(source_library_commitment), Some(source_root_id)) =
-            (source_library_commitment, source_root_id)
-        {
-            let exact_root = self
-                .statically_linked_forest_indices_by_commitment
-                .get(&source_library_commitment)
-                .and_then(|forest_idx| {
-                    self.statically_linked_root_map.map_root(*forest_idx, &source_root_id)
-                });
-
-            if let Some(exact_root) = exact_root
-                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
-            {
-                return Some(exact_root);
-            }
-        }
-
-        self.statically_linked_mast.find_procedure_root(mast_root)
-    }
-
-    /// Copies a subtree from the statically linked forest into the builder's forest.
-    fn copy_statically_linked_subtree_ref(
-        &mut self,
-        root_id: MastNodeId,
-    ) -> Result<MastNodeRef, Report> {
-        let mut node_refs_by_source_id = BTreeMap::new();
-        for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-            let node = self.statically_linked_mast[old_id].clone();
-            let child_refs =
-                self.pending_refs_for_statically_linked_source(&node, &node_refs_by_source_id);
-            let new_ref =
-                self.ensure_node_from_statically_linked_source_ref(old_id, node, child_refs)?;
-            node_refs_by_source_id.insert(old_id, new_ref);
-        }
-        Ok(*node_refs_by_source_id
-            .get(&root_id)
-            .expect("statically linked subtree root must be copied"))
-    }
 }
 
 impl MastForestBuilder {
@@ -1518,7 +875,12 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::operations::{DebugVarLocation, Operation};
+    use alloc::string::String;
+
+    use miden_core::{
+        mast::{DebugInfo, MastNodeBuilder, MastNodeId},
+        operations::{DebugVarLocation, Operation},
+    };
     use proptest::prelude::*;
 
     use super::*;
@@ -1755,10 +1117,10 @@ mod tests {
         builder.record_procedure_root_ref(external_b);
 
         let mut expected_external_refs = [
-            (external_a, builder.nodes[external_a].fingerprint),
-            (external_b, builder.nodes[external_b].fingerprint),
+            (external_a, builder.nodes[external_a].key),
+            (external_b, builder.nodes[external_b].key),
         ];
-        expected_external_refs.sort_by_key(|(_, fingerprint)| *fingerprint);
+        expected_external_refs.sort_by_key(|(_, key)| *key);
 
         let (forest, remapping) = builder.build().unwrap().into_parts();
 
@@ -1932,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_control_nodes_include_child_error_code_fingerprints() {
+    fn test_control_nodes_include_child_error_code_keys() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
         let first_block = builder

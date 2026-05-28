@@ -73,7 +73,7 @@ impl FinalForestLayout {
                 true
             }
         });
-        external_node_refs.sort_by_key(|node_ref| (nodes[*node_ref].fingerprint, *node_ref));
+        external_node_refs.sort_by_key(|node_ref| (nodes[*node_ref].key, *node_ref));
 
         let mut final_order = external_node_refs;
         let mut emitted_node_refs = final_order.iter().copied().collect::<BTreeSet<_>>();
