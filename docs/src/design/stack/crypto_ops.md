@@ -385,7 +385,8 @@ $$
 ## LOG_PRECOMPILE
 
 The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling precompile-transcript state. The transcript is a framework-AND chain over Poseidon2:
+rolling commitment state shared by legacy precompile requests and deferred commitments. The fold is
+a framework-AND chain over Poseidon2:
 `STATE_NEW = Node::and(STATE_PREV, STMNT).digest()`, i.e. a permutation over
 `[STATE_PREV, STMNT, Tag::AND]` with capacity `[1, 0, 0, 0]`. Initialization and boundary
 enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
@@ -400,7 +401,7 @@ which computes `STMNT = Poseidon2::merge(COMM, TAG)` from the user-provided comm
 and seats it at stack[4..8] before invoking the opcode (see
 [Precompiles](./precompiles.md#core-data) for the commitment model).
 
-Additionally, the processor maintains a persistent rolling transcript state word that is updated
+Additionally, the processor maintains a persistent rolling commitment state word that is updated
 with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑deterministically via
 helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
@@ -422,10 +423,10 @@ the caller immediately.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
-- $h_1, h_2, h_3, h_4$: Previous transcript state `STATE_PREV`
+- $h_1, h_2, h_3, h_4$: Previous commitment state `STATE_PREV`
 
 Note: helper registers expose `STATE_PREV` for bus constraints only; the VM maintains the
-transcript state internally between invocations.
+commitment state internally between invocations.
 
 ### Bus Communication
 
@@ -482,9 +483,9 @@ rows are consecutive, so their addresses differ by exactly 1.
 
 
 
-### Transcript-state Initialization
+### Commitment-state Initialization
 
-Inside the VM, the transcript state is tracked via the virtual-table bus: each update removes the
+Inside the VM, the commitment state is tracked via the virtual-table bus: each update removes the
 previous entry before inserting the next one.
 
 We denote the messages for removing and inserting the state as
@@ -503,7 +504,7 @@ $$
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final transcript state, the verifier initializes
+To ensure the column accounts for the initial and final commitment state, the verifier initializes
 the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it
 constrains the first value of the bus to be equal to
 
@@ -511,8 +512,8 @@ $$
 b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
 $$
 
-Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be
-used to extend an existing running state from a previous execution. The final transcript state is
+Usually, we initialize the commitment state to the empty word `[0,0,0,0]`, though it may also be
+used to extend an existing running state from a previous execution. The final commitment state is
 provided to the verifier (as a variable‑length public input) and enforced via the boundary
 constraint. The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
@@ -525,5 +526,5 @@ v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \
 $$
 
 Because the fold is the digest of a structural AND node (`Node::and(STATE_PREV, STMNT)`), the
-state is itself a complete digest at every step. The transcript digest is just the final state — no
-extra finalization step is required.
+state is itself a complete digest at every step. The deferred commitment / legacy transcript digest
+is just the final state — no extra finalization step is required.

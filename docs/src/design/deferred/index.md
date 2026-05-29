@@ -96,8 +96,8 @@ Precompiles are collected in a **`PrecompileRegistry`**, the framework's dispatc
 precompile's `id` is derived the same way event IDs are — the name hashed with Blake3 and folded
 into a single field element — but in its own domain-separated namespace, so a precompile and an
 event of the same name get different ids by construction. The registry rejects misconfigured or
-duplicate ids at construction. The default registry is empty and rejects every tag; a host installs
-precompiles via `FastProcessor::with_precompile`.
+duplicate ids at construction. The default registry is empty and rejects every tag. Hosts install
+precompiles directly or by loading `HostLibrary` values that export a registry.
 
 During reduction the framework hands the precompile a `WitnessBuilder`, through which it can
 `resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. The
@@ -128,7 +128,8 @@ data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) clo
 composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
-- once the deferred root is threaded into proof public inputs, the **transcript root-match** will bind that digest to the wire the verifier rehydrates;
+- once the deferred root is threaded into proof public inputs, the **deferred-commitment root
+  match** will bind that digest to the wire the verifier rehydrates;
 - `DeferredState::rehydrate` then re-reduces every logged statement from wire data.
 
 Once the root is public, these pieces bind the wire — and therefore every reduction the verifier
