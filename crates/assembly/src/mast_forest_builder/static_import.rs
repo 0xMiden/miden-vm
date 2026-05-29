@@ -11,26 +11,45 @@ use super::{
 };
 use crate::diagnostics::Report;
 
-struct StaticImportMetadata {
-    asm_ops: Vec<(usize, AssemblyOp)>,
-    debug_vars: Vec<(usize, DebugVarInfo)>,
-}
-
-enum StaticRootLookup {
-    Found(MastNodeId),
-    Ambiguous,
-    Missing,
-}
-
-impl StaticImportMetadata {
-    fn from_source(builder: &MastForestBuilder, source_node_id: MastNodeId) -> Self {
-        let asm_ops = builder.pending_asm_ops_for_statically_linked_source(source_node_id);
-        let debug_vars = builder.pending_debug_vars_for_statically_linked_source(source_node_id);
-        Self { asm_ops, debug_vars }
-    }
-}
-
 impl MastForestBuilder {
+    /// Creates a complete [`PendingMastNodeDraft`] for a node imported from a statically
+    /// linked forest, including indexed assembly ops and debug variable metadata.
+    fn pending_draft_for_statically_linked_source(
+        &mut self,
+        source_node_id: MastNodeId,
+        source_node: MastNode,
+        child_refs: Vec<MastNodeRef>,
+    ) -> Result<(PendingMastNodeDraft, usize, usize), Report> {
+        let digest = source_node.digest();
+        let kind = PendingMastNodeKind::from_node(source_node);
+        let asm_ops = self.pending_asm_ops_for_statically_linked_source(source_node_id);
+        let debug_vars = self.pending_debug_vars_for_statically_linked_source(source_node_id);
+
+        let asm_op_checkpoint = self.asm_op_by_ref.len();
+        let debug_var_checkpoint = self.debug_vars.len();
+        let indexed_asm_ops = self.indexed_asm_op_refs(asm_ops)?;
+        let indexed_debug_vars = match self.indexed_debug_var_refs(debug_vars) {
+            Ok(vars) => vars,
+            Err(err) => {
+                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
+                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
+                return Err(err);
+            },
+        };
+
+        Ok((
+            PendingMastNodeDraft {
+                digest,
+                kind,
+                child_refs,
+                asm_ops: indexed_asm_ops,
+                debug_vars: indexed_debug_vars,
+            },
+            asm_op_checkpoint,
+            debug_var_checkpoint,
+        ))
+    }
+
     /// Copies a statically linked node into this builder while keeping source metadata in the
     /// pending record when a new node is created.
     pub(super) fn ensure_node_from_statically_linked_source_ref(
@@ -39,29 +58,12 @@ impl MastForestBuilder {
         source_node: MastNode,
         child_refs: Vec<MastNodeRef>,
     ) -> Result<MastNodeRef, Report> {
-        let digest = source_node.digest();
-        let mut draft = PendingMastNodeDraft::new(
-            PendingMastNodeKind::from_node(source_node),
-            digest,
-            child_refs,
-        );
+        let (draft, asm_op_checkpoint, debug_var_checkpoint) = self
+            .pending_draft_for_statically_linked_source(source_node_id, source_node, child_refs)?;
         let dedup_key = self.dedup_key_for_pending_data(&draft);
         if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
             return Ok(node_ref);
         }
-
-        let metadata = StaticImportMetadata::from_source(self, source_node_id);
-        let asm_op_checkpoint = self.asm_op_by_ref.len();
-        let debug_var_checkpoint = self.debug_vars.len();
-        draft.asm_ops = self.indexed_asm_op_refs(metadata.asm_ops)?;
-        draft.debug_vars = match self.indexed_debug_var_refs(metadata.debug_vars) {
-            Ok(debug_vars) => debug_vars,
-            Err(err) => {
-                truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
-                truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
-                return Err(err);
-            },
-        };
 
         self.insert_pending_node_with_allocated_metadata_refs(
             dedup_key,
@@ -171,52 +173,25 @@ impl MastForestBuilder {
         if let (Some(source_library_commitment), Some(source_root_id)) =
             (source_library_commitment, source_root_id)
         {
-            match self.find_exact_statically_linked_root(
-                source_library_commitment,
-                source_root_id,
-                mast_root,
-            ) {
-                StaticRootLookup::Found(root_id) => return Some(root_id),
-                // `MastForest::commitment()` does not include diagnostics metadata, so multiple
-                // source forests can share a commitment while still carrying different metadata.
-                // Without a non-colliding package identity, an ambiguous exact lookup must not
-                // fall back to digest-only linking because that can import the wrong source node.
-                StaticRootLookup::Ambiguous => return None,
-                StaticRootLookup::Missing => {},
+            let exact_root = self
+                .statically_linked_forest_indices_by_commitment
+                .get(&source_library_commitment)
+                .and_then(|forest_indices| {
+                    forest_indices.iter().find_map(|forest_idx| {
+                        self.statically_linked_root_map
+                            .map_root(*forest_idx, &source_root_id)
+                            .filter(|root_id| {
+                                self.statically_linked_mast[*root_id].digest() == mast_root
+                            })
+                    })
+                });
+
+            if let Some(exact_root) = exact_root {
+                return Some(exact_root);
             }
         }
 
         self.statically_linked_mast.find_procedure_root(mast_root)
-    }
-
-    fn find_exact_statically_linked_root(
-        &self,
-        source_library_commitment: Word,
-        source_root_id: MastNodeId,
-        mast_root: Word,
-    ) -> StaticRootLookup {
-        let Some(forest_indices) = self
-            .statically_linked_forest_indices_by_commitment
-            .get(&source_library_commitment)
-        else {
-            return StaticRootLookup::Missing;
-        };
-
-        let mut matching_roots = forest_indices.iter().filter_map(|forest_idx| {
-            self.statically_linked_root_map
-                .map_root(*forest_idx, &source_root_id)
-                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
-        });
-
-        let Some(root_id) = matching_roots.next() else {
-            return StaticRootLookup::Missing;
-        };
-
-        if matching_roots.next().is_some() {
-            StaticRootLookup::Ambiguous
-        } else {
-            StaticRootLookup::Found(root_id)
-        }
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
