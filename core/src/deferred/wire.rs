@@ -2,13 +2,16 @@
 //!
 //! Proofs carry a sectioned, topologically ordered DAG witness. Opaque payload data is stored as a
 //! flat block buffer, while binary nodes reference earlier reconstructed nodes by index.
-//! Rehydration recomputes digests and validates the DAG before any wire data becomes trusted state.
+//! Rehydration first decodes this untrusted representation into a temporary arena, then replays the
+//! transcript through [`DeferredState`]'s ordinary registration/evaluation/logging API before
+//! accepting it as trusted state.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
     vec::Vec,
 };
+use core::iter::zip;
 
 use super::{
     Chunk, DeferredState, Digest, Node, NodeType, Payload, PrecompileRegistry, TRUE_DIGEST, Tag,
@@ -59,6 +62,10 @@ pub struct WireNode {
 ///
 /// The transcript commitment is derived from the last reconstructed node, so the wire does not
 /// carry a separate root field. Empty sections represent the empty transcript.
+///
+/// Accepted wire is strict and canonical: every materialized entry must reconstruct to a unique
+/// digest, all entries must be reachable from the transcript root under registry/framework join
+/// semantics, and reserializing the rehydrated state must produce the same wire structure.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DeferredStateWire {
     pub leaf_tags: Vec<Tag>,
@@ -68,8 +75,8 @@ pub struct DeferredStateWire {
 }
 
 impl DeferredStateWire {
-    /// Serializes the transcript-reachable DAG into compact wire form.
-    pub(super) fn from_state(
+    /// Serializes the transcript-reachable DAG into compact canonical wire form.
+    pub fn from_state(
         state: &DeferredState,
         precompiles: &PrecompileRegistry,
     ) -> Result<Self, IntegrityError> {
@@ -79,97 +86,310 @@ impl DeferredStateWire {
     }
 
     /// Rebuilds and verifies a deferred state from untrusted wire data.
-    pub(super) fn rehydrate(
+    pub fn rehydrate(
         &self,
         precompiles: &PrecompileRegistry,
     ) -> Result<DeferredState, IntegrityError> {
-        let mut state = DeferredState::new();
-        // Parallel to the global wire index space: TRUE, then leaves, then chunk nodes, then
-        // binary nodes.
-        let total_nodes = 1 + self.leaf_tags.len() + self.chunk_tags.len() + self.nodes.len();
-        let mut digests: Vec<Digest> = Vec::with_capacity(total_nodes);
-        digests.push(TRUE_DIGEST);
+        let decoded = DecodedWire::decode(self, precompiles)?;
+        let transcript = decoded.validate_transcript_and_closure()?;
+        let state = decoded.replay_transcript(&transcript, precompiles)?;
 
-        if self.blocks.len() < self.leaf_tags.len() {
+        // Canonicality/uniqueness: any accepted wire must be exactly what the canonical serializer
+        // emits for the replayed state. This rejects equivalent-but-reordered index assignments.
+        let canonical = Self::from_state(&state, precompiles)?;
+        if &canonical != self {
+            return Err(IntegrityError::NonCanonicalWire);
+        }
+
+        Ok(state)
+    }
+}
+
+// DECODED WIRE ARENA
+// ================================================================================================
+
+/// Temporary reconstruction arena for untrusted wire data.
+///
+/// The arena is not a trusted [`DeferredState`]. It only gives rehydration a digest-addressed view
+/// of the wire so it can validate transcript reachability and replay ordinary state transitions.
+struct DecodedWire {
+    entries: Vec<DecodedEntry>,
+    /// Parallel to the global wire index space. Index 0 is always [`TRUE_DIGEST`].
+    index_to_digest: Vec<Digest>,
+    /// Maps a materialized digest to its entry position in `entries`.
+    by_digest: BTreeMap<Digest, usize>,
+    root: Digest,
+}
+
+struct DecodedEntry {
+    node: Node,
+    node_type: NodeType,
+}
+
+struct DecodedTranscript {
+    /// Transcript steps in execution order.
+    steps: Vec<TranscriptStep>,
+}
+
+struct TranscriptStep {
+    /// The transcript root before this statement was logged.
+    prev_root: Digest,
+    /// The logged statement digest.
+    stmt_digest: Digest,
+    /// The transcript root after this statement was logged.
+    expected_root: Digest,
+}
+
+impl DecodedWire {
+    fn decode(
+        wire: &DeferredStateWire,
+        precompiles: &PrecompileRegistry,
+    ) -> Result<Self, IntegrityError> {
+        let total_nodes = 1usize
+            .checked_add(wire.leaf_tags.len())
+            .and_then(|n| n.checked_add(wire.chunk_tags.len()))
+            .and_then(|n| n.checked_add(wire.nodes.len()))
+            .ok_or(IntegrityError::ShapeMismatch)?;
+
+        let mut decoded = Self {
+            entries: Vec::with_capacity(total_nodes.saturating_sub(1)),
+            index_to_digest: Vec::with_capacity(total_nodes),
+            by_digest: BTreeMap::new(),
+            root: TRUE_DIGEST,
+        };
+        decoded.index_to_digest.push(TRUE_DIGEST);
+
+        if wire.blocks.len() < wire.leaf_tags.len() {
             return Err(IntegrityError::ShapeMismatch);
         }
 
-        for (tag, block) in self.leaf_tags.iter().copied().zip(self.blocks.iter().copied()) {
-            let node_type = decode_wire_tag(precompiles, tag)?;
+        for (tag, block) in zip(&wire.leaf_tags, &wire.blocks) {
+            let node_type = decode_tag_type(precompiles, *tag)?;
             if node_type != NodeType::Value {
                 return Err(IntegrityError::ShapeMismatch);
             }
-            let node = Node::leaf(tag, block);
-            intern_wire_node(&mut state, node, &mut digests)?;
+            decoded.push_entry(Node::leaf(*tag, *block), node_type)?;
         }
 
-        let mut block_offset = self.leaf_tags.len();
-        for tag in self.chunk_tags.iter().copied() {
-            let node_type = decode_wire_tag(precompiles, tag)?;
+        let mut block_offset = wire.leaf_tags.len();
+        for tag in &wire.chunk_tags {
+            let node_type = decode_tag_type(precompiles, *tag)?;
             let NodeType::Chunks(n) = node_type else {
                 return Err(IntegrityError::ShapeMismatch);
             };
             let len = n.get() as usize;
             let end = block_offset.checked_add(len).ok_or(IntegrityError::ShapeMismatch)?;
-            if end > self.blocks.len() {
+            if end > wire.blocks.len() {
                 return Err(IntegrityError::ShapeMismatch);
             }
-            let chunks = Arc::from(&self.blocks[block_offset..end]);
-            let node = Node::chunk(tag, chunks);
-            intern_wire_node(&mut state, node, &mut digests)?;
+            let chunks = Arc::from(&wire.blocks[block_offset..end]);
+            decoded.push_entry(Node::chunk(*tag, chunks), node_type)?;
             block_offset = end;
         }
-        if block_offset != self.blocks.len() {
+        if block_offset != wire.blocks.len() {
             return Err(IntegrityError::ShapeMismatch);
         }
 
-        for wire_node in &self.nodes {
-            let resolve_index =
-                |idx: u32| digests.get(idx as usize).copied().ok_or(IntegrityError::BadIndex);
-            let lhs_d = resolve_index(wire_node.lhs)?;
-            let rhs_d = resolve_index(wire_node.rhs)?;
-            let node_type = decode_wire_tag(precompiles, wire_node.tag)?;
+        for wire_node in &wire.nodes {
+            let lhs_d = resolve_index(wire_node.lhs, &decoded.index_to_digest)?;
+            let rhs_d = resolve_index(wire_node.rhs, &decoded.index_to_digest)?;
+            let node_type = decode_tag_type(precompiles, wire_node.tag)?;
             if node_type != NodeType::Join {
                 return Err(IntegrityError::ShapeMismatch);
             }
-            let node = Node::join(wire_node.tag, lhs_d, rhs_d);
-            intern_wire_node(&mut state, node, &mut digests)?;
+            decoded.push_entry(Node::join(wire_node.tag, lhs_d, rhs_d), node_type)?;
         }
 
-        // Derive the deferred commitment from phase 1's last reconstructed node. Empty sections →
-        // the `TRUE_DIGEST` seeded at index 0.
-        state.set_root(*digests.last().expect("digest table is seeded with TRUE_DIGEST"));
+        decoded.root =
+            *decoded.index_to_digest.last().expect("digest table is seeded with TRUE_DIGEST");
 
-        // Reachability — every reconstructed node must lie in the registry-declared closure of
-        // `root`. `to_wire` emits exactly that closure, so a faithful wire passes; any node outside
-        // it is bloat or hidden data and is rejected. Done here, before phase 2's evaluate re-mints
-        // canonical intermediates into `state.nodes`.
-        if reachable_closure(state.nodes(), state.root(), precompiles)?.len() != state.nodes().len()
-        {
-            return Err(IntegrityError::DanglingNode);
-        }
-
-        // Phase 2 — chain walk + per-statement re-evaluation. AND-nodes share Tag::TRUE and a
-        // `(prev_root, stmt_digest)` payload; statements must reduce to `Node::TRUE` under the
-        // precompiles.
-        let mut cur = state.root();
-        while cur != TRUE_DIGEST {
-            let and_node = state.nodes().get(&cur).ok_or(IntegrityError::BrokenChain)?;
-            if and_node.tag != Tag::TRUE {
+        // A non-empty transcript must end in a framework-owned AND node. Empty wire is the only
+        // accepted representation of the virtual TRUE transcript root.
+        if decoded.root != TRUE_DIGEST {
+            let root = decoded.entry(&decoded.root).ok_or(IntegrityError::BrokenChain)?;
+            if root.node.tag != Tag::TRUE {
                 return Err(IntegrityError::NonAndNode);
             }
-            let (prev_root, stmt_digest) =
-                and_node.payload.join_children().map_err(|_| IntegrityError::BadAndPayload)?;
-            let stmt =
-                state.nodes().get(&stmt_digest).ok_or(IntegrityError::MissingStatement)?.clone();
-            let canonical = state.evaluate_node(precompiles, stmt)?;
-            if !canonical.is_true_node() {
-                return Err(IntegrityError::PredicateNotTrue);
+        }
+
+        Ok(decoded)
+    }
+
+    fn push_entry(&mut self, node: Node, node_type: NodeType) -> Result<(), IntegrityError> {
+        let digest = node.digest();
+        if digest == TRUE_DIGEST || self.by_digest.contains_key(&digest) {
+            return Err(IntegrityError::DuplicateNode);
+        }
+
+        let index = self.index_to_digest.len();
+        if index > u32::MAX as usize {
+            return Err(IntegrityError::ShapeMismatch);
+        }
+
+        let entry_pos = self.entries.len();
+        self.entries.push(DecodedEntry { node, node_type });
+        self.index_to_digest.push(digest);
+        self.by_digest.insert(digest, entry_pos);
+        Ok(())
+    }
+
+    fn entry(&self, digest: &Digest) -> Option<&DecodedEntry> {
+        self.by_digest.get(digest).map(|idx| &self.entries[*idx])
+    }
+
+    fn contains_digest(&self, digest: &Digest) -> bool {
+        *digest != TRUE_DIGEST && self.by_digest.contains_key(digest)
+    }
+
+    fn validate_transcript_and_closure(&self) -> Result<DecodedTranscript, IntegrityError> {
+        let mut steps = Vec::new();
+        let mut consumed = BTreeSet::new();
+        let mut chain_nodes = BTreeSet::new();
+        let mut cur = self.root;
+
+        while cur != TRUE_DIGEST {
+            let entry = self.entry(&cur).ok_or(IntegrityError::BrokenChain)?;
+            if entry.node.tag != Tag::TRUE {
+                return Err(IntegrityError::NonAndNode);
             }
+            if entry.node_type != NodeType::Join {
+                return Err(IntegrityError::BadAndPayload);
+            }
+            if !chain_nodes.insert(cur) {
+                return Err(IntegrityError::BrokenChain);
+            }
+            consumed.insert(cur);
+
+            let (prev_root, stmt_digest) =
+                entry.node.payload.join_children().map_err(|_| IntegrityError::BadAndPayload)?;
+            if stmt_digest != TRUE_DIGEST && !self.contains_digest(&stmt_digest) {
+                return Err(IntegrityError::MissingStatement);
+            }
+            steps.push(TranscriptStep {
+                prev_root,
+                stmt_digest,
+                expected_root: cur,
+            });
             cur = prev_root;
         }
 
+        steps.reverse();
+
+        for step in &steps {
+            self.mark_structural_closure(step.stmt_digest, &mut consumed)?;
+        }
+
+        if consumed.len() != self.entries.len() {
+            return Err(IntegrityError::DanglingNode);
+        }
+
+        Ok(DecodedTranscript { steps })
+    }
+
+    fn mark_structural_closure(
+        &self,
+        root: Digest,
+        consumed: &mut BTreeSet<Digest>,
+    ) -> Result<(), IntegrityError> {
+        let mut stack = Vec::new();
+        let mut visited = BTreeSet::new();
+        push_materialized(&mut stack, root);
+
+        while let Some(digest) = stack.pop() {
+            if !visited.insert(digest) {
+                continue;
+            }
+
+            let entry = self.entry(&digest).ok_or(IntegrityError::MissingChild)?;
+            consumed.insert(digest);
+
+            if entry.node_type == NodeType::Join {
+                let (lhs, rhs) = entry
+                    .node
+                    .payload
+                    .join_children()
+                    .map_err(|_| IntegrityError::ShapeMismatch)?;
+                push_materialized(&mut stack, lhs);
+                push_materialized(&mut stack, rhs);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn replay_transcript(
+        &self,
+        transcript: &DecodedTranscript,
+        precompiles: &PrecompileRegistry,
+    ) -> Result<DeferredState, IntegrityError> {
+        let mut state = DeferredState::new();
+
+        for step in &transcript.steps {
+            // The decoded chain already says what the previous root must be. Check before doing
+            // expensive evaluation so malformed chains fail at the transcript boundary.
+            if state.root() != step.prev_root {
+                return Err(IntegrityError::BrokenChain);
+            }
+
+            self.register_statement_closure(&mut state, step.stmt_digest, precompiles)?;
+            let canonical = state.evaluate_statement_digest(precompiles, step.stmt_digest)?;
+            if !canonical.is_true_node() {
+                return Err(IntegrityError::PredicateNotTrue);
+            }
+            state
+                .log(step.stmt_digest, step.expected_root)
+                .map_err(|_| IntegrityError::BrokenChain)?;
+        }
+
+        if state.root() != self.root {
+            return Err(IntegrityError::BrokenChain);
+        }
+
         Ok(state)
+    }
+
+    fn register_statement_closure(
+        &self,
+        state: &mut DeferredState,
+        root: Digest,
+        precompiles: &PrecompileRegistry,
+    ) -> Result<(), IntegrityError> {
+        let mut stack = Vec::new();
+        let mut seen = BTreeSet::new();
+        push_materialized(&mut stack, root);
+
+        while let Some(digest) = stack.pop() {
+            if !seen.insert(digest) {
+                continue;
+            }
+
+            let entry = self.entry(&digest).ok_or(IntegrityError::MissingChild)?;
+
+            match state.nodes().get(&digest) {
+                Some(existing) if existing == &entry.node => {},
+                Some(_) => return Err(IntegrityError::DuplicateNode),
+                None => {
+                    let registered = state
+                        .register(precompiles, entry.node.clone())
+                        .map_err(IntegrityError::PredicateFailed)?;
+                    if registered != digest {
+                        return Err(IntegrityError::DuplicateNode);
+                    }
+                },
+            }
+
+            if entry.node_type == NodeType::Join {
+                let (lhs, rhs) = entry
+                    .node
+                    .payload
+                    .join_children()
+                    .map_err(|_| IntegrityError::ShapeMismatch)?;
+                push_materialized(&mut stack, lhs);
+                push_materialized(&mut stack, rhs);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -197,7 +417,7 @@ impl WireBuild {
             return Ok(());
         }
         let node = state.nodes().get(&digest).ok_or(IntegrityError::MissingChild)?;
-        let node_type = decode_wire_tag(precompiles, node.tag)?;
+        let node_type = decode_tag_type(precompiles, node.tag)?;
         if !node_type.matches_payload(&node.payload) {
             return Err(IntegrityError::ShapeMismatch);
         }
@@ -240,15 +460,15 @@ impl WireBuild {
         let mut next_index = 1u32;
         for leaf in &self.leaves {
             by_digest.insert(leaf.digest, next_index);
-            next_index += 1;
+            next_index = next_index.checked_add(1).ok_or(IntegrityError::ShapeMismatch)?;
         }
         for chunk in &self.chunks {
             by_digest.insert(chunk.digest, next_index);
-            next_index += 1;
+            next_index = next_index.checked_add(1).ok_or(IntegrityError::ShapeMismatch)?;
         }
         for node in &self.pending_nodes {
             by_digest.insert(node.digest, next_index);
-            next_index += 1;
+            next_index = next_index.checked_add(1).ok_or(IntegrityError::ShapeMismatch)?;
         }
 
         let mut leaf_tags = Vec::with_capacity(self.leaves.len());
@@ -300,58 +520,22 @@ struct PendingWireNode {
     rhs: Digest,
 }
 
-fn intern_wire_node(
-    state: &mut DeferredState,
-    node: Node,
-    digests: &mut Vec<Digest>,
-) -> Result<(), IntegrityError> {
-    let digest = node.digest();
-    if state.contains(&digest) {
-        return Err(IntegrityError::DuplicateNode);
-    }
-    state.intern(node);
-    digests.push(digest);
-    Ok(())
+/// Resolves a wire child index to the digest it references during rehydration.
+fn resolve_index(idx: u32, digests: &[Digest]) -> Result<Digest, IntegrityError> {
+    digests.get(idx as usize).copied().ok_or(IntegrityError::BadIndex)
 }
 
-fn decode_wire_tag(precompiles: &PrecompileRegistry, tag: Tag) -> Result<NodeType, IntegrityError> {
+fn decode_tag_type(precompiles: &PrecompileRegistry, tag: Tag) -> Result<NodeType, IntegrityError> {
     if tag == Tag::TRUE {
         return Ok(NodeType::Join);
     }
     precompiles.decode(tag).map_err(|_| IntegrityError::UnknownTag)
 }
 
-/// Returns the registry-declared closure reachable from a transcript root.
-///
-/// Only tags decoded as [`NodeType::Join`] contribute graph edges. Opaque value and chunk payloads
-/// are never inspected for digest-looking field elements.
-fn reachable_closure(
-    nodes: &BTreeMap<Digest, Node>,
-    root: Digest,
-    precompiles: &PrecompileRegistry,
-) -> Result<BTreeSet<Digest>, IntegrityError> {
-    let mut seen = BTreeSet::new();
-    let mut stack = Vec::new();
-    let push_materialized = |stack: &mut Vec<Digest>, digest| {
-        if digest != TRUE_DIGEST {
-            stack.push(digest);
-        }
-    };
-    push_materialized(&mut stack, root);
-
-    while let Some(d) = stack.pop() {
-        if !seen.insert(d) {
-            continue;
-        }
-        let node = nodes.get(&d).ok_or(IntegrityError::MissingChild)?;
-        if decode_wire_tag(precompiles, node.tag)? == NodeType::Join {
-            let (lhs, rhs) =
-                node.payload.join_children().map_err(|_| IntegrityError::ShapeMismatch)?;
-            push_materialized(&mut stack, lhs);
-            push_materialized(&mut stack, rhs);
-        }
+fn push_materialized(stack: &mut Vec<Digest>, digest: Digest) {
+    if digest != TRUE_DIGEST {
+        stack.push(digest);
     }
-    Ok(seen)
 }
 
 // SERIALIZATION
@@ -495,6 +679,7 @@ pub enum IntegrityError {
     /// A logged statement digest is absent from the wire closure.
     #[error("AND-chain walk references a statement digest that is not in the node set")]
     MissingStatement,
+
     /// A logged statement failed while being re-evaluated by its precompile.
     #[error("AND-chain statement failed re-evaluation: {0}")]
     PredicateFailed(#[from] super::PrecompileError),
@@ -504,6 +689,9 @@ pub enum IntegrityError {
     /// The wire reconstructs data outside the transcript root's reachable closure.
     #[error("wire reconstructs a node not reachable from the transcript root")]
     DanglingNode,
+    /// The wire is semantically valid but not the canonical serialization of the replayed state.
+    #[error("wire is not the canonical serialization of the replayed deferred state")]
+    NonCanonicalWire,
 }
 
 #[cfg(test)]
