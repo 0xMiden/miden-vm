@@ -7,6 +7,8 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU32;
 
+use super::Payload;
+
 // NODE TYPE
 // ================================================================================================
 
@@ -23,6 +25,17 @@ pub enum NodeType {
     Join,
     /// Non-empty bulk data whose chunk count is fixed by the tag.
     Chunks(NonZeroU32),
+}
+
+impl NodeType {
+    /// Returns whether a payload variant matches this declared shape.
+    pub(crate) fn matches_payload(self, payload: &Payload) -> bool {
+        match (self, payload) {
+            (Self::Value | Self::Join, Payload::Expression(_)) => true,
+            (Self::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n.get() as usize,
+            _ => false,
+        }
+    }
 }
 
 // PRECOMPILE ERROR

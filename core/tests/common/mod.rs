@@ -31,7 +31,8 @@ pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, pr
 
 /// Asserts that wire round-tripping preserves the verified transcript root and nodes.
 pub fn assert_round_trips(state: &DeferredState, schema: &PrecompileRegistry) {
-    let rehydrated = DeferredState::rehydrate(&state.to_wire(), schema).unwrap();
+    let wire = state.to_wire(schema).unwrap();
+    let rehydrated = DeferredState::rehydrate(&wire, schema).unwrap();
     assert_eq!(rehydrated.root(), state.root());
     assert!(
         rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),

@@ -20,7 +20,7 @@ pub use node::{NodeType, PrecompileError};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_schema::PrecompileRegistry;
 pub use state::{DeferredState, WitnessBuilder};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireBody, WireEntry};
+pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireNode};
 
 use crate::{Felt, Word};
 
