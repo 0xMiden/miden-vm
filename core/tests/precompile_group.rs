@@ -8,39 +8,39 @@ use miden_core::{
     testing::precompile::{Group, Uint},
 };
 
-/// Builds a uint+group schema with an empty state for tests that assert node counts.
+/// Builds a uint+group registry with an empty state for tests that assert node counts.
 fn fresh() -> (PrecompileRegistry, DeferredState) {
-    let schema = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
-    (schema, DeferredState::new())
+    let registry = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
+    (registry, DeferredState::new())
 }
 
-/// Builds the same schema with uint constants pre-registered.
-fn schema_and_state() -> (PrecompileRegistry, DeferredState) {
-    let (schema, mut state) = fresh();
-    schema.init(&mut state).unwrap();
-    (schema, state)
+/// Builds the same registry with uint constants pre-registered.
+fn registry_and_state() -> (PrecompileRegistry, DeferredState) {
+    let (registry, mut state) = fresh();
+    registry.init(&mut state).unwrap();
+    (registry, state)
 }
 
 fn register_group(
-    schema: &PrecompileRegistry,
+    registry: &PrecompileRegistry,
     state: &mut DeferredState,
     x: u64,
     y: u64,
 ) -> Digest {
-    let h_x = state.register(schema, leaf(x)).unwrap();
-    let h_y = state.register(schema, leaf(y)).unwrap();
-    state.register(schema, Group::new_node(h_x, h_y)).unwrap()
+    let h_x = state.register(registry, leaf(x)).unwrap();
+    let h_y = state.register(registry, leaf(y)).unwrap();
+    state.register(registry, Group::new_node(h_x, h_y)).unwrap()
 }
 
 #[test]
 fn add_produces_minted_new_and_passes_eq_against_expected() {
-    let (schema, mut state) = schema_and_state();
+    let (registry, mut state) = registry_and_state();
 
-    let h_g1 = register_group(&schema, &mut state, 3, 4);
-    let h_g2 = register_group(&schema, &mut state, 10, 20);
+    let h_g1 = register_group(&registry, &mut state, 3, 4);
+    let h_g2 = register_group(&registry, &mut state, 10, 20);
 
     // Evaluate add: returns new(h_x3_leaf, h_y3_leaf) where leaves are minted.
-    let add_canonical = state.evaluate_node(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let add_canonical = state.evaluate_node(&registry, Group::add_node(h_g1, h_g2)).unwrap();
     let expected = Group::new_node(leaf(13).digest(), leaf(24).digest());
     assert_eq!(add_canonical, expected);
 
@@ -49,46 +49,46 @@ fn add_produces_minted_new_and_passes_eq_against_expected() {
     assert!(state.contains(&leaf(24).digest()));
 
     // Build expected group element via registration, then assert eq.
-    let h_expected = register_group(&schema, &mut state, 13, 24);
-    let h_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
-    let eq_result = state.evaluate_node(&schema, Group::eq_node(h_add, h_expected)).unwrap();
+    let h_expected = register_group(&registry, &mut state, 13, 24);
+    let h_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
+    let eq_result = state.evaluate_node(&registry, Group::eq_node(h_add, h_expected)).unwrap();
     assert!(eq_result.is_true_node());
 
     // Defense-in-depth: log the proven equality and round-trip the transcript — this re-runs
     // the Group reduce (including its mid-`reduce` minting) through rehydrate.
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_add, h_expected));
+    common::log_and_verify(&registry, &mut state, Group::eq_node(h_add, h_expected));
 }
 
 #[test]
 fn sub_chains_through_add_with_mint_at_every_step() {
-    let (schema, mut state) = schema_and_state();
+    let (registry, mut state) = registry_and_state();
 
     // ((g1 + g2) - g1)  should equal g2 under coord-wise mock arithmetic.
-    let h_g1 = register_group(&schema, &mut state, 7, 11);
-    let h_g2 = register_group(&schema, &mut state, 100, 200);
+    let h_g1 = register_group(&registry, &mut state, 7, 11);
+    let h_g2 = register_group(&registry, &mut state, 100, 200);
 
-    let h_sum = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
-    let h_diff = state.register(&schema, Group::sub_node(h_sum, h_g1)).unwrap();
+    let h_sum = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
+    let h_diff = state.register(&registry, Group::sub_node(h_sum, h_g1)).unwrap();
 
-    let canonical = state.evaluate_digest(&schema, h_diff).unwrap();
+    let canonical = state.evaluate_digest(&registry, h_diff).unwrap();
     assert_eq!(canonical, Group::new_node(leaf(100).digest(), leaf(200).digest()));
 }
 
 #[test]
 fn new_preserves_field_expression_commitments() {
-    let (schema, mut state) = fresh();
+    let (registry, mut state) = fresh();
 
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_5 = state.register(&schema, leaf(5)).unwrap();
-    let h_6 = state.register(&schema, leaf(6)).unwrap();
+    let h_3 = state.register(&registry, leaf(3)).unwrap();
+    let h_4 = state.register(&registry, leaf(4)).unwrap();
+    let h_5 = state.register(&registry, leaf(5)).unwrap();
+    let h_6 = state.register(&registry, leaf(6)).unwrap();
 
-    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_y_expr = state.register(&schema, Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
+    let h_x_expr = state.register(&registry, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
+    let h_y_expr = state.register(&registry, Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
 
-    let h_group = state.register(&schema, Group::new_node(h_x_expr, h_y_expr)).unwrap();
+    let h_group = state.register(&registry, Group::new_node(h_x_expr, h_y_expr)).unwrap();
 
-    let canonical = state.evaluate_digest(&schema, h_group).unwrap();
+    let canonical = state.evaluate_digest(&registry, h_group).unwrap();
 
     assert_eq!(
         canonical,
@@ -106,65 +106,65 @@ fn new_preserves_field_expression_commitments() {
     assert_eq!(h_x, h_x_expr);
     assert_eq!(h_y, h_y_expr);
 
-    let h_value_group = register_group(&schema, &mut state, 7, 11);
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_group, h_value_group));
+    let h_value_group = register_group(&registry, &mut state, 7, 11);
+    common::log_and_verify(&registry, &mut state, Group::eq_node(h_group, h_value_group));
 }
 
 #[test]
 fn eq_predicate_errors_on_mismatch() {
-    let (schema, mut state) = fresh();
-    let h_g1 = register_group(&schema, &mut state, 7, 11);
-    let h_g2 = register_group(&schema, &mut state, 7, 12);
-    let err = state.evaluate_node(&schema, Group::eq_node(h_g1, h_g2));
+    let (registry, mut state) = fresh();
+    let h_g1 = register_group(&registry, &mut state, 7, 11);
+    let h_g2 = register_group(&registry, &mut state, 7, 12);
+    let err = state.evaluate_node(&registry, Group::eq_node(h_g1, h_g2));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
 fn eq_compares_coordinate_values_not_coordinate_commitments() {
-    let (schema, mut state) = fresh();
+    let (registry, mut state) = fresh();
 
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_5 = state.register(&schema, leaf(5)).unwrap();
+    let h_3 = state.register(&registry, leaf(3)).unwrap();
+    let h_4 = state.register(&registry, leaf(4)).unwrap();
+    let h_5 = state.register(&registry, leaf(5)).unwrap();
 
-    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_expr_group = state.register(&schema, Group::new_node(h_x_expr, h_5)).unwrap();
+    let h_x_expr = state.register(&registry, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
+    let h_expr_group = state.register(&registry, Group::new_node(h_x_expr, h_5)).unwrap();
 
-    let h_value_group = register_group(&schema, &mut state, 7, 5);
+    let h_value_group = register_group(&registry, &mut state, 7, 5);
 
     let result = state
-        .evaluate_node(&schema, Group::eq_node(h_expr_group, h_value_group))
+        .evaluate_node(&registry, Group::eq_node(h_expr_group, h_value_group))
         .unwrap();
 
     assert!(result.is_true_node(), "new(add(3, 4), 5) must equal new(7, 5)");
 
     let swapped = state
-        .evaluate_node(&schema, Group::eq_node(h_value_group, h_expr_group))
+        .evaluate_node(&registry, Group::eq_node(h_value_group, h_expr_group))
         .unwrap();
 
     assert!(swapped.is_true_node(), "group equality should not depend on operand order");
 
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_expr_group, h_value_group));
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_value_group, h_expr_group));
+    common::log_and_verify(&registry, &mut state, Group::eq_node(h_expr_group, h_value_group));
+    common::log_and_verify(&registry, &mut state, Group::eq_node(h_value_group, h_expr_group));
 }
 
 #[test]
 fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
-    let (schema, mut state) = fresh();
+    let (registry, mut state) = fresh();
 
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_5 = state.register(&schema, leaf(5)).unwrap();
-    let h_6 = state.register(&schema, leaf(6)).unwrap();
+    let h_3 = state.register(&registry, leaf(3)).unwrap();
+    let h_4 = state.register(&registry, leaf(4)).unwrap();
+    let h_5 = state.register(&registry, leaf(5)).unwrap();
+    let h_6 = state.register(&registry, leaf(6)).unwrap();
 
-    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_y_expr = state.register(&schema, Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
+    let h_x_expr = state.register(&registry, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
+    let h_y_expr = state.register(&registry, Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
 
-    let h_g1 = state.register(&schema, Group::new_node(h_x_expr, h_y_expr)).unwrap();
+    let h_g1 = state.register(&registry, Group::new_node(h_x_expr, h_y_expr)).unwrap();
 
-    let h_g2 = register_group(&schema, &mut state, 10, 20);
+    let h_g2 = register_group(&registry, &mut state, 10, 20);
 
-    let canonical = state.evaluate_node(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let canonical = state.evaluate_node(&registry, Group::add_node(h_g1, h_g2)).unwrap();
 
     let expected = Group::new_node(leaf(17).digest(), leaf(31).digest());
     assert_eq!(canonical, expected);
@@ -172,31 +172,31 @@ fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
     assert!(state.contains(&leaf(17).digest()));
     assert!(state.contains(&leaf(31).digest()));
 
-    let h_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
-    let h_expected = register_group(&schema, &mut state, 17, 31);
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_add, h_expected));
+    let h_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
+    let h_expected = register_group(&registry, &mut state, 17, 31);
+    common::log_and_verify(&registry, &mut state, Group::eq_node(h_add, h_expected));
 }
 
 #[test]
 fn new_requires_coordinate_expression_commitments_not_eval_memo_only() {
-    let (schema, mut state) = fresh();
+    let (registry, mut state) = fresh();
 
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_y = state.register(&schema, leaf(5)).unwrap();
+    let h_3 = state.register(&registry, leaf(3)).unwrap();
+    let h_4 = state.register(&registry, leaf(4)).unwrap();
+    let h_y = state.register(&registry, leaf(5)).unwrap();
 
     let x_expr = Node::join(Uint::add_tag(), h_3, h_4);
     let h_x_expr = x_expr.digest();
 
     // Evaluate directly, but do not register the expression node.
-    let x_canonical = state.evaluate_node(&schema, x_expr).unwrap();
+    let x_canonical = state.evaluate_node(&registry, x_expr).unwrap();
     assert_eq!(x_canonical, leaf(7));
     assert!(
         !state.contains(&h_x_expr),
         "direct evaluate should not register the input expression"
     );
 
-    let err = state.evaluate_node(&schema, Group::new_node(h_x_expr, h_y)).unwrap_err();
+    let err = state.evaluate_node(&registry, Group::new_node(h_x_expr, h_y)).unwrap_err();
 
     assert!(matches!(err.root(), PrecompileError::MissingNode));
 }
@@ -208,25 +208,25 @@ fn eq_predicate_commutes_over_minted_children() {
     // `val = Group::new(leaf(13).digest(), leaf(24).digest())` references those digests directly
     // without the leaves being explicitly registered. The eq predicate must succeed regardless
     // of operand order — i.e. resolution must not depend on which side reduces first.
-    let (schema, mut state) = fresh();
-    let h_g1 = register_group(&schema, &mut state, 3, 4);
-    let h_g2 = register_group(&schema, &mut state, 10, 20);
-    let h_g_add = state.register(&schema, Group::add_node(h_g1, h_g2)).unwrap();
+    let (registry, mut state) = fresh();
+    let h_g1 = register_group(&registry, &mut state, 3, 4);
+    let h_g2 = register_group(&registry, &mut state, 10, 20);
+    let h_g_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
     let h_val = state
-        .register(&schema, Group::new_node(leaf(13).digest(), leaf(24).digest()))
+        .register(&registry, Group::new_node(leaf(13).digest(), leaf(24).digest()))
         .unwrap();
 
     // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
-    state.evaluate_digest(&schema, h_g_add).unwrap();
+    state.evaluate_digest(&registry, h_g_add).unwrap();
     assert!(state.contains(&leaf(13).digest()), "x3 minted into nodes");
     assert!(state.contains(&leaf(24).digest()), "y3 minted into nodes");
 
     let mut state_normal = state.clone();
-    let normal = state_normal.evaluate_node(&schema, Group::eq_node(h_g_add, h_val)).unwrap();
+    let normal = state_normal.evaluate_node(&registry, Group::eq_node(h_g_add, h_val)).unwrap();
     assert!(normal.is_true_node(), "Eq(g_add, val) holds");
 
     let mut state_swapped = state.clone();
-    let swapped = state_swapped.evaluate_node(&schema, Group::eq_node(h_val, h_g_add)).unwrap();
+    let swapped = state_swapped.evaluate_node(&registry, Group::eq_node(h_val, h_g_add)).unwrap();
     assert!(swapped.is_true_node(), "Eq(val, g_add) holds — operand order doesn't matter");
 }
 
@@ -234,11 +234,11 @@ fn eq_predicate_commutes_over_minted_children() {
 fn reduce_rejects_new_with_non_field_leaf_children() {
     // Children resolve to canonical leaves but their tag is *not* the field leaf tag —
     // new must reject.
-    let (schema, mut state) = fresh();
-    let h_g = register_group(&schema, &mut state, 1, 1);
-    let h_y = state.register(&schema, leaf(2)).unwrap();
+    let (registry, mut state) = fresh();
+    let h_g = register_group(&registry, &mut state, 1, 1);
+    let h_y = state.register(&registry, leaf(2)).unwrap();
     let bad_new = Group::new_node(h_g, h_y);
-    let err = state.evaluate_node(&schema, bad_new);
+    let err = state.evaluate_node(&registry, bad_new);
     assert!(matches!(
         err.unwrap_err().root(),
         PrecompileError::Other(_) | PrecompileError::InvalidNode

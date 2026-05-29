@@ -128,7 +128,7 @@ end
 
 #! Folds a deferred node digest into the rolling deferred commitment using the existing
 #! `log_precompile` commitment state. The digest must reference a node that will reduce to TRUE
-#! under the installed schema.
+#! under the installed precompiles.
 #!
 #! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees
 #! NODE_DIGEST at stack[4..8] (the HPERM rate1 lanes). The opcode folds with framework AND
