@@ -297,9 +297,11 @@ pub enum SystemEvent {
     // --------------------------------------------------------------------------------------------
     /// Commits an expression-bodied deferred node to the DAG.
     ///
-    /// Registration gives later nodes and transcript steps a stable digest to reference, but it
-    /// does not verify predicate truth. The MASM wrapper derives the digest in-circuit from the
-    /// operand-stack payload so the commitment is bound to program data rather than advice.
+    /// Registration validates the tag/payload shape against the host-installed deferred
+    /// precompile registry and gives later nodes and transcript steps a stable digest to
+    /// reference, but it does not verify predicate truth. The MASM wrapper derives the digest
+    /// in-circuit from the operand-stack payload so the commitment is bound to program data rather
+    /// than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -313,8 +315,9 @@ pub enum SystemEvent {
     /// Reduces a committed node and exposes its canonical form as advice.
     ///
     /// The digest must already be committed in deferred state; memo hits are accepted only after
-    /// that membership check. Predicate nodes verify here by reducing to
-    /// [`crate::deferred::Node::TRUE`] or failing with the precompile's assertion error.
+    /// that membership check. Reduction is routed through the host-installed deferred precompile
+    /// registry. Predicate nodes verify here by reducing to [`crate::deferred::Node::TRUE`] or
+    /// failing with the precompile's assertion error.
     ///
     /// The advice output is an unbound host hint. Callers that rely on it must re-hash the
     /// returned felts in-circuit and log a predicate so the verifier re-checks the claim.
@@ -329,9 +332,10 @@ pub enum SystemEvent {
 
     /// Commits a chunk-bodied deferred node to the DAG.
     ///
-    /// The tag declares the chunk count, making length part of the commitment. The MASM wrapper
-    /// hashes the same memory range in-circuit, so the registered digest is bound to memory
-    /// contents rather than advice.
+    /// The host-installed deferred precompile registry decodes the tag's chunk count, making
+    /// length part of the commitment. The handler checks the projected deferred-state budget before
+    /// allocating or reading chunk memory. The MASM wrapper hashes the same memory range
+    /// in-circuit, so the registered digest is bound to memory contents rather than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, ...]

@@ -583,7 +583,7 @@ This is the core mechanism for memoization.
 The hasher uses this running product for two logically separate purposes:
 
 - sibling-table balancing for `MRUPDATE`,
-- precompile transcript state tracking for `LOG_PRECOMPILE`.
+- commitment-state tracking for `LOG_PRECOMPILE`.
 
 For the sibling-table part, the old-path leg inserts siblings and the new-path
 leg removes them. Because the entries are keyed by `(mrupdate_id, node_index,
