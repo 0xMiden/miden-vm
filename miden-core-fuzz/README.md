@@ -113,6 +113,18 @@ cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`deferred_state_wire_deserialize`** — Tests `DeferredStateWire::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`deferred_state_wire_serde_deserialize`** — Tests `DeferredStateWire` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`precompile_request_deserialize`** — Tests `PrecompileRequest::read_from_bytes`.
 
 ```bash
