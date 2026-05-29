@@ -785,7 +785,6 @@ fn translate_snapshot_continuation_stack(
             },
             Continuation::FinishCall(id) => Continuation::FinishCall(id),
             Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
-            Continuation::FinishExternal(id) => Continuation::FinishExternal(id),
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
             },
@@ -793,7 +792,6 @@ fn translate_snapshot_continuation_stack(
                 Continuation::Respan { node_id, batch_index }
             },
             Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
-            Continuation::AfterExitDecorators(id) => Continuation::AfterExitDecorators(id),
         };
         out.push_continuation(translated);
     }

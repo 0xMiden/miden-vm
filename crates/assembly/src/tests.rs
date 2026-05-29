@@ -12,10 +12,10 @@ use miden_core::{
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
     },
-    operations::{Decorator, Operation},
+    operations::Operation,
     program::Program,
     serde::{Deserializable, Serializable},
 };
@@ -1760,249 +1760,6 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     Ok(())
 }
-// DECORATORS
-// ================================================================================================
-
-#[test]
-fn decorators_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        add
-        trace.1
-        mul
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        push.1
-        push.2
-        trace.1
-        add
-        trace.2
-    end"
-    );
-
-    let program = context.assemble(source)?;
-    let forest = program.mast_forest();
-    let (block_id, block) = forest
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, node)| {
-            node.get_basic_block().map(|block| (MastNodeId::from(idx as u32), block))
-        })
-        .find(|(_, block)| matches!(block.raw_operations().last(), Some(Operation::Add)))
-        .expect("expected a basic block ending in add");
-
-    let raw_ops = block.raw_operations().collect::<Vec<_>>();
-    let last_real_op_idx = raw_ops.len() - 1;
-    assert!(
-        matches!(raw_ops.last(), Some(Operation::Add)),
-        "expected add to be the last real operation in the block",
-    );
-
-    let indexed_decorators = block.indexed_decorator_iter(forest).collect::<Vec<_>>();
-    let last_op_trace_decorators = indexed_decorators
-        .iter()
-        .filter_map(|(op_idx, decorator_id)| {
-            (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
-                Decorator::Trace(value) => Some(*value),
-            })?
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        last_op_trace_decorators,
-        vec![1],
-        "only the pre-add decorator should be attached to the last real op",
-    );
-
-    let after_exit_trace_decorators = block
-        .after_exit(forest)
-        .iter()
-        .map(|decorator_id| match &forest[*decorator_id] {
-            Decorator::Trace(value) => *value,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        after_exit_trace_decorators,
-        vec![2],
-        "trailing decorator should be placed in the containing block's after_exit set",
-    );
-
-    assert!(
-        forest.after_exit_decorators(block_id) == block.after_exit(forest),
-        "block-level and forest-level after_exit accessors should agree",
-    );
-
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_one_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2 add end
-        trace.1
-        repeat.2 mul end
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2
-            if.true
-                trace.1 push.42 trace.2
-            else
-                trace.3 push.22 trace.3
-            end
-            trace.4
-        end
-        trace.5
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_call() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_dyn() -> TestResult {
-    // single line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        dynexec
-        trace.1
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-
-    // multi line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1 trace.2 trace.3 trace.4
-        dynexec
-        trace.5 trace.6 trace.7 trace.8 trace.9
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_external() -> TestResult {
-    let context = TestContext::default();
-    let baz = r#"
-        pub proc f
-            push.7 push.8 sub
-        end
-    "#;
-    let baz = parse_module!(&context, "lib::baz", baz);
-
-    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [baz])?;
-
-    let program_source = source_file!(
-        &context,
-        "\
-    use lib::baz
-    begin
-        trace.0
-        exec.baz::f
-        trace.1
-    end"
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", program_source)?
-        .unwrap_program();
-    insta::assert_snapshot!(program);
-
-    Ok(())
-}
-
-#[test]
-fn decorators_join_and_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        if.true
-            trace.2 add trace.3
-        else
-            trace.4 mul trace.5
-        end
-        trace.6
-        if.true
-            trace.7 push.42 trace.8
-        else
-            trace.9 push.22 trace.10
-        end
-        trace.11
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
 // ASSERTIONS
 // ================================================================================================
 
@@ -2174,8 +1931,8 @@ fn u32assertw_with_code() -> TestResult {
     Ok(())
 }
 
-/// Ensure that there is no collision between `Assert`, `U32assert2`, and `MpVerify`
-/// instructions with different inner values (which all don't contribute to the MAST root).
+/// Ensure that assertion and `mtree_verify` error codes are preserved after assembly, including
+/// through duplicate procedures with metadata-neutral MAST roots.
 #[test]
 fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     let context = TestContext::default();
@@ -2330,61 +2087,6 @@ fn control_flow_nesting_depth_exceeded() {
 
 // PROGRAMS WITH PROCEDURES
 // ================================================================================================
-
-/// If the program has 2 procedures with the same MAST root (but possibly different decorators), the
-/// correct procedure is chosen on exec
-#[test]
-fn ensure_correct_procedure_selection_on_collision() -> TestResult {
-    let context = TestContext::default();
-
-    // if with else
-    let source = source_file!(
-        &context,
-        "
-        proc f
-            add
-        end
-
-        proc g
-            trace.2
-            add
-        end
-
-        begin
-            if.true
-                exec.f
-            else
-                exec.g
-            end
-        end"
-    );
-    let program = context.assemble(source)?;
-
-    // Note: those values were taken from adding prints to the assembler at the time of writing. It
-    // is possible that this test starts failing if we end up ordering procedures differently.
-    let expected_f_node_id =
-        MastNodeId::from_u32_safe(1_u32, program.mast_forest().as_ref()).unwrap();
-    let expected_g_node_id =
-        MastNodeId::from_u32_safe(0_u32, program.mast_forest().as_ref()).unwrap();
-
-    let (exec_f_node_id, exec_g_node_id) = {
-        let split_node_id = {
-            // Note: the program starts with a join node, which joins:
-            // - left: the fmp initialization sequence,
-            // - right: the actual entrypoint of the program (the if statement).
-            let root_join_id = program.entrypoint();
-            program.mast_forest()[root_join_id].unwrap_join().second()
-        };
-        let split_node = &program.mast_forest()[split_node_id].unwrap_split();
-
-        (split_node.on_true(), split_node.on_false())
-    };
-
-    assert_eq!(program.mast_forest()[expected_f_node_id], program.mast_forest()[exec_f_node_id]);
-    assert_eq!(program.mast_forest()[expected_g_node_id], program.mast_forest()[exec_g_node_id]);
-
-    Ok(())
-}
 
 #[test]
 fn program_with_one_procedure() -> TestResult {
@@ -3573,13 +3275,12 @@ fn invalid_repeat_count_zero() {
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() {
+fn invalid_repeat_count_zero_in_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
         "\
 proc foo
-    trace.1
     repeat.0
         nop
     end
@@ -3589,9 +3290,7 @@ begin
     call.foo
 end"
     );
-    let error = context
-        .assemble(source)
-        .expect_err("expected repeat.0 with decorator to be rejected");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
@@ -4067,37 +3766,6 @@ fn test_program_serde_simple() {
     assert_eq!(original_program, deserialized_program);
 }
 
-#[test]
-fn test_program_serde_with_decorators() {
-    let source = "
-    const DEFAULT_CONST = 100
-    const EVENT_CONST = event(\"serde::evt\")
-
-    proc foo
-        push.1.2 add
-    end
-
-    begin
-        emit.EVENT_CONST
-
-        exec.foo
-
-        drop
-
-        trace.DEFAULT_CONST
-    end
-    ";
-
-    let assembler = Assembler::default();
-    let original_program = assembler.assemble_program("test", source).unwrap().unwrap_program();
-
-    let mut target = Vec::new();
-    original_program.write_into(&mut target);
-    let deserialized_program = Program::read_from_bytes(&target).unwrap();
-
-    assert_eq!(original_program, deserialized_program);
-}
-
 // MAST BUILDER ACCEPTANCE CORPUS
 // ================================================================================================
 
@@ -4108,7 +3776,7 @@ fn mast_builder_acceptance_corpus() -> TestResult {
 
     let cases = [
         (
-            "straight_line_decorators",
+            "straight_line_events",
             source_file!(
                 &context,
                 r#"
@@ -4117,7 +3785,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 begin
                     push.1 push.2 add
                     emit.EVT
-                    trace.7
                 end
                 "#
             ),
@@ -4130,9 +3797,9 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 begin
                     push.1
                     if.true
-                        push.2 trace.1
+                        push.2
                     else
-                        push.3 trace.2
+                        push.3
                     end
 
                     repeat.3
@@ -4156,7 +3823,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 end
 
                 proc decorated
-                    trace.44
                     push.0 drop
                 end
 
@@ -4183,7 +3849,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             r#"
             pub proc inc
                 push.1 add
-                trace.11
             end
 
             pub proc inspect
@@ -4239,19 +3904,13 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
 
     writeln!(
         output,
-        "debug_counts=decorators:{} asm_ops:{} debug_vars:{} procedure_names:{}",
-        debug_info.num_decorators(),
+        "debug_counts=asm_ops:{} debug_vars:{} procedure_names:{}",
         debug_info.num_asm_ops(),
         debug_info.num_debug_vars(),
         debug_info.num_procedure_names(),
     )
     .unwrap();
 
-    let decorators = debug_info
-        .decorators()
-        .iter()
-        .map(|decorator| format!("{decorator:?}"))
-        .collect::<Vec<_>>();
     let asm_ops = debug_info
         .asm_ops()
         .iter()
@@ -4266,29 +3925,11 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
         })
         .collect::<Vec<_>>();
     let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
-    writeln!(output, "decorators={decorators:?}").unwrap();
     writeln!(output, "asm_ops={asm_ops:?}").unwrap();
     writeln!(output, "debug_vars={debug_vars:?}").unwrap();
 
     for node_idx in 0..forest.num_nodes() {
         let node_id = MastNodeId::new_unchecked(node_idx);
-        let before_enter = forest
-            .before_enter_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let after_exit = forest
-            .after_exit_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let indexed_decorators = match &forest[node_id] {
-            MastNode::Block(block) => block
-                .indexed_decorator_iter(forest)
-                .map(|(op_idx, decorator_id)| (op_idx, u32::from(decorator_id)))
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
         let asm_op_links = debug_info
             .asm_ops_for_node(node_id)
             .into_iter()
@@ -4300,17 +3941,9 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
             .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
             .collect::<Vec<_>>();
 
-        if !before_enter.is_empty()
-            || !after_exit.is_empty()
-            || !indexed_decorators.is_empty()
-            || !asm_op_links.is_empty()
-            || !debug_var_links.is_empty()
-        {
-            writeln!(
-                output,
-                "node[{node_idx}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
-            )
-            .unwrap();
+        if !asm_op_links.is_empty() || !debug_var_links.is_empty() {
+            writeln!(output, "node[{node_idx}]=asm:{asm_op_links:?} debug:{debug_var_links:?}",)
+                .unwrap();
         }
     }
 }
@@ -4487,15 +4120,11 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .ensure_block(vec![Operation::Add], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                CallNodeBuilder::new_syscall(kernel_foo_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(CallNodeBuilder::new_syscall(kernel_foo_node_id))
             .unwrap()
     };
 
@@ -4539,85 +4168,35 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(29))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(2))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(3))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(5))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true1, r#false1])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true1, r#false1]))
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(7))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(11))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true3, r#false3])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true3, r#false3]))
         .unwrap();
 
     let r#while = {
@@ -4628,46 +4207,24 @@ fn nested_blocks() -> Result<(), Report> {
                     Operation::Push(Felt::from_u32(19)),
                     Operation::Push(Felt::from_u32(23)),
                 ],
-                Vec::new(),
-                vec![],
-                vec![],
                 vec![],
                 vec![],
             )
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                LoopNodeBuilder::new(body_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(LoopNodeBuilder::new(body_node_id))
             .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(13))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_node(
-            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(JoinNodeBuilder::new([push_13_basic_block_id, r#while]))
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true2, r#false2])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true2, r#false2]))
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
@@ -4821,7 +4378,8 @@ fn distinguish_grandchildren_correctly() {
     begin
         if.true
             while.true
-                trace.1234
+                push.2
+                drop
                 push.1
             end
         end
@@ -5300,7 +4858,7 @@ fn test_assembler_debug_info_present() {
     let mast_forest = library.mast_forest();
 
     // Debug info should be present since debug mode is always enabled.
-    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    // AssemblyOps are stored separately in DebugInfo.
     let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
     assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }

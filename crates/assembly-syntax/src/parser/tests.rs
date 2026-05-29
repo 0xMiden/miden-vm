@@ -724,7 +724,6 @@ begin
     procref.foo::bar
     emit.EVENT_ID
     emit.event(\"abc\")
-    trace.7
     assert.err=\"oops\"
     u32assert.err=ERR_CODE
 end

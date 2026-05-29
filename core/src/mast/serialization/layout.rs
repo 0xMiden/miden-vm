@@ -122,11 +122,6 @@ impl ForestLayout {
     //
     // These expose the structural section offsets for consumers that need random access
     // into the serialized wire format.
-    #[allow(dead_code)]
-    pub(super) fn roots_offset(&self) -> usize {
-        self.roots_offset
-    }
-
     pub(super) fn basic_block_offset(&self) -> usize {
         self.basic_block_offset
     }
@@ -135,7 +130,7 @@ impl ForestLayout {
         self.basic_block_len
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn node_entry_offset(&self) -> usize {
         self.node_entry_offset
     }

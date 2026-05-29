@@ -74,13 +74,8 @@ pub trait Tracer {
     /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
     /// `continuation_stack` represents whatever comes after executing `continuation`.
     ///
-    /// The following continuations do not occur at the start of a clock cycle, and hence will never
-    /// be passed to this method:
-    /// - Continuation::FinishExternal: because external nodes are resolved before starting a clock
-    ///   cycle,
-    /// - Continuation::EnterForest: because entering a new forest does not consume a clock cycle,
-    /// - Continuation::AfterExitDecorators: because after-exit decorators are executed at the end
-    ///   of an `END` operation; never at the start of a clock cycle
+    /// `Continuation::EnterForest` does not occur at the start of a clock cycle because entering a
+    /// new forest does not consume a clock cycle, and hence will never be passed to this method.
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.

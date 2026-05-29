@@ -70,15 +70,6 @@ impl EventHandler for NoopEventHandler {
 /// ```
 pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
-// TRACE ERRORS
-// ================================================================================================
-
-/// A generic [`Error`] wrapper for trace handler errors.
-///
-/// Trace handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
-
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 
@@ -181,18 +172,5 @@ impl Debug for EventHandlerRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let events: Vec<_> = self.handlers.values().map(|(event, _)| event).collect();
         f.debug_struct("EventHandlerRegistry").field("handlers", &events).finish()
-    }
-}
-
-// TRACE HANDLER
-// ================================================================================================
-
-/// Handler for trace operations
-pub trait TraceHandler: Sync {
-    /// This function is invoked when the `Trace` decorator is executed.
-    ///
-    /// The default implementation is a no-op.
-    fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
-        Ok(())
     }
 }

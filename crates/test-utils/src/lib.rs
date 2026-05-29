@@ -33,6 +33,8 @@ use miden_core::{
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::Package;
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
@@ -41,8 +43,6 @@ pub use miden_processor::{
 use miden_processor::{
     DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::{DefaultTraceHandler, trace::build_trace};
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
@@ -222,22 +222,6 @@ pub struct Test {
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
-// BUFFER WRITER FOR TESTING
-// ================================================================================================
-
-/// A writer that buffers output in a String for testing debug output.
-#[derive(Default)]
-pub struct BufferWriter {
-    pub buffer: String,
-}
-
-impl core::fmt::Write for BufferWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.buffer.push_str(s);
-        Ok(())
-    }
-}
-
 impl Test {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -372,8 +356,7 @@ impl Test {
         // execute the test
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_tracing(self.in_tracing_mode);
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -551,7 +534,6 @@ impl Test {
                 stack_inputs,
                 self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
-                    .with_tracing(self.in_tracing_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
@@ -580,43 +562,9 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_tracing(true);
+            .map_err(ExecutionError::advice_error_no_context)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
-    }
-
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
-    /// the [`StackOutputs`] and a [`String`] containing all trace output.
-    ///
-    /// If the execution fails, the output is printed `stderr`.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn execute_with_trace_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
-        let trace_handler = DefaultTraceHandler::new(BufferWriter::default());
-
-        let (program, host) = self.get_program_and_host();
-        let mut host = host
-            .with_source_manager(self.source_manager.clone())
-            .with_trace_handler(trace_handler);
-
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_tracing(true);
-
-        let stack_result = processor.execute_sync(&program, &mut host);
-
-        let trace_output = host.trace_handler().writer().buffer.clone();
-
-        match stack_result {
-            Ok(exec_output) => Ok((exec_output.stack, trace_output)),
-            Err(err) => {
-                // If we get an error, we print the output as an error
-                #[cfg(feature = "std")]
-                std::eprintln!("{trace_output}");
-                Err(err)
-            },
-        }
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -766,8 +714,7 @@ impl Test {
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_tracing(self.in_tracing_mode);
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

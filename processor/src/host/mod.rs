@@ -11,7 +11,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{ProcessorState, TraceError};
+use crate::ProcessorState;
 
 pub(super) mod advice;
 
@@ -20,7 +20,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{EventError, TraceHandler};
+use handlers::EventError;
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -61,8 +61,7 @@ impl AdviceMutation {
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
-/// 2. handling VM events (which can mutate the process' advice provider), and
-/// 3. handling trace events.
+/// 2. handling VM events (which can mutate the process' advice provider).
 pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -75,12 +74,6 @@ pub trait BaseHost {
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
-
-    /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        let mut handler = debug::DefaultTraceHandler::default();
-        handler.on_trace(process, trace_id)
-    }
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///

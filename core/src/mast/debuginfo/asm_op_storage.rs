@@ -38,8 +38,8 @@ use crate::{
 
 /// CSR storage mapping (NodeId, OpIdx) -> AsmOpId.
 ///
-/// Unlike [`OpToDecoratorIds`](super::OpToDecoratorIds), each operation has at most one
-/// AssemblyOp. We store only the operations that have an AssemblyOp, using sparse storage.
+/// Each operation has at most one AssemblyOp. We store only the operations that have an AssemblyOp,
+/// using sparse storage.
 ///
 /// This structure provides efficient lookup of AssemblyOps by node and operation index, which is
 /// needed for error context reporting and debugging tools.

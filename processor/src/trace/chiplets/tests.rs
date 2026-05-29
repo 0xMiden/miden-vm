@@ -147,7 +147,7 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
     let program = {
         let mut forest = MastForest::new();
 
-        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(callee);
@@ -188,9 +188,8 @@ fn build_trace(
     let mut host = DefaultHost::default();
     let program = {
         let mut mast_forest = MastForest::new();
-        let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
         mast_forest.make_root(basic_block_id);
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };

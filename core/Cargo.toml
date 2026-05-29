@@ -60,8 +60,6 @@ miden-utils-sync.workspace = true
 # External dependencies
 derive_more.workspace = true
 log.workspace = true
-num-derive = { version = "0.4", default-features = false }
-num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }

@@ -70,7 +70,6 @@ fn cli_bundle_debug() {
 
     let lib = Package::deserialize_from_file(&output_file).unwrap();
     // If there are any AssemblyOps in the forest, the bundle is in debug mode.
-    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
     let found_one_asm_op = lib.mast_forest().debug_info().num_asm_ops() > 0;
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();

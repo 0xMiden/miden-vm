@@ -176,7 +176,7 @@ fn accepts_single_suffix(name: &str) -> bool {
     COMPACT_SUFFIX_SPECS
         .iter()
         .any(|spec| spec.prefix.len() == 1 && spec.prefix[0] == name)
-        || matches!(name, "debug" | "emit" | "trace")
+        || matches!(name, "debug" | "emit")
 }
 
 /// Returns the compact legacy expected-token set for block-local syntax errors.
@@ -1238,7 +1238,6 @@ fn lower_extended_instruction(
         },
 
         ExtendedInstructionKind::Emit => lower_emit_instruction(context, span, &tokens),
-        ExtendedInstructionKind::Trace => lower_trace_instruction(context, span, &tokens),
         ExtendedInstructionKind::ErrorCode(build) => {
             lower_error_code_instruction(context, span, &tokens, spec.keyword, build)
         },
@@ -1255,7 +1254,6 @@ enum ExtendedInstructionKind {
     Push,
     Invocation(fn(ast::InvocationTarget) -> Instruction),
     Emit,
-    Trace,
     ErrorCode(fn(ast::ErrorMsg) -> Instruction),
 }
 
@@ -1283,10 +1281,6 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
     ExtendedInstructionSpec {
         keyword: "emit",
         kind: ExtendedInstructionKind::Emit,
-    },
-    ExtendedInstructionSpec {
-        keyword: "trace",
-        kind: ExtendedInstructionKind::Trace,
     },
     ExtendedInstructionSpec {
         keyword: "assert",
@@ -1417,27 +1411,6 @@ fn lower_emit_instruction(
         },
         _ => Ok(None),
     }
-}
-
-/// Lowers `trace.<u32>` immediates.
-fn lower_trace_instruction(
-    context: &mut LoweringContext<'_>,
-    instruction_span: SourceSpan,
-    tokens: &[SyntaxToken],
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    if !matches!(tokens, [trace, dot, _value] if trace.kind() == SyntaxKind::Ident
-        && trace.text() == "trace"
-        && dot.kind() == SyntaxKind::Dot)
-    {
-        return Ok(None);
-    }
-
-    let value =
-        lower_u32_immediate(context, &tokens[2])?.ok_or_else(|| ParsingError::InvalidSyntax {
-            span: context.parse().span_for_token(&tokens[2]),
-            message: "expected a u32 literal or constant reference".to_string(),
-        })?;
-    Ok(Some(vec![inst_op(instruction_span, Instruction::Trace(value))]))
 }
 
 /// Lowers `.err=` forms for assertion-like instructions.

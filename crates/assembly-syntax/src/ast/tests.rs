@@ -1438,8 +1438,6 @@ begin
     exec.add_n_times
     push.20
     assert_eq
-
-    trace.DEFAULT_CONST
 end
 ";
 
@@ -1500,7 +1498,6 @@ begin
     exec.add_n_times
     push.20
     assert_eq
-    trace.100
 end
 ";
 

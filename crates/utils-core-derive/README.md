@@ -117,8 +117,7 @@ pub enum MastNodeBuilder {
 ## Implementation Details
 
 The `MastNodeExt` macro generates implementations for these methods:
-- `digest()`, `before_enter()`, `after_exit()`
-- `append_before_enter()`, `append_after_exit()`, `remove_decorators()`
+- `digest()`
 - `to_display()`, `to_pretty_print()`
 - `has_children()`, `append_children_to()`, `for_each_child()`
 - `domain()`, `to_builder()`
@@ -127,4 +126,3 @@ The `MastForestContributor` macro generates implementations for:
 - `add_to_forest()`
 - `fingerprint_for_node()`
 - `remap_children()`
-- `with_before_enter()`, `with_after_exit()`

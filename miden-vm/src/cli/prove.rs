@@ -55,10 +55,6 @@ pub struct ProveCmd {
     #[arg(short = 's', long = "security", default_value = "96bits")]
     security: String,
 
-    /// Enable tracing to monitor execution of the VM
-    #[arg(short = 't', long = "trace")]
-    trace: bool,
-
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
@@ -70,8 +66,6 @@ impl ProveCmd {
             Some(self.max_cycles),
             self.expected_cycles,
             ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            self.trace,
-            true,
         )
         .map_err(|err| Report::msg(format!("{err}")))
     }

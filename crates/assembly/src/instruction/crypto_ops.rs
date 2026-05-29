@@ -166,8 +166,8 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
 // ================================================================================================
 
 /// This is a helper function for assembly operations that fetches the node value from the
-/// Merkle tree using decorators and pushes it onto the stack. It prepares the stack with the
-/// elements expected by the VM's MPVERIFY & MRUPDATE operations.
+/// Merkle tree using an advice-provider event and pushes it onto the stack. It prepares the stack
+/// with the elements expected by the VM's MPVERIFY & MRUPDATE operations.
 /// The stack is expected to be arranged as follows (from the top):
 /// - depth of the node, 1 element
 /// - index of the node, 1 element
@@ -183,10 +183,10 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
 ///
 /// This operation takes 5 VM cycles.
 fn read_mtree_node(block_builder: &mut BasicBlockBuilder) {
-    // The stack should be arranged in the following way: [d, i, R, ...] so that the decorator
-    // can fetch the node value from the root. In the `mtree.get` operation we have the stack in
-    // the following format: [d, i, R], whereas in the case of `mtree.set` we would also have the
-    // new node value post the tree root: [d, i, R, V_new]
+    // The stack should be arranged in the following way: [d, i, R, ...] so that the advice
+    // provider can fetch the node value from the root. In the `mtree.get` operation we have the
+    // stack in the following format: [d, i, R], whereas in the case of `mtree.set` we would also
+    // have the new node value post the tree root: [d, i, R, V_new]
     //
     // Push the value of the node we are looking for onto the advice stack
     block_builder.push_system_event(SystemEvent::MerkleNodeToStack);

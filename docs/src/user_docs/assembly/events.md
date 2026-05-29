@@ -33,16 +33,3 @@ push.<felt> emit drop
 **System Events** - Built-in events handled by the VM for memory operations, cryptography, math operations, and data structures.
 
 **Custom Events** - Application-defined events for external services, logging, or custom protocols.
-
-## Tracing
-
-Miden assembly also supports code tracing, which works similar to the event emitting.
-
-A trace can be emitted via the `trace.<trace_id>` assembly instruction where `<trace_id>` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). For example:
-
-```
-trace.EVENT_ID_1
-trace.2
-```
-
-To make use of the `trace` instruction, programs should be ran with tracing flag (`-t` or `--trace`), otherwise these instructions will be ignored.

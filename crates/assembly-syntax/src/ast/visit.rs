@@ -478,8 +478,7 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
@@ -1054,8 +1053,7 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),

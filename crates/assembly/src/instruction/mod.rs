@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
@@ -9,7 +7,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
     mast::MastNodeId,
-    operations::{AssemblyOp, Decorator, Operation},
+    operations::{AssemblyOp, Operation},
 };
 
 use crate::{
@@ -62,12 +60,10 @@ impl Assembler {
             None
         };
 
-        // Compile the instruction (decorators are now always empty for this path).
         let opt_new_node_id = self.compile_instruction_impl(
             instruction,
             block_builder,
             proc_ctx,
-            vec![],
             pending_node_asm_op,
         )?;
 
@@ -84,7 +80,6 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-        before_enter: Vec<miden_core::mast::DecoratorId>,
         node_asm_op: Option<AssemblyOp>,
     ) -> Result<Option<MastNodeId>, Report> {
         use Operation::*;
@@ -552,7 +547,6 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
-                        before_enter,
                         None,
                     )
                     .map(Into::into);
@@ -564,7 +558,6 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
-                        before_enter,
                         Some(node_asm_op.expect("call instructions must provide an AssemblyOp")),
                     )
                     .map(Into::into);
@@ -576,7 +569,6 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
-                        before_enter,
                         Some(node_asm_op.expect("syscall instructions must provide an AssemblyOp")),
                     )
                     .map(Into::into);
@@ -584,14 +576,12 @@ impl Assembler {
             Instruction::DynExec => {
                 return self.dynexec(
                     block_builder.mast_forest_builder_mut(),
-                    before_enter,
                     node_asm_op.expect("dynexec instructions must provide an AssemblyOp"),
                 );
             },
             Instruction::DynCall => {
                 return self.dyncall(
                     block_builder.mast_forest_builder_mut(),
-                    before_enter,
                     node_asm_op.expect("dyncall instructions must provide an AssemblyOp"),
                 );
             },
@@ -610,11 +600,6 @@ impl Assembler {
             Instruction::EmitImm(event_id) => {
                 let event_id_value = event_id.expect_value();
                 block_builder.push_ops([Push(event_id_value), Emit, Drop]);
-            },
-
-            // ----- trace instruction ------------------------------------------------------------
-            Instruction::Trace(trace_id) => {
-                block_builder.push_decorator(Decorator::Trace(trace_id.expect_value()))?;
             },
         }
 

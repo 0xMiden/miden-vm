@@ -19,7 +19,7 @@ use crate::{Package, PackageExport, ProcedureExport};
 
 fn build_forest() -> (MastForest, MastNodeId) {
     let mut forest = MastForest::new();
-    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
         .expect("failed to build basic block");
     forest.make_root(node_id);

@@ -111,7 +111,7 @@ fn block_stack_span_push_pop() {
 fn block_stack_call_full_push_pop() {
     let program = {
         let mut forest = MastForest::new();
-        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
         let call_id = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
@@ -176,12 +176,8 @@ fn block_stack_call_full_push_pop() {
 fn block_stack_split_push_pop(#[case] cond: u64) {
     let program = {
         let mut f = MastForest::new();
-        let t = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut f)
-            .unwrap();
-        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
-            .add_to_forest(&mut f)
-            .unwrap();
+        let t = BasicBlockNodeBuilder::new(vec![Operation::Add]).add_to_forest(&mut f).unwrap();
+        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul]).add_to_forest(&mut f).unwrap();
         let s = SplitNodeBuilder::new([t, e]).add_to_forest(&mut f).unwrap();
         f.make_root(s);
         Program::new(f.into(), s)
@@ -239,7 +235,7 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
 fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Felt) {
     let program = {
         let mut f = MastForest::new();
-        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
             .add_to_forest(&mut f)
             .unwrap();
         let loop_id = LoopNodeBuilder::new(body).add_to_forest(&mut f).unwrap();
@@ -355,10 +351,10 @@ fn block_stack_respan_add_and_remove() {
 fn block_hash_join_enqueue_dequeue() {
     let program = {
         let mut mast_forest = MastForest::new();
-        let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let join_id = JoinNodeBuilder::new([bb1, bb2]).add_to_forest(&mut mast_forest).unwrap();
@@ -412,10 +408,10 @@ fn block_hash_join_enqueue_dequeue() {
 fn block_hash_loop_body_with_repeat() {
     let program = {
         let mut mast_forest = MastForest::new();
-        let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Pad], Vec::new())
+        let bb1 = BasicBlockNodeBuilder::new(vec![Operation::Pad])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let bb2 = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let join_id = JoinNodeBuilder::new([bb1, bb2]).add_to_forest(&mut mast_forest).unwrap();
@@ -481,12 +477,8 @@ fn block_hash_loop_body_with_repeat() {
 fn block_hash_split_enqueue_dequeue(#[case] cond: u64) {
     let program = {
         let mut f = MastForest::new();
-        let t = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut f)
-            .unwrap();
-        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
-            .add_to_forest(&mut f)
-            .unwrap();
+        let t = BasicBlockNodeBuilder::new(vec![Operation::Add]).add_to_forest(&mut f).unwrap();
+        let e = BasicBlockNodeBuilder::new(vec![Operation::Mul]).add_to_forest(&mut f).unwrap();
         let s = SplitNodeBuilder::new([t, e]).add_to_forest(&mut f).unwrap();
         f.make_root(s);
         Program::new(f.into(), s)
@@ -773,18 +765,15 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
 
     // 1. Build the root join node first (preamble + dyncall).
     let root = {
-        let preamble = BasicBlockNodeBuilder::new(
-            vec![
-                Operation::Push(HASH_ADDR),
-                Operation::MStoreW,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Push(HASH_ADDR),
-            ],
-            Vec::new(),
-        )
+        let preamble = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(HASH_ADDR),
+            Operation::MStoreW,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(HASH_ADDR),
+        ])
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -795,7 +784,7 @@ fn decoder_dyncall_at_min_stack_depth_records_post_drop_ctx_info() {
     forest.make_root(root);
 
     // 2. Add the procedure that DYNCALL will call, as a second forest root.
-    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(target);
@@ -852,7 +841,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     let mut forest = MastForest::new();
 
     // 1. Build the callee procedure first so we can get its digest.
-    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(target);
@@ -862,19 +851,16 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
 
     // 2. Build the main program.
     let root = {
-        let preamble = BasicBlockNodeBuilder::new(
-            vec![
-                Operation::Push(HASH_ADDR),
-                Operation::MStoreW,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Push(ZERO),      // depth=17, overflow[0]=0 (clk=T1)
-                Operation::Push(HASH_ADDR), // depth=18, overflow[1]=0 (clk=T2)
-            ],
-            Vec::new(),
-        )
+        let preamble = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(HASH_ADDR),
+            Operation::MStoreW,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(ZERO),      // depth=17, overflow[0]=0 (clk=T1)
+            Operation::Push(HASH_ADDR), // depth=18, overflow[1]=0 (clk=T2)
+        ])
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -882,7 +868,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
         let inner_join =
             JoinNodeBuilder::new([preamble, dyncall]).add_to_forest(&mut forest).unwrap();
 
-        let cleanup = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let cleanup = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut forest)
             .unwrap();
 
