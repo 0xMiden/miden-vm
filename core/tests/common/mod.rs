@@ -18,21 +18,21 @@ pub fn leaf(low: u64) -> Node {
 }
 
 /// Registers, verifies, logs, and round-trips a predicate expected to reduce to TRUE.
-pub fn log_and_verify(schema: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
-    let stmt_digest = state.register(schema, predicate.clone()).unwrap();
+pub fn log_and_verify(registry: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
+    let stmt_digest = state.register(registry, predicate.clone()).unwrap();
     assert!(
-        state.evaluate_node(schema, predicate).unwrap().is_true_node(),
+        state.evaluate_node(registry, predicate).unwrap().is_true_node(),
         "log_and_verify expects a predicate that reduces to the TRUE node",
     );
     let new_root = Node::and(state.root(), stmt_digest).digest();
     state.log(stmt_digest, new_root).unwrap();
-    assert_round_trips(state, schema);
+    assert_round_trips(state, registry);
 }
 
 /// Asserts that wire round-tripping preserves the verified transcript root and nodes.
-pub fn assert_round_trips(state: &DeferredState, schema: &PrecompileRegistry) {
-    let wire = state.to_wire(schema).unwrap();
-    let rehydrated = DeferredState::rehydrate(&wire, schema).unwrap();
+pub fn assert_round_trips(state: &DeferredState, registry: &PrecompileRegistry) {
+    let wire = state.to_wire(registry).unwrap();
+    let rehydrated = DeferredState::rehydrate(&wire, registry).unwrap();
     assert_eq!(rehydrated.root(), state.root());
     assert!(
         rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),

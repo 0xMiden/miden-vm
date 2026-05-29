@@ -9,7 +9,7 @@
 
 mod node;
 mod precompile;
-mod precompile_schema;
+mod precompile_registry;
 mod state;
 mod wire;
 
@@ -18,7 +18,7 @@ use alloc::sync::Arc;
 use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
 pub use node::{NodeType, PrecompileError};
 pub use precompile::{Precompile, precompile_id};
-pub use precompile_schema::PrecompileRegistry;
+pub use precompile_registry::PrecompileRegistry;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use state::{DeferredState, WitnessBuilder};

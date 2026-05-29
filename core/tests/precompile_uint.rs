@@ -13,23 +13,23 @@ use miden_core::{
 
 #[test]
 fn end_to_end_register_evaluate_assert_extract() {
-    let schema = PrecompileRegistry::default().with_precompile(Uint);
+    let registry = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
 
-    let a = state.register(&schema, leaf(3)).unwrap();
-    let b = state.register(&schema, leaf(4)).unwrap();
-    let c = state.register(&schema, leaf(5)).unwrap();
-    let expected = state.register(&schema, leaf(35)).unwrap();
-    let add = state.register(&schema, Node::join(Uint::add_tag(), a, b)).unwrap();
-    let mul = state.register(&schema, Node::join(Uint::mul_tag(), add, c)).unwrap();
+    let a = state.register(&registry, leaf(3)).unwrap();
+    let b = state.register(&registry, leaf(4)).unwrap();
+    let c = state.register(&registry, leaf(5)).unwrap();
+    let expected = state.register(&registry, leaf(35)).unwrap();
+    let add = state.register(&registry, Node::join(Uint::add_tag(), a, b)).unwrap();
+    let mul = state.register(&registry, Node::join(Uint::mul_tag(), add, c)).unwrap();
 
-    let canonical = state.evaluate_digest(&schema, mul).unwrap();
+    let canonical = state.evaluate_digest(&registry, mul).unwrap();
     assert_eq!(canonical, leaf(35));
 
     // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
     let assertion = Node::join(Uint::eq_tag(), mul, expected);
-    state.register(&schema, assertion.clone()).unwrap();
-    let result = state.evaluate_node(&schema, assertion).unwrap();
+    state.register(&registry, assertion.clone()).unwrap();
+    let result = state.evaluate_node(&registry, assertion).unwrap();
     assert!(result.is_true_node());
 
     // 6 registered expression nodes + 1 registered eq predicate, plus canonicals interned by
@@ -38,22 +38,22 @@ fn end_to_end_register_evaluate_assert_extract() {
     assert!(state.contains(&leaf(7).digest()));
 
     // Log the proven equality and round-trip the whole transcript.
-    common::log_and_verify(&schema, &mut state, Node::join(Uint::eq_tag(), mul, expected));
+    common::log_and_verify(&registry, &mut state, Node::join(Uint::eq_tag(), mul, expected));
 }
 
 #[test]
 fn empty_registry_rejects_all_uint_nodes() {
-    let schema = PrecompileRegistry::default();
+    let registry = PrecompileRegistry::default();
     let mut state = DeferredState::new();
-    let err = state.register(&schema, leaf(0));
+    let err = state.register(&registry, leaf(0));
     assert!(matches!(err, Err(PrecompileError::InvalidNode)));
 }
 
 #[test]
 fn init_pre_registers_uint_constants() {
-    let schema = PrecompileRegistry::default().with_precompile(Uint);
+    let registry = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
-    schema.init(&mut state).unwrap();
+    registry.init(&mut state).unwrap();
     // TRUE plus three uint constants: ZERO, ONE, P_MINUS_1.
     assert_eq!(state.nodes().len(), 4);
     assert!(state.contains(&leaf(0).digest()));
