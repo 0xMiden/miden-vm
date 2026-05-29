@@ -24,6 +24,6 @@ pub use rowan;
 pub use self::{
     ast::{Item, Operation},
     lexer::{Lexer, Token, tokenize, tokenize_text},
-    parser::{Parse, parse_source_file, parse_text},
+    parser::{Parse, parse_inline_masm, parse_source_file, parse_text},
     syntax::{MasmLanguage, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };

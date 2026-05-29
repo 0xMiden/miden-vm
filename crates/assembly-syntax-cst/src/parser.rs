@@ -105,6 +105,31 @@ pub fn parse_text(input: &str) -> Parse {
     parse_source_file(detached_source_file(input))
 }
 
+/// Parses a inline MASM from a subset of a source-managed file into a lossless CST.
+///
+/// Content of an inline MASM block is parsed like the body block of a procedure - it is not
+/// supported to define top-level items in an inline MASM block
+pub fn parse_inline_masm(source: Arc<SourceFile>, bounds: Option<SourceSpan>) -> Parse {
+    let parser_source = Arc::clone(&source);
+    if let Some(bounds) = bounds {
+        Parser::new_bounded(parser_source.as_ref(), bounds).parse_inline_masm(source)
+    } else {
+        Parser::new(parser_source.as_ref()).parse_inline_masm(source)
+    }
+}
+
+/// Parses raw MASM text as inline MASM, this is like `parse_text` for `parse_inline_masm`.
+///
+/// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
+/// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
+pub fn parse_inline_masm_text(input: &str, bounds: Option<core::ops::Range<usize>>) -> Parse {
+    let file = detached_source_file(input);
+    let bounds = bounds.map(|range| {
+        SourceSpan::try_from_range(file.id(), range).expect("invalid inline masm bounds")
+    });
+    parse_inline_masm(file, bounds)
+}
+
 struct Parser<'input> {
     tokens: Vec<Token<'input>>,
     pos: usize,
@@ -193,7 +218,20 @@ enum BlockParseOutcome {
 
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
-        let eof_span = eof_anchor_span(source);
+        let eof_span = eof_anchor_span(source, None);
+        Self {
+            tokens: tokenize(source),
+            pos: 0,
+            builder: GreenNodeBuilder::new(),
+            diagnostics: Vec::new(),
+            eof_span,
+        }
+    }
+
+    fn new_bounded(source: &'input SourceFile, bounds: SourceSpan) -> Self {
+        assert_eq!(source.id(), bounds.source_id());
+
+        let eof_span = eof_anchor_span(source, Some(bounds.into_slice_index()));
         Self {
             tokens: tokenize(source),
             pos: 0,
@@ -210,6 +248,21 @@ impl<'input> Parser<'input> {
         }
         self.finish_node();
 
+        Parse {
+            source,
+            green_node: self.builder.finish(),
+            diagnostics: self.diagnostics,
+        }
+    }
+
+    fn parse_inline_masm(mut self, source: Arc<SourceFile>) -> Parse {
+        match self.parse_block_unterminated() {
+            BlockParseOutcome::ReachedEof => (),
+            BlockParseOutcome::FoundTerminator => self.error_here("unexpected 'end'"),
+            BlockParseOutcome::RecoveredImplicitEnd => {
+                self.error_here("unclosed nested block: expected 'end' but reached eof")
+            },
+        }
         Parse {
             source,
             green_node: self.builder.finish(),
@@ -613,6 +666,51 @@ impl<'input> Parser<'input> {
         if self.pos == start {
             self.error_here("expected a result type after `->` in procedure signature");
         }
+    }
+
+    fn parse_block_unterminated(&mut self) -> BlockParseOutcome {
+        self.start_node(SyntaxKind::Block);
+        while !self.eof() {
+            if self.at_regular_trivia() {
+                self.bump();
+                continue;
+            }
+
+            if self.at_kind(SyntaxKind::DocComment) {
+                self.start_node(SyntaxKind::Error);
+                self.error_here("doc comments are not allowed in inline MASM blocks");
+                self.bump();
+                self.finish_node();
+                continue;
+            }
+
+            if self.at_keyword("if") {
+                if self.parse_if() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
+            } else if self.at_keyword("while") {
+                if self.parse_while() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
+            } else if self.at_keyword("repeat") {
+                if self.parse_repeat() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
+            } else if self.can_start_instruction() {
+                self.parse_instruction();
+            } else {
+                self.start_node(SyntaxKind::Error);
+                self.error_here("unexpected token in block");
+                self.bump();
+                self.finish_node();
+            }
+        }
+
+        self.finish_node();
+        BlockParseOutcome::ReachedEof
     }
 
     fn parse_block(&mut self, owner: BlockOwner, terminators: &[&str]) -> BlockParseOutcome {
@@ -1167,9 +1265,13 @@ fn detached_source_file(input: &str) -> Arc<SourceFile> {
     ))
 }
 
-fn eof_anchor_span(source: &SourceFile) -> SourceSpan {
-    source
-        .as_str()
+fn eof_anchor_span(source: &SourceFile, bounds: Option<core::ops::Range<usize>>) -> SourceSpan {
+    let content = source.as_str();
+    let (content, start) = match bounds {
+        Some(range) => (&content[range.start..range.end], range.start),
+        None => (content, 0),
+    };
+    content
         .char_indices()
         .last()
         .map(|(offset, _)| {
@@ -1179,7 +1281,7 @@ fn eof_anchor_span(source: &SourceFile) -> SourceSpan {
             )
         })
         .unwrap_or_else(|| {
-            SourceSpan::try_from_range(source.id(), 0..0)
+            SourceSpan::try_from_range(source.id(), start..start)
                 .expect("source files larger than 4GiB are not supported")
         })
 }
@@ -1276,6 +1378,7 @@ mod tests {
     use crate::{
         ast::{Item, SourceFile as AstSourceFile},
         parse_source_file, parse_text,
+        parser::parse_inline_masm_text,
         syntax::SyntaxKind,
     };
 
@@ -1382,6 +1485,32 @@ adv_map TABLE = [
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
             assert_lossless_parse(&source, path.display());
         }
+    }
+
+    #[test]
+    fn parse_text_as_inline_masm() {
+        let source = "\
+            if.true
+                repeat.4
+                    swap dup.1 add
+                end
+            else
+                while.true
+                    nop
+                end
+            end
+        ";
+        let parse = parse_inline_masm_text(source, None);
+        assert!(!parse.has_errors());
+        let root = parse.syntax();
+        assert_eq!(root.kind(), SyntaxKind::Block);
+
+        let child_kinds = root.children().map(|child| child.kind()).collect::<Vec<_>>();
+        assert_eq!(child_kinds, vec![SyntaxKind::IfOp,]);
+
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::RepeatOp));
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
     }
 
     #[test]
