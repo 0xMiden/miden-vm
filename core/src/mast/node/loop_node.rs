@@ -18,7 +18,8 @@ use crate::{
 // ================================================================================================
 
 /// A Loop node defines condition-controlled iterative execution. When the VM encounters a Loop
-/// node, it will keep executing the body of the loop as long as the top of the stack is `1``.
+/// node, it will keep executing the body of the loop as long as the top of the stack is `1``,
+/// except for the encounter which it executes unconditionally.
 ///
 /// The loop is exited when at the end of executing the loop body the top of the stack is `0``.
 /// If the top of the stack is neither `0` nor `1` when the condition is checked, the execution
@@ -71,7 +72,7 @@ impl PrettyPrint for LoopNodePrettyPrint<'_> {
 
         let loop_body = self.mast_forest[self.loop_node.body].to_pretty_print(self.mast_forest);
 
-        indent(4, const_text("while.true") + nl() + loop_body.render()) + nl() + const_text("end")
+        indent(4, const_text("loop") + nl() + loop_body.render()) + nl() + const_text("end")
     }
 }
 

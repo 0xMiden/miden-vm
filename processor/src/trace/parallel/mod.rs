@@ -780,9 +780,7 @@ fn translate_snapshot_continuation_stack(
             Continuation::StartNode(id) => Continuation::StartNode(id),
             Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
             Continuation::FinishSplit(id) => Continuation::FinishSplit(id),
-            Continuation::FinishLoop { node_id, was_entered } => {
-                Continuation::FinishLoop { node_id, was_entered }
-            },
+            Continuation::FinishLoop(node_id) => Continuation::FinishLoop(node_id),
             Continuation::FinishCall(id) => Continuation::FinishCall(id),
             Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {

@@ -225,13 +225,12 @@ fn block_stack_split_push_pop(#[case] cond: u64) {
     log.assert_contains(&exp);
 }
 
-/// LOOP with `s0 = 1` pushes a `Simple { is_loop: 1 }` entry and the matching END pops it.
-/// LOOP with `s0 = 0` also pushes (emitter is unconditional on LOOP), but with `is_loop = 0`
-/// and no body executes — the END on the very next row pops immediately. This test runs both
-/// variants via `rstest`.
+/// LOOP pushes a `Simple { is_loop: 1 }` entry and the matching END pops it. With do-while
+/// semantics the body always runs at least once, so a raw LoopNode never produces an
+/// `is_loop = 0` push. The skip-without-entering path lives in the wrapping SPLIT inserted by
+/// the assembler for `while.true` and is covered by the Split-node tests.
 #[rstest::rstest]
 #[case::enters(1, ONE)]
-#[case::skips(0, ZERO)]
 fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Felt) {
     let program = {
         let mut f = MastForest::new();
@@ -289,6 +288,87 @@ fn block_stack_loop_is_loop_flag(#[case] cond: u64, #[case] expected_is_loop: Fe
     assert_eq!(
         loop_pops, 1,
         "expected one matching LOOP END pop (is_loop={expected_is_loop:?})"
+    );
+    log.assert_contains(&exp);
+}
+
+/// Regression: when a `LoopNode` is wrapped in a `SplitNode` (the shape the assembler emits
+/// for `while.true`), the LOOP row's `s_0` is whatever sat below the entry condition that the
+/// SPLIT consumed — not necessarily 1. The block-stack push for LOOP must therefore use the
+/// constant `is_loop = 1` (matching `h_5 = 1` at the loop END under do-while semantics),
+/// otherwise the bus push and the matching pop encode different values and the block-stack
+/// bus does not balance.
+///
+/// Layout `Split { Loop { Pad Drop }, Noop }` driven by stack `[1, 0]`: the SPLIT pops the
+/// entry condition `1` and the LOOP enters the body with `s_0 = 0`. If the push erroneously
+/// reads `s_0`, this test fails because the expected `is_loop = 1` push is absent from the log.
+#[test]
+fn block_stack_split_wrapped_loop_uses_constant_is_loop() {
+    let program = {
+        let mut f = MastForest::new();
+        let body = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut f)
+            .unwrap();
+        let loop_id = LoopNodeBuilder::new(body).add_to_forest(&mut f).unwrap();
+        let noop = BasicBlockNodeBuilder::new(vec![Operation::Noop]).add_to_forest(&mut f).unwrap();
+        let split_id = SplitNodeBuilder::new([loop_id, noop]).add_to_forest(&mut f).unwrap();
+        f.make_root(split_id);
+        Program::new(f.into(), split_id)
+    };
+    // Stack top-first: `1` drives SPLIT (enter true branch → LOOP), `0` is the value the LOOP
+    // sees on `s_0` after the SPLIT-pop. Pad+Drop is net-zero, so the trailing condition at
+    // REPEAT/END is also `0` and the loop exits cleanly after one iteration.
+    let trace = build_trace_from_program(&program, &[1, 0]);
+    let log = InteractionLog::new(&trace);
+    let main = trace.main_trace();
+
+    let mut loop_push_row: Option<usize> = None;
+    let mut loop_end_row: Option<usize> = None;
+    for_each_op(&trace, |row, op| {
+        let idx = RowIndex::from(row);
+        if op == Felt::from_u8(opcodes::LOOP) {
+            assert_eq!(
+                main.stack_element(0, idx),
+                ZERO,
+                "test setup: expected s_0 = 0 at LOOP row to expose the bug",
+            );
+            loop_push_row = Some(row);
+        } else if op == Felt::from_u8(opcodes::END)
+            && main.is_loop_flag(idx) == ONE
+            && main.is_loop_body_flag(idx) == ZERO
+        {
+            loop_end_row = Some(row);
+        }
+    });
+
+    let push_row = loop_push_row.expect("expected one LOOP row in the trace");
+    let pop_row = loop_end_row.expect("expected one loop-closing END row in the trace");
+
+    let push_idx = RowIndex::from(push_row);
+    let pop_idx = RowIndex::from(pop_row);
+    let push_block_id = main.addr(RowIndex::from(push_row + 1));
+    let push_parent_id = main.addr(push_idx);
+    let pop_block_id = main.addr(pop_idx);
+    let pop_parent_id = main.addr(RowIndex::from(pop_row + 1));
+
+    let mut exp = Expectations::new(&log);
+    // Correct push: `is_loop` is a constant `1`, regardless of `s_0`.
+    exp.add(
+        push_row,
+        &BlockStackMsg::Simple {
+            block_id: push_block_id,
+            parent_id: push_parent_id,
+            is_loop: ONE,
+        },
+    );
+    // Matching pop: `is_loop = h_5 = 1` at every loop END under do-while.
+    exp.remove(
+        pop_row,
+        &BlockStackMsg::Simple {
+            block_id: pop_block_id,
+            parent_id: pop_parent_id,
+            is_loop: ONE,
+        },
     );
     log.assert_contains(&exp);
 }
@@ -401,9 +481,9 @@ fn block_hash_join_enqueue_dequeue() {
     log.assert_contains(&exp);
 }
 
-/// LOOP (when `s0 = 1`) and REPEAT both enqueue a `LoopBody` entry for the body, and the END
-/// at the end of each body dequeues it with `is_loop_body = 1`. Runs two iterations
-/// (advice/inputs `[1, 1, 0]`) so both the LOOP and REPEAT branches fire.
+/// LOOP and REPEAT both enqueue a `LoopBody` entry for the body, and the END at the end of
+/// each body dequeues it with `is_loop_body = 1`. Runs two iterations (inputs `[1, 0]`) so both
+/// the LOOP entry and the REPEAT branches fire.
 #[test]
 fn block_hash_loop_body_with_repeat() {
     let program = {
@@ -420,8 +500,10 @@ fn block_hash_loop_body_with_repeat() {
         Program::new(mast_forest.into(), loop_id)
     };
 
-    // Stack `[1, 1, 0]` drives two iterations: enter, repeat, exit.
-    let trace = build_trace_from_program(&program, &[1, 1, 0]);
+    // Pad+Drop is a net-zero body, so the trailing condition at REPEAT/END is whatever the
+    // stack already had: input `[1, 0]` drives two iterations (first the do-while-entered body
+    // sees a `1` on top → REPEAT, then `0` on top → END).
+    let trace = build_trace_from_program(&program, &[1, 0]);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
@@ -436,10 +518,10 @@ fn block_hash_loop_body_with_repeat() {
         let h0: [Felt; 4] = [first[0], first[1], first[2], first[3]];
         let addr_next = main.addr(next);
 
-        // `f_loop_body = loop_op * s0 + repeat`. LOOP with `s0 = 0` does not enter the body, so
-        // the body is only enqueued when `s0 = 1` (first iteration entry) or on REPEAT.
-        let is_loop_entering =
-            op == Felt::from_u8(opcodes::LOOP) && main.stack_element(0, idx) == ONE;
+        // Under do-while the LOOP unconditionally enqueues the body for the first iteration,
+        // and each REPEAT enqueues for a subsequent iteration. The AIR's `f_loop_body` expression
+        // becomes `loop_op + repeat` in Phase 3.
+        let is_loop_entering = op == Felt::from_u8(opcodes::LOOP);
         let is_repeat = op == Felt::from_u8(opcodes::REPEAT);
         if is_loop_entering || is_repeat {
             exp.add(row, &BlockHashMsg::LoopBody { parent: addr_next, child_hash: h0 });
