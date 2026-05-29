@@ -238,6 +238,31 @@ const VALUE = (parts::COUNT + 3) // 2
 }
 
 #[test]
+fn parser_preserves_literal_constant_expr_tree() {
+    let source = test_source_file("const VALUE = 1 + 2 * 3\n");
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Constant(constant)] = forms.as_slice() else {
+        panic!("expected one constant form, got {forms:?}");
+    };
+
+    let ast::ConstantExpr::BinaryOp { op, lhs, rhs, .. } = &constant.value else {
+        panic!("expected addition expression, got {:?}", constant.value);
+    };
+    assert_eq!(*op, ast::ConstantOp::Add);
+    assert!(matches!(lhs.as_ref(), ast::ConstantExpr::Int(value)
+        if *value.inner() == IntValue::U8(1)));
+
+    let ast::ConstantExpr::BinaryOp { op, lhs, rhs, .. } = rhs.as_ref() else {
+        panic!("expected multiplication expression, got {rhs:?}");
+    };
+    assert_eq!(*op, ast::ConstantOp::Mul);
+    assert!(matches!(lhs.as_ref(), ast::ConstantExpr::Int(value)
+        if *value.inner() == IntValue::U8(2)));
+    assert!(matches!(rhs.as_ref(), ast::ConstantExpr::Int(value)
+        if *value.inner() == IntValue::U8(3)));
+}
+
+#[test]
 fn parse_string_constant_forms() {
     let source = test_source_file("const ERR = \"failed to load the circuit description\"\n");
 

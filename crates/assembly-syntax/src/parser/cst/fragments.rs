@@ -161,8 +161,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 op,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
-            }
-            .try_fold()?;
+            };
         }
 
         Ok(lhs)
@@ -193,8 +192,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 op,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
-            }
-            .try_fold()?;
+            };
         }
 
         Ok(lhs)

@@ -175,24 +175,6 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
-    #[error("constant expression nesting depth exceeded")]
-    #[diagnostic(help("constant expression folding exceeded the maximum depth of {max_depth}"))]
-    ConstExprDepthExceeded {
-        #[label]
-        span: SourceSpan,
-        max_depth: usize,
-    },
-    #[error("invalid constant expression: value is larger than expected range")]
-    ConstantOverflow {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("unexpected string in an arithmetic expression")]
-    #[diagnostic()]
-    StringInArithmeticExpression {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("doc comment is too large")]
     #[diagnostic(help("make sure it is less than u16::MAX bytes in length"))]
     DocsTooLarge {
