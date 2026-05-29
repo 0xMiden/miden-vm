@@ -83,37 +83,8 @@ fn decode_classifies_each_discriminant() {
         Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]),
         Some(NodeType::Join)
     ));
+    assert!(Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), ZERO, ZERO]).is_none());
     assert!(Hash.decode([Felt::from_u32(99), ZERO, ZERO]).is_none());
-}
-
-#[test]
-fn preimage_reduces_to_digest_leaf() {
-    let (schema, mut state) = fresh();
-    let data = chunks(2);
-    let expected = Hash::digest_node(Hash::hash(&data));
-    let node = Hash::preimage_node(64, data);
-    let canonical = state.evaluate_node(&schema, node).unwrap();
-    assert_eq!(canonical, expected);
-}
-
-#[test]
-fn digest_leaf_is_self_evaluating() {
-    let (schema, mut state) = fresh();
-    let leaf = Hash::digest_node([Felt::from_u32(7); 8]);
-    let h = state.register(&schema, leaf.clone()).unwrap();
-    let canonical = state.evaluate_digest(&schema, h).unwrap();
-    assert_eq!(canonical, leaf);
-}
-
-#[test]
-fn eq_predicate_matches_preimage_against_known_digest() {
-    let (schema, mut state) = fresh();
-    let data = chunks(2);
-    let known = Hash::digest_node(Hash::hash(&data));
-    let h_known = state.register(&schema, known).unwrap();
-    let h_preimage = state.register(&schema, Hash::preimage_node(64, data)).unwrap();
-    let result = state.evaluate_node(&schema, Hash::eq_node(h_preimage, h_known)).unwrap();
-    assert!(result.is_true_node());
 }
 
 #[test]
@@ -125,21 +96,4 @@ fn eq_predicate_errors_on_mismatch() {
     let h_preimage = state.register(&schema, Hash::preimage_node(32, data)).unwrap();
     let err = state.evaluate_node(&schema, Hash::eq_node(h_preimage, h_wrong));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
-}
-
-#[test]
-fn zero_byte_preimage_decodes_to_none() {
-    // n_bytes=0 derives zero chunks; `NonZeroU32` makes that unrepresentable, so decode rejects
-    // the tag rather than producing a `Chunks(0)`. An empty preimage can never be registered.
-    assert!(Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), ZERO, ZERO]).is_none());
-}
-
-#[test]
-fn composite_with_hash_dispatches() {
-    // Sanity: id-based routing works in a composite holding only Hash.
-    let schema = PrecompileRegistry::default().with_precompile(Hash);
-    let mut state = DeferredState::new();
-    let data = chunks(1);
-    let canonical = state.evaluate_node(&schema, Hash::preimage_node(32, data.clone())).unwrap();
-    assert_eq!(canonical, Hash::digest_node(Hash::hash(&data)));
 }

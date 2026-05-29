@@ -21,8 +21,8 @@ pub trait Precompile: Send + Sync {
 
     /// Stable tag id for this precompile.
     ///
-    /// The registry validates this against [`precompile_id`] and rejects the framework-reserved
-    /// `ZERO` id, turning id drift into a setup-time failure.
+    /// The registry validates this against [`precompile_id`] and rejects framework-reserved ids,
+    /// turning id drift into a setup-time failure.
     fn id(&self) -> Felt;
 
     /// Canonical constants this precompile wants committed before execution.

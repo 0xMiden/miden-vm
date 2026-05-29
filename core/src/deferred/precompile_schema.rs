@@ -4,9 +4,10 @@ use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 use super::precompile::{Precompile, precompile_id};
 use crate::{
-    Felt, ZERO,
+    Felt,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag, WitnessBuilder,
+        DeferredError, DeferredState, Digest, IntegrityError, Node, NodeType, PrecompileError, Tag,
+        WitnessBuilder,
     },
 };
 
@@ -33,19 +34,11 @@ impl core::fmt::Debug for PrecompileRegistry {
 impl PrecompileRegistry {
     /// Adds a precompile to the registry and returns `self` for chaining.
     ///
-    /// Panics on setup errors: id drift, the framework-reserved `ZERO` id, or a duplicate id.
+    /// Panics on setup errors: id drift, a framework-reserved id, or a duplicate id.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
         let p: Box<dyn Precompile> = Box::new(precompile);
         let id = p.id();
-        assert!(
-            id == precompile_id(&*p),
-            "precompile `{}` declares an id inconsistent with its name derivation",
-            p.name()
-        );
-        // `id == precompile_id` here, so a `ZERO` id means the derivation itself produced the
-        // framework-reserved value (a ~2^-64 event). `ZERO` tags the TRUE / AND nodes and must
-        // never route to a precompile.
-        assert!(id != ZERO, "precompile `{}` derives the framework-reserved id ZERO", p.name());
+        validate_precompile_id(p.name(), id, precompile_id(&*p));
         let name = p.name();
         if let Some(prev) = self.precompiles.insert(id, p) {
             panic!("duplicate precompile id in registry (`{}` and `{name}`)", prev.name());
@@ -75,16 +68,57 @@ impl PrecompileRegistry {
         Ok(())
     }
 
-    /// Decodes a tag by routing its local arguments to the owning precompile.
+    /// Decodes a precompile-owned tag by routing its local arguments to the owning precompile.
     ///
     /// Unknown ids are registry failures; recognized ids whose arguments are invalid are
-    /// attributed to the owning precompile.
+    /// attributed to the owning precompile. Framework tags are handled by the internal
+    /// framework-aware decoder and rejected here.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
+        if tag.is_framework_reserved() {
+            return Err(PrecompileError::InvalidNode);
+        }
         let p = self.precompiles.get(&tag.id).ok_or(PrecompileError::InvalidNode)?;
         p.decode(tag.args).ok_or_else(|| PrecompileError::Precompile {
             name: p.name(),
             source: Box::new(PrecompileError::InvalidNode),
         })
+    }
+
+    /// Decodes either a framework-owned tag or a precompile-owned tag.
+    pub(crate) fn decode_node_type(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
+        if tag == Tag::TRUE {
+            Ok(NodeType::Value)
+        } else if tag == Tag::AND {
+            Ok(NodeType::Join)
+        } else {
+            self.decode(tag)
+        }
+    }
+
+    /// Validates a node's tag and payload shape under this registry.
+    pub(crate) fn validate_node(&self, node: &Node) -> Result<NodeType, PrecompileError> {
+        let node_type = self.decode_node_type(node.tag)?;
+        if node.tag == Tag::TRUE && !node.is_true_node() {
+            return Err(PrecompileError::InvalidNode);
+        }
+        if !node_type.matches_payload(&node.payload) {
+            return Err(PrecompileError::InvalidNode);
+        }
+        Ok(node_type)
+    }
+
+    /// Decodes a tag while preserving wire-level integrity errors.
+    pub(crate) fn decode_wire_tag_type(&self, tag: Tag) -> Result<NodeType, IntegrityError> {
+        self.decode_node_type(tag).map_err(|_| IntegrityError::UnknownTag)
+    }
+
+    /// Decodes the type of a materialized wire node while rejecting attempts to serialize TRUE.
+    pub(crate) fn decode_wire_node_type(&self, node: &Node) -> Result<NodeType, IntegrityError> {
+        let node_type = self.decode_wire_tag_type(node.tag)?;
+        if node.tag == Tag::TRUE && !node.is_true_node() {
+            return Err(IntegrityError::ShapeMismatch);
+        }
+        Ok(node_type)
     }
 
     /// Reduces a node through the precompile selected by its tag id.
@@ -96,6 +130,9 @@ impl PrecompileRegistry {
         node: &Node,
         witness: &mut WitnessBuilder<'_>,
     ) -> Result<Node, PrecompileError> {
+        if node.tag.is_framework_reserved() {
+            return Err(PrecompileError::InvalidNode);
+        }
         let p = self.precompiles.get(&node.tag.id).ok_or(PrecompileError::InvalidNode)?;
         p.reduce(node.tag.args, &node.payload, witness).map_err(|source| {
             PrecompileError::Precompile { name: p.name(), source: Box::new(source) }
@@ -103,10 +140,21 @@ impl PrecompileRegistry {
     }
 }
 
+fn validate_precompile_id(name: &'static str, id: Felt, derived: Felt) {
+    assert!(
+        id == derived,
+        "precompile `{name}` declares an id inconsistent with its name derivation"
+    );
+    assert!(
+        !Tag::is_framework_reserved_id(id),
+        "precompile `{name}` derives a framework-reserved id"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deferred::Payload;
+    use crate::{ZERO, deferred::Payload};
 
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
@@ -182,6 +230,18 @@ mod tests {
         let registry = PrecompileRegistry::default().with_precompile(f);
         // The fixture chose to reject the immediate, so the registry name-wraps the cause.
         assert!(matches!(registry.decode(tag).unwrap_err().root(), PrecompileError::InvalidNode));
+    }
+
+    #[test]
+    #[should_panic(expected = "framework-reserved id")]
+    fn true_id_is_reserved_for_framework() {
+        validate_precompile_id("reserved-true", Tag::TRUE.id, Tag::TRUE.id);
+    }
+
+    #[test]
+    #[should_panic(expected = "framework-reserved id")]
+    fn and_id_is_reserved_for_framework() {
+        validate_precompile_id("reserved-and", Tag::AND.id, Tag::AND.id);
     }
 
     #[test]

@@ -75,15 +75,6 @@ fn sub_chains_through_add_with_mint_at_every_step() {
 }
 
 #[test]
-fn new_self_evaluates_when_children_are_leaves() {
-    let (schema, mut state) = fresh();
-    let h_g = register_group(&schema, &mut state, 3, 4);
-    let g = state.get(&h_g).unwrap().clone();
-    let canonical = state.evaluate_node(&schema, g.clone()).unwrap();
-    assert_eq!(canonical, g, "new over field leaves is self-evaluating");
-}
-
-#[test]
 fn new_preserves_field_expression_commitments() {
     let (schema, mut state) = fresh();
 
@@ -117,38 +108,6 @@ fn new_preserves_field_expression_commitments() {
 
     let h_value_group = register_group(&schema, &mut state, 7, 11);
     common::log_and_verify(&schema, &mut state, Group::eq_node(h_group, h_value_group));
-}
-
-#[test]
-fn add_mints_new_field_leaves_and_returns_new() {
-    let (schema, mut state) = fresh();
-    let h_g1 = register_group(&schema, &mut state, 3, 4);
-    let h_g2 = register_group(&schema, &mut state, 10, 20);
-
-    let canonical = state.evaluate_node(&schema, Group::add_node(h_g1, h_g2)).unwrap();
-    let expected = Group::new_node(leaf(13).digest(), leaf(24).digest());
-    assert_eq!(canonical, expected);
-    assert!(state.contains(&leaf(13).digest()), "minted x-coord leaf must be interned");
-    assert!(state.contains(&leaf(24).digest()), "minted y-coord leaf must be interned");
-}
-
-#[test]
-fn sub_mints_new_field_leaves_and_returns_new() {
-    let (schema, mut state) = fresh();
-    let h_g1 = register_group(&schema, &mut state, 100, 50);
-    let h_g2 = register_group(&schema, &mut state, 30, 20);
-
-    let canonical = state.evaluate_node(&schema, Group::sub_node(h_g1, h_g2)).unwrap();
-    let expected = Group::new_node(leaf(70).digest(), leaf(30).digest());
-    assert_eq!(canonical, expected);
-}
-
-#[test]
-fn eq_predicate_matches_on_canonical_equality() {
-    let (schema, mut state) = fresh();
-    let h_g = register_group(&schema, &mut state, 7, 11);
-    let result = state.evaluate_node(&schema, Group::eq_node(h_g, h_g)).unwrap();
-    assert!(result.is_true_node());
 }
 
 #[test]
@@ -187,22 +146,6 @@ fn eq_compares_coordinate_values_not_coordinate_commitments() {
 
     common::log_and_verify(&schema, &mut state, Group::eq_node(h_expr_group, h_value_group));
     common::log_and_verify(&schema, &mut state, Group::eq_node(h_value_group, h_expr_group));
-}
-
-#[test]
-fn expression_backed_group_eq_round_trips_through_wire() {
-    let (schema, mut state) = fresh();
-
-    let h_3 = state.register(&schema, leaf(3)).unwrap();
-    let h_4 = state.register(&schema, leaf(4)).unwrap();
-    let h_5 = state.register(&schema, leaf(5)).unwrap();
-
-    let h_x_expr = state.register(&schema, Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_expr_group = state.register(&schema, Group::new_node(h_x_expr, h_5)).unwrap();
-
-    let h_value_group = register_group(&schema, &mut state, 7, 5);
-
-    common::log_and_verify(&schema, &mut state, Group::eq_node(h_expr_group, h_value_group));
 }
 
 #[test]

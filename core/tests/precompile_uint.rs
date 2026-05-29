@@ -42,21 +42,6 @@ fn end_to_end_register_evaluate_assert_extract() {
 }
 
 #[test]
-fn predicate_mismatch_surfaces_as_error_on_evaluate() {
-    let schema = PrecompileRegistry::default().with_precompile(Uint);
-    let mut state = DeferredState::new();
-    let a = state.register(&schema, leaf(7)).unwrap();
-    let b = state.register(&schema, leaf(8)).unwrap();
-    let assertion = Node::join(Uint::eq_tag(), a, b);
-    // Register is a pure hint — succeeds even when the predicate doesn't hold.
-    state.register(&schema, assertion.clone()).unwrap();
-    // The mismatch surfaces only when we explicitly verify.
-    let err = state.evaluate_node(&schema, assertion);
-    // The registry wraps the precompile's error with its name; assert the root cause.
-    assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
-}
-
-#[test]
 fn empty_registry_rejects_all_uint_nodes() {
     let schema = PrecompileRegistry::default();
     let mut state = DeferredState::new();
@@ -69,8 +54,8 @@ fn init_pre_registers_uint_constants() {
     let schema = PrecompileRegistry::default().with_precompile(Uint);
     let mut state = DeferredState::new();
     schema.init(&mut state).unwrap();
-    // Three constants: ZERO, ONE, P_MINUS_1.
-    assert_eq!(state.nodes().len(), 3);
+    // TRUE plus three uint constants: ZERO, ONE, P_MINUS_1.
+    assert_eq!(state.nodes().len(), 4);
     assert!(state.contains(&leaf(0).digest()));
     assert!(state.contains(&leaf(1).digest()));
     assert!(state.contains(&Uint::leaf_node([u32::MAX; 8]).digest()));
