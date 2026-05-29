@@ -220,8 +220,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   and debug-variable storage in CSR layout (eliminates per-node metadata sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
 /// - [0, 0, 2]: AssemblyOps moved out of inline metadata into a dedicated DebugInfo section.
-///   Removed `should_break` field from AssemblyOp serialization (#2646).
-///   Removed `breakpoint` instruction (#2655).
+///   Removed `should_break` field from AssemblyOp serialization (#2646). Removed `breakpoint`
+///   instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
