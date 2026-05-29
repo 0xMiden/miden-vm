@@ -8,6 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
+    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireNode},
     events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
@@ -264,6 +265,51 @@ fn generate_fuzz_seeds() {
     {
         let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
         write_seed("precompile_request_deserialize", "precompile_request.bin", &request.to_bytes());
+    }
+
+    // Deferred-state wire seeds. These are standalone compact-wire witnesses; ExecutionProof still
+    // carries legacy PrecompileRequest values on this branch.
+    {
+        let empty = DeferredStateWire::default();
+        write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
+
+        let tag = Tag::from_word([
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+        ]);
+        let wire = DeferredStateWire {
+            leaf_tags: vec![tag],
+            chunk_tags: vec![tag],
+            blocks: vec![[Felt::new_unchecked(1); 8], [Felt::new_unchecked(2); 8]],
+            nodes: vec![WireNode { tag, lhs: TRUE_INDEX, rhs: 1 }],
+        };
+        write_seed("deferred_state_wire_deserialize", "all_sections_wire.bin", &wire.to_bytes());
+
+        let mut oversized_leaf_count = Vec::new();
+        oversized_leaf_count.write_usize(usize::MAX);
+        oversized_leaf_count.write_usize(0);
+        oversized_leaf_count.write_usize(0);
+        oversized_leaf_count.write_usize(0);
+        write_seed(
+            "deferred_state_wire_deserialize",
+            "oversized_leaf_count.bin",
+            &oversized_leaf_count,
+        );
+
+        #[cfg(feature = "serde")]
+        {
+            let empty_json =
+                serde_json::to_vec(&empty).expect("failed to serialize empty wire seed");
+            write_seed("deferred_state_wire_serde_deserialize", "empty_wire.json", &empty_json);
+            let wire_json = serde_json::to_vec(&wire).expect("failed to serialize wire seed");
+            write_seed(
+                "deferred_state_wire_serde_deserialize",
+                "all_sections_wire.json",
+                &wire_json,
+            );
+        }
     }
 
     // Execution proof seed (minimal)
