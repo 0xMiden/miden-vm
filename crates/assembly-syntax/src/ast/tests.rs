@@ -475,7 +475,7 @@ fn test_ast_parsing_program_simple() -> Result<(), Report> {
     let forms = module!(begin!(
         inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0).into())))),
         inst!(Assertz),
-        inst!(Incr)
+        inst!(AddImm(Immediate::Value(Span::unknown(Felt::ONE))))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);

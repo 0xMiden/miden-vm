@@ -731,12 +731,12 @@ struct CompactSuffixSpec {
 enum CompactSuffixKind {
     /// A comparison instruction with felt immediate, e.g. `eq.1` or `lt.42`
     Comparison(fn(ast::ImmFelt) -> Instruction),
-    /// A possibly-foldable felt arithmetic instruction with felt immediate
-    Felt(fn(ast::ImmFelt, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>),
+    /// An instruction with felt immediate
+    Felt(fn(ast::ImmFelt) -> Instruction),
     /// An instruction with u32 immediate
     U32(fn(ast::ImmU32) -> Instruction),
-    /// A instruction with u32 immediate with parse-time folder
-    U32WithFolder(fn(ast::ImmU32, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>),
+    /// A u32 instruction family represented by pushing the immediate, then applying the opcode
+    U32Expanded(fn() -> Instruction),
     U16(fn(ast::ImmU16) -> Instruction),
     Stack(&'static StackIndexSpec),
     ShiftU32(fn(ast::ImmU8) -> Instruction),
@@ -771,19 +771,19 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["add"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_add),
+        kind: CompactSuffixKind::Felt(Instruction::AddImm),
     },
     CompactSuffixSpec {
         prefix: &["sub"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_sub),
+        kind: CompactSuffixKind::Felt(Instruction::SubImm),
     },
     CompactSuffixSpec {
         prefix: &["mul"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_mul),
+        kind: CompactSuffixKind::Felt(Instruction::MulImm),
     },
     CompactSuffixSpec {
         prefix: &["div"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_div),
+        kind: CompactSuffixKind::Felt(Instruction::DivImm),
     },
     CompactSuffixSpec {
         prefix: &["exp"],
@@ -875,43 +875,43 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["u32div"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32div),
+        kind: CompactSuffixKind::U32(Instruction::U32DivImm),
     },
     CompactSuffixSpec {
         prefix: &["u32divmod"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32divmod),
+        kind: CompactSuffixKind::U32(Instruction::U32DivModImm),
     },
     CompactSuffixSpec {
         prefix: &["u32mod"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32mod),
+        kind: CompactSuffixKind::U32(Instruction::U32ModImm),
     },
     CompactSuffixSpec {
         prefix: &["u32and"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32and),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32And),
     },
     CompactSuffixSpec {
         prefix: &["u32or"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32or),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Or),
     },
     CompactSuffixSpec {
         prefix: &["u32xor"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32xor),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Xor),
     },
     CompactSuffixSpec {
         prefix: &["u32not"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32not),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Not),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_add"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_add),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingAddImm),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_sub"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_sub),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingSubImm),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_mul"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_mul),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingMulImm),
     },
     CompactSuffixSpec {
         prefix: &["u32overflowing_add"],
@@ -931,27 +931,27 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["u32lt"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32lt),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Lt),
     },
     CompactSuffixSpec {
         prefix: &["u32lte"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32lte),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Lte),
     },
     CompactSuffixSpec {
         prefix: &["u32gt"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32gt),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Gt),
     },
     CompactSuffixSpec {
         prefix: &["u32gte"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32gte),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Gte),
     },
     CompactSuffixSpec {
         prefix: &["u32min"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32min),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Min),
     },
     CompactSuffixSpec {
         prefix: &["u32max"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32max),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Max),
     },
     CompactSuffixSpec {
         prefix: &["u32shl"],
@@ -1163,10 +1163,10 @@ fn lower_compact_suffix_instruction(
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     match kind {
         CompactSuffixKind::Comparison(build) => lower_felt_comparison(context, span, token, build),
-        CompactSuffixKind::Felt(folder) => lower_felt_instruction(context, span, token, folder),
+        CompactSuffixKind::Felt(build) => lower_felt_instruction(context, span, token, build),
         CompactSuffixKind::U32(build) => lower_u32_instruction(context, span, token, build),
-        CompactSuffixKind::U32WithFolder(folder) => {
-            lower_foldable_u32_instruction(context, span, token, folder)
+        CompactSuffixKind::U32Expanded(build) => {
+            lower_expanded_u32_instruction(context, span, token, build)
         },
         CompactSuffixKind::U16(build) => lower_u16_instruction(context, span, token, build),
         CompactSuffixKind::Stack(spec) => lower_stack_index_instruction(context, span, token, spec),
@@ -1758,22 +1758,17 @@ fn lower_felt_comparison(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
-/// Lowers foldable felt-immediate arithmetic and applies the same peephole folds as the legacy
-/// parser.
-///
-/// TODO(pauls): Remove folding after legacy parser removal, as this sort of optimization should not
-/// be performed during parsing.
 fn lower_felt_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
     token: &SyntaxToken,
-    folder: fn(ast::ImmFelt, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>,
+    build: fn(ast::ImmFelt) -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(imm) = lower_felt_immediate(context, token)? else {
         return Ok(None);
     };
 
-    folder(imm, span).map(Some)
+    Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
 /// Lowers the two `exp` families: `exp.<felt>` and `exp.u<bits>`.
@@ -1817,18 +1812,19 @@ fn lower_u32_instruction(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
-/// Lowers foldable `u32` immediate instruction families and preserves the legacy peephole folds.
-fn lower_foldable_u32_instruction(
+/// Lowers `u32.<imm>` spellings for instruction families without a dedicated immediate AST
+/// variant.
+fn lower_expanded_u32_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
     token: &SyntaxToken,
-    folder: fn(ast::ImmU32, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>,
+    build: fn() -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(imm) = lower_u32_immediate(context, token)? else {
         return Ok(None);
     };
 
-    folder(imm, span).map(Some)
+    Ok(Some(vec![push_u32_op(span, imm), inst_op(span, build())]))
 }
 
 /// Lowers `u16` immediates for local-memory operations.
@@ -2000,9 +1996,4 @@ pub(super) fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
         Immediate::Value(value) => Immediate::Value(value.map(PushValue::from)),
     };
     inst_op(span, Instruction::Push(push))
-}
-
-/// Builds a `push.0` op at `span`.
-pub(super) fn push_zero_op(span: SourceSpan) -> ast::Op {
-    inst_op(span, Instruction::Push(Immediate::Value(Span::new(span, PushValue::from(0u8)))))
 }

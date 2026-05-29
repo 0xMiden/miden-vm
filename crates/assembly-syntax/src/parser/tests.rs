@@ -615,18 +615,54 @@ fn parser_reports_invalid_advice_map_keys() {
 }
 
 #[test]
-fn parser_reports_direct_division_by_zero_for_foldable_instructions() {
+fn parser_preserves_immediate_spellings_without_rewrites() {
     let source = test_source_file(
         "\
 begin
+    add.0
+    mul.1
     u32div.0
+    u32and.0
+    u32wrapping_mul.0
 end
 ",
     );
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Begin(block)] = forms.as_slice() else {
+        panic!("expected a single begin block, got {forms:?}");
+    };
 
-    let err = parse_forms(source).expect_err("expected division by zero error");
+    let ops = block.iter().collect::<Vec<_>>();
+    assert_eq!(ops.len(), 6);
+    assert!(matches!(
+        instruction_at(ops[0]),
+        Instruction::AddImm(Immediate::Value(value)) if *value.inner() == crate::Felt::ZERO
+    ));
+    assert!(matches!(
+        instruction_at(ops[1]),
+        Instruction::MulImm(Immediate::Value(value)) if *value.inner() == crate::Felt::ONE
+    ));
+    assert!(matches!(
+        instruction_at(ops[2]),
+        Instruction::U32DivImm(Immediate::Value(value)) if *value.inner() == 0
+    ));
+    assert!(matches!(
+        instruction_at(ops[3]),
+        Instruction::Push(Immediate::Value(value))
+            if *value.inner() == PushValue::Int(IntValue::U32(0))
+    ));
+    assert!(matches!(instruction_at(ops[4]), Instruction::U32And));
+    assert!(matches!(
+        instruction_at(ops[5]),
+        Instruction::U32WrappingMulImm(Immediate::Value(value)) if *value.inner() == 0
+    ));
+}
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("division by zero"));
+fn instruction_at(op: &Op) -> &Instruction {
+    let Op::Inst(instruction) = op else {
+        panic!("expected instruction op, got {op:?}");
+    };
+    instruction.inner()
 }
 
 #[test]

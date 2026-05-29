@@ -1,6 +1,5 @@
 mod blocks;
 mod context;
-mod folders;
 mod forms;
 mod fragments;
 mod instructions;
