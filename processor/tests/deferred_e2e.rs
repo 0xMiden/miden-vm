@@ -11,7 +11,8 @@ use miden_core::{
     testing::precompile::{Hash, Uint},
 };
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, Felt, StackInputs,
+    advice::AdviceInputs,
 };
 
 extern crate alloc;
@@ -21,13 +22,13 @@ extern crate alloc;
 
 /// Builds a processor with the uint precompile installed for deferred tests.
 fn build_processor() -> FastProcessor {
-    FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction")
-    .with_precompile(Uint)
+    build_processor_with_options(ExecutionOptions::default())
+}
+
+fn build_processor_with_options(options: ExecutionOptions) -> FastProcessor {
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor construction")
+        .with_precompile(Uint)
 }
 
 // MASM BUILDERS
@@ -182,6 +183,29 @@ fn deferred_evaluate_returns_true_node_for_predicate() {
 // E2E: a predicate is just a host hint — `adv.register_deferred` does NOT verify it. The
 // mismatch only surfaces when the program explicitly evaluates the predicate.
 // ================================================================================================
+
+#[test]
+fn deferred_register_over_deferred_budget_is_rejected() {
+    let leaf = arith_leaf(42);
+
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, leaf);
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let result =
+        build_processor_with_options(ExecutionOptions::default().with_max_deferred_elements(11))
+            .execute_sync(&program, &mut host);
+
+    match result {
+        Err(ExecutionError::DeferredStateTooLarge { num_elements, max, .. }) => {
+            assert_eq!(num_elements, 12);
+            assert_eq!(max, 11);
+        },
+        other => panic!("expected DeferredStateTooLarge, got {other:?}"),
+    }
+}
 
 #[test]
 fn deferred_register_predicate_does_not_verify() {
@@ -365,13 +389,13 @@ fn preimage_tag(n: u32) -> Tag {
 }
 
 fn build_chunk_processor() -> FastProcessor {
-    FastProcessor::new_with_options(
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .expect("processor construction")
-    .with_precompile(Hash)
+    build_chunk_processor_with_options(ExecutionOptions::default())
+}
+
+fn build_chunk_processor_with_options(options: ExecutionOptions) -> FastProcessor {
+    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+        .expect("processor construction")
+        .with_precompile(Hash)
 }
 
 /// Emits MASM that registers a chunk node from memory.
@@ -382,6 +406,31 @@ fn emit_register_chunk(src: &mut String, tag: Tag, ptr: u32) {
         writeln!(src, "    push.{}", f.as_canonical_u64()).unwrap();
     }
     src.push_str("    adv.register_deferred_chunk\n");
+}
+
+#[test]
+fn chunk_register_over_deferred_budget_is_rejected_before_reading_memory() {
+    let huge_n_chunks = 1 << 20;
+    let tag = preimage_tag(huge_n_chunks);
+
+    let mut src = String::from("begin\n");
+    emit_register_chunk(&mut src, tag, 0);
+    src.push_str("end\n");
+
+    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let mut host = DefaultHost::default();
+    let result = build_chunk_processor_with_options(
+        ExecutionOptions::default().with_max_deferred_elements(16),
+    )
+    .execute_sync(&program, &mut host);
+
+    match result {
+        Err(ExecutionError::DeferredStateTooLarge { num_elements, max, .. }) => {
+            assert_eq!(num_elements, 4 + 8 * huge_n_chunks as usize);
+            assert_eq!(max, 16);
+        },
+        other => panic!("expected DeferredStateTooLarge, got {other:?}"),
+    }
 }
 
 #[test]

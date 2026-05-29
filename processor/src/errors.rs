@@ -66,6 +66,17 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         err: PrecompileError,
     },
+    /// Deferred system events exceeded the configured state-size budget.
+    #[error("deferred state size {num_elements} exceeds the configured maximum {max}")]
+    #[diagnostic()]
+    DeferredStateTooLarge {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        num_elements: usize,
+        max: usize,
+    },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
     #[error("operand stack depth {depth} exceeds the maximum of {max}")]
@@ -696,6 +707,14 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
                     SystemEventError::Deferred(err) => {
                         ExecutionError::DeferredError { label, source_file, err }
                     },
+                    SystemEventError::DeferredStateTooLarge { num_elements, max } => {
+                        ExecutionError::DeferredStateTooLarge {
+                            label,
+                            source_file,
+                            num_elements,
+                            max,
+                        }
+                    },
                 })
             },
         }
@@ -731,6 +750,14 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
                     },
                     SystemEventError::Deferred(err) => {
                         ExecutionError::DeferredError { label, source_file, err }
+                    },
+                    SystemEventError::DeferredStateTooLarge { num_elements, max } => {
+                        ExecutionError::DeferredStateTooLarge {
+                            label,
+                            source_file,
+                            num_elements,
+                            max,
+                        }
                     },
                 })
             },

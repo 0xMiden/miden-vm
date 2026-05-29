@@ -19,10 +19,15 @@ use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
 pub use node::{NodeType, PrecompileError};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_schema::PrecompileRegistry;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 pub use state::{DeferredState, WitnessBuilder};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireNode};
 
-use crate::{Felt, Word};
+use crate::{
+    Felt, Word,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 /// Stable address of a deferred [`Node`], computed as a 4-felt Poseidon2 digest.
 pub type Digest = Word;
@@ -33,6 +38,7 @@ pub type Digest = Word;
 /// remaining three felts are opaque to the framework and are decoded only by the owning
 /// [`Precompile`]. The canonical layout is `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Tag {
     pub id: Felt,
     pub args: [Felt; 3],
@@ -68,6 +74,29 @@ impl Tag {
     /// Restores a tag from the canonical 4-felt layout.
     pub const fn from_word(w: [Felt; 4]) -> Self {
         Self { id: w[0], args: [w[1], w[2], w[3]] }
+    }
+}
+
+impl Serializable for Tag {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        for felt in &self.as_word() {
+            felt.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for Tag {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::from_word([
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+            Felt::read_from(source)?,
+        ]))
+    }
+
+    fn min_serialized_size() -> usize {
+        4 * Felt::min_serialized_size()
     }
 }
 
@@ -202,6 +231,15 @@ impl Node {
     /// is [`TRUE_DIGEST`].
     pub fn is_true_node(&self) -> bool {
         self.tag == Tag::TRUE && matches!(&self.payload, Payload::Expression(f) if *f == [ZERO; 8])
+    }
+
+    /// Returns a rough serialized field-element footprint for budget accounting.
+    pub fn num_elements(&self) -> usize {
+        let payload_elements = match &self.payload {
+            Payload::Expression(_) => 8,
+            Payload::Chunk(chunks) => 8usize.saturating_mul(chunks.len()),
+        };
+        4usize.saturating_add(payload_elements)
     }
 
     /// Computes the canonical digest used by both host code and in-circuit wrappers.

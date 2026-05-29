@@ -13,6 +13,13 @@ use miden_core::{
 use super::SystemEventError;
 use crate::{MemoryError, advice::AdviceError, fast::FastProcessor};
 
+fn check_deferred_budget(num_elements: usize, max: usize) -> Result<(), SystemEventError> {
+    if num_elements > max {
+        return Err(SystemEventError::DeferredStateTooLarge { num_elements, max });
+    }
+    Ok(())
+}
+
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
@@ -62,9 +69,10 @@ pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
+    let max_deferred_elements = processor.options.max_deferred_elements();
     let (state, precompiles) = processor.deferred_view_mut();
     state.register(precompiles, Node::expression(tag, payload))?;
-    Ok(())
+    check_deferred_budget(state.num_elements(), max_deferred_elements)
 }
 
 /// Handles deferred-node evaluation and returns the canonical node as advice.
@@ -78,8 +86,10 @@ pub(super) fn handle_deferred_evaluate(
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
+    let max_deferred_elements = processor.options.max_deferred_elements();
     let (state, precompiles) = processor.deferred_view_mut();
     let canonical = state.evaluate_digest(precompiles, digest)?;
+    check_deferred_budget(state.num_elements(), max_deferred_elements)?;
 
     // Serialize the canonical as `tag || payload` in natural order.
     let mut value: Vec<Felt> = Vec::new();
@@ -135,10 +145,24 @@ pub(super) fn handle_deferred_register_chunk(
         );
     }
     let total = 8u64 * n as u64;
-    let end = ptr + total;
+    let end = ptr
+        .checked_add(total)
+        .ok_or(MemoryError::AddressOutOfBounds { addr: u64::MAX })?;
     if end > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: end }.into());
     }
+    let max_deferred_elements = processor.options.max_deferred_elements();
+    let chunk_elements = (n as usize)
+        .checked_mul(8)
+        .and_then(|payload_elements| payload_elements.checked_add(4))
+        .unwrap_or(usize::MAX);
+    let projected = processor
+        .deferred_state()
+        .num_elements()
+        .checked_add(chunk_elements)
+        .unwrap_or(usize::MAX);
+    check_deferred_budget(projected, max_deferred_elements)?;
+
     let max_value_size = processor.options.max_adv_map_value_size();
     if total as usize > max_value_size {
         return Err(AdviceError::AdvMapValueSizeExceeded {
@@ -162,5 +186,5 @@ pub(super) fn handle_deferred_register_chunk(
 
     let (state, precompiles) = processor.deferred_view_mut();
     state.register(precompiles, Node::chunk(tag, chunks))?;
-    Ok(())
+    check_deferred_budget(state.num_elements(), max_deferred_elements)
 }
