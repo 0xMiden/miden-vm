@@ -127,7 +127,7 @@ pub proc register_chunk
 end
 
 #! Folds a deferred node digest into the rolling deferred commitment using the existing
-#! `log_precompile` transcript state. The digest must reference a node that will reduce to TRUE
+#! `log_precompile` commitment state. The digest must reference a node that will reduce to TRUE
 #! under the installed schema.
 #!
 #! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees
