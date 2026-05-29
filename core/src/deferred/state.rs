@@ -16,6 +16,7 @@ pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
     root: Digest,
     evals: BTreeMap<Digest, Node>,
+    num_elements: usize,
 }
 
 impl Default for DeferredState {
@@ -26,7 +27,12 @@ impl Default for DeferredState {
         let mut evals = BTreeMap::new();
         evals.insert(TRUE_DIGEST, Node::TRUE);
 
-        Self { nodes, root: TRUE_DIGEST, evals }
+        Self {
+            nodes,
+            root: TRUE_DIGEST,
+            evals,
+            num_elements: 0,
+        }
     }
 }
 
@@ -52,21 +58,40 @@ impl DeferredState {
     /// Use only after the caller has established the relevant invariants. The wire encoder emits
     /// an interned node only if it is reachable from the transcript root.
     pub(crate) fn intern(&mut self, node: Node) -> Digest {
-        let digest = node.digest();
-        self.nodes.insert(digest, node);
-        digest
+        self.insert_node_counted(node)
     }
 
     pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
         &self.nodes
     }
 
+    /// Returns the approximate number of field elements stored by deferred nodes and eval memos.
+    pub fn num_elements(&self) -> usize {
+        self.num_elements
+    }
+
     fn get_eval(&self, digest: &Digest) -> Option<&Node> {
         self.evals.get(digest)
     }
 
+    fn add_elements(&mut self, elements: usize) {
+        self.num_elements = self.num_elements.saturating_add(elements);
+    }
+
+    fn insert_node_counted(&mut self, node: Node) -> Digest {
+        let digest = node.digest();
+        if !self.nodes.contains_key(&digest) {
+            self.add_elements(node.num_elements());
+        }
+        self.nodes.insert(digest, node);
+        digest
+    }
+
     /// Caches a reduction result and materializes its canonical node for downstream references.
     fn record_eval(&mut self, input_digest: Digest, canonical: Node) {
+        if !self.evals.contains_key(&input_digest) {
+            self.add_elements(canonical.num_elements());
+        }
         self.evals.insert(input_digest, canonical.clone());
         self.intern(canonical);
     }
@@ -91,7 +116,7 @@ impl DeferredState {
         if actual != expected_new_root {
             return Err(DeferredError::InvalidPayload);
         }
-        self.nodes.insert(actual, and_node);
+        self.insert_node_counted(and_node);
         self.root = actual;
         Ok(())
     }
@@ -107,8 +132,7 @@ impl DeferredState {
         node: Node,
     ) -> Result<Digest, PrecompileError> {
         precompiles.validate_node(&node)?;
-        let digest = node.digest();
-        self.nodes.insert(digest, node);
+        let digest = self.insert_node_counted(node);
         Ok(digest)
     }
 
@@ -294,9 +318,7 @@ impl<'a> WitnessBuilder<'a> {
     /// Use this when a compound canonical needs stable child commitments that were created during
     /// reduction.
     pub fn intern(&mut self, node: Node) -> Digest {
-        let digest = node.digest();
-        self.state.nodes.insert(digest, node);
-        digest
+        self.state.intern(node)
     }
 
     /// Reduces a node, memoizes the canonical form, and commits the canonical node.
@@ -318,7 +340,7 @@ mod tests {
     use crate::{
         Felt, Word, ZERO,
         deferred::{PrecompileRegistry, TRUE_DIGEST, Tag},
-        testing::precompile::Uint,
+        testing::precompile::{Hash, Uint},
     };
 
     /// Single-precompile registry used by deferred-state unit tests.
@@ -345,7 +367,9 @@ mod tests {
         assert!(state.contains(&TRUE_DIGEST));
         assert_eq!(state.get(&TRUE_DIGEST).unwrap(), &Node::TRUE);
         assert_eq!(state.root(), TRUE_DIGEST);
+        assert_eq!(state.num_elements(), 0);
         assert_eq!(state.evaluate_digest(&schema, TRUE_DIGEST).unwrap(), Node::TRUE);
+        assert_eq!(state.num_elements(), 0);
     }
 
     #[test]
@@ -357,6 +381,7 @@ mod tests {
         assert_eq!(digest, TRUE_DIGEST);
         assert_eq!(state.get(&TRUE_DIGEST).unwrap(), &Node::TRUE);
         assert_eq!(state.nodes().len(), 1);
+        assert_eq!(state.num_elements(), 0);
     }
 
     #[test]
@@ -379,6 +404,7 @@ mod tests {
         // The newly-minted AND-node must be in the map keyed by its digest.
         assert!(state.contains(&expected));
         assert_eq!(state.get(&expected).unwrap().tag, Tag::AND);
+        assert_eq!(state.num_elements(), 48);
     }
 
     #[test]
@@ -403,6 +429,7 @@ mod tests {
         let digest = state.register(&schema, node.clone()).unwrap();
         assert_eq!(digest, node.digest());
         assert_eq!(state.get(&digest).unwrap(), &node);
+        assert_eq!(state.num_elements(), node.num_elements());
     }
 
     #[test]
@@ -414,6 +441,24 @@ mod tests {
         let d2 = state.register(&schema, node).unwrap();
         assert_eq!(d1, d2);
         assert_eq!(state.nodes().len(), 2); // TRUE plus the leaf
+        assert_eq!(state.num_elements(), test_leaf(7).num_elements());
+    }
+
+    #[test]
+    fn chunk_nodes_contribute_payload_length_to_num_elements() {
+        let mut state = DeferredState::new();
+        let schema = PrecompileRegistry::default().with_precompile(Hash);
+        let chunks = alloc::vec![[Felt::from_u32(1); 8], [Felt::from_u32(2); 8]];
+        let node = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks);
+        let expected_elements = node.num_elements();
+
+        let digest = state.register(&schema, node.clone()).unwrap();
+        assert_eq!(digest, node.digest());
+        assert_eq!(expected_elements, 20);
+        assert_eq!(state.num_elements(), expected_elements);
+
+        state.register(&schema, node).unwrap();
+        assert_eq!(state.num_elements(), expected_elements, "idempotent re-registration is free");
     }
 
     #[test]
@@ -489,6 +534,7 @@ mod tests {
         assert!(state.contains(&test_leaf(7).digest()), "canonical(add) is interned into nodes");
         assert!(state.contains(&Node::TRUE.digest()), "canonical(TRUE) remains in nodes");
         assert_eq!(state.root(), TRUE_DIGEST, "no log called, root is still TRUE");
+        assert_eq!(state.num_elements(), 15 * 12);
     }
 
     #[test]
@@ -510,6 +556,7 @@ mod tests {
         assert_eq!(canonical, test_leaf(35));
         assert!(!state.contains(&mul_digest), "input op stays out of nodes");
         assert!(state.contains(&test_leaf(35).digest()), "computed canonical is interned");
+        assert_eq!(state.num_elements(), 11 * 12);
 
         let err = state.evaluate_digest(&schema, mul_digest).unwrap_err();
         assert!(matches!(err, PrecompileError::MissingNode));
