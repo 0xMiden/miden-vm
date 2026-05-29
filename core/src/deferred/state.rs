@@ -1,8 +1,8 @@
 use alloc::collections::BTreeMap;
 
 use super::{
-    DeferredError, DeferredStateWire, Digest, IntegrityError, Node, PrecompileError,
-    PrecompileRegistry, TRUE_DIGEST,
+    DeferredError, DeferredStateWire, Digest, IntegrityError, Node, NodeType, PrecompileError,
+    PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 
 /// In-memory witness for deferred-DAG verification.
@@ -77,10 +77,6 @@ impl DeferredState {
         self.root
     }
 
-    pub(super) fn set_root(&mut self, root: Digest) {
-        self.root = root;
-    }
-
     /// Appends a statement commitment to the transcript.
     ///
     /// `expected_new_root` lets the host check that its digest agrees with the in-circuit hash.
@@ -111,7 +107,7 @@ impl DeferredState {
         precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Digest, PrecompileError> {
-        let node_type = precompiles.decode(node.tag)?;
+        let node_type = decode_node_type(precompiles, node.tag)?;
         if !node_type.matches_payload(&node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
@@ -130,12 +126,58 @@ impl DeferredState {
         precompiles: &PrecompileRegistry,
         node: Node,
     ) -> Result<Node, PrecompileError> {
-        let node_type = precompiles.decode(node.tag)?;
+        let node_type = decode_node_type(precompiles, node.tag)?;
         if !node_type.matches_payload(&node.payload) {
             return Err(PrecompileError::InvalidNode);
         }
         let input_digest = node.digest();
-        WitnessBuilder::new(self, precompiles).reduce_and_record_eval(node, input_digest)
+        if node.tag == Tag::TRUE {
+            self.evaluate_framework_and(precompiles, node, input_digest)
+        } else {
+            WitnessBuilder::new(self, precompiles).reduce_and_record_eval(node, input_digest)
+        }
+    }
+
+    /// Reduces a transcript/statement root to its canonical form.
+    ///
+    /// [`TRUE_DIGEST`] is accepted as the virtual empty transcript and reduces to [`Node::TRUE`].
+    /// Materialized [`Tag::TRUE`] nodes are reduced by the framework as conjunctions: both child
+    /// roots must reduce to TRUE. Other nodes are reduced through the installed precompiles.
+    pub(crate) fn evaluate_statement_digest(
+        &mut self,
+        precompiles: &PrecompileRegistry,
+        digest: Digest,
+    ) -> Result<Node, PrecompileError> {
+        if digest == TRUE_DIGEST {
+            return Ok(Node::TRUE);
+        }
+        self.evaluate_digest(precompiles, digest)
+    }
+
+    fn verify_statement_digest(
+        &mut self,
+        precompiles: &PrecompileRegistry,
+        digest: Digest,
+    ) -> Result<(), PrecompileError> {
+        let canonical = self.evaluate_statement_digest(precompiles, digest)?;
+        if canonical.is_true_node() {
+            Ok(())
+        } else {
+            Err(PrecompileError::AssertionFailed)
+        }
+    }
+
+    fn evaluate_framework_and(
+        &mut self,
+        precompiles: &PrecompileRegistry,
+        node: Node,
+        input_digest: Digest,
+    ) -> Result<Node, PrecompileError> {
+        let (lhs, rhs) = node.payload.join_children()?;
+        self.verify_statement_digest(precompiles, lhs)?;
+        self.verify_statement_digest(precompiles, rhs)?;
+        self.record_eval(input_digest, Node::TRUE);
+        Ok(Node::TRUE)
     }
 
     /// Reduces a committed node addressed by digest.
@@ -210,6 +252,17 @@ impl DeferredState {
         }
         out.reverse();
         out
+    }
+}
+
+fn decode_node_type(
+    precompiles: &PrecompileRegistry,
+    tag: Tag,
+) -> Result<NodeType, PrecompileError> {
+    if tag == Tag::TRUE {
+        Ok(NodeType::Join)
+    } else {
+        precompiles.decode(tag)
     }
 }
 
@@ -533,6 +586,11 @@ mod tests {
             rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),
             "wire round-trip changed a reachable node",
         );
+        assert_eq!(
+            rehydrated.to_wire(precompiles).unwrap(),
+            wire,
+            "accepted wire must be canonical"
+        );
     }
 
     /// Builds a logged `(a+b)*c == 35` transcript used by round-trip tests.
@@ -577,6 +635,63 @@ mod tests {
     }
 
     #[test]
+    fn rehydrate_accepts_logged_empty_transcript_root() {
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+        let new_root = Node::and(state.root(), TRUE_DIGEST).digest();
+        state.log(TRUE_DIGEST, new_root).unwrap();
+
+        let wire = state.to_wire(&schema).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &schema).unwrap();
+        assert_eq!(rehydrated.root(), new_root);
+        assert_eq!(rehydrated.statements(), alloc::vec![TRUE_DIGEST]);
+        assert_round_trips(&state, &schema);
+    }
+
+    #[test]
+    fn rehydrate_accepts_logged_nested_transcript_root() {
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+        let a = state.register(&schema, test_leaf(7)).unwrap();
+        let pred = Node::join(Uint::eq_tag(), a, a);
+        let pred_digest = state.register(&schema, pred.clone()).unwrap();
+        state.evaluate_node(&schema, pred).unwrap();
+
+        let inner_root = state.register(&schema, Node::and(TRUE_DIGEST, pred_digest)).unwrap();
+        let outer_root = Node::and(state.root(), inner_root).digest();
+        state.log(inner_root, outer_root).unwrap();
+
+        let wire = state.to_wire(&schema).unwrap();
+        let rehydrated = DeferredState::rehydrate(&wire, &schema).unwrap();
+        assert_eq!(rehydrated.root(), outer_root);
+        assert_eq!(rehydrated.statements(), alloc::vec![inner_root]);
+        assert!(rehydrated.contains(&inner_root));
+        assert!(rehydrated.contains(&pred_digest));
+        assert_round_trips(&state, &schema);
+    }
+
+    #[test]
+    fn rehydrate_rejects_nested_transcript_with_failed_statement() {
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let bad_pred = Node::join(Uint::eq_tag(), a, b);
+        let bad_digest = state.register(&schema, bad_pred).unwrap();
+
+        let inner_root = state.register(&schema, Node::and(TRUE_DIGEST, bad_digest)).unwrap();
+        let outer_root = Node::and(state.root(), inner_root).digest();
+        state.log(inner_root, outer_root).unwrap();
+
+        let wire = state.to_wire(&schema).unwrap();
+        let err = DeferredState::rehydrate(&wire, &schema);
+        assert!(
+            matches!(err, Err(IntegrityError::PredicateFailed(_))),
+            "expected PredicateFailed, got {err:?}"
+        );
+    }
+
+    #[test]
     fn rehydrate_rejects_bad_index() {
         // Index 0 is reserved for TRUE. With no materialized nodes, index 1 is out of range.
         let wire = DeferredStateWire {
@@ -585,6 +700,59 @@ mod tests {
         };
         let err = DeferredState::rehydrate(&wire, &precompiles());
         assert!(matches!(err, Err(IntegrityError::BadIndex)));
+    }
+
+    #[test]
+    fn rehydrate_rejects_duplicate_leaf_digest() {
+        let leaf = test_leaf(7);
+        let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
+        let wire = DeferredStateWire {
+            leaf_tags: alloc::vec![leaf.tag, leaf.tag],
+            blocks: alloc::vec![payload, payload],
+            ..Default::default()
+        };
+        let err = DeferredState::rehydrate(&wire, &precompiles());
+        assert!(
+            matches!(err, Err(IntegrityError::DuplicateNode)),
+            "expected DuplicateNode, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rehydrate_rejects_duplicate_binary_digest() {
+        let leaf = test_leaf(7);
+        let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
+        let pred = Node::join(Uint::eq_tag(), leaf.digest(), leaf.digest());
+        let wire = DeferredStateWire {
+            leaf_tags: alloc::vec![leaf.tag],
+            blocks: alloc::vec![payload],
+            nodes: alloc::vec![
+                crate::deferred::WireNode { tag: pred.tag, lhs: 1, rhs: 1 },
+                crate::deferred::WireNode { tag: pred.tag, lhs: 1, rhs: 1 },
+            ],
+            ..Default::default()
+        };
+        let err = DeferredState::rehydrate(&wire, &precompiles());
+        assert!(
+            matches!(err, Err(IntegrityError::DuplicateNode)),
+            "expected DuplicateNode, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rehydrate_rejects_non_and_root() {
+        let leaf = test_leaf(7);
+        let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
+        let wire = DeferredStateWire {
+            leaf_tags: alloc::vec![leaf.tag],
+            blocks: alloc::vec![payload],
+            ..Default::default()
+        };
+        let err = DeferredState::rehydrate(&wire, &precompiles());
+        assert!(
+            matches!(err, Err(IntegrityError::NonAndNode)),
+            "expected NonAndNode, got {err:?}"
+        );
     }
 
     #[test]
@@ -655,6 +823,45 @@ mod tests {
         let rehydrated = DeferredState::rehydrate(&wire, &schema).unwrap();
         assert_eq!(rehydrated.root(), original.root());
         assert_eq!(rehydrated.statements(), original.statements());
+    }
+
+    #[test]
+    fn rehydrate_rejects_noncanonical_leaf_order() {
+        let mut state = DeferredState::new();
+        let schema = precompiles();
+
+        let a = state.register(&schema, test_leaf(3)).unwrap();
+        let pred_a = Node::join(Uint::eq_tag(), a, a);
+        let pred_a_digest = state.register(&schema, pred_a.clone()).unwrap();
+        state.evaluate_node(&schema, pred_a).unwrap();
+        let root_a = Node::and(state.root(), pred_a_digest).digest();
+        state.log(pred_a_digest, root_a).unwrap();
+
+        let b = state.register(&schema, test_leaf(4)).unwrap();
+        let pred_b = Node::join(Uint::eq_tag(), b, b);
+        let pred_b_digest = state.register(&schema, pred_b.clone()).unwrap();
+        state.evaluate_node(&schema, pred_b).unwrap();
+        let root_b = Node::and(state.root(), pred_b_digest).digest();
+        state.log(pred_b_digest, root_b).unwrap();
+
+        let mut wire = state.to_wire(&schema).unwrap();
+        assert_eq!(wire.leaf_tags.len(), 2, "fixture should have two leaves");
+        assert_eq!(wire.nodes.len(), 4, "fixture should have two predicates and two ANDs");
+
+        wire.blocks.swap(0, 1);
+        // Preserve the same reconstructed DAG/root under the swapped leaf section by updating the
+        // predicate indices. The result is semantically valid but not the canonical serializer's
+        // first-visit order.
+        wire.nodes[0].lhs = 2;
+        wire.nodes[0].rhs = 2;
+        wire.nodes[2].lhs = 1;
+        wire.nodes[2].rhs = 1;
+
+        let err = DeferredState::rehydrate(&wire, &schema);
+        assert!(
+            matches!(err, Err(IntegrityError::NonCanonicalWire)),
+            "expected NonCanonicalWire, got {err:?}"
+        );
     }
 
     #[test]
