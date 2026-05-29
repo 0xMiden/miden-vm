@@ -17,7 +17,6 @@ exclude.workspace = true
 [features]
 default = ["std"]
 std = [
-    "aho-corasick/std",
     "miden-assembly-syntax-cst/std",
     "miden-core/std",
     "miden-debug-types/std",
@@ -45,7 +44,6 @@ miden-utils-diagnostics.workspace = true
 midenc-hir-type = { workspace = true, features = ["serde"] }
 
 # External dependencies
-aho-corasick = { version = "1.1", default-features = false }
 env_logger = { workspace = true, optional = true }
 log.workspace = true
 proptest = { workspace = true, optional = true }

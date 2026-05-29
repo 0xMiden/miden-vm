@@ -1334,7 +1334,6 @@ dependencies = [
 name = "miden-assembly-syntax"
 version = "0.24.0"
 dependencies = [
- "aho-corasick",
  "env_logger",
  "log",
  "miden-assembly-syntax-cst",

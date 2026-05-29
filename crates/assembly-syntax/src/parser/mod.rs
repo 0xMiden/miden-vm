@@ -1,10 +1,8 @@
 mod cst;
 mod error;
-mod lexer;
-mod scanner;
 #[cfg(test)]
 mod tests;
-mod token;
+mod value;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
@@ -14,9 +12,7 @@ use miden_utils_diagnostics::Report;
 pub use self::{
     cst::parse_inline_masm,
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
-    lexer::Lexer,
-    scanner::Scanner,
-    token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
+    value::{IntValue, PushValue, WordValue},
 };
 use crate::{Path, ast, sema};
 

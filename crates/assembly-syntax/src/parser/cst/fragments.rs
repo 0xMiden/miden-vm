@@ -1212,7 +1212,7 @@ pub(super) fn parse_numeric_token(
         });
     }
 
-    Ok(ParsedNumeric::Int(super::super::lexer::shrink_u64_hex(value)))
+    Ok(ParsedNumeric::Int(super::super::value::shrink_u64_hex(value)))
 }
 
 /// Parses a hexadecimal literal body after the radix prefix has been removed.
@@ -1235,7 +1235,7 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
                     kind: LiteralErrorKind::FeltOverflow,
                 });
             }
-            Ok(ParsedNumeric::Int(super::super::lexer::shrink_u64_hex(value)))
+            Ok(ParsedNumeric::Int(super::super::value::shrink_u64_hex(value)))
         },
         64 => {
             let mut word = [Felt::ZERO; 4];
