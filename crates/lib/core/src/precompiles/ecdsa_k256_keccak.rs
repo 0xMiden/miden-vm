@@ -208,7 +208,7 @@ mod tests {
         let (pk_bytes, sig_bytes) = ecdsa_keypair_and_sig(digest);
         let chunks = pack_ecdsa(&pk_bytes, &digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let result = state.evaluate(&precompiles, node).unwrap();
+        let result = state.evaluate_node(&precompiles, node).unwrap();
         assert!(result.is_true_node());
     }
 
@@ -220,7 +220,7 @@ mod tests {
         sig_bytes[0] ^= 0xff;
         let chunks = pack_ecdsa(&pk_bytes, &digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
@@ -233,7 +233,7 @@ mod tests {
         wrong_digest[0] ^= 0xff;
         let chunks = pack_ecdsa(&pk_bytes, &wrong_digest, &sig_bytes);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
@@ -249,7 +249,7 @@ mod tests {
         buf[80..145].copy_from_slice(&sig_bytes);
         let chunks = pack_chunks(&buf);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
@@ -265,7 +265,7 @@ mod tests {
         buf[150] = 0xaa;
         let chunks = pack_chunks(&buf);
         let node = EcdsaK256KeccakPrecompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 }

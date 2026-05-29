@@ -9,7 +9,7 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
-use miden_core::deferred::DeferredState;
+use miden_core::deferred::{DeferredState, PrecompileRegistry};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -53,10 +53,14 @@ pub struct TraceBuildInputs {
 pub(crate) struct TraceBuildOutput {
     stack_outputs: StackOutputs,
     deferred_state: DeferredState,
+    precompiles: PrecompileRegistry,
 }
 
 impl TraceBuildOutput {
-    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
+    fn from_execution_output(
+        execution_output: ExecutionOutput,
+        precompiles: PrecompileRegistry,
+    ) -> Self {
         let ExecutionOutput {
             stack,
             advice: _,
@@ -64,7 +68,11 @@ impl TraceBuildOutput {
             deferred_state,
         } = execution_output;
 
-        Self { stack_outputs: stack, deferred_state }
+        Self {
+            stack_outputs: stack,
+            deferred_state,
+            precompiles,
+        }
     }
 }
 
@@ -72,9 +80,10 @@ impl TraceBuildInputs {
     pub(crate) fn from_execution(
         program: &Program,
         execution_output: ExecutionOutput,
+        precompiles: PrecompileRegistry,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
+        let trace_output = TraceBuildOutput::from_execution_output(execution_output, precompiles);
         let program_info = program.to_info();
         Self {
             trace_output,
@@ -92,6 +101,11 @@ impl TraceBuildInputs {
     /// root).
     pub fn deferred_state(&self) -> &DeferredState {
         &self.trace_output.deferred_state
+    }
+
+    /// Returns the deferred precompile registry installed on the host during execution.
+    pub fn precompiles(&self) -> &PrecompileRegistry {
+        &self.trace_output.precompiles
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -129,6 +143,7 @@ pub struct ExecutionTrace {
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     deferred_state: DeferredState,
+    precompiles: PrecompileRegistry,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -142,13 +157,18 @@ impl ExecutionTrace {
         main_trace: MainTrace,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
-        let TraceBuildOutput { stack_outputs, deferred_state } = trace_output;
+        let TraceBuildOutput {
+            stack_outputs,
+            deferred_state,
+            precompiles,
+        } = trace_output;
 
         Self {
             main_trace,
             program_info,
             stack_outputs,
             deferred_state,
+            precompiles,
             trace_len_summary,
         }
     }
@@ -200,6 +220,11 @@ impl ExecutionTrace {
     /// root).
     pub fn deferred_state(&self) -> &DeferredState {
         &self.deferred_state
+    }
+
+    /// Returns the deferred precompile registry installed on the host during execution.
+    pub fn precompiles(&self) -> &PrecompileRegistry {
+        &self.precompiles
     }
 
     /// Returns the owned execution outputs required for proof packaging.

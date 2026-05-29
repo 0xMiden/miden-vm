@@ -195,7 +195,7 @@ mod tests {
         let (pk, k_digest, sig) = eddsa_valid_triple_for_word(eddsa_test_word(1));
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let result = state.evaluate(&precompiles, node).unwrap();
+        let result = state.evaluate_node(&precompiles, node).unwrap();
         assert!(result.is_true_node());
     }
 
@@ -206,7 +206,7 @@ mod tests {
         sig[0] ^= 0xff;
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
@@ -217,7 +217,7 @@ mod tests {
         k_digest[0] ^= 0xff;
         let chunks = pack_eddsa(&pk, &k_digest, &sig);
         let node = EddsaEd25519Precompile::verify_node(chunks);
-        let err = state.evaluate(&precompiles, node);
+        let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 }

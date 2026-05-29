@@ -259,7 +259,7 @@ fn test_poseidon2_recursive_verify_with_deferred_root() {
 fn test_verify_rejects_tampered_deferred_wire() {
     use miden_core::{
         Felt, ZERO,
-        deferred::{DeferredStateWire, Tag, WireBody, WireEntry},
+        deferred::{DeferredStateWire, Tag},
     };
     use miden_verifier::VerificationError;
 
@@ -294,10 +294,9 @@ fn test_verify_rejects_tampered_deferred_wire() {
         args: [ZERO; 3],
     };
     proof.deferred_state = DeferredStateWire {
-        entries: alloc::vec![WireEntry {
-            tag: bogus_tag,
-            body: WireBody::Value([ZERO; 8]),
-        }],
+        leaf_tags: alloc::vec![bogus_tag],
+        blocks: alloc::vec![[ZERO; 8]],
+        ..Default::default()
     };
 
     let precompiles = CoreLibrary::default().precompiles();
@@ -515,10 +514,9 @@ mod fast_parallel {
         )
         .expect("Proving failed");
 
-        let deferred_state = trace.deferred_state().clone();
+        let deferred_wire = trace.deferred_state().to_wire(trace.precompiles()).unwrap();
 
-        let proof =
-            ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_state.to_wire());
+        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, deferred_wire);
 
         // Verify the proof
         let precompiles = CoreLibrary::default().precompiles();

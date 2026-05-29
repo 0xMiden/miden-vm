@@ -11,7 +11,6 @@ use miden_core::{
     deferred::DeferredState,
     mast::{ExecutableMastForest, MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
-    precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
@@ -139,10 +138,6 @@ pub struct FastProcessor {
     /// the size of core trace fragments during execution, etc.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
-    pc_transcript: PrecompileTranscript,
-
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
 
@@ -159,7 +154,6 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript: self.pc_transcript,
             deferred_state: self.deferred_state,
         }
     }
@@ -299,7 +293,6 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             options,
-            pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
@@ -482,10 +475,9 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript.
-    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
-        (self.advice, self.memory, self.pc_transcript)
+    /// Consumes the processor and returns the advice provider, memory, and deferred state.
+    pub fn into_parts(self) -> (AdviceProvider, Memory, DeferredState) {
+        (self.advice, self.memory, self.deferred_state)
     }
 
     /// Returns a reference to the execution options.
@@ -751,13 +743,12 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile transcript at the end of execution.
+/// memory, and deferred state at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_transcript: PrecompileTranscript,
     pub deferred_state: DeferredState,
 }
 

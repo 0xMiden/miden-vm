@@ -203,7 +203,7 @@ mod tests {
         // Empty input still needs one chunk (empty chunk bodies are banned); a 0-byte preimage is
         // a single zero chunk.
         let node = Sha512Precompile::preimage_node(0, vec![[ZERO; 8]]);
-        let canonical = state.evaluate(&precompiles, node).unwrap();
+        let canonical = state.evaluate_node(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
@@ -214,7 +214,7 @@ mod tests {
         let expected = sha512_known(bytes);
         let chunks = pack_chunks(bytes);
         let node = Sha512Precompile::preimage_node(bytes.len() as u32, chunks);
-        let canonical = state.evaluate(&precompiles, node).unwrap();
+        let canonical = state.evaluate_node(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
@@ -225,7 +225,7 @@ mod tests {
         let expected = sha512_known(&bytes);
         let chunks = pack_chunks(&bytes);
         let node = Sha512Precompile::preimage_node(bytes.len() as u32, chunks);
-        let canonical = state.evaluate(&precompiles, node).unwrap();
+        let canonical = state.evaluate_node(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
     }
 
@@ -235,8 +235,9 @@ mod tests {
         let felts: [Felt; 16] = core::array::from_fn(|i| Felt::from_u32(i as u32));
         let leaf = Sha512Precompile::digest_node(felts);
         let leaf_digest = state.register(&precompiles, leaf.clone()).unwrap();
-        let canonical =
-            state.evaluate(&precompiles, state.get(&leaf_digest).unwrap().clone()).unwrap();
+        let canonical = state
+            .evaluate_node(&precompiles, state.get(&leaf_digest).unwrap().clone())
+            .unwrap();
         assert_eq!(canonical, leaf);
     }
 
@@ -250,7 +251,7 @@ mod tests {
             .unwrap();
         let leaf_digest = state.register(&precompiles, sha512_known(bytes)).unwrap();
         let eq = Sha512Precompile::eq_node(preimage_digest, leaf_digest);
-        let result = state.evaluate(&precompiles, eq).unwrap();
+        let result = state.evaluate_node(&precompiles, eq).unwrap();
         assert!(result.is_true_node());
     }
 
@@ -265,7 +266,7 @@ mod tests {
         let wrong_leaf = Sha512Precompile::digest_node([Felt::from_u32(0xdead); 16]);
         let wrong_digest = state.register(&precompiles, wrong_leaf).unwrap();
         let eq = Sha512Precompile::eq_node(preimage_digest, wrong_digest);
-        let err = state.evaluate(&precompiles, eq);
+        let err = state.evaluate_node(&precompiles, eq);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 }

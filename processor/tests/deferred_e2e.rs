@@ -471,6 +471,7 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
         .expect("registration");
 
     let leaf = arith_leaf(42);
+    let leaf_digest = leaf.digest();
 
     let mut src = String::from("begin\n");
     // Legacy event: push event_id, emit, drop.
@@ -489,7 +490,8 @@ fn legacy_event_handler_still_works_with_deferred_infrastructure() {
         .expect("execution must succeed");
 
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert_eq!(output.deferred_state.nodes().len(), 1);
+    assert!(output.deferred_state.contains(&leaf_digest));
+    assert_eq!(output.deferred_state.nodes().len(), 2); // TRUE plus the registered leaf.
 }
 
 // CHUNK REGISTER E2E
