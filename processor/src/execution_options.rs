@@ -20,6 +20,9 @@ pub struct ExecutionOptions {
     max_adv_map_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
+    /// Maximum approximate number of field elements allowed in deferred-state nodes and eval
+    /// memos.
+    max_deferred_elements: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
@@ -37,6 +40,7 @@ impl Default for ExecutionOptions {
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         }
@@ -66,6 +70,9 @@ impl ExecutionOptions {
     /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
     /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
+
+    /// Default maximum approximate number of field elements allowed in deferred state.
+    pub const DEFAULT_MAX_DEFERRED_ELEMENTS: usize = 1 << 20;
 
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
@@ -135,6 +142,7 @@ impl ExecutionOptions {
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_deferred_elements: Self::DEFAULT_MAX_DEFERRED_ELEMENTS,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         })
@@ -196,6 +204,12 @@ impl ExecutionOptions {
         self.max_hash_len_bytes
     }
 
+    /// Returns the maximum approximate number of field elements allowed in deferred state.
+    #[inline]
+    pub fn max_deferred_elements(&self) -> usize {
+        self.max_deferred_elements
+    }
+
     /// Sets the maximum number of field elements allowed in a single live advice map value.
     pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
         self.max_adv_map_value_size = size;
@@ -211,6 +225,12 @@ impl ExecutionOptions {
     /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
     pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
         self.max_hash_len_bytes = size;
+        self
+    }
+
+    /// Sets the maximum approximate number of field elements allowed in deferred state.
+    pub fn with_max_deferred_elements(mut self, size: usize) -> Self {
+        self.max_deferred_elements = size;
         self
     }
 

@@ -13,12 +13,18 @@ use alloc::{
 };
 use core::iter::zip;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{
     Chunk, DeferredState, Digest, Node, NodeType, Payload, PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
     Felt, ZERO,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
 };
 
 // CONSTANTS
@@ -36,6 +42,7 @@ pub const TRUE_INDEX: u32 = 0;
 /// for the implicit TRUE node. During rehydration, binary node `i` may reference [`TRUE_INDEX`],
 /// any leaf, any chunk node, or an earlier binary node.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WireNode {
     pub tag: Tag,
     pub lhs: u32,
@@ -67,6 +74,7 @@ pub struct WireNode {
 /// digest, all entries must be reachable from the transcript root under registry/framework join
 /// semantics, and reserializing the rehydrated state must produce the same wire structure.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {
     pub leaf_tags: Vec<Tag>,
     pub chunk_tags: Vec<Tag>,
@@ -106,18 +114,11 @@ impl DeferredStateWire {
 
     fn write_tag<W: ByteWriter>(tag: Tag, target: &mut W) {
         // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]`.
-        for felt in &tag.as_word() {
-            felt.write_into(target);
-        }
+        tag.write_into(target);
     }
 
     fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> {
-        Ok(Tag::from_word([
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-            Felt::read_from(source)?,
-        ]))
+        Tag::read_from(source)
     }
 
     fn write_block<W: ByteWriter>(block: &Chunk, target: &mut W) {
@@ -593,6 +594,22 @@ impl Deserializable for WireNode {
         let rhs = source.read_u32()?;
         Ok(Self { tag, lhs, rhs })
     }
+
+    fn min_serialized_size() -> usize {
+        Tag::min_serialized_size() + 2 * core::mem::size_of::<u32>()
+    }
+}
+
+struct WireBlock(Chunk);
+
+impl Deserializable for WireBlock {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        DeferredStateWire::read_block(source).map(Self)
+    }
+
+    fn min_serialized_size() -> usize {
+        8 * Felt::min_serialized_size()
+    }
 }
 
 impl Serializable for DeferredStateWire {
@@ -624,27 +641,20 @@ impl Deserializable for DeferredStateWire {
         let block_count = source.read_usize()?;
         let node_count = source.read_usize()?;
 
-        let mut leaf_tags = Vec::with_capacity(leaf_count);
-        for _ in 0..leaf_count {
-            leaf_tags.push(Self::read_tag(source)?);
-        }
-
-        let mut chunk_tags = Vec::with_capacity(chunk_count);
-        for _ in 0..chunk_count {
-            chunk_tags.push(Self::read_tag(source)?);
-        }
-
-        let mut blocks = Vec::with_capacity(block_count);
-        for _ in 0..block_count {
-            blocks.push(Self::read_block(source)?);
-        }
-
-        let mut nodes = Vec::with_capacity(node_count);
-        for _ in 0..node_count {
-            nodes.push(WireNode::read_from(source)?);
-        }
+        let leaf_tags = source.read_many_iter::<Tag>(leaf_count)?.collect::<Result<_, _>>()?;
+        let chunk_tags = source.read_many_iter::<Tag>(chunk_count)?.collect::<Result<_, _>>()?;
+        let blocks = source
+            .read_many_iter::<WireBlock>(block_count)?
+            .map(|block| block.map(|block| block.0))
+            .collect::<Result<_, _>>()?;
+        let nodes = source.read_many_iter::<WireNode>(node_count)?.collect::<Result<_, _>>()?;
 
         Ok(Self { leaf_tags, chunk_tags, blocks, nodes })
+    }
+
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), bytes.len());
+        Self::read_from(&mut reader)
     }
 }
 
@@ -703,8 +713,10 @@ pub enum IntegrityError {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::*;
-    use crate::Felt;
+    use crate::{Felt, serde::ByteWriter};
 
     fn felts(seed: u64) -> [Felt; 8] {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
@@ -728,5 +740,59 @@ mod tests {
 
         let empty = DeferredStateWire::default();
         assert_eq!(DeferredStateWire::read_from_bytes(&empty.to_bytes()).unwrap(), empty);
+    }
+
+    #[test]
+    fn wire_deserializes_many_minimal_section_entries() {
+        let leaf_tags: Vec<Tag> =
+            (0..64).map(|i| Tag::from_word(felts(i)[..4].try_into().unwrap())).collect();
+        let chunk_tags: Vec<Tag> =
+            (64..128).map(|i| Tag::from_word(felts(i)[..4].try_into().unwrap())).collect();
+        let blocks: Vec<Chunk> = (0..128).map(felts).collect();
+        let nodes: Vec<WireNode> = (0..64)
+            .map(|i| WireNode {
+                tag: Tag::from_word(felts(128 + i)[..4].try_into().unwrap()),
+                lhs: TRUE_INDEX,
+                rhs: TRUE_INDEX,
+            })
+            .collect();
+        let wire = DeferredStateWire { leaf_tags, chunk_tags, blocks, nodes };
+
+        let decoded = DeferredStateWire::read_from_bytes(&wire.to_bytes()).unwrap();
+        assert_eq!(decoded, wire);
+    }
+
+    fn encoded_counts(
+        leaf_count: usize,
+        chunk_count: usize,
+        block_count: usize,
+        node_count: usize,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.write_usize(leaf_count);
+        bytes.write_usize(chunk_count);
+        bytes.write_usize(block_count);
+        bytes.write_usize(node_count);
+        bytes
+    }
+
+    #[test]
+    fn wire_rejects_over_budget_leaf_tag_count() {
+        assert!(DeferredStateWire::read_from_bytes(&encoded_counts(usize::MAX, 0, 0, 0)).is_err());
+    }
+
+    #[test]
+    fn wire_rejects_over_budget_chunk_tag_count() {
+        assert!(DeferredStateWire::read_from_bytes(&encoded_counts(0, usize::MAX, 0, 0)).is_err());
+    }
+
+    #[test]
+    fn wire_rejects_over_budget_block_count() {
+        assert!(DeferredStateWire::read_from_bytes(&encoded_counts(0, 0, usize::MAX, 0)).is_err());
+    }
+
+    #[test]
+    fn wire_rejects_over_budget_node_count() {
+        assert!(DeferredStateWire::read_from_bytes(&encoded_counts(0, 0, 0, usize::MAX)).is_err());
     }
 }

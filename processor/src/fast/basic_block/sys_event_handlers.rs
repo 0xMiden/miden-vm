@@ -37,6 +37,8 @@ pub enum SystemEventError {
     Memory(#[from] MemoryError),
     #[error(transparent)]
     Deferred(#[from] PrecompileError),
+    #[error("deferred state size {num_elements} exceeds maximum {max}")]
+    DeferredStateTooLarge { num_elements: usize, max: usize },
 }
 
 // SYSTEM EVENT HANDLERS
