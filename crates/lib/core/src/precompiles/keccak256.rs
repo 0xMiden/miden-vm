@@ -94,12 +94,12 @@ impl Precompile for Keccak256Precompile {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
         match disc {
-            Self::PREIMAGE_TAG_ID => {
+            Self::PREIMAGE_TAG_ID if args[2] == ZERO => {
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
                 Some(NodeType::Chunks(n_chunks(n_bytes)))
             },
-            Self::DIGEST_TAG_ID => Some(NodeType::Value),
-            Self::EQ_TAG_ID => Some(NodeType::Join),
+            Self::DIGEST_TAG_ID if args[1] == ZERO && args[2] == ZERO => Some(NodeType::Value),
+            Self::EQ_TAG_ID if args[1] == ZERO && args[2] == ZERO => Some(NodeType::Join),
             _ => None,
         }
     }
@@ -204,6 +204,47 @@ mod tests {
         assert!(info.is_none());
     }
 
+    #[test]
+    fn decode_rejects_nonzero_unused_args() {
+        assert!(
+            Keccak256Precompile
+                .decode([
+                    Felt::from_u32(Keccak256Precompile::PREIMAGE_TAG_ID),
+                    Felt::from_u32(65),
+                    Felt::from_u32(1),
+                ])
+                .is_none()
+        );
+        assert!(
+            Keccak256Precompile
+                .decode([
+                    Felt::from_u32(Keccak256Precompile::DIGEST_TAG_ID),
+                    Felt::from_u32(1),
+                    ZERO,
+                ])
+                .is_none()
+        );
+        assert!(
+            Keccak256Precompile
+                .decode([
+                    Felt::from_u32(Keccak256Precompile::DIGEST_TAG_ID),
+                    ZERO,
+                    Felt::from_u32(1),
+                ])
+                .is_none()
+        );
+        assert!(
+            Keccak256Precompile
+                .decode([Felt::from_u32(Keccak256Precompile::EQ_TAG_ID), Felt::from_u32(1), ZERO,])
+                .is_none()
+        );
+        assert!(
+            Keccak256Precompile
+                .decode([Felt::from_u32(Keccak256Precompile::EQ_TAG_ID), ZERO, Felt::from_u32(1),])
+                .is_none()
+        );
+    }
+
     fn pack_chunks(bytes: &[u8]) -> Vec<[Felt; 8]> {
         let felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(8);
@@ -263,6 +304,16 @@ mod tests {
         let (precompiles, mut state) = fresh_state();
         let chunks = vec![[Felt::from_u32(0); 8]];
         let node = Keccak256Precompile::preimage_node(100, chunks);
+        let err = state.evaluate_node(&precompiles, node);
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
+    }
+
+    #[test]
+    fn preimage_rejects_nonzero_trailing_padding() {
+        let (precompiles, mut state) = fresh_state();
+        let mut chunks = pack_chunks(&[1, 2, 3]);
+        chunks[0][0] = Felt::from_u32(u32::from_le_bytes([1, 2, 3, 0xaa]));
+        let node = Keccak256Precompile::preimage_node(3, chunks);
         let err = state.evaluate_node(&precompiles, node);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }

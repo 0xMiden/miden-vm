@@ -85,15 +85,15 @@ impl Precompile for Sha512Precompile {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
         match disc {
-            Self::PREIMAGE_TAG_ID => {
+            Self::PREIMAGE_TAG_ID if args[2] == ZERO => {
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
                 Some(NodeType::Chunks(n_chunks(n_bytes)))
             },
             // 64-byte SHA-512 digest packed as 16 u32 felts → 2 chunks of 8 felts.
-            Self::DIGEST_TAG_ID => {
+            Self::DIGEST_TAG_ID if args[1] == ZERO && args[2] == ZERO => {
                 Some(NodeType::Chunks(NonZeroU32::new(2).expect("2 is nonzero")))
             },
-            Self::EQ_TAG_ID => Some(NodeType::Join),
+            Self::EQ_TAG_ID if args[1] == ZERO && args[2] == ZERO => Some(NodeType::Join),
             _ => None,
         }
     }
@@ -176,6 +176,39 @@ mod tests {
         assert!(matches!(info, NodeType::Join));
     }
 
+    #[test]
+    fn decode_rejects_nonzero_unused_args() {
+        assert!(
+            Sha512Precompile
+                .decode([
+                    Felt::from_u32(Sha512Precompile::PREIMAGE_TAG_ID),
+                    Felt::from_u32(100),
+                    Felt::from_u32(1),
+                ])
+                .is_none()
+        );
+        assert!(
+            Sha512Precompile
+                .decode([Felt::from_u32(Sha512Precompile::DIGEST_TAG_ID), Felt::from_u32(1), ZERO])
+                .is_none()
+        );
+        assert!(
+            Sha512Precompile
+                .decode([Felt::from_u32(Sha512Precompile::DIGEST_TAG_ID), ZERO, Felt::from_u32(1)])
+                .is_none()
+        );
+        assert!(
+            Sha512Precompile
+                .decode([Felt::from_u32(Sha512Precompile::EQ_TAG_ID), Felt::from_u32(1), ZERO])
+                .is_none()
+        );
+        assert!(
+            Sha512Precompile
+                .decode([Felt::from_u32(Sha512Precompile::EQ_TAG_ID), ZERO, Felt::from_u32(1)])
+                .is_none()
+        );
+    }
+
     fn pack_chunks(bytes: &[u8]) -> Vec<[Felt; 8]> {
         let felts = bytes_to_packed_u32_elements(bytes);
         let n_chunks = felts.len().div_ceil(8);
@@ -227,6 +260,16 @@ mod tests {
         let node = Sha512Precompile::preimage_node(bytes.len() as u32, chunks);
         let canonical = state.evaluate_node(&precompiles, node).unwrap();
         assert_eq!(canonical, expected);
+    }
+
+    #[test]
+    fn preimage_rejects_nonzero_trailing_padding() {
+        let (precompiles, mut state) = fresh_state();
+        let mut chunks = pack_chunks(&[1, 2, 3]);
+        chunks[0][0] = Felt::from_u32(u32::from_le_bytes([1, 2, 3, 0xaa]));
+        let node = Sha512Precompile::preimage_node(3, chunks);
+        let err = state.evaluate_node(&precompiles, node);
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Shared chunk ↔ byte codec for the core precompiles. Each precompile's `reduce` consumes its
 //! chunk body as a flat byte buffer; the framework guarantees the chunk count via `decode`,
-//! and this codec strips the trailing zero pad back down to the declared `n_bytes`.
+//! and this codec strips the trailing zero pad back down to the declared `n_bytes` after
+//! validating that the discarded pad bytes are zero.
 
 use alloc::vec::Vec;
 use core::num::NonZeroU32;
@@ -23,7 +24,8 @@ pub fn n_chunks(n_bytes: u32) -> NonZeroU32 {
 /// `PrecompileError::InvalidNode` if any felt holds a value larger than `u32::MAX`.
 ///
 /// The caller-supplied `n_bytes` may be shorter than `chunks.len() * BYTES_PER_CHUNK as usize`;
-/// the trailing bytes are zero-pad and are stripped from the output.
+/// the trailing bytes are zero-pad and are stripped from the output after validating they are
+/// zero.
 pub fn chunks_to_bytes(chunks: &[[Felt; 8]], n_bytes: usize) -> Result<Vec<u8>, PrecompileError> {
     let chunk_bytes = BYTES_PER_CHUNK as usize;
     if n_bytes > chunks.len() * chunk_bytes {
@@ -36,6 +38,9 @@ pub fn chunks_to_bytes(chunks: &[[Felt; 8]], n_bytes: usize) -> Result<Vec<u8>, 
                 u32::try_from(felt.as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
             bytes.extend_from_slice(&limb.to_le_bytes());
         }
+    }
+    if bytes[n_bytes..].iter().any(|&b| b != 0) {
+        return Err(PrecompileError::InvalidNode);
     }
     bytes.truncate(n_bytes);
     Ok(bytes)

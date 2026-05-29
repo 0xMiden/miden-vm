@@ -68,7 +68,7 @@ impl Precompile for EddsaEd25519Precompile {
         let disc = u32::try_from(args[0].as_canonical_u64()).ok()?;
         match disc {
             // pk[8] || k_digest[16] || sig[16] = 40 felts = 5 chunks.
-            Self::VERIFY_TAG_ID => {
+            Self::VERIFY_TAG_ID if args[1] == ZERO && args[2] == ZERO => {
                 Some(NodeType::Chunks(NonZeroU32::new(5).expect("5 is nonzero")))
             },
             _ => None,
@@ -160,6 +160,28 @@ mod tests {
             .decode([Felt::from_u32(EddsaEd25519Precompile::VERIFY_TAG_ID), ZERO, ZERO])
             .unwrap();
         assert!(matches!(info, NodeType::Chunks(n) if n.get() == 5));
+    }
+
+    #[test]
+    fn decode_rejects_nonzero_unused_args() {
+        assert!(
+            EddsaEd25519Precompile
+                .decode([
+                    Felt::from_u32(EddsaEd25519Precompile::VERIFY_TAG_ID),
+                    Felt::from_u32(1),
+                    ZERO,
+                ])
+                .is_none()
+        );
+        assert!(
+            EddsaEd25519Precompile
+                .decode([
+                    Felt::from_u32(EddsaEd25519Precompile::VERIFY_TAG_ID),
+                    ZERO,
+                    Felt::from_u32(1),
+                ])
+                .is_none()
+        );
     }
 
     fn pack_eddsa(pk: &[u8], k_digest: &[u8], sig: &[u8]) -> Vec<[Felt; 8]> {
