@@ -1,6 +1,6 @@
-//! Validated multi-AIR statements: [`Statement`] (per-proof inputs over a
-//! [`MultiAir`]) and [`ProverStatement`] (a `Statement` plus per-AIR main
-//! traces). Both validate their inputs on construction.
+//! Validated runtime inputs for trusted multi-AIR definitions: [`Statement`]
+//! holds per-proof caller inputs, and [`ProverStatement`] adds per-AIR main
+//! traces.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -21,7 +21,7 @@ use crate::{
 
 /// Validated per-proof inputs over a [`MultiAir`]: `air_inputs` and `aux_inputs`.
 ///
-/// Holding one guarantees the input-length checks in [`Statement::new`] passed.
+/// Holding one guarantees the caller-input length checks in [`Statement::new`] passed.
 /// The `MultiAir` itself is trusted application code; run
 /// [`crate::debug::assert_multi_air_valid`] in tests/setup to check structural
 /// invariants such as non-empty `airs()`, shared public-value counts, and
@@ -44,12 +44,13 @@ where
     EF: ExtensionField<F>,
     MA: MultiAir<F, EF>,
 {
-    /// Construct a [`Statement`], validating `air_inputs` and `aux_inputs` lengths
+    /// Construct a [`Statement`], validating caller-supplied input lengths
     /// against `multi_air`.
     ///
     /// This assumes `multi_air` satisfies the structural contract checked by
-    /// [`crate::debug::assert_multi_air_valid`]; malformed AIRs may panic in
-    /// trusted helper methods such as [`MultiAir::num_air_inputs`].
+    /// [`crate::debug::assert_multi_air_valid`]; malformed AIR definitions (for
+    /// example an empty [`MultiAir::airs`] collection) may panic in trusted
+    /// helper methods such as [`MultiAir::num_air_inputs`].
     pub fn new(
         multi_air: MA,
         air_inputs: Vec<F>,
@@ -108,9 +109,10 @@ where
 
     /// Absorb statement-owned data into the Fiat-Shamir challenger via [`MultiAir::observe`].
     ///
-    /// The protocol observes `log_trace_heights` separately after this call, but
-    /// passes them through so custom `MultiAir` bindings can depend on trace
-    /// heights or prover-selected trace ordering when needed.
+    /// The protocol separately observes the instance count and
+    /// `log_trace_heights` in instance order after this call. Heights are passed
+    /// here only so custom `MultiAir` bindings can include height-dependent
+    /// statement data.
     pub fn observe<C: CanObserve<F>>(&self, challenger: &mut C, log_trace_heights: &[u8]) {
         self.multi_air
             .observe(challenger, &self.air_inputs, &self.aux_inputs, log_trace_heights);

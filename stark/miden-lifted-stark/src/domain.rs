@@ -635,13 +635,12 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 /// We commit to Q(X) by splitting it into D chunks of degree < N; D = M − 1
 /// suffices, rounded up to a power of two.
 ///
-/// # Degenerate AIRs
+/// # Low symbolic degrees
 ///
-/// A trivial or linear AIR — combined degree `< 2`, whose constraints all
-/// vanish under `Z_H` — is **supported, not rejected**. The prover and verifier
-/// clamp the quotient degree to `D = 2` (`log_quotient_degree ≥ 1`) and proceed
-/// normally. The air crate imposes no minimum and applies no clamping; this is
-/// the single place the clamp lives.
+/// Quotient construction still needs at least one chunk. The prover and
+/// verifier therefore clamp the derived quotient degree to `D = 2`
+/// (`log_quotient_degree ≥ 1`). The air crate reports raw symbolic degrees;
+/// this STARK-layer helper applies the protocol clamp.
 pub fn log_quotient_degree<F, EF, A>(air: &A) -> u8
 where
     F: Field,

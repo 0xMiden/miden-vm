@@ -13,9 +13,9 @@
 //! prover module-level docs for the full binding contract and recommended
 //! pattern.
 //!
-//! The proof's per-AIR log trace heights are carried on [`StarkProof`] (in
-//! instance order) and observed into the challenger by [`verify`] at the
-//! protocol layer. Callers must not pre-observe them.
+//! The proof's instance count and per-AIR log trace heights are carried on
+//! [`StarkProof`] (in instance order) and observed into the challenger by
+//! [`verify`] at the protocol layer. Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
 //!
@@ -49,7 +49,6 @@ use miden_lifted_air::{
     BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
-use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use periodic::PeriodicPolys;
@@ -97,13 +96,14 @@ pub enum VerifierError {
 /// order, matching [`Statement::airs`]) and reconstructs the proof's AIR
 /// ordering deterministically from those heights. The caller's challenger
 /// must already be bound to protocol parameters and AIR configurations —
-/// see the prover module-level docs. The statement's inputs are absorbed
-/// internally via [`Statement::observe`].
+/// see the prover module-level docs. The statement's inputs are absorbed via
+/// [`Statement::observe`], then the proof's log trace heights are observed in
+/// instance order.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
-/// 1. Validate per-AIR contracts and observe each AIR's log trace height (instance order) into the
-///    challenger
+/// 1. Validate runtime statement/proof shape data, absorb statement-owned inputs, and observe log
+///    trace heights in instance order
 /// 2. Receive commitments and sample challenges in the same order as the prover
 /// 3. For each AIR (in proof order), evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
 /// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
@@ -155,19 +155,12 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb statement data first. Then the protocol binds each AIR's log trace
-    // height in instance order so this metadata is committed uniformly even if
-    // `MultiAir::observe` is overridden.
-    statement.observe(&mut challenger, trace_order.log_heights_instance());
-    for &log_h in trace_order.log_heights_instance() {
-        challenger.observe(F::from_u8(log_h));
-    }
+    // `Statement::observe` absorbs statement-owned inputs. The protocol then
+    // binds the instance count and each log trace height in instance order.
+    statement.observe(&mut challenger, trace_order.log_heights());
+    trace_order.observe_shape::<F, _>(&mut challenger);
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
-
-    // Clear the challenger's absorb buffer after observing instance shapes by
-    // squeezing a throwaway extension element. Must mirror the prover exactly.
-    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
@@ -330,7 +323,7 @@ where
     let aux_instance = trace_order.to_instance_order(&all_aux_values);
     let aux_views: Vec<&[EF]> = aux_instance.iter().map(Vec::as_slice).collect();
     let assertions = statement
-        .eval_external(&randomness, &aux_views, trace_order.log_heights_instance())
+        .eval_external(&randomness, &aux_views, trace_order.log_heights())
         .map_err(VerifierError::Reduction)?;
     for (k, assertion) in assertions.iter().enumerate() {
         if *assertion != EF::ZERO {

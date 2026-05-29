@@ -9,9 +9,9 @@
 //! # Fiat-Shamir / transcript binding (initial challenger state)
 //!
 //! This crate does **not** prescribe the *initial* transcript state. The caller
-//! must bind the full statement into the Fiat-Shamir challenger before calling
-//! [`prove`]. Both prover and verifier must produce identical challenger
-//! states. Concretely, the caller **MUST** observe:
+//! must bind protocol and AIR configuration data before calling [`prove`]. Both
+//! prover and verifier must produce identical challenger states. Concretely, the
+//! caller **MUST** observe:
 //!
 //! 1. **Protocol parameters** — e.g. the STARK configuration, blowup factor, and any
 //!    application-level domain separator.
@@ -24,8 +24,8 @@
 //!
 //! The proof's `air_inputs` and `aux_inputs` are absorbed automatically by
 //! [`Statement::observe`](crate::Statement::observe), followed by protocol-level
-//! absorption of each AIR's log trace height in instance order. Callers do not
-//! bind these themselves.
+//! absorption of the instance count and each AIR's log trace height in instance
+//! order. Callers do not bind these themselves.
 //!
 //! ## Recommended pattern
 //!
@@ -73,7 +73,6 @@ use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
 use miden_lifted_air::{InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
-use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use periodic::PeriodicLde;
@@ -103,7 +102,7 @@ use crate::{
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
 /// - `prover_statement`: validated statement plus per-AIR traces (instance order)
-/// - `challenger`: Fiat-Shamir challenger (statement and heights observed before use)
+/// - `challenger`: Fiat-Shamir challenger pre-bound to protocol parameters and AIR configurations
 ///
 /// # Returns
 /// `Ok(StarkOutput { digest, proof })`, or a [`ProverError`] if validation fails.
@@ -151,20 +150,12 @@ where
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
 
-    // Absorb statement data first. Then the protocol binds each AIR's log trace
-    // height in instance order so this metadata is committed uniformly even if
-    // `MultiAir::observe` is overridden.
-    statement.observe(&mut challenger, trace_order.log_heights_instance());
-    for &log_h in trace_order.log_heights_instance() {
-        challenger.observe(F::from_u8(log_h));
-    }
+    // `Statement::observe` absorbs statement-owned inputs. The protocol then
+    // binds the instance count and each log trace height in instance order.
+    statement.observe(&mut challenger, trace_order.log_heights());
+    trace_order.observe_shape::<F, _>(&mut challenger);
 
     let mut channel = ProverTranscript::new(challenger);
-
-    // Clear the challenger's absorb buffer after observing instance shapes by
-    // squeezing a throwaway extension element. This guarantees later sampled
-    // challenges depend on all prior inputs regardless of sponge state.
-    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
 
     // Infer per-AIR quotient degrees from symbolic analysis (per-AIR optimization).
     let log_quotient_degrees: Vec<u8> = proof_ordered
@@ -232,7 +223,7 @@ where
     // verifier-side sanity check.
     let aux_views: Vec<&[EF]> = all_aux_values.iter().map(Vec::as_slice).collect();
     let assertions = statement
-        .eval_external(&randomness, &aux_views, trace_order.log_heights_instance())
+        .eval_external(&randomness, &aux_views, trace_order.log_heights())
         .map_err(ProverError::Reduction)?;
     for (k, assertion) in assertions.iter().enumerate() {
         if *assertion != EF::ZERO {
@@ -392,7 +383,7 @@ where
 
     let (digest, transcript) = channel.finalize();
     let proof = StarkProof {
-        log_trace_heights: trace_order.log_heights_instance().to_vec(),
+        log_trace_heights: trace_order.log_heights().to_vec(),
         transcript,
     };
     Ok(StarkOutput { digest, proof })

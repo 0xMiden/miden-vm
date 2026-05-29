@@ -13,6 +13,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use miden_lifted_air::{LiftedAir, log2_strict_u8};
+use p3_challenger::CanObserve;
 use p3_field::Field;
 use thiserror::Error;
 
@@ -30,9 +31,10 @@ use thiserror::Error;
 /// [`Self::reorder_to_proof_in_place`]) to move data between the two views.
 #[derive(Clone, Debug)]
 pub(crate) struct TraceOrder {
-    log_heights_instance: Vec<u8>,
+    /// Log trace heights in instance order.
+    log_heights: Vec<u8>,
     /// `instance_indices[j]` = instance index at proof position `j`. Length
-    /// matches `log_heights_instance`.
+    /// matches `log_heights`.
     instance_indices: Vec<u8>,
 }
 
@@ -81,20 +83,20 @@ impl TraceOrder {
     /// for the AIRs.
     pub(crate) fn from_log_heights<F, EF, A>(
         airs: &[A],
-        log_heights_instance: Vec<u8>,
+        log_heights: Vec<u8>,
     ) -> Result<Self, ShapeError>
     where
         F: Field,
         A: LiftedAir<F, EF>,
     {
-        if log_heights_instance.is_empty() {
+        if log_heights.is_empty() {
             return Err(ShapeError::Empty);
         }
-        if log_heights_instance.len() > u8::MAX as usize + 1 {
-            return Err(ShapeError::TooManyInstances { count: log_heights_instance.len() });
+        if log_heights.len() > u8::MAX as usize + 1 {
+            return Err(ShapeError::TooManyInstances { count: log_heights.len() });
         }
         let max_log = (usize::BITS - 1) as u8;
-        for (idx, &h) in log_heights_instance.iter().enumerate() {
+        for (idx, &h) in log_heights.iter().enumerate() {
             if h == 0 {
                 return Err(ShapeError::TraceHeightTooSmall { air: idx });
             }
@@ -102,13 +104,13 @@ impl TraceOrder {
                 return Err(ShapeError::LogTraceHeightTooLarge { log_h: h, max: max_log });
             }
         }
-        if airs.len() != log_heights_instance.len() {
+        if airs.len() != log_heights.len() {
             return Err(ShapeError::TraceCountMismatch {
                 airs: airs.len(),
-                heights: log_heights_instance.len(),
+                heights: log_heights.len(),
             });
         }
-        for (idx, (air, &log_h)) in airs.iter().zip(log_heights_instance.iter()).enumerate() {
+        for (idx, (air, &log_h)) in airs.iter().zip(log_heights.iter()).enumerate() {
             let trace_height = 1usize << log_h as usize;
             let max_period = air.max_periodic_length();
             if trace_height < max_period {
@@ -119,23 +121,23 @@ impl TraceOrder {
                 });
             }
         }
-        let n = log_heights_instance.len();
+        let n = log_heights.len();
         // `0..n as u8` would wrap to an empty range at the boundary n == 256
         // (`256 as u8 == 0`), which the `TooManyInstances` guard above permits.
         let mut instance_indices: Vec<u8> = (0..n).map(|i| i as u8).collect();
-        instance_indices.sort_by_key(|&i| (log_heights_instance[i as usize], i));
-        Ok(Self { log_heights_instance, instance_indices })
+        instance_indices.sort_by_key(|&i| (log_heights[i as usize], i));
+        Ok(Self { log_heights, instance_indices })
     }
 
     /// Number of AIR instances.
     pub(crate) fn len(&self) -> usize {
-        self.log_heights_instance.len()
+        self.log_heights.len()
     }
 
     /// Log trace heights in instance order. Matches
     /// [`MultiAir::airs`](miden_lifted_air::MultiAir::airs).
-    pub(crate) fn log_heights_instance(&self) -> &[u8] {
-        &self.log_heights_instance
+    pub(crate) fn log_heights(&self) -> &[u8] {
+        &self.log_heights
     }
 
     /// Instance indices in proof order: `instance_indices()[j]` is the
@@ -144,19 +146,32 @@ impl TraceOrder {
         &self.instance_indices
     }
 
+    /// Bind protocol-owned instance shape into Fiat-Shamir.
+    ///
+    /// The instance count is observed first, followed by log trace heights in
+    /// instance order. Proof order is derived deterministically from these
+    /// heights, so it is not observed separately.
+    pub(crate) fn observe_shape<F, C>(&self, challenger: &mut C)
+    where
+        F: Field,
+        C: CanObserve<F>,
+    {
+        challenger.observe(F::from_usize(self.len()));
+        for &log_h in self.log_heights() {
+            challenger.observe(F::from_u8(log_h));
+        }
+    }
+
     /// Log trace heights in proof order (ascending by construction).
     pub(crate) fn log_heights_proof(&self) -> Vec<u8> {
-        self.instance_indices
-            .iter()
-            .map(|&i| self.log_heights_instance[i as usize])
-            .collect()
+        self.instance_indices.iter().map(|&i| self.log_heights[i as usize]).collect()
     }
 
     /// The largest log trace height (= last entry of [`Self::log_heights_proof`]).
     pub(crate) fn max_log_height(&self) -> u8 {
         // `instance_indices` is non-empty (constructor rejects empty input).
         let last = *self.instance_indices.last().expect("TraceOrder is non-empty");
-        self.log_heights_instance[last as usize]
+        self.log_heights[last as usize]
     }
 
     /// Reorder instance-order data to proof order, cloning.
@@ -305,7 +320,7 @@ mod tests {
         // [1 (log=1), 3 (log=2), 0 (log=3), 2 (log=3)].
         let order = TraceOrder::from_trace_heights::<TF, TF, _>(&airs(4), &[8, 2, 8, 4]).unwrap();
         assert_eq!(order.instance_indices(), &[1, 3, 0, 2]);
-        assert_eq!(order.log_heights_instance(), &[3, 1, 3, 2]);
+        assert_eq!(order.log_heights(), &[3, 1, 3, 2]);
         assert_eq!(order.log_heights_proof(), vec![1, 2, 3, 3]);
         assert_eq!(order.max_log_height(), 3);
     }

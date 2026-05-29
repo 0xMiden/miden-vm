@@ -7,25 +7,23 @@
 //!
 //! The lifted STARK has three trust domains:
 //!
-//! 1. **AIR = trusted** — [`air::LiftedAir`] implementations are correct application code. It is
-//!    the AIR implementer's responsibility to satisfy the structural contract below.
-//!    [`miden_lifted_air::debug::assert_multi_air_valid`] / [`debug::assert_prover_setup`] are
-//!    panic-based helpers that check the statically-verifiable subset; passing a malformed AIR to
-//!    the prover or verifier may panic or produce invalid proofs.
+//! 1. **AIR = trusted** — [`air::LiftedAir`] / [`air::MultiAir`] implementations are application
+//!    code. Structural mistakes, including an empty AIR collection, may panic; check them in
+//!    tests/setup with [`miden_lifted_air::debug::assert_multi_air_valid`] or
+//!    [`debug::assert_prover_setup`].
 //!
-//! 2. **Statement = validated** — The prover validates that its witness matches the AIR spec. The
-//!    verifier validates the proof's shape metadata and the per-AIR contracts. Both return typed
-//!    errors ([`ProverError`] / [`VerifierError`]) — the underlying checks run on the [`Statement`]
-//!    / [`ProverStatement`] constructors and on `TraceOrder`.
+//! 2. **Runtime inputs = validated** — [`Statement::new`], [`ProverStatement::new`], `TraceOrder`,
+//!    and domain checks validate caller/proof shape data and return typed [`ProverError`] /
+//!    [`VerifierError`] values.
 //!
 //! 3. **Proof = untrusted** — Transcript data is verified cryptographically (PCS errors, constraint
 //!    mismatch, etc.).
 //!
 //! ## Validated at runtime
 //!
-//! Checked by [`Statement::new`] / [`ProverStatement::new`] (caller inputs and trace shape), the
-//! inline `log_quotient_degree(air) ≤ log_blowup` compat check, plus the internal trace-order
-//! reconstruction from the proof's log heights, all run before any cryptographic work begins:
+//! Checked before cryptographic work begins: [`Statement::new`] / [`ProverStatement::new`] for
+//! caller inputs and prover trace shape, `TraceOrder` for proof/caller heights, and domain checks
+//! for `log_quotient_degree(air) ≤ log_blowup`:
 //!
 //! - **Shape well-formedness** — ≤ 256 instances, with the maximum LDE order `log_trace_height +
 //!   log_blowup` bounded by the field's two-adicity and the host's `usize` width.
@@ -34,15 +32,15 @@
 //!   height ≥ max periodic column length, trace width matches `width()` (prover-only), height is a
 //!   power of two (prover-only), `aux_inputs.len() ≤ max_aux_inputs`.
 //!
-//! ## Trusted (NOT validated)
+//! ## Trusted AIR contracts
 //!
-//! These cannot be verified statically and are the AIR implementer's
-//! responsibility. Run [`debug::assert_prover_setup`] (or its components)
-//! from your test harness to enforce them in debug builds:
+//! These are AIR implementer responsibilities. Run [`debug::assert_prover_setup`] (or its
+//! components) from your test harness to catch structural mistakes early:
 //!
 //! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, no
 //!    preprocessed trace, positive aux width, power-of-two periodic column lengths, and matching
-//!    override helpers. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`].
+//!    override helpers. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`]. These are
+//!    not typed `Statement::new` errors.
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.

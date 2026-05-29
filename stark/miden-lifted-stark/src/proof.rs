@@ -16,8 +16,8 @@ use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{BaseAir, LiftedAir, MultiAir, Statement};
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
-use p3_challenger::{CanFinalizeDigest, CanObserve};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_challenger::CanFinalizeDigest;
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -142,9 +142,6 @@ where
     /// [`log_trace_heights`](Self::log_trace_heights) and
     /// [`air_order`](Self::air_order).
     pub(crate) trace_order: TraceOrder,
-    /// Throwaway challenge squeezed after observing instance metadata, clearing the
-    /// challenger's absorb buffer so later challenges depend on the full shape.
-    pub instance_challenge: EF,
     /// Main trace commitment.
     pub main_commit: L::Commitment,
     /// Randomness sampled for auxiliary traces.
@@ -174,7 +171,7 @@ where
     /// Per-AIR log₂ trace heights in instance order (matches
     /// [`Statement::airs`] position-for-position).
     pub fn log_trace_heights(&self) -> &[u8] {
-        self.trace_order.log_heights_instance()
+        self.trace_order.log_heights()
     }
 
     /// The proof's AIR ordering: position `j` holds the instance index of the
@@ -186,8 +183,8 @@ where
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify`](crate::verifier::verify):
-    /// 0. Reconstruct + validate the AIR ordering from the heights, observe the statement, and
-    ///    squeeze a throwaway `instance_challenge` to clear the absorb buffer
+    /// 0. Reconstruct + validate AIR ordering from heights, absorb statement-owned inputs, then
+    ///    observe the instance count and log trace heights in instance order
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
@@ -224,18 +221,12 @@ where
         let log_blowup = config.pcs().log_blowup();
         let log_max_trace_height = trace_order.max_log_height();
         let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
-        // Absorb statement data first. Then the protocol binds the proof's log
-        // trace heights. Mirrors prove/verify.
-        statement.observe(&mut challenger, trace_order.log_heights_instance());
-        for &log_h in trace_order.log_heights_instance() {
-            challenger.observe(L::F::from_u8(log_h));
-        }
+        // `Statement::observe` absorbs statement-owned inputs. The protocol then
+        // binds the proof's instance count and log trace heights in instance order.
+        statement.observe(&mut challenger, trace_order.log_heights());
+        trace_order.observe_shape::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
-
-        // Clear the challenger's absorb buffer after observing instance shapes.
-        // Mirrors `prove` / `verify`.
-        let instance_challenge: EF = channel.sample_algebra_element::<EF>();
 
         let alignment = config.lmcs().alignment();
 
@@ -331,7 +322,6 @@ where
         Ok((
             Self {
                 trace_order,
-                instance_challenge,
                 main_commit,
                 randomness,
                 aux_commit,

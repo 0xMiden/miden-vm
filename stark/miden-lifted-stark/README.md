@@ -55,40 +55,46 @@ See the "Mathematical background" in `src/prover/README.md` and
 
 ### Prover (`prove`)
 
-1. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
+1. **Validate and bind instance shape** — Validate runtime inputs, call
+   `Statement::observe`, then observe the instance count and log trace heights
+   in instance order.
+2. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
    rows, build LMCS tree. Send root.
-2. **Sample randomness** — Squeeze auxiliary randomness from the Fiat-Shamir
+3. **Sample randomness** — Squeeze auxiliary randomness from the Fiat-Shamir
    channel. Build and commit auxiliary traces.
-3. **Sample challenges** — `alpha` (constraint folding) and `beta`
+4. **Sample challenges** — `alpha` (constraint folding) and `beta`
    (cross-trace accumulation).
-4. **Evaluate constraints** — For each trace in ascending height order,
+5. **Evaluate constraints** — For each trace in ascending height order,
    evaluate AIR constraints on the quotient domain using SIMD-packed
    arithmetic. Produces a numerator N_j per trace (no vanishing division).
-5. **Accumulate numerators** — Fold across traces:
+6. **Accumulate numerators** — Fold across traces:
    `acc = cyclic_extend(acc) * beta + N_j`.
-6. **Divide by vanishing polynomial** — One pass on the full quotient domain,
+7. **Divide by vanishing polynomial** — One pass on the full quotient domain,
    exploiting Z_H periodicity for batch inverse.
-7. **Commit quotient** — Decompose Q into D chunks via fused iDFT + coefficient
+8. **Commit quotient** — Decompose Q into D chunks via fused iDFT + coefficient
    scaling + flatten + DFT pipeline. Commit via LMCS.
-8. **Sample OOD point z** — Rejection-sampled to lie outside H and the LDE
+9. **Sample OOD point z** — Rejection-sampled to lie outside H and the LDE
    coset.
-9. **Open via PCS** — Delegate to the internal `pcs` modules.
+10. **Open via PCS** — Delegate to the internal `pcs` modules.
 
 ### Verifier (`verify`)
 
-1. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
-2. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
-3. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.
-4. **Reconstruct Q(z)** — Barycentric interpolation over the D quotient
+1. **Validate and bind instance shape** — Validate proof heights against the
+   AIRs, call `Statement::observe`, then observe the instance count and log
+   trace heights in instance order.
+2. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
+3. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
+4. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.
+5. **Reconstruct Q(z)** — Barycentric interpolation over the D quotient
    chunks.
-5. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
+6. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
    `y_j = z^{r_j}`: compute selectors, evaluate periodic polynomials,
    fold constraints with alpha, accumulate with beta.
-6. **Evaluate external assertions** — Call `Statement::eval_external`
+7. **Evaluate external assertions** — Call `Statement::eval_external`
    once over the global view (challenges, aux values, log heights); each
    returned EF value must equal zero.
-7. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
-8. **Ensure transcript is fully consumed** — Canonicality enforcement.
+8. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
+9. **Ensure transcript is fully consumed** — Canonicality enforcement.
 
 ## Math Sketch
 
@@ -190,8 +196,8 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 |------|---------|
 | `prover::prove` | Prove one or more AIR instances |
 | `ProverStatement` | A `Statement` plus per-AIR traces and aux construction |
-| `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
-| `MultiAir` | The circuit — AIRs (`type Air`/`fn airs`), `eval_external`, the aux-trace builder, `observe` |
+| `Statement` | A `MultiAir` plus validated per-proof caller inputs (`air_inputs`, optional `aux_inputs`) |
+| `MultiAir` | Trusted AIR collection plus cross-AIR assertions and statement observation hooks |
 | `verifier::verify` | Verify a multi-trace proof |
 | `MultiAir::eval_external` | Cross-AIR external-assertions hook (default: no assertions) |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
@@ -232,9 +238,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Constraint degree** — Derived per AIR from symbolic analysis
   (`log_quotient_degree`); the proof uses the max over AIRs. Each AIR must
   satisfy `log_quotient_degree(air) ≤ log_blowup`.
-- **Transcript ordering** — The Fiat-Shamir transcript follows a strict
-  observe/squeeze protocol. Prover and verifier must process commitments and
-  challenges in identical order. This is security-critical.
+- **Transcript ordering** — `Statement::observe` absorbs statement-owned inputs;
+  prover and verifier then observe the instance count and log trace heights in
+  instance order. All later observe/squeeze steps must match exactly.
 - **Extension field discipline** — Main trace and preprocessed data stay in
   the base field. Only auxiliary columns, challenges, alpha powers, and the
   accumulator use the extension field.

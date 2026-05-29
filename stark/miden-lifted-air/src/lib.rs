@@ -4,14 +4,10 @@
 //! - [`LiftedAir`]: super-trait for AIR definitions (inherits upstream + adds aux trace support and
 //!   periodic column data)
 //! - [`LiftedAirBuilder`]: super-trait for constraint builders
-//! - [`MultiAir`]: the circuit — the AIR collection (`airs`) plus `eval_external`, `observe`, and
-//!   the `max_aux_inputs` budget
-//! - [`Statement`]: validated per-proof inputs over a `MultiAir` — [`Statement::new`] rejects bad
-//!   inputs at construction with a typed [`InstanceError`]
-//! - [`ProverStatement`]: validated prover-side companion — a `Statement` plus per-AIR main traces,
-//!   trace shape checked by [`ProverStatement::new`]
-//! - [`debug`]: panic-based structural checks for tests / setup ([`debug::assert_multi_air_valid`],
-//!   [`debug::check_builder_shape`])
+//! - [`MultiAir`]: trusted application AIR collection plus cross-AIR hooks
+//! - [`Statement`]: validated per-proof caller inputs over a `MultiAir`
+//! - [`ProverStatement`]: validated prover-side companion with per-AIR main traces
+//! - [`debug`]: panic-based AIR structural checks for tests / setup
 
 #![no_std]
 

@@ -21,9 +21,8 @@ use crate::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 /// - Each periodic column is non-empty and has power-of-two length.
 /// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.
 ///
-/// Panics on any violation. A degenerate AIR whose constraints all vanish under
-/// `Z_H` is supported, not rejected — the prover/verifier clamp the quotient
-/// degree to `D = 2`.
+/// Panics on any violation. An empty [`MultiAir`] is a malformed trusted AIR
+/// definition, not a typed [`Statement::new`](crate::Statement::new) error.
 pub fn assert_multi_air_valid<F, EF, MA>(multi_air: &MA)
 where
     F: Field,

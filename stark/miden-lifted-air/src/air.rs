@@ -150,17 +150,10 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Symbolic constraint degree multiples, split into base-field and
     /// extension-field maxima (see [`ConstraintDegrees`]).
     ///
-    /// The default evaluates the AIR on a
-    /// [`SymbolicAirBuilder`](crate::symbolic::SymbolicAirBuilder) — using
-    /// `SymbolicAirBuilder<F>` (i.e. `EF = F`), sufficient for degree computation
-    /// since extension-field operations have the same degree structure. Override
-    /// this when the split is known statically so a per-AIR bound can be sharp
-    /// without redoing the symbolic pass.
-    ///
-    /// These are the raw symbolic degree multiples — no minimum is imposed and
-    /// no clamping is applied. A degenerate AIR whose constraints all vanish
-    /// under `Z_H` (combined degree `< 2`) is the prover/verifier's concern,
-    /// not an air-crate structural check.
+    /// The split lets callers report base and extension constraint degree maxima
+    /// separately; STARK prover/verifier code derives quotient degrees from these
+    /// raw symbolic bounds later. Override this when the split is known statically
+    /// so a per-AIR bound can be sharp without redoing the symbolic pass.
     fn constraint_degree(&self) -> ConstraintDegrees
     where
         Self: Sized,
@@ -173,9 +166,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
 ///
 /// `base` is the maximum degree multiple over the base-field constraints and
 /// `ext` over the extension-field constraints (each `0` if the AIR has none of
-/// that kind). Consumers that need a single value take [`max`](Self::max); the
-/// split is exposed via [`LiftedAir::constraint_degree`] so a per-AIR override
-/// can be sharp without redoing the symbolic pass.
+/// that kind). Consumers that need a single value take [`max`](Self::max).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ConstraintDegrees {
     /// Max degree multiple over base-field constraints (`0` if there are none).
@@ -320,9 +311,9 @@ where
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
     /// The default order is `air_inputs`, then `aux_inputs`. The protocol
-    /// observes `log_trace_heights` separately after this hook, but passes them
-    /// here so custom bindings can include AIR metadata that depends on the
-    /// prover-chosen trace ordering or heights.
+    /// observes the instance count and `log_trace_heights` separately after this
+    /// hook, but passes the heights here so custom bindings can include AIR
+    /// metadata that depends on the prover-chosen trace ordering or heights.
     ///
     /// # Soundness gap (TODO)
     ///
