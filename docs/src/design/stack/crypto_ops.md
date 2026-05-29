@@ -385,10 +385,11 @@ $$
 ## LOG_PRECOMPILE
 
 The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling precompile-transcript state. The transcript is a linear hash tree over Poseidon2:
-`STATE_NEW = Poseidon2::merge(STATE_PREV, STMNT)`. Initialization and boundary enforcement are
-handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a
-high‑level overview. This section concentrates on the stack interaction and bus messages.
+rolling precompile-transcript state. The transcript is a framework-AND chain over Poseidon2:
+`STATE_NEW = Node::and(STATE_PREV, STMNT).digest()`, i.e. a permutation over
+`[STATE_PREV, STMNT, Tag::AND]` with capacity `[1, 0, 0, 0]`. Initialization and boundary
+enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
+for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -404,8 +405,9 @@ with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑dete
 helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`,
-with the following stack transition:
+The operation evaluates
+`[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, Tag::AND])`, with the following
+stack transition:
 
 ```
 Before:  [_,         STMNT,      _,       ...]
@@ -437,16 +439,16 @@ $$
 \begin{aligned}
 \mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
 \mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-0                              &              &&\text{(constant capacity input)}
+\mathsf{AND}_i                &= \mathrm{Tag::AND}_i &&\text{(constant capacity input }[1,0,0,0]\text{)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
 The input message reduces the Poseidon2 state in the canonical order
-`[STATE_PREV, STMNT, ZERO]`:
+`[STATE_PREV, STMNT, Tag::AND]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{AND}_i.
 $$
 
 One controller row later, the `op_retstate` response provides the permuted state
@@ -478,16 +480,14 @@ The above constraint enforces that the specified input and output controller row
 in the trace of the hash chiplet. In the controller/permutation split design these two controller
 rows are consecutive, so their addresses differ by exactly 1.
 
-Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
-variables in the trace, it should be possible to combine the bus constraint in a way that avoids
-increasing the degree of the overall bus expression.
+
 
 ### Transcript-state Initialization
 
 Inside the VM, the transcript state is tracked via the virtual-table bus: each update removes the
 previous entry before inserting the next one.
 
-We denote the messages for removing and inserting the message as
+We denote the messages for removing and inserting the state as
 
 $$
 v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_PREV}_j
@@ -524,6 +524,6 @@ $$
 v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
 $$
 
-Because the fold is a 2‑to‑1 hash (`merge(STATE_PREV, STMNT)`), the state is itself a complete
-digest at every step. The transcript digest is just the final state — no extra finalization step
-is required.
+Because the fold is the digest of a structural AND node (`Node::and(STATE_PREV, STMNT)`), the
+state is itself a complete digest at every step. The transcript digest is just the final state — no
+extra finalization step is required.
