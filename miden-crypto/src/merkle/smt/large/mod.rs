@@ -1,10 +1,10 @@
 //! Large-scale Sparse Merkle Tree backed by pluggable storage.
 //!
-//! `LargeSmt` stores the top of the tree (depths 0–23) in memory and persists the lower
-//! depths (24–64) in storage as fixed-size subtrees. This hybrid layout scales beyond RAM
+//! `LargeSmt` stores the top of the tree (depths 0–`IN_MEMORY_DEPTH`-1) in memory and persists
+//! the lower depths in storage as fixed-size subtrees. This hybrid layout scales beyond RAM
 //! while keeping common operations fast. With the `rocksdb` feature enabled, the lower
 //! subtrees and leaves are stored in RocksDB. On reload, the in-memory top is reconstructed
-//! from cached depth-24 subtree roots.
+//! from cached in-memory-depth subtree roots.
 //!
 //! Examples below require the `rocksdb` feature.
 //!
@@ -277,17 +277,17 @@ mod smt_trait;
 // CONSTANTS
 // ================================================================================================
 
-/// Number of levels of the tree that are stored in memory
-const IN_MEMORY_DEPTH: u8 = 24;
+/// Number of levels of the tree that are stored in memory.
+pub(super) const IN_MEMORY_DEPTH: u8 = 16;
 
-/// Number of nodes that are stored in memory (including the unused index 0)
+/// Number of nodes that are stored in memory (including the unused index 0).
 const NUM_IN_MEMORY_NODES: usize = 1 << (IN_MEMORY_DEPTH + 1);
 
 /// Index of the root node inside `in_memory_nodes`.
 pub(super) const ROOT_MEMORY_INDEX: usize = 1;
 
-/// Number of subtree levels below in-memory depth (24-64 in steps of 8)
-const NUM_SUBTREE_LEVELS: usize = 5;
+/// Number of subtree levels below in-memory depth (16-64 in steps of 8).
+const NUM_SUBTREE_LEVELS: usize = 6;
 
 /// How many subtrees we buffer before flushing them to storage **during the
 /// SMT construction phase**.
@@ -320,8 +320,8 @@ type MutatedLeaves = (MutatedSubtreeLeaves, Map<u64, SmtLeaf>, Map<Word, Word>, 
 ///
 /// Unlike the regular `Smt`, this implementation is designed for very large trees by using external
 /// storage (such as RocksDB) for the bulk of the tree data, while keeping only the upper levels (up
-/// to depth 24) in memory. This hybrid approach allows the tree to scale beyond memory limitations
-/// while maintaining good performance for common operations.
+/// to `IN_MEMORY_DEPTH`) in memory. This hybrid approach allows the tree to scale beyond memory
+/// limitations while maintaining good performance for common operations.
 ///
 /// All leaves sit at depth 64. The most significant element of the key is used to identify the leaf
 /// to which the key maps.
@@ -361,7 +361,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     pub const EMPTY_ROOT: Word = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
     /// Subtree depths for the subtrees stored in storage.
-    pub const SUBTREE_DEPTHS: [u8; 5] = [56, 48, 40, 32, 24];
+    pub const SUBTREE_DEPTHS: [u8; 6] = [56, 48, 40, 32, 24, 16];
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------

@@ -368,3 +368,23 @@ fn rocksdb_entry_count_through_leaf_lifecycle() {
     assert_eq!(smt.num_entries(), 0, "persisted entry count should be 0");
     assert_eq!(smt.num_leaves(), 0, "persisted leaf count should be 0");
 }
+
+#[test]
+fn rocksdb_inner_nodes_match_full_smt() {
+    use miden_crypto::merkle::smt::Smt;
+
+    let entries = generate_entries(1000);
+    let control_smt = Smt::with_entries(entries.clone()).unwrap();
+
+    let (storage, _tmp) = setup_storage();
+    let large_smt = LargeSmt::<RocksDbStorage>::with_entries(storage, entries).unwrap();
+
+    let mut control_nodes: Vec<InnerNodeInfo> = control_smt.inner_nodes().collect();
+    let mut rocksdb_nodes: Vec<InnerNodeInfo> = large_smt.inner_nodes().unwrap().collect();
+
+    control_nodes.sort_by_key(|info| info.value);
+    rocksdb_nodes.sort_by_key(|info| info.value);
+
+    assert_eq!(control_nodes.len(), rocksdb_nodes.len());
+    assert_eq!(control_nodes, rocksdb_nodes);
+}

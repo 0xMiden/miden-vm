@@ -731,11 +731,11 @@ fn test_flat_layout_children_relationship() {
     }
 }
 
-/// Verifies that a snapshot produced by `MemoryStorage::reader()` returns correct depth-24 roots
-/// from `get_depth24()`, and that loading a `LargeSmt` from that snapshot reconstructs the same
-/// root as the original tree.
+/// Verifies that a snapshot produced by `MemoryStorage::reader()` returns correct top subtree
+/// roots from `get_top_subtree_roots()`, and that loading a `LargeSmt` from that snapshot
+/// reconstructs the same root as the original tree.
 #[test]
-fn test_memory_storage_snapshot_depth24() {
+fn test_memory_storage_snapshot_in_mem_depth() {
     use crate::merkle::NodeIndex;
 
     let entries = generate_entries(50);
@@ -745,17 +745,20 @@ fn test_memory_storage_snapshot_depth24() {
 
     let snapshot = smt.storage.reader().unwrap();
 
-    // The depth-24 entries must be non-empty for a non-empty tree.
-    let depth24 = snapshot.get_depth24().unwrap();
-    assert!(!depth24.is_empty(), "snapshot must expose depth-24 roots for a non-empty tree");
+    // The in-memory-depth entries must be non-empty for a non-empty tree.
+    let in_mem_roots = snapshot.get_top_subtree_roots().unwrap();
+    assert!(
+        !in_mem_roots.is_empty(),
+        "snapshot must expose in-memory-depth roots for a non-empty tree"
+    );
 
     // Every returned entry must sit exactly at IN_MEMORY_DEPTH.
-    for (position, _hash) in &depth24 {
+    for (position, _hash) in &in_mem_roots {
         let index = NodeIndex::new(IN_MEMORY_DEPTH, *position).unwrap();
         assert_eq!(
             index.depth(),
             IN_MEMORY_DEPTH,
-            "depth-24 entry at position {position} has wrong depth"
+            "in-memory-depth entry at position {position} has wrong depth"
         );
     }
 

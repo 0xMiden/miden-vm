@@ -64,8 +64,8 @@ impl<T: SmtStorageReader> SmtStorageReader for BoxedStorage<T> {
     {
         self.0.iter_subtrees()
     }
-    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
-        self.0.get_depth24()
+    fn get_top_subtree_roots(&self) -> Result<Vec<(u64, Word)>, StorageError> {
+        self.0.get_top_subtree_roots()
     }
 }
 

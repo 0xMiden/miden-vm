@@ -130,13 +130,13 @@ impl SmtStorageReader for MemoryStorage {
         Ok(Box::new(self.subtrees.values().cloned()))
     }
 
-    /// Retrieves all depth 24 roots for fast tree rebuilding.
+    /// Retrieves roots of all subtrees at `IN_MEMORY_DEPTH` depth.
     ///
     /// Derived from the subtrees already in memory: for each subtree whose root sits at
-    /// `IN_MEMORY_DEPTH`, the root node's hash is the depth-24 entry that `initialize_from_storage`
+    /// `IN_MEMORY_DEPTH`, the root node's hash is the entry that `initialize_from_storage`
     /// needs to reconstruct the in-memory top of the tree.
-    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
-        let depth24 = self
+    fn get_top_subtree_roots(&self) -> Result<Vec<(u64, Word)>, StorageError> {
+        let in_mem_roots = self
             .subtrees
             .values()
             .filter(|subtree| subtree.root_index().depth() == IN_MEMORY_DEPTH)
@@ -146,7 +146,7 @@ impl SmtStorageReader for MemoryStorage {
                     .map(|node| (subtree.root_index().position(), node.hash()))
             })
             .collect();
-        Ok(depth24)
+        Ok(in_mem_roots)
     }
 }
 
@@ -397,7 +397,7 @@ impl SmtStorageReader for MemoryStorageSnapshot {
         self.0.iter_subtrees()
     }
 
-    fn get_depth24(&self) -> Result<Vec<(u64, Word)>, StorageError> {
-        self.0.get_depth24()
+    fn get_top_subtree_roots(&self) -> Result<Vec<(u64, Word)>, StorageError> {
+        self.0.get_top_subtree_roots()
     }
 }

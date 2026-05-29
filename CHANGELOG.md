@@ -1,13 +1,14 @@
 ## 0.26.0 (TBD)
 
-- Optimized prover quotient evaluation by evaluating each AIR's quotient on its native coset (size `n_j · D_j`) and lifting per-AIR, instead of always on the global maximum coset; constraint division is fused into the constraint evaluation loop ([#991](https://github.com/0xMiden/crypto/pull/991)).
-- [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
-- perf: fuse per-group accumulator and defer allocations ([#1008](https://github.com/0xMiden/crypto/pull/1008))
-- [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
-- [BREAKING] Fixed RocksDB CLI safety, non-canonical serde input handling, and qualified `WordWrapper` derive paths ([#1022](https://github.com/0xMiden/crypto/pull/1022)).
+- Optimized prover quotient evaluation by evaluating each AIR's quotient on its native coset (size `n_j · D_j`) and lifting per-AIR, instead of always on the global maximum coset; constraint division is fused into the constraint evaluation loop ([#991](https://github.com/0xMiden/crypto/pull/991)).
 - [BREAKING] Refactored `miden-lifted-stark::domain` around a uniform `Coset` trait shared by `TwoAdicSubgroup` and `TwoAdicCoset`, slimmed the `LiftedDomain` surface (drops dead getters, removes silently-dispatched `points`/`bit_reversed_points`/`vanishing_at` in favour of explicit `trace_subgroup()` / `lde_coset()` access), made `LiftedDomain` constructors fallible, moved selector logic onto `LiftedDomain`, and changed `log_blowup` to return `u8` ([#993](https://github.com/0xMiden/crypto/pull/993)).
+- [BREAKING] Upgraded direct `rand` dependencies to 0.10, updating RNG trait bounds and removing direct `rand_hc` usage ([#995](https://github.com/0xMiden/crypto/pull/995)).
+- [BREAKING] Reorganized `miden-lifted-stark` internals: consolidated `align`, `bitrev`, `horner`, and `packing` helpers under a new `util` module; removed the legacy `fri::*` re-export facade ([#1000](https://github.com/0xMiden/crypto/pull/1000)).
+- perf: fuse per-group accumulator and defer allocations ([#1008](https://github.com/0xMiden/crypto/pull/1008)).
+- [BREAKING] Reduced `LargeSmt<S>` cache depth from 24 to 16 levels ([#1011](https://github.com/0xMiden/crypto/pull/1011)).
 - [BREAKING] Implemented two-phase commit_mutations() / apply_mutations()-style API for `LargeSmtForest` ([#1018](https://github.com/0xMiden/crypto/pull/1018)).
+- [BREAKING] Fixed RocksDB CLI safety, non-canonical serde input handling, and qualified `WordWrapper` derive paths ([#1022](https://github.com/0xMiden/crypto/pull/1022)).
 - [BREAKING] Simplify `LargeSmtForest` backend API ([#1030](https://github.com/0xMiden/crypto/pull/1030)).
 
 ## 0.25.1 (2026-05-21)
