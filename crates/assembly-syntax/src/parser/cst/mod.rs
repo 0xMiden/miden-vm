@@ -7,7 +7,7 @@ mod instructions;
 
 use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::SourceFile;
+use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::LabeledSpan;
 
 use self::{context::LoweringContext, forms::lower_source_file};
@@ -72,6 +72,33 @@ pub fn parse_forms(
     if diagnostics.is_empty() {
         let mut context = LoweringContext::new(parse, interned);
         lower_source_file(&mut context).map_err(move |err| err.with_source_code(source))
+    } else {
+        Err(Report::from(SyntaxError::from(diagnostics)).with_source_code(source))
+    }
+}
+
+/// This is like `parse_forms`, but for parsing the content of inline MASM blocks in languages like
+/// Rust.
+///
+/// Inline MASM is parsed as an [ast::Block], as if it was the body of a procedure definition. This
+/// means that top-level items such as imports and constant declarations are not allowed.
+///
+/// An optional span can be provided, in which case only the contents of the span are parsed as the
+/// inline MASM.
+pub fn parse_inline_masm(
+    source: Arc<SourceFile>,
+    bounds: Option<SourceSpan>,
+    interned: &mut BTreeSet<Arc<str>>,
+) -> Result<ast::Block, Report> {
+    use miden_assembly_syntax_cst::ast::AstNode;
+    let mut parse = miden_assembly_syntax_cst::parse_inline_masm(source.clone(), bounds);
+    let diagnostics = parse.take_diagnostics();
+    if diagnostics.is_empty() {
+        let mut context = LoweringContext::new(parse, interned);
+        let cst_block = miden_assembly_syntax_cst::ast::Block::cast(context.parse().syntax())
+            .expect("inline masm root kind should always be Block");
+        blocks::lower_block(&mut context, &cst_block)
+            .map_err(move |err| Report::from(err).with_source_code(source))
     } else {
         Err(Report::from(SyntaxError::from(diagnostics)).with_source_code(source))
     }

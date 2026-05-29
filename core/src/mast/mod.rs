@@ -1240,21 +1240,6 @@ impl MastNodeId {
         Self::from_u32_with_node_count(value, mast_forest.nodes.len())
     }
 
-    /// Returns a new [`MastNodeId`] with the provided `node_id`, or an error if `node_id` is
-    /// greater than the number of nodes in the [`MastForest`] for which this ID is being
-    /// constructed.
-    pub fn from_usize_safe(
-        node_id: usize,
-        mast_forest: &MastForest,
-    ) -> Result<Self, DeserializationError> {
-        let node_id: u32 = node_id.try_into().map_err(|_| {
-            DeserializationError::InvalidValue(format!(
-                "node id '{node_id}' does not fit into a u32"
-            ))
-        })?;
-        MastNodeId::from_u32_safe(node_id, mast_forest)
-    }
-
     /// Returns a new [`MastNodeId`] from the given `value` without checking its validity.
     pub fn new_unchecked(value: u32) -> Self {
         Self(value)
@@ -1379,14 +1364,7 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        Self::from_u32_bounded(value, mast_forest.debug_info.num_decorators())
-    }
-
-    /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
-    /// `value` is greater than or equal to `bound`.
-    ///
-    /// For use in deserialization when the bound is known without needing the full MastForest.
-    pub fn from_u32_bounded(value: u32, bound: usize) -> Result<Self, DeserializationError> {
+        let bound = mast_forest.debug_info.num_decorators();
         if (value as usize) < bound {
             Ok(Self(value))
         } else {
