@@ -6,6 +6,13 @@
 //! landed felt is a valid u32; the fixed `offset = [CARRY_SHIFT; NUM_CARRY_COEFFS]` polynomial,
 //! pinned alongside the modulus, undoes the shift inside the identity.
 //!
+//! Contract mirrored by the generated MASM:
+//! - operand-stack inputs are u256 values: 8 limbs, each bounded to u32;
+//! - accepted witnesses return a canonical residue `c = a * b mod m`, with `c < m`;
+//! - the standard handler is complete when `floor(a * b / m) < 2^256`;
+//! - this holds if either input is canonical (`< m`) and the other is any well-formed u256;
+//! - malformed witness advice traps.
+//!
 //! Per-curve event handlers in `u256_modmul_k1.rs` are thin wrappers that supply the modulus
 //! constants and delegate to [`handle_modmul`].
 
@@ -42,9 +49,12 @@ pub struct ModmulWitness {
     pub alpha: [Felt; 2],
 }
 
-/// Reads `b` from operand-stack offsets 1..9 and `a` from offsets 9..17, computes the
-/// witness for the Schwartz-Zippel check that `a * b = q * m + c` holds, and derives the
-/// Fiat-Shamir challenge `alpha`. Returns everything in a [`ModmulWitness`].
+/// Reads `b` from operand-stack offsets 1..9 and `a` from offsets 9..17, requiring every limb
+/// to be a valid u32. Computes the witness for the Schwartz-Zippel check that
+/// `a * b = q * m + c` holds, and derives the Fiat-Shamir challenge `alpha`.
+///
+/// Returns an error if the quotient does not fit in u256. That is a completeness condition for
+/// the standard handler, not a soundness assumption for an accepted MASM execution.
 ///
 /// `#[doc(hidden)]`: exposed only for verifier-level negative tests. Not a stable public API.
 #[doc(hidden)]

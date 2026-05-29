@@ -22,6 +22,21 @@ const K1_POINT_DECOMPRESS_EVENT = event("miden::core::math::k1_point::decompress
 # Mirrors the canonical declaration in `u256.masm`; kept in sync by convention.
 pub type u256 = struct { lo: u128, hi: u128 }
 
+# ===== MEMORY HELPERS ===========================================================================
+
+#! Writes the canonical point-at-infinity to `out_addr`: (X = 0, Y = 0, is_infinity = 1,
+#! reserved = 0). Consumes `out_addr`.
+#!
+#! Stack: [out_addr, ...]  ->  [...]
+proc write_identity
+    padw  dup.4         mem_storew_le dropw
+    padw  dup.4 add.4   mem_storew_le dropw
+    padw  dup.4 add.8   mem_storew_le dropw
+    padw  dup.4 add.12  mem_storew_le dropw
+    push.0.0.0.1  dup.4 add.16  mem_storew_le dropw
+    drop
+end
+
 # ===== POINT NEGATION ===========================================================================
 
 #! Negation: out = -P = (X, -Y, is_infinity).
@@ -115,12 +130,8 @@ pub proc point_double
 
     loc_load.16
     if.true
-        # P = identity: 2 * identity = identity. Write zeros for X, Y and flag = 1.
-        padw  loc_load.20         mem_storew_le dropw
-        padw  loc_load.20 add.4   mem_storew_le dropw
-        padw  loc_load.20 add.8   mem_storew_le dropw
-        padw  loc_load.20 add.12  mem_storew_le dropw
-        push.0.0.0.1  loc_load.20 add.16  mem_storew_le dropw
+        # P = identity: 2 * identity = identity.
+        loc_load.20  exec.write_identity
     else
         # ----- 3 * X^2 -> mem[24..32] -----
         padw loc_loadw_le.4   padw loc_loadw_le.0          # X
@@ -141,7 +152,8 @@ pub proc point_double
         loc_storew_le.32  swapw  loc_storew_le.36  swapw
 
         # ----- inv(2 * Y) -> mem[40..48] -----
-        exec.f_k1::inv                                     # [inv(2*Y), ...]
+        # inv_unsafe precondition: `3*X^2` is canonical and `f_k1::mul` reduces the product.
+        exec.f_k1::inv_unsafe                              # [inv(2*Y), ...]
         loc_storew_le.40  swapw  loc_storew_le.44  swapw
 
         # ----- m = (3*X^2) * inv(2*Y) -> mem[48..56] -----
@@ -271,11 +283,7 @@ pub proc point_add
                     exec.point_double
                 else
                     # P1 == -P2: out = identity.
-                    padw  loc_load.40         mem_storew_le dropw
-                    padw  loc_load.40 add.4   mem_storew_le dropw
-                    padw  loc_load.40 add.8   mem_storew_le dropw
-                    padw  loc_load.40 add.12  mem_storew_le dropw
-                    push.0.0.0.1  loc_load.40 add.16  mem_storew_le dropw
+                    loc_load.40  exec.write_identity
                 end
             else
                 # X1 != X2: generic affine addition.
@@ -292,8 +300,9 @@ pub proc point_add
                 exec.f_k1::sub                                # X2 - X1
 
                 # ----- inv(X2 - X1) -> mem[60..68] -----
+                # inv_unsafe precondition: `Y2 - Y1` is canonical and `f_k1::mul` reduces the product.
                 loc_storew_le.52 swapw  loc_storew_le.56  swapw
-                exec.f_k1::inv                                # [inv, ...]
+                exec.f_k1::inv_unsafe                         # [inv, ...]
                 loc_storew_le.60  swapw  loc_storew_le.64  swapw
 
                 # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[68..76] -----
@@ -383,9 +392,7 @@ pub proc decompress
 
     # ----- Assert X < p -----
     padw loc_loadw_le.4   padw loc_loadw_le.0             # X (a, deeper)
-    push.0xffffffff dup dup dup
-    push.0xffffffff dup
-    push.0xfffffffe.0xfffffc2f   # p (b, top)
+    exec.f_k1::push_p                                     # p (b, top)
     exec.::miden::core::math::u256::lt
     assert.err="k1_point::decompress: X not canonical"
 
@@ -400,18 +407,17 @@ pub proc decompress
     loc_load.16                                           # parity (deeper)
     padw loc_loadw_le.4  padw loc_loadw_le.0              # X (X[0] on top)
     emit.K1_POINT_DECOMPRESS_EVENT
-    drop                                                  # drop parity
+    drop                                                  # drop X[0]; remaining X[1..7] + parity are clobbered by the Y load below
 
-    # ----- Pull Y hint from advice -----
-    adv_loadw  loc_storew_le.8                            # Y[0..4] -> mem[8..12]
+    # Pull Y hint from advice. u32-assert at the boundary -- downstream `u256::lt` and
+    # modmul rely on u32-valid inputs but only range-check their own outputs.
+    adv_loadw  u32assertw  loc_storew_le.8                # Y[0..4] -> mem[8..12]
     swapw
-    adv_loadw  loc_storew_le.12                           # Y[4..8] -> mem[12..16]
+    adv_loadw  u32assertw  loc_storew_le.12               # Y[4..8] -> mem[12..16]
     swapw                                                 # => [Y[0..4], Y[4..8], ...]
 
     # ----- Assert Y < p -----
-    push.0xffffffff dup dup dup
-    push.0xffffffff dup
-    push.0xfffffffe.0xfffffc2f   # p (b)
+    exec.f_k1::push_p                                     # p (b)
     exec.::miden::core::math::u256::lt
     assert.err="k1_point::decompress: Y not canonical"
 
@@ -454,6 +460,133 @@ pub proc decompress
     loc_loadw_le.8         loc_load.20 add.8   mem_storew_le
     loc_loadw_le.12        loc_load.20 add.12  mem_storew_le  dropw
     padw           loc_load.20 add.16  mem_storew_le dropw
+end
+
+#! No-trap decompress for caller inputs. Non-canonical X, non-boolean parity, or an off-curve
+#! (X, Y) sets the returned flag to 0 instead of trapping. On success the proc writes the affine
+#! point to `dest_pt_addr` (X, Y, is_infinity = 0) and pushes flag = 1; on caller failure the slot
+#! is overwritten with the point at infinity so downstream point operations stay safe.
+#!
+#! Malformed advice (the host-supplied Y hint with non-u32 felts) is treated as an
+#! inconsistent witness and traps at the `u32assertw` boundary check below. The no-trap
+#! guarantee covers caller data only.
+#!
+#! Stack: [dest_pt_addr, x_addr, parity_addr, ...]  ->  [flag, ...]
+#!
+#! Caller layout:
+#!   x_addr      : 8 u32 LE integer limbs (word-aligned read; 2 word loads).
+#!   parity_addr : 1 felt holding 0 or 1.
+#!   dest_pt_addr: 5 words of point storage laid out as
+#!                 `X_0 || X_1 || Y_0 || Y_1 || [is_infinity, 0, 0, 0]`
+#!                 where `X_i`, `Y_i` are the low/high 4 u32 limbs and the last 3 felts of
+#!                 the flag word are overwritten with zero on every write.
+#!
+#! Local memory (64 felts):
+#!   0..8    : X (loaded from x_addr)
+#!   8..16   : Y (hint from advice)
+#!   16      : parity (loaded from parity_addr)
+#!   20..28  : X^2
+#!   28..36  : X^3
+#!   36..44  : X^3 + 7
+#!   44..52  : Y^2
+#!   52      : validity flag (initialised to 1; ANDed with each check)
+#!   53..56  : address caches (dest_pt, x, parity)
+@locals(64)
+pub proc decompress_no_trap
+    # Stash [flag=1, dest_pt_addr, x_addr, parity_addr] at mem[52..56] in one word store,
+    # then dereference parity_addr into mem[16] inline. The cached parity_addr at mem[55]
+    # is dead after this; we keep it in the word so the storew is a single chiplet op.
+    push.1                                               # [1, dest_pt, x_addr, par_addr, ...]
+    loc_storew_le.52                                     # mem[52..56] = [1, dest_pt, x_addr, par_addr]
+    movup.3                                              # [par_addr, 1, dest_pt, x_addr, ...]
+    mem_load  loc_store.16                               # mem[16] = *par_addr
+    drop drop drop
+
+    # Load X from x_addr to mem[0..8] (assumes word-aligned x_addr).
+    padw  loc_load.54         mem_loadw_le  loc_storew_le.0
+    padw  loc_load.54 add.4   mem_loadw_le  loc_storew_le.4
+    swapw                                                # [X[0..4], X[4..8], ...]
+
+    # Check X < p. Substitute X = 1 if non-canonical so the f_k1::mul calls below don't
+    # trap on quotient overflow; the flag is already 0 so the math result is irrelevant.
+    exec.f_k1::push_p
+    exec.::miden::core::math::u256::lt
+    dup  loc_load.52  mul  loc_store.52
+    not
+    if.true
+        padw  loc_storew_le.4  dropw
+        push.0.0.0.1  loc_storew_le.0  dropw
+    end
+
+    # Check parity in {0, 1}: parity * (parity - 1) == 0.
+    loc_load.16  dup  push.1 sub  mul  eq.0
+    loc_load.52  mul  loc_store.52
+
+    # Push (X, parity) onto operand stack and emit so the host can compute the Y hint.
+    loc_load.16
+    padw loc_loadw_le.4  padw loc_loadw_le.0
+    emit.K1_POINT_DECOMPRESS_EVENT
+    drop                                                 # drop X[0]; remaining X[1..7] + parity are clobbered by the Y load below
+
+    # Pull Y from advice into mem[8..16]. u32-assert at the boundary -- downstream
+    # `u256::lt` and modmul rely on u32-valid inputs but only range-check their own outputs.
+    adv_loadw  u32assertw  loc_storew_le.8               # Y[0..4] -> mem[8..12]
+    swapw
+    adv_loadw  u32assertw  loc_storew_le.12              # Y[4..8] -> mem[12..16]
+    swapw                                                # => [Y[0..4], Y[4..8], ...]
+
+    # Check Y < p. Substitute Y = 1 if non-canonical (same trap-safety reason as X above).
+    exec.f_k1::push_p
+    exec.::miden::core::math::u256::lt
+    dup  loc_load.52  mul  loc_store.52
+    not
+    if.true
+        padw  loc_storew_le.12  dropw
+        push.0.0.0.1  loc_storew_le.8   dropw
+    end
+
+    # Check (Y mod 2) == parity.
+    loc_load.8  push.1 u32and  loc_load.16  eq
+    loc_load.52  mul  loc_store.52
+
+    # X^2 -> mem[20..28].
+    padw loc_loadw_le.4  padw loc_loadw_le.0
+    dupw.1 dupw.1                                        # [X, X, ...]
+    exec.f_k1::mul                                       # [X^2, ...]
+    loc_storew_le.20  swapw  loc_storew_le.24  swapw
+
+    # X^3 = X^2 * X -> mem[28..36].
+    padw loc_loadw_le.4   padw loc_loadw_le.0            # push X on top of X^2
+    exec.f_k1::mul                                       # [X^3, ...]
+    loc_storew_le.28  swapw  loc_storew_le.32  swapw
+
+    # X^3 + 7 -> mem[36..44].
+    padw  push.0.0.0.7
+    exec.f_k1::add                                       # [X^3+7, ...]
+    loc_storew_le.36 swapw  loc_storew_le.40             # mem[36..44] = X^3+7
+
+    # Y^2 -> mem[44..52].
+    loc_loadw_le.12  swapw  loc_loadw_le.8
+    dupw.1 dupw.1                                        # [Y, Y, ...]
+    exec.f_k1::mul
+    loc_storew_le.44 swapw  loc_storew_le.48  swapw      # mem[44..52] = Y^2
+
+    # Check Y^2 == X^3 + 7.
+    padw loc_loadw_le.40  padw loc_loadw_le.36
+    exec.::miden::core::math::u256::eq
+    loc_load.52  mul  loc_store.52
+
+    # Write (X, Y, is_infinity = !flag) to dest_pt_addr. Forcing is_infinity = 1 on failure
+    # turns the slot into the identity for downstream point ops, so off-curve (X, Y) cannot
+    # drive subsequent slope inversions into a trap.
+    padw loc_loadw_le.0    loc_load.53         mem_storew_le
+    loc_loadw_le.4         loc_load.53 add.4   mem_storew_le
+    loc_loadw_le.8         loc_load.53 add.8   mem_storew_le
+    loc_loadw_le.12        loc_load.53 add.12  mem_storew_le  dropw
+    push.0.0.0  loc_load.52 not   loc_load.53 add.16  mem_storew_le dropw
+
+    # Push the accumulated flag.
+    loc_load.52
 end
 
 # ===== SCALAR MULTIPLICATION ====================================================================
@@ -1122,7 +1255,7 @@ pub proc verify_glv_hinted
     loc_load.123 add.12         mem_loadw_le  loc_storew_le.52
     loc_load.123 add.16         mem_loadw_le  loc_storew_le.56  dropw
 
-    # ----- Compute φ(Q) into mem[60..80]. Same shape as φ(G) but Q_x is now in local mem. -----
+    # ----- Compute φ(Q) into mem[60..80]. Same shape as φ(G), with Q_x loaded from local mem. -----
     push.0x7ae96a2b.0x657c0710.0x6e64479e.0xac3434e9
     push.0x9cf04975.0x12f58995.0xc1396c28.0x719501ee
     padw loc_loadw_le.44  padw loc_loadw_le.40

@@ -2,8 +2,9 @@ use miden::core::math::u256_sz_modmul_k1_base
 
 # F_p arithmetic over the secp256k1 base prime p = 2^256 - 2^32 - 977.
 #
-# All inputs and outputs are u256 values in canonical form (< p). Callers must reduce inputs at
-# the module boundary; internal field operations preserve canonicity.
+# Public field operations take and return canonical values (< p) unless their proc docs say
+# otherwise. The exception is `inv_unsafe`, which may return a non-canonical u256 representative;
+# callers may only use it when the next operation is multiplication by a canonical operand.
 #
 # Built on `u256` wrapping/overflowing arithmetic for add/sub, `u256_sz_modmul_k1_base` for
 # multiplication, and a hint-and-verify pattern for inverse (the host computes `a^-1 mod p` and
@@ -13,6 +14,17 @@ const U256_INV_K1_BASE_EVENT = event("miden::core::math::u256::u256_inv_k1_base"
 
 # Mirrors the canonical declaration in `u256.masm`; kept in sync by convention.
 pub type u256 = struct { lo: u128, hi: u128 }
+
+# ===== MODULUS HELPERS ==========================================================================
+
+#! Pushes the secp256k1 base prime `p = 2^256 - 2^32 - 977` onto the operand stack as 8 u32 LE
+#! limbs (p[0] on top, p[7] deepest).
+#!
+#! Stack: [...]  ->  [p[0], p[1], ..., p[7], ...]
+pub proc push_p
+    push.0xffffffff dup dup dup dup dup
+    push.0xfffffffe.0xfffffc2f
+end
 
 # ===== ADDITION =================================================================================
 
@@ -40,9 +52,7 @@ pub proc add(b: u256, a: u256) -> u256
     else
         # carry = 0: test c - p while keeping the original c for the borrow case.
         dupw.1 dupw.1                          # [c, c, ...]
-        push.0xffffffff dup dup dup
-        push.0xffffffff dup
-        push.0xfffffffe.0xfffffc2f             # [p0..p7, c, c, ...]
+        exec.push_p                            # [p0..p7, c, c, ...]
         exec.::miden::core::math::u256::overflowing_sub
         # => [borrow, (c - p) wrap, c, ...]
 
@@ -70,9 +80,7 @@ pub proc sub(b: u256, a: u256) -> u256
 
     if.true
         # borrow = 1 (a < b): add p.
-        push.0xffffffff dup dup dup
-        push.0xffffffff dup
-        push.0xfffffffe.0xfffffc2f
+        exec.push_p
         exec.::miden::core::math::u256::wrapping_add
     end
     # else: a - b already canonical.
@@ -87,18 +95,13 @@ end
 #!
 #! Returns 0 when a = 0; otherwise p - a (which is in (0, p)).
 pub proc neg(a: u256) -> u256
-    # eqz consumes one copy of a; keep another for the p - a branch.
+    # Keep a copy of `a` below the eqz consumer: the `a > 0` branch consumes it as p - a,
+    # and the `a = 0` branch returns it directly (zeros == result).
     dupw.1 dupw.1                                                # [a, a, ...]
-    exec.::miden::core::math::u256::eqz                          # [is_zero, a, ...]
+    exec.::miden::core::math::u256::eqz  not                     # [a != 0, a, ...]
 
     if.true
-        # a = 0: drop original a, push zero word as the result.
-        dropw dropw padw padw
-    else
-        # a > 0: c = p - a.
-        push.0xffffffff dup dup dup
-        push.0xffffffff dup
-        push.0xfffffffe.0xfffffc2f
+        exec.push_p
         swapdw
         exec.::miden::core::math::u256::wrapping_sub             # p - a
     end
@@ -106,7 +109,11 @@ end
 
 # ===== MULTIPLICATION ===========================================================================
 
-#! Modular multiplication: c = (a * b) mod p, with a, b < p.
+#! Modular multiplication: c = (a * b) mod p.
+#!
+#! Inputs must be u32-valid u256 values, with at least one operand canonical (< p). Normal field
+#! callers pass two canonical operands; `inv_unsafe` consumers pair a canonical operand with the
+#! (modular-but-possibly-non-canonical) inverse.
 #!
 #! Stack transition:
 #! [b0..b7, a0..a7, ...]  ->  [c0..c7, ...]
@@ -116,20 +123,43 @@ end
 
 # ===== INVERSE ==================================================================================
 
-#! Multiplicative inverse: c = a^(-1) mod p, with a in (0, p).
+#! Canonical multiplicative inverse: returns c = a^(-1) mod p in [0, p), with a in (0, p).
 #!
-#! Hint-and-verify: emits `U256_INV_K1_BASE_EVENT` to ask the host for `inv = a^(-1) mod p`,
-#! then checks the result with one `modmul_k1_base` call (asserting `a * inv == 1 mod p`).
-#! The MASM proc traps with "f_k1::inv: hint not a multiplicative inverse" if the host
-#! returns a non-inverse, including when called with `a = 0`.
+#! Wraps `inv_unsafe` with a final `c < p` assert. Use this when the inverse is exposed to code
+#! that depends on canonical bytes (hashing, equality, returned to caller). Hot paths that
+#! immediately multiply the result by a canonical operand can use `inv_unsafe` instead.
 #!
 #! Stack transition:
 #! [a0..a7, ...]  ->  [c0..c7, ...]
 pub proc inv(a: u256) -> u256
+    exec.inv_unsafe                                      # [inv, ...] (modular but possibly >= p)
+
+    dupw.1  dupw.1                                       # [inv_copy, inv, ...]
+    exec.push_p                                          # [p, inv_copy, inv, ...]
+    exec.::miden::core::math::u256::lt                   # [inv < p, inv, ...]
+    assert.err="f_k1::inv: hint not canonical (>= p)"
+end
+
+#! UNSAFE fast multiplicative inverse: returns some c congruent to a^(-1) mod p, with a in
+#! (0, p). The returned u256 is u32-valid per limb but NOT guaranteed to satisfy c < p.
+#!
+#! Use only when the result is immediately multiplied by a canonical operand through `f_k1::mul`
+#! or `modmul_k1_base`, which returns a canonical residue. For any other use, call `inv`.
+#!
+#! Traps with "f_k1::inv_unsafe: hint not a multiplicative inverse" on a non-inverse hint
+#! (including `a = 0`).
+#!
+#! Stack transition:
+#! [a0..a7, ...]  ->  [c0..c7, ...]
+pub proc inv_unsafe(a: u256) -> u256
     emit.U256_INV_K1_BASE_EVENT
 
+    # u32-assert advice at the boundary -- modmul's integer-lift bound assumes u32 inputs,
+    # and u32divmod.65536 inside modmul only catches felts >= 2^48.
     # Advice order is inv[0..4], inv[4..8]; swapw puts inv[0] at depth 0.
-    adv_pushw  adv_pushw  swapw                          # [inv, a, ...]
+    adv_pushw  u32assertw                                # [inv[0..4], a, ...]
+    adv_pushw  u32assertw                                # [inv[4..8], inv[0..4], a, ...]
+    swapw                                                # [inv, a, ...]
 
     # Check a * inv = 1 while leaving inv as the return value.
     swapdw                                               # [a, inv, ...]
@@ -139,5 +169,5 @@ pub proc inv(a: u256) -> u256
     # Assert c == 1.
     padw  push.0.0.0.1                                   # u256(1) on top
     exec.::miden::core::math::u256::eq
-    assert.err="f_k1::inv: hint not a multiplicative inverse"
+    assert.err="f_k1::inv_unsafe: hint not a multiplicative inverse"
 end

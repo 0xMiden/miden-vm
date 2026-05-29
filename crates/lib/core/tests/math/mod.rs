@@ -1,4 +1,5 @@
 mod f_k1;
+mod k1_advice_traps;
 mod k1_point;
 mod k1_scalar;
 mod modmul_k1_hint_checker_comparison;

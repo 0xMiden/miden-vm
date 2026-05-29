@@ -162,6 +162,23 @@ fn emit_doc_comment(rel: &LinearRelation, out: &mut String) {
         "#! Schwartz-Zippel-based {} modular-multiplication verifier.\n",
         rel.name
     ));
+    out.push_str("#!\n");
+    out.push_str("#! Contract:\n");
+    out.push_str(
+        "#!   - Inputs are u256 values encoded as 8 u32 limbs. The proc assumes this limb\n",
+    );
+    out.push_str(
+        "#!     bound; callers must validate untrusted or advice-derived inputs before calling.\n",
+    );
+    out.push_str("#!   - On success, returns the canonical residue c = a * b mod m, with c < m.\n");
+    out.push_str(
+        "#!   - The standard witness handler is complete when floor(a * b / m) fits in u256.\n",
+    );
+    out.push_str(
+        "#!     This holds if either input is canonical (< m) and the other is a well-formed u256.\n",
+    );
+    out.push_str("#!   - Malformed or inconsistent advice traps.\n");
+    out.push_str("#!\n");
     out.push_str("#! Main checked identity:\n");
     out.push_str(&format!("#!   {}\n", render_identity(rel)));
     out.push_str(

@@ -8,6 +8,15 @@ use miden::core::crypto::hashes::poseidon2
 const U256_MODMUL_K1_BASE_EVENT = event("miden::core::math::u256::u256_modmul_k1_base")
 
 #! Schwartz-Zippel-based modmul_k1_base modular-multiplication verifier.
+#!
+#! Contract:
+#!   - Inputs are u256 values encoded as 8 u32 limbs. The proc assumes this limb
+#!     bound; callers must validate untrusted or advice-derived inputs before calling.
+#!   - On success, returns the canonical residue c = a * b mod m, with c < m.
+#!   - The standard witness handler is complete when floor(a * b / m) fits in u256.
+#!     This holds if either input is canonical (< m) and the other is a well-formed u256.
+#!   - Malformed or inconsistent advice traps.
+#!
 #! Main checked identity:
 #!   a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha) = (W - alpha) * (e_shifted(alpha) - offset(alpha))
 #! at a Fiat-Shamir-derived alpha in the Miden base-field extension (W = 2^16).

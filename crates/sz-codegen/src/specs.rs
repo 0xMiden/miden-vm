@@ -37,21 +37,27 @@ const SECP256K1_SCALAR_MODULUS: &[u16] = &[
 
 /// `modmul_k1_base(b: u256, a: u256) -> u256` computing `a * b mod (2^256 - 2^32 - 977)`.
 ///
+/// Contract:
+/// - `a`, `b`: operand-stack inputs encoded as 8 u32 limbs. The generated proc assumes this bound;
+///   callers must validate untrusted or advice-derived values before calling.
+/// - On success, the proc returns the canonical residue `c = a * b mod p`, with `c < p`.
+/// - The standard witness handler is complete when `floor(a * b / p) < 2^256`. This holds if
+///   either input is canonical (`< p`) and the other is any well-formed u256.
+/// - Malformed or inconsistent advice traps.
+///
 /// Identity: `a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha)
 ///   - (W - alpha) * (e_shifted(alpha) - offset(alpha)) = 0` over u16 limbs.
-/// - `a`, `b`: inputs (16 u16 coefficients each = 8 u32 limbs). Caller must provide reduced inputs
-///   `a, b < p`; the proc does not check this.
 /// - `q`, `c`: 16-coefficient witness. Honest witnesses use u16 coefficients; the VM accepts
-///   u32-bounded non-canonical ones. The aux check enforces `c(W) < p`; with `a, b < p`, a valid
-///   identity then forces `q(W) = floor(a*b / p) < p`.
+///   u32-bounded non-canonical ones. The aux check enforces `c(W) < p`.
 /// - `e_shifted`: 32-coefficient signed-carry witness in shifted form (`signed_carry + 2^31`). Top
 ///   two coefficients equal `2^31` (the shifted encoding of zero), pinned by aux checks.
 /// - `p`: fixed modulus.
 /// - `offset`: fixed `[2^31; 32]` vector. Absorbed alongside `p` in the same fixed-statement prefix
 ///   and pinned by a single combined Poseidon2 digest.
 ///
-/// Soundness: with `a, b < p`, the SZ identity implies `a(W) * b(W) = q(W) * p(W) + c(W)` up to
-/// the Schwartz-Zippel failure probability. `c(W) < p` then pins c as the canonical residue.
+/// Soundness: with u32-bounded input limbs, the SZ identity implies
+/// `a(W) * b(W) = q(W) * p(W) + c(W)` up to the Schwartz-Zippel failure probability. `c(W) < p`
+/// then pins c as the canonical residue.
 ///
 /// The witness `q` and `c` are not required to be canonical u16 digits, only u32-bounded
 /// coefficients. The explicit `(W - x) * e(x)` term absorbs non-canonical representations
@@ -152,8 +158,8 @@ pub static MODMUL_K1_BASE: LinearRelation = LinearRelation {
 /// `modmul_k1_scalar(b: u256, a: u256) -> u256` computing `a * b mod n_k1` where `n_k1` is the
 /// secp256k1 group order.
 ///
-/// Same identity and witness shape as [`MODMUL_K1_BASE`]; the fixed modulus is the group order
-/// polynomial `n`.
+/// Same contract, identity, and witness shape as [`MODMUL_K1_BASE`]; the fixed modulus is the
+/// group order polynomial `n`.
 pub static MODMUL_K1_SCALAR: LinearRelation = LinearRelation {
     name: "modmul_k1_scalar",
     signature: "(b: u256, a: u256) -> u256",

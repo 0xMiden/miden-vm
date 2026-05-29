@@ -25,6 +25,30 @@ const PK_LEN_FELTS = 9     # 33.div_ceil(4)
 const DIGEST_LEN_FELTS = 8 # 32.div_ceil(4)
 const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 
+# `verify_prehash_native` local memory slot names. Each *_LO / *_HI pair is the low / high
+# 4-felt word of a u256; bare names are single felts.
+const VPN_R_LO         = 32   # signature r, low word
+const VPN_R_HI         = 36   # signature r, high word
+const VPN_S_LO         = 40   # signature s, low word
+const VPN_S_HI         = 44   # signature s, high word
+const VPN_E_LO         = 48   # digest e (reduced mod n), low word
+const VPN_E_HI         = 52   # digest e, high word
+const VPN_R_PT_X_LO    = 76   # R.x, low word (R = u1*G + u2*Q)
+const VPN_R_PT_X_HI    = 80   # R.x, high word
+const VPN_R_PT_INF     = 92   # R.is_infinity
+const VPN_S_INV_LO     = 96   # s^-1 mod n, low word
+const VPN_S_INV_HI     = 100  # s^-1 mod n, high word
+const VPN_U1_LO        = 104  # u1 = e * s^-1 mod n, low word
+const VPN_U1_HI        = 108  # u1, high word
+const VPN_U2_LO        = 112  # u2 = r * s^-1 mod n, low word
+const VPN_U2_HI        = 116  # u2, high word
+const VPN_RX_MOD_LO    = 120  # R.x mod n, low word
+const VPN_RX_MOD_HI    = 124  # R.x mod n, high word
+const VPN_FLAG         = 128  # validity flag
+const VPN_PK_PTR       = 129  # pk_ptr (cached)
+const VPN_DIGEST_PTR   = 130  # digest_ptr (cached)
+const VPN_SIG_PTR      = 131  # sig_ptr (cached)
+
 # PROCEDURES
 # ================================================================================================
 
@@ -209,13 +233,13 @@ end
 # (digest, r, s, x): byte-reverse each packed felt, and read the felts in reverse order
 # (felt 0 -> limb 7) so the overall byte stream flips from BE to LE.
 
-#! Pushes the secp256k1 group order `n_k1` onto the operand stack as 8 u32 LE limbs (n[0] on
-#! top, n[7] deepest).
+#! Pushes floor(n_k1 / 2) onto the operand stack as 8 u32 LE limbs (low limb on top). Used by
+#! the low-s gate in the native verifier.
 #!
-#! Stack: [...]  ->  [n[0], n[1], ..., n[7], ...]
-proc _push_n_k1
-    push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
-    push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+#! Stack: [...]  ->  [n_half[0], n_half[1], ..., n_half[7], ...]
+proc _push_n_half_k1
+    push.0x7fffffff push.0xffffffff dup dup
+    push.0x5d576e73.0x57a4501d.0xdfe92f46.0x681b20a0
 end
 
 #! Reverses the byte order of a u32. Maps `b0 + b1*256 + b2*2^16 + b3*2^24` to
@@ -361,136 +385,6 @@ proc _parse_compressed_pk
     # Stack: [is_valid, ...] (the byte-shuffling above leaves the stack at this depth).
 end
 
-#! Non-trapping decompress: same logic as `k1_point::decompress` but every assert is replaced
-#! with a multiply-AND into a validity flag. On success the proc writes the affine point to
-#! `dest_pt_addr` (X, Y, is_infinity = 0) and pushes flag = 1. On any check failure the flag
-#! is 0 and the point at `dest_pt_addr` is whatever the math happened to write (the caller
-#! must check the flag before using the point).
-#!
-#! Stack: [dest_pt_addr, x_addr, parity_addr, ...]  ->  [flag, ...]
-#!
-#! Caller layout:
-#!   x_addr      : 8 u32 LE integer limbs (word-aligned read; 2 word loads).
-#!   parity_addr : 1 felt holding 0 or 1.
-#!   dest_pt_addr: 20 felts of point storage (5 words).
-#!
-#! Local memory (64 felts):
-#!   0..8    : X (loaded from x_addr)
-#!   8..16   : Y (hint from advice)
-#!   16      : parity (loaded from parity_addr)
-#!   20..28  : X^2
-#!   28..36  : X^3
-#!   36..44  : X^3 + 7
-#!   44..52  : Y^2
-#!   52      : validity flag (initialised to 1; ANDed with each check)
-#!   53..56  : address caches (dest_pt, x, parity)
-@locals(64)
-proc _decompress_no_trap
-    loc_store.53                                         # dest_pt_addr
-    loc_store.54                                         # x_addr
-    loc_store.55                                         # parity_addr
-
-    # Initialise validity flag to 1.
-    push.1 loc_store.52
-
-    # Load X from x_addr to mem[0..8] (assumes word-aligned x_addr).
-    padw  loc_load.54         mem_loadw_le  loc_storew_le.0
-    padw  loc_load.54 add.4   mem_loadw_le  loc_storew_le.4
-    swapw                                                # [X[0..4], X[4..8], ...]
-
-    # Load parity from parity_addr to mem[16].
-    loc_load.55  mem_load  loc_store.16
-
-    # Check X < p. If X is non-canonical, substitute X = 1 so the f_k1::mul calls below do
-    # not trap on quotient overflow. The flag is already 0 in that case so the proc returns
-    # 0 regardless of what the math computes.
-    push.0xffffffff dup dup dup
-    push.0xffffffff dup
-    push.0xfffffffe.0xfffffc2f
-    exec.::miden::core::math::u256::lt
-    dup  loc_load.52  mul  loc_store.52
-    not
-    if.true
-        padw  loc_storew_le.4  dropw
-        push.0.0.0.1  loc_storew_le.0  dropw
-    end
-
-    # Check parity in {0, 1}: parity * (parity - 1) == 0.
-    loc_load.16  dup  push.1 sub  mul  eq.0
-    loc_load.52  mul  loc_store.52
-
-    # Push (X, parity) onto operand stack and emit so the host can compute the Y hint.
-    loc_load.16
-    padw loc_loadw_le.4  padw loc_loadw_le.0
-    emit.K1_POINT_DECOMPRESS_EVENT
-    drop                                                 # drop parity
-
-    # Pull Y from advice into mem[8..16].
-    adv_loadw  loc_storew_le.8                           # Y[0..4] -> mem[8..12]
-    swapw
-    adv_loadw  loc_storew_le.12                          # Y[4..8] -> mem[12..16]
-    swapw                                                # => [Y[0..4], Y[4..8], ...]
-
-    # Check Y < p. Substitute Y = 1 if non-canonical (same trap-safety reason as X above).
-    push.0xffffffff dup dup dup
-    push.0xffffffff dup
-    push.0xfffffffe.0xfffffc2f
-    exec.::miden::core::math::u256::lt
-    dup  loc_load.52  mul  loc_store.52
-    not
-    if.true
-        padw  loc_storew_le.12  dropw
-        push.0.0.0.1  loc_storew_le.8   dropw
-    end
-
-    # Check (Y mod 2) == parity.
-    loc_load.8  push.1 u32and  loc_load.16  eq
-    loc_load.52  mul  loc_store.52
-
-    # X^2 -> mem[20..28].
-    padw loc_loadw_le.4  padw loc_loadw_le.0
-    dupw.1 dupw.1                                        # [X, X, ...]
-    exec.f_k1::mul                                       # [X^2, ...]
-    loc_storew_le.20  swapw  loc_storew_le.24  swapw
-
-    # X^3 = X^2 * X -> mem[28..36].
-    padw loc_loadw_le.4   padw loc_loadw_le.0            # push X on top of X^2
-    exec.f_k1::mul                                       # [X^3, ...]
-    loc_storew_le.28  swapw  loc_storew_le.32  swapw
-
-    # X^3 + 7 -> mem[36..44].
-    padw  push.0.0.0.7
-    exec.f_k1::add                                       # [X^3+7, ...]
-    loc_storew_le.36 swapw  loc_storew_le.40             # mem[36..44] = X^3+7
-
-    # Y^2 -> mem[44..52].
-    loc_loadw_le.12  swapw  loc_loadw_le.8
-    dupw.1 dupw.1                                        # [Y, Y, ...]
-    exec.f_k1::mul
-    loc_storew_le.44 swapw  loc_storew_le.48  swapw      # mem[44..52] = Y^2
-
-    # Check Y^2 == X^3 + 7.
-    padw loc_loadw_le.40  padw loc_loadw_le.36
-    exec.::miden::core::math::u256::eq
-    loc_load.52  mul  loc_store.52
-
-    # Write (X, Y, is_infinity = 1 - flag) to dest_pt_addr.
-    # When decompression succeeds (flag = 1), the result is (X, Y, 0) -- a finite point on
-    # the curve. When decompression fails (flag = 0), is_infinity is forced to 1, so any
-    # downstream point operation treats the slot as the identity. This keeps the MSM in
-    # `verify_glv_hinted` safe even when decompression failed (an off-curve `(X, Y)` could
-    # otherwise drive `point_double`'s `inv(2Y)` or `point_add`'s `inv(X2 - X1)` into a
-    # trap-prone state).
-    padw loc_loadw_le.0    loc_load.53         mem_storew_le
-    loc_loadw_le.4         loc_load.53 add.4   mem_storew_le
-    loc_loadw_le.8         loc_load.53 add.8   mem_storew_le
-    loc_loadw_le.12        loc_load.53 add.12  mem_storew_le  dropw
-    push.0.0.0  loc_load.52 not   loc_load.53 add.16  mem_storew_le dropw
-
-    # Push the accumulated flag.
-    loc_load.52
-end
-
 # NATIVE VERIFY ENTRY POINT
 # ================================================================================================
 
@@ -500,13 +394,17 @@ end
 #!
 #! Stack: [pk_ptr, digest_ptr, sig_ptr, ...]  ->  [result, ...]
 #!
-#! Returns 1 if the signature is valid, 0 otherwise. No trap on failure: every check
-#! contributes to a multiplicative validity flag, and the math is run with safe-fallback
-#! values whenever an input would otherwise trap a sub-proc.
+#! Returns 1 if the signature is valid, 0 otherwise. No trap on signature/key validation:
+#! every check contributes to a multiplicative validity flag, and the math is run with
+#! safe-fallback values whenever an input would otherwise trap a sub-proc. The no-trap
+#! guarantee assumes calldata felts are valid packed u32 values (the parser uses `u32shr`,
+#! `u32and`, and `u32lt` directly on them); callers that source calldata from untrusted
+#! memory should validate u32-ness before calling.
 #!
 #! Validation:
 #!   - pk parses (prefix in {0x02, 0x03}) and decompresses to an on-curve point Q.
-#!   - r in (0, n) and s in (0, n).
+#!   - r in (0, n).
+#!   - s in (0, n/2] (matches the precompile/k256 path, which rejects high-s signatures).
 #!   - R = u1*G + u2*Q is not the identity, where u1 = e * s^-1 mod n, u2 = r * s^-1 mod n.
 #!   - R.x mod n == r.
 #!
@@ -527,94 +425,98 @@ end
 @locals(144)
 pub proc verify_prehash_native
     # Stack: [pk_ptr, digest_ptr, sig_ptr, ...]
-    loc_store.129
-    loc_store.130
-    loc_store.131
+    loc_store.VPN_PK_PTR
+    loc_store.VPN_DIGEST_PTR
+    loc_store.VPN_SIG_PTR
 
     # Initialise validity flag = 1.
-    push.1 loc_store.128
+    push.1 loc_store.VPN_FLAG
 
     # ----- Parse pk into x_pk (mem[0..8]) and parity (mem[8]) -----
-    loc_load.129  locaddr.8  locaddr.0   # [dest_x, dest_parity, pk_ptr]
+    loc_load.VPN_PK_PTR  locaddr.8  locaddr.0   # [dest_x, dest_parity, pk_ptr]
     exec._parse_compressed_pk                            # [pk_flag, ...]
-    loc_load.128  mul  loc_store.128
+    loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG
 
     # ----- Parse signature into r (mem[32..40]) and s (mem[40..48]); validate v + padding -----
-    loc_load.131  locaddr.40  locaddr.32   # [dest_r, dest_s, sig_ptr]
+    loc_load.VPN_SIG_PTR  locaddr.40  locaddr.32   # [dest_r, dest_s, sig_ptr]
     exec._parse_sig                                      # [sig_flag, ...]
-    loc_load.128  mul  loc_store.128
+    loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG
 
     # ----- Parse digest into e (mem[48..56]) -----
-    loc_load.130  locaddr.48
+    loc_load.VPN_DIGEST_PTR  locaddr.48
     exec._parse_be_u256
 
     # ----- Decompress pk into Q (mem[12..32]) -----
     locaddr.8  locaddr.0  locaddr.12
-    exec._decompress_no_trap                             # [decompress_flag, ...]
-    loc_load.128  mul  loc_store.128
+    exec.k1_point::decompress_no_trap                    # [decompress_flag, ...]
+    loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG
 
     # ----- Validate r in (0, n_k1); substitute r = 1 if not -----
-    # r != 0
-    padw loc_loadw_le.36  padw loc_loadw_le.32
-    exec.::miden::core::math::u256::eqz  not             # [r_nonzero, ...]
-    # r < n
-    padw loc_loadw_le.36  padw loc_loadw_le.32
-    exec._push_n_k1
+    # Load r once and dup so both checks run against the same word; movdn slips the eqz
+    # result under the live copy so push_n + lt see the right operands.
+    padw loc_loadw_le.VPN_R_HI  padw loc_loadw_le.VPN_R_LO           # [r, ...]
+    dupw.1 dupw.1                                        # [r, r, ...]
+    exec.::miden::core::math::u256::eqz  not             # [r_nonzero, r, ...]
+    movdn.8                                              # [r, r_nonzero, ...]
+    exec.k1_scalar::push_n
     exec.::miden::core::math::u256::lt                   # [r_lt_n, r_nonzero, ...]
     mul                                                  # [r_valid, ...]
-    dup  loc_load.128  mul  loc_store.128                # flag &= r_valid; r_valid stays
+    dup  loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG                # flag &= r_valid; r_valid stays
     not
     if.true
         # r = 1 fallback prevents q-overflow in modmul below; flag is already 0.
-        padw  loc_storew_le.36  dropw
-        push.0.0.0.1  loc_storew_le.32  dropw
+        padw  loc_storew_le.VPN_R_HI  dropw
+        push.0.0.0.1  loc_storew_le.VPN_R_LO  dropw
     end
 
-    # ----- Validate s in (0, n_k1); substitute s = 1 if not (also keeps inv(s) from trapping) -----
-    padw loc_loadw_le.44  padw loc_loadw_le.40
-    exec.::miden::core::math::u256::eqz  not             # [s_nonzero, ...]
-    padw loc_loadw_le.44  padw loc_loadw_le.40
-    exec._push_n_k1
-    exec.::miden::core::math::u256::lt                   # [s_lt_n, s_nonzero, ...]
+    # ----- Validate s in (0, n_k1/2]; substitute s = 1 if not -----
+    # Match the precompile/k256 path, which rejects high-s signatures. The low-s bound also
+    # subsumes s < n. Same load-once + dup pattern as the r-validation above.
+    padw loc_loadw_le.VPN_S_HI  padw loc_loadw_le.VPN_S_LO           # [s, ...]
+    dupw.1 dupw.1                                        # [s, s, ...]
+    exec.::miden::core::math::u256::eqz  not             # [s_nonzero, s, ...]
+    movdn.8                                              # [s, s_nonzero, ...]
+    exec._push_n_half_k1
+    exec.::miden::core::math::u256::lte                  # [s_le_n_half, s_nonzero, ...]
     mul                                                  # [s_valid, ...]
-    dup  loc_load.128  mul  loc_store.128
+    dup  loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG
     not
     if.true
-        padw  loc_storew_le.44  dropw
-        push.0.0.0.1  loc_storew_le.40  dropw
+        padw  loc_storew_le.VPN_S_HI  dropw
+        push.0.0.0.1  loc_storew_le.VPN_S_LO  dropw
     end
 
     # ----- Reduce e mod n_k1 -----
     # e is the digest as a u256. Since e < 2^256 < 2*n, a single conditional subtraction
-    # suffices. Required by `k1_scalar::mul`, which assumes inputs < n.
-    padw loc_loadw_le.52  padw loc_loadw_le.48
-    exec._push_n_k1
+    # canonicalizes it. `k1_scalar::mul` below requires at least one canonical operand.
+    padw loc_loadw_le.VPN_E_HI  padw loc_loadw_le.VPN_E_LO
+    exec.k1_scalar::push_n
     exec.::miden::core::math::u256::lt
     not
     if.true
         # e >= n: e = e - n.
-        padw loc_loadw_le.52  padw loc_loadw_le.48
-        exec._push_n_k1
+        padw loc_loadw_le.VPN_E_HI  padw loc_loadw_le.VPN_E_LO
+        exec.k1_scalar::push_n
         exec.::miden::core::math::u256::wrapping_sub
-        loc_storew_le.48  dropw  loc_storew_le.52  dropw
+        loc_storew_le.VPN_E_LO  dropw  loc_storew_le.VPN_E_HI  dropw
     end
 
     # ----- s_inv = inv(s) -----
-    padw loc_loadw_le.44  padw loc_loadw_le.40
-    exec.k1_scalar::inv                                  # [s_inv on stack, ...]
-    loc_storew_le.96   dropw  loc_storew_le.100  dropw
+    # inv_unsafe precondition: e and r are canonical, and `k1_scalar::mul` reduces the products.
+    padw loc_loadw_le.VPN_S_HI  padw loc_loadw_le.VPN_S_LO
+    exec.k1_scalar::inv_unsafe                           # [s_inv on stack, ...]
+    loc_storew_le.VPN_S_INV_LO   dropw  loc_storew_le.VPN_S_INV_HI  dropw
 
-    # ----- u1 = e * s_inv mod n_k1 -----
-    padw loc_loadw_le.52  padw loc_loadw_le.48           # e (a, deeper)
-    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b, top)
-    exec.k1_scalar::mul
-    loc_storew_le.104  dropw  loc_storew_le.108  dropw
-
-    # ----- u2 = r * s_inv mod n_k1 -----
-    padw loc_loadw_le.36  padw loc_loadw_le.32           # r (a)
-    padw loc_loadw_le.100  padw loc_loadw_le.96          # s_inv (b)
-    exec.k1_scalar::mul
-    loc_storew_le.112  dropw  loc_storew_le.116  dropw
+    # ----- u1 = e * s_inv, u2 = r * s_inv (mod n_k1) -----
+    # Load s_inv once and dup so both products reuse the same copy.
+    padw loc_loadw_le.VPN_S_INV_HI  padw loc_loadw_le.VPN_S_INV_LO          # [s_inv, ...]
+    dupw.1 dupw.1                                        # [s_inv_copy, s_inv, ...]
+    padw loc_loadw_le.VPN_E_HI  padw loc_loadw_le.VPN_E_LO           # [e, s_inv_copy, s_inv, ...]
+    exec.k1_scalar::mul                                  # [u1, s_inv, ...]
+    loc_storew_le.VPN_U1_LO  dropw  loc_storew_le.VPN_U1_HI  dropw   # [s_inv, ...]
+    padw loc_loadw_le.VPN_R_HI  padw loc_loadw_le.VPN_R_LO           # [r, s_inv, ...]
+    exec.k1_scalar::mul                                  # [u2, ...]
+    loc_storew_le.VPN_U2_LO  dropw  loc_storew_le.VPN_U2_HI  dropw
 
     # ----- R = u1*G + u2*Q -----
     # `verify_glv_hinted` hardcodes G; pass Q and the two scalar addresses.
@@ -623,28 +525,27 @@ pub proc verify_prehash_native
     exec.k1_point::verify_glv_hinted
 
     # ----- Validate R != identity -----
-    loc_load.92  not  loc_load.128  mul  loc_store.128   # flag &= !R.is_infinity (mem[76+16] = 92)
+    loc_load.VPN_R_PT_INF  not  loc_load.VPN_FLAG  mul  loc_store.VPN_FLAG   # flag &= !R.is_infinity (mem[76+16] = 92)
 
     # ----- rx_mod = R.x mod n_k1 -----
-    # R.x is at mem[76..84]. If R.x < n_k1, rx_mod = R.x; else rx_mod = R.x - n_k1.
-    padw loc_loadw_le.80  padw loc_loadw_le.76           # R.x (a)
-    exec._push_n_k1                                       # n_k1 (b)
-    exec.::miden::core::math::u256::lt                   # [Rx<n, ...]
+    # Load R.x once and dup; either branch consumes the live copy via the storew sequence.
+    padw loc_loadw_le.VPN_R_PT_X_HI  padw loc_loadw_le.VPN_R_PT_X_LO           # [R.x, ...]
+    dupw.1 dupw.1                                        # [R.x, R.x, ...]
+    exec.k1_scalar::push_n                               # [n_k1, R.x, R.x, ...]
+    exec.::miden::core::math::u256::lt                   # [R.x < n, R.x, ...]
     if.true
-        # R.x < n_k1: rx_mod = R.x.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
-        loc_storew_le.120  dropw  loc_storew_le.124  dropw
+        # R.x < n: rx_mod = R.x (already on stack).
+        loc_storew_le.VPN_RX_MOD_LO  dropw  loc_storew_le.VPN_RX_MOD_HI  dropw
     else
-        # R.x >= n_k1: rx_mod = R.x - n_k1.
-        padw loc_loadw_le.80  padw loc_loadw_le.76
-        exec._push_n_k1
+        # R.x >= n: rx_mod = R.x - n.
+        exec.k1_scalar::push_n
         exec.::miden::core::math::u256::wrapping_sub
-        loc_storew_le.120  dropw  loc_storew_le.124  dropw
+        loc_storew_le.VPN_RX_MOD_LO  dropw  loc_storew_le.VPN_RX_MOD_HI  dropw
     end
 
     # ----- Validate rx_mod == r -----
-    padw loc_loadw_le.124  padw loc_loadw_le.120         # rx_mod (a)
-    padw loc_loadw_le.36   padw loc_loadw_le.32          # r (b)
+    padw loc_loadw_le.VPN_RX_MOD_HI  padw loc_loadw_le.VPN_RX_MOD_LO         # rx_mod (a)
+    padw loc_loadw_le.VPN_R_HI   padw loc_loadw_le.VPN_R_LO          # r (b)
     exec.::miden::core::math::u256::eq
-    loc_load.128  mul                                    # final validity flag, returned on stack
+    loc_load.VPN_FLAG  mul                                    # final validity flag, returned on stack
 end

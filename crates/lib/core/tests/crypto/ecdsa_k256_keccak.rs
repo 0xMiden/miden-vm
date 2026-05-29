@@ -410,7 +410,7 @@ fn parse_sig_known_values() {
 
             # _parse_sig(dest_r=locaddr.20, dest_s=locaddr.28, sig_ptr=locaddr.0).
             # Stack convention: [dest_r_addr, dest_s_addr, sig_ptr, ...] with dest_r on top.
-            # _parse_sig now also returns a `flag` (1 iff sig[16] < 4); assert it.
+            # _parse_sig returns a `flag` (1 iff sig[16] < 4); assert it.
             locaddr.0  locaddr.28  locaddr.20
             exec._parse_sig
             assert.err=\"_parse_sig flag\"
@@ -463,14 +463,14 @@ fn parse_compressed_pk_source(felt0: u32, asserts: &str) -> String {
             # _parse_compressed_pk(dest_x=locaddr.20, dest_parity=locaddr.30, pk_ptr=locaddr.0).
             locaddr.0  locaddr.30  locaddr.20
             exec._parse_compressed_pk
-            # Stack now: [flag, ...]. Stash flag in mem[31] for retrieval below.
+            # Stack: [flag, ...]. Stash flag in mem[31] for retrieval below.
             loc_store.31
 
             # Load mem[30] (parity), mem[20..28] (x limbs in reverse so x[0] on top), and mem[31] (flag).
             loc_load.31  loc_load.30
             loc_load.27  loc_load.26  loc_load.25  loc_load.24
             loc_load.23  loc_load.22  loc_load.21  loc_load.20
-            # Stack now (top -> bottom): x[0], x[1], ..., x[7], parity, flag.
+            # Stack (top -> bottom): x[0], x[1], ..., x[7], parity, flag.
         end",
         include_str!("../../asm/crypto/dsa/ecdsa_k256_keccak.masm"),
     );
@@ -642,6 +642,31 @@ fn ecdsa_verify_prehash_native_zero_s_returns_zero() {
     for b in &mut sig_bytes[32..64] {
         *b = 0;
     }
+    assert_native_verify(&request.pk().to_bytes(), request.digest(), &sig_bytes, 0);
+}
+
+#[test]
+fn ecdsa_verify_prehash_native_high_s_returns_zero() {
+    // The precompile path (via k256's verify_prehashed) rejects high-s; the native path must
+    // agree.
+    use num::bigint::BigUint;
+    let request = generate_valid_signature();
+    let mut sig_bytes = request.sig().to_bytes();
+
+    // sig_bytes[32..64] is `s` in big-endian. Replace with n - s.
+    let n_bytes: [u8; 32] = [
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36,
+        0x41, 0x41,
+    ];
+    let n = BigUint::from_bytes_be(&n_bytes);
+    let s = BigUint::from_bytes_be(&sig_bytes[32..64]);
+    let high_s = &n - &s;
+    let high_s_bytes = high_s.to_bytes_be();
+    let pad = 32 - high_s_bytes.len();
+    sig_bytes[32..32 + pad].fill(0);
+    sig_bytes[32 + pad..64].copy_from_slice(&high_s_bytes);
+
     assert_native_verify(&request.pk().to_bytes(), request.digest(), &sig_bytes, 0);
 }
 
@@ -872,8 +897,8 @@ fn neg_gy_limbs() -> [u32; 8] {
     out
 }
 
-/// Build a `_decompress_no_trap` test wrapper. Pushes x and parity, calls the helper, then
-/// leaves `[flag, X (8), Y (8), inf_word (4), ...]` on the stack.
+/// Build a `k1_point::decompress_no_trap` test wrapper. Pushes x and parity, calls the helper,
+/// then leaves `[flag, X (8), Y (8), inf_word (4), ...]` on the stack.
 fn decompress_no_trap_source(x_limbs: &[u32; 8], parity: u8, asserts: &str) -> String {
     let pushes_x = (0..8)
         .rev()
@@ -888,9 +913,9 @@ fn decompress_no_trap_source(x_limbs: &[u32; 8], parity: u8, asserts: &str) -> S
             loc_storew_le.4  dropw                       # mem[4..8] = x[4..8]
             loc_store.8                                  # mem[8] = parity
 
-            # _decompress_no_trap(dest_pt=locaddr.12, x_addr=locaddr.0, parity_addr=locaddr.8).
+            # k1_point::decompress_no_trap(dest_pt=locaddr.12, x_addr=locaddr.0, parity_addr=locaddr.8).
             locaddr.8  locaddr.0  locaddr.12
-            exec._decompress_no_trap
+            exec.k1_point::decompress_no_trap
             loc_store.32                                 # stash flag at mem[32]
 
             # Read mem[12..32] in reverse address order so X[0..4] ends on top.

@@ -3,8 +3,9 @@ use miden::core::math::u256_sz_modmul_k1_scalar
 # Scalar-field arithmetic over the secp256k1 group order
 # n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141.
 #
-# All inputs and outputs are u256 values in canonical form (< n). Callers must reduce inputs at
-# the module boundary; internal field operations preserve canonicity.
+# Public scalar operations take and return canonical values (< n) unless their proc docs say
+# otherwise. The exception is `inv_unsafe`, which may return a non-canonical u256 representative;
+# callers may only use it when the next operation is multiplication by a canonical operand.
 #
 # Built on `u256` wrapping/overflowing arithmetic for add/sub, `u256_sz_modmul_k1_scalar` for
 # multiplication, and a hint-and-verify pattern for inverse (the host computes `a^-1 mod n` and
@@ -16,6 +17,17 @@ pub type u256 = struct { lo: u128, hi: u128 }
 const U256_INV_K1_SCALAR_EVENT = event("miden::core::math::u256::u256_inv_k1_scalar")
 
 const GLV_SPLIT_K1_EVENT = event("miden::core::math::k1_scalar::glv_split")
+
+# ===== MODULUS HELPERS ==========================================================================
+
+#! Pushes the secp256k1 group order `n` onto the operand stack as 8 u32 LE limbs (n[0] on top,
+#! n[7] deepest).
+#!
+#! Stack: [...]  ->  [n[0], n[1], ..., n[7], ...]
+pub proc push_n
+    push.0xffffffff dup dup push.0xfffffffe
+    push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+end
 
 # ===== ADDITION =================================================================================
 
@@ -43,9 +55,7 @@ pub proc add(b: u256, a: u256) -> u256
     else
         # carry = 0: test c - n while keeping the original c for the borrow case.
         dupw.1 dupw.1                          # [c, c, ...]
-        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
-        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
-        # => [n0..n7, c, c, ...]
+        exec.push_n                            # [n0..n7, c, c, ...]
         exec.::miden::core::math::u256::overflowing_sub
         # => [borrow, (c - n) wrap, c, ...]
 
@@ -73,8 +83,7 @@ pub proc sub(b: u256, a: u256) -> u256
 
     if.true
         # borrow = 1 (a < b): add n.
-        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
-        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+        exec.push_n
         exec.::miden::core::math::u256::wrapping_add
     end
     # else: a - b already canonical.
@@ -89,17 +98,13 @@ end
 #!
 #! Returns 0 when a = 0; otherwise n - a (which is in (0, n)).
 pub proc neg(a: u256) -> u256
-    # eqz consumes one copy of a; keep another for the n - a branch.
+    # Keep a copy of `a` below the eqz consumer: the `a > 0` branch consumes it as n - a,
+    # and the `a = 0` branch returns it directly (zeros == result).
     dupw.1 dupw.1                                                # [a, a, ...]
-    exec.::miden::core::math::u256::eqz                          # [is_zero, a, ...]
+    exec.::miden::core::math::u256::eqz  not                     # [a != 0, a, ...]
 
     if.true
-        # a = 0: drop original a, push zero word as the result.
-        dropw dropw padw padw
-    else
-        # a > 0: c = n - a.
-        push.0xffffffff.0xffffffff.0xffffffff.0xfffffffe
-        push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+        exec.push_n
         swapdw
         exec.::miden::core::math::u256::wrapping_sub             # n - a
     end
@@ -107,7 +112,11 @@ end
 
 # ===== MULTIPLICATION ===========================================================================
 
-#! Modular multiplication: c = (a * b) mod n, with a, b < n.
+#! Modular multiplication: c = (a * b) mod n.
+#!
+#! Inputs must be u32-valid u256 values, with at least one operand canonical (< n). Normal scalar
+#! callers pass two canonical operands; `inv_unsafe` consumers pair a canonical operand with the
+#! (modular-but-possibly-non-canonical) inverse.
 #!
 #! Stack transition:
 #! [b0..b7, a0..a7, ...]  ->  [c0..c7, ...]
@@ -117,20 +126,44 @@ end
 
 # ===== INVERSE ==================================================================================
 
-#! Multiplicative inverse: c = a^(-1) mod n, with a in (0, n).
+#! Canonical multiplicative inverse: returns c = a^(-1) mod n in [0, n), with a in (0, n).
 #!
-#! Hint-and-verify: emits `U256_INV_K1_SCALAR_EVENT` to ask the host for `inv = a^(-1) mod n`,
-#! then checks the result with one `modmul_k1_scalar` call (asserting `a * inv == 1 mod n`).
-#! The MASM proc traps with "k1_scalar::inv: hint not a multiplicative inverse" if the host
-#! returns a non-inverse, including when called with `a = 0`.
+#! Wraps `inv_unsafe` with a final `c < n` assert. Use this when the inverse is exposed to code
+#! that depends on canonical bytes (hashing, equality, returned to caller). Hot paths that
+#! immediately multiply the result by a canonical operand can use `inv_unsafe` instead.
 #!
 #! Stack transition:
 #! [a0..a7, ...]  ->  [c0..c7, ...]
 pub proc inv(a: u256) -> u256
+    exec.inv_unsafe                                      # [inv, ...] (modular but possibly >= n)
+
+    dupw.1  dupw.1                                       # [inv_copy, inv, ...]
+    exec.push_n                                          # [n, inv_copy, inv, ...]
+    exec.::miden::core::math::u256::lt                   # [inv < n, inv, ...]
+    assert.err="k1_scalar::inv: hint not canonical (>= n)"
+end
+
+#! UNSAFE fast multiplicative inverse: returns some c congruent to a^(-1) mod n, with a in
+#! (0, n). The returned u256 is u32-valid per limb but NOT guaranteed to satisfy c < n.
+#!
+#! Use only when the result is immediately multiplied by a canonical operand through
+#! `k1_scalar::mul` or `modmul_k1_scalar`, which returns a canonical residue. For any other use,
+#! call `inv`.
+#!
+#! Traps with "k1_scalar::inv_unsafe: hint not a multiplicative inverse" on a non-inverse
+#! hint (including `a = 0`).
+#!
+#! Stack transition:
+#! [a0..a7, ...]  ->  [c0..c7, ...]
+pub proc inv_unsafe(a: u256) -> u256
     emit.U256_INV_K1_SCALAR_EVENT
 
+    # u32-assert advice at the boundary -- modmul's integer-lift bound assumes u32 inputs,
+    # and u32divmod.65536 inside modmul only catches felts >= 2^48.
     # Advice order is inv[0..4], inv[4..8]; swapw puts inv[0] at depth 0.
-    adv_pushw  adv_pushw  swapw                          # [inv, a, ...]
+    adv_pushw  u32assertw                                # [inv[0..4], a, ...]
+    adv_pushw  u32assertw                                # [inv[4..8], inv[0..4], a, ...]
+    swapw                                                # [inv, a, ...]
 
     # Check a * inv = 1 while leaving inv as the return value.
     swapdw                                               # [a, inv, ...]
@@ -140,14 +173,14 @@ pub proc inv(a: u256) -> u256
     # Assert c == 1.
     padw  push.0.0.0.1                          # u256(1) on top, low limb = 1
     exec.::miden::core::math::u256::eq
-    assert.err="k1_scalar::inv: hint not a multiplicative inverse"
+    assert.err="k1_scalar::inv_unsafe: hint not a multiplicative inverse"
 end
 
 # ===== GLV DECOMPOSITION ========================================================================
 
 #! Hint-and-verify GLV decomposition of a scalar `k`. Reads `k` from `mem[k_addr..k_addr+8]`
 #! (8 u32 LE limbs), asks the host to split it into signed `(k_a, k_b)` such that
-#! `k ≡ k_a + k_b·λ (mod n)` with both magnitudes strictly less than `2^128`, and writes
+#! `k = k_a + k_b * lambda mod n` with both magnitudes strictly less than `2^128`, and writes
 #! the witness to `mem[out_addr..out_addr+18]`:
 #!   out_addr[0..8]:    |k_a| (8 u32 LE limbs)
 #!   out_addr[8..16]:   |k_b| (8 u32 LE limbs)
@@ -157,7 +190,8 @@ end
 #! Asserts:
 #!   - magnitudes fit in 128 bits (limbs 4..7 are zero)
 #!   - sign bits are boolean
-#!   - `(canonical_a + canonical_b·λ) mod n == k`, where `canonical_x = sign_x ? n - |k_x| : |k_x|`
+#!   - `(canonical_a + canonical_b * lambda) mod n == k`, where
+#!     `canonical_x = sign_x ? n - |k_x| : |k_x|`
 #!
 #! Stack transition:
 #!   [out_addr, k_addr, ...]  ->  [...]
@@ -178,35 +212,32 @@ pub proc verify_glv_split
     loc_store.48
     loc_store.49
 
-    # Push k_addr on top so the handler can read it via `get_stack_item(1)`. The Rust event
-    # handler sees a synthesized event id at offset 0 and the actual operand stack at
-    # offsets 1..N. `emit` does not modify the operand stack, so we drop the placeholder
-    # k_addr explicitly after the emit.
+    # Push k_addr for the handler (it reads operand-stack offset 1 -- offset 0 is the
+    # synthesized event id), then drop it: `emit` doesn't pop.
     loc_load.49
     emit.GLV_SPLIT_K1_EVENT
     drop
 
-    # Pull witness from advice. Push order from the handler:
-    #   |k_a|[0..8], sign_a, |k_b|[0..8], sign_b. Pop order matches.
-    adv_pushw  loc_storew_le.0   dropw
-    adv_pushw  loc_storew_le.4   dropw
+    # Pull witness from advice. Handler push order: |k_a|[0..8], sign_a, |k_b|[0..8], sign_b.
+    # `adv_loadw` overwrites the top word, so a single `padw` provides the scratch slots and
+    # every subsequent word load reuses them -- no per-word `dropw`. u32-assert each magnitude
+    # word; downstream `neg` and `mul` rely on u32-valid inputs. The high-limb words also get
+    # an `assertz` below for the 2^128 bound; the sign felts are bound to {0, 1} below.
+    padw
+    adv_loadw  u32assertw  loc_storew_le.0
+    adv_loadw  u32assertw  loc_storew_le.4
     adv_push   loc_store.16
-    adv_pushw  loc_storew_le.8   dropw
-    adv_pushw  loc_storew_le.12  dropw
+    adv_loadw  u32assertw  loc_storew_le.8
+    adv_loadw  u32assertw  loc_storew_le.12
     adv_push   loc_store.17
+    dropw
 
-    # Bound check magnitudes: limbs 4..7 == 0 (so |k_*| < 2^128). Guards against a
-    # malicious host pushing a magnitude that would let the relation check pass with a
-    # different scalar — the relation alone has many solutions in F_n; the bound pins us
-    # to the unique GLV decomposition.
-    loc_load.4   assertz.err="glv: |k_a| limb 4 must be 0"
-    loc_load.5   assertz.err="glv: |k_a| limb 5 must be 0"
-    loc_load.6   assertz.err="glv: |k_a| limb 6 must be 0"
-    loc_load.7   assertz.err="glv: |k_a| limb 7 must be 0"
-    loc_load.12  assertz.err="glv: |k_b| limb 4 must be 0"
-    loc_load.13  assertz.err="glv: |k_b| limb 5 must be 0"
-    loc_load.14  assertz.err="glv: |k_b| limb 6 must be 0"
-    loc_load.15  assertz.err="glv: |k_b| limb 7 must be 0"
+    # Bound magnitudes to 2^128 (limbs 4..7 == 0). The relation alone has many F_n
+    # solutions; the 2^128 bound pins us to the unique GLV decomposition. Each high-limb
+    # word is u32-bounded so its 4-limb sum stays well below the felt modulus; assertz on
+    # the sum is equivalent to asserting all four limbs are zero.
+    padw  loc_loadw_le.4    add  add  add  assertz.err="glv: |k_a| not < 2^128"
+    padw  loc_loadw_le.12   add  add  add  assertz.err="glv: |k_b| not < 2^128"
 
     # Assert each sign bit is boolean: s * (s - 1) = 0.
     loc_load.16  dup  mul  loc_load.16  sub  assertz.err="glv: sign_a not boolean"
@@ -217,8 +248,8 @@ pub proc verify_glv_split
     padw  loc_load.49         mem_loadw_le  loc_storew_le.40
     loc_load.49 add.4         mem_loadw_le  loc_storew_le.44
 
-    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28]. c_a is also
-    # left on stack (consumed below by the final `add`).
+    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28] and left on stack
+    # for the final `add` below.
     loc_loadw_le.4         padw  loc_loadw_le.0
     loc_load.16
     if.true
@@ -226,8 +257,7 @@ pub proc verify_glv_split
     end
     loc_storew_le.20 swapw  loc_storew_le.24  swapw
 
-    # Canonicalize c_b at mem[28..36]. c_b is also left on stack (consumed below by
-    # `mul` as the second operand after λ is pushed on top).
+    # Canonicalize c_b at mem[28..36] and leave it on stack for the `mul` below.
     padw  loc_loadw_le.12  padw  loc_loadw_le.8
     loc_load.17
     if.true
@@ -235,16 +265,12 @@ pub proc verify_glv_split
     end
     loc_storew_le.28 swapw  loc_storew_le.32  swapw
 
-    # Compute c_b * λ mod n. `mul` consumes [b0..b7, a0..a7, ...] and returns [a*b mod n].
-    # λ = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
+    # sum = c_a + c_b * lambda mod n. lambda is the secp256k1 GLV eigenvalue.
+    # lambda = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
     push.0x5363ad4c.0xc05c30e0.0xa5261c02.0x8812645a
     push.0x122e22ea.0x20816678.0xdf02967c.0x1b23bd72
-    exec.mul
-    # Stack: [(λ·c_b)0..7, c_a0..c_a7, ...]
-
-    # Add c_a mod n.
-    exec.add
-    # Stack: [sum0..sum7, ...]
+    exec.mul                                              # [lambda * c_b, c_a, ...]
+    exec.add                                              # [sum, ...]
 
     # Compare sum to k. Load k0..k7 onto the stack (k0 on top, k7 deepest).
     padw loc_loadw_le.44  padw loc_loadw_le.40

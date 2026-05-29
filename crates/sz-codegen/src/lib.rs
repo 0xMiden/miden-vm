@@ -14,6 +14,11 @@
 //! witness layout and auxiliary checks; [`emit_masm`] turns one into a fully-specialized MASM
 //! proc.
 //!
+//! The generated procs assume operand-stack inputs are well-formed u256 values: 8 limbs, each
+//! already bounded to u32. They return a canonical residue `c < m` if the witness is accepted.
+//! The standard witness handler is complete when `floor(a * b / m) < 2^256`. This holds if
+//! either input is canonical (`< m`) and the other is any well-formed u256.
+//!
 //! Emitted artifacts (`modmul_k1_base`, `modmul_k1_scalar`) are checked into source control.
 //! The `regen` binary regenerates them; CI runs it in `--check` mode and fails if the working
 //! tree drifts from the spec.
