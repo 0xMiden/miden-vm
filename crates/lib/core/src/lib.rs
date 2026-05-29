@@ -14,7 +14,8 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest};
 use miden_core::{
-    events::EventName, precompile::PrecompileVerifierRegistry, serde::Deserializable,
+    deferred::PrecompileRegistry, events::EventName, precompile::PrecompileVerifierRegistry,
+    serde::Deserializable,
 };
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
@@ -110,6 +111,7 @@ impl From<&CoreLibrary> for HostLibrary {
         Self {
             mast_forest: core_lib.mast_forest().clone(),
             handlers: core_lib.handlers(),
+            precompiles: core_lib.precompiles(),
         }
     }
 }
@@ -144,6 +146,13 @@ impl CoreLibrary {
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
             (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ]
+    }
+
+    /// Returns the deferred precompile registry exported by this library.
+    ///
+    /// The framework branch has not migrated the core precompiles yet, so this is currently empty.
+    pub fn precompiles(&self) -> PrecompileRegistry {
+        PrecompileRegistry::default()
     }
 
     /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate

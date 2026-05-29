@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ZERO,
-    deferred::{Digest, Node, NodeType, Payload, PrecompileError, Tag},
+    deferred::{Digest, Node, NodeType, Payload, PrecompileError, PrecompileRegistry, Tag},
 };
 
 use super::SystemEventError;
@@ -67,12 +67,12 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
 /// unconstrained commitment through advice.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
+    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
     let max_deferred_elements = processor.options.max_deferred_elements();
-    let (state, precompiles) = processor.deferred_view_mut();
-    state.register(precompiles, Node::expression(tag, payload))?;
-    check_deferred_budget(state.num_elements(), max_deferred_elements)
+    processor.deferred_state.register(precompiles, Node::expression(tag, payload))?;
+    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)
 }
 
 /// Handles deferred-node evaluation and returns the canonical node as advice.
@@ -83,13 +83,13 @@ pub(super) fn handle_deferred_register(
 /// rehydration will verify.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
+    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
     let max_deferred_elements = processor.options.max_deferred_elements();
-    let (state, precompiles) = processor.deferred_view_mut();
-    let canonical = state.evaluate_digest(precompiles, digest)?;
-    check_deferred_budget(state.num_elements(), max_deferred_elements)?;
+    let canonical = processor.deferred_state.evaluate_digest(precompiles, digest)?;
+    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)?;
 
     // Serialize the canonical as `tag || payload` in natural order.
     let mut value: Vec<Felt> = Vec::new();
@@ -118,21 +118,19 @@ pub(super) fn handle_deferred_evaluate(
 /// enforces alignment, bounds, and bulk-data limits.
 pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
+    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let tag = Tag::from_word(processor.stack_get_word(CHUNK_TAG_OFFSET).into());
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
 
     // Decode `n` from the tag before any memory reads — the precompile is the source of truth
     // for chunk length, and reading otherwise would let a malformed tag waste work.
-    let n = {
-        let (_state, precompiles) = processor.deferred_view_mut();
-        match precompiles.decode(tag)? {
-            // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by `decode`.
-            NodeType::Chunks(n) => n.get(),
-            NodeType::Value | NodeType::Join => {
-                return Err(PrecompileError::InvalidNode.into());
-            },
-        }
+    let n = match precompiles.decode(tag)? {
+        // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by `decode`.
+        NodeType::Chunks(n) => n.get(),
+        NodeType::Value | NodeType::Join => {
+            return Err(PrecompileError::InvalidNode.into());
+        },
     };
 
     // Bounds + alignment validation.
@@ -184,7 +182,6 @@ pub(super) fn handle_deferred_register_chunk(
         chunks.push(chunk);
     }
 
-    let (state, precompiles) = processor.deferred_view_mut();
-    state.register(precompiles, Node::chunk(tag, chunks))?;
-    check_deferred_budget(state.num_elements(), max_deferred_elements)
+    processor.deferred_state.register(precompiles, Node::chunk(tag, chunks))?;
+    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)
 }
