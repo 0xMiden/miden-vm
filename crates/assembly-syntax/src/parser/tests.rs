@@ -401,7 +401,42 @@ end
 ",
     );
 
-    parse_forms(source).expect("parser should accept an empty else block");
+    let forms = parse_forms(source).expect("parser should accept an empty else block");
+    let [Form::Begin(block)] = forms.as_slice() else {
+        panic!("expected a single begin block, got {forms:?}");
+    };
+    let ops = block.iter().collect::<Vec<_>>();
+    let [Op::If { then_blk, else_blk, .. }] = ops.as_slice() else {
+        panic!("expected a single if op, got {ops:?}");
+    };
+
+    assert_eq!(then_blk.iter().count(), 1);
+    assert_eq!(else_blk.iter().count(), 0);
+}
+
+#[test]
+fn parser_lowers_missing_else_to_empty_block() {
+    let source = test_source_file(
+        "\
+begin
+    if.true
+        add
+    end
+end
+",
+    );
+
+    let forms = parse_forms(source).expect("parser should accept a missing else block");
+    let [Form::Begin(block)] = forms.as_slice() else {
+        panic!("expected a single begin block, got {forms:?}");
+    };
+    let ops = block.iter().collect::<Vec<_>>();
+    let [Op::If { then_blk, else_blk, .. }] = ops.as_slice() else {
+        panic!("expected a single if op, got {ops:?}");
+    };
+
+    assert_eq!(then_blk.iter().count(), 1);
+    assert_eq!(else_blk.iter().count(), 0);
 }
 
 #[test]

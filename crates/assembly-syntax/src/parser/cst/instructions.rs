@@ -44,10 +44,6 @@ pub(super) fn try_lower_instruction(
         if let Some(ops) = lower_immediate_instruction(context, span, &compact)? {
             return Ok(Some(ops));
         }
-
-        if let Some(error) = unexpected_primitive_suffix_error(context, instruction, &compact) {
-            return Err(error);
-        }
     }
 
     lower_extended_instruction(context, instruction)
@@ -126,11 +122,6 @@ impl CompactInstruction {
     fn first_segment_text(&self) -> Option<&str> {
         self.segment_text(0)
     }
-
-    /// Returns the first segment when the compact spelling has exactly one suffix.
-    fn single_suffix_base(&self) -> Option<&str> {
-        (self.segment_count() == 2).then(|| self.segment_text(0)).flatten()
-    }
 }
 
 /// Lowers compact spellings that carry exactly one immediate-like segment.
@@ -145,47 +136,6 @@ fn lower_immediate_instruction(
         }
     }
     Ok(None)
-}
-
-/// Restores the legacy “unexpected `.`” diagnostic for primitive opcodes that do not accept
-/// suffixes, e.g. `neg.1` or `inv.1`.
-fn unexpected_primitive_suffix_error(
-    context: &LoweringContext<'_>,
-    instruction: &CstInstruction,
-    compact: &CompactInstruction,
-) -> Option<ParsingError> {
-    let name = compact.single_suffix_base()?;
-    if lower_primitive_instruction(name).is_none() || accepts_single_suffix(name) {
-        return None;
-    }
-
-    let dot = instruction
-        .syntax()
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .find(|token| token.kind() == SyntaxKind::Dot)?;
-    Some(ParsingError::UnrecognizedToken {
-        span: context.parse().span_for_token(&dot),
-        token: dot.text().to_string(),
-        expected: expected_block_operation_tokens(),
-    })
-}
-
-/// Returns true when `name.<suffix>` may be a valid spelling handled by direct lowering.
-fn accepts_single_suffix(name: &str) -> bool {
-    COMPACT_SUFFIX_SPECS
-        .iter()
-        .any(|spec| spec.prefix.len() == 1 && spec.prefix[0] == name)
-        || matches!(name, "debug" | "emit")
-}
-
-/// Returns the compact legacy expected-token set for block-local syntax errors.
-fn expected_block_operation_tokens() -> Vec<String> {
-    vec![
-        r#"primitive opcode (e.g. "add")"#.to_string(),
-        r#""end""#.to_string(),
-        r#"control flow opcode (e.g. "if.true")"#.to_string(),
-    ]
 }
 
 /// Returns the fixed primitive instruction for suffix-free spellings.
@@ -1487,8 +1437,7 @@ fn lower_invocation_target(
 
 /// Lowers a `push` list of integer immediates and/or constant references.
 ///
-/// Each pushed element becomes a separate AST op so the rest of the pipeline sees the same shape
-/// produced by the legacy parser.
+/// Each pushed element becomes a separate AST op so the rest of the pipeline sees scalar pushes.
 fn lower_push_list(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -1672,27 +1621,9 @@ fn expected_integer_literal_error(
     context: &LoweringContext<'_>,
     token: &SyntaxToken,
 ) -> ParsingError {
-    ParsingError::UnrecognizedToken {
+    ParsingError::InvalidSyntax {
         span: context.parse().span_for_token(token),
-        token: legacy_token_name(token),
-        expected: vec!["integer literal".to_string()],
-    }
-}
-
-fn legacy_token_name(token: &SyntaxToken) -> String {
-    match token.kind() {
-        SyntaxKind::Number if token.text().starts_with("0x") || token.text().starts_with("0X") => {
-            "hex-encoded value".to_string()
-        },
-        SyntaxKind::Number if token.text().starts_with("0b") || token.text().starts_with("0B") => {
-            "bin-encoded value".to_string()
-        },
-        SyntaxKind::Number => "integer".to_string(),
-        SyntaxKind::Ident if token.text().chars().next().is_some_and(char::is_uppercase) => {
-            "constant identifier".to_string()
-        },
-        SyntaxKind::Ident => "identifier".to_string(),
-        _ => token.text().to_string(),
+        message: "expected integer literal".to_string(),
     }
 }
 

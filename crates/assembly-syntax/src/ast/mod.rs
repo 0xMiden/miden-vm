@@ -47,7 +47,5 @@ pub use self::{
     visit::{Visit, VisitMut},
 };
 
-pub(crate) type SmallOpsVec = smallvec::SmallVec<[Op; 1]>;
-
 /// Maximum stack index at which a full word can start.
 pub const MAX_STACK_WORD_OFFSET: u8 = 12;

@@ -57,7 +57,7 @@ pub enum SyntaxError {
     },
 }
 
-/// Parses zero or more legacy AST forms from `source` using the CST-backed frontend.
+/// Parses zero or more AST forms from `source` using the CST-backed frontend.
 ///
 /// This function is the public entry point for the CST backend. It first runs the lossless CST
 /// parser, converts any CST diagnostics into the existing parser-facing report surface, and only
@@ -103,22 +103,11 @@ pub fn parse_inline_masm(
     }
 }
 
-/// Collapses a recovered CST diagnostic list into the user-facing syntax error surface.
-///
-/// When recovery produced multiple diagnostics, we prefer the first real error to avoid surfacing
-/// noisy follow-on messages that the legacy parser would never have reported.
+/// Converts recovered CST diagnostics into the user-facing syntax error surface.
 impl From<Vec<MietteDiagnostic>> for SyntaxError {
     fn from(mut diagnostics: Vec<MietteDiagnostic>) -> Self {
         if diagnostics.len() == 1 {
-            // If we have only a single diagnostic, flatten them for cleaner output
             Self::from(diagnostics.pop().unwrap())
-        } else if let Some(first_error) = diagnostics.iter().position(|diagnostic| {
-            diagnostic.severity.is_none_or(|severity| matches!(severity, Severity::Error))
-        }) {
-            // The legacy parser surfaced the primary syntax error and stopped. The CST parser
-            // can recover and accumulate follow-on syntax diagnostics, but the user-facing
-            // parser surface should still prefer the first real error to avoid noisy cascades.
-            Self::from(diagnostics.remove(first_error))
         } else {
             Self::Multiple {
                 diagnostics: diagnostics.into_iter().map(Self::from).collect(),
