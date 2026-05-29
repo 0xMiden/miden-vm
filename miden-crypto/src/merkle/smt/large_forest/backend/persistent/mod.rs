@@ -47,15 +47,16 @@ use rocksdb as db;
 pub use snapshot::PersistentBackendReader;
 
 use super::{BackendError, Result};
+#[cfg(test)]
+use crate::merkle::smt::SmtUpdateBatch;
 use crate::{
     EMPTY_WORD, Map, Word,
     merkle::{
         EmptySubtreeRoots, MerkleError, NodeIndex,
         smt::{
             Backend, BackendReader, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
-            SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, SmtUpdateBatch,
-            StorageUpdateParts, StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot,
-            VersionId,
+            SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, StorageUpdateParts,
+            StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot, VersionId,
             full::concurrent::{
                 MutatedSubtreeLeaves, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
                 fetch_sibling_pair, process_sorted_pairs_to_leaves,
@@ -331,137 +332,7 @@ impl Backend for PersistentBackend {
         ))
     }
 
-    /// Computes the mutations required to add the provided `lineage` to the forest with the
-    /// provided `version` and sets the associated tree to have the value created by applying
-    /// `updates` to the empty tree, returning the mutation set.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::DuplicateLineage`] if the provided `lineage` already exists in the
-    ///   backend.
-    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
-    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
-    fn compute_add_lineage_mutations(
-        &self,
-        lineage: LineageId,
-        version: VersionId,
-        updates: SmtUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)> {
-        // We start by checking if the lineage already exists, preserving the behavior expected by
-        // the backend tests.
-        if self.lineages.contains_key(&lineage) {
-            return Err(BackendError::DuplicateLineage(lineage));
-        }
-
-        // We now build our new tree metadata, which begins as a fully-empty tree with the default
-        // root, no leaves, and no entries.
-        let metadata = TreeMetadata {
-            version,
-            root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
-            entry_count: 0,
-        };
-
-        let (mutation, prepared) = self.prepare_tree_update(
-            lineage,
-            metadata,
-            version,
-            updates.into(),
-            LineageMutationKind::AddLineage,
-        )?;
-
-        Ok((vec![mutation], PersistentPreparedMutations { entries: vec![prepared] }))
-    }
-
-    /// Computes the mutations required to perform the provided `updates` on the tree with the
-    /// specified `lineage`, returning the mutation set.
-    ///
-    /// At most one new root is added to the backend for the entire batch.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
-    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
-    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    fn compute_update_tree_mutations(
-        &self,
-        lineage: LineageId,
-        new_version: VersionId,
-        updates: SmtUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)> {
-        // We check our lineage existence at the start just as a sanity check.
-        let metadata = self
-            .lineages
-            .get(&lineage)
-            .ok_or(BackendError::UnknownLineage(lineage))?
-            .clone();
-
-        let (mutation, prepared) = self.prepare_tree_update(
-            lineage,
-            metadata,
-            new_version,
-            updates.into(),
-            LineageMutationKind::UpdateTree,
-        )?;
-
-        Ok((vec![mutation], PersistentPreparedMutations { entries: vec![prepared] }))
-    }
-
-    /// Computes the mutations required to add multiple new `lineages` to the tree, creating
-    /// an empty tree for each and applying the provided modifications to it, with the result
-    /// being given the specified `version`. Returns the mutation set.
-    ///
-    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
-    /// will be added** as the first version in that lineage.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::DuplicateLineage`] if any of the provided lineages already exists in the
-    ///   backend.
-    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
-    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
-    fn compute_add_lineages_mutations(
-        &self,
-        version: VersionId,
-        lineages: SmtForestUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)> {
-        // We start by checking that none of the lineages already exist, as we are expected by
-        // contract to error if any is a duplicate.
-        let updates = lineages
-            .into_iter()
-            .map(|(lineage, ops)| {
-                if self.lineages.contains_key(&lineage) {
-                    return Err(BackendError::DuplicateLineage(lineage));
-                }
-                Ok((lineage, ops))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        // Process lineages in parallel.
-        let lineage_data = updates
-            .into_par_iter()
-            .map(|(lineage, ops)| {
-                let metadata = TreeMetadata {
-                    version,
-                    root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
-                    entry_count: 0,
-                };
-                self.prepare_tree_update(
-                    lineage,
-                    metadata,
-                    version,
-                    ops.into_iter().map(Into::into).collect(),
-                    LineageMutationKind::AddLineage,
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let (mutations, prepared): (Vec<_>, Vec<_>) = lineage_data.into_iter().unzip();
-
-        Ok((mutations, PersistentPreparedMutations { entries: prepared }))
-    }
-
-    /// Computes the mutations required to apply the provided `updates` on the entire forest,
-    /// returning the mutation sets.
+    /// Computes the mutations required to apply the provided `updates` on the forest.
     ///
     /// The order of application of these mutations is unspecified, but is guaranteed to produce no
     /// more than one new root for each operated-upon lineage. All operations are performed as part
@@ -472,35 +343,40 @@ impl Backend for PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    fn compute_update_forest_mutations(
+    fn compute_mutations(
         &self,
         new_version: VersionId,
         updates: SmtForestUpdateBatch,
     ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)> {
-        // We first have to check our precondition that all lineages are valid, returning an error
-        // as required by our contract if any lineage is unknown to the backend.
         let updates = updates
             .into_iter()
             .map(|(lineage, ops)| {
-                let metadata = self
-                    .lineages
-                    .get(&lineage)
-                    .ok_or(BackendError::UnknownLineage(lineage))?
-                    .clone();
-                Ok((lineage, ops, metadata))
+                let (metadata, kind) = if let Some(metadata) = self.lineages.get(&lineage) {
+                    (metadata.clone(), LineageMutationKind::UpdateTree)
+                } else {
+                    (
+                        TreeMetadata {
+                            version: new_version,
+                            root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
+                            entry_count: 0,
+                        },
+                        LineageMutationKind::AddLineage,
+                    )
+                };
+                Ok((lineage, ops, metadata, kind))
             })
             .collect::<Result<Vec<_>>>()?;
 
         // Now we can simply issue the work in parallel.
         let lineage_data = updates
             .into_par_iter()
-            .map(|(lineage, ops, metadata)| {
+            .map(|(lineage, ops, metadata, kind)| {
                 self.prepare_tree_update(
                     lineage,
                     metadata,
                     new_version,
                     ops.into_iter().map(Into::into).collect(),
-                    LineageMutationKind::UpdateTree,
+                    kind,
                 )
             })
             .collect::<Result<Vec<_>>>()?;
@@ -632,8 +508,13 @@ impl PersistentBackend {
         version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<TreeWithRoot> {
-        let (_mutations, persistent_mutations) =
-            self.compute_add_lineage_mutations(lineage, version, updates)?;
+        if self.lineages.contains_key(&lineage) {
+            return Err(BackendError::DuplicateLineage(lineage));
+        }
+
+        let mut batch = SmtForestUpdateBatch::empty();
+        batch.operations(lineage).add_operations(updates.into_iter());
+        let (_mutations, persistent_mutations) = self.compute_mutations(version, batch)?;
 
         let mut applied_mutations = self.apply_mutations(persistent_mutations)?;
         let applied_mutation = applied_mutations
@@ -660,8 +541,13 @@ impl PersistentBackend {
         new_version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<MutationSet> {
-        let (_mutations, persistent_mutations) =
-            self.compute_update_tree_mutations(lineage, new_version, updates)?;
+        if !self.lineages.contains_key(&lineage) {
+            return Err(BackendError::UnknownLineage(lineage));
+        }
+
+        let mut batch = SmtForestUpdateBatch::empty();
+        batch.operations(lineage).add_operations(updates.into_iter());
+        let (_mutations, persistent_mutations) = self.compute_mutations(new_version, batch)?;
 
         let mut applied_mutations = self.apply_mutations(persistent_mutations)?;
         let applied_mutation = applied_mutations
@@ -689,8 +575,13 @@ impl PersistentBackend {
         version: VersionId,
         lineages: SmtForestUpdateBatch,
     ) -> Result<Vec<(LineageId, TreeWithRoot)>> {
-        let (_mutations, persistent_mutations) =
-            self.compute_add_lineages_mutations(version, lineages)?;
+        for lineage in lineages.lineages() {
+            if self.lineages.contains_key(lineage) {
+                return Err(BackendError::DuplicateLineage(*lineage));
+            }
+        }
+
+        let (_mutations, persistent_mutations) = self.compute_mutations(version, lineages)?;
 
         let applied_mutations = self.apply_mutations(persistent_mutations)?;
 
@@ -720,8 +611,13 @@ impl PersistentBackend {
         new_version: VersionId,
         updates: SmtForestUpdateBatch,
     ) -> Result<Vec<(LineageId, MutationSet)>> {
-        let (_mutations, persistent_mutations) =
-            self.compute_update_forest_mutations(new_version, updates)?;
+        for lineage in updates.lineages() {
+            if !self.lineages.contains_key(lineage) {
+                return Err(BackendError::UnknownLineage(*lineage));
+            }
+        }
+
+        let (_mutations, persistent_mutations) = self.compute_mutations(new_version, updates)?;
 
         let applied_mutations = self.apply_mutations(persistent_mutations)?;
 

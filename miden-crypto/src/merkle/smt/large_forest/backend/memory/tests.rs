@@ -651,7 +651,9 @@ fn apply_mutations_returns_reversion_data() -> Result<()> {
     let expected_forward = reference.compute_mutations([(key_2, value_3)])?;
     let expected_reverse = reference.apply_mutations_with_reversion(expected_forward)?;
 
-    let (_, prepared) = backend.compute_update_tree_mutations(lineage, version_2, updates)?;
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage).add_operations(updates.into_iter());
+    let (_, prepared) = backend.compute_mutations(version_2, batch)?;
     let applied = backend.apply_mutations(prepared)?;
 
     assert_eq!(applied.len(), 1);
@@ -683,8 +685,9 @@ fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
 
     let mut stale_updates = SmtUpdateBatch::default();
     stale_updates.add_insert(key_2, value_2);
-    let (_visible, stale_prepared) =
-        backend.compute_update_tree_mutations(lineage, 2, stale_updates)?;
+    let mut stale_batch = SmtForestUpdateBatch::empty();
+    stale_batch.operations(lineage).add_operations(stale_updates.into_iter());
+    let (_visible, stale_prepared) = backend.compute_mutations(2, stale_batch)?;
 
     let mut intervening_updates = SmtUpdateBatch::default();
     intervening_updates.add_insert(key_3, value_3);

@@ -17,7 +17,7 @@ use crate::{
         smt::{
             LeafIndex, SMT_DEPTH, SmtLeaf, SmtProof,
             large_forest::{
-                operation::{SmtForestUpdateBatch, SmtUpdateBatch},
+                operation::SmtForestUpdateBatch,
                 root::{LineageId, TreeEntry, TreeWithRoot, VersionId},
                 utils::{AppliedLineageMutation, LineageMutation},
             },
@@ -181,93 +181,20 @@ pub trait Backend: BackendReader {
     // TWO-PHASE MODIFIERS
     // ============================================================================================
 
-    /// Computes the backend data required to add one lineage, without applying it.
-    ///
-    /// The returned [`LineageMutation`] entries describe the visible root/version effects of the
-    /// prospective addition, while [`Self::PreparedMutations`] contains the backend-specific data
-    /// needed to commit those effects later via [`Self::apply_mutations`].
+    /// Computes the backend data required to mutate lineages, without applying it.
     ///
     /// # Expected Behavior
     ///
     /// Implementations must guarantee the following behavior in addition to the global invariants:
     ///
     /// - The backend's committed state must not change.
-    /// - If the provided `lineage` conflicts with an already-existing lineage in the backend, this
-    ///   method must return [`BackendError::DuplicateLineage`].
-    /// - The returned prepared mutations must be sufficient for [`Self::apply_mutations`] to apply
-    ///   the addition without recomputing the Merkle update from `updates`.
-    /// - Empty `updates` must still prepare a new empty lineage.
-    fn compute_add_lineage_mutations(
-        &self,
-        lineage: LineageId,
-        version: VersionId,
-        updates: SmtUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)>;
-
-    /// Computes the backend data required to update one lineage, without applying it.
-    ///
-    /// The returned [`LineageMutation`] describes the visible root/version effect. The
-    /// backend-specific prepared payload is consumed by [`Self::apply_mutations`] to commit the
-    /// forward changes and return the reverse mutation data needed for history construction.
-    ///
-    /// # Expected Behavior
-    ///
-    /// Implementations must guarantee the following behavior in addition to the global invariants:
-    ///
-    /// - The backend's committed state must not change.
-    /// - If `lineage` is unknown to the backend, this method must return
-    ///   [`BackendError::UnknownLineage`].
-    /// - If applying `updates` would not change the tree, the returned lineage mutation must
-    ///   describe a no-op and the prepared data must not allocate a new backend tree version when
-    ///   applied.
-    /// - The returned prepared mutations must be sufficient for [`Self::apply_mutations`] to apply
-    ///   the update without recomputing the Merkle update from `updates`.
-    fn compute_update_tree_mutations(
-        &self,
-        lineage: LineageId,
-        new_version: VersionId,
-        updates: SmtUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)>;
-
-    /// Computes the backend data required to add multiple lineages, without applying it.
-    ///
-    /// This is the batched equivalent of [`Self::compute_add_lineage_mutations`]. Backends may use
-    /// this method to prepare the additions in parallel or to build a more efficient batched apply
-    /// representation.
-    ///
-    /// # Expected Behavior
-    ///
-    /// Implementations must guarantee the following behavior in addition to the global invariants:
-    ///
-    /// - The backend's committed state must not change.
-    /// - If any provided lineage conflicts with an already-existing lineage, this method must
-    ///   return [`BackendError::DuplicateLineage`] and prepare no partial committed state.
-    /// - Each lineage in `lineages` must produce at most one [`LineageMutation`].
-    /// - The prepared mutations must be applicable atomically by [`Self::apply_mutations`] where
-    ///   the backend supports atomic writes.
-    fn compute_add_lineages_mutations(
-        &self,
-        version: VersionId,
-        lineages: SmtForestUpdateBatch,
-    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)>;
-
-    /// Computes the backend data required to update multiple lineages, without applying it.
-    ///
-    /// This is the batched equivalent of [`Self::compute_update_tree_mutations`]. Backends may use
-    /// this method to exploit parallelism across lineages and to prepare a single batched commit.
-    ///
-    /// # Expected Behavior
-    ///
-    /// Implementations must guarantee the following behavior in addition to the global invariants:
-    ///
-    /// - The backend's committed state must not change.
-    /// - If any target lineage is unknown, this method must return [`BackendError::UnknownLineage`]
-    ///   and prepare no partial committed state.
+    /// - Each unknown lineage in `updates` is treated as an addition from the empty tree.
+    /// - Each known lineage in `updates` is treated as an update to its latest tree.
     /// - Each lineage in `updates` must produce at most one [`LineageMutation`].
     /// - No-op lineage updates must not allocate new backend tree versions when applied.
     /// - The prepared mutations must be applicable atomically by [`Self::apply_mutations`] where
     ///   the backend supports atomic writes.
-    fn compute_update_forest_mutations(
+    fn compute_mutations(
         &self,
         new_version: VersionId,
         updates: SmtForestUpdateBatch,

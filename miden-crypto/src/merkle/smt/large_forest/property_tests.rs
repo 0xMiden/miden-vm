@@ -9,8 +9,8 @@ use proptest::prelude::*;
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        ForestConfig, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LargeSmtForestError,
-        LineageId, RootInfo, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeId,
+        ForestConfig, ForestInMemoryBackend, LargeSmtForest, LargeSmtForestError, LineageId,
+        RootInfo, Smt, SmtForestOperation, SmtForestUpdateBatch, SmtUpdateBatch, TreeId,
         large_forest::test_utils::{
             apply_batch, arbitrary_batch, arbitrary_distinct_lineages, arbitrary_lineage,
             arbitrary_non_empty_word, arbitrary_version, arbitrary_word, assert_lineage_metadata,
@@ -116,50 +116,50 @@ proptest! {
             .add_lineage(
                 lineage,
                 version,
-                SmtUpdateBatch::new([ForestOperation::insert(key_1, value_1)].into_iter()),
+                SmtUpdateBatch::new([SmtForestOperation::insert(key_1, value_1)].into_iter()),
             )
             .map_err(to_fail)?;
         forest
             .update_tree(
                 lineage,
                 version + 1,
-                SmtUpdateBatch::new([ForestOperation::insert(key_2, value_2)].into_iter()),
+                SmtUpdateBatch::new([SmtForestOperation::insert(key_2, value_2)].into_iter()),
             )
             .map_err(to_fail)?;
         forest
             .update_tree(
                 lineage,
                 version + 2,
-                SmtUpdateBatch::new([ForestOperation::insert(key_3, value_3)].into_iter()),
+                SmtUpdateBatch::new([SmtForestOperation::insert(key_3, value_3)].into_iter()),
             )
             .map_err(to_fail)?;
         forest
             .update_tree(
                 lineage,
                 version + 3,
-                SmtUpdateBatch::new([ForestOperation::insert(key_4, value_4)].into_iter()),
+                SmtUpdateBatch::new([SmtForestOperation::insert(key_4, value_4)].into_iter()),
             )
             .map_err(to_fail)?;
 
         let mut tree_v1 = Smt::new();
         apply_batch(
             &mut tree_v1,
-            SmtUpdateBatch::new([ForestOperation::insert(key_1, value_1)].into_iter()),
+            SmtUpdateBatch::new([SmtForestOperation::insert(key_1, value_1)].into_iter()),
         )?;
         let mut tree_v2 = tree_v1.clone();
         apply_batch(
             &mut tree_v2,
-            SmtUpdateBatch::new([ForestOperation::insert(key_2, value_2)].into_iter()),
+            SmtUpdateBatch::new([SmtForestOperation::insert(key_2, value_2)].into_iter()),
         )?;
         let mut tree_v3 = tree_v2.clone();
         apply_batch(
             &mut tree_v3,
-            SmtUpdateBatch::new([ForestOperation::insert(key_3, value_3)].into_iter()),
+            SmtUpdateBatch::new([SmtForestOperation::insert(key_3, value_3)].into_iter()),
         )?;
         let mut tree_v4 = tree_v3.clone();
         apply_batch(
             &mut tree_v4,
-            SmtUpdateBatch::new([ForestOperation::insert(key_4, value_4)].into_iter()),
+            SmtUpdateBatch::new([SmtForestOperation::insert(key_4, value_4)].into_iter()),
         )?;
 
         let sample_keys = vec![key_1, key_2, key_3, key_4];
@@ -523,7 +523,7 @@ proptest! {
         let invalid_value = Word::from([1u32, 1, 1, 1]);
         invalid_updates.add_operations(
             lineage_1,
-            SmtUpdateBatch::new([ForestOperation::insert(query_key, invalid_value)].into_iter())
+            SmtUpdateBatch::new([SmtForestOperation::insert(query_key, invalid_value)].into_iter())
                 .consume()
                 .into_iter(),
         );
