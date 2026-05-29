@@ -11,6 +11,12 @@ use super::{
 };
 use crate::diagnostics::Report;
 
+enum StaticRootLookup {
+    Found(MastNodeId),
+    Ambiguous,
+    Missing,
+}
+
 impl MastForestBuilder {
     /// Creates a complete [`PendingMastNodeDraft`] for a node imported from a statically
     /// linked forest, including indexed assembly ops and debug variable metadata.
@@ -173,25 +179,52 @@ impl MastForestBuilder {
         if let (Some(source_library_commitment), Some(source_root_id)) =
             (source_library_commitment, source_root_id)
         {
-            let exact_root = self
-                .statically_linked_forest_indices_by_commitment
-                .get(&source_library_commitment)
-                .and_then(|forest_indices| {
-                    forest_indices.iter().find_map(|forest_idx| {
-                        self.statically_linked_root_map
-                            .map_root(*forest_idx, &source_root_id)
-                            .filter(|root_id| {
-                                self.statically_linked_mast[*root_id].digest() == mast_root
-                            })
-                    })
-                });
-
-            if let Some(exact_root) = exact_root {
-                return Some(exact_root);
+            match self.find_exact_statically_linked_root(
+                source_library_commitment,
+                source_root_id,
+                mast_root,
+            ) {
+                StaticRootLookup::Found(root_id) => return Some(root_id),
+                // `MastForest::commitment()` does not include diagnostics metadata, so multiple
+                // source forests can share a commitment while still carrying different metadata.
+                // Without a non-colliding package identity, an ambiguous exact lookup must not
+                // fall back to digest-only linking because that can import the wrong source node.
+                StaticRootLookup::Ambiguous => return None,
+                StaticRootLookup::Missing => {},
             }
         }
 
         self.statically_linked_mast.find_procedure_root(mast_root)
+    }
+
+    fn find_exact_statically_linked_root(
+        &self,
+        source_library_commitment: Word,
+        source_root_id: MastNodeId,
+        mast_root: Word,
+    ) -> StaticRootLookup {
+        let Some(forest_indices) = self
+            .statically_linked_forest_indices_by_commitment
+            .get(&source_library_commitment)
+        else {
+            return StaticRootLookup::Missing;
+        };
+
+        let mut matching_roots = forest_indices.iter().filter_map(|forest_idx| {
+            self.statically_linked_root_map
+                .map_root(*forest_idx, &source_root_id)
+                .filter(|root_id| self.statically_linked_mast[*root_id].digest() == mast_root)
+        });
+
+        let Some(root_id) = matching_roots.next() else {
+            return StaticRootLookup::Missing;
+        };
+
+        if matching_roots.next().is_some() {
+            StaticRootLookup::Ambiguous
+        } else {
+            StaticRootLookup::Found(root_id)
+        }
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
