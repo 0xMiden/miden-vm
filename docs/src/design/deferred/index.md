@@ -57,9 +57,9 @@ content yields an identical digest, so equal subterms are shared automatically (
 
 - A **tag** is a node's identity and constructor: `Tag { id, args: [Felt; 3] }`. The `id` selects
   the owning precompile; the three immediate felts (`args`) are entirely the precompile's to
-  interpret (a discriminant, a chunk length, a small constant, …). The framework reserves
-  `id == ZERO` for itself — it tags the canonical `TRUE` node and the AND nodes of the commitment;
-  no precompile may claim it.
+  interpret (a discriminant, a chunk length, a small constant, …). The framework reserves ids `0`
+  and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
+  `Tag::AND = [1, 0, 0, 0]` tags transcript/conjunction nodes. No precompile may claim either id.
 - A **payload** is the node's body, in one of two shapes:
   - an **expression** — exactly 8 felts (one Poseidon2 rate block): raw value data for a leaf, or
     two packed child digests (`lhs || rhs`) for anything referential (an operation, a predicate,
@@ -81,7 +81,7 @@ fields.
 A precompile supplies three things:
 
 - `decode(args) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
-  structural shape does it carry (`Value`, `Binary`, or `Chunks(n)`)? Tag inspection only.
+  structural shape does it carry (`Value`, `Join`, or `Chunks(n)`)? Tag inspection only.
 - `reduce(args, payload, …) -> Result<Node>` — *normalizes* a node to its **canonical form**. The
   common roles are: validate a value leaf (its canonical is itself), evaluate an operation (resolve
   the child canonicals, then combine), or check a predicate (resolve operands, return the `TRUE`
@@ -113,7 +113,7 @@ advice. The `sys` core-library module wraps the two register events in a thin he
 | Event (`adv.*`)            | `sys` helper     | Operand stack in                 | Effect |
 | -------------------------- | ---------------- | -------------------------------- | ------ |
 | `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and interns the expression node. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_chunk`  | `register_chunk` | `[TAG, ptr, n_chunks, …]`        | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, interns the chunk node. No advice/stack output; the helper then computes `NODE_DIGEST` with a `mem_stream` linear hash over the same `8n` felts. |
+| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, and interns the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
 | `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, interns the canonical, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
 `register_*` validate the tag's shape and intern the node, but do not reduce it — they are pure
@@ -128,11 +128,11 @@ data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) clo
 composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
-- **transcript root-match** (a public input) binds that digest to the wire the verifier rehydrates;
+- once the deferred root is threaded into proof public inputs, the **transcript root-match** will bind that digest to the wire the verifier rehydrates;
 - `DeferredState::rehydrate` then re-reduces every logged statement from wire data.
 
-Together these bind the wire — and therefore every reduction the verifier re-checks — to the data
-the circuit actually committed to.
+Once the root is public, these pieces bind the wire — and therefore every reduction the verifier
+re-checks — to the data the circuit actually committed to.
 
 ### Why `evaluate_deferred` is a bare event
 
@@ -151,36 +151,36 @@ error before any felts are pushed.
 
 ## The deferred commitment
 
-The commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word (`TRUE_DIGEST`,
-the empty-transcript terminal). To fold a verified **statement** — a predicate node that reduces to
-`TRUE` — the framework interns an AND node `{ tag: TRUE, payload: prev_root || stmt_digest }` and
-advances the root to that node's digest. Because the AND tag is the zero word, the AND node's digest
-is exactly `Poseidon2::merge(prev_root, stmt_digest)`: the chain is a 2-to-1 hash fold, and its head
-is a complete digest at every step.
+The commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word (`TRUE_DIGEST`),
+which is also the digest of the always-present canonical `Node::TRUE`. To fold a verified
+**statement** — a predicate node that reduces to `TRUE` — the framework interns an AND node
+`{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
+The digest is structural: even `AND(TRUE, TRUE)` hashes under the distinct capacity
+`[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates semantically to `TRUE`.
 
-> **The fold reuses the existing `log_precompile` opcode.** Folding a statement (`merge(root,
-> stmt)`) is identical to one step of the VM's rolling precompile transcript, so the new
-> `sys::log_node_digest` helper feeds a node digest straight into `log_precompile`. The opcode is
-> doing *deferred-commitment* work, not anything precompile-specific; it will be renamed
-> `log_deferred` once it is no longer shared with the model this work supersedes.
+> **The fold reuses the existing `log_precompile` opcode.** Folding a statement is one framework
+> AND step, so the `sys::log_node_digest` helper feeds a node digest straight into
+> `log_precompile`. The opcode name is historical; in this branch it is doing
+> *deferred-commitment* work, not anything precompile-specific.
 
 The verifier's obligation collapses to a single fixed point: **reduce the root to `TRUE`, and every
 logged statement holds.** There is no separate finalization step.
 
 ## Wire format and verification
 
-The in-memory `DeferredState` does not travel in the proof. `to_wire` lowers it to a passive
-`DeferredStateWire`: a topologically-ordered list of entries in which referential nodes encode their
-children by **index** into earlier entries (an 8-byte pair of `u32`s) rather than by 64-byte
-digests. The walk is a DFS post-order from the root that emits exactly the root's reachable closure,
-so unreferenced orphans are dropped and the commitment is recoverable as the digest of the last
-entry.
+The intended proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`.
+`to_wire` lowers state to a passive, topologically ordered list of entries in which referential
+nodes encode their children by **index** into earlier entries rather than by two full child digests.
+The walk is a DFS post-order from the root that emits exactly the root's reachable closure, so
+unreferenced orphans are dropped and the commitment is recoverable as the digest of the last entry.
 
-`rehydrate` is the only trusted path from wire bytes back to a validated state. It runs in two
-phases, with a reachability gate between them:
+`rehydrate` is the only trusted path from wire bytes back to a validated state. It runs as a
+structural decode, a reachability gate, and a semantic replay:
 
-1. **structural** — reconstruct each node (translating child indices back to digests), decode its
-   tag, check that the payload shape matches the declared `NodeType`, and intern it;
+1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each materialized
+   node (translating child indices back to digests), decode its tag, check that the payload shape
+   matches the declared `NodeType`, reject attempts to materialize another `TRUE_DIGEST`, and intern
+   the remaining entries;
 2. **reachability** — reject any entry outside the root's structural closure, so an adversarial wire
    cannot smuggle in hidden or bloat nodes;
 3. **semantic** — walk the AND-chain from the root down to the terminal, asserting each step is a
@@ -195,9 +195,11 @@ to the prover's.
 This framework is an additive substrate. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
-- the state is **not** yet threaded into the STARK proof, and the AIR is unchanged;
-- the legacy precompile path (`core::precompile`, the `sys::log_precompile_request` wrapper) is
-  untouched, and is still documented under [Precompiles](../stack/precompiles.md).
+- the deferred DAG root is **not** yet threaded into the STARK proof; this branch only reuses the
+  existing `log_precompile` transcript path and changes that fold to the framework-AND digest;
+- the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
+  wrapper) now shares the same framework-AND transcript fold and is still documented under
+  [Precompiles](../stack/precompiles.md).
 
 The proof-model cutover — threading the deferred commitment into the proof, migrating the existing
 precompiles onto this model, and retiring the request-list transcript — lands in a follow-up. The

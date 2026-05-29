@@ -15,7 +15,7 @@ mod wire;
 
 use alloc::sync::Arc;
 
-use miden_crypto::{ZERO, hash::poseidon2::Poseidon2};
+use miden_crypto::{ONE, ZERO, hash::poseidon2::Poseidon2};
 pub use node::{NodeType, PrecompileError};
 pub use precompile::{Precompile, precompile_id};
 pub use precompile_schema::PrecompileRegistry;
@@ -29,9 +29,9 @@ pub type Digest = Word;
 
 /// Identifies the precompile that owns a node and carries its local immediates.
 ///
-/// `id == ZERO` is framework-owned for TRUE and transcript AND nodes. The remaining three felts
-/// are opaque to the framework and are decoded only by the owning [`Precompile`]. The canonical
-/// layout is `[id, arg0, arg1, arg2]` for hashing and wire encoding.
+/// Framework ids are reserved for built-in nodes: `0` is TRUE and `1` is transcript AND. The
+/// remaining three felts are opaque to the framework and are decoded only by the owning
+/// [`Precompile`]. The canonical layout is `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tag {
     pub id: Felt,
@@ -39,8 +39,21 @@ pub struct Tag {
 }
 
 impl Tag {
-    /// Framework-owned tag for TRUE and transcript AND nodes; no precompile may use id `ZERO`.
+    /// Framework-owned tag for the canonical TRUE node.
     pub const TRUE: Tag = Tag { id: ZERO, args: [ZERO; 3] };
+
+    /// Framework-owned tag for structural transcript/conjunction nodes.
+    pub const AND: Tag = Tag { id: ONE, args: [ZERO; 3] };
+
+    /// Returns whether an id is reserved by the deferred framework.
+    pub fn is_framework_reserved_id(id: Felt) -> bool {
+        id == ZERO || id == ONE
+    }
+
+    /// Returns whether this tag belongs to the framework namespace.
+    pub fn is_framework_reserved(&self) -> bool {
+        Self::is_framework_reserved_id(self.id)
+    }
 
     /// Creates a tag from a precompile id and its three local immediates.
     pub const fn new(id: Felt, args: [Felt; 3]) -> Self {
@@ -61,11 +74,10 @@ impl Tag {
 /// One Poseidon2 rate block, used as the unit of chunk-bodied deferred leaves.
 pub type Chunk = [Felt; 8];
 
-/// Virtual root for an empty transcript and the terminal of the AND-chain.
+/// Digest of [`Node::TRUE`], root for an empty transcript, and terminal of the AND-chain.
 ///
-/// This is not the digest of [`Node::TRUE`]: nodes always hash through Poseidon2, while this zero
-/// word is only the verifier's sentinel for "no prior statements." Use [`Node::is_true_node`] for
-/// predicate results and compare against this value only for transcript-chain terminals.
+/// TRUE is an always-present framework node with digest zero. Wire encoding still reserves index 0
+/// for this digest instead of serializing the TRUE node as a normal entry.
 pub const TRUE_DIGEST: Digest = Word::new([ZERO; 4]);
 
 // PAYLOAD
@@ -168,9 +180,9 @@ impl Node {
         Self::expression(tag, Payload::join(lhs, rhs))
     }
 
-    /// Creates a transcript AND step from the previous root and statement digest.
+    /// Creates a structural transcript AND step from the previous root and statement digest.
     pub fn and(lhs: Digest, rhs: Digest) -> Self {
-        Self::join(Tag::TRUE, lhs, rhs)
+        Self::join(Tag::AND, lhs, rhs)
     }
 
     /// Creates a chunk-bodied node from one or more rate blocks.
@@ -186,18 +198,22 @@ impl Node {
 
     /// Returns whether this node is structurally the canonical TRUE result.
     ///
-    /// This checks the zero tag and zero expression body, not the digest. That keeps predicate
-    /// success distinct from the virtual [`TRUE_DIGEST`] transcript terminal.
+    /// The canonical TRUE node is the exact zero tag with an all-zero expression body; its digest
+    /// is [`TRUE_DIGEST`].
     pub fn is_true_node(&self) -> bool {
         self.tag == Tag::TRUE && matches!(&self.payload, Payload::Expression(f) if *f == [ZERO; 8])
     }
 
     /// Computes the canonical digest used by both host code and in-circuit wrappers.
     ///
-    /// Expression nodes hash one `[payload || tag]` Poseidon2 state; chunk nodes stream each
-    /// 8-felt chunk with the same tag capacity. [`Node::TRUE`] hashes normally, so its digest is
-    /// not [`TRUE_DIGEST`], which is only the virtual transcript terminal.
+    /// [`Node::TRUE`] is the distinguished zero-digest framework node. All other expression nodes
+    /// hash one `[payload || tag]` Poseidon2 state; chunk nodes stream each 8-felt chunk with the
+    /// same tag capacity. Transcript AND nodes use [`Tag::AND`] as their capacity.
     pub fn digest(&self) -> Digest {
+        if self.is_true_node() {
+            return TRUE_DIGEST;
+        }
+
         let mut state = [ZERO; 12];
         state[8..12].copy_from_slice(&self.tag.as_word());
         match &self.payload {
@@ -243,11 +259,11 @@ mod tests {
     use super::*;
 
     const TAG_A: Tag = Tag {
-        id: Felt::new_unchecked(1),
+        id: Felt::new_unchecked(42),
         args: [Felt::new_unchecked(0); 3],
     };
     const TAG_B: Tag = Tag {
-        id: Felt::new_unchecked(1),
+        id: Felt::new_unchecked(42),
         args: [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)],
     };
 
@@ -265,34 +281,21 @@ mod tests {
     }
 
     #[test]
-    fn digest_is_deterministic() {
-        let n = Node::leaf(TAG_A, *payload(42).as_felts().unwrap());
-        assert_eq!(n.digest(), n.digest());
-    }
+    fn digest_binds_tag_and_payload() {
+        let p = *payload(7).as_felts().unwrap();
+        let same = Node::leaf(TAG_A, p);
+        let different_tag = Node::leaf(TAG_B, p);
+        let different_payload = Node::leaf(TAG_A, *payload(8).as_felts().unwrap());
 
-    #[test]
-    fn tag_changes_digest() {
-        let p = payload(7);
-        assert_ne!(
-            Node::leaf(TAG_A, *p.as_felts().unwrap()).digest(),
-            Node::leaf(TAG_B, *p.as_felts().unwrap()).digest()
-        );
-    }
-
-    #[test]
-    fn payload_changes_digest() {
-        assert_ne!(
-            Node::leaf(TAG_A, *payload(0).as_felts().unwrap()).digest(),
-            Node::leaf(TAG_A, *payload(1).as_felts().unwrap()).digest(),
-        );
+        assert_ne!(same.digest(), different_tag.digest());
+        assert_ne!(same.digest(), different_payload.digest());
     }
 
     #[test]
     fn chunk_n1_matches_expression_with_same_tag_and_payload() {
         // Single-chunk digest is the same body as Expression: rate := payload, capacity := tag,
         // one permutation, take state[0..4].
-        let p = payload(123);
-        let felts = *p.as_felts().unwrap();
+        let felts = *payload(123).as_felts().unwrap();
         let expr = Node::leaf(TAG_A, felts);
         let chunk = Node::chunk(TAG_A, vec![felts]);
         assert_eq!(expr.digest(), chunk.digest());
@@ -316,62 +319,25 @@ mod tests {
     }
 
     #[test]
-    fn true_tag_and_digest_are_zero_word() {
+    fn framework_true_node_is_canonical() {
         assert_eq!(Tag::TRUE, Tag { id: ZERO, args: [ZERO; 3] });
+        assert_eq!(Tag::AND, Tag { id: ONE, args: [ZERO; 3] });
+        assert_eq!(Tag::TRUE.as_word(), [ZERO, ZERO, ZERO, ZERO]);
+        assert_eq!(Tag::AND.as_word(), [ONE, ZERO, ZERO, ZERO]);
         assert_eq!(TRUE_DIGEST, Word::new([ZERO; 4]));
+
+        let true_node = Node::TRUE;
+        assert_eq!(true_node.tag, Tag::TRUE);
+        assert!(matches!(&true_node.payload, Payload::Expression(f) if *f == [ZERO; 8]));
+        assert!(true_node.is_true_node());
+        assert_eq!(true_node.digest(), TRUE_DIGEST);
     }
 
     #[test]
-    fn true_node_has_zero_tag_and_zero_expression_payload() {
-        let n = Node::TRUE;
-        assert_eq!(n.tag, Tag::TRUE);
-        match &n.payload {
-            Payload::Expression(f) => assert_eq!(*f, [ZERO; 8]),
-            Payload::Chunk(_) => panic!("Node::TRUE must be expression-bodied"),
-        }
-        assert!(n.is_true_node());
-    }
-
-    #[test]
-    fn poseidon2_does_not_fix_zero() {
-        // Load-bearing for the unified-transcript refactor: because Poseidon2's round
-        // constants are non-zero, applying the permutation to the all-zero state does NOT
-        // return all zeros. Consequence: `Node::TRUE.digest() != TRUE_DIGEST`, and the
-        // framework keeps these two concepts separate (see TRUE_DIGEST docs and
-        // `true_node_digest_matches_in_circuit_merge` below).
-        let mut state = [ZERO; 12];
-        Poseidon2::apply_permutation(&mut state);
-        let rate0 = Word::new([state[0], state[1], state[2], state[3]]);
-        assert_ne!(rate0, Word::new([ZERO; 4]));
-    }
-
-    #[test]
-    fn true_node_hashes_normally_via_poseidon2() {
-        // TRUE-node is not digest-special-cased: it hashes through Poseidon2 like any other
-        // node, producing a specific non-zero word. This keeps `Node::digest()` honest to the
-        // in-circuit hasher — critical for AND-nodes interned by `DeferredState::log` (where the
-        // in-circuit hasher computes the same `merge(0, 0)` value).
-        assert_ne!(Node::TRUE.digest(), TRUE_DIGEST);
-    }
-
-    #[test]
-    fn true_node_digest_equals_and_of_true_true() {
-        // AND(TRUE, TRUE) and the TRUE sentinel share the structural shape
-        // `Node { tag: Tag::TRUE, payload: Expression([0; 8]) }`, so their digests are equal
-        // (both run the same Poseidon2 permutation). This is logically consistent (AND of two
-        // TRUEs IS TRUE) and load-bearing for the recursive-proof use case where the program
-        // logs a sub-proof's transcript whose root happens to be TRUE_DIGEST.
+    fn and_of_true_true_hashes_as_distinct_structural_node() {
         let and_true_true = Node::and(TRUE_DIGEST, TRUE_DIGEST);
-        assert_eq!(and_true_true.digest(), Node::TRUE.digest());
-    }
-
-    #[test]
-    fn clone_yields_consistent_digest() {
-        // A clone's digest matches the source's — `Clone` is a structural copy.
-        let n = Node::leaf(TAG_A, *payload(33).as_felts().unwrap());
-        let d1 = n.digest();
-        let cloned = n;
-        let d2 = cloned.digest();
-        assert_eq!(d1, d2);
+        assert_eq!(and_true_true.tag, Tag::AND);
+        assert_ne!(and_true_true.digest(), TRUE_DIGEST);
+        assert_ne!(and_true_true.digest(), Node::TRUE.digest());
     }
 }

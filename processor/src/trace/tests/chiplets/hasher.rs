@@ -28,6 +28,7 @@ use miden_air::{
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    deferred::Tag,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     operations::{Operation, opcodes},
     program::Program,
@@ -336,14 +337,14 @@ fn logprecompile_hasher_bus() {
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
         logprecompile_addr = Some(log_addr);
 
-        // Input: [STATE_PREV, STMNT, ZERO] — 4 helpers + 4 stack lanes + 4 ZEROs.
+        // Input: [STATE_PREV, STMNT, Tag::AND] — 4 helpers + 4 stack lanes + AND capacity.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
                 main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
                 main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                ZERO
+                Tag::AND.as_word()[i - 8]
             }
         });
 
