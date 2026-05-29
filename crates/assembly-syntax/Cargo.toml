@@ -47,7 +47,6 @@ midenc-hir-type = { workspace = true, features = ["serde"] }
 # External dependencies
 aho-corasick = { version = "1.1", default-features = false }
 env_logger = { workspace = true, optional = true }
-lalrpop-util = { version = "0.22", default-features = false }
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
@@ -65,5 +64,4 @@ pretty_assertions = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 
 [build-dependencies]
-lalrpop = { version = "0.22", default-features = false }
 rustc_version = "0.4"
