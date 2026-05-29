@@ -4,7 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::{DeferredState, Precompile, PrecompileRegistry},
+    deferred::DeferredState,
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -143,9 +143,6 @@ pub struct FastProcessor {
 
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
-
-    /// Precompile registry used by deferred system events; empty by default, rejecting all tags.
-    deferred_precompiles: Arc<PrecompileRegistry>,
 }
 
 impl FastProcessor {
@@ -242,18 +239,6 @@ impl FastProcessor {
         Ok(self)
     }
 
-    /// Installs a [`Precompile`] needed by deferred system events.
-    ///
-    /// The registry is empty by default, so programs using deferred precompile tags must install
-    /// their precompiles before execution. Setup mistakes, such as id drift or duplicate ids,
-    /// panic immediately.
-    pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
-        let registry = Arc::try_unwrap(self.deferred_precompiles)
-            .expect("configure precompiles before running the program");
-        self.deferred_precompiles = Arc::new(registry.with_precompile(precompile));
-        self
-    }
-
     /// Constructor for creating a `FastProcessor` with all options specified at once.
     ///
     /// For a more fluent API, consider using `FastProcessor::new()` with builder methods.
@@ -290,7 +275,6 @@ impl FastProcessor {
             options,
             pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(),
-            deferred_precompiles: Arc::new(PrecompileRegistry::default()),
         })
     }
 
@@ -312,12 +296,6 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Returns disjoint deferred state and registry borrows for system-event handlers.
-    #[inline(always)]
-    pub(crate) fn deferred_view_mut(&mut self) -> (&mut DeferredState, &PrecompileRegistry) {
-        (&mut self.deferred_state, &self.deferred_precompiles)
-    }
 
     /// Returns the deferred witness accumulated during execution.
     #[inline(always)]

@@ -5,6 +5,7 @@ use miden_core::{
     Felt, Word,
     advice::AdviceMap,
     crypto::merkle::InnerNodeInfo,
+    deferred::PrecompileRegistry,
     events::{EventId, EventName},
     mast::MastForest,
     precompile::PrecompileRequest,
@@ -57,6 +58,8 @@ impl AdviceMutation {
 // HOST TRAIT
 // ================================================================================================
 
+static EMPTY_PRECOMPILES: PrecompileRegistry = PrecompileRegistry::new();
+
 /// Defines the host functionality shared by both sync and async execution.
 ///
 /// There are three main categories of interactions between the VM and the host:
@@ -81,6 +84,13 @@ pub trait BaseHost {
     /// names for diagnostics. The default implementation returns `None`.
     fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
         None
+    }
+
+    /// Returns the deferred precompile registry installed on this host.
+    ///
+    /// Hosts that do not support deferred precompiles can use the default empty registry.
+    fn precompiles(&self) -> &PrecompileRegistry {
+        &EMPTY_PRECOMPILES
     }
 }
 

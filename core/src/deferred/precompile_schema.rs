@@ -1,6 +1,6 @@
 //! Registry that routes deferred tags to their owning precompile.
 
-use alloc::{boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 
 use super::precompile::{Precompile, precompile_id};
 use crate::{
@@ -15,9 +15,9 @@ use crate::{
 ///
 /// Routing is entirely id-based. The empty registry is valid but rejects every precompile-owned
 /// tag, which is useful for programs that do not use deferred precompiles.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PrecompileRegistry {
-    precompiles: BTreeMap<Felt, Box<dyn Precompile>>,
+    precompiles: BTreeMap<Felt, Arc<dyn Precompile>>,
 }
 
 impl core::fmt::Debug for PrecompileRegistry {
@@ -32,18 +32,41 @@ impl core::fmt::Debug for PrecompileRegistry {
 }
 
 impl PrecompileRegistry {
+    /// Creates an empty deferred precompile registry.
+    pub const fn new() -> Self {
+        Self { precompiles: BTreeMap::new() }
+    }
+
+    /// Returns whether this registry contains no installed precompiles.
+    pub fn is_empty(&self) -> bool {
+        self.precompiles.is_empty()
+    }
+
+    /// Merges another registry into this one.
+    ///
+    /// Panics on duplicate ids, preserving [`Self::with_precompile`]'s setup-failure behavior.
+    pub fn merge(&mut self, registry: Self) -> &mut Self {
+        for precompile in registry.precompiles.into_values() {
+            self.insert_precompile(precompile);
+        }
+        self
+    }
+
     /// Adds a precompile to the registry and returns `self` for chaining.
     ///
     /// Panics on setup errors: id drift, a framework-reserved id, or a duplicate id.
     pub fn with_precompile<P: Precompile + 'static>(mut self, precompile: P) -> Self {
-        let p: Box<dyn Precompile> = Box::new(precompile);
+        self.insert_precompile(Arc::new(precompile));
+        self
+    }
+
+    fn insert_precompile(&mut self, p: Arc<dyn Precompile>) {
         let id = p.id();
         validate_precompile_id(p.name(), id, precompile_id(&*p));
         let name = p.name();
         if let Some(prev) = self.precompiles.insert(id, p) {
             panic!("duplicate precompile id in registry (`{}` and `{name}`)", prev.name());
         }
-        self
     }
 
     /// Boots a state with constants contributed by installed precompiles.
@@ -262,5 +285,18 @@ mod tests {
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
         let canonical = state.evaluate_node(&registry, node.clone()).unwrap();
         assert_eq!(canonical, node);
+    }
+
+    #[test]
+    fn merges_registry() {
+        let a = Fixture::new("merge-a");
+        let b = Fixture::new("merge-b");
+        let tag_a = a.tag();
+        let tag_b = b.tag();
+        let mut registry = PrecompileRegistry::default().with_precompile(a);
+        registry.merge(PrecompileRegistry::default().with_precompile(b));
+
+        assert!(matches!(registry.decode(tag_a).unwrap(), NodeType::Value));
+        assert!(matches!(registry.decode(tag_b).unwrap(), NodeType::Value));
     }
 }
