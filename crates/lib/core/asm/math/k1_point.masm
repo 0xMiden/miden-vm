@@ -97,25 +97,26 @@ end
 #!   X3 = m^2 - 2*X
 #!   Y3 = m * (X - X3) - Y
 #! For the identity, the result is the identity. For an input with Y = 0 (no curve point on
-#! secp256k1 has Y = 0, so this is an invalid input), the call to `f_k1::inv(2Y)` traps.
+#! secp256k1 has Y = 0, so this is an invalid input), the call to `f_k1::inv_unsafe(2Y)` traps.
 #!
 #! Cost: 4 modmuls + 1 inv + ~10 adds/subs.
 #!
-#! Local memory (96 felts):
+#! Local memory (40 felts):
 #!   0..8    : X (input)
 #!   8..16   : Y (input)
-#!   16..20  : flag word (input + output)
+#!   16..20  : flag word (input)
 #!   20      : out_addr cache
-#!   24..32  : 3 * X^2
-#!   32..40  : 2 * Y
-#!   40..48  : inv(2 * Y)
-#!   48..56  : m = (3 * X^2) * inv(2 * Y)
-#!   56..64  : m^2
-#!   64..72  : 2 * X
-#!   72..80  : X3 = m^2 - 2*X
-#!   80..88  : (X - X3)
-#!   88..96  : Y3 = m * (X - X3) - Y
-@locals(96)
+#!   24..32  : X^2 then overwritten with 3*X^2
+#!   32..40  : m = (3 * X^2) * inv(2 * Y)
+#!
+#! Stack-carried intermediates:
+#!   - 2*Y
+#!   - inv(2*Y)
+#!   - m^2
+#!   - 2*X
+#!   - X - X3
+#! X3 and Y3 are written directly to `out_addr`.
+@locals(40)
 pub proc point_double
     # Stack: [out_addr, p_addr, ...]
     loc_store.20                                          # cache out_addr; [p_addr, ...]
@@ -145,56 +146,52 @@ pub proc point_double
         exec.f_k1::add                                     # 3*X^2
         loc_storew_le.24 swapw  loc_storew_le.28           # mem[24..32] = 3*X^2
 
-        # ----- 2 * Y -> mem[32..40] -----
+        # ----- 2 * Y (kept on stack, consumed by inv_unsafe) -----
         loc_loadw_le.12  swapw  loc_loadw_le.8             # Y
         dupw.1 dupw.1                                      # [Y, Y, ...]
         exec.f_k1::add                                     # [2*Y, ...]
-        loc_storew_le.32  swapw  loc_storew_le.36  swapw
 
-        # ----- inv(2 * Y) -> mem[40..48] -----
-        # inv_unsafe precondition: `3*X^2` is canonical and `f_k1::mul` reduces the product.
+        # ----- inv(2 * Y) (kept on stack, consumed by m mul) -----
+        # inv_unsafe is sound here: its result is immediately consumed by f_k1::mul, which
+        # accepts u32-bounded operands and canonicalizes the product.
         exec.f_k1::inv_unsafe                              # [inv(2*Y), ...]
-        loc_storew_le.40  swapw  loc_storew_le.44  swapw
 
-        # ----- m = (3*X^2) * inv(2*Y) -> mem[48..56] -----
+        # ----- m = (3*X^2) * inv(2*Y) -> mem[32..40] -----
         padw loc_loadw_le.28  padw loc_loadw_le.24         # [3*X^2, inv(2*Y), ...]
         exec.f_k1::mul                                     # [m, ...]
-        loc_storew_le.48  swapw  loc_storew_le.52  swapw
+        loc_storew_le.32  swapw  loc_storew_le.36  swapw
 
-        # ----- m^2 -> mem[56..64] -----
+        # ----- m^2 (kept on stack) -----
         dupw.1 dupw.1                                      # duplicate m on stack; [m, m, ...]
         exec.f_k1::mul                                     # [m^2, ...]
-        loc_storew_le.56  swapw  loc_storew_le.60  swapw
 
-        # ----- 2 * X -> mem[64..72] -----
+        # ----- 2 * X (kept on stack above m^2) -----
         padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, m^2, ...]
         dupw.1 dupw.1                                      # [X, X, m^2, ...]
         exec.f_k1::add                                     # [2*X, m^2, ...]
-        loc_storew_le.64  swapw  loc_storew_le.68  swapw
 
-        # ----- X3 = m^2 - 2*X -> mem[72..80] -----
+        # ----- X3 = m^2 - 2*X -> out_addr[0..8], kept on stack for the (X - X3) step -----
         exec.f_k1::sub                                     # [X3, ...]
-        loc_storew_le.72  swapw  loc_storew_le.76  swapw
+        loc_load.20         mem_storew_le                  # mem[out_addr+0..4] = X3_low; X3_low kept on stack
+        swapw                                              # [X3_high, X3_low, ...]
+        loc_load.20 add.4   mem_storew_le                  # mem[out_addr+4..8] = X3_high; X3_high kept
+        swapw                                              # [X3_low, X3_high, ...] restored
 
-        # ----- (X - X3) -> mem[80..88] -----
+        # ----- (X - X3) kept on stack for Y3 -----
         padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, X3, ...]
         swapdw                                             # [X3, X, ...]
         exec.f_k1::sub                                     # [X - X3, ...]
-        loc_storew_le.80  swapw  loc_storew_le.84  swapw
 
-        # ----- Y3 = m * (X - X3) - Y -> mem[88..96] -----
-        padw loc_loadw_le.52  padw loc_loadw_le.48         # [m, X - X3, ...]
+        # ----- Y3 = m * (X - X3) - Y -> out_addr[8..16] -----
+        padw loc_loadw_le.36  padw loc_loadw_le.32         # [m, X - X3, ...]
         exec.f_k1::mul                                     # [m*(X - X3), ...]
         padw loc_loadw_le.12  padw loc_loadw_le.8          # [Y, m*(X - X3), ...]
         exec.f_k1::sub                                     # [Y3, ...]
-        loc_storew_le.88 dropw  loc_storew_le.92
+        loc_load.20 add.8   mem_storew_le  dropw           # mem[out_addr+8..12] = Y3_low; drop
+        loc_load.20 add.12  mem_storew_le  dropw           # mem[out_addr+12..16] = Y3_high; drop
 
-        # ----- Write (X3, Y3, flag = 0) to out_addr -----
-        loc_loadw_le.72        loc_load.20         mem_storew_le
-        loc_loadw_le.76        loc_load.20 add.4   mem_storew_le
-        loc_loadw_le.88        loc_load.20 add.8   mem_storew_le
-        loc_loadw_le.92        loc_load.20 add.12  mem_storew_le  dropw
-        padw           loc_load.20 add.16  mem_storew_le dropw
+        # ----- Clear flag word at out_addr+16 -----
+        padw  loc_load.20 add.16  mem_storew_le  dropw
     end
 end
 
@@ -217,19 +214,20 @@ end
 #!
 #! Cost (generic case): 2 modmul + 1 inv + 1 sq + ~6 adds/subs.
 #!
-#! Local memory (112 felts):
+#! Local memory (60 felts):
 #!   0..20    : P1 (input)
 #!   20..40   : P2 (input)
 #!   40       : out_addr cache
 #!   44..52   : Y2 - Y1 (numerator)
-#!   52..60   : X2 - X1 (denominator)
-#!   60..68   : inv(X2 - X1)
-#!   68..76   : m
-#!   76..84   : m^2
-#!   84..92   : X3
-#!   92..100  : (X1 - X3)
-#!   100..108 : Y3
-@locals(112)
+#!   52..60   : m
+#!
+#! Stack-carried intermediates:
+#!   - X2 - X1
+#!   - inv(X2 - X1)
+#!   - m^2
+#!   - X1 - X3
+#! X3 and Y3 are written directly to `out_addr`.
+@locals(60)
 pub proc point_add
     # Stack: [out_addr, p1_addr, p2_addr, ...]
     loc_store.40                                          # cache out_addr; [p1_addr, p2_addr, ...]
@@ -294,53 +292,50 @@ pub proc point_add
                 exec.f_k1::sub                                # Y2 - Y1
                 loc_storew_le.44 swapw  loc_storew_le.48      # mem[44..52] = Y2-Y1
 
-                # ----- X2 - X1 -> mem[52..60] -----
+                # ----- X2 - X1 (kept on stack, consumed by inv_unsafe) -----
                 loc_loadw_le.24  swapw  loc_loadw_le.20       # X2 (a)
                 padw loc_loadw_le.4    padw loc_loadw_le.0    # X1 (b)
                 exec.f_k1::sub                                # X2 - X1
 
-                # ----- inv(X2 - X1) -> mem[60..68] -----
-                # inv_unsafe precondition: `Y2 - Y1` is canonical and `f_k1::mul` reduces the product.
-                loc_storew_le.52 swapw  loc_storew_le.56  swapw
+                # ----- inv(X2 - X1) (kept on stack, consumed by m mul) -----
+                # inv_unsafe is sound here: its result is immediately consumed by f_k1::mul, which
+                # accepts u32-bounded operands and canonicalizes the product.
                 exec.f_k1::inv_unsafe                         # [inv, ...]
-                loc_storew_le.60  swapw  loc_storew_le.64  swapw
 
-                # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[68..76] -----
+                # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[52..60] -----
                 padw loc_loadw_le.48  padw loc_loadw_le.44    # [Y2-Y1, inv, ...]
                 exec.f_k1::mul                                # [m, ...]
-                loc_storew_le.68  swapw  loc_storew_le.72  swapw
+                loc_storew_le.52  swapw  loc_storew_le.56  swapw
 
-                # ----- m^2 -> mem[76..84] -----
+                # ----- m^2 (kept on stack) -----
                 dupw.1 dupw.1                                 # duplicate m on stack; [m, m, ...]
                 exec.f_k1::mul                                # [m^2, ...]
-                loc_storew_le.76  swapw  loc_storew_le.80  swapw
 
-                # ----- X3 = m^2 - X1 - X2 -> mem[84..92] -----
+                # ----- X3 = m^2 - X1 - X2 -> out_addr[0..8], kept on stack for the (X1 - X3) step -----
                 padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, m^2, ...]
                 exec.f_k1::sub                                # [m^2 - X1, ...]
                 padw loc_loadw_le.24  padw loc_loadw_le.20    # [X2, m^2-X1, ...]
                 exec.f_k1::sub                                # [X3, ...]
-                loc_storew_le.84  swapw  loc_storew_le.88  swapw
+                loc_load.40         mem_storew_le             # mem[out_addr+0..4] = X3_low; kept
+                swapw                                         # [X3_high, X3_low, ...]
+                loc_load.40 add.4   mem_storew_le             # mem[out_addr+4..8] = X3_high; kept
+                swapw                                         # [X3_low, X3_high, ...] restored
 
-                # ----- (X1 - X3) -> mem[92..100] -----
+                # ----- (X1 - X3) kept on stack for Y3 -----
                 padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, X3, ...]
                 swapdw                                        # [X3, X1, ...]
                 exec.f_k1::sub                                # [X1 - X3, ...]
-                loc_storew_le.92  swapw  loc_storew_le.96  swapw
 
-                # ----- Y3 = m * (X1 - X3) - Y1 -> mem[100..108] -----
-                padw loc_loadw_le.72  padw loc_loadw_le.68    # [m, X1-X3, ...]
+                # ----- Y3 = m * (X1 - X3) - Y1 -> out_addr[8..16] -----
+                padw loc_loadw_le.56  padw loc_loadw_le.52    # [m, X1-X3, ...]
                 exec.f_k1::mul                                # [m*(X1-X3), ...]
                 padw loc_loadw_le.12  padw loc_loadw_le.8     # [Y1, m*(X1-X3), ...]
                 exec.f_k1::sub                                # [Y3, ...]
-                loc_storew_le.100 dropw  loc_storew_le.104
+                loc_load.40 add.8   mem_storew_le  dropw      # mem[out_addr+8..12] = Y3_low; drop
+                loc_load.40 add.12  mem_storew_le  dropw      # mem[out_addr+12..16] = Y3_high; drop
 
-                # ----- Write (X3, Y3, flag = 0) to out_addr -----
-                loc_loadw_le.84         loc_load.40         mem_storew_le
-                loc_loadw_le.88         loc_load.40 add.4   mem_storew_le
-                loc_loadw_le.100        loc_load.40 add.8   mem_storew_le
-                loc_loadw_le.104        loc_load.40 add.12  mem_storew_le  dropw
-                padw            loc_load.40 add.16  mem_storew_le dropw
+                # ----- Clear flag word at out_addr+16 -----
+                padw  loc_load.40 add.16  mem_storew_le  dropw
             end
         end
     end
@@ -1053,13 +1048,12 @@ pub proc msm_4_128_glv_k1
         locaddr.300 dup
         exec.point_double
 
-        # Conditional add LUT[code]. point_add(out=accum, p2=accum, p1=LUT[code]).
+        # Conditional add LUT[code]. point_add(out=accum, p1=accum, p2=LUT[code]).
+        # Operand order relies on point_add commutativity to skip the swap before exec.point_add.
         dup neq.0
         if.true
-            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300                                  # P_2 = accum (deeper)
-            swap                                         # [LUT_addr, accum]
-            locaddr.300                                  # out = accum (top)
+            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base; [LUT_addr, ...]
+            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]
             exec.point_add
         else
             drop
@@ -1091,9 +1085,7 @@ pub proc msm_4_128_glv_k1
         dup neq.0
         if.true
             sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300
-            swap
-            locaddr.300
+            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
@@ -1123,9 +1115,7 @@ pub proc msm_4_128_glv_k1
         dup neq.0
         if.true
             sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300
-            swap
-            locaddr.300
+            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
@@ -1155,9 +1145,7 @@ pub proc msm_4_128_glv_k1
         dup neq.0
         if.true
             sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300
-            swap
-            locaddr.300
+            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
