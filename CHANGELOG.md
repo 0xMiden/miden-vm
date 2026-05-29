@@ -97,6 +97,9 @@
 - Hardened MAST forest and package byte-slice deserialization against fuzzed length fields ([#3088](https://github.com/0xMiden/miden-vm/pull/3088)).
 - [BREAKING] Fixed project artifact reuse to ignore unrelated manifest fields, rejected private cross-module imports, and kept signature-only type imports live ([#3091](https://github.com/0xMiden/miden-vm/pull/3091)).
 - Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
+- Allowed parser-generated empty control-flow forms (`if.<cond> end`, `if.<cond> else end`,
+  `while.true end`, `repeat.<N> end`) and added semantic warnings for empty `while.true` and
+  `repeat` bodies (rejected under `warnings_as_errors` unless intent is explicit via `nop`).
 
 #### Changes
 

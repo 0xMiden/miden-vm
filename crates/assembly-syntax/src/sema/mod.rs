@@ -16,7 +16,7 @@ use miden_core::{Word, crypto::hash::Poseidon2};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
-use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
+use self::passes::{LocalInvokeTarget, VerifyEmptyControlFlow, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
     errors::{LimitKind, SemanticAnalysisError, SyntaxError},
@@ -227,6 +227,17 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                 log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = VerifyRepeatCounts::new(analyzer);
+                    let _ = visitor.visit_procedure(&procedure);
+                }
+
+                // Warn about empty loop/repeat bodies where behavior may be surprising.
+                log::debug!(
+                    target: "verify-empty-control-flow",
+                    "visiting procedure {}",
+                    procedure.name()
+                );
+                {
+                    let mut visitor = VerifyEmptyControlFlow::new(analyzer);
                     let _ = visitor.visit_procedure(&procedure);
                 }
 

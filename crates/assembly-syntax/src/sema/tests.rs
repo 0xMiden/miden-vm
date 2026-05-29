@@ -245,6 +245,48 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
 }
 
 #[test]
+fn empty_loop_bodies_are_allowed_when_warnings_are_not_errors() {
+    let context = SyntaxTestContext::default();
+    context
+        .parse_program("begin while.true end end")
+        .expect("expected empty while body to be allowed when warnings are not errors");
+    context
+        .parse_program("begin repeat.5 end end")
+        .expect("expected empty repeat body to be allowed when warnings are not errors");
+}
+
+#[test]
+fn empty_while_body_rejected_when_warnings_are_errors() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_program("begin while.true end end")
+        .expect_err("expected empty while body warning to fail under warnings_as_errors");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("empty while.true body"));
+}
+
+#[test]
+fn empty_repeat_body_rejected_when_warnings_are_errors() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_program("begin repeat.5 end end")
+        .expect_err("expected empty repeat body warning to fail under warnings_as_errors");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("empty repeat body"));
+}
+
+#[test]
+fn explicit_nop_silences_empty_loop_body_warnings() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    context
+        .parse_program("begin while.true nop end end")
+        .expect("expected explicit nop to silence empty while warning");
+    context
+        .parse_program("begin repeat.5 nop end end")
+        .expect("expected explicit nop to silence empty repeat warning");
+}
+
+#[test]
 fn exported_constant_with_private_local_dependency_is_fully_evaluated_in_analysis() {
     let context = SyntaxTestContext::default();
     let module = context

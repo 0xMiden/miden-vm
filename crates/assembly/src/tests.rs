@@ -85,31 +85,24 @@ fn simple_instructions() -> TestResult {
     Ok(())
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly?
 #[test]
-#[ignore]
-fn empty_program() -> TestResult {
+fn empty_program_is_rejected() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context
+        .assemble(source)
+        .expect_err("expected empty begin/end program to be rejected");
+    assert_diagnostic!(&err, "invalid syntax");
+    assert_diagnostic!(&err, "expected a non-empty entry block");
 }
 
 #[test]
 fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: expected a non-empty `if` block",
-        regex!(r#",-\[test[\d]+:1:15\]"#),
-        "1 | begin if.true end end",
-        "  :               ^",
-        "  :               `-- expected a non-empty `if` block",
-        "  `----"
-    );
+    context
+        .assemble(source)
+        .expect("expected empty if to be accepted");
 }
 
 #[test]
@@ -121,26 +114,24 @@ fn empty_if_true_then_branch() -> TestResult {
     Ok(())
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly
 #[test]
-#[ignore]
-fn empty_while() -> TestResult {
+fn empty_while_is_rejected_when_warnings_are_errors() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context
+        .assemble(source)
+        .expect_err("expected empty while body warning to fail under warnings_as_errors");
+    assert_diagnostic!(err, "empty while.true body");
 }
 
-/// TODO(pauls): Do we want to allow this in Miden Assembly
 #[test]
-#[ignore]
-fn empty_repeat() -> TestResult {
+fn empty_repeat_is_rejected_when_warnings_are_errors() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
+    let err = context
+        .assemble(source)
+        .expect_err("expected empty repeat body warning to fail under warnings_as_errors");
+    assert_diagnostic!(err, "empty repeat body");
 }
 
 /// This test ensures that all iterations of a repeat control block are merged into a single basic

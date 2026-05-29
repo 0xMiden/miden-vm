@@ -114,6 +114,28 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("empty while.true body")]
+    #[diagnostic(
+        severity(Warning),
+        help(
+            "an empty while.true body relies on operand-stack state and may lead to undefined behavior; add an explicit `nop` to acknowledge intent"
+        )
+    )]
+    EmptyWhileBody {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("empty repeat body")]
+    #[diagnostic(
+        severity(Warning),
+        help(
+            "repeat with an empty body is dead code; add an explicit `nop` to acknowledge intent"
+        )
+    )]
+    EmptyRepeatBody {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("missing import: the referenced module has not been imported")]
     #[diagnostic()]
     MissingImport {

@@ -1037,7 +1037,7 @@ end
 }
 
 #[test]
-fn cst_backend_rejects_empty_while_blocks() {
+fn cst_backend_accepts_empty_while_blocks() {
     let source = test_source_file(
         "\
 begin
@@ -1047,16 +1047,20 @@ end
 ",
     );
 
-    let _legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
-        .expect_err("expected empty while block error");
     let cst = parse_forms_with_backend(source, ParserBackend::Cst)
-        .expect_err("expected empty while block error");
-
-    assert_matches!(render_diagnostic(&cst), diag if diag.contains("expected a non-empty `while` block"));
+        .expect("cst backend should accept empty while blocks");
+    let [Form::Begin(block)] = cst.as_slice() else {
+        panic!("expected a single begin block");
+    };
+    let ops = block.iter().collect::<Vec<_>>();
+    let [Op::While { body, .. }] = ops.as_slice() else {
+        panic!("expected one while op, got {ops:?}");
+    };
+    assert!(body.is_empty(), "expected empty while body");
 }
 
 #[test]
-fn cst_backend_rejects_empty_if_then_without_else() {
+fn cst_backend_accepts_empty_if_then_without_else() {
     let source = test_source_file(
         "\
 begin
@@ -1067,10 +1071,45 @@ end
     );
 
     let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    assert!(
+        legacy.is_err(),
+        "legacy parser currently rejects empty if-then blocks"
+    );
 
-    assert!(legacy.is_err(), "legacy parser should reject empty if-then blocks");
-    assert!(cst.is_err(), "cst backend should reject empty if-then blocks");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect("cst backend should accept empty if-then blocks");
+    let [Form::Begin(block)] = cst.as_slice() else {
+        panic!("expected a single begin block");
+    };
+    let ops = block.iter().collect::<Vec<_>>();
+    let [Op::If { then_blk, else_blk, .. }] = ops.as_slice() else {
+        panic!("expected one if op, got {ops:?}");
+    };
+    assert!(then_blk.is_empty(), "expected empty then branch");
+    assert!(else_blk.is_empty(), "expected empty else branch");
+}
+
+#[test]
+fn cst_backend_accepts_empty_repeat_blocks() {
+    let source = test_source_file(
+        "\
+begin
+    repeat.4
+    end
+end
+",
+    );
+
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect("cst backend should accept empty repeat blocks");
+    let [Form::Begin(block)] = cst.as_slice() else {
+        panic!("expected a single begin block");
+    };
+    let ops = block.iter().collect::<Vec<_>>();
+    let [Op::Repeat { body, .. }] = ops.as_slice() else {
+        panic!("expected one repeat op, got {ops:?}");
+    };
+    assert!(body.is_empty(), "expected empty repeat body");
 }
 
 #[test]
