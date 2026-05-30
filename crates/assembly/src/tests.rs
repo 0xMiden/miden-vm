@@ -308,16 +308,16 @@ fn library_exports() -> Result<(), Report> {
     let root = r#"
         namespace lib2
 
-        mod foo
+        pub mod foo
 
-        use lib1::baz
+        use self::foo->foo_api
 
-        pub use baz::baz1->bar1
+        pub use lib1::baz::baz1->bar1
 
-        pub use foo::foo2->bar2
+        pub use self::foo::foo2->bar2
 
         pub proc bar3
-            exec.foo::foo2
+            exec.foo_api::foo2
         end
 
         proc bar4
@@ -326,7 +326,7 @@ fn library_exports() -> Result<(), Report> {
 
         pub proc bar5
             push.3 sub
-            exec.foo::foo2
+            exec.foo_api::foo2
             exec.bar1
             exec.bar2
             exec.bar4
@@ -659,7 +659,7 @@ fn procref_call() -> TestResult {
         namespace module::path::two
 
         use module::path::one
-        pub use one::foo
+        pub use module::path::one::foo
 
         pub proc bar
             procref.one::aaa
@@ -2586,13 +2586,11 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        use dummy1::math::u64
-
         #! checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
-        pub use u64::checked_eqz # re-export
+        pub use dummy1::math::u64::checked_eqz # re-export
 
         #! unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
-        pub use u64::unchecked_eqz->notchecked_eqz # re-export with alias
+        pub use dummy1::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
     "#;
 
     let mut context = TestContext::new();
@@ -2673,13 +2671,11 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        use dummy1::math::u64->myu64
-
         #! checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
-        pub use myu64::checked_eqz # re-export
+        pub use dummy1::math::u64::checked_eqz # re-export
 
         #! unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
-        pub use myu64::unchecked_eqz->notchecked_eqz # re-export with alias
+        pub use dummy1::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
     "#;
 
     let mut context = TestContext::new();
@@ -2738,9 +2734,8 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        use dummy2::math::u64
-        pub use u64::checked_eqz # re-export
-        pub use u64::unchecked_eqz->notchecked_eqz # re-export with alias
+        pub use dummy2::math::u64::checked_eqz # re-export
+        pub use dummy2::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
     "#;
 
     let mut context = TestContext::default();
@@ -2802,15 +2797,14 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:2:13\]"#),
-        "1 |",
-        "2 |         use dummy2::math::u64",
-        "  :             ^^^^^^^^|^^^^^^^^",
-        "  :                     `-- this symbol path could not be resolved",
-        "3 |         begin",
+        "undefined item 'dummy2::math::u64'",
+        regex!(r#",-\[test[\d]+:4:13\]"#),
+        "3 |",
+        "4 |         use dummy2::math::u64",
+        "  :             ^^^^^^^^^^^^^^^^^",
+        "5 |         begin",
         "  `----",
-        "help: maybe you are missing an import?"
+        "help: you might be missing an import, or the containing library has not been linked"
     );
     Ok(())
 }
@@ -4746,9 +4740,7 @@ fn re_exports() -> Result<(), Report> {
     const BAZ: &str = r#"
         namespace foo::baz
 
-        use foo::bar
-
-        pub use bar::baz
+        pub use foo::bar::baz
 
         pub proc qux
             push.1 push.2 add
@@ -4757,7 +4749,7 @@ fn re_exports() -> Result<(), Report> {
     let context = TestContext::new();
     let bar = context.parse_module(BAR)?;
     let baz = context.parse_module(BAZ)?;
-    let library = context.assemble_library("foo", None, bar, [baz]).unwrap();
+    let library = context.assemble_library("foo", None, baz, [bar]).unwrap();
 
     let assembler = Assembler::new(context.source_manager())
         .with_package(library.into(), Linkage::Dynamic)
@@ -6108,11 +6100,10 @@ fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
 }
 
 #[test]
-fn path_alias_chain_to_digest_assembles_without_panicking() {
+fn path_alias_chain_to_digest_is_rejected_without_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
-    let digest = Word::default();
     let module = context
         .parse_module(source_file!(
             &context,
@@ -6133,12 +6124,11 @@ fn path_alias_chain_to_digest_assembles_without_panicking() {
         Assembler::new(context.source_manager()).assemble_library("m", module, None::<Box<Module>>)
     }));
 
-    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
-    let library = assembled
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled
         .unwrap()
-        .expect("expected digest alias chain to assemble successfully");
-    assert_eq!(library.get_procedure_root_by_path("m::n::bar"), Some(digest));
-    assert!(library.get_procedure_root_by_path("m::n::calls_bar").is_some());
+        .expect_err("expected import chaining through a digest alias to be rejected");
+    assert_diagnostic!(&err, "undefined item 'm::n::foo'");
 }
 
 #[test]

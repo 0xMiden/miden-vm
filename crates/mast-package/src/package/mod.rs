@@ -310,9 +310,7 @@ impl Package {
     ///
     /// Panics if the specified procedure is not exported from this package.
     pub fn get_export_node_id(&self, path: impl AsRef<Path>) -> MastNodeId {
-        let path = path.as_ref().to_absolute().unwrap();
-        self.manifest
-            .get_export(path)
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
             .expect("procedure not exported from this package")
@@ -320,11 +318,7 @@ impl Package {
 
     /// Returns true if the specified exported procedure is re-exported from a dependency.
     pub fn is_reexport(&self, path: impl AsRef<Path>) -> bool {
-        let Ok(path) = path.as_ref().to_absolute() else {
-            return false;
-        };
-        self.manifest
-            .get_export(path.as_ref())
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
             .map(|node| self.mast[node].is_external())
@@ -334,20 +328,29 @@ impl Package {
     /// Returns the digest of the procedure with the specified name, or `None` if it was not found
     /// in the library or its library path is malformed.
     pub fn get_procedure_root_by_path(&self, path: impl AsRef<Path>) -> Option<Word> {
-        let path = path.as_ref().to_absolute().ok()?;
-        self.manifest
-            .get_export(path)
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .map(|proc| proc.digest)
     }
 
     /// Returns the exact procedure node for the specified path, if it is present.
     pub fn get_procedure_node_by_path(&self, path: impl AsRef<Path>) -> Option<MastNodeId> {
-        let path = path.as_ref().to_absolute().ok()?;
-        self.manifest
-            .get_export(path.as_ref())
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
+    }
+
+    fn get_export_by_lookup_path(&self, path: &Path) -> Option<&PackageExport> {
+        self.manifest
+            .get_export(path)
+            .or_else(|| path.is_absolute().then(|| self.manifest.get_export(path.to_relative()))?)
+            .or_else(|| {
+                if path.is_absolute() {
+                    None
+                } else {
+                    path.to_absolute().ok().and_then(|path| self.manifest.get_export(path.as_ref()))
+                }
+            })
     }
 
     /// Returns an iterator over the module infos of the library.
@@ -707,6 +710,11 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
+    fn relative_path(name: &str) -> Arc<AstPath> {
+        let path = PathBuf::relative(name);
+        Arc::from(path.into_boxed_path())
+    }
+
     fn build_package_exports(export: &str) -> (Arc<MastForest>, Vec<PackageExport>) {
         let (forest, node_id) = build_forest();
         let root = forest[node_id].digest();
@@ -858,6 +866,31 @@ mod tests {
         assert_eq!(package.get_procedure_root_by_path(invalid_path), None);
         assert_eq!(package.get_procedure_node_by_path(invalid_path), None);
         assert!(!package.is_reexport(invalid_path));
+    }
+
+    #[test]
+    fn procedure_lookup_accepts_relative_and_absolute_export_paths() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = relative_path("app::entry");
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, Some(node_id), digest, None));
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![export],
+            None,
+        )
+        .expect("package should be valid");
+
+        assert_eq!(package.get_procedure_root_by_path("app::entry"), Some(digest));
+        assert_eq!(package.get_procedure_root_by_path("::app::entry"), Some(digest));
+        assert_eq!(package.get_procedure_node_by_path("app::entry"), Some(node_id));
+        assert_eq!(package.get_procedure_node_by_path("::app::entry"), Some(node_id));
+        assert_eq!(package.get_export_node_id("::app::entry"), node_id);
+        assert!(!package.is_reexport("::app::entry"));
     }
 
     #[test]

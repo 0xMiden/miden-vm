@@ -279,9 +279,14 @@ impl NamespaceGraph {
 
             if let Some(resolved) = imports.get(owner, first) {
                 return match resolved {
-                    ResolvedUse::Module(module) => {
-                        self.resolve_path_from_module(owner, module, rest, path.span(), linker)
-                    },
+                    ResolvedUse::Module(module) => self.resolve_path_from_module(
+                        owner,
+                        module,
+                        rest,
+                        path.span(),
+                        imports,
+                        linker,
+                    ),
                     ResolvedUse::Item(item) => Err(SymbolResolutionError::invalid_sub_path(
                         path.span(),
                         linker[item.module][item.index].name().span(),
@@ -351,6 +356,7 @@ impl NamespaceGraph {
         module: ModuleIndex,
         path: &Path,
         span: SourceSpan,
+        imports: &ResolvedImports,
         linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
         let mut current = module;
@@ -371,6 +377,13 @@ impl NamespaceGraph {
                 if let Some(edge) = module.submodule(component) {
                     self.ensure_submodule_visible(edge, span, linker)?;
                     return Ok(ResolvedUse::Module(edge.child()));
+                }
+
+                if let Some(import) = module.import(component)
+                    && import.visibility().is_public()
+                    && let Some(resolved) = imports.get(current, component)
+                {
+                    return Ok(resolved);
                 }
 
                 return Err(undefined_symbol_from_path(linker, span, path));
