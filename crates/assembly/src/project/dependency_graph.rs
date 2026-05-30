@@ -102,9 +102,7 @@ impl DependencyGraph {
 
         match source {
             ProjectSource::Virtual { .. } => Ok(None),
-            ProjectSource::Real {
-                origin, manifest_path, workspace_root, ..
-            } => self
+            ProjectSource::Real { origin, manifest_path, .. } => self
                 .expected_source_provenance(
                     package_id,
                     project,
@@ -112,7 +110,6 @@ impl DependencyGraph {
                     profile_name,
                     origin,
                     manifest_path,
-                    workspace_root.as_deref(),
                     source_provider,
                 )
                 .map(Some),
@@ -127,7 +124,6 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
         source_provider: &SourceProvider,
     ) -> Result<PackageBuildProvenance, Report> {
         self.expected_source_provenance_with_visited(
@@ -137,7 +133,6 @@ impl DependencyGraph {
             profile_name,
             origin,
             manifest_path,
-            workspace_root,
             source_provider,
             &mut BTreeSet::new(),
         )
@@ -154,7 +149,6 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        _workspace_root: Option<&FsPath>,
         source_provider: &SourceProvider,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
@@ -289,7 +283,6 @@ impl DependencyGraph {
             ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
                 origin,
                 manifest_path,
-                workspace_root,
                 library_path: Some(_),
                 ..
             }) => {
@@ -314,7 +307,6 @@ impl DependencyGraph {
                     profile_name,
                     origin,
                     manifest_path,
-                    workspace_root.as_deref(),
                     source_provider,
                     visiting,
                 )?;

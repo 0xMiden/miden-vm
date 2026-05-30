@@ -434,7 +434,6 @@ where
                 manifest_path,
                 origin,
                 library_path: Some(_),
-                workspace_root,
                 ..
             }) => {
                 let project = miden_project::Project::load_project_reference(
@@ -459,7 +458,6 @@ where
                     profile_name,
                     origin,
                     manifest_path,
-                    workspace_root.as_deref(),
                 )? {
                     RegisteredSourcePackage::Loaded(package) => (
                         ResolvedPackage {
@@ -622,7 +620,6 @@ where
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
     ) -> Result<RegisteredSourcePackage, Report> {
         let Some(record) = self.store.get_by_semver(package_id, version) else {
             return Ok(RegisteredSourcePackage::Missing);
@@ -641,7 +638,6 @@ where
             profile_name,
             origin,
             manifest_path,
-            workspace_root,
             &self.source_provider,
         )?;
 
