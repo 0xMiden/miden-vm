@@ -221,18 +221,22 @@ impl<'a> ProcessorState<'a> {
 
     /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
     /// without modifying the state of the stack), and verifies that memory range is valid.
+    ///
+    /// The range is half-open `[start, end)`. `start` must be a valid address (`<= u32::MAX`),
+    /// while `end` is the exclusive upper bound and may be up to `2^32`, so the range can cover
+    /// the cell at `u32::MAX`. For that reason the range is returned as `Range<u64>`.
     pub fn get_mem_addr_range(
         &self,
         start_idx: usize,
         end_idx: usize,
-    ) -> Result<core::ops::Range<u32>, MemoryError> {
+    ) -> Result<core::ops::Range<u64>, MemoryError> {
         let start_addr = self.get_stack_item(start_idx).as_canonical_u64();
         let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
 
         if start_addr > u32::MAX as u64 {
             return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
         }
-        if end_addr > u32::MAX as u64 {
+        if end_addr > u32::MAX as u64 + 1 {
             return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
         }
 
@@ -240,7 +244,7 @@ impl<'a> ProcessorState<'a> {
             return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
         }
 
-        Ok(start_addr as u32..end_addr as u32)
+        Ok(start_addr..end_addr)
     }
 
     /// Returns the entire memory state for the specified execution context at the current clock

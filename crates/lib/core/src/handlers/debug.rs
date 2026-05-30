@@ -184,13 +184,16 @@ fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
 /// Prints the initialized memory cells in the range `[start, end)` of the current context.
 ///
 /// Backs `print_mem` (an explicit range), `print_mem_addr` (the single-cell range
-/// `[addr, addr+1)`), and `print_mem_all` (the full range `[0, u32::MAX)`). Only cells that have
+/// `[addr, addr+1)`), and `print_mem_all` (the full range `[0, 2^32)`). Only cells that have
 /// been written are listed, so a full-range print enumerates just the initialized state rather
 /// than the entire address space.
+///
+/// The range is half-open `[start, end)` with `end` up to `2^32`, hence `Range<u64>`, so that the
+/// cell at `u32::MAX` can be addressed.
 fn write_mem_range<W: fmt::Write>(
     w: &mut W,
     process: &ProcessorState,
-    range: core::ops::Range<u32>,
+    range: core::ops::Range<u64>,
 ) -> fmt::Result {
     let (ctx, clk) = (process.ctx(), process.clock());
     if range.is_empty() {
@@ -203,7 +206,7 @@ fn write_mem_range<W: fmt::Write>(
     let items: Vec<_> = process
         .get_mem_state(ctx)
         .into_iter()
-        .filter(|(addr, _)| range.contains(&u32::from(*addr)))
+        .filter(|(addr, _)| range.contains(&u64::from(u32::from(*addr))))
         .map(|(addr, value)| (format!("{addr:#010x}"), Some(value.to_string())))
         .collect();
     if items.is_empty() {

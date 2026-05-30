@@ -202,6 +202,40 @@ fn print_mem_all_outputs_memory() {
 }
 
 #[test]
+fn print_mem_addr_prints_max_u32_cell() {
+    // Regression: `print_mem_addr` builds the range `[addr, addr+1)`. At `addr == u32::MAX` the
+    // exclusive end is `2^32`, which used to be rejected and aborted execution. It must now print
+    // the cell.
+    let source = "
+    use miden::core::debug
+    begin
+        push.42 push.4294967295 mem_store
+        push.4294967295
+        exec.debug::print_mem_addr
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value at u32::MAX; got:\n{out}");
+}
+
+#[test]
+fn print_mem_all_includes_max_u32_cell() {
+    // Regression: `print_mem_all` covers `[0, 2^32)` so the cell at `u32::MAX` is no longer
+    // silently excluded.
+    let source = "
+    use miden::core::debug
+    begin
+        push.42 push.4294967295 mem_store
+        exec.debug::print_mem_all
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value at u32::MAX; got:\n{out}");
+}
+
+#[test]
 fn print_mem_rejects_out_of_bounds_range_end() {
     let source = "
     use miden::core::debug

@@ -88,6 +88,13 @@ fn push_lowerbound_result(
     // Read inputs from the stack; keys are provided in structural / little-endian order.
     let key = word_to_search_key(process.get_stack_word(KEY_OFFSET), key_size);
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
+    // `get_mem_addr_range` permits an exclusive end of up to `2^32` (so memory printing can reach
+    // the cell at `u32::MAX`), but a sorted array is addressed in `u32`, so reject that boundary
+    // and narrow back to `u32` (lossless) for the logic below.
+    if addr_range.end > u32::MAX as u64 {
+        return Err(MemoryError::AddressOutOfBounds { addr: addr_range.end }.into());
+    }
+    let addr_range = addr_range.start as u32..addr_range.end as u32;
 
     // Validate the start_addr is word-aligned (multiple of 4)
     if addr_range.start % 4 != 0 {
