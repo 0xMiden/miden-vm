@@ -1,4 +1,10 @@
-use miden::core::stark::verifier
+pub mod constants
+pub mod deep_queries
+pub mod ood_frames
+pub mod public_inputs
+pub mod random_coin
+pub mod utils
+pub mod verifier
 
 #! Verifies a STARK proof.
 #!
@@ -30,4 +36,4 @@ use miden::core::stark::verifier
 #!
 #! Inputs:  [D0, D1, D2, D3, D4, log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3]
 #! Outputs: []
-pub use verifier::verify
+pub use self::verifier::verify

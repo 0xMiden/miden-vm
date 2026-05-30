@@ -381,6 +381,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
             exec.falcon512_poseidon2::mod_12289
         end
     ";
+    let source = crate::exec_source(source);
 
     let a = (a_hi << 32) | a_lo;
     let true_remainder = a % M;
@@ -433,6 +434,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
             exec.falcon512_poseidon2::mod_12289
         end
     ";
+    let source = crate::exec_source(source);
 
     // Choose input equal to wrapping sum, so without the assertz this forged advice would pass.
     let a = M.wrapping_mul(FORGED_Q).wrapping_add(FORGED_R);
@@ -480,6 +482,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
             exec.falcon512_poseidon2::mod_12289
         end
     ";
+    let source = crate::exec_source(source);
 
     let op_stack = vec![0, 100_000];
     let adv_stack: Vec<u64> = vec![];
@@ -531,7 +534,7 @@ fn generate_test(
     sk: SecretKey,
     message: Word,
 ) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
-    let source = format!(
+    let source = crate::exec_source(format!(
         "
     use miden::core::crypto::dsa::falcon512_poseidon2
 
@@ -540,7 +543,7 @@ fn generate_test(
         exec.falcon512_poseidon2::verify
     end
     "
-    );
+    ));
 
     let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();

@@ -73,7 +73,7 @@ fn test_memcopy_words() {
         .expect("failed to load core library");
 
     let program: Program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", crate::exec_source(source))
         .expect("Failed to compile test source.")
         .unwrap_program();
 
@@ -191,7 +191,7 @@ fn test_memcopy_elements() {
         .expect("failed to load core library");
 
     let program: Program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", crate::exec_source(source))
         .expect("Failed to compile test source.")
         .unwrap_program();
 

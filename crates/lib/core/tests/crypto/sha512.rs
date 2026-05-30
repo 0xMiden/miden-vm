@@ -223,7 +223,7 @@ fn run_sha512_with_max_hash_len(
     let program = Assembler::default()
         .with_package(core_lib.package(), Linkage::Static)
         .unwrap()
-        .assemble_program("program", &source)
+        .assemble_program("program", crate::exec_source(&source))
         .unwrap()
         .unwrap_program();
 

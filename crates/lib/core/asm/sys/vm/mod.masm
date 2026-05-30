@@ -1,8 +1,8 @@
-use miden::core::sys::vm::aux_trace
-use miden::core::sys::vm::deep_queries
-use miden::core::sys::vm::constraints_eval
-use miden::core::sys::vm::ood_frames
-use miden::core::sys::vm::public_inputs
+pub mod aux_trace
+pub mod constraints_eval
+pub mod deep_queries
+pub mod ood_frames
+pub mod public_inputs
 
 use miden::core::stark::verifier
 use miden::core::stark::constants

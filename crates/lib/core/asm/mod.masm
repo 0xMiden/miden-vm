@@ -1,3 +1,13 @@
 #! This is the top-level module of the miden::core namespace.
 #!
 #! It is currently empty as we do not export any procedures from here.
+
+pub mod collections
+pub mod crypto
+pub mod debug
+pub mod math
+pub mod mem
+pub mod pcs
+pub mod stark
+pub mod sys
+pub mod word

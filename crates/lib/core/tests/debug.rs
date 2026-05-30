@@ -53,6 +53,10 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
     ]
 }
 
+fn exec_source(source: impl AsRef<str>) -> String {
+    format!("namespace $exec\n\n{}", source.as_ref())
+}
+
 /// Assembles `source` against the core library and executes it with a [`DebugPrinter`] writing
 /// into an in-memory buffer (rather than the default stdout one), returning everything printed by
 /// the `print_*` events along with the execution output.
@@ -62,7 +66,7 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
 
@@ -102,7 +106,7 @@ fn run_with_default_core_handlers(source: &str, advice: AdviceInputs) -> Executi
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
     let mut host = DefaultHost::default()
@@ -288,7 +292,7 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
@@ -330,7 +334,7 @@ fn print_mem_rejects_oversized_range() {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
@@ -572,7 +576,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
 
@@ -644,7 +648,7 @@ fn noop_debug_handlers_run_print_stack_without_output() {
         .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
     let program = assembler
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .expect("failed to assemble program")
         .unwrap_program();
     let host_lib = HostLibrary {
