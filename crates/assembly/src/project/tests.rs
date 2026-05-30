@@ -87,19 +87,13 @@ end
 "#,
     );
     write_file(
-        &tempdir.path().join("shared.masm"),
-        r#"pub proc helper
-    push.2
-end
-"#,
-    );
-    write_file(
         &tempdir.path().join("main.masm"),
-        r#"use app::shared
+        r#"pub mod lib
+
+use self::lib->lib_api
 
 begin
-    exec.app::helper
-    exec.shared::helper
+    exec.lib_api::helper
 end
 "#,
     );
@@ -2717,7 +2711,7 @@ path = "kernel.masm"
 
 [[bin]]
 name = "main"
-path = "main.masm"
+path = "bin/main.masm"
 "#,
     );
     write_file(
@@ -2728,7 +2722,7 @@ end
 "#,
     );
     write_file(
-        &root.join("main.masm"),
+        &root.join("bin/main.masm"),
         r#"begin
     syscall.foo
 end

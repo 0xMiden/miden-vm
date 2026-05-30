@@ -1086,6 +1086,46 @@ mod tests {
     }
 
     #[test]
+    fn namespace_graph_resolves_absolute_code_paths_to_public_item_reexports() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut dep = parse_module(
+            source_manager.clone(),
+            "dep.masm",
+            r#"
+                namespace dep
+
+                pub const VALUE = 1
+            "#,
+        );
+        let mut root = parse_module(
+            source_manager.clone(),
+            "root.masm",
+            r#"
+                namespace root
+
+                pub use dep::VALUE->ALIAS
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        let dep_id = linker.link_module(&mut dep).expect("dep link should succeed");
+        let root_id = linker.link_module(&mut root).expect("root link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let imports = graph.resolve_imports(&linker).expect("imports should resolve");
+        let resolved = graph
+            .resolve_code_path(
+                root_id,
+                Span::unknown(Path::new("::root::ALIAS")),
+                &imports,
+                &linker,
+            )
+            .expect("absolute code path should resolve to public item re-export");
+
+        assert!(matches!(resolved, ResolvedUse::Item(gid) if gid.module == dep_id));
+    }
+
+    #[test]
     fn namespace_graph_rejects_private_submodule_import() {
         let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
         let mut root = parse_module(

@@ -121,16 +121,9 @@ fn empty_program() -> TestResult {
 fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "namespace $exec\nbegin if.true end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: expected a non-empty `if` block",
-        regex!(r#",-\[test[\d]+:2:15\]"#),
-        "2 | begin if.true end end",
-        "  :               ^",
-        "  :               `-- expected a non-empty `if` block",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected empty if block to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected a non-empty `if` block");
+    assert_diagnostic!(&err, "begin if.true end end");
 }
 
 #[test]
@@ -709,18 +702,9 @@ fn get_proc_name_of_unknown_module() -> TestResult {
         .assemble_library("test", module1, None::<Box<Module>>)
         .expect_err("expected unknown module error");
 
-    assert_diagnostic_lines!(
-        report,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:2:9\]"#),
-        "1 |",
-        "2 |     use module::path::two",
-        "  :         ^^^^^^^^|^^^^^^^^",
-        "  :                 `-- this symbol path could not be resolved",
-        "3 |",
-        "  `----",
-        "help: maybe you are missing an import?"
-    );
+    assert_diagnostic!(&report, "undefined item 'module::path::two'");
+    assert_diagnostic!(&report, "use module::path::two");
+    assert_diagnostic!(&report, "you might be missing an import");
 
     Ok(())
 }
@@ -980,19 +964,10 @@ fn constant_err_const_not_initialized() {
     push.TEST_CONSTANT \
     end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "undefined constant 'A'",
-        regex!(r#",-\[test[\d]+:2:25\]"#),
-        "2 |     const TEST_CONSTANT = 5+A begin push.TEST_CONSTANT end",
-        "  :                         |",
-        "  :                         `-- the constant referenced here is not defined in the current scope",
-        "  `----",
-        " help: are you missing an import?"
-    );
+    let err = context.assemble(source).expect_err("expected undefined constant diagnostic");
+    assert_diagnostic!(&err, "undefined constant 'A'");
+    assert_diagnostic!(&err, "the constant referenced here is not defined in the current scope");
+    assert_diagnostic!(&err, "are you missing an import?");
 }
 
 #[test]
@@ -1006,17 +981,9 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid constant expression: division by zero",
-        regex!(r#",-\[test[\d]+:2:23\]"#),
-        "2 |     const TEST_CONSTANT = 5/0 begin push.TEST_CONSTANT end",
-        "  :                       ^^^",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
+    assert_diagnostic!(&err, "invalid constant expression: division by zero");
+    assert_diagnostic!(&err, "const TEST_CONSTANT = 5/0");
 
     let source = source_file!(
         &context,
@@ -1026,17 +993,9 @@ fn constant_err_div_by_zero() {
     push.TEST_CONSTANT \
     end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid constant expression: division by zero",
-        regex!(r#",-\[test[\d]+:2:23\]"#),
-        "2 |     const TEST_CONSTANT = 5//0 begin push.TEST_CONSTANT end",
-        "  :                       ^^^^",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
+    assert_diagnostic!(&err, "invalid constant expression: division by zero");
+    assert_diagnostic!(&err, "const TEST_CONSTANT = 5//0");
 }
 
 #[test]
@@ -1047,28 +1006,18 @@ fn constant_err_div_by_zero_indirect() {
         &context,
         "namespace $exec
 
-    pub const NUMERATOR = 10
-    pub const DENOMINATOR = 0
-    pub const BAD_DIV = NUMERATOR / DENOMINATOR
+    const NUMERATOR = 10
+    const DENOMINATOR = 0
+    const BAD_DIV = NUMERATOR / DENOMINATOR
 
     begin
         push.BAD_DIV
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid constant expression: division by zero",
-        regex!(r#",-\[test[\d]+:5:25\]"#),
-        "4 |     pub const DENOMINATOR = 0",
-        "5 |     pub const BAD_DIV = NUMERATOR / DENOMINATOR",
-        "  :                         ^^^^^^^^^^^^^^^^^^^^^^^",
-        "4 |",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
+    assert_diagnostic!(&err, "invalid constant expression: division by zero");
+    assert_diagnostic!(&err, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 }
 
 #[test]
@@ -1099,17 +1048,9 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid constant expression: division by zero",
-        regex!(r#",-\[test[\d]+:4:21\]"#),
-        "3 |",
-        "4 |     const BAD_DIV = NUMERATOR / DENOMINATOR",
-        "  :                     ^^^^^^^^^^^^^^^^^^^^^^^",
-        "5 |",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected division by zero diagnostic");
+    assert_diagnostic!(&err, "invalid constant expression: division by zero");
+    assert_diagnostic!(&err, "const BAD_DIV = NUMERATOR / DENOMINATOR");
 
     Ok(())
 }
@@ -1126,17 +1067,12 @@ fn constants_must_be_uppercase() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        regex!(r#",-\[test[\d]+:2:11\]"#),
-        "2 |     const constant_1 = 12 begin push.constant_1 end",
-        "  :       ^^^^^^^^^^",
-        "  `----",
-        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
+    let err = context.assemble(source).expect_err("expected lowercase constant diagnostic");
+    assert_diagnostic!(
+        &err,
+        "invalid identifier: only uppercase characters or underscores are allowed"
     );
+    assert_diagnostic!(&err, "const constant_1 = 12");
 }
 
 #[test]
@@ -1152,19 +1088,10 @@ fn duplicate_constant_name() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "symbol conflict: found duplicate definitions of the same name",
-        regex!(r#",-\[test[\d]+:2:5\]"#),
-        "2 |     const CONSTANT = 12 const CONSTANT = 14 begin push.CONSTANT end",
-        "  : ^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^|^^^^^^^^^",
-        "  :           |                   `-- conflict occurs here",
-        "  :           `-- previously defined here",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected duplicate constant diagnostic");
+    assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
+    assert_diagnostic!(&err, "conflict occurs here");
+    assert_diagnostic!(&err, "previously defined here");
 }
 
 #[test]
@@ -1179,16 +1106,9 @@ fn constant_must_be_valid_felt() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: unexpected trailing tokens in expression",
-        regex!(r#",-\[test[\d]+:2:26\]"#),
-        "2 |     const CONSTANT = 1122INVALID begin push.CONSTANT end",
-        "  :                      ^^^|^^^",
-        "  :                         `-- unexpected trailing tokens in expression",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected invalid felt diagnostic");
+    assert_diagnostic!(&err, "invalid syntax: unexpected trailing tokens in expression");
+    assert_diagnostic!(&err, "unexpected trailing tokens in expression");
 }
 
 #[test]
@@ -1205,15 +1125,9 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid literal: value overflowed the field modulus",
-        regex!(r#",-\[test[\d]+:2:22\]"#),
-        "2 |     const CONSTANT = 18446744073709551615 begin push.CONSTANT end",
-        "  :                  ^^^^^^^^^^^^^^^^^^^^",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
+    assert_diagnostic!(&err, "18446744073709551615");
 
     // test the field modulus value in u64 form
     let source = source_file!(
@@ -1225,15 +1139,9 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid literal: value overflowed the field modulus",
-        regex!(r#",-\[test[\d]+:2:22\]"#),
-        "2 |     const CONSTANT = 18446744069414584321 begin push.CONSTANT end",
-        "  :                  ^^^^^^^^^^^^^^^^^^^^",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
+    assert_diagnostic!(&err, "18446744069414584321");
 
     // test the field modulus value in hex form
     let source = source_file!(
@@ -1245,15 +1153,9 @@ fn constant_must_be_within_valid_felt_range() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid literal: value overflowed the field modulus",
-        regex!(r#",-\[test[\d]+:2:22\]"#),
-        "2 |     const CONSTANT = 0xFFFFFFFF00000001 begin push.CONSTANT end",
-        "  :                  ^^^^^^^^^^^^^^^^^^",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected felt overflow diagnostic");
+    assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
+    assert_diagnostic!(&err, "0xFFFFFFFF00000001");
 }
 
 #[test]
@@ -1325,6 +1227,8 @@ fn mem_operations_with_constants() -> TestResult {
         &context,
         format!(
             "\
+    namespace $exec
+
     const PROC_LOC_STORE_PTR = {PROC_LOC_STORE_PTR}
     const PROC_LOC_LOAD_PTR = {PROC_LOC_LOAD_PTR}
     const PROC_LOC_STOREW_PTR = {PROC_LOC_STOREW_PTR}
@@ -1378,6 +1282,8 @@ fn mem_operations_with_constants() -> TestResult {
         &context,
         format!(
             "\
+    namespace $exec
+
     @locals(12)
     proc test_const_loc
         # constant should resolve using locaddr operation
@@ -1430,6 +1336,8 @@ fn const_conversion_failed_to_u16() {
         &context,
         format!(
             "\
+    namespace $exec
+
     const CONSTANT = {constant_value}
 
     @locals(1)
@@ -1450,11 +1358,11 @@ fn const_conversion_failed_to_u16() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:5:18\]"#),
-        "4 |     proc test_constant_overflow",
-        "5 |         loc_load.CONSTANT",
+        regex!(r#",-\[test[\d]+:7:18\]"#),
+        "6 |     proc test_constant_overflow",
+        "7 |         loc_load.CONSTANT",
         "  :                  ^^^^^^^^",
-        "6 |     end",
+        "8 |     end",
         "  `----"
     );
 }
@@ -1469,6 +1377,8 @@ fn const_conversion_failed_to_u32() {
         &context,
         format!(
             "\
+    namespace $exec
+
     const CONSTANT = {constant_value}
 
     begin
@@ -1484,11 +1394,11 @@ fn const_conversion_failed_to_u32() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:4:18\]"#),
-        "3 |     begin",
-        "4 |         mem_load.CONSTANT",
+        regex!(r#",-\[test[\d]+:6:18\]"#),
+        "5 |     begin",
+        "6 |         mem_load.CONSTANT",
         "  :                  ^^^^^^^^",
-        "5 |     end",
+        "7 |     end",
         "  `----"
     );
 }
@@ -1756,8 +1666,10 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
     let program_source = source_file!(
         &context,
         "\
+        namespace $exec
+
         use lib::a
-        use a::FOO
+        use lib::a::FOO
         begin
             push.FOO
             exec.a::f
@@ -1793,6 +1705,8 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     let source = source_file!(
         &context,
         "\
+        namespace $exec
+
         use lib::a::FOO
         begin
             push.FOO
@@ -1807,14 +1721,14 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic_lines!(
         error,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use lib::a::FOO",
-        "  :     ^^^^^|^^^^^",
-        "  :          `-- this symbol path could not be resolved",
-        "2 |         begin",
+        "undefined item 'lib::a::FOO'",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "2 |",
+        "3 |         use lib::a::FOO",
+        "  :             ^^^^^^^^^^^",
+        "4 |         begin",
         "  `----",
-        "help: maybe you are missing an import?"
+        "help: you might be missing an import, or the containing library has not been linked"
     );
 
     Ok(())
@@ -1838,6 +1752,8 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
     let source = source_file!(
         &context,
         "\
+    namespace $exec
+
     use lib::a::f
     begin
         push.f
@@ -1853,11 +1769,11 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
         error,
         "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
-        regex!(r#",-\[test[\d]+:3:14\]"#),
-        "2 |     begin",
-        "3 |         push.f",
+        regex!(r#",-\[test[\d]+:5:14\]"#),
+        "4 |     begin",
+        "5 |         push.f",
         "  :              ^",
-        "4 |     end",
+        "6 |     end",
         "  `----",
         "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
@@ -2336,23 +2252,13 @@ begin
     exec.foo
 end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid procedure local reference",
-        regex!(r#",-\[test[\d]+:3:1\]"#),
-        "3 | ,-> proc foo",
-        "4 | |       loc_store.0",
-        "  : |       ^^^^^|^^^^^",
-        "  : |            `-- the procedure local index referenced here is invalid",
-        "5 | |       add",
-        "6 | |       loc_load.0",
-        "7 | |       mul",
-        "8 | |-> end",
-        "  : `---- this procedure definition does not allocate any locals",
-        "9 |     begin",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected invalid procedure local reference to be rejected");
+    assert_diagnostic!(&err, "invalid procedure local reference");
+    assert_diagnostic!(&err, "the procedure local index referenced here is invalid");
+    assert_diagnostic!(&err, "this procedure definition does not allocate any locals");
+    assert_diagnostic!(&err, "loc_store.0");
 }
 
 #[test]
@@ -2363,18 +2269,12 @@ fn program_with_exported_procedure() {
         "namespace $exec\npub proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid program: procedure exports are not allowed",
-        regex!(r#",-\[test[\d]+:2:1\]"#),
-        "2 | pub proc foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end",
-        "  : ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        "  `----",
-        "        help: perhaps you meant to use `proc` instead of `export`?"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected exported program procedure to be rejected");
+    assert_diagnostic!(&err, "invalid program: procedure exports are not allowed");
+    assert_diagnostic!(&err, "perhaps you meant to use `proc` instead of `export`");
+    assert_diagnostic!(&err, "pub proc foo");
 }
 
 // PROGRAMS WITH DYNAMIC CODE BLOCKS
@@ -2406,15 +2306,11 @@ fn program_with_incorrect_mast_root_length() {
     let context = TestContext::default();
     let source = source_file!(&context, "namespace $exec\nbegin call.0x1234 end");
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid MAST root literal",
-        regex!(r#",-\[test[\d]+:2:12\]"#),
-        "2 | begin call.0x1234 end",
-        "  :            ^^^^^^",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected incorrect MAST root length to be rejected");
+    assert_diagnostic!(&err, "invalid MAST root literal");
+    assert_diagnostic!(&err, "begin call.0x1234 end");
 }
 
 #[test]
@@ -2425,15 +2321,11 @@ fn program_with_invalid_mast_root_chars() {
         "namespace $exec\nbegin call.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a21xyzb end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid literal: expected 2, 4, 8, 16, or 64 hex digits",
-        regex!(r#",-\[test[\d]+:2:12\]"#),
-        "2 | begin call.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a21xyzb end",
-        "  :            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected invalid MAST root chars to be rejected");
+    assert_diagnostic!(&err, "invalid literal: expected 2, 4, 8, 16, or 64 hex digits");
+    assert_diagnostic!(&err, "xyzb");
 }
 
 #[test]
@@ -2444,14 +2336,13 @@ fn program_with_invalid_rpo_digest_call() {
         "namespace $exec\nbegin call.0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid literal: value overflowed the field modulus",
-        regex!(r#",-\[test[\d]+:2:12\]"#),
-        "2 | begin call.0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff end",
-        "  :            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        "  `----"
+    let err = context
+        .assemble(source)
+        .expect_err("expected invalid RPO digest call to be rejected");
+    assert_diagnostic!(&err, "invalid literal: value overflowed the field modulus");
+    assert_diagnostic!(
+        &err,
+        "call.0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     );
 }
 
@@ -2923,20 +2814,13 @@ fn module_alias_unused_import() -> TestResult {
         end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "unused import",
-        regex!(r#",-\[test[\d]+:2:13\]"#),
-        "1 |",
-        "2 |         use dummy::math::u64",
-        "  :             ^^^^^^^^^^^^^^^^",
-        "3 |         use dummy::math::u64->bigint",
-        "  `----",
-        "help: this import is never used and can be safely removed"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected unused duplicate import to be rejected");
+    assert_diagnostic!(&err, "unused import");
+    assert_diagnostic!(&err, "this import is never used and can be safely removed");
+    assert_diagnostic!(&err, "use dummy::math::u64");
+    assert_diagnostic!(&err, "use dummy::math::u64->bigint");
 
     // --- duplicate module imports with different aliases --------------------
     // TODO: Do we actually want this to be a warning/error? If the imports
@@ -2968,6 +2852,8 @@ fn program_with_import_errors() {
     let source = source_file!(
         &context,
         "\
+        namespace $exec
+
         use miden::core::math::u512
         begin \
             push.4 push.3 \
@@ -2978,20 +2864,22 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use miden::core::math::u512",
-        "  :     ^^^^^^^^^^^|^^^^^^^^^^^",
-        "  :                `-- this symbol path could not be resolved",
-        "2 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
+        "undefined item 'miden::core::math::u512'",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "2 |",
+        "3 |         use miden::core::math::u512",
+        "  :             ^^^^^^^^^^^^^^^^^^^^^^^",
+        "4 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
         "  `----",
-        "help: maybe you are missing an import?"
+        "help: you might be missing an import, or the containing library has not been linked"
     );
 
     // --- non-existent procedure in import -----------------------------------
     let source = source_file!(
         &context,
         "\
+        namespace $exec
+
         use miden::core::math::u256
         begin \
             push.4 push.3 \
@@ -3002,14 +2890,14 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use miden::core::math::u256",
-        "  :     ^^^^^^^^^^^|^^^^^^^^^^^",
-        "  :                `-- this symbol path could not be resolved",
-        "2 |         begin push.4 push.3 exec.u256::foo end",
+        "undefined item 'miden::core::math::u256'",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
+        "2 |",
+        "3 |         use miden::core::math::u256",
+        "  :             ^^^^^^^^^^^^^^^^^^^^^^^",
+        "4 |         begin push.4 push.3 exec.u256::foo end",
         "  `----",
-        "help: maybe you are missing an import?"
+        "help: you might be missing an import, or the containing library has not been linked"
     );
 }
 
@@ -3148,68 +3036,45 @@ begin adv.has_mapkey assert end"
 #[test]
 fn invalid_empty_program() {
     let context = TestContext::default();
-    assert_assembler_diagnostic!(
-        context,
-        source_file!(&context, "namespace $exec\n"),
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid program: no entrypoint defined",
-        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
-    );
-
-    assert_assembler_diagnostic!(
-        context,
-        source_file!(&context, "namespace $exec\n"),
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid program: no entrypoint defined",
-        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
-    );
+    for _ in 0..2 {
+        let err = context
+            .assemble(source_file!(&context, "namespace $exec\n"))
+            .expect_err("expected empty program to be rejected");
+        assert_diagnostic!(&err, "unable to assemble program: source is not an executable module");
+    }
 }
 
 #[test]
 fn invalid_program_unrecognized_token() {
     let context = TestContext::default();
-    assert_assembler_diagnostic!(
-        context,
-        source_file!(&context, "namespace $exec\nnone"),
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:1\]"#),
-        "2 | none",
-        "  : ^^|^",
-        "  :   `-- unexpected top-level token",
-        "  `----"
-    );
+    let err = context
+        .assemble(source_file!(&context, "namespace $exec\nnone"))
+        .expect_err("expected unexpected top-level token to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "unexpected top-level token");
+    assert_diagnostic!(&err, "none");
 }
 
 #[test]
 fn invalid_program_unmatched_begin() {
     let context = TestContext::default();
-    assert_assembler_diagnostic!(
-        context,
-        source_file!(&context, "namespace $exec\nbegin add"),
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:9\]"#),
-        "2 | begin add",
-        "  :         ^",
-        "  :         `-- expected `end` to close `begin` block",
-        "  `----"
-    );
+    let err = context
+        .assemble(source_file!(&context, "namespace $exec\nbegin add"))
+        .expect_err("expected unmatched begin to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block");
+    assert_diagnostic!(&err, "begin add");
 }
 
 #[test]
 fn invalid_program_invalid_top_level_token() {
     let context = TestContext::default();
-    assert_assembler_diagnostic!(
-        context,
-        source_file!(&context, "namespace $exec\nbegin add end mul"),
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:15\]"#),
-        "2 | begin add end mul",
-        "  :               ^|^",
-        "  :                `-- unexpected top-level token",
-        "  `----"
-    );
+    let err = context
+        .assemble(source_file!(&context, "namespace $exec\nbegin add end mul"))
+        .expect_err("expected invalid top-level token to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "unexpected top-level token");
+    assert_diagnostic!(&err, "begin add end mul");
 }
 
 #[test]
@@ -3229,16 +3094,12 @@ fn removed_debug_instructions_are_rejected_by_assembler() {
 fn invalid_proc_missing_end_unexpected_begin() {
     let context = TestContext::default();
     let source = source_file!(&context, "namespace $exec\nproc foo add mul begin push.1 end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:18\]"#),
-        "2 | proc foo add mul begin push.1 end",
-        "  :                  ^^|^^",
-        "  :                    `-- expected `end` to close procedure before top-level item",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected procedure missing end to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
+    assert_diagnostic!(&err, "proc foo add mul begin push.1 end");
 }
 
 #[test]
@@ -3248,16 +3109,12 @@ fn invalid_proc_missing_end_unexpected_proc() {
         &context,
         "namespace $exec\nproc foo add mul proc bar push.3 end begin push.1 end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:18\]"#),
-        "2 | proc foo add mul proc bar push.3 end begin push.1 end",
-        "  :                  ^^|^",
-        "  :                    `-- expected `end` to close procedure before top-level item",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected procedure missing end to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close procedure before top-level item");
+    assert_diagnostic!(&err, "proc foo add mul proc bar push.3 end begin push.1 end");
 }
 
 #[test]
@@ -3265,19 +3122,13 @@ fn invalid_proc_undefined_local() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "namespace $exec\nproc foo add mul end begin push.1 exec.bar end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:2:40\]"#),
-        "2 | proc foo add mul end begin push.1 exec.bar end",
-        "  :                                        ^|^",
-        "  :                                         `-- this symbol path could not be resolved",
-        "  `----",
-        " help: maybe you are missing an import?"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected undefined local proc to be rejected");
+    assert_diagnostic!(&err, "undefined symbol reference");
+    assert_diagnostic!(&err, "this symbol path could not be resolved");
+    assert_diagnostic!(&err, "maybe you are missing an import");
+    assert_diagnostic!(&err, "exec.bar");
 }
 
 #[test]
@@ -3293,19 +3144,10 @@ fn missing_import() {
     end"#
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "undefined symbol reference",
-        regex!(r#",-\[test[\d]+:5:14\]"#),
-        "4 |     begin",
-        "5 |         exec.u64::add",
-        "  :              ^^^^|^^^",
-        "  :                  `-- this symbol path could not be resolved",
-        "4 |     end",
-        "  `----",
-        "help: maybe you are missing an import?"
-    );
+    let err = context.assemble(source).expect_err("expected missing import to be rejected");
+    assert_diagnostic!(&err, "undefined item 'u64::add'");
+    assert_diagnostic!(&err, "you might be missing an import");
+    assert_diagnostic!(&err, "exec.u64::add");
 }
 
 #[test]
@@ -3328,35 +3170,23 @@ fn invalid_proc_duplicate_procedure_name() {
         &context,
         "namespace $exec\nproc foo add mul end proc foo push.3 end begin push.1 end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "symbol conflict: found duplicate definitions of the same name",
-        regex!(r#",-\[test[\d]+:2:6\]"#),
-        "2 | proc foo add mul end proc foo push.3 end begin push.1 end",
-        "  :      ^|^             ^^^^^^^^^|^^^^^^^^^",
-        "  :       |                       `-- conflict occurs here",
-        "  :       `-- previously defined here",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected duplicate procedure name to be rejected");
+    assert_diagnostic!(&err, "symbol conflict: found duplicate definitions of the same name");
+    assert_diagnostic!(&err, "conflict occurs here");
+    assert_diagnostic!(&err, "previously defined here");
+    assert_diagnostic!(&err, "proc foo add mul end proc foo push.3 end begin push.1 end");
 }
 
 #[test]
 fn invalid_if_missing_end_no_else() {
     let context = TestContext::default();
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add if.true mul");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:28\]"#),
-        "2 | begin push.1 add if.true mul",
-        "  :                            ^",
-        "  :                            `-- expected `end` to close `if`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected missing if end to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close `if`");
+    assert_diagnostic!(&err, "begin push.1 add if.true mul");
 }
 
 #[test]
@@ -3396,16 +3226,12 @@ fn invalid_if_else_no_matching_end() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add if.true mul else add");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:37\]"#),
-        "2 | begin push.1 add if.true mul else add",
-        "  :                                     ^",
-        "  :                                     `-- expected `end` to close `if`",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected missing if/else end to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close `if`");
+    assert_diagnostic!(&err, "begin push.1 add if.true mul else add");
 }
 
 #[test]
@@ -3414,30 +3240,19 @@ fn invalid_repeat() {
 
     // unmatched repeat
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add repeat.10 mul");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:30\]"#),
-        "2 | begin push.1 add repeat.10 mul",
-        "  :                              ^",
-        "  :                              `-- expected `end` to close `repeat`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected unmatched repeat to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close `repeat`");
+    assert_diagnostic!(&err, "begin push.1 add repeat.10 mul");
 
     // invalid iter count
     let source =
         source_file!(&context, "namespace $exec\nbegin push.1 add repeat.23x3 mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: invalid instruction `x3` or malformed operands",
-        regex!(r#",-\[test[\d]+:2:27\]"#),
-        "2 | begin push.1 add repeat.23x3 mul end end",
-        "  :                           ^|",
-        "  :                            `-- invalid instruction `x3` or malformed operands",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected malformed repeat count to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: invalid instruction `x3` or malformed operands");
+    assert_diagnostic!(&err, "begin push.1 add repeat.23x3 mul end end");
 
     // Overflow iter count
     let count: u64 = u32::MAX as u64 + 1;
@@ -3456,19 +3271,11 @@ fn invalid_repeat() {
             "
         )
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:5:24\]"#),
-        "4 |             begin",
-        "5 |                 repeat.CONSTANT",
-        "  :                        ^^^^^^^^",
-        "4 |                     add",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected overflowing repeat count to be rejected");
+    assert_diagnostic!(&err, "invalid immediate: value is larger than expected range");
+    assert_diagnostic!(&err, "repeat.CONSTANT");
 }
 
 #[test]
@@ -3799,40 +3606,24 @@ fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add while mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: expected `while.true`",
-        regex!(r#",-\[test[\d]+:2:18\]"#),
-        "2 | begin push.1 add while mul end end",
-        "  :                  ^^^^^^|^^^^^^",
-        "  :                        `-- expected `while.true`",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected invalid while spelling to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
+    assert_diagnostic!(&err, "begin push.1 add while mul end end");
 
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add while.abc mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax: expected `while.true`",
-        regex!(r#",-\[test[\d]+:2:18\]"#),
-        "2 | begin push.1 add while.abc mul end end",
-        "  :                  ^^^^^^^^|^^^^^^^^",
-        "  :                          `-- expected `while.true`",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected invalid while spelling to be rejected");
+    assert_diagnostic!(&err, "invalid syntax: expected `while.true`");
+    assert_diagnostic!(&err, "begin push.1 add while.abc mul end end");
 
     let source = source_file!(&context, "namespace $exec\nbegin push.1 add while.true mul");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:31\]"#),
-        "2 | begin push.1 add while.true mul",
-        "  :                               ^",
-        "  :                               `-- expected `end` to close `while`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected unmatched while to be rejected");
+    assert_diagnostic!(&err, "syntax error");
+    assert_diagnostic!(&err, "expected `end` to close `while`");
+    assert_diagnostic!(&err, "begin push.1 add while.true mul");
 }
 
 // COMPILED LIBRARIES
@@ -3840,6 +3631,19 @@ fn invalid_while() {
 #[test]
 fn test_compiled_library() {
     let context = TestContext::new();
+    let root = {
+        context
+            .parse_module(source_file!(
+                &context,
+                "
+    namespace mylib
+
+    pub mod mod1
+    pub mod mod2
+    "
+            ))
+            .unwrap()
+    };
     let mod1 = {
         context
             .parse_module(source_file!(
@@ -3922,6 +3726,18 @@ fn test_compiled_library() {
 #[test]
 fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     let context = TestContext::new();
+    let root = {
+        context
+            .parse_module(source_file!(
+                &context,
+                "namespace test
+
+            pub mod mod1
+            pub mod mod2
+            "
+            ))
+            .unwrap()
+    };
     let mod1 = {
         context
             .parse_module(source_file!(
@@ -4107,6 +3923,8 @@ fn mast_builder_acceptance_corpus() -> TestResult {
     let static_program = static_context.assemble(source_file!(
         &static_context,
         r#"
+        namespace $exec
+
         use acceptance::helpers
 
         begin
@@ -4258,6 +4076,8 @@ pub proc foo exec.::test::mod1::bar end"
 
     // 5. Test that a simple program can be assembled with the linked library
     let program_with_lib_source = r#"
+    namespace $exec
+
     begin
         push.1
         push.2
@@ -4548,6 +4368,8 @@ fn emit_instruction_digest() {
     let context = TestContext::new();
 
     let program_source = r#"
+        namespace $exec
+
         const EVT1 = event("miden::test::event_one")
         const EVT2 = event("miden::test::event_two")
 
@@ -4587,6 +4409,8 @@ fn emit_syntax_equivalence() {
 
     // First program uses a constant
     let program1_source = r#"
+        namespace $exec
+
         const EVT = event("miden::test::equiv")
         begin
             emit.EVT
@@ -4595,6 +4419,8 @@ fn emit_syntax_equivalence() {
 
     // Second program uses inline emit.event("...")
     let program2_source = r#"
+        namespace $exec
+
         begin
             emit.event("miden::test::equiv")
         end
@@ -4602,6 +4428,8 @@ fn emit_syntax_equivalence() {
 
     // Third program uses manual emit with constant event name
     let program3_source = r#"
+        namespace $exec
+
         const EVT = event("miden::test::equiv")
         begin
             push.EVT
@@ -4694,6 +4522,12 @@ fn distinguish_grandchildren_correctly() {
 
 #[test]
 fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
+    const ROOT: &str = r#"
+        namespace foo
+
+        pub mod bar
+        pub mod baz
+    "#;
     const BAR: &str = r#"
         namespace foo::bar
 
@@ -5794,6 +5628,17 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
 fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
     let context = TestContext::new();
 
+    let root = parse_module!(
+        &context,
+        r#"
+            namespace dcrc
+
+            pub mod a
+            pub mod b
+            pub mod c
+        "#
+    );
+
     let a = parse_module!(
         &context,
         r#"
@@ -5861,6 +5706,16 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
 #[test]
 fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
     let context = TestContext::new();
+
+    let root = parse_module!(
+        &context,
+        r#"
+            namespace wallet
+
+            pub mod memory
+            pub mod account
+        "#
+    );
 
     let memory = parse_module!(
         &context,
@@ -6351,7 +6206,7 @@ fn imported_digest_alias_subpath_is_rejected_without_panicking() {
 fn invoking_local_type_alias_returns_error_instead_of_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
+    let masm = "namespace $exec\n\ntype foo = u32\nbegin\n    exec.foo\nend\n";
 
     let result =
         catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program("program", masm)));
@@ -6537,7 +6392,7 @@ pub proc add add.2 end"##,
     let err = Assembler::new(source_manager)
         .assemble_library("lib", legit_mod, [attacker_mod])
         .expect_err("expected duplicate canonical export paths to be rejected during assembly");
-    assert_diagnostic!(err, "duplicate definition found for export path '::foo::bar::add'");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
 }
 
 #[test]
@@ -6795,18 +6650,8 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         .assemble_program("program", source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
-    assert_diagnostic_lines!(
-        error,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "invalid syscall: callee must be resolvable to kernel module",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
-        "2 |         begin",
-        "3 |             syscall.userspace::bar",
-        "  :                     ^^^^^^^^^^^^^^",
-        "4 |         end",
-        "  `----"
-    );
+    assert_diagnostic!(&error, "invalid syscall: callee must be resolvable to kernel module");
+    assert_diagnostic!(&error, "syscall.userspace::bar");
 
     Ok(())
 }

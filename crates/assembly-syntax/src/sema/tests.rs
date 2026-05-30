@@ -260,6 +260,55 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
 }
 
 #[test]
+fn expected_path_is_used_when_namespace_is_omitted() {
+    let context = SyntaxTestContext::default();
+    let mut parser = Module::parser(None);
+    let module = parser
+        .parse_str(
+            Some(Path::new("app::helpers")),
+            "pub proc helper\n    push.1\nend",
+            context.source_manager(),
+        )
+        .expect("expected parser-provided namespace to be applied");
+
+    assert_eq!(module.path(), Path::new("::app::helpers"));
+    assert!(module.namespace_decl.is_none());
+}
+
+#[test]
+fn explicit_namespace_is_normalized_before_expected_path_check() {
+    let context = SyntaxTestContext::default();
+    let mut parser = Module::parser(None);
+    let module = parser
+        .parse_str(
+            Some(Path::new("app::helpers")),
+            "namespace app::helpers\n\npub proc helper\n    push.1\nend",
+            context.source_manager(),
+        )
+        .expect("expected matching relative namespace declaration to be accepted");
+
+    assert_eq!(module.path(), Path::new("::app::helpers"));
+}
+
+#[test]
+fn explicit_namespace_conflict_still_reports_expected_path() {
+    let context = SyntaxTestContext::default();
+    let mut parser = Module::parser(None);
+    let error = parser
+        .parse_str(
+            Some(Path::new("app::helpers")),
+            "namespace other::helpers\n\npub proc helper\n    push.1\nend",
+            context.source_manager(),
+        )
+        .expect_err("expected mismatched namespace declaration to be rejected");
+
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("conflicting module namespace specification"));
+    assert!(rendered.contains("expected '::app::helpers'"));
+    assert!(rendered.contains("got '::other::helpers'"));
+}
+
+#[test]
 fn exported_constant_with_private_local_dependency_is_fully_evaluated_in_analysis() {
     let context = SyntaxTestContext::default();
     let module = context

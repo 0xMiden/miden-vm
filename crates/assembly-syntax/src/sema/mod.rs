@@ -266,6 +266,13 @@ pub fn analyze(
     analyzer.into_result().map(move |_| module)
 }
 
+fn normalize_namespace_path(path: &Path) -> Result<Arc<Path>, PathError> {
+    use alloc::borrow::Cow;
+    path.canonicalize()
+        .and_then(|path| path.to_absolute().map(Cow::into_owned))
+        .map(Arc::<Path>::from)
+}
+
 /// Visit all of the items of the current analysis context, and apply various transformation and
 /// analysis passes.
 ///

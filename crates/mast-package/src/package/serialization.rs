@@ -716,7 +716,7 @@ impl Serializable for ConstantExport {
 impl Deserializable for ConstantExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
-        let value = miden_assembly_syntax::ast::ConstantValue::read_from(source)?;
+        let value = ast::ConstantValue::read_from(source)?;
         Ok(Self { path, value })
     }
 }
@@ -851,6 +851,33 @@ mod tests {
             .unwrap_or_else(|err| {
                 panic!("{err}");
             });
+    }
+
+    #[test]
+    fn executable_package_entrypoint_roundtrips() {
+        let (forest, node_id) = build_forest();
+        let entrypoint =
+            Arc::from(AstPath::exec_path().join(ProcedureName::MAIN_PROC_NAME).into_boxed_path());
+        let export = ProcedureExport::new(
+            Arc::clone(&entrypoint),
+            Some(node_id),
+            forest[node_id].digest(),
+            None,
+        );
+        let package = Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Executable,
+            Arc::new(forest),
+            [PackageExport::Procedure(export)],
+            None,
+        )
+        .expect("executable package should be valid");
+
+        let deserialized = Package::read_from_bytes(&package.to_bytes())
+            .expect("executable package should deserialize without duplicate entrypoint errors");
+
+        assert_eq!(deserialized.manifest.entrypoint(), Some(entrypoint));
     }
 
     #[test]
