@@ -47,15 +47,15 @@ mod symbols;
 
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 use core::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     ops::{ControlFlow, Index},
 };
 
 use miden_assembly_syntax::{
     Report,
     ast::{
-        self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
-        Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
+        self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module,
+        ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::{ItemInfo, ModuleInfo},
@@ -69,7 +69,7 @@ pub use self::{
     errors::LinkerError,
     library::{LinkLibrary, Linkage},
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
-    symbols::{Symbol, SymbolItem},
+    symbols::{Import, Symbol, SymbolItem},
 };
 use self::{
     module::{LinkModule, ModuleSource},
@@ -289,32 +289,43 @@ impl Linker {
 
         let module_index = self.next_module_id();
         let submodules = module.submodules().to_vec();
-        let symbols = {
-            module
-                .take_items()
-                .into_iter()
-                .enumerate()
-                .map(|(idx, item)| {
-                    let gid = module_index + ItemIndex::new(idx);
+        let mut symbols = Vec::new();
+        let mut imports = Vec::new();
+        for item in module.take_items() {
+            match item {
+                ast::Item::Alias(alias) => imports.push(Import::new(alias)),
+                ast::Item::Type(item) => {
+                    let gid = module_index + ItemIndex::new(symbols.len());
                     self.callgraph.get_or_insert_node(gid);
-                    Symbol::new(
+                    symbols.push(Symbol::new(
                         item.name().clone(),
                         item.visibility(),
                         LinkStatus::Unlinked,
-                        match item {
-                            ast::Item::Alias(alias) => {
-                                SymbolItem::Alias { alias, resolved: Cell::new(None) }
-                            },
-                            ast::Item::Type(item) => SymbolItem::Type(item),
-                            ast::Item::Constant(item) => SymbolItem::Constant(item),
-                            ast::Item::Procedure(item) => {
-                                SymbolItem::Procedure(RefCell::new(Box::new(item)))
-                            },
-                        },
-                    )
-                })
-                .collect()
-        };
+                        SymbolItem::Type(item),
+                    ));
+                },
+                ast::Item::Constant(item) => {
+                    let gid = module_index + ItemIndex::new(symbols.len());
+                    self.callgraph.get_or_insert_node(gid);
+                    symbols.push(Symbol::new(
+                        item.name().clone(),
+                        item.visibility,
+                        LinkStatus::Unlinked,
+                        SymbolItem::Constant(item),
+                    ));
+                },
+                ast::Item::Procedure(item) => {
+                    let gid = module_index + ItemIndex::new(symbols.len());
+                    self.callgraph.get_or_insert_node(gid);
+                    symbols.push(Symbol::new(
+                        item.name().clone().into(),
+                        item.visibility(),
+                        LinkStatus::Unlinked,
+                        SymbolItem::Procedure(RefCell::new(Box::new(item))),
+                    ));
+                },
+            }
+        }
         let link_module = LinkModule::new(
             module_index,
             module.kind(),
@@ -324,6 +335,7 @@ impl Linker {
         )
         .with_advice_map(module.advice_map().clone())
         .with_submodules(submodules)
+        .with_imports(imports)
         .with_symbols(symbols);
 
         self.modules.push(link_module);
@@ -587,6 +599,27 @@ impl Linker {
 
                 let module_index = ModuleIndex::new(module_index);
 
+                for import in module.imports() {
+                    let alias = import.alias();
+                    let context = SymbolResolutionContext {
+                        span: alias.target().span(),
+                        module: module_index,
+                        kind: None,
+                    };
+                    match resolver.resolve_alias_target(&context, alias)? {
+                        SymbolResolution::Exact { gid, .. } => import.set_resolved(gid),
+                        SymbolResolution::MastRoot(root) => {
+                            if let Some(gid) = self.get_procedure_index_by_digest(&root) {
+                                import.set_resolved(gid);
+                            }
+                        },
+                        SymbolResolution::Module { .. } => {},
+                        SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                            unreachable!("namespace resolver should not return local/external")
+                        },
+                    }
+                }
+
                 for (symbol_idx, symbol) in module.symbols().enumerate() {
                     let gid = module_index + ItemIndex::new(symbol_idx);
 
@@ -596,34 +629,6 @@ impl Linker {
                     // Update the linker graph
                     match symbol.item() {
                         SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
-                        },
-                        SymbolItem::Alias { alias, resolved } => {
-                            if let Some(resolved) = resolved.get() {
-                                log::debug!(target: "linker", "  | resolved alias {} to item {resolved}", alias.target());
-                                if self[resolved].is_procedure() {
-                                    edges.push((gid, resolved));
-                                }
-                            } else {
-                                log::debug!(target: "linker", "  | resolving alias {}..", alias.target());
-
-                                let context = SymbolResolutionContext {
-                                    span: alias.target().span(),
-                                    module: module_index,
-                                    kind: None,
-                                };
-                                if let Some(callee) =
-                                    resolver.resolve_alias_target(&context, alias)?.into_global_id()
-                                {
-                                    log::debug!(
-                                        target: "linker",
-                                        "  | resolved alias to gid {:?}:{:?}",
-                                        callee.module,
-                                        callee.index
-                                    );
-                                    edges.push((gid, callee));
-                                    resolved.set(Some(callee));
-                                }
-                            }
                         },
                         SymbolItem::Procedure(proc) => {
                             // Add edges to all transitive dependencies of this item due to
@@ -791,26 +796,6 @@ impl Linker {
                     None => Ok(None),
                 }
             },
-            SymbolItem::Alias { alias, resolved } => {
-                if let Some(resolved) = resolved.get() {
-                    return self.resolve_signature(resolved);
-                }
-
-                let context = SymbolResolutionContext {
-                    span: alias.target().span(),
-                    module: gid.module,
-                    kind: Some(InvokeKind::ProcRef),
-                };
-                let resolution = self.resolve_alias_target(&context, alias)?;
-                match resolution {
-                    // If we get back a MAST root resolution, it's a phantom digest
-                    SymbolResolution::MastRoot(_) => Ok(None),
-                    SymbolResolution::Exact { gid, .. } => self.resolve_signature(gid),
-                    SymbolResolution::Module { .. }
-                    | SymbolResolution::Local(_)
-                    | SymbolResolution::External(_) => unreachable!(),
-                }
-            },
             SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                 panic!("procedure index unexpectedly refers to non-procedure item")
             },
@@ -870,27 +855,6 @@ impl Linker {
             SymbolItem::Procedure(proc) => {
                 let proc = proc.borrow();
                 Ok(proc.attributes().clone())
-            },
-            SymbolItem::Alias { alias, resolved } => {
-                if let Some(resolved) = resolved.get() {
-                    return self.resolve_attributes(resolved);
-                }
-
-                let context = SymbolResolutionContext {
-                    span: alias.target().span(),
-                    module: gid.module,
-                    kind: Some(InvokeKind::ProcRef),
-                };
-                let resolution = self.resolve_alias_target(&context, alias)?;
-                match resolution {
-                    SymbolResolution::MastRoot(_)
-                    | SymbolResolution::Local(_)
-                    | SymbolResolution::External(_) => Ok(AttributeSet::default()),
-                    SymbolResolution::Exact { gid, .. } => self.resolve_attributes(gid),
-                    SymbolResolution::Module { .. } => {
-                        unreachable!("expected resolver to raise error")
-                    },
-                }
             },
             SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                 panic!("procedure index unexpectedly refers to non-procedure item")

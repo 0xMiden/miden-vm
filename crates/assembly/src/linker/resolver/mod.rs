@@ -76,7 +76,6 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
                 return Ok(());
             },
             SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => (),
-            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
         }
 
         Err(self.invalid_constant_ref(span))
@@ -101,7 +100,6 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
             | SymbolItem::Constant(_)
             | SymbolItem::Procedure(_)
             | SymbolItem::Type(_) => Err(self.invalid_constant_ref(span)),
-            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
         }
     }
 }
@@ -259,7 +257,6 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
                     source_file: self.get_source_file_for(context),
                 })
             },
-            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
         }
     }
 

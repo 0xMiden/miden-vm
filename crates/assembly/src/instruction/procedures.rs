@@ -28,7 +28,7 @@ impl Assembler {
         asm_op: Option<AssemblyOp>,
     ) -> Result<MastNodeRef, Report> {
         let resolved = self
-            .resolve_target(kind, callee, caller, mast_forest_builder)?
+            .resolve_target(kind, callee, caller.module, mast_forest_builder)?
             .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
 
         match kind {
@@ -74,7 +74,7 @@ impl Assembler {
                 .resolve_target(
                     InvokeKind::ProcRef,
                     callee,
-                    caller,
+                    caller.module,
                     block_builder.mast_forest_builder_mut(),
                 )?
                 .ok_or_else(|| {

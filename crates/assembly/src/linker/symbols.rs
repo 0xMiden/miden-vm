@@ -21,17 +21,18 @@ pub struct Symbol {
     item: SymbolItem,
 }
 
+/// An import declared by a module.
+#[derive(Debug, Clone)]
+pub struct Import {
+    /// The original alias/import declaration.
+    alias: ast::Alias,
+    /// Once this import has been resolved to a concrete item, cache the target id.
+    resolved: Cell<Option<GlobalItemIndex>>,
+}
+
 /// A [SymbolItem] represents the type of item associated with a [Symbol].
 #[derive(Debug, Clone)]
 pub enum SymbolItem {
-    /// An alias of an externally-defined item
-    Alias {
-        /// The original alias item
-        alias: ast::Alias,
-        /// Once the alias has been resolved, we set this to `Some(target_gid)` so that we can
-        /// simply shortcut to the resolved target once known.
-        resolved: Cell<Option<GlobalItemIndex>>,
-    },
     /// A constant declaration in AST form
     Constant(ast::Constant),
     /// A type or enum declaration in AST form
@@ -41,6 +42,32 @@ pub enum SymbolItem {
     Procedure(RefCell<Box<ast::Procedure>>),
     /// An already-assembled item
     Compiled(ItemInfo),
+}
+
+impl Import {
+    /// Create a new [Import].
+    #[inline]
+    pub fn new(alias: ast::Alias) -> Self {
+        Self { alias, resolved: Cell::new(None) }
+    }
+
+    /// Get the import declaration.
+    #[inline(always)]
+    pub fn alias(&self) -> &ast::Alias {
+        &self.alias
+    }
+
+    /// Get the cached resolved concrete item, if known.
+    #[inline(always)]
+    pub fn resolved(&self) -> Option<GlobalItemIndex> {
+        self.resolved.get()
+    }
+
+    /// Set the cached resolved concrete item.
+    #[inline]
+    pub fn set_resolved(&self, resolved: GlobalItemIndex) {
+        self.resolved.set(Some(resolved));
+    }
 }
 
 impl Symbol {

@@ -13,7 +13,6 @@ use crate::{
     GlobalItemIndex, LinkerError, ModuleIndex,
     linker::{
         Linker,
-        SymbolItem,
         namespaces::{NamespaceGraph, ResolvedImports, ResolvedUse},
     },
 };
@@ -71,11 +70,7 @@ pub struct SymbolResolver<'a> {
 impl<'a> SymbolResolver<'a> {
     /// Create a new [SymbolResolver] for the provided [Linker].
     pub fn new(graph: &'a Linker) -> Self {
-        Self {
-            graph,
-            namespaces: None,
-            imports: None,
-        }
+        Self { graph, namespaces: None, imports: None }
     }
 
     /// Create a new [SymbolResolver] with precomputed namespace and import resolutions.
@@ -375,12 +370,10 @@ impl<'a> SymbolResolver<'a> {
         let Some((first, rest)) = path.split_first() else {
             return Ok(None);
         };
-        let Some(symbol) = self.graph[module].get(first) else {
+        let Some(import) = self.graph[module].get_import(first) else {
             return Ok(None);
         };
-        let SymbolItem::Alias { alias, .. } = symbol.item() else {
-            return Ok(None);
-        };
+        let alias = import.alias();
         let AliasTarget::MastRoot(mast_root) = alias.target() else {
             return Ok(None);
         };

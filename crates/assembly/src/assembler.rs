@@ -34,7 +34,7 @@ use crate::{
     ast::Path,
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
+    linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
     mast_forest_builder::{MastForestBuilder, MastNodeRef},
 };
 
@@ -530,15 +530,22 @@ impl Assembler {
             let mut exports = BTreeMap::new();
 
             for module_idx in module_indices.iter().copied() {
-                let module = &self.linker[module_idx];
+                let (module_kind, module_path, num_symbols, imports) = {
+                    let module = &self.linker[module_idx];
 
-                if let Some(advice_map) = module.advice_map() {
-                    mast_forest_builder.merge_advice_map(advice_map)?;
-                }
+                    if let Some(advice_map) = module.advice_map() {
+                        mast_forest_builder.merge_advice_map(advice_map)?;
+                    }
 
-                let module_kind = module.kind();
-                let module_path = module.path().clone();
-                for index in 0..module.symbols().len() {
+                    (
+                        module.kind(),
+                        module.path().clone(),
+                        module.symbols().len(),
+                        module.imports().cloned().collect::<Vec<_>>(),
+                    )
+                };
+
+                for index in 0..num_symbols {
                     let index = ItemIndex::new(index);
                     let gid = module_idx + index;
 
@@ -558,6 +565,30 @@ impl Assembler {
                         gid,
                         module_kind,
                         path.clone(),
+                        &mut mast_forest_builder,
+                    )?;
+                    if exports.insert(path.clone(), export).is_some() {
+                        return Err(Report::new(AssemblerError::DuplicateExportPath { path }));
+                    }
+                }
+
+                for import in imports.iter() {
+                    let alias = import.alias();
+                    if !alias.visibility().is_public() {
+                        continue;
+                    }
+
+                    let path: Arc<Path> = module_path
+                        .join(alias.name())
+                        .canonicalize()
+                        .into_diagnostic()?
+                        .into_boxed_path()
+                        .into();
+                    let export = self.export_import(
+                        module_idx,
+                        module_kind,
+                        path.clone(),
+                        import,
                         &mut mast_forest_builder,
                     )?;
                     if exports.insert(path.clone(), export).is_some() {
@@ -599,7 +630,6 @@ impl Assembler {
             SymbolItem::Procedure(_) => "procedure",
             SymbolItem::Constant(_) => "constant",
             SymbolItem::Type(_) => "type",
-            SymbolItem::Alias { .. } => "alias",
         });
         let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
@@ -683,21 +713,32 @@ impl Assembler {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
                 PendingPackageExport::Type(TypeExport { path: symbol_path, ty })
             },
+        };
 
-            SymbolItem::Alias { alias, resolved } => {
-                if let Some(resolved) = resolved.get() {
-                    return self.export_symbol(
-                        resolved,
-                        module_kind,
-                        symbol_path,
-                        mast_forest_builder,
-                    );
-                }
+        Ok(export)
+    }
 
-                let Some(ResolvedProcedure { node, signature }) = self.resolve_target(
+    fn export_import(
+        &mut self,
+        module: ModuleIndex,
+        module_kind: ModuleKind,
+        symbol_path: Arc<Path>,
+        import: &Import,
+        mast_forest_builder: &mut MastForestBuilder,
+    ) -> Result<PendingPackageExport, Report> {
+        let alias = import.alias();
+        if let Some(resolved) = import.resolved() {
+            return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
+        }
+
+        match alias.target() {
+            ast::AliasTarget::MastRoot(root) => {
+                let node_ref = self.ensure_valid_procedure_mast_root(
                     InvokeKind::ProcRef,
-                    &alias.target().into(),
-                    gid,
+                    root.span(),
+                    *root.inner(),
+                    None,
+                    None,
                     mast_forest_builder,
                 )?
                 else {
@@ -720,6 +761,7 @@ impl Assembler {
                 let body_node_ref = procedure.body_node_ref();
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
+                mast_forest_builder.make_root(node);
 
                 return Ok(PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
@@ -729,9 +771,43 @@ impl Assembler {
                     attributes: Default::default(),
                 }));
             },
-        };
-
-        Ok(export)
+            ast::AliasTarget::Path(_) => {
+                let context = SymbolResolutionContext {
+                    span: alias.target().span(),
+                    module,
+                    kind: Some(InvokeKind::ProcRef),
+                };
+                match self.linker.resolve_alias_target(&context, alias)? {
+                    SymbolResolution::Exact { gid, .. } => {
+                        self.export_symbol(gid, module_kind, symbol_path, mast_forest_builder)
+                    },
+                    SymbolResolution::MastRoot(root) => {
+                        let node_ref = self.ensure_valid_procedure_mast_root(
+                            InvokeKind::ProcRef,
+                            root.span(),
+                            *root.inner(),
+                            None,
+                            None,
+                            mast_forest_builder,
+                        )?;
+                        mast_forest_builder.record_procedure_root_ref(node_ref);
+                        Ok(PendingPackageExport::Procedure(PendingProcedureExport {
+                            digest: *root.inner(),
+                            path: symbol_path,
+                            node_ref,
+                            signature: None,
+                            attributes: Default::default(),
+                        }))
+                    },
+                    SymbolResolution::Module { .. } => {
+                        Err(self.unresolved_alias_report("export", &symbol_path, alias))
+                    },
+                    SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                        unreachable!("namespace resolver should not return local/external")
+                    },
+                }
+            },
+        }
     }
 
     /// Compiles the provided module into an executable package.
@@ -950,12 +1026,7 @@ impl Assembler {
                 LinkerError::Cycle { nodes: nodes.into() }
             })?
             .into_iter()
-            .filter(|&gid| {
-                matches!(
-                    self.linker[gid].item(),
-                    SymbolItem::Procedure(_) | SymbolItem::Alias { .. }
-                )
-            })
+            .filter(|&gid| matches!(self.linker[gid].item(), SymbolItem::Procedure(_)))
             .collect();
 
         assert!(!worklist.is_empty());
@@ -1063,7 +1134,7 @@ impl Assembler {
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
-                            procedure_gid,
+                            procedure_gid.module,
                             mast_forest_builder,
                         )?
                     else {
@@ -1397,12 +1468,12 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         target: &InvocationTarget,
-        caller_id: GlobalItemIndex,
+        caller_module: ModuleIndex,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<Option<ResolvedProcedure>, Report> {
         let caller = SymbolResolutionContext {
             span: target.span(),
-            module: caller_id.module,
+            module: caller_module,
             kind: Some(kind),
         };
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
@@ -1441,9 +1512,6 @@ impl Assembler {
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
                         ),
-                        SymbolItem::Alias { .. } => {
-                            unreachable!("unexpected reference to ast alias item from {gid:?}")
-                        },
                         SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
                             Ok(None)
                         },

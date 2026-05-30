@@ -606,43 +606,38 @@ impl ModuleNode {
             let name = symbol.name().as_str().to_string();
             let span = symbol.name().span();
             if node.contains_member(&name) {
-                return Err(name_conflict(
-                    linker,
-                    module,
-                    &name,
-                    span,
-                    match symbol.item() {
-                        SymbolItem::Alias { .. } => "import",
-                        _ => "item",
-                    },
-                ));
+                return Err(name_conflict(linker, module, &name, span, "item"));
             }
 
-            match symbol.item() {
-                SymbolItem::Alias { alias, .. } => {
-                    node.imports.insert(
-                        name.clone(),
-                        UseDecl {
-                            owner: module.id(),
-                            alias: name,
-                            visibility: symbol.visibility(),
-                            target: alias.target().clone(),
-                            span: alias.span(),
-                        },
-                    );
+            node.items.insert(
+                name,
+                ItemDef {
+                    id: module.id() + ItemIndex::new(index),
+                    kind: ItemKind::from_symbol_item(symbol.item()),
+                    visibility: symbol.visibility(),
+                    span,
                 },
-                item => {
-                    node.items.insert(
-                        name,
-                        ItemDef {
-                            id: module.id() + ItemIndex::new(index),
-                            kind: ItemKind::from_symbol_item(item),
-                            visibility: symbol.visibility(),
-                            span,
-                        },
-                    );
-                },
+            );
+        }
+
+        for import in module.imports() {
+            let alias = import.alias();
+            let name = alias.name().as_str().to_string();
+            let span = alias.name().span();
+            if node.contains_member(&name) {
+                return Err(name_conflict(linker, module, &name, span, "import"));
             }
+
+            node.imports.insert(
+                name.clone(),
+                UseDecl {
+                    owner: module.id(),
+                    alias: name,
+                    visibility: alias.visibility(),
+                    target: alias.target().clone(),
+                    span: alias.span(),
+                },
+            );
         }
 
         Ok(node)
@@ -764,7 +759,6 @@ impl ItemKind {
             },
             SymbolItem::Constant(_) | SymbolItem::Compiled(ItemInfo::Constant(_)) => Self::Constant,
             SymbolItem::Type(_) | SymbolItem::Compiled(ItemInfo::Type(_)) => Self::Type,
-            SymbolItem::Alias { .. } => unreachable!("aliases are stored as namespace imports"),
         }
     }
 }

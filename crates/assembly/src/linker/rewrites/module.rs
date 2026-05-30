@@ -105,7 +105,6 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
                 return Ok(Some(CachedConstantValue::Hit(cached)));
             },
             SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => (),
-            SymbolItem::Alias { .. } => unreachable!(),
         }
 
         Err(self.invalid_constant_ref(span))

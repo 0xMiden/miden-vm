@@ -5101,6 +5101,37 @@ end
 }
 
 #[test]
+fn public_item_import_exports_without_alias_symbol() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+
+        pub use dep::foo->bar
+        "#
+    ))?;
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace dep
+
+        pub proc foo
+            push.1
+        end
+        "#
+    ))?;
+
+    let library = Assembler::new(context.source_manager()).assemble_library("pkg", root, [dep])?;
+    let exports = library.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+
+    assert_eq!(exports.len(), 1);
+    assert!(exports.contains(&Arc::from(Path::new("::root::bar"))));
+
+    Ok(())
+}
+
+#[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
