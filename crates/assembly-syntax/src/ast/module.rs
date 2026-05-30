@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt;
 
 use miden_core::{
@@ -146,6 +152,9 @@ pub struct Module {
     kind: ModuleKind,
     /// The items (defined or re-exported) in the module body.
     pub(crate) items: Vec<Export>,
+    /// Maps export name to its position in `items`, for O(log n) conflict checks.
+    /// Must be kept in sync with `items` via `push_export`.
+    name_map: BTreeMap<String, usize>,
     /// AdviceMap that this module expects to be loaded in the host before executing.
     pub(crate) advice_map: AdviceMap,
 }
@@ -174,6 +183,7 @@ impl Module {
             path,
             kind,
             items: Default::default(),
+            name_map: BTreeMap::new(),
             advice_map: Default::default(),
         }
     }
@@ -228,32 +238,40 @@ impl Module {
 
     pub(crate) fn push_export(&mut self, item: Export) -> Result<(), SemanticAnalysisError> {
         self.ensure_item_capacity(item.span())?;
+        let idx = self.items.len();
+        let prev = self.name_map.insert(item.name().to_string(), idx);
+        debug_assert!(prev.is_none(), "duplicate export inserted via push_export: {}", item.name());
         self.items.push(item);
         Ok(())
     }
 
+    /// Takes all items from this module, clearing the name index.
+    /// Used by the linker to consume module contents.
+    pub fn take_items(&mut self) -> Vec<Export> {
+        self.name_map.clear();
+        core::mem::take(&mut self.items)
+    }
+
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) = self.items.iter().find(|item| item.name() == &constant.name) {
+        if let Some(&idx) = self.name_map.get(constant.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: constant.span,
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
             });
         }
-        self.push_export(Export::Constant(constant))?;
-        Ok(())
+        self.push_export(Export::Constant(constant))
     }
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) = self.items.iter().find(|item| item.name() == ty.name()) {
+        if let Some(&idx) = self.name_map.get(ty.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: ty.span(),
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
             });
         }
-        self.push_export(Export::Type(ty.into()))?;
-        Ok(())
+        self.push_export(Export::Type(ty.into()))
     }
 
     /// Define a new enum type `ty` with `visibility`
@@ -275,11 +293,10 @@ impl Module {
 
         let export = ty.clone();
         let (alias, variants) = ty.into_parts();
-
-        if let Some(prev) = self.items.iter().find(|t| t.name() == &alias.name) {
+        if let Some(&idx) = self.name_map.get(alias.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: alias.span(),
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
             });
         }
 
@@ -343,16 +360,13 @@ impl Module {
         procedure: Procedure,
         _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) =
-            self.items.iter().find(|item| item.name().as_str() == procedure.name().as_str())
-        {
+        if let Some(&idx) = self.name_map.get(procedure.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: procedure.span(),
-                prev_span: prev.name().span(),
+                prev_span: self.items[idx].name().span(),
             });
         }
-        self.push_export(Export::Procedure(procedure))?;
-        Ok(())
+        self.push_export(Export::Procedure(procedure))
     }
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
@@ -365,18 +379,13 @@ impl Module {
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        if let Some(prev) = self
-            .items
-            .iter()
-            .find(|existing| existing.name().as_str() == item.name().as_str())
-        {
+        if let Some(&idx) = self.name_map.get(item.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: item.name().span(),
-                prev_span: prev.name().span(),
+                prev_span: self.items[idx].name().span(),
             });
         }
-        self.push_export(Export::Alias(item))?;
-        Ok(())
+        self.push_export(Export::Alias(item))
     }
 }
 
