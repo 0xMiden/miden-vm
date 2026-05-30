@@ -225,6 +225,76 @@ impl NamespaceGraph {
         }
     }
 
+    /// Resolve a path referenced from code in `owner`.
+    ///
+    /// Unlike import declarations, code references may start with a local import alias. Imports are
+    /// still not expanded recursively here; this only consults the already-resolved import table.
+    pub fn resolve_code_path(
+        &self,
+        owner: ModuleIndex,
+        path: Span<&Path>,
+        imports: &ResolvedImports,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        if path.is_absolute() {
+            return self.resolve_global_path(
+                owner,
+                path.into_inner(),
+                path.span(),
+                Some(imports),
+                linker,
+            );
+        }
+
+        let Some((first, rest)) = path.split_first() else {
+            return Err(undefined_symbol(linker, path));
+        };
+
+        if first == "self" {
+            if rest.is_empty() {
+                return Err(undefined_symbol(linker, path));
+            }
+            return self.resolve_self_relative_path(owner, rest, path.span(), linker);
+        }
+
+        let owner_module = self.module(owner);
+        if rest.is_empty() {
+            if let Some(item) = owner_module.item(first) {
+                self.ensure_item_visible(owner, item, path.span(), linker)?;
+                return Ok(ResolvedUse::Item(item.id()));
+            }
+
+            if let Some(resolved) = imports.get(owner, first) {
+                return Ok(resolved);
+            }
+        } else {
+            if let Some(item) = owner_module.item(first) {
+                return Err(SymbolResolutionError::invalid_sub_path(
+                    path.span(),
+                    item.span(),
+                    linker.source_manager.as_ref(),
+                )
+                .into());
+            }
+
+            if let Some(resolved) = imports.get(owner, first) {
+                return match resolved {
+                    ResolvedUse::Module(module) => {
+                        self.resolve_path_from_module(owner, module, rest, path.span(), linker)
+                    },
+                    ResolvedUse::Item(item) => Err(SymbolResolutionError::invalid_sub_path(
+                        path.span(),
+                        linker[item.module][item.index].name().span(),
+                        linker.source_manager.as_ref(),
+                    )
+                    .into()),
+                };
+            }
+        }
+
+        self.resolve_global_path(owner, path.into_inner(), path.span(), Some(imports), linker)
+    }
+
     fn resolve_self_relative_path(
         &self,
         owner: ModuleIndex,
@@ -275,6 +345,57 @@ impl NamespaceGraph {
         }
     }
 
+    fn resolve_path_from_module(
+        &self,
+        owner: ModuleIndex,
+        module: ModuleIndex,
+        path: &Path,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        let mut current = module;
+        let mut remaining = path;
+
+        loop {
+            let Some((component, rest)) = remaining.split_first() else {
+                return Ok(ResolvedUse::Module(current));
+            };
+            let module = self.module(current);
+
+            if rest.is_empty() {
+                if let Some(item) = module.item(component) {
+                    self.ensure_item_visible(owner, item, span, linker)?;
+                    return Ok(ResolvedUse::Item(item.id()));
+                }
+
+                if let Some(edge) = module.submodule(component) {
+                    self.ensure_submodule_visible(edge, span, linker)?;
+                    return Ok(ResolvedUse::Module(edge.child()));
+                }
+
+                return Err(undefined_symbol_from_path(linker, span, path));
+            }
+
+            if let Some(edge) = module.submodule(component) {
+                self.ensure_submodule_visible(edge, span, linker)?;
+                current = edge.child();
+                remaining = rest;
+                continue;
+            }
+
+            if let Some(item) = module.item(component) {
+                return Err(SymbolResolutionError::invalid_sub_path(
+                    span,
+                    item.span(),
+                    linker.source_manager.as_ref(),
+                )
+                .into());
+            }
+
+            return Err(undefined_symbol_from_path(linker, span, path));
+        }
+    }
+
     fn resolve_global_path(
         &self,
         owner: ModuleIndex,
@@ -292,7 +413,7 @@ impl NamespaceGraph {
             return Err(undefined_symbol_from_path(linker, span, path));
         };
 
-        if parent_path.is_empty() {
+        if parent_path.is_empty() && !parent_path.is_absolute() {
             return Err(undefined_symbol_from_path(linker, span, path));
         }
 
@@ -689,7 +810,7 @@ mod tests {
 
     use miden_assembly_syntax::{
         Parse, Path,
-        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager},
+        debuginfo::{DefaultSourceManager, SourceLanguage, SourceManager, Span},
     };
 
     use super::*;
@@ -827,6 +948,96 @@ mod tests {
 
         assert_eq!(imports.get(consumer_id, "mod"), Some(ResolvedUse::Module(imported_id)));
         assert!(matches!(imports.get(consumer_id, "VALUE"), Some(ResolvedUse::Item(_))));
+    }
+
+    #[test]
+    fn namespace_graph_resolves_code_paths_through_imported_modules() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut imported = parse_module(
+            source_manager.clone(),
+            "imported.masm",
+            r#"
+                namespace lib::mod
+
+                pub const VALUE = 1
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                use lib::mod
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        linker.link_module(&mut imported).expect("imported link should succeed");
+        let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let imports = graph.resolve_imports(&linker).expect("imports should resolve");
+        let resolved = graph
+            .resolve_code_path(
+                consumer_id,
+                Span::unknown(Path::new("mod::VALUE")),
+                &imports,
+                &linker,
+            )
+            .expect("code path should resolve through imported module");
+
+        assert!(matches!(resolved, ResolvedUse::Item(_)));
+    }
+
+    #[test]
+    fn namespace_graph_resolves_absolute_code_paths_globally() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut imported = parse_module(
+            source_manager.clone(),
+            "imported.masm",
+            r#"
+                namespace real::mod
+
+                pub const VALUE = 1
+            "#,
+        );
+        let mut global = parse_module(
+            source_manager.clone(),
+            "global.masm",
+            r#"
+                namespace lib
+
+                pub const VALUE = 2
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                use real::mod->lib
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        linker.link_module(&mut imported).expect("imported link should succeed");
+        let global_id = linker.link_module(&mut global).expect("global link should succeed");
+        let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let imports = graph.resolve_imports(&linker).expect("imports should resolve");
+        let resolved = graph
+            .resolve_code_path(
+                consumer_id,
+                Span::unknown(Path::new("::lib::VALUE")),
+                &imports,
+                &linker,
+            )
+            .expect("absolute code path should resolve globally");
+
+        assert!(matches!(resolved, ResolvedUse::Item(gid) if gid.module == global_id));
     }
 
     #[test]

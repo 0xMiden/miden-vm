@@ -233,7 +233,7 @@ struct LinkModuleIter<'a, 'b: 'a> {
 impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
-    fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
+    fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
         let symbols = self
             .module
             .symbols
@@ -291,18 +291,8 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                                     resolution: Ok(SymbolResolution::MastRoot(*root)),
                                 },
                                 AliasTarget::Path(path) => {
-                                    let resolution = LocalSymbolResolver::expand(
-                                        |name| {
-                                            self.module.get(name).and_then(|sym| match sym.item() {
-                                                SymbolItem::Alias { alias, .. } => {
-                                                    Some(alias.target().clone())
-                                                },
-                                                _ => None,
-                                            })
-                                        },
-                                        path.as_deref(),
-                                        &source_manager,
-                                    );
+                                    let resolution =
+                                        Ok(SymbolResolution::External(path.clone()));
                                     LocalSymbol::Import { name, resolution }
                                 },
                             }

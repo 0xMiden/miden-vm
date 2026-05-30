@@ -439,7 +439,7 @@ impl Linker {
         let namespaces = NamespaceGraph::build(self)?;
         let imports = namespaces.resolve_imports(self)?;
 
-        self.link_and_rewrite(&imports)?;
+        self.link_and_rewrite(&namespaces, &imports)?;
 
         let mut reachable = BTreeSet::new();
 
@@ -483,9 +483,11 @@ impl Linker {
 
         self.kernel_index = Some(module_index);
 
-        let result = NamespaceGraph::build(self)
-            .and_then(|namespaces| namespaces.resolve_imports(self))
-            .and_then(|imports| self.link_and_rewrite(&imports));
+        let result = (|| {
+            let namespaces = NamespaceGraph::build(self)?;
+            let imports = namespaces.resolve_imports(self)?;
+            self.link_and_rewrite(&namespaces, &imports)
+        })();
 
         if let Err(err) = result {
             self.kernel_index = original_kernel_index;
@@ -539,7 +541,11 @@ impl Linker {
     /// NOTE: This will return `Err` if we detect a validation error, a cycle in the graph, or an
     /// operation not supported by the current configuration. Basically, for any reason that would
     /// cause the resulting graph to represent an invalid program.
-    fn link_and_rewrite(&mut self, imports: &ResolvedImports) -> Result<(), LinkerError> {
+    fn link_and_rewrite(
+        &mut self,
+        namespaces: &NamespaceGraph,
+        imports: &ResolvedImports,
+    ) -> Result<(), LinkerError> {
         log::debug!(
             target: "linker",
             "processing {} unlinked/partially-linked modules, and recomputing module graph",
@@ -569,7 +575,7 @@ impl Linker {
         let original_callgraph = self.callgraph.clone();
 
         let result = {
-            let resolver = SymbolResolver::with_resolved_imports(self, imports);
+            let resolver = SymbolResolver::with_namespaces(self, namespaces, imports);
             let mut edges = Vec::new();
             let mut cache = ResolverCache::default();
             let mut linked_modules = Vec::new();
@@ -741,7 +747,9 @@ impl Linker {
         caller: &SymbolResolutionContext,
         target: &InvocationTarget,
     ) -> Result<SymbolResolution, LinkerError> {
-        let resolver = SymbolResolver::new(self);
+        let namespaces = NamespaceGraph::build(self)?;
+        let imports = namespaces.resolve_imports(self)?;
+        let resolver = SymbolResolver::with_namespaces(self, &namespaces, &imports);
         resolver.resolve_invoke_target(caller, target)
     }
 
@@ -751,7 +759,9 @@ impl Linker {
         caller: &SymbolResolutionContext,
         target: &Alias,
     ) -> Result<SymbolResolution, LinkerError> {
-        let resolver = SymbolResolver::new(self);
+        let namespaces = NamespaceGraph::build(self)?;
+        let imports = namespaces.resolve_imports(self)?;
+        let resolver = SymbolResolver::with_namespaces(self, &namespaces, &imports);
         resolver.resolve_alias_target(caller, target)
     }
 
@@ -761,7 +771,9 @@ impl Linker {
         caller: &SymbolResolutionContext,
         path: &Path,
     ) -> Result<SymbolResolution, LinkerError> {
-        let resolver = SymbolResolver::new(self);
+        let namespaces = NamespaceGraph::build(self)?;
+        let imports = namespaces.resolve_imports(self)?;
+        let resolver = SymbolResolver::with_namespaces(self, &namespaces, &imports);
         resolver.resolve_path(caller, Span::new(caller.span, path))
     }
 
