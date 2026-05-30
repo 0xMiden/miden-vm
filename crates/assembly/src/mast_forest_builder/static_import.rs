@@ -11,9 +11,14 @@ use super::{
 };
 use crate::diagnostics::Report;
 
+/// Result of resolving an exact static-library root provenance hint.
 enum StaticRootLookup {
+    /// Exactly one linked source forest maps the hinted source root to the requested digest.
     Found(MastNodeId),
+    /// More than one linked source forest matches the hint, so importing by provenance would risk
+    /// selecting metadata from the wrong forest.
     Ambiguous,
+    /// The hint did not match any linked source forest/root pair.
     Missing,
 }
 

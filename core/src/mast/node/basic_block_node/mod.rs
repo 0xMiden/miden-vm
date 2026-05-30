@@ -790,10 +790,12 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Creates a builder from pre-existing OpBatches.
+    /// Creates a builder from pre-existing OpBatches and a trusted digest.
     ///
-    /// This constructor is used during deserialization where operations are already batched. The
-    /// digest must also be provided.
+    /// This constructor is used when operations are already batched, such as during
+    /// deserialization. The provided digest is preserved as-is; it is not recomputed or checked
+    /// against the batches by the builder. Callers that accept untrusted input must validate the
+    /// resulting forest before use.
     pub(crate) fn from_op_batches(op_batches: Vec<OpBatch>, digest: Word) -> Self {
         Self {
             operation_data: OperationData::Batched { op_batches },
@@ -804,7 +806,8 @@ impl BasicBlockNodeBuilder {
     /// Creates a builder from already-batched operations and preserves the provided digest.
     ///
     /// This is used by the assembly builder when it has already formed operation batches while
-    /// pending nodes were still builder-local references.
+    /// pending nodes were still builder-local references. The digest is treated as trusted node
+    /// identity and is not recomputed by this builder.
     #[doc(hidden)]
     pub fn from_op_batches_preserving_digest(op_batches: Vec<OpBatch>, digest: Word) -> Self {
         Self::from_op_batches(op_batches, digest)

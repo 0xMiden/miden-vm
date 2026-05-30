@@ -372,6 +372,10 @@ impl MastForestBuilder {
     /// convention used by externally linked procedure roots while still keeping final node IDs
     /// local to the resulting forest.
     ///
+    /// Finalization must happen in the order used below: plan the live layout first, materialize
+    /// live nodes so builder-local refs have final node IDs, then register metadata against those
+    /// final IDs before assembling the immutable forest.
+    ///
     /// It also returns the map from assembly-time node refs to final node IDs. Any [`MastNodeRef`]
     /// used in reference to this builder should be resolved using this map.
     pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
