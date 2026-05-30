@@ -89,12 +89,9 @@ impl proptest::arbitrary::Arbitrary for Package {
 
                 // Generate an entrypoint export if needed
                 if kind.is_executable() {
-                    let node_id = BasicBlockNodeBuilder::new(
-                        vec![Operation::Add, Operation::Mul],
-                        Vec::new(),
-                    )
-                    .add_to_forest(&mut mast_forest)
-                    .unwrap();
+                    let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
+                        .add_to_forest(&mut mast_forest)
+                        .unwrap();
                     // Add the node to the forest roots if it's not already there
                     mast_forest.make_root(node_id);
                     nodes.push(node_id);

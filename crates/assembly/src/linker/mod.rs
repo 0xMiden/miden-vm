@@ -40,6 +40,7 @@ mod debug;
 mod errors;
 mod library;
 mod module;
+mod namespaces;
 mod resolver;
 mod rewrites;
 mod symbols;
@@ -72,6 +73,7 @@ pub use self::{
 };
 use self::{
     module::{LinkModule, ModuleSource},
+    namespaces::NamespaceGraph,
     resolver::*,
 };
 
@@ -434,39 +436,17 @@ impl Linker {
 
         let root_indices = self.link_modules(roots)?;
         let _support_indices = self.link_modules(support)?;
+        let namespaces = NamespaceGraph::build(self)?;
 
         self.link_and_rewrite()?;
 
         let mut reachable = BTreeSet::new();
 
         for root in root_indices {
-            reachable.extend(self.reachable_from_root(root));
+            reachable.extend(namespaces.reachable_from_root(root));
         }
 
         Ok(reachable.into_iter().collect())
-    }
-
-    fn reachable_from_root(&self, root: ModuleIndex) -> Vec<ModuleIndex> {
-        use alloc::collections::BTreeSet;
-
-        let mut reachable = BTreeSet::new();
-        let mut stack = vec![root];
-
-        while let Some(module_index) = stack.pop() {
-            if !reachable.insert(module_index) {
-                continue;
-            }
-
-            let module = &self.modules[module_index.as_usize()];
-            for submodule in module.submodules().filter(|decl| decl.visibility.is_public()) {
-                let child_path = module.path().join(&submodule.name);
-                if let Some(child_index) = self.find_module_index(child_path.as_path()) {
-                    stack.push(child_index);
-                }
-            }
-        }
-
-        reachable.into_iter().collect()
     }
 
     /// Links `kernel` using the current state of the linker.

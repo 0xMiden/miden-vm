@@ -64,6 +64,30 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         path: Arc<Path>,
     },
+    #[error(
+        "module '{path}' is not declared by its parent module '{parent}' as `mod {name}` or `pub mod {name}`"
+    )]
+    #[diagnostic(help(
+        "source modules must be declared by their parent module before they can be linked as descendants"
+    ))]
+    UndeclaredSubmodule {
+        path: Arc<Path>,
+        parent: Arc<Path>,
+        name: String,
+    },
+    #[error(
+        "name conflict in module '{module}': {kind} '{name}' conflicts with an existing item, import, or submodule"
+    )]
+    #[diagnostic()]
+    NamespaceNameConflict {
+        #[label("conflicting namespace member")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        module: Arc<Path>,
+        name: String,
+        kind: &'static str,
+    },
     #[error("undefined item '{path}'")]
     #[diagnostic(help(
         "you might be missing an import, or the containing library has not been linked"
