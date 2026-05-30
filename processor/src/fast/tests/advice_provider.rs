@@ -144,9 +144,10 @@ fn test_advice_provider() {
 
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
+        let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
 
         let kernel_lib = Assembler::new(source_manager.clone())
-            .assemble_kernel("kernel", kernel_source)
+            .assemble_kernel("kernel", kernel)
             .map(Arc::<Package>::from)
             .unwrap();
         let program = Assembler::with_kernel(source_manager, kernel_lib.clone())

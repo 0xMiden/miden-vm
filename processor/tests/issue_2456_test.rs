@@ -7,9 +7,11 @@ use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::Advice
 fn test_issue_2456_statically_linked_library_call() {
     use std::sync::Arc;
 
-    use miden_assembly::{DefaultSourceManager, diagnostics::NamedSource};
+    use miden_assembly::DefaultSourceManager;
 
     let test_module_source = "
+        namespace test::module_1
+
         pub proc foo
             push.3.4
             add
@@ -17,14 +19,18 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    let source = NamedSource::new("test::module_1", test_module_source);
     let source_manager = Arc::new(DefaultSourceManager::default());
     let mut assembler = Assembler::new(source_manager);
 
-    let library = assembler.clone().assemble_library("library", [source]).unwrap();
+    let library = assembler
+        .clone()
+        .assemble_library("library", test_module_source, None::<Box<miden_assembly::ast::Module>>)
+        .unwrap();
 
     // This program calls a procedure from a statically linked library.
     let source = "
+        namespace $exec
+
         use test::module_1
 
         begin

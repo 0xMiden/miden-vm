@@ -1,15 +1,15 @@
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, PathBuf,
-    ast::Module,
+    Assembler, DefaultSourceManager, Path, PathBuf,
+    ast::{Module, ModuleKind},
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
-use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
+use miden_debug_types::SourceManager;
 use miden_utils_testing::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
@@ -46,6 +46,22 @@ impl EventHandler for DuplicateMapMutationHandler {
     }
 }
 
+fn parse_library_module(
+    source_manager: Arc<dyn SourceManager>,
+    module_name: &str,
+    body: &str,
+) -> Box<Module> {
+    let path = PathBuf::new(module_name).unwrap();
+    let source = format!("namespace {module_name}\n{body}");
+    let mut parser = Module::parser(None);
+    parser.parse_str(Some(path.as_path()), source, source_manager).unwrap()
+}
+
+fn parse_kernel_module(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
+    let mut parser = Module::parser(Some(ModuleKind::Kernel));
+    parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
+
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
 
@@ -78,10 +94,12 @@ fn test_diagnostic_advice_map_key_already_present() {
     let test_context = TestContext::new();
 
     let (lib_1, lib_2) = {
-        let dummy_library_source = source_file!(&test_context, "pub proc foo add end");
-        let module = test_context.parse_module_with_path("foo::bar", dummy_library_source).unwrap();
-        let mut lib_2 =
-            test_context.assemble_library("lib2", None, std::iter::once(module)).unwrap();
+        let dummy_library_source =
+            source_file!(&test_context, "namespace foo::bar\n\npub proc foo add end");
+        let module = test_context.parse_module(dummy_library_source).unwrap();
+        let mut lib_2 = test_context
+            .assemble_library("lib2", None, module, None::<Box<Module>>)
+            .unwrap();
         lib_2.extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])]));
         let mut lib_1 = lib_2.clone();
         lib_1.name = "lib1".into();
@@ -804,16 +822,7 @@ fn test_diagnostic_procedure_not_found_call() {
             push.1
         end
     ";
-        let uri = Uri::from("src.masm");
-        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        Module::parse(
-            PathBuf::new(module_name).unwrap(),
-            miden_assembly::ast::ModuleKind::Library,
-            source_file,
-            source_manager.clone(),
-        )
-        .unwrap()
+        parse_library_module(source_manager.clone(), module_name, src)
     };
 
     let program_source = "
@@ -825,7 +834,7 @@ fn test_diagnostic_procedure_not_found_call() {
     ";
 
     let library = Assembler::new(source_manager.clone())
-        .assemble_library("lib", [lib_module])
+        .assemble_library("lib", lib_module, None::<Box<Module>>)
         .unwrap();
 
     let program = Assembler::new(source_manager.clone())
@@ -864,16 +873,7 @@ fn test_diagnostic_procedure_not_found_join() {
             push.1
         end
     ";
-        let uri = Uri::from("src.masm");
-        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        Module::parse(
-            PathBuf::new(module_name).unwrap(),
-            miden_assembly::ast::ModuleKind::Library,
-            source_file,
-            source_manager.clone(),
-        )
-        .unwrap()
+        parse_library_module(source_manager.clone(), module_name, src)
     };
 
     let program_source = "
@@ -886,7 +886,7 @@ fn test_diagnostic_procedure_not_found_join() {
     ";
 
     let library = Assembler::new(source_manager.clone())
-        .assemble_library("library", [lib_module])
+        .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
     let program = Assembler::new(source_manager.clone())
@@ -927,16 +927,7 @@ fn test_diagnostic_procedure_not_found_loop() {
             push.1
         end
     ";
-        let uri = Uri::from("src.masm");
-        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        Module::parse(
-            PathBuf::new(module_name).unwrap(),
-            miden_assembly::ast::ModuleKind::Library,
-            source_file,
-            source_manager.clone(),
-        )
-        .unwrap()
+        parse_library_module(source_manager.clone(), module_name, src)
     };
 
     let program_source = "
@@ -951,7 +942,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     ";
 
     let library = Assembler::new(source_manager.clone())
-        .assemble_library("library", [lib_module])
+        .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
     let program = Assembler::new(source_manager.clone())
@@ -991,16 +982,7 @@ fn test_diagnostic_procedure_not_found_split() {
             push.1
         end
     ";
-        let uri = Uri::from("src.masm");
-        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        Module::parse(
-            PathBuf::new(module_name).unwrap(),
-            miden_assembly::ast::ModuleKind::Library,
-            source_file,
-            source_manager.clone(),
-        )
-        .unwrap()
+        parse_library_module(source_manager.clone(), module_name, src)
     };
 
     let program_source = "
@@ -1017,7 +999,7 @@ fn test_diagnostic_procedure_not_found_split() {
     ";
 
     let library = Assembler::new(source_manager.clone())
-        .assemble_library("library", [lib_module])
+        .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
     let program = Assembler::new(source_manager.clone())
@@ -1245,8 +1227,9 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         end
     ";
 
+    let kernel = parse_kernel_module(source_manager.clone(), kernel_source);
     let kernel_library = Assembler::new(source_manager.clone())
-        .assemble_kernel("kernel", kernel_source)
+        .assemble_kernel("kernel", kernel)
         .unwrap();
 
     let program = {

@@ -1,7 +1,10 @@
 use alloc::{string::ToString, sync::Arc, vec};
 
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::{
+    Assembler, DefaultSourceManager, Path,
+    ast::{Module, ModuleKind},
+};
 use miden_core::{
     ONE, assert_matches,
     events::SystemEvent,
@@ -23,6 +26,14 @@ mod advice_provider;
 mod all_ops;
 mod masm_consistency;
 mod memory;
+
+fn parse_kernel_source(
+    source_manager: Arc<dyn miden_debug_types::SourceManager>,
+    source: &str,
+) -> Box<Module> {
+    let mut parser = Module::parser(Some(ModuleKind::Kernel));
+    parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
 
 #[test]
 fn stack_get_word_out_of_bounds_read() {
