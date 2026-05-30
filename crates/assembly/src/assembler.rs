@@ -6,7 +6,7 @@ use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec:
 
 use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
+    MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -276,15 +276,7 @@ impl Assembler {
     ) -> Result<&mut Self, Report> {
         let modules = modules
             .into_iter()
-            .map(|module| {
-                module.parse_with_options(
-                    self.source_manager.clone(),
-                    ParseOptions {
-                        warnings_as_errors: self.warnings_as_errors,
-                        ..ParseOptions::for_library()
-                    },
-                )
-            })
+            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
         self.linker.link_modules(modules)?;
@@ -292,20 +284,18 @@ impl Assembler {
         Ok(self)
     }
 
-    /// Compiles and statically links all Miden Assembly modules in the provided directory, using
-    /// the provided [Path] as the root namespace for the compiled modules.
+    /// Compiles and statically links all Miden Assembly modules reachable from the provided root
+    /// module. The namespace of the resulting modules will be derived from an explicit namespace
+    /// declaration in the root module, or from `namespace` if provided - if both are present, they
+    /// must agree.
     ///
-    /// When compiling each module, its Miden Assembly path is derived by appending path components
-    /// corresponding to the relative path of the module in `dir`, to `namespace`. If a source file
-    /// named `mod.masm` is found, the resulting module will derive its path using the path
-    /// components of the parent directory, rather than the file name.
+    /// The module structure is determined by `mod` declarations reachable from the root module,
+    /// i.e. if the root module contains the line `mod foo`, then a submodule `foo` in the namespace
+    /// of the root module will be located and parsed.
     ///
-    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
-    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
-    /// allows defining multiple projects relative to a common root namespace without conflict.
-    ///
-    /// This function recursively parses the entire directory structure under `dir`, ignoring
-    /// any files which do not have the `.masm` extension.
+    /// If provided `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as
+    /// is `std::math::u64` - there is no requirement that the namespace be a single identifier.
+    /// This allows defining multiple projects relative to a common root namespace without conflict.
     ///
     /// For example, let's say I call this function like so:
     ///
@@ -313,32 +303,51 @@ impl Assembler {
     /// use miden_assembly::{Assembler, Path};
     ///
     /// let mut assembler = Assembler::default();
-    /// assembler.compile_and_statically_link_from_dir("~/masm/core", "miden::core::foo");
+    /// assembler.compile_and_statically_link_from_root("~/masm/core/lib.masm", None);
     /// ```
     ///
-    /// Here's how we would handle various files under this path:
+    /// And `lib.masm` contains:
     ///
-    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
-    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
-    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
-    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
-    /// - ~/masm/core/math/README.md      -> Ignored
+    /// ```text,ignore
+    /// namespace miden::core
+    ///
+    /// pub mod sys;
+    /// pub mod math;
+    /// ```
+    ///
+    /// Then either of the following directory layouts would be parsed successfully, with the
+    /// namespacing shown:
+    ///
+    /// Layout 1: Submodules are defined at the same level as the parent, named after their module
+    /// name:
+    ///
+    /// - ~/masm/core/lib.masm        -> Parsed as "miden::core"
+    /// - ~/masm/core/sys.masm        -> Parsed as "miden::core::sys"
+    /// - ~/masm/core/math.masm       -> Parsed as "miden::core::math"
+    /// - ~/masm/core/math/README.md  -> Ignored
+    ///
+    /// Layout 2: Submodules are defined in sub-directories named after their module name:
+    ///
+    /// - ~/masm/core/lib.masm        -> Parsed as "miden::core"
+    /// - ~/masm/core/sys/mod.masm    -> Parsed as "miden::core::sys"
+    /// - ~/masm/core/math/mod.masm   -> Parsed as "miden::core::math"
+    /// - ~/masm/core/math/README.md  -> Ignored
     #[cfg(feature = "std")]
-    pub fn compile_and_statically_link_from_dir(
+    pub fn compile_and_statically_link_from_root(
         &mut self,
-        dir: impl AsRef<std::path::Path>,
-        namespace: impl AsRef<Path>,
+        root: impl AsRef<std::path::Path>,
+        namespace: Option<&Path>,
     ) -> Result<(), Report> {
         use miden_assembly_syntax::parser;
 
-        let namespace = namespace.as_ref();
-        let modules = parser::read_modules_from_dir(
-            dir,
-            namespace,
+        let (root, modules) = parser::read_modules_from_root(
+            root,
+            namespace.map(Into::into),
+            None,
             self.source_manager.clone(),
             self.warnings_as_errors,
         )?;
-        self.linker.link_modules(modules)?;
+        self.linker.link_modules(core::iter::once(root).chain(modules))?;
         Ok(())
     }
 
@@ -412,75 +421,46 @@ impl Assembler {
     pub fn assemble_library(
         self,
         name: impl Into<PackageId>,
-        modules: impl IntoIterator<Item = impl Parse>,
+        root: impl Parse,
+        support: impl IntoIterator<Item = impl Parse>,
     ) -> Result<Box<Package>, Report> {
-        let modules = modules
+        let root = root.parse(self.warnings_as_errors, self.source_manager.clone())?;
+        let support = support
             .into_iter()
-            .map(|module| {
-                module.parse_with_options(
-                    self.source_manager.clone(),
-                    ParseOptions {
-                        warnings_as_errors: self.warnings_as_errors,
-                        ..ParseOptions::for_library()
-                    },
-                )
-            })
+            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
-        self.assemble_library_modules(name.into(), modules, TargetType::Library)?
+        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
             .into_artifact()
     }
 
-    /// Assemble a library [`Package`] from a standard Miden Assembly project layout, using the
-    /// provided [Path] as the root under which the project is rooted.
+    /// Assemble a library [`Package`] from the set of modules reachable from `root`.
     ///
-    /// The standard layout assumes that the given filesystem path corresponds to the root of
-    /// `namespace`. Modules will be parsed with their path made relative to `namespace` according
-    /// to their location in the directory structure with respect to `path`. See below for an
-    /// example of what this looks like in practice.
-    ///
-    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
-    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
-    /// allows defining multiple projects relative to a common root namespace without conflict.
-    ///
-    /// NOTE: You must ensure there is no conflict in namespace between projects, e.g. two projects
-    /// both assembled with `namespace` set to `std::math` would conflict with each other in a way
-    /// that would prevent them from being used at the same time.
-    ///
-    /// This function recursively parses the entire directory structure under `path`, ignoring
-    /// any files which do not have the `.masm` extension.
-    ///
-    /// For example, let's say I call this function like so:
-    ///
-    /// ```rust
-    /// use miden_assembly::{Assembler, Path};
-    ///
-    /// Assembler::default().assemble_library_from_dir("~/masm/core", "miden::core::foo");
-    /// ```
-    ///
-    /// Here's how we would handle various files under this path:
-    ///
-    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
-    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
-    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
-    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
-    /// - ~/masm/core/math/README.md      -> Ignored
+    /// See [Assembler::compile_and_link_statically_from_root] for details on how modules are
+    /// discovered and linked from `root`.
     #[cfg(feature = "std")]
-    pub fn assemble_library_from_dir(
+    pub fn assemble_library_from_root(
         self,
-        dir: impl AsRef<std::path::Path>,
-        namespace: impl AsRef<Path>,
+        root: impl AsRef<std::path::Path>,
+        namespace: Option<&Path>,
     ) -> Result<Box<Package>, Report> {
         use miden_assembly_syntax::parser;
 
-        let dir = dir.as_ref();
-        let namespace = namespace.as_ref();
-        let name = namespace.as_str().replace("::", "-");
+        let root = root.as_ref().to_path_buf();
+        let namespace = namespace.map(Into::into);
+        let (root, support) = parser::read_modules_from_root(
+            &root,
+            namespace,
+            Some(ModuleKind::Library),
+            self.source_manager.clone(),
+            self.warnings_as_errors,
+        )?;
 
-        let source_manager = self.source_manager.clone();
-        let modules =
-            parser::read_modules_from_dir(dir, namespace, source_manager, self.warnings_as_errors)?;
-        self.assemble_library(name, modules)
+        // Derive the package name from the namespace of the root module
+        let name = root.path().as_str().replace("::", "-");
+
+        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
+            .into_artifact()
     }
 
     /// Assembles the provided module into a kernel package.
@@ -491,18 +471,9 @@ impl Assembler {
     pub fn assemble_kernel(
         self,
         name: impl Into<PackageId>,
-        module: impl Parse,
+        root: Box<ast::Module>,
     ) -> Result<Box<Package>, Report> {
-        let module = module.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                path: Some(Path::kernel_path().into()),
-                warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::for_kernel()
-            },
-        )?;
-
-        self.assemble_kernel_module(name.into(), module)?.into_artifact()
+        self.assemble_kernel_module(name.into(), root)?.into_artifact()
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -519,19 +490,25 @@ impl Assembler {
     /// Note: this is a temporary structure which will likely change once
     /// <https://github.com/0xMiden/miden-vm/issues/1436> is implemented.
     #[cfg(feature = "std")]
-    pub fn assemble_kernel_from_dir(
+    pub fn assemble_kernel_from_root(
         mut self,
         name: impl Into<PackageId>,
         sys_module_path: impl AsRef<std::path::Path>,
-        lib_dir: Option<impl AsRef<std::path::Path>>,
     ) -> Result<Box<Package>, Report> {
-        // if library directory is provided, add modules from this directory to the assembler
-        if let Some(lib_dir) = lib_dir {
-            self.compile_and_statically_link_from_dir(lib_dir, Path::kernel_path())?;
-        }
+        let sys_module_path = sys_module_path.as_ref();
+        let namespace = Some(Path::KERNEL.into());
+        let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
+            sys_module_path,
+            namespace,
+            Some(ModuleKind::Kernel),
+            self.source_manager.clone(),
+            self.warnings_as_errors,
+        )?;
+
+        self.linker.link_modules(support)?;
 
         let name = name.into();
-        self.assemble_kernel(name, sys_module_path.as_ref())
+        self.assemble_kernel(name, root)
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -770,14 +747,12 @@ impl Assembler {
         name: impl Into<PackageId>,
         source: impl Parse,
     ) -> Result<Box<Package>, Report> {
-        let options = ParseOptions {
-            kind: ModuleKind::Executable,
-            warnings_as_errors: self.warnings_as_errors,
-            path: Some(Path::exec_path().into()),
-        };
-
-        let program = source.parse_with_options(self.source_manager.clone(), options)?;
-        assert!(program.is_executable());
+        let program = source.parse(self.warnings_as_errors, self.source_manager.clone())?;
+        if !program.is_executable() {
+            return Err(Report::msg(
+                "unable to assemble program: source is not an executable module",
+            ));
+        }
 
         self.assemble_executable_modules(name.into(), program, [])?.into_artifact()
     }
@@ -785,10 +760,11 @@ impl Assembler {
     pub(crate) fn assemble_library_modules(
         mut self,
         name: PackageId,
-        modules: impl IntoIterator<Item = Box<ast::Module>>,
+        root: Box<ast::Module>,
+        support: impl IntoIterator<Item = Box<ast::Module>>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let module_indices = self.linker.link(modules)?;
+        let module_indices = self.linker.link([root], support)?;
         self.assemble_library_product(name, &module_indices, kind)
     }
 
@@ -807,10 +783,8 @@ impl Assembler {
         program: Box<ast::Module>,
         support_modules: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<AssemblyProduct, Report> {
-        self.linker.link_modules(support_modules)?;
-
         // Recompute graph with executable module, and start compiling
-        let module_index = self.linker.link([program])?[0];
+        let module_index = self.linker.link([program], support_modules)?[0];
 
         // Find the executable entrypoint Note: it is safe to use `unwrap_ast()` here, since this is
         // the module we just added, which is in AST representation.

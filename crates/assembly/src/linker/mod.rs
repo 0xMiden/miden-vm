@@ -286,6 +286,7 @@ impl Linker {
         }
 
         let module_index = self.next_module_id();
+        let submodules = module.submodules().to_vec();
         let symbols = {
             module
                 .take_items()
@@ -299,12 +300,12 @@ impl Linker {
                         item.visibility(),
                         LinkStatus::Unlinked,
                         match item {
-                            ast::Export::Alias(alias) => {
+                            ast::Item::Alias(alias) => {
                                 SymbolItem::Alias { alias, resolved: Cell::new(None) }
                             },
-                            ast::Export::Type(item) => SymbolItem::Type(item),
-                            ast::Export::Constant(item) => SymbolItem::Constant(item),
-                            ast::Export::Procedure(item) => {
+                            ast::Item::Type(item) => SymbolItem::Type(item),
+                            ast::Item::Constant(item) => SymbolItem::Constant(item),
+                            ast::Item::Procedure(item) => {
                                 SymbolItem::Procedure(RefCell::new(Box::new(item)))
                             },
                         },
@@ -320,6 +321,7 @@ impl Linker {
             module.path().into(),
         )
         .with_advice_map(module.advice_map().clone())
+        .with_submodules(submodules)
         .with_symbols(symbols);
 
         self.modules.push(link_module);
@@ -417,19 +419,54 @@ impl Linker {
         LinkerError::Cycle { nodes: nodes.into() }
     }
 
-    /// Links `modules` using the current state of the linker.
+    /// Links the modules in `roots` and `support` using the current state of the linker.
     ///
-    /// Returns the module indices corresponding to the provided modules, which are expected to
-    /// provide the public interface of the final assembled artifact.
+    /// Returns the module indices corresponding to the public interface of the final assembled
+    /// artifact. This is determined by tracing the modules reachable from `roots` via their public
+    /// submodules. Any module in the graph reachable this way is returned as part of the public
+    /// interface.
     pub fn link(
         &mut self,
-        modules: impl IntoIterator<Item = Box<Module>>,
+        roots: impl IntoIterator<Item = Box<Module>>,
+        support: impl IntoIterator<Item = Box<Module>>,
     ) -> Result<Vec<ModuleIndex>, LinkerError> {
-        let module_indices = self.link_modules(modules)?;
+        use alloc::collections::BTreeSet;
+
+        let root_indices = self.link_modules(roots)?;
+        let _support_indices = self.link_modules(support)?;
 
         self.link_and_rewrite()?;
 
-        Ok(module_indices)
+        let mut reachable = BTreeSet::new();
+
+        for root in root_indices {
+            reachable.extend(self.reachable_from_root(root));
+        }
+
+        Ok(reachable.into_iter().collect())
+    }
+
+    fn reachable_from_root(&self, root: ModuleIndex) -> Vec<ModuleIndex> {
+        use alloc::collections::BTreeSet;
+
+        let mut reachable = BTreeSet::new();
+        let mut stack = vec![root];
+
+        while let Some(module_index) = stack.pop() {
+            if !reachable.insert(module_index) {
+                continue;
+            }
+
+            let module = &self.modules[module_index.as_usize()];
+            for submodule in module.submodules().filter(|decl| decl.visibility.is_public()) {
+                let child_path = module.path().join(&submodule.name);
+                if let Some(child_index) = self.find_module_index(child_path.as_path()) {
+                    stack.push(child_index);
+                }
+            }
+        }
+
+        reachable.into_iter().collect()
     }
 
     /// Links `kernel` using the current state of the linker.
@@ -993,22 +1030,21 @@ mod tests {
                 "#;
 
         let userspace = context
-            .parse_module_with_path(
-                "userspace",
-                source_file!(
-                    &context,
-                    r#"
+            .parse_module(source_file!(
+                &context,
+                r#"
+                    namespace userspace
+
                     pub proc helper
                         push.1
                     end
                     "#
-                ),
-            )
+            ))
             .expect("userspace module parsing must succeed");
 
         let mut linker = Linker::new(source_manager);
         let userspace_index = linker
-            .link([userspace])
+            .link([userspace], None)
             .expect("userspace module must link successfully")
             .into_iter()
             .next()

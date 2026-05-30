@@ -515,22 +515,21 @@ fn preassembled_dependency_bypasses_registry_semver_collision() {
     let tempdir = TempDir::new().unwrap();
     let mut context = TestContext::new();
 
-    let registered_module = Module::parse(
-        "deps::predep",
-        ModuleKind::Library,
-        source_file!(
+    let registered_module = context
+        .parse_module(source_file!(
             context,
-            r#"pub proc leaf
+            r#"namespace deps::predep
+
+pub proc leaf
     push.1
     drop
 end
 "#
-        ),
-        context.source_manager(),
-    )
-    .unwrap();
-    let registered =
-        context.assemble_library("predep", Some("1.0.0"), [registered_module]).unwrap();
+        ))
+        .unwrap();
+    let registered = context
+        .assemble_library("predep", Some("1.0.0"), registered_module, None::<Box<Module>>)
+        .unwrap();
     let registered_digest = registered.digest();
     context.registry_mut().add_package(registered.into());
 

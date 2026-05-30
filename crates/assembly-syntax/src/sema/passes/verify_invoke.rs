@@ -23,12 +23,12 @@ pub(crate) enum LocalInvokeTarget {
     Other(SourceSpan),
 }
 
-impl From<&Export> for LocalInvokeTarget {
-    fn from(item: &Export) -> Self {
+impl From<&Item> for LocalInvokeTarget {
+    fn from(item: &Item) -> Self {
         match item {
-            Export::Procedure(_) => Self::Procedure,
-            Export::Alias(alias) => Self::Alias(alias.target().clone()),
-            Export::Constant(_) | Export::Type(_) => Self::Other(item.span()),
+            Item::Procedure(_) => Self::Procedure,
+            Item::Alias(alias) => Self::Alias(alias.target().clone()),
+            Item::Constant(_) | Item::Type(_) => Self::Other(item.span()),
         }
     }
 }

@@ -85,7 +85,7 @@ pub trait Visit<T = ()> {
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         visit_module(self, module)
     }
-    fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
+    fn visit_export(&mut self, export: &Item) -> ControlFlow<T> {
         visit_export(self, export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
@@ -182,7 +182,7 @@ where
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         (**self).visit_module(module)
     }
-    fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
+    fn visit_export(&mut self, export: &Item) -> ControlFlow<T> {
         (**self).visit_export(export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
@@ -283,15 +283,15 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_export<V, T>(visitor: &mut V, export: &Export) -> ControlFlow<T>
+pub fn visit_export<V, T>(visitor: &mut V, export: &Item) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
     match export {
-        Export::Procedure(item) => visitor.visit_procedure(item),
-        Export::Constant(item) => visitor.visit_constant(item),
-        Export::Type(item) => visitor.visit_type_decl(item),
-        Export::Alias(item) => visitor.visit_alias(item),
+        Item::Procedure(item) => visitor.visit_procedure(item),
+        Item::Constant(item) => visitor.visit_constant(item),
+        Item::Type(item) => visitor.visit_type_decl(item),
+        Item::Alias(item) => visitor.visit_alias(item),
     }
 }
 
@@ -660,7 +660,7 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         visit_mut_module(self, module)
     }
-    fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
+    fn visit_mut_export(&mut self, export: &mut Item) -> ControlFlow<T> {
         visit_mut_export(self, export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
@@ -757,7 +757,7 @@ where
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         (**self).visit_mut_module(module)
     }
-    fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
+    fn visit_mut_export(&mut self, export: &mut Item) -> ControlFlow<T> {
         (**self).visit_mut_export(export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
@@ -858,15 +858,15 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_mut_export<V, T>(visitor: &mut V, export: &mut Export) -> ControlFlow<T>
+pub fn visit_mut_export<V, T>(visitor: &mut V, export: &mut Item) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
     match export {
-        Export::Procedure(item) => visitor.visit_mut_procedure(item),
-        Export::Constant(item) => visitor.visit_mut_constant(item),
-        Export::Type(item) => visitor.visit_mut_type_decl(item),
-        Export::Alias(item) => visitor.visit_mut_alias(item),
+        Item::Procedure(item) => visitor.visit_mut_procedure(item),
+        Item::Constant(item) => visitor.visit_mut_constant(item),
+        Item::Type(item) => visitor.visit_mut_type_decl(item),
+        Item::Alias(item) => visitor.visit_mut_alias(item),
     }
 }
 

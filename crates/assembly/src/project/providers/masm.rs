@@ -74,9 +74,9 @@ fn parse_module_file(
     module_path: &MasmPath,
     context: &TargetAssemblyContext<'_>,
 ) -> Result<Box<Module>, Report> {
-    let mut parser = ModuleParser::new(kind);
+    let mut parser = ModuleParser::new(Some(kind));
     parser.set_warnings_as_errors(context.warnings_as_errors);
-    parser.parse_file(module_path, source, context.source_manager.clone())
+    parser.parse_file(Some(module_path), source, context.source_manager.clone())
 }
 
 fn read_support_module_paths(

@@ -81,6 +81,24 @@ ast_node!(
     "doc comment"
 );
 ast_node!(
+    #[doc = "A `namespace` item."]
+    Namespace,
+    SyntaxKind::Namespace,
+    "namespace declaration"
+);
+ast_node!(
+    #[doc = "An `extern package` item."]
+    ExternPackage,
+    SyntaxKind::ExternPackage,
+    "extern package declaration"
+);
+ast_node!(
+    #[doc = "A `mod` or `pub mod` item."]
+    Submodule,
+    SyntaxKind::Submodule,
+    "submodule declaration"
+);
+ast_node!(
     #[doc = "A `use` item."]
     Import,
     SyntaxKind::Import,
@@ -194,6 +212,9 @@ ast_node!(
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {
     Doc(Doc),
+    Namespace(Namespace),
+    ExternPackage(ExternPackage),
+    Submodule(Submodule),
     Import(Import),
     Constant(Constant),
     TypeDecl(TypeDecl),
@@ -207,6 +228,9 @@ impl Item {
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         match node.kind() {
             SyntaxKind::Doc => Doc::cast(node).map(Self::Doc),
+            SyntaxKind::Namespace => Namespace::cast(node).map(Self::Namespace),
+            SyntaxKind::ExternPackage => ExternPackage::cast(node).map(Self::ExternPackage),
+            SyntaxKind::Submodule => Submodule::cast(node).map(Self::Submodule),
             SyntaxKind::Import => Import::cast(node).map(Self::Import),
             SyntaxKind::Constant => Constant::cast(node).map(Self::Constant),
             SyntaxKind::TypeDecl => TypeDecl::cast(node).map(Self::TypeDecl),
@@ -246,6 +270,32 @@ impl SourceFile {
     /// Returns the top-level items in source order.
     pub fn items(&self) -> impl Iterator<Item = Item> + '_ {
         self.syntax.children().filter_map(Item::cast)
+    }
+}
+
+impl Namespace {
+    /// Returns the declared namespace path.
+    pub fn path(&self) -> Option<Path> {
+        support::child(&self.syntax)
+    }
+}
+
+impl ExternPackage {
+    /// Returns the package identifier token following `extern package`.
+    pub fn package_token(&self) -> Option<SyntaxToken> {
+        token_after_keyword(&self.syntax, "package")
+    }
+}
+
+impl Submodule {
+    /// Returns the optional visibility marker for this submodule declaration.
+    pub fn visibility(&self) -> Option<Visibility> {
+        support::child(&self.syntax)
+    }
+
+    /// Returns the declared child-module name token.
+    pub fn name_token(&self) -> Option<SyntaxToken> {
+        token_after_keyword(&self.syntax, "mod")
     }
 }
 

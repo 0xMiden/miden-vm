@@ -7,7 +7,10 @@ use core::fmt;
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::ast::{SymbolResolutionError, constants::ConstEvalError};
+use crate::{
+    Path,
+    ast::{SymbolResolutionError, constants::ConstEvalError},
+};
 
 /// The high-level error type for all semantic analysis errors.
 ///
@@ -48,6 +51,27 @@ pub struct SyntaxWarning {
 /// Represents an error that occurs during semantic analysis
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum SemanticAnalysisError {
+    #[error(
+        "conflicting module namespace specification: expected '{expected}', but got '{actual}'"
+    )]
+    NamespaceConflict {
+        expected: Arc<Path>,
+        actual: Arc<Path>,
+        #[label("this declaration conflicts with the expected namespace")]
+        span: SourceSpan,
+    },
+    #[error("invalid namespace '{path}': {err}")]
+    InvalidNamespacePath { path: Arc<Path>, err: crate::PathError },
+    #[error("invalid namespace declaration: must be placed before any other item in the module")]
+    MisplacedNamespaceDeclaration {
+        #[label("make sure this declaration precedes other declarations in this module")]
+        span: SourceSpan,
+    },
+    #[error("invalid module: no namespace declared or explicitly provided")]
+    #[diagnostic(help(
+        "ensure you declare this module's namespace with a `namespace` declaration, or by providing it to the parser"
+    ))]
+    MissingNamespace,
     #[error("invalid program: no entrypoint defined")]
     #[diagnostic(help(
         "ensure you define an entrypoint somewhere in the body with `begin`..`end`"
@@ -103,6 +127,14 @@ pub enum SemanticAnalysisError {
     #[error("symbol conflict: found duplicate definitions of the same name")]
     #[diagnostic()]
     SymbolConflict {
+        #[label("conflict occurs here")]
+        span: SourceSpan,
+        #[label("previously defined here")]
+        prev_span: SourceSpan,
+    },
+    #[error("dependency conflict: found duplicate 'extern package' declarations")]
+    #[diagnostic()]
+    ExternPackageConflict {
         #[label("conflict occurs here")]
         span: SourceSpan,
         #[label("previously defined here")]

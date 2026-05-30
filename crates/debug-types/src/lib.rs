@@ -188,6 +188,24 @@ impl<'a> From<&'a std::path::Path> for Uri {
     }
 }
 
+#[cfg(feature = "std")]
+impl From<std::path::PathBuf> for Uri {
+    fn from(path: std::path::PathBuf) -> Self {
+        use alloc::string::ToString;
+
+        Self::from(path.display().to_string())
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<Arc<std::path::Path>> for Uri {
+    fn from(path: Arc<std::path::Path>) -> Self {
+        use alloc::string::ToString;
+
+        Self::from(path.display().to_string())
+    }
+}
+
 impl Serializable for Uri {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.as_str().write_into(target);

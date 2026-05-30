@@ -26,7 +26,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{AttributeSet, PathBuf};
+use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -274,6 +274,7 @@ impl serde::Serialize for PackageManifest {
         let mut serializer = serializer.serialize_struct("PackageManifest", 2)?;
         serializer.serialize_field("exports", &PackageExports(&self.exports))?;
         serializer.serialize_field("dependencies", &self.dependencies)?;
+        serializer.serialize_field("entrypoint", &self.entrypoint)?;
         serializer.end()
     }
 }
@@ -289,6 +290,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
         enum Field {
             Exports,
             Dependencies,
+            Entrypoint,
         }
 
         struct PackageManifestVisitor;
@@ -310,8 +312,17 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let dependencies = seq
                     .next_element::<Vec<Dependency>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let entrypoint =
+                    seq.next_element::<PathBuf>().map(|p| p.map(Arc::<ast::Path>::from))?;
                 PackageManifest::new(exports)
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .and_then(|manifest| {
+                        if let Some(entrypoint) = entrypoint {
+                            manifest.with_entrypoint(entrypoint)
+                        } else {
+                            Ok(manifest)
+                        }
+                    })
                     .map_err(serde::de::Error::custom)
             }
 
@@ -321,6 +332,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
             {
                 let mut exports = None;
                 let mut dependencies = None;
+                let mut entrypoint = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::Exports => {
@@ -335,6 +347,13 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                             }
                             dependencies = Some(map.next_value::<Vec<Dependency>>()?);
                         },
+                        Field::Entrypoint => {
+                            if entrypoint.is_some() {
+                                return Err(serde::de::Error::duplicate_field("entrypoint"));
+                            }
+                            entrypoint =
+                                Some(map.next_value::<PathBuf>().map(Arc::<ast::Path>::from)?);
+                        },
                     }
                 }
                 let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
@@ -342,13 +361,20 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                     dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
                 PackageManifest::new(exports)
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .and_then(|manifest| {
+                        if let Some(entrypoint) = entrypoint {
+                            manifest.with_entrypoint(entrypoint)
+                        } else {
+                            Ok(manifest)
+                        }
+                    })
                     .map_err(serde::de::Error::custom)
             }
         }
 
         deserializer.deserialize_struct(
             "PackageManifest",
-            &["exports", "dependencies"],
+            &["exports", "dependencies", "entrypoint"],
             PackageManifestVisitor,
         )
     }
@@ -366,6 +392,14 @@ impl Serializable for PackageManifest {
         target.write_usize(self.num_dependencies());
         for dep in self.dependencies() {
             dep.write_into(target);
+        }
+
+        // Write entrypoint
+        if let Some(entrypoint) = self.entrypoint.as_ref() {
+            target.write_bool(true);
+            entrypoint.write_into(target);
+        } else {
+            target.write_bool(false);
         }
     }
 }
@@ -391,8 +425,22 @@ impl PackageManifest {
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
         PackageManifest::new(exports)
             .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
     }
 }
@@ -406,8 +454,22 @@ impl Deserializable for PackageManifest {
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
         PackageManifest::new(exports)
             .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
     }
 }
@@ -903,6 +965,7 @@ mod tests {
         let mut manifest = PackageManifest {
             exports: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
         let dependency = build_dependency();
 
@@ -960,6 +1023,7 @@ mod tests {
         let manifest = PackageManifest {
             exports,
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();
@@ -990,6 +1054,7 @@ mod tests {
         let manifest = PackageManifest {
             exports,
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();
@@ -1018,6 +1083,7 @@ mod tests {
         let manifest = PackageManifest {
             exports,
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();

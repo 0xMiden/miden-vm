@@ -76,7 +76,7 @@ impl SymbolTable for &crate::ast::Module {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
     fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
-        use crate::ast::{AliasTarget, Export};
+        use crate::ast::{AliasTarget, Item};
 
         let mut items = Vec::with_capacity(self.items.len());
 
@@ -86,7 +86,7 @@ impl SymbolTable for &crate::ast::Module {
             let span = name.span();
             let name = name.into_inner();
 
-            if let Export::Alias(alias) = item {
+            if let Item::Alias(alias) = item {
                 match alias.target() {
                     AliasTarget::MastRoot(root) => {
                         items.push(LocalSymbol::Import {
@@ -616,7 +616,7 @@ mod tests {
             crate::ast::Module::new(crate::ast::ModuleKind::Library, Path::new("::m::huge"));
 
         for i in 0..=ItemIndex::MAX_ITEMS {
-            module.items.push(crate::ast::Export::Constant(crate::ast::Constant::new(
+            module.items.push(crate::ast::Item::Constant(crate::ast::Constant::new(
                 SourceSpan::UNKNOWN,
                 crate::ast::Visibility::Private,
                 Ident::new(format!("A{i}")).expect("valid identifier"),

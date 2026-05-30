@@ -7,8 +7,8 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    self as masm, Assembler, Parse, ParseOptions, Report,
-    ast::{self, ModuleKind},
+    self as masm, Assembler, Report,
+    ast::{self, Module},
     debuginfo::DefaultSourceManager,
     diagnostics::IntoDiagnostic,
 };
@@ -155,16 +155,10 @@ type DocPayload = (Option<String>, Vec<(String, Option<String>)>);
 
 /// Parse MASM source using AST-parsing
 fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload> {
-    let path = masm::Path::new(label);
-    let module = file_path
-        .parse_with_options(
-            Arc::new(DefaultSourceManager::default()),
-            ParseOptions {
-                kind: ModuleKind::Library,
-                warnings_as_errors: false,
-                path: Some(path.into()),
-            },
-        )
+    let source = fs::read_to_string(file_path)?;
+    let source = format!("namespace {}\n\n{}", masm::Path::new(label), source);
+    let module = Module::parser(None)
+        .parse_str(None, &source, Arc::new(DefaultSourceManager::default()))
         .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Extract module documentation
@@ -174,18 +168,18 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
     let mut procedures = Vec::new();
     for (index, name) in module.exported() {
         match &module[index] {
-            ast::Export::Procedure(proc) => {
+            ast::Item::Procedure(proc) => {
                 let docs = proc.docs().map(|d| d.to_string());
                 procedures.push((name.name().to_string(), docs));
             },
-            ast::Export::Alias(alias) => {
+            ast::Item::Alias(alias) => {
                 // Ignore undocumented aliases, as they may not be procedure items
                 if let Some(docs) = alias.docs() {
                     procedures.push((name.name().to_string(), Some(docs.to_string())));
                 }
             },
             // TODO: Update doc format to allow for other item types
-            ast::Export::Constant(_) | ast::Export::Type(_) => {},
+            ast::Item::Constant(_) | ast::Item::Type(_) => {},
         }
     }
 

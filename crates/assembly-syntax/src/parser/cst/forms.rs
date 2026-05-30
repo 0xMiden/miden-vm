@@ -8,7 +8,9 @@ use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{
         AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
-        Import as CstImport, Item as CstItem, Procedure as CstProcedure, TypeDecl as CstTypeDecl,
+        ExternPackage as CstExternPackage, Import as CstImport, Item as CstItem,
+        Namespace as CstNamespace, Procedure as CstProcedure, Submodule as CstSubmodule,
+        TypeDecl as CstTypeDecl,
     },
     rowan,
 };
@@ -47,6 +49,18 @@ pub(super) fn lower_source_file(
 
         match &items[index] {
             CstItem::Doc(_) => unreachable!("doc items handled above"),
+            CstItem::Namespace(namespace) => {
+                forms.push(lower_namespace(context, namespace)?);
+                index += 1;
+            },
+            CstItem::ExternPackage(extern_package) => {
+                forms.push(lower_extern_package(context, extern_package)?);
+                index += 1;
+            },
+            CstItem::Submodule(submodule) => {
+                forms.push(lower_submodule(context, submodule)?);
+                index += 1;
+            },
             CstItem::Import(import) => {
                 forms.push(lower_import(context, import)?);
                 index += 1;
@@ -185,6 +199,50 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     text.push_str(raw);
     text.push('\n');
     text
+}
+
+/// Lowers a `namespace` declaration.
+fn lower_namespace(
+    context: &mut LoweringContext<'_>,
+    namespace: &CstNamespace,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(namespace.syntax());
+    let path = namespace.path().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a namespace path".to_string(),
+    })?;
+    Ok(ast::Form::Namespace(context.lower_path(&path)?))
+}
+
+/// Lowers an `extern package` declaration.
+fn lower_extern_package(
+    context: &mut LoweringContext<'_>,
+    extern_package: &CstExternPackage,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(extern_package.syntax());
+    let package = extern_package.package_token().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a package name".to_string(),
+    })?;
+    Ok(ast::Form::ExternPackage(context.lower_ident_or_string_token(&package)?))
+}
+
+/// Lowers a `mod` or `pub mod` declaration.
+fn lower_submodule(
+    context: &mut LoweringContext<'_>,
+    submodule: &CstSubmodule,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(submodule.syntax());
+    let visibility = context.lower_visibility(submodule.visibility());
+    let name = submodule.name_token().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a submodule name".to_string(),
+    })?;
+
+    Ok(ast::Form::Submodule(ast::SubmoduleDecl {
+        visibility,
+        name: context.lower_ident_token(&name)?,
+    }))
 }
 
 /// Lowers a `use` form into the alias representation.
@@ -629,6 +687,9 @@ fn lower_import_digest_target(
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {
     match item {
         CstItem::Doc(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::Namespace(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::ExternPackage(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::Submodule(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Import(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Constant(node) => context.parse().span_for_node(node.syntax()),
         CstItem::TypeDecl(node) => context.parse().span_for_node(node.syntax()),

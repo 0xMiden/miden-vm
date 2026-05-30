@@ -100,6 +100,10 @@ impl Package {
     ) -> Result<Self, ManifestValidationError> {
         let manifest = PackageManifest::new(exports)?.with_dependencies(dependencies)?;
 
+        if manifest.entrypoint().is_some() && !kind.is_executable() {
+            return Err(ManifestValidationError::NonExecutableEntrypoint);
+        }
+
         // Validate that procedure export node provenance is valid when present
         for export in manifest.exports() {
             if let Some(proc) = export.as_procedure()
@@ -236,6 +240,12 @@ impl Package {
     /// Returns true if this package was produced specifically for a kernel target
     pub fn is_kernel(&self) -> bool {
         matches!(self.kind, TargetType::Kernel)
+    }
+
+    /// Returns the absolute path of the entrypoint procedure for this package, if it is executable
+    #[inline]
+    pub fn entrypoint(&self) -> Option<Arc<Path>> {
+        self.manifest.entrypoint()
     }
 
     /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
@@ -405,8 +415,10 @@ impl Package {
                 self.kind
             )));
         }
-        let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(entrypoint) = self.get_procedure_node_by_path(&main_path) {
+        let entrypoint = self.manifest.entrypoint().unwrap_or_else(|| {
+            MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into()
+        });
+        if let Some(entrypoint) = self.get_procedure_node_by_path(&entrypoint) {
             let mast_forest = self.mast.clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_package()?, kernel_dependency) {
@@ -424,7 +436,7 @@ impl Package {
             }
         } else {
             Err(Report::msg(format!(
-                "malformed executable package: no procedure root for '{main_path}'"
+                "malformed executable package: no procedure root for '{entrypoint}'"
             )))
         }
     }
@@ -541,54 +553,42 @@ impl Package {
     /// [miden_core::mast::MastForest] is left untouched, so the resulting package may still contain
     /// nodes in the forest which are now unused.
     pub fn make_executable(&self, entrypoint: &QualifiedProcedureName) -> Result<Self, Report> {
-        use miden_assembly_syntax::{Path as MasmPath, ast as masm};
+        use miden_assembly_syntax::Path as MasmPath;
         if !self.is_library() {
             return Err(Report::msg("expected library but got an executable"));
         }
 
-        let entrypoint_namespace = entrypoint.namespace().to_absolute().map_err(Report::msg)?;
-        let module = self
-            .module_infos()
-            .find(|info| info.path() == entrypoint_namespace.as_ref())
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "invalid entrypoint: library does not contain a module named '{}'",
-                    entrypoint.namespace()
-                ))
-            })?;
-        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
-            let digest = procedure.digest;
-            let node_id = procedure
-                 .source_root_id()
-                 .or_else(|| self.mast.find_procedure_root(digest))
-                 .ok_or_else(|| {
-                     Report::msg(
-                         "invalid entrypoint: malformed library - procedure exported, but digest has \
-                          no node in the forest",
-                     )
-                 })?;
-
-            let exec_path: Arc<MasmPath> =
-                MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
-            let mut package = Self::create(
-                self.name.clone(),
-                self.version.clone(),
-                TargetType::Executable,
-                self.mast.clone(),
-                vec![PackageExport::Procedure(ProcedureExport::new(
-                    exec_path,
-                    Some(node_id),
-                    digest,
-                    None,
-                ))],
-                self.manifest.dependencies.clone(),
-            )
-            .map_err(Report::msg)?;
-
-            package.description = self.description.clone();
-            package.sections = self.sections.clone();
-
-            Ok(package)
+        let entrypoint =
+            Arc::<MasmPath>::from(entrypoint.to_absolute().map_err(Report::msg)?.to_path_buf());
+        if let Some(export) = self.manifest.get_export(&entrypoint) {
+            match export {
+                PackageExport::Constant(_) | PackageExport::Type(_) => {
+                    let actual = match export {
+                        PackageExport::Constant(_) => "constant",
+                        PackageExport::Type(_) => "type",
+                        _ => unreachable!(),
+                    };
+                    Err(Report::msg(ManifestValidationError::UnexpectedExportType {
+                        path: entrypoint,
+                        expected: "procedure",
+                        actual,
+                    }))
+                },
+                PackageExport::Procedure(procedure) => {
+                    let mut package = Self::create(
+                        self.name.clone(),
+                        self.version.clone(),
+                        TargetType::Executable,
+                        self.mast.clone(),
+                        [PackageExport::Procedure(procedure.clone())],
+                        self.manifest.dependencies.clone(),
+                    )
+                    .map_err(Report::msg)?;
+                    package.description = self.description.clone();
+                    package.sections = self.sections.clone();
+                    Ok(package)
+                },
+            }
         } else {
             Err(Report::msg(format!(
                 "invalid entrypoint: library does not export '{entrypoint}'"
@@ -758,6 +758,7 @@ mod tests {
         package.manifest = PackageManifest {
             exports: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let error = package

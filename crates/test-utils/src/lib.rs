@@ -14,7 +14,7 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -426,7 +426,10 @@ impl Test {
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
     pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
-        use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
+        use miden_assembly::{
+            Assembler,
+            ast::{Module, ModuleKind},
+        };
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         let cache_key = self.compile_cache_key();
@@ -447,6 +450,8 @@ impl Test {
         }
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+            let mut parser = Module::parser(Some(ModuleKind::Kernel));
+            let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
             let kernel_lib = Assembler::new(self.source_manager.clone())
                 .assemble_kernel("kernel", kernel)
                 .map(Arc::<Package>::from)
@@ -461,12 +466,9 @@ impl Test {
         };
 
         let mut assembler =
-            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
-                let module = source
-                    .parse_with_options(
-                        self.source_manager.clone(),
-                        ParseOptions::new(ModuleKind::Library, path.clone()),
-                    )
+            self.add_modules.iter().fold(assembler, |mut assembler, (_path, source)| {
+                let module = Module::parser(None)
+                    .parse_str(None, source, self.source_manager.clone())
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler

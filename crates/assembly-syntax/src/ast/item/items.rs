@@ -7,12 +7,12 @@ use crate::{
     debuginfo::{SourceSpan, Span, Spanned},
 };
 
-// EXPORT
+// MODULE ITEM
 // ================================================================================================
 
 /// Represents an exportable item from a [crate::ast::Module].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Export {
+pub enum Item {
     /// A locally-defined procedure.
     Procedure(Procedure),
     /// A locally-defined constant.
@@ -23,7 +23,7 @@ pub enum Export {
     Alias(Alias),
 }
 
-impl Export {
+impl Item {
     /// Adds documentation to this export.
     pub fn with_docs(self, docs: Option<Span<String>>) -> Self {
         match self {
@@ -125,7 +125,7 @@ impl Export {
     }
 }
 
-impl crate::prettier::PrettyPrint for Export {
+impl crate::prettier::PrettyPrint for Item {
     fn render(&self) -> crate::prettier::Document {
         match self {
             Self::Procedure(item) => item.render(),
@@ -136,7 +136,7 @@ impl crate::prettier::PrettyPrint for Export {
     }
 }
 
-impl Spanned for Export {
+impl Spanned for Item {
     fn span(&self) -> SourceSpan {
         match self {
             Self::Procedure(spanned) => spanned.span(),

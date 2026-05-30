@@ -44,6 +44,9 @@ pub struct PackageManifest {
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
     pub(super) dependencies: Vec<Dependency>,
+    /// The (optional) entrypoint function for this package, if it is executable
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
+    pub(super) entrypoint: Option<Arc<Path>>,
 }
 
 #[derive(Debug, Error)]
@@ -52,6 +55,21 @@ pub enum ManifestValidationError {
     DuplicateExport(Arc<Path>),
     #[error("duplicate dependency '{0}' in package manifest")]
     DuplicateDependency(PackageId),
+    #[error("multiple entrypoint procedures found: '{duplicate}' conflicts with '{original}'")]
+    DuplicateEntrypoint {
+        original: Arc<Path>,
+        duplicate: Arc<Path>,
+    },
+    #[error("invalid {expected} path '{path}': found export of type {actual}")]
+    UnexpectedExportType {
+        path: Arc<Path>,
+        expected: &'static str,
+        actual: &'static str,
+    },
+    #[error("found an executable entrypoint in a package declared with non-executable type")]
+    NonExecutableEntrypoint,
+    #[error("invalid entrypoint path '{path}': no export with that path was found in the manifest")]
+    MissingEntrypoint { path: Arc<Path> },
     #[error(
         "package manifest declares export for procedure '{path}', but no procedure root with its digest was found in the MAST"
     )]
@@ -75,13 +93,25 @@ impl PackageManifest {
         let mut manifest = Self {
             exports: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
         let mut has_procedures = false;
         for mut export in exports {
-            if export.is_procedure() {
-                has_procedures = true;
-            }
             normalize_export(&mut export)?;
+            if let Some(proc) = export.as_procedure() {
+                has_procedures = true;
+                // The presence of `begin` in any exported module is automatically made the
+                // entrypoint for that package.
+                if proc.path.last().is_some_and(|name| name == ast::ProcedureName::MAIN_PROC_NAME) {
+                    if let Some(original) = manifest.entrypoint.clone() {
+                        return Err(ManifestValidationError::DuplicateEntrypoint {
+                            original,
+                            duplicate: proc.path.clone(),
+                        });
+                    }
+                    manifest.entrypoint = Some(proc.path.clone());
+                }
+            }
             manifest.add_export(export)?;
         }
 
@@ -90,6 +120,60 @@ impl PackageManifest {
         }
 
         Ok(manifest)
+    }
+
+    /// Specify the entrypoint procedure for this package.
+    ///
+    /// This will return an error if an entrypoint already exists, or if `entrypoint` is not
+    /// found in the set of exported procedures declared in this manifest.
+    pub fn with_entrypoint(
+        mut self,
+        entrypoint: Arc<Path>,
+    ) -> Result<Self, ManifestValidationError> {
+        self.set_entrypoint(entrypoint)?;
+
+        Ok(self)
+    }
+
+    /// Override the entrypoint procedure for this package.
+    ///
+    /// This will return an error if an entrypoint already exists, or if `entrypoint` is not
+    /// found in the set of exported procedures declared in this manifest.
+    pub(super) fn set_entrypoint(
+        &mut self,
+        entrypoint: Arc<Path>,
+    ) -> Result<(), ManifestValidationError> {
+        if let Some(original) = self.entrypoint.clone() {
+            if original == entrypoint {
+                Ok(())
+            } else {
+                Err(ManifestValidationError::DuplicateEntrypoint {
+                    original,
+                    duplicate: entrypoint,
+                })
+            }
+        } else if let Some(export) = self.get_export(&entrypoint) {
+            match export {
+                PackageExport::Procedure(proc) => {
+                    self.entrypoint = Some(proc.path.clone());
+                    Ok(())
+                },
+                other @ (PackageExport::Constant(_) | PackageExport::Type(_)) => {
+                    let actual = match other {
+                        PackageExport::Constant(_) => "constant",
+                        PackageExport::Type(_) => "type",
+                        _ => unreachable!(),
+                    };
+                    Err(ManifestValidationError::UnexpectedExportType {
+                        path: entrypoint,
+                        expected: "procedure",
+                        actual,
+                    })
+                },
+            }
+        } else {
+            Err(ManifestValidationError::MissingEntrypoint { path: entrypoint })
+        }
     }
 
     /// Extend this manifest with the provided dependencies
@@ -154,6 +238,11 @@ impl PackageManifest {
             PackageExport::Procedure(_) => None,
             PackageExport::Constant(_) | PackageExport::Type(_) => None,
         })
+    }
+
+    /// Get the entrypoint specified in the package manifest, if one is specified
+    pub fn entrypoint(&self) -> Option<Arc<Path>> {
+        self.entrypoint.clone()
     }
 
     fn add_export(&mut self, export: PackageExport) -> Result<(), ManifestValidationError> {

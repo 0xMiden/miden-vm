@@ -285,6 +285,21 @@ impl<'input> Parser<'input> {
             return;
         }
 
+        if self.at_keyword("namespace") {
+            self.parse_namespace();
+            return;
+        }
+
+        if self.at_prefixed_keyword("extern", "package") {
+            self.parse_extern_package();
+            return;
+        }
+
+        if self.at_keyword("mod") || self.at_prefixed_keyword("pub", "mod") {
+            self.parse_submodule();
+            return;
+        }
+
         if self.at_kind(SyntaxKind::At)
             || self.at_keyword("proc")
             || self.at_prefixed_keyword("pub", "proc")
@@ -331,6 +346,50 @@ impl<'input> Parser<'input> {
     fn parse_doc_form(&mut self) {
         self.start_node(SyntaxKind::Doc);
         self.bump();
+        self.finish_node();
+    }
+
+    fn parse_namespace(&mut self) {
+        self.start_node(SyntaxKind::Namespace);
+        self.expect_keyword("namespace", "expected `namespace` in namespace declaration");
+        self.bump_regular_trivia();
+        self.parse_path_with_message("expected a namespace path");
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_extern_package(&mut self) {
+        self.start_node(SyntaxKind::ExternPackage);
+        self.expect_keyword("extern", "expected `extern` in extern package declaration");
+        self.expect_keyword("package", "expected `package` in extern package declaration");
+        self.bump_regular_trivia();
+
+        if self.at_package_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected a package name");
+        }
+
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_submodule(&mut self) {
+        self.start_node(SyntaxKind::Submodule);
+
+        if self.at_keyword("pub") {
+            self.parse_visibility();
+        }
+
+        self.expect_keyword("mod", "expected `mod` in submodule declaration");
+        self.bump_regular_trivia();
+        if self.at_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected a submodule name");
+        }
+
+        self.parse_line_tail();
         self.finish_node();
     }
 
@@ -450,6 +509,10 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_path(&mut self) {
+        self.parse_path_with_message("expected an import path");
+    }
+
+    fn parse_path_with_message(&mut self, message: &'static str) {
         self.start_node(SyntaxKind::Path);
         if self.at_kind(SyntaxKind::ColonColon) {
             self.bump();
@@ -459,7 +522,7 @@ impl<'input> Parser<'input> {
         if self.at_name_like() {
             self.bump();
         } else {
-            self.error_here("expected an import path");
+            self.error_here(message);
             self.finish_node();
             return;
         }
@@ -1094,13 +1157,19 @@ impl<'input> Parser<'input> {
             || token.kind() == SyntaxKind::At
             || (token.kind() == SyntaxKind::Ident
                 && match token.text() {
-                    "adv_map" | "begin" | "const" | "enum" | "proc" | "type" | "use" => true,
+                    "adv_map" | "begin" | "const" | "enum" | "mod" | "namespace" | "proc"
+                    | "type" | "use" => true,
+                    "extern" => matches!(
+                        self.next_relevant_top_level_token(index + 1)
+                            .and_then(|next| self.tokens.get(next)),
+                        Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
+                    ),
                     "pub" => matches!(
                         self.next_relevant_top_level_token(index + 1)
                             .and_then(|next| self.tokens.get(next)),
                         Some(next)
                             if next.kind() == SyntaxKind::Ident
-                                && matches!(next.text(), "const" | "enum" | "proc" | "type" | "use")
+                                && matches!(next.text(), "const" | "enum" | "mod" | "proc" | "type" | "use")
                     ),
                     _ => false,
                 })
@@ -1188,6 +1257,10 @@ impl<'input> Parser<'input> {
             self.current_kind(),
             Some(SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent)
         )
+    }
+
+    fn at_package_name_like(&self) -> bool {
+        self.at_name_like() || self.at_kind(SyntaxKind::QuotedString)
     }
 
     fn at_keyword(&self, keyword: &str) -> bool {
@@ -1418,7 +1491,10 @@ fn is_reserved_block_keyword(text: &str) -> bool {
             | "else"
             | "end"
             | "enum"
+            | "extern"
             | "if"
+            | "mod"
+            | "namespace"
             | "proc"
             | "pub"
             | "repeat"
@@ -1492,6 +1568,12 @@ mod tests {
         &[
             "",
             "# leading comment\n#! module docs\npub const X = [0x01, 0x02]\n",
+            "\
+namespace std::math
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod u64
+",
             "\
 @inline
 # keep standalone
@@ -1656,6 +1738,10 @@ adv_map TABLE = [
     fn parses_top_level_forms_and_nested_structured_ops() {
         let source = "\
 #! docs
+namespace std::math
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod u64
 pub use foo::bar -> baz
 pub const X = 1
 pub type FeltAlias = felt
@@ -1685,6 +1771,10 @@ end
             child_kinds,
             vec![
                 SyntaxKind::Doc,
+                SyntaxKind::Namespace,
+                SyntaxKind::ExternPackage,
+                SyntaxKind::Submodule,
+                SyntaxKind::Submodule,
                 SyntaxKind::Import,
                 SyntaxKind::Constant,
                 SyntaxKind::TypeDecl,
@@ -1702,6 +1792,10 @@ end
     #[test]
     fn exposes_typed_wrappers_for_structured_top_level_forms() {
         let source = "\
+namespace app::accounts
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod api
 pub use miden::core::mem -> memory
 pub const EVENT = event(\"miden::event\")
 pub enum Bool : u8 {
@@ -1716,9 +1810,39 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 8);
 
-        let Item::Import(import) = &items[0] else {
+        let Item::Namespace(namespace) = &items[0] else {
+            panic!("expected namespace, got {:?}", items[0]);
+        };
+        assert_eq!(
+            namespace
+                .path()
+                .expect("namespace path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["app", "accounts"]
+        );
+
+        let Item::ExternPackage(package) = &items[1] else {
+            panic!("expected extern package, got {:?}", items[1]);
+        };
+        assert_eq!(package.package_token().expect("package name").text(), "\"miden/base@0.1.0\"");
+
+        let Item::Submodule(submodule) = &items[2] else {
+            panic!("expected submodule, got {:?}", items[2]);
+        };
+        assert!(submodule.visibility().is_none());
+        assert_eq!(submodule.name_token().expect("submodule name").text(), "internal");
+
+        let Item::Submodule(submodule) = &items[3] else {
+            panic!("expected public submodule, got {:?}", items[3]);
+        };
+        assert!(submodule.visibility().is_some());
+        assert_eq!(submodule.name_token().expect("submodule name").text(), "api");
+
+        let Item::Import(import) = &items[4] else {
             panic!("expected import, got {:?}", items[0]);
         };
         assert_eq!(
@@ -1732,7 +1856,7 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
         );
         assert_eq!(import.alias_token().expect("alias").text(), "memory");
 
-        let Item::Constant(constant) = &items[1] else {
+        let Item::Constant(constant) = &items[5] else {
             panic!("expected constant, got {:?}", items[1]);
         };
         assert_eq!(constant.name_token().expect("constant name").text(), "EVENT");
@@ -1746,7 +1870,7 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
             vec!["event", "(", "\"miden::event\"", ")"]
         );
 
-        let Item::TypeDecl(type_decl) = &items[2] else {
+        let Item::TypeDecl(type_decl) = &items[6] else {
             panic!("expected type declaration, got {:?}", items[2]);
         };
         assert_eq!(type_decl.keyword_token().expect("type keyword").text(), "enum");
@@ -1756,7 +1880,7 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
             "expected enum declaration to expose a structured type body"
         );
 
-        let Item::AdviceMap(advice_map) = &items[3] else {
+        let Item::AdviceMap(advice_map) = &items[7] else {
             panic!("expected advice map, got {:?}", items[3]);
         };
         assert_eq!(advice_map.name_token().expect("advice map name").text(), "TABLE");

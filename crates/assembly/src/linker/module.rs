@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
     Path,
     ast::{
         AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
-        SymbolResolution, SymbolResolutionError, SymbolTable,
+        SubmoduleDecl, SymbolResolution, SymbolResolutionError, SymbolTable,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
@@ -46,6 +46,8 @@ pub struct LinkModule {
     ///
     /// For modules loaded from MAST, only exported symbols will be available here.
     symbols: Vec<Symbol>,
+    /// The set of submodules declared by this module.
+    submodules: Vec<SubmoduleDecl>,
     /// An optional [AdviceMap] to merge into the advice data of the assembled artifact.
     ///
     /// This is only relevant for modules parsed from MASM sources.
@@ -68,6 +70,7 @@ impl LinkModule {
             source,
             path,
             symbols: Vec::default(),
+            submodules: Vec::default(),
             advice_map: None,
         }
     }
@@ -79,6 +82,13 @@ impl LinkModule {
     #[inline]
     pub fn with_symbols(mut self, symbols: Vec<Symbol>) -> Self {
         self.symbols = symbols;
+        self
+    }
+
+    /// Load the submodules declared by this module.
+    #[inline]
+    pub fn with_submodules(mut self, submodules: Vec<SubmoduleDecl>) -> Self {
+        self.submodules = submodules;
         self
     }
 
@@ -161,6 +171,12 @@ impl LinkModule {
     #[inline]
     pub fn symbols(&self) -> core::slice::Iter<'_, Symbol> {
         self.symbols.iter()
+    }
+
+    /// Get an iterator over the submodules declared by this module.
+    #[inline]
+    pub fn submodules(&self) -> core::slice::Iter<'_, SubmoduleDecl> {
+        self.submodules.iter()
     }
 
     /// Get the number of symbols defined in this module.

@@ -8,7 +8,7 @@ use miden_debug_types::{Span, Spanned};
 use crate::{
     MAX_REPEAT_COUNT, Path,
     ast::{
-        Constant, ConstantExpr, Export, Module, ModuleKind, TypeAlias, TypeExpr, Visibility, types,
+        Constant, ConstantExpr, Item, Module, ModuleKind, TypeAlias, TypeExpr, Visibility, types,
     },
     diagnostics::reporting::PrintDiagnostic,
     sema::SemanticAnalysisError,
@@ -21,7 +21,7 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
         .iter()
         .find(|item| item.name().as_str() == name && item.visibility().is_public())
     {
-        Some(Export::Constant(constant)) => constant,
+        Some(Item::Constant(constant)) => constant,
         Some(item) => panic!("expected exported constant named {name}, found {item:?}"),
         None => panic!("expected exported constant named {name}"),
     }
@@ -115,7 +115,7 @@ fn assert_cross_kind_conflict(first: DefinitionKind, second: DefinitionKind) {
     let context = SyntaxTestContext::default();
     let source = format!("{}\n{}\n", first.declaration(symbol), second.declaration(symbol));
     let message = format!("expected symbol conflict during analysis ({first:?} then {second:?})");
-    let error = context.parse_module(source).expect_err(&message);
+    let error = context.parse_module(&source).expect_err(&message);
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
     if error.downcast_ref::<crate::sema::SyntaxError>().is_none() {
         panic!("expected SyntaxError ({first:?} then {second:?}), got: {rendered}");
@@ -211,7 +211,7 @@ fn repeat_count_too_large_rejected_in_analysis() {
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = format!("begin repeat.{repeat_count} nop end end");
     let error = context
-        .parse_program(source)
+        .parse_program(&source)
         .expect_err("expected repeat count above limit to be rejected during analysis");
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
@@ -222,7 +222,7 @@ fn repeat_count_at_limit_allowed_in_analysis() {
     let context = SyntaxTestContext::default();
     let source = format!("begin repeat.{MAX_REPEAT_COUNT} nop end end");
     let _module = context
-        .parse_program(source)
+        .parse_program(&source)
         .expect("expected repeat count at limit to be accepted during analysis");
 }
 
@@ -242,7 +242,7 @@ fn repeat_count_constant_at_limit_allowed_in_analysis() {
     let source =
         format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end");
     let _module = context
-        .parse_program(source)
+        .parse_program(&source)
         .expect("expected repeat count at limit from constant to be accepted during analysis");
 }
 
@@ -252,7 +252,7 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source =
         format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end");
-    let error = context.parse_program(source).expect_err(
+    let error = context.parse_program(&source).expect_err(
         "expected repeat count above limit from constant to be rejected during analysis",
     );
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
@@ -263,9 +263,10 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
 fn exported_constant_with_private_local_dependency_is_fully_evaluated_in_analysis() {
     let context = SyntaxTestContext::default();
     let module = context
-        .parse_module_with_path(
-            "wallet::memory",
+        .parse_module(
             "
+namespace wallet::memory
+
 const ACCOUNT_ID_AND_NONCE_OFFSET = 4
 pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 ",
@@ -338,7 +339,7 @@ fn name_map_rebuilds_after_mutable_item_rename() {
         .expect("first insertion should succeed");
 
     for item in module.items_mut() {
-        let Export::Constant(constant) = item else {
+        let Item::Constant(constant) = item else {
             continue;
         };
         constant.name = ident_with_name("dup");
@@ -359,7 +360,7 @@ fn name_map_drops_old_name_after_mutable_item_rename() {
         .expect("first insertion should succeed");
 
     for item in module.items_mut() {
-        let Export::Constant(constant) = item else {
+        let Item::Constant(constant) = item else {
             continue;
         };
         constant.name = ident_with_name("new");

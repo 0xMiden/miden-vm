@@ -18,13 +18,13 @@ use proptest::prelude::*;
 use smallvec::SmallVec;
 
 use super::{
-    Alias, Constant, DocString, EnumType, Export, FunctionType, GlobalItemIndex, ItemIndex,
-    LocalSymbolResolver, Path, Procedure, ProcedureName, QualifiedProcedureName, SymbolResolution,
-    SymbolResolutionError, TypeAlias, TypeDecl, TypeResolver, Variant,
+    Alias, Constant, Declaration, DocString, EnumType, FunctionType, Item, ItemIndex, Path,
+    Procedure, ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant,
+    Visibility,
 };
 use crate::{
     PathBuf,
-    ast::{self, Ident, types},
+    ast::{self, Ident},
     parser::ModuleParser,
     sema::{LimitKind, SemanticAnalysisError},
 };
@@ -150,8 +150,32 @@ pub struct Module {
     path: PathBuf,
     /// The kind of module this represents.
     kind: ModuleKind,
+    /// The namespace given by a `namespace` declaration, if present in this module
+    ///
+    /// The `namespace` declaration is optional when the module being parsed is part of a project
+    /// controlled by a `miden-project.toml` manifest. If present at the same time as a controlling
+    /// manifest, the namespace must agree with what is specified in `miden-project.toml`.
+    ///
+    /// The `namespace` declaration is only permitted in the root module of a project - if present
+    /// in any submodules, an error will be raised.
+    pub(crate) namespace_decl: Option<Span<Arc<Path>>>,
+    /// The set of external package requirements declared in this module.
+    ///
+    /// The `extern package "<package-id>"` declaration is optional when either the module being
+    /// parsed is part of a project controlled by a `miden-project.toml` manifest; or when the
+    /// module and its submodules has no external dependencies. If present at the same time as a
+    /// controlling manifest, the set of `extern package` declarations must agree exactly with what
+    /// is specified in `miden-project.toml`.
+    ///
+    /// The `extern package` declaration is only permitted in the root module of a project - if
+    /// present in any submodules, an error will be raised.
+    pub(crate) extern_packages: Vec<Ident>,
+    /// The set of submodule declarations in this module, i.e. `mod foo` or `pub mod foo`
+    ///
+    /// If specified, it is expected that a module with the given
+    pub(crate) submodules: Vec<SubmoduleDecl>,
     /// The items (defined or re-exported) in the module body.
-    pub(crate) items: Vec<Export>,
+    pub(crate) items: Vec<Item>,
     /// Maps export name to its position in `items`, for O(log n) conflict checks.
     /// Must be kept in sync with `items` via `push_export`.
     name_map: BTreeMap<String, usize>,
@@ -184,6 +208,9 @@ impl Module {
             docs: None,
             path,
             kind,
+            namespace_decl: None,
+            extern_packages: Default::default(),
+            submodules: Default::default(),
             items: Default::default(),
             name_map: BTreeMap::new(),
             name_map_dirty: false,
@@ -231,6 +258,14 @@ impl Module {
         self.span = span;
     }
 
+    /// Registers that `namespace` was explicitly declared for this module via `namespace <ns>`
+    ///
+    /// This will also override the module path to ensure they agree
+    pub(crate) fn set_declared_namespace(&mut self, namespace: Span<Arc<Path>>) {
+        self.path = namespace.to_path_buf();
+        self.namespace_decl = Some(namespace);
+    }
+
     fn ensure_item_capacity(&self, span: SourceSpan) -> Result<(), SemanticAnalysisError> {
         if self.items.len() >= ItemIndex::MAX_ITEMS {
             return Err(SemanticAnalysisError::LimitExceeded { span, kind: LimitKind::Items });
@@ -239,7 +274,7 @@ impl Module {
         Ok(())
     }
 
-    pub(crate) fn push_export(&mut self, item: Export) -> Result<(), SemanticAnalysisError> {
+    pub(crate) fn push_export(&mut self, item: Item) -> Result<(), SemanticAnalysisError> {
         self.ensure_item_capacity(item.span())?;
         self.ensure_name_map_current();
         let idx = self.items.len();
@@ -263,34 +298,88 @@ impl Module {
 
     /// Takes all items from this module, clearing the name index.
     /// Used by the linker to consume module contents.
-    pub fn take_items(&mut self) -> Vec<Export> {
+    pub fn take_items(&mut self) -> Vec<Item> {
         self.name_map.clear();
         self.name_map_dirty = false;
         core::mem::take(&mut self.items)
     }
 
+    /// Get the [Declaration] corresponding to `name` in this module, if `name` has been declared
+    pub(crate) fn get_declaration<'module>(
+        &'module self,
+        name: &str,
+    ) -> Option<Declaration<'module>> {
+        self.get_item(name)
+            .map(Declaration::Item)
+            .or_else(|| self.get_submodule_declaration(name).map(Declaration::Submodule))
+    }
+
+    #[inline]
+    pub(crate) fn get_item(&self, name: &str) -> Option<&Item> {
+        self.name_map.get(name).copied().map(|idx| &self.items[idx])
+    }
+
+    #[inline]
+    pub(crate) fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
+        self.submodules.iter().find(|decl| decl.name.as_str() == name)
+    }
+
+    /// Declares that this module has a submodule named `name`, with the specified `visibility`.
+    ///
+    /// This returns an error if it conflicts with a previous declaration (either a previous
+    /// submodule declaration, or an imported symbol name).
+    pub fn declare_submodule(
+        &mut self,
+        name: Ident,
+        visibility: Visibility,
+    ) -> Result<(), SemanticAnalysisError> {
+        if let Some(decl) = self.get_declaration(name.as_str()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: name.span(),
+                prev_span: decl.span(),
+            });
+        }
+        self.submodules.push(SubmoduleDecl { visibility, name });
+        Ok(())
+    }
+
+    /// Declares that this module has a dependency on the library target of an external package
+    /// named `name`.
+    ///
+    /// This returns an error if it conflicts with a previous `extern package` declaration.
+    pub fn declare_extern_package(&mut self, name: Ident) -> Result<(), SemanticAnalysisError> {
+        if let Some(prev) = self.extern_packages.iter().find(|ep| *ep == &name) {
+            return Err(SemanticAnalysisError::ExternPackageConflict {
+                span: name.span(),
+                prev_span: prev.span(),
+            });
+        }
+        self.extern_packages.push(name);
+        Ok(())
+    }
+
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
-        if let Some(&idx) = self.name_map.get(constant.name.as_str()) {
+        if let Some(prev) = self.get_declaration(constant.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: constant.span,
-                prev_span: self.items[idx].span(),
+                prev_span: prev.span(),
             });
         }
-        self.push_export(Export::Constant(constant))
+        self.push_export(Item::Constant(constant))
     }
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
-        if let Some(&idx) = self.name_map.get(ty.name().as_str()) {
+        if let Some(prev) = self.get_declaration(ty.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: ty.span(),
-                prev_span: self.items[idx].span(),
+                prev_span: prev.span(),
             });
         }
-        self.push_export(Export::Type(ty.into()))
+        self.push_export(Item::Type(ty.into()))
     }
 
     /// Define a new enum type `ty` with `visibility`
@@ -313,16 +402,17 @@ impl Module {
 
         let export = ty.clone();
         let (alias, variants) = ty.into_parts();
-        if let Some(&idx) = self.name_map.get(alias.name.as_str()) {
+
+        if let Some(prev) = self.get_declaration(alias.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: alias.span(),
-                prev_span: self.items[idx].span(),
+                prev_span: prev.span(),
             });
         }
 
         // We only define constants for C-like enums
         if !is_c_like {
-            self.push_export(Export::Type(export.into()))?;
+            self.push_export(Item::Type(export.into()))?;
             return Ok(());
         }
         // Check that no variant name conflicts with the enum type name itself
@@ -375,7 +465,7 @@ impl Module {
             })?;
         }
 
-        self.push_export(Export::Type(export.into()))?;
+        self.push_export(Item::Type(export.into()))?;
 
         Ok(())
     }
@@ -388,13 +478,13 @@ impl Module {
         _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
-        if let Some(&idx) = self.name_map.get(procedure.name().as_str()) {
+        if let Some(prev) = self.get_declaration(procedure.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: procedure.span(),
-                prev_span: self.items[idx].name().span(),
+                prev_span: prev.span(),
             });
         }
-        self.push_export(Export::Procedure(procedure))
+        self.push_export(Item::Procedure(procedure))
     }
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
@@ -408,13 +498,13 @@ impl Module {
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        if let Some(&idx) = self.name_map.get(item.name().as_str()) {
+        if let Some(prev) = self.get_declaration(item.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: item.name().span(),
-                prev_span: self.items[idx].name().span(),
+                prev_span: prev.span(),
             });
         }
-        self.push_export(Export::Alias(item))
+        self.push_export(Item::Alias(item))
     }
 }
 
@@ -423,17 +513,33 @@ impl Module {
     /// Parse a [Module], `name`, of the given [ModuleKind], from `source_file`.
     pub fn parse(
         name: impl AsRef<Path>,
-        kind: ModuleKind,
         source_file: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<Self>, Report> {
         let name = name.as_ref();
+        let kind = if name.is_kernel_path() {
+            Some(ModuleKind::Kernel)
+        } else {
+            None
+        };
         let mut parser = Self::parser(kind);
-        parser.parse(name, source_file, source_manager)
+        parser.parse(Some(name), source_file, source_manager)
+    }
+
+    pub fn parse_kernel(
+        source_file: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Box<Self>, Report> {
+        let mut parser = Self::parser(Some(ModuleKind::Kernel));
+        parser.parse(Some(Path::KERNEL), source_file, source_manager)
     }
 
     /// Get a [ModuleParser] for parsing modules of the provided [ModuleKind]
-    pub fn parser(kind: ModuleKind) -> ModuleParser {
+    ///
+    /// If `kind` is `None`, then the module kind is inferred as either library or executable based
+    /// on whether the module contains a `begin` block. If you wish to parse a kernel module, it
+    /// must be done explicitly.
+    pub fn parser(kind: Option<ModuleKind>) -> ModuleParser {
         ModuleParser::new(kind)
     }
 }
@@ -502,7 +608,7 @@ impl Module {
     /// Returns true if this module has an entrypoint procedure defined,
     /// i.e. a `begin`..`end` block.
     pub fn has_entrypoint(&self) -> bool {
-        self.index_of(Export::is_main).is_some()
+        self.index_of(Item::is_main).is_some()
     }
 
     /// Returns a reference to the advice map derived from this module
@@ -513,7 +619,7 @@ impl Module {
     /// Get an iterator over the constants defined in this module.
     pub fn constants(&self) -> impl Iterator<Item = &Constant> + '_ {
         self.items.iter().filter_map(|item| match item {
-            Export::Constant(item) => Some(item),
+            Item::Constant(item) => Some(item),
             _ => None,
         })
     }
@@ -522,7 +628,7 @@ impl Module {
     pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut Constant> + '_ {
         self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
-            Export::Constant(item) => Some(item),
+            Item::Constant(item) => Some(item),
             _ => None,
         })
     }
@@ -530,7 +636,7 @@ impl Module {
     /// Get an iterator over the types defined in this module.
     pub fn types(&self) -> impl Iterator<Item = &TypeDecl> + '_ {
         self.items.iter().filter_map(|item| match item {
-            Export::Type(item) => Some(item),
+            Item::Type(item) => Some(item),
             _ => None,
         })
     }
@@ -539,7 +645,7 @@ impl Module {
     pub fn types_mut(&mut self) -> impl Iterator<Item = &mut TypeDecl> + '_ {
         self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
-            Export::Type(item) => Some(item),
+            Item::Type(item) => Some(item),
             _ => None,
         })
     }
@@ -547,7 +653,7 @@ impl Module {
     /// Get an iterator over the procedures defined in this module.
     pub fn procedures(&self) -> impl Iterator<Item = &Procedure> + '_ {
         self.items.iter().filter_map(|item| match item {
-            Export::Procedure(item) => Some(item),
+            Item::Procedure(item) => Some(item),
             _ => None,
         })
     }
@@ -556,7 +662,7 @@ impl Module {
     pub fn procedures_mut(&mut self) -> impl Iterator<Item = &mut Procedure> + '_ {
         self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
-            Export::Procedure(item) => Some(item),
+            Item::Procedure(item) => Some(item),
             _ => None,
         })
     }
@@ -564,7 +670,7 @@ impl Module {
     /// Get an iterator over the item aliases in this module.
     pub fn aliases(&self) -> impl Iterator<Item = &Alias> + '_ {
         self.items.iter().filter_map(|item| match item {
-            Export::Alias(item) => Some(item),
+            Item::Alias(item) => Some(item),
             _ => None,
         })
     }
@@ -573,18 +679,32 @@ impl Module {
     pub fn aliases_mut(&mut self) -> impl Iterator<Item = &mut Alias> + '_ {
         self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
-            Export::Alias(item) => Some(item),
+            Item::Alias(item) => Some(item),
             _ => None,
         })
     }
 
+    /// Get a reference to the set of package identifiers that this module declares a dependency on
+    ///
+    /// This is only reflects explicit `extern package` declarations of the root project module,
+    /// not actual requirements, i.e. it is not authoritative.
+    pub fn required_packages(&self) -> &[Ident] {
+        &self.extern_packages
+    }
+
+    /// Get a reference to the set of submodule declarations in this module.
+    pub fn submodules(&self) -> &[SubmoduleDecl] {
+        &self.submodules
+    }
+
     /// Get a reference to the items stored in this module
-    pub fn items(&self) -> &[Export] {
+    pub fn items(&self) -> &[Item] {
         &self.items
     }
+
     /// Returns a mutable iterator over the items in this module.
     /// Note: does not expose `Vec` directly to preserve the `name_map` invariant.
-    pub fn items_mut(&mut self) -> impl Iterator<Item = &mut Export> {
+    pub fn items_mut(&mut self) -> impl Iterator<Item = &mut Item> {
         self.name_map_dirty = true;
         self.items.iter_mut()
     }
@@ -614,9 +734,9 @@ impl Module {
 
     /// Get the item at `index` in this module's item table.
     ///
-    /// The item returned may be either a locally-defined item, or a re-exported item. See [Export]
+    /// The item returned may be either a locally-defined item, or a re-exported item. See [Item]
     /// for details.
-    pub fn get(&self, index: ItemIndex) -> Option<&Export> {
+    pub fn get(&self, index: ItemIndex) -> Option<&Item> {
         self.items.get(index.as_usize())
     }
 
@@ -624,7 +744,7 @@ impl Module {
     /// `predicate`.
     pub fn index_of<F>(&self, predicate: F) -> Option<ItemIndex>
     where
-        F: FnMut(&Export) -> bool,
+        F: FnMut(&Item) -> bool,
     {
         self.items.iter().position(predicate).map(ItemIndex::new)
     }
@@ -637,39 +757,10 @@ impl Module {
         self.index_of(|item| item.name() == name && item.visibility().is_public())
     }
 
-    /// Resolves `name` to an item within the local scope of this module
-    pub fn resolve(
-        &self,
-        name: Span<&str>,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<SymbolResolution, SymbolResolutionError> {
-        let resolver = self.resolver(source_manager)?;
-        resolver.resolve(name)
-    }
-
-    /// Resolves `path` to an item within the local scope of this module
-    pub fn resolve_path(
-        &self,
-        path: Span<&Path>,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<SymbolResolution, SymbolResolutionError> {
-        let resolver = self.resolver(source_manager)?;
-        resolver.resolve_path(path)
-    }
-
-    /// Construct a search structure that can resolve procedure names local to this module
-    #[inline]
-    pub fn resolver(
-        &self,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<LocalSymbolResolver, SymbolResolutionError> {
-        LocalSymbolResolver::new(self, source_manager)
-    }
-
     /// Resolves `module_name` to an [Alias] within the context of this module
     pub fn get_import(&self, module_name: &str) -> Option<&Alias> {
         self.items.iter().find_map(|item| match item {
-            Export::Alias(item) if item.name().as_str() == module_name => Some(item),
+            Item::Alias(item) if item.name().as_str() == module_name => Some(item),
             _ => None,
         })
     }
@@ -678,32 +769,14 @@ impl Module {
     pub fn get_import_mut(&mut self, module_name: &str) -> Option<&mut Alias> {
         self.name_map_dirty = true;
         self.items.iter_mut().find_map(|item| match item {
-            Export::Alias(item) if item.name().as_str() == module_name => Some(item),
+            Item::Alias(item) if item.name().as_str() == module_name => Some(item),
             _ => None,
         })
-    }
-
-    /// Resolves a user-expressed type, `ty`, to a concrete type
-    pub fn resolve_type(
-        &self,
-        ty: &ast::TypeExpr,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Option<types::Type>, SymbolResolutionError> {
-        let mut type_resolver = self.type_resolver(source_manager)?;
-        type_resolver.resolve(ty)
-    }
-
-    /// Get a type resolver for this module
-    pub fn type_resolver(
-        &self,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<impl TypeResolver<SymbolResolutionError> + '_, SymbolResolutionError> {
-        ModuleTypeResolver::new(self, source_manager)
     }
 }
 
 impl core::ops::Index<ItemIndex> for Module {
-    type Output = Export;
+    type Output = Item;
 
     #[inline]
     fn index(&self, index: ItemIndex) -> &Self::Output {
@@ -742,7 +815,10 @@ impl fmt::Debug for Module {
         f.debug_struct("Module")
             .field("docs", &self.docs)
             .field("path", &self.path)
+            .field("namespace_decl", &self.namespace_decl)
             .field("kind", &self.kind)
+            .field("extern_packages", &self.extern_packages)
+            .field("submodules", &self.submodules)
             .field("items", &self.items)
             .finish()
     }
@@ -775,6 +851,49 @@ impl crate::prettier::PrettyPrint for Module {
             .map(|docstring| docstring.render() + nl())
             .unwrap_or(Document::Empty);
 
+        doc += nl()
+            + const_text("namespace")
+            + const_text(" ")
+            + display(self.path().to_relative())
+            + nl();
+
+        for (i, package) in self.extern_packages.iter().enumerate() {
+            if i > 0 {
+                doc += nl();
+            }
+            doc += const_text("extern package") + const_text(" ");
+            if Ident::requires_quoting(package) {
+                doc += text(format!("\"{package}\""));
+            } else {
+                doc += package.render();
+            }
+        }
+
+        if !self.extern_packages.is_empty() {
+            doc += nl();
+        }
+
+        for (i, submodule) in self.submodules.iter().enumerate() {
+            if i > 0 {
+                doc += nl();
+            }
+            if submodule.visibility.is_public() {
+                doc += const_text("pub mod");
+            } else {
+                doc += const_text("mod");
+            }
+            doc += const_text(" ");
+            if Ident::requires_quoting(&submodule.name) {
+                doc += text(format!("\"{}\"", submodule.name));
+            } else {
+                doc += submodule.name.render();
+            }
+        }
+
+        if !self.submodules.is_empty() {
+            doc += nl();
+        }
+
         for (item_index, item) in self.items.iter().enumerate() {
             if item_index > 0 {
                 doc += nl();
@@ -783,61 +902,5 @@ impl crate::prettier::PrettyPrint for Module {
         }
 
         doc
-    }
-}
-
-struct ModuleTypeResolver<'a> {
-    module: &'a Module,
-    resolver: LocalSymbolResolver,
-}
-
-impl<'a> ModuleTypeResolver<'a> {
-    pub fn new(
-        module: &'a Module,
-        source_manager: Arc<dyn SourceManager>,
-    ) -> Result<Self, SymbolResolutionError> {
-        let resolver = module.resolver(source_manager)?;
-        Ok(Self { module, resolver })
-    }
-}
-
-impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
-    fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.resolver.source_manager()
-    }
-    fn get_type(
-        &mut self,
-        context: SourceSpan,
-        _gid: GlobalItemIndex,
-    ) -> Result<types::Type, SymbolResolutionError> {
-        Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
-    }
-    fn get_local_type(
-        &mut self,
-        context: SourceSpan,
-        id: ItemIndex,
-    ) -> Result<Option<types::Type>, SymbolResolutionError> {
-        match &self.module[id] {
-            Export::Type(ty) => match ty {
-                TypeDecl::Alias(ty) => self.resolve(&ty.ty),
-                TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
-            },
-            item => Err(self.resolve_local_failed(SymbolResolutionError::invalid_symbol_type(
-                context,
-                "type",
-                item.span(),
-                &self.resolver.source_manager(),
-            ))),
-        }
-    }
-    #[inline(always)]
-    fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
-        err
-    }
-    fn resolve_type_ref(
-        &mut self,
-        path: Span<&Path>,
-    ) -> Result<SymbolResolution, SymbolResolutionError> {
-        self.resolver.resolve_path(path)
     }
 }

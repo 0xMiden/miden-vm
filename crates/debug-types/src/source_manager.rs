@@ -152,6 +152,17 @@ pub trait SourceManager: Debug {
         let content = SourceContent::new(lang, name.clone(), content);
         self.load_from_raw_parts(name, content)
     }
+    /// Load the given `content` into this [SourceManager] with a name generated from the hash of
+    /// its contents
+    fn load_anonymous(&self, lang: SourceLanguage, content: String) -> Arc<SourceFile> {
+        use alloc::format;
+
+        use miden_crypto::hash::sha2::Sha256;
+        let digest = Sha256::hash(content.as_bytes());
+        let name = Uri::new(format!("memory://{}", String::from(digest)));
+        let content = SourceContent::new(lang, name.clone(), content);
+        self.load_from_raw_parts(name, content)
+    }
     /// Load content into this [SourceManager] from raw [SourceFile] components
     fn load_from_raw_parts(&self, name: Uri, content: SourceContent) -> Arc<SourceFile>;
     /// Update the source file corresponding to `id` after being notified of a change event.

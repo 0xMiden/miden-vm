@@ -354,10 +354,7 @@ where
                 assembler.assemble_kernel_module(package_id.clone(), root)?
             },
             _ if target.ty.is_library() => {
-                let mut modules = Vec::with_capacity(support.len() + 1);
-                modules.push(root);
-                modules.extend(support);
-                assembler.assemble_library_modules(package_id.clone(), modules, target.ty)?
+                assembler.assemble_library_modules(package_id.clone(), root, support, target.ty)?
             },
             _ => unreachable!("non-exhaustive target type"),
         };

@@ -180,6 +180,9 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
 fn render_item(item: &Item, indent: usize, config: &Config) -> String {
     match item {
         Item::Doc(doc) => render_doc(doc, indent),
+        Item::Namespace(namespace) => render_line_form(namespace.syntax(), indent),
+        Item::ExternPackage(package) => render_line_form(package.syntax(), indent),
+        Item::Submodule(submodule) => render_line_form(submodule.syntax(), indent),
         Item::Import(import) => render_import(import, indent, config),
         Item::Constant(constant) => render_value_declaration(constant.syntax(), indent, config),
         Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent, config),
@@ -1623,16 +1626,18 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace => false,
         LBracket | Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
         Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
-        Tombstone | Error | SourceFile | Doc | Import | Constant | TypeDecl | AdviceMap
-        | BeginBlock | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp
-        | DoWhileOp | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline
-        | Comment | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString
-        | At | Bang | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow
-        | Semicolon | Slash | SlashSlash | Star => match previous_kind {
-            Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
-            DotDot => false,
-            Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
-            _ => true,
+        Tombstone | Error | SourceFile | Doc | Namespace | ExternPackage | Submodule | Import
+        | Constant | TypeDecl | AdviceMap | BeginBlock | Procedure | Attribute | Visibility
+        | Signature | Block | IfOp | WhileOp | DoWhileOp | RepeatOp | Instruction | Path | Expr
+        | TypeBody | Whitespace | Newline | Comment | DocComment | Ident | SpecialIdent
+        | Number | QuotedIdent | QuotedString | At | Bang | Colon | Equal | LBrace | LBracket
+        | LParen | Minus | Plus | RArrow | Semicolon | Slash | SlashSlash | Star => {
+            match previous_kind {
+                Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
+                DotDot => false,
+                Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
+                _ => true,
+            }
         },
     }
 }
@@ -1824,6 +1829,36 @@ const X =
 
         assert_eq!(formatted, expected);
         assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn formats_namespace_extern_package_and_submodule_forms() {
+        let source = "\
+namespace   app::main # root
+extern   package   \"miden:base@1.0.0\"
+pub   mod   lib
+mod   private
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+namespace app::main # root
+extern package \"miden:base@1.0.0\"
+pub mod lib
+mod private
+";
+
+        assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
