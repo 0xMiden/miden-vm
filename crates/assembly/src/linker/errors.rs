@@ -64,6 +64,17 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         path: Arc<Path>,
     },
+    #[error("private submodule '{module}'")]
+    #[diagnostic(help("only public submodules can be imported from another module"))]
+    PrivateSubmodule {
+        #[label("this submodule is private")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        module: Arc<Path>,
+        #[related]
+        defined: Option<RelatedLabel>,
+    },
     #[error(
         "module '{path}' is not declared by its parent module '{parent}' as `mod {name}` or `pub mod {name}`"
     )]
@@ -87,6 +98,29 @@ pub enum LinkerError {
         module: Arc<Path>,
         name: String,
         kind: &'static str,
+    },
+    #[error("modules cannot be re-exported with `pub use`: '{path}'")]
+    #[diagnostic(help(
+        "declare the module with `pub mod` in its parent module instead of re-exporting it"
+    ))]
+    ModuleReExport {
+        #[label("this `pub use` resolves to a module")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
+    #[error("import target '{path}' cannot be resolved through import '{alias}'")]
+    #[diagnostic(help(
+        "imports are resolved independently; use the original global path instead of another import alias"
+    ))]
+    ImportTargetUsesImport {
+        #[label("this import target starts with another import alias")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+        alias: String,
     },
     #[error("undefined item '{path}'")]
     #[diagnostic(help(

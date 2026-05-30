@@ -9,7 +9,13 @@ use miden_assembly_syntax::{
 };
 use miden_core::Word;
 
-use crate::{GlobalItemIndex, LinkerError, ModuleIndex, linker::Linker};
+use crate::{
+    GlobalItemIndex, LinkerError, ModuleIndex,
+    linker::{
+        Linker,
+        namespaces::{ResolvedImports, ResolvedUse},
+    },
+};
 
 // HELPER STRUCTS
 // ================================================================================================
@@ -55,12 +61,23 @@ impl SymbolResolutionContext {
 pub struct SymbolResolver<'a> {
     /// The graph containing already-compiled and partially-resolved modules.
     graph: &'a Linker,
+    /// Precomputed import resolutions for the current link pass.
+    imports: Option<&'a ResolvedImports>,
 }
 
 impl<'a> SymbolResolver<'a> {
     /// Create a new [SymbolResolver] for the provided [Linker].
     pub fn new(graph: &'a Linker) -> Self {
-        Self { graph }
+        Self { graph, imports: None }
+    }
+
+    /// Create a new [SymbolResolver] with precomputed import resolutions.
+    pub(crate) fn with_resolved_imports(graph: &'a Linker, imports: &'a ResolvedImports) -> Self {
+        Self { graph, imports: Some(imports) }
+    }
+
+    pub(crate) fn resolved_import(&self, owner: ModuleIndex, alias: &str) -> Option<ResolvedUse> {
+        self.imports.and_then(|imports| imports.get(owner, alias))
     }
 
     #[inline(always)]
@@ -264,6 +281,20 @@ impl<'a> SymbolResolver<'a> {
         context: &SymbolResolutionContext,
         alias: &Alias,
     ) -> Result<SymbolResolution, LinkerError> {
+        if let Some(resolved) = self.resolved_import(context.module, alias.name().as_str()) {
+            let span = alias.target().span();
+            return Ok(match resolved {
+                ResolvedUse::Module(id) => SymbolResolution::Module {
+                    id,
+                    path: Span::new(span, Arc::from(self.module_path(id))),
+                },
+                ResolvedUse::Item(gid) => SymbolResolution::Exact {
+                    gid,
+                    path: Span::new(span, self.item_path(gid)),
+                },
+            });
+        }
+
         match alias.target() {
             target @ AliasTarget::MastRoot(mast_root) => {
                 log::debug!(target: "name-resolver::alias", "resolving alias target {target}");
@@ -314,10 +345,12 @@ impl<'a> SymbolResolver<'a> {
         let span = path.span();
         let mut path = path.into_inner();
         let mut context = context.clone();
+        let mut force_global = false;
         loop {
             log::debug!(target: "name-resolver::expand", "expanding path '{path}' (absolute = {})", path.is_absolute());
-            if path.is_absolute() {
-                // An absolute path does not reference any aliases in the current module, but may
+            if path.is_absolute() || force_global {
+                force_global = false;
+                // A global path does not reference any aliases in the current module, but may
                 // refer to aliases in any of its non-root components.
                 //
                 // However, if the root component of the path is not a known module, then we have to
@@ -452,17 +485,8 @@ impl<'a> SymbolResolver<'a> {
                 let (imported_symbol, subpath) = path.split_first().expect("multi-component path");
                 if ignored_imports.contains(imported_symbol) {
                     log::trace!(target: "name-resolver::expand", "skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead");
-                    let path = path.to_absolute().map_err(|_| {
-                        LinkerError::SymbolResolution(Box::new(
-                            SymbolResolutionError::UndefinedSymbol { span, source_file: None },
-                        ))
-                    })?;
-                    break self.expand_path_from(
-                        origin_module,
-                        &context,
-                        Span::new(span, path.as_ref()),
-                        ignored_imports,
-                    );
+                    force_global = true;
+                    continue;
                 }
                 match self
                     .resolve_local_with_index(context.module, Span::new(span, imported_symbol))
@@ -534,19 +558,10 @@ impl<'a> SymbolResolver<'a> {
                             SymbolResolutionError::UndefinedSymbol { .. }
                         ) =>
                     {
-                        // Try to expand the path by treating it as an absolute path
-                        let absolute = path.to_absolute().map_err(|_| {
-                            LinkerError::SymbolResolution(Box::new(
-                                SymbolResolutionError::UndefinedSymbol { span, source_file: None },
-                            ))
-                        })?;
+                        // Try to expand the path by treating it as a global path
                         log::trace!(target: "name-resolver::expand", "no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead");
-                        break self.expand_path_from(
-                            origin_module,
-                            &context,
-                            Span::new(span, absolute.as_ref()),
-                            ignored_imports,
-                        );
+                        force_global = true;
+                        continue;
                     },
                     Err(err) => {
                         log::trace!(target: "name-resolver::expand", "expansion failed due to symbol resolution error");

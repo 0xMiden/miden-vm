@@ -10,7 +10,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
-use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
+use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver, namespaces::ResolvedUse};
 
 /// The source from which a [LinkModule] was derived.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -260,7 +260,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                         let name = alias.name().clone();
                         let name = Span::new(name.span(), name.into_inner());
                         if let Some(resolved) = resolved.get() {
-                            let path = self.resolver.item_path(gid);
+                            let path = self.resolver.item_path(resolved);
                             let span = name.span();
                             LocalSymbol::Import {
                                 name,
@@ -269,6 +269,21 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                                     path: Span::new(span, path),
                                 }),
                             }
+                        } else if let Some(resolved) =
+                            self.resolver.resolved_import(self.module.id(), alias.name().as_str())
+                        {
+                            let span = name.span();
+                            let resolution = match resolved {
+                                ResolvedUse::Module(id) => SymbolResolution::Module {
+                                    id,
+                                    path: Span::new(span, Arc::from(self.resolver.module_path(id))),
+                                },
+                                ResolvedUse::Item(gid) => SymbolResolution::Exact {
+                                    gid,
+                                    path: Span::new(span, self.resolver.item_path(gid)),
+                                },
+                            };
+                            LocalSymbol::Import { name, resolution: Ok(resolution) }
                         } else {
                             match alias.target() {
                                 AliasTarget::MastRoot(root) => LocalSymbol::Import {

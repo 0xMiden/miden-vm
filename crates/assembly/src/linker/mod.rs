@@ -73,7 +73,7 @@ pub use self::{
 };
 use self::{
     module::{LinkModule, ModuleSource},
-    namespaces::NamespaceGraph,
+    namespaces::{NamespaceGraph, ResolvedImports},
     resolver::*,
 };
 
@@ -437,8 +437,9 @@ impl Linker {
         let root_indices = self.link_modules(roots)?;
         let _support_indices = self.link_modules(support)?;
         let namespaces = NamespaceGraph::build(self)?;
+        let imports = namespaces.resolve_imports(self)?;
 
-        self.link_and_rewrite()?;
+        self.link_and_rewrite(&imports)?;
 
         let mut reachable = BTreeSet::new();
 
@@ -482,7 +483,11 @@ impl Linker {
 
         self.kernel_index = Some(module_index);
 
-        if let Err(err) = self.link_and_rewrite() {
+        let result = NamespaceGraph::build(self)
+            .and_then(|namespaces| namespaces.resolve_imports(self))
+            .and_then(|imports| self.link_and_rewrite(&imports));
+
+        if let Err(err) = result {
             self.kernel_index = original_kernel_index;
             self.callgraph = original_callgraph;
             self.modules.truncate(original_module_len);
@@ -534,7 +539,7 @@ impl Linker {
     /// NOTE: This will return `Err` if we detect a validation error, a cycle in the graph, or an
     /// operation not supported by the current configuration. Basically, for any reason that would
     /// cause the resulting graph to represent an invalid program.
-    fn link_and_rewrite(&mut self) -> Result<(), LinkerError> {
+    fn link_and_rewrite(&mut self, imports: &ResolvedImports) -> Result<(), LinkerError> {
         log::debug!(
             target: "linker",
             "processing {} unlinked/partially-linked modules, and recomputing module graph",
@@ -564,7 +569,7 @@ impl Linker {
         let original_callgraph = self.callgraph.clone();
 
         let result = {
-            let resolver = SymbolResolver::new(self);
+            let resolver = SymbolResolver::with_resolved_imports(self, imports);
             let mut edges = Vec::new();
             let mut cache = ResolverCache::default();
             let mut linked_modules = Vec::new();

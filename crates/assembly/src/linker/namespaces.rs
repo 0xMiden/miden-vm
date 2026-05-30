@@ -11,8 +11,11 @@ use alloc::{
 
 use miden_assembly_syntax::{
     Path,
-    ast::{AliasTarget, GlobalItemIndex, ItemIndex, ModuleIndex, Visibility},
-    debuginfo::{SourceManager, SourceSpan, Spanned},
+    ast::{
+        AliasTarget, GlobalItemIndex, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility,
+    },
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::RelatedLabel,
     module::ItemInfo,
 };
 
@@ -83,6 +86,19 @@ pub enum ResolvedUse {
     Item(GlobalItemIndex),
 }
 
+/// Import resolutions keyed by the module that owns the import and the local alias name.
+#[derive(Debug, Default, Clone)]
+pub struct ResolvedImports {
+    imports: BTreeMap<(ModuleIndex, String), ResolvedUse>,
+}
+
+impl ResolvedImports {
+    #[inline]
+    pub fn get(&self, owner: ModuleIndex, alias: &str) -> Option<ResolvedUse> {
+        self.imports.get(&(owner, alias.to_string())).copied()
+    }
+}
+
 impl NamespaceGraph {
     /// Build a namespace graph from the modules currently registered in `linker`.
     pub fn build(linker: &Linker) -> Result<Self, LinkerError> {
@@ -142,6 +158,250 @@ impl NamespaceGraph {
         }
 
         reachable.into_iter().collect()
+    }
+
+    /// Resolve all path imports without consulting any imports from the importing module.
+    pub fn resolve_imports(&self, linker: &Linker) -> Result<ResolvedImports, LinkerError> {
+        let mut imports = ResolvedImports::default();
+
+        for module in self.modules.iter() {
+            for import in module.imports.values() {
+                let AliasTarget::Path(path) = import.target() else {
+                    continue;
+                };
+                let resolved =
+                    self.resolve_import_target(import.owner(), path.as_deref(), linker)?;
+
+                if import.visibility().is_public()
+                    && let ResolvedUse::Module(id) = resolved
+                {
+                    return Err(LinkerError::ModuleReExport {
+                        span: import.span(),
+                        source_file: source_file(linker.source_manager.as_ref(), import.span()),
+                        path: self.module(id).path.clone(),
+                    });
+                }
+
+                imports.imports.insert((import.owner(), import.alias().to_string()), resolved);
+            }
+        }
+
+        Ok(imports)
+    }
+
+    fn resolve_import_target(
+        &self,
+        owner: ModuleIndex,
+        path: Span<&Path>,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        let Some((first, rest)) = path.split_first() else {
+            return Err(undefined_symbol(linker, path));
+        };
+
+        if first == "self" {
+            if rest.is_empty() {
+                return Err(undefined_symbol(linker, path));
+            }
+            return self.resolve_self_relative_path(owner, rest, path.span(), linker);
+        }
+
+        match self.resolve_global_path(owner, path.into_inner(), path.span(), None, linker) {
+            Ok(resolved) => Ok(resolved),
+            Err(LinkerError::UndefinedSymbol { .. }) => {
+                let owner_module = self.module(owner);
+                if owner_module.import(first).is_some() {
+                    Err(LinkerError::ImportTargetUsesImport {
+                        span: path.span(),
+                        source_file: source_file(linker.source_manager.as_ref(), path.span()),
+                        path: path.into_inner().to_path_buf().into_boxed_path().into(),
+                        alias: first.to_string(),
+                    })
+                } else {
+                    Err(undefined_symbol(linker, path))
+                }
+            },
+            Err(err) => Err(err),
+        }
+    }
+
+    fn resolve_self_relative_path(
+        &self,
+        owner: ModuleIndex,
+        path: &Path,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        let mut current = owner;
+        let mut remaining = path;
+
+        loop {
+            let Some((component, rest)) = remaining.split_first() else {
+                return Err(undefined_symbol_from_path(linker, span, path));
+            };
+            let module = self.module(current);
+
+            if rest.is_empty() {
+                if let Some(edge) = module.submodule(component) {
+                    self.ensure_submodule_visible(edge, span, linker)?;
+                    return Ok(ResolvedUse::Module(edge.child()));
+                }
+
+                if let Some(item) = module.item(component) {
+                    self.ensure_item_visible(owner, item, span, linker)?;
+                    return Ok(ResolvedUse::Item(item.id()));
+                }
+
+                return Err(undefined_symbol_from_path(linker, span, path));
+            }
+
+            if let Some(edge) = module.submodule(component) {
+                self.ensure_submodule_visible(edge, span, linker)?;
+                current = edge.child();
+                remaining = rest;
+                continue;
+            }
+
+            if let Some(item) = module.item(component) {
+                return Err(SymbolResolutionError::invalid_sub_path(
+                    span,
+                    item.span(),
+                    linker.source_manager.as_ref(),
+                )
+                .into());
+            }
+
+            return Err(undefined_symbol_from_path(linker, span, path));
+        }
+    }
+
+    fn resolve_global_path(
+        &self,
+        owner: ModuleIndex,
+        path: &Path,
+        span: SourceSpan,
+        imports: Option<&ResolvedImports>,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        if let Some(module) = self.find_global_module_index(path) {
+            self.ensure_module_visible(module, span, linker)?;
+            return Ok(ResolvedUse::Module(module));
+        }
+
+        let Some((name, parent_path)) = path.split_last() else {
+            return Err(undefined_symbol_from_path(linker, span, path));
+        };
+
+        if parent_path.is_empty() {
+            return Err(undefined_symbol_from_path(linker, span, path));
+        }
+
+        let Some(parent) = self.find_global_module_index(parent_path) else {
+            return Err(undefined_symbol_from_path(linker, span, path));
+        };
+        self.ensure_module_visible(parent, span, linker)?;
+        let module = self.module(parent);
+
+        if let Some(item) = module.item(name) {
+            self.ensure_item_visible(owner, item, span, linker)?;
+            return Ok(ResolvedUse::Item(item.id()));
+        }
+
+        if let Some(edge) = module.submodule(name) {
+            self.ensure_submodule_visible(edge, span, linker)?;
+            return Ok(ResolvedUse::Module(edge.child()));
+        }
+
+        if let Some(imports) = imports
+            && let Some(import) = module.import(name)
+            && import.visibility().is_public()
+            && let Some(resolved) = imports.get(parent, name)
+        {
+            return Ok(resolved);
+        }
+
+        Err(undefined_symbol_from_path(linker, span, path))
+    }
+
+    fn find_global_module_index(&self, path: &Path) -> Option<ModuleIndex> {
+        self.find_module_index(path)
+            .or_else(|| {
+                path.is_absolute().then(|| self.find_module_index(path.to_relative())).flatten()
+            })
+            .or_else(|| {
+                if path.is_absolute() {
+                    None
+                } else {
+                    path.to_absolute()
+                        .ok()
+                        .and_then(|absolute| self.find_module_index(absolute.as_ref()))
+                }
+            })
+    }
+
+    fn ensure_module_visible(
+        &self,
+        module: ModuleIndex,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Result<(), LinkerError> {
+        let mut child = module;
+        while let Some(parent) = self.module(child).parent() {
+            let edge = self
+                .module(parent)
+                .submodules
+                .values()
+                .find(|edge| edge.child == child)
+                .expect("child parent edge must exist");
+            self.ensure_submodule_visible(edge, span, linker)?;
+            child = parent;
+        }
+
+        Ok(())
+    }
+
+    fn ensure_submodule_visible(
+        &self,
+        edge: &ModuleEdge,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Result<(), LinkerError> {
+        if edge.visibility().is_public() {
+            return Ok(());
+        }
+
+        let child = self.module(edge.child());
+        let defined_source_file = source_file(linker.source_manager.as_ref(), edge.span());
+        let source_file = source_file(linker.source_manager.as_ref(), span);
+        Err(LinkerError::PrivateSubmodule {
+            span,
+            source_file,
+            module: child.path.clone(),
+            defined: Some(
+                RelatedLabel::advice("the referenced submodule is private")
+                    .with_labeled_span(edge.span(), "the referenced submodule is private")
+                    .with_source_file(defined_source_file),
+            ),
+        })
+    }
+
+    fn ensure_item_visible(
+        &self,
+        owner: ModuleIndex,
+        item: &ItemDef,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Result<(), LinkerError> {
+        if owner == item.id().module || item.visibility().is_public() {
+            return Ok(());
+        }
+
+        Err(SymbolResolutionError::private_symbol(
+            span,
+            item.span(),
+            linker.source_manager.as_ref(),
+        )
+        .into())
     }
 
     fn connect_submodule_edges(&mut self, linker: &Linker) -> Result<(), LinkerError> {
@@ -404,6 +664,18 @@ fn name_conflict(
     }
 }
 
+fn undefined_symbol(linker: &Linker, path: Span<&Path>) -> LinkerError {
+    undefined_symbol_from_path(linker, path.span(), path.into_inner())
+}
+
+fn undefined_symbol_from_path(linker: &Linker, span: SourceSpan, path: &Path) -> LinkerError {
+    LinkerError::UndefinedSymbol {
+        span,
+        source_file: source_file(linker.source_manager.as_ref(), span),
+        path: path.to_path_buf().into_boxed_path().into(),
+    }
+}
+
 fn source_file(
     source_manager: &dyn SourceManager,
     span: SourceSpan,
@@ -521,5 +793,159 @@ mod tests {
 
         let err = NamespaceGraph::build(&linker).expect_err("undeclared child should fail");
         assert!(matches!(err, LinkerError::UndeclaredSubmodule { .. }));
+    }
+
+    #[test]
+    fn namespace_graph_resolves_module_and_item_imports_independently() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut imported = parse_module(
+            source_manager.clone(),
+            "imported.masm",
+            r#"
+                namespace lib::mod
+
+                pub const VALUE = 1
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                use lib::mod
+                use lib::mod::VALUE
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        let imported_id = linker.link_module(&mut imported).expect("imported link should succeed");
+        let consumer_id = linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let imports = graph.resolve_imports(&linker).expect("imports should resolve");
+
+        assert_eq!(imports.get(consumer_id, "mod"), Some(ResolvedUse::Module(imported_id)));
+        assert!(matches!(imports.get(consumer_id, "VALUE"), Some(ResolvedUse::Item(_))));
+    }
+
+    #[test]
+    fn namespace_graph_rejects_private_submodule_import() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut root = parse_module(
+            source_manager.clone(),
+            "root.masm",
+            r#"
+                namespace root
+
+                mod child
+            "#,
+        );
+        let mut child = parse_module(
+            source_manager.clone(),
+            "child.masm",
+            r#"
+                namespace root::child
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                use root::child
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        linker.link_module(&mut root).expect("root link should succeed");
+        linker.link_module(&mut child).expect("child link should succeed");
+        linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let err = graph.resolve_imports(&linker).expect_err("private submodule should fail");
+        assert!(matches!(err, LinkerError::PrivateSubmodule { .. }));
+    }
+
+    #[test]
+    fn namespace_graph_rejects_module_reexport() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut root = parse_module(
+            source_manager.clone(),
+            "root.masm",
+            r#"
+                namespace root
+
+                pub mod child
+            "#,
+        );
+        let mut child = parse_module(
+            source_manager.clone(),
+            "child.masm",
+            r#"
+                namespace root::child
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                pub use root::child
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        linker.link_module(&mut root).expect("root link should succeed");
+        linker.link_module(&mut child).expect("child link should succeed");
+        linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let err = graph.resolve_imports(&linker).expect_err("module re-export should fail");
+        assert!(matches!(err, LinkerError::ModuleReExport { .. }));
+    }
+
+    #[test]
+    fn namespace_graph_rejects_imports_through_other_imports() {
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let mut root = parse_module(
+            source_manager.clone(),
+            "root.masm",
+            r#"
+                namespace root
+
+                pub mod child
+            "#,
+        );
+        let mut child = parse_module(
+            source_manager.clone(),
+            "child.masm",
+            r#"
+                namespace root::child
+
+                pub const VALUE = 1
+            "#,
+        );
+        let mut consumer = parse_module(
+            source_manager.clone(),
+            "consumer.masm",
+            r#"
+                namespace app
+
+                use root::child
+                use child::VALUE
+            "#,
+        );
+
+        let mut linker = Linker::new(source_manager);
+        linker.link_module(&mut root).expect("root link should succeed");
+        linker.link_module(&mut child).expect("child link should succeed");
+        linker.link_module(&mut consumer).expect("consumer link should succeed");
+
+        let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
+        let err = graph.resolve_imports(&linker).expect_err("import chaining should fail");
+        assert!(matches!(err, LinkerError::ImportTargetUsesImport { .. }));
     }
 }
