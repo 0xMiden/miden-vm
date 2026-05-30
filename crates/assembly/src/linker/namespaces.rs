@@ -10,7 +10,7 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    Path,
+    Path, PathBuf,
     ast::{
         AliasTarget, GlobalItemIndex, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility,
     },
@@ -418,6 +418,9 @@ impl NamespaceGraph {
         }
 
         let Some(parent) = self.find_global_module_index(parent_path) else {
+            if let Some(err) = self.invalid_global_subpath_error(path, span, linker) {
+                return Err(err);
+            }
             return Err(undefined_symbol_from_path(linker, span, path));
         };
         self.ensure_module_visible(parent, span, linker)?;
@@ -442,6 +445,41 @@ impl NamespaceGraph {
         }
 
         Err(undefined_symbol_from_path(linker, span, path))
+    }
+
+    fn invalid_global_subpath_error(
+        &self,
+        path: &Path,
+        span: SourceSpan,
+        linker: &Linker,
+    ) -> Option<LinkerError> {
+        let mut prefix = PathBuf::with_capacity(path.byte_len());
+        if path.is_absolute() {
+            prefix.push_component("::");
+        }
+
+        let mut remaining = path;
+        while let Some((component, rest)) = remaining.split_first() {
+            prefix.push_component(component);
+
+            if let Some(module) = self.find_global_module_index(prefix.as_path())
+                && let Some((next, _)) = rest.split_first()
+                && let Some(item) = self.module(module).item(next)
+            {
+                return Some(
+                    SymbolResolutionError::invalid_sub_path(
+                        span,
+                        item.span(),
+                        linker.source_manager.as_ref(),
+                    )
+                    .into(),
+                );
+            }
+
+            remaining = rest;
+        }
+
+        None
     }
 
     fn find_global_module_index(&self, path: &Path) -> Option<ModuleIndex> {

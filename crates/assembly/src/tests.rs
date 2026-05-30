@@ -5184,6 +5184,329 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
 }
 
 #[test]
+fn link_diagnostic_for_missing_declared_submodule() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod missing
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, None::<Box<Module>>)
+        .expect_err("declared missing child module should be rejected");
+
+    assert_diagnostic!(&err, "undefined module '::diag::root::missing'");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_undeclared_child_module() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child])
+        .expect_err("undeclared child module should be rejected");
+
+    assert_diagnostic!(&err, "module '::diag::root::child' is not declared");
+    assert_diagnostic!(&err, "`mod child` or `pub mod child`");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_private_submodule_import() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        mod child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        use diag::root::child
+
+        pub proc entry
+            exec.child::child_entry
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", consumer, [root, child])
+        .expect_err("private submodule import should be rejected");
+
+    assert_diagnostic!(&err, "private submodule '::diag::root::child'");
+    assert_diagnostic!(&err, "only public submodules can be imported from another module");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_module_reexport() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        pub use diag::root::child->child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", consumer, [root, child])
+        .expect_err("module re-export should be rejected");
+
+    assert_diagnostic!(&err, "modules cannot be re-exported with `pub use`");
+    assert_diagnostic!(&err, "declare the module with `pub mod`");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub const VALUE = 1
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        use diag::root::child
+        use child::VALUE
+
+        pub proc entry
+            push.VALUE
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", consumer, [root, child])
+        .expect_err("import through another import should be rejected");
+
+    assert_diagnostic!(
+        &err,
+        "import target 'child::VALUE' cannot be resolved through import 'child'"
+    );
+    assert_diagnostic!(&err, "imports are resolved independently");
+
+    Ok(())
+}
+
+#[test]
+fn self_relative_import_walks_public_submodules() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        use self::child->child_api
+
+        pub proc entry
+            exec.child_api::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            push.1
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+
+    Ok(())
+}
+
+#[test]
+fn self_relative_import_rejects_private_descendant() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        use self::child::hidden->hidden
+
+        pub proc entry
+            exec.hidden::hidden_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        mod hidden
+        "#
+    ))?;
+    let hidden = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child::hidden
+
+        pub proc hidden_entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child, hidden])
+        .expect_err("private descendant import should be rejected");
+
+    assert_diagnostic!(&err, "private submodule '::diag::root::child::hidden'");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::dep
+
+        pub const VALUE = 1
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        use diag::dep::VALUE::nested->NESTED
+
+        pub proc entry
+            push.NESTED
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", consumer, [dep])
+        .expect_err("subpath through item should be rejected");
+
+    assert_diagnostic!(&err, "invalid symbol path");
+    assert_diagnostic!(&err, "all ancestors of a path must be modules");
+
+    Ok(())
+}
+
+#[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
