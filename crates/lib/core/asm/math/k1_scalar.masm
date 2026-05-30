@@ -18,6 +18,22 @@ const U256_INV_K1_SCALAR_EVENT = event("miden::core::math::u256::u256_inv_k1_sca
 
 const GLV_SPLIT_K1_EVENT = event("miden::core::math::k1_scalar::glv_split")
 
+# `verify_glv_split` local-memory slot names.
+const VGS_MAG_A_LO   = 0     # |k_a|, low word
+const VGS_MAG_A_HI   = 4     # |k_a|, high word
+const VGS_MAG_B_LO   = 8     # |k_b|, low word
+const VGS_MAG_B_HI   = 12    # |k_b|, high word
+const VGS_SIGN_A     = 16    # sign_a (boolean)
+const VGS_SIGN_B     = 17    # sign_b (boolean)
+const VGS_CANON_A_LO = 20    # canonical_a (= sign_a ? n - |k_a| : |k_a|), low word
+const VGS_CANON_A_HI = 24    # canonical_a, high word
+const VGS_CANON_B_LO = 28    # canonical_b, low word
+const VGS_CANON_B_HI = 32    # canonical_b, high word
+const VGS_K_LO       = 40    # k cached from k_addr, low word
+const VGS_K_HI       = 44    # k, high word
+const VGS_OUT_ADDR   = 48    # out_addr cached
+const VGS_K_ADDR     = 49    # k_addr cached
+
 # ===== MODULUS HELPERS ==========================================================================
 
 #! Pushes the secp256k1 group order `n` onto the operand stack as 8 u32 LE limbs (n[0] on top,
@@ -197,24 +213,24 @@ end
 #!   [out_addr, k_addr, ...]  ->  [...]
 #!
 #! Local memory layout (mem[0..56]):
-#!   0..8     : |k_a|
-#!   8..16    : |k_b|
-#!   16       : sign_a
-#!   17       : sign_b
-#!   20..28   : canonical_a (= sign_a ? n - |k_a| : |k_a|), used by the relation check
-#!   28..36   : canonical_b
-#!   40..48   : k cached from k_addr
-#!   48       : out_addr cached
-#!   49       : k_addr cached
+#!   VGS_MAG_A_LO/HI    (0/4)    : |k_a| (low/high word)
+#!   VGS_MAG_B_LO/HI    (8/12)   : |k_b|
+#!   VGS_SIGN_A         (16)     : sign_a
+#!   VGS_SIGN_B         (17)     : sign_b
+#!   VGS_CANON_A_LO/HI  (20/24)  : canonical_a (= sign_a ? n - |k_a| : |k_a|)
+#!   VGS_CANON_B_LO/HI  (28/32)  : canonical_b
+#!   VGS_K_LO/HI        (40/44)  : k cached from k_addr
+#!   VGS_OUT_ADDR       (48)     : out_addr cached
+#!   VGS_K_ADDR         (49)     : k_addr cached
 @locals(56)
 pub proc verify_glv_split
     # Cache out_addr and k_addr.
-    loc_store.48
-    loc_store.49
+    loc_store.VGS_OUT_ADDR
+    loc_store.VGS_K_ADDR
 
     # Push k_addr for the handler (it reads operand-stack offset 1 -- offset 0 is the
     # synthesized event id), then drop it: `emit` doesn't pop.
-    loc_load.49
+    loc_load.VGS_K_ADDR
     emit.GLV_SPLIT_K1_EVENT
     drop
 
@@ -224,46 +240,46 @@ pub proc verify_glv_split
     # word; downstream `neg` and `mul` rely on u32-valid inputs. The high-limb words also get
     # an `assertz` below for the 2^128 bound; the sign felts are bound to {0, 1} below.
     padw
-    adv_loadw  u32assertw  loc_storew_le.0
-    adv_loadw  u32assertw  loc_storew_le.4
-    adv_push   loc_store.16
-    adv_loadw  u32assertw  loc_storew_le.8
-    adv_loadw  u32assertw  loc_storew_le.12
-    adv_push   loc_store.17
+    adv_loadw  u32assertw  loc_storew_le.VGS_MAG_A_LO
+    adv_loadw  u32assertw  loc_storew_le.VGS_MAG_A_HI
+    adv_push   loc_store.VGS_SIGN_A
+    adv_loadw  u32assertw  loc_storew_le.VGS_MAG_B_LO
+    adv_loadw  u32assertw  loc_storew_le.VGS_MAG_B_HI
+    adv_push   loc_store.VGS_SIGN_B
     dropw
 
     # Bound magnitudes to 2^128 (limbs 4..7 == 0). The relation alone has many F_n
     # solutions; the 2^128 bound pins us to the unique GLV decomposition. Each high-limb
     # word is u32-bounded so its 4-limb sum stays well below the felt modulus; assertz on
     # the sum is equivalent to asserting all four limbs are zero.
-    padw  loc_loadw_le.4    add  add  add  assertz.err="glv: |k_a| not < 2^128"
-    padw  loc_loadw_le.12   add  add  add  assertz.err="glv: |k_b| not < 2^128"
+    padw  loc_loadw_le.VGS_MAG_A_HI   add  add  add  assertz.err="glv: |k_a| not < 2^128"
+    padw  loc_loadw_le.VGS_MAG_B_HI   add  add  add  assertz.err="glv: |k_b| not < 2^128"
 
     # Assert each sign bit is boolean: s * (s - 1) = 0.
-    loc_load.16  dup  mul  loc_load.16  sub  assertz.err="glv: sign_a not boolean"
-    loc_load.17  dup  mul  loc_load.17  sub  assertz.err="glv: sign_b not boolean"
+    loc_load.VGS_SIGN_A  dup  mul  loc_load.VGS_SIGN_A  sub  assertz.err="glv: sign_a not boolean"
+    loc_load.VGS_SIGN_B  dup  mul  loc_load.VGS_SIGN_B  sub  assertz.err="glv: sign_b not boolean"
 
-    # Cache k from absolute mem[k_addr..k_addr+8] into local mem[40..48] so the verification
-    # math can use the cheaper `loc_loadw_le` immediates.
-    padw  loc_load.49         mem_loadw_le  loc_storew_le.40
-    loc_load.49 add.4         mem_loadw_le  loc_storew_le.44
+    # Cache k from absolute mem[k_addr..k_addr+8] into local mem[VGS_K_LO..VGS_OUT_ADDR] so the
+    # verification math can use the cheaper `loc_loadw_le` immediates.
+    padw  loc_load.VGS_K_ADDR         mem_loadw_le  loc_storew_le.VGS_K_LO
+    loc_load.VGS_K_ADDR add.4         mem_loadw_le  loc_storew_le.VGS_K_HI
 
-    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[20..28] and left on stack
-    # for the final `add` below.
-    loc_loadw_le.4         padw  loc_loadw_le.0
-    loc_load.16
+    # Canonicalize: c_a = sign_a ? n - |k_a| : |k_a|, stored at mem[VGS_CANON_A_LO..] and left
+    # on stack for the final `add` below.
+    loc_loadw_le.VGS_MAG_A_HI    padw  loc_loadw_le.VGS_MAG_A_LO
+    loc_load.VGS_SIGN_A
     if.true
         exec.neg
     end
-    loc_storew_le.20 swapw  loc_storew_le.24  swapw
+    loc_storew_le.VGS_CANON_A_LO swapw  loc_storew_le.VGS_CANON_A_HI  swapw
 
-    # Canonicalize c_b at mem[28..36] and leave it on stack for the `mul` below.
-    padw  loc_loadw_le.12  padw  loc_loadw_le.8
-    loc_load.17
+    # Canonicalize c_b at mem[VGS_CANON_B_LO..] and leave it on stack for the `mul` below.
+    padw  loc_loadw_le.VGS_MAG_B_HI  padw  loc_loadw_le.VGS_MAG_B_LO
+    loc_load.VGS_SIGN_B
     if.true
         exec.neg
     end
-    loc_storew_le.28 swapw  loc_storew_le.32  swapw
+    loc_storew_le.VGS_CANON_B_LO swapw  loc_storew_le.VGS_CANON_B_HI  swapw
 
     # sum = c_a + c_b * lambda mod n. lambda is the secp256k1 GLV eigenvalue.
     # lambda = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
@@ -273,16 +289,16 @@ pub proc verify_glv_split
     exec.add                                              # [sum, ...]
 
     # Compare sum to k. Load k0..k7 onto the stack (k0 on top, k7 deepest).
-    padw loc_loadw_le.44  padw loc_loadw_le.40
+    padw loc_loadw_le.VGS_K_HI  padw loc_loadw_le.VGS_K_LO
     # Stack: [k0..k7, sum0..sum7, ...]
     exec.::miden::core::math::u256::eq
     assert.err="glv: k_a + k_b*lambda != k mod n"
 
     # Copy witness to absolute mem[out_addr..out_addr+18].
-    padw  loc_loadw_le.0   loc_load.48           mem_storew_le
-    loc_loadw_le.4         loc_load.48 add.4     mem_storew_le
-    loc_loadw_le.8         loc_load.48 add.8     mem_storew_le
-    loc_loadw_le.12        loc_load.48 add.12    mem_storew_le  dropw
-    loc_load.16            loc_load.48 add.16    mem_store
-    loc_load.17            loc_load.48 add.17    mem_store
+    padw  loc_loadw_le.VGS_MAG_A_LO   loc_load.VGS_OUT_ADDR           mem_storew_le
+    loc_loadw_le.VGS_MAG_A_HI         loc_load.VGS_OUT_ADDR add.4     mem_storew_le
+    loc_loadw_le.VGS_MAG_B_LO         loc_load.VGS_OUT_ADDR add.8     mem_storew_le
+    loc_loadw_le.VGS_MAG_B_HI         loc_load.VGS_OUT_ADDR add.12    mem_storew_le  dropw
+    loc_load.VGS_SIGN_A               loc_load.VGS_OUT_ADDR add.16    mem_store
+    loc_load.VGS_SIGN_B               loc_load.VGS_OUT_ADDR add.17    mem_store
 end

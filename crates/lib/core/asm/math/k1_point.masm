@@ -3,6 +3,94 @@ use miden::core::math::k1_scalar
 
 const K1_POINT_DECOMPRESS_EVENT = event("miden::core::math::k1_point::decompress")
 
+# `point_double` local-memory slot names. *_LO / *_HI pairs are the low / high 4-felt word
+# of a u256; bare names are single felts or 4-felt words read as one unit.
+const PD_X_LO       = 0     # X (input), low word
+const PD_X_HI       = 4     # X (input), high word
+const PD_Y_LO       = 8     # Y (input), low word
+const PD_Y_HI       = 12    # Y (input), high word
+const PD_FLAG       = 16    # is_infinity flag (input; first felt of the flag word)
+const PD_OUT_ADDR   = 20    # out_addr cache (single felt)
+const PD_X2_LO      = 24    # X^2 (then overwritten with 3*X^2), low word
+const PD_X2_HI      = 28    # X^2 (then overwritten with 3*X^2), high word
+const PD_M_LO       = 32    # m = (3*X^2) * inv(2*Y), low word
+const PD_M_HI       = 36    # m, high word
+
+# `point_add` local-memory slot names.
+const PA_P1_X_LO    = 0     # P1.x, low word
+const PA_P1_X_HI    = 4     # P1.x, high word
+const PA_P1_Y_LO    = 8     # P1.y, low word
+const PA_P1_Y_HI    = 12    # P1.y, high word
+const PA_P1_FLAG    = 16    # P1.is_infinity (first felt of P1's flag word)
+const PA_P2_X_LO    = 20    # P2.x, low word
+const PA_P2_X_HI    = 24    # P2.x, high word
+const PA_P2_Y_LO    = 28    # P2.y, low word
+const PA_P2_Y_HI    = 32    # P2.y, high word
+const PA_P2_FLAG    = 36    # P2.is_infinity (first felt of P2's flag word)
+const PA_OUT_ADDR   = 40    # out_addr cache (single felt)
+const PA_NUM_LO     = 44    # numerator (Y2 - Y1), low word
+const PA_NUM_HI     = 48    # numerator, high word
+const PA_M_LO       = 52    # m = (Y2 - Y1) * inv(X2 - X1), low word
+const PA_M_HI       = 56    # m, high word
+
+# `msm_4_128_glv_k1` local-memory slot names. The 15 LUT entries each occupy 20 felts (5 words,
+# laid out as X_lo, X_hi, Y_lo, Y_hi, flag).
+const MSM_LUT_1     = 0     # LUT[1]  = P_1
+const MSM_LUT_2     = 20    # LUT[2]  = P_2
+const MSM_LUT_3     = 40    # LUT[3]  = P_1 + P_2  (selected from 4 hardcoded constants)
+const MSM_LUT_4     = 60    # LUT[4]  = P_3
+const MSM_LUT_5     = 80    # LUT[5]  = P_1 + P_3
+const MSM_LUT_6     = 100   # LUT[6]  = P_2 + P_3
+const MSM_LUT_7     = 120   # LUT[7]  = P_1 + P_2 + P_3
+const MSM_LUT_8     = 140   # LUT[8]  = P_4
+const MSM_LUT_9     = 160   # LUT[9]  = P_1 + P_4
+const MSM_LUT_10    = 180   # LUT[10] = P_2 + P_4
+const MSM_LUT_11    = 200   # LUT[11] = P_1 + P_2 + P_4
+const MSM_LUT_12    = 220   # LUT[12] = P_3 + P_4
+const MSM_LUT_13    = 240   # LUT[13] = P_1 + P_3 + P_4
+const MSM_LUT_14    = 260   # LUT[14] = P_2 + P_3 + P_4
+const MSM_LUT_15    = 280   # LUT[15] = P_1 + P_2 + P_3 + P_4
+
+# Accumulator (running R), same 20-felt point layout as the LUT entries.
+const MSM_ACC       = 300
+const MSM_ACC_X_LO  = 300
+const MSM_ACC_X_HI  = 304
+const MSM_ACC_Y_LO  = 308
+const MSM_ACC_Y_HI  = 312
+const MSM_ACC_FLAG  = 316
+
+# Scalar storage: 4 scalars, 4 u32 limbs each.
+const MSM_K1_L0     = 320
+const MSM_K1_L1     = 321
+const MSM_K1_L2     = 322
+const MSM_K1_L3     = 323
+const MSM_K2_L0     = 324
+const MSM_K2_L1     = 325
+const MSM_K2_L2     = 326
+const MSM_K2_L3     = 327
+const MSM_K3_L0     = 328
+const MSM_K3_L1     = 329
+const MSM_K3_L2     = 330
+const MSM_K3_L3     = 331
+const MSM_K4_L0     = 332
+const MSM_K4_L1     = 333
+const MSM_K4_L2     = 334
+const MSM_K4_L3     = 335
+
+# Caller-arg caches and sign / endomorphism selectors.
+const MSM_OUT_ADDR   = 336
+const MSM_P1_ADDR    = 337
+const MSM_P2_ADDR    = 338
+const MSM_P3_ADDR    = 339
+const MSM_P4_ADDR    = 340
+const MSM_K1_ADDR    = 341
+const MSM_K2_ADDR    = 342
+const MSM_K3_ADDR    = 343
+const MSM_K4_ADDR    = 344
+const MSM_SIGN_A     = 345
+const MSM_SIGN_B     = 346
+const MSM_LUT12_ENDO = 347
+
 # Affine secp256k1 point arithmetic.
 #
 # Each point is stored as 20 contiguous felts (5 words) at a memory address `addr`:
@@ -119,79 +207,79 @@ end
 @locals(40)
 pub proc point_double
     # Stack: [out_addr, p_addr, ...]
-    loc_store.20                                          # cache out_addr; [p_addr, ...]
+    loc_store.PD_OUT_ADDR                                 # cache out_addr; [p_addr, ...]
 
-    # Copy P to local mem[0..20].
-    padw  dup.4              mem_loadw_le  loc_storew_le.0
-    dup.4 add.4              mem_loadw_le  loc_storew_le.4
-    dup.4 add.8              mem_loadw_le  loc_storew_le.8
-    dup.4 add.12             mem_loadw_le  loc_storew_le.12
-    dup.4 add.16             mem_loadw_le  loc_storew_le.16  dropw
+    # Copy P to local mem[PD_X_LO..PD_OUT_ADDR].
+    padw  dup.4              mem_loadw_le  loc_storew_le.PD_X_LO
+    dup.4 add.4              mem_loadw_le  loc_storew_le.PD_X_HI
+    dup.4 add.8              mem_loadw_le  loc_storew_le.PD_Y_LO
+    dup.4 add.12             mem_loadw_le  loc_storew_le.PD_Y_HI
+    dup.4 add.16             mem_loadw_le  loc_storew_le.PD_FLAG  dropw
     drop                                                  # drop p_addr
 
-    loc_load.16
+    loc_load.PD_FLAG
     if.true
         # P = identity: 2 * identity = identity.
-        loc_load.20  exec.write_identity
+        loc_load.PD_OUT_ADDR  exec.write_identity
     else
-        # ----- 3 * X^2 -> mem[24..32] -----
-        padw loc_loadw_le.4   padw loc_loadw_le.0          # X
-        dupw.1 dupw.1                                      # [X, X, ...]
-        exec.f_k1::mul                                     # [X^2, ...]
-        loc_storew_le.24  swapw  loc_storew_le.28  swapw
+        # ----- 3 * X^2 -> mem[PD_X2_LO..PD_M_LO] -----
+        padw loc_loadw_le.PD_X_HI    padw loc_loadw_le.PD_X_LO     # X
+        dupw.1 dupw.1                                              # [X, X, ...]
+        exec.f_k1::mul                                             # [X^2, ...]
+        loc_storew_le.PD_X2_LO  swapw  loc_storew_le.PD_X2_HI  swapw
 
-        dupw.1 dupw.1                                      # duplicate X^2 on stack; [X^2, X^2, ...]
-        exec.f_k1::add                                     # 2*X^2
-        padw loc_loadw_le.28  padw loc_loadw_le.24         # X^2
-        exec.f_k1::add                                     # 3*X^2
-        loc_storew_le.24 swapw  loc_storew_le.28           # mem[24..32] = 3*X^2
+        dupw.1 dupw.1                                              # duplicate X^2 on stack; [X^2, X^2, ...]
+        exec.f_k1::add                                             # 2*X^2
+        padw loc_loadw_le.PD_X2_HI   padw loc_loadw_le.PD_X2_LO    # X^2
+        exec.f_k1::add                                             # 3*X^2
+        loc_storew_le.PD_X2_LO  swapw  loc_storew_le.PD_X2_HI      # mem[PD_X2_LO..PD_M_LO] = 3*X^2
 
         # ----- 2 * Y (kept on stack, consumed by inv_unsafe) -----
-        loc_loadw_le.12  swapw  loc_loadw_le.8             # Y
-        dupw.1 dupw.1                                      # [Y, Y, ...]
-        exec.f_k1::add                                     # [2*Y, ...]
+        loc_loadw_le.PD_Y_HI   swapw  loc_loadw_le.PD_Y_LO         # Y
+        dupw.1 dupw.1                                              # [Y, Y, ...]
+        exec.f_k1::add                                             # [2*Y, ...]
 
         # ----- inv(2 * Y) (kept on stack, consumed by m mul) -----
         # inv_unsafe is sound here: its result is immediately consumed by f_k1::mul, which
         # accepts u32-bounded operands and canonicalizes the product.
-        exec.f_k1::inv_unsafe                              # [inv(2*Y), ...]
+        exec.f_k1::inv_unsafe                                      # [inv(2*Y), ...]
 
-        # ----- m = (3*X^2) * inv(2*Y) -> mem[32..40] -----
-        padw loc_loadw_le.28  padw loc_loadw_le.24         # [3*X^2, inv(2*Y), ...]
-        exec.f_k1::mul                                     # [m, ...]
-        loc_storew_le.32  swapw  loc_storew_le.36  swapw
+        # ----- m = (3*X^2) * inv(2*Y) -> mem[PD_M_LO..PD_M_LO+8] -----
+        padw loc_loadw_le.PD_X2_HI   padw loc_loadw_le.PD_X2_LO    # [3*X^2, inv(2*Y), ...]
+        exec.f_k1::mul                                             # [m, ...]
+        loc_storew_le.PD_M_LO  swapw  loc_storew_le.PD_M_HI  swapw
 
         # ----- m^2 (kept on stack) -----
-        dupw.1 dupw.1                                      # duplicate m on stack; [m, m, ...]
-        exec.f_k1::mul                                     # [m^2, ...]
+        dupw.1 dupw.1                                              # duplicate m on stack; [m, m, ...]
+        exec.f_k1::mul                                             # [m^2, ...]
 
         # ----- 2 * X (kept on stack above m^2) -----
-        padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, m^2, ...]
-        dupw.1 dupw.1                                      # [X, X, m^2, ...]
-        exec.f_k1::add                                     # [2*X, m^2, ...]
+        padw loc_loadw_le.PD_X_HI    padw loc_loadw_le.PD_X_LO     # [X, m^2, ...]
+        dupw.1 dupw.1                                              # [X, X, m^2, ...]
+        exec.f_k1::add                                             # [2*X, m^2, ...]
 
         # ----- X3 = m^2 - 2*X -> out_addr[0..8], kept on stack for the (X - X3) step -----
-        exec.f_k1::sub                                     # [X3, ...]
-        loc_load.20         mem_storew_le                  # mem[out_addr+0..4] = X3_low; X3_low kept on stack
-        swapw                                              # [X3_high, X3_low, ...]
-        loc_load.20 add.4   mem_storew_le                  # mem[out_addr+4..8] = X3_high; X3_high kept
-        swapw                                              # [X3_low, X3_high, ...] restored
+        exec.f_k1::sub                                             # [X3, ...]
+        loc_load.PD_OUT_ADDR         mem_storew_le                 # mem[out_addr+0..4] = X3_low; X3_low kept on stack
+        swapw                                                      # [X3_high, X3_low, ...]
+        loc_load.PD_OUT_ADDR add.4   mem_storew_le                 # mem[out_addr+4..8] = X3_high; X3_high kept
+        swapw                                                      # [X3_low, X3_high, ...] restored
 
         # ----- (X - X3) kept on stack for Y3 -----
-        padw loc_loadw_le.4   padw loc_loadw_le.0          # [X, X3, ...]
-        swapdw                                             # [X3, X, ...]
-        exec.f_k1::sub                                     # [X - X3, ...]
+        padw loc_loadw_le.PD_X_HI    padw loc_loadw_le.PD_X_LO     # [X, X3, ...]
+        swapdw                                                     # [X3, X, ...]
+        exec.f_k1::sub                                             # [X - X3, ...]
 
         # ----- Y3 = m * (X - X3) - Y -> out_addr[8..16] -----
-        padw loc_loadw_le.36  padw loc_loadw_le.32         # [m, X - X3, ...]
-        exec.f_k1::mul                                     # [m*(X - X3), ...]
-        padw loc_loadw_le.12  padw loc_loadw_le.8          # [Y, m*(X - X3), ...]
-        exec.f_k1::sub                                     # [Y3, ...]
-        loc_load.20 add.8   mem_storew_le  dropw           # mem[out_addr+8..12] = Y3_low; drop
-        loc_load.20 add.12  mem_storew_le  dropw           # mem[out_addr+12..16] = Y3_high; drop
+        padw loc_loadw_le.PD_M_HI    padw loc_loadw_le.PD_M_LO     # [m, X - X3, ...]
+        exec.f_k1::mul                                             # [m*(X - X3), ...]
+        padw loc_loadw_le.PD_Y_HI    padw loc_loadw_le.PD_Y_LO     # [Y, m*(X - X3), ...]
+        exec.f_k1::sub                                             # [Y3, ...]
+        loc_load.PD_OUT_ADDR add.8   mem_storew_le  dropw          # mem[out_addr+8..12] = Y3_low; drop
+        loc_load.PD_OUT_ADDR add.12  mem_storew_le  dropw          # mem[out_addr+12..16] = Y3_high; drop
 
         # ----- Clear flag word at out_addr+16 -----
-        padw  loc_load.20 add.16  mem_storew_le  dropw
+        padw  loc_load.PD_OUT_ADDR add.16  mem_storew_le  dropw
     end
 end
 
@@ -230,112 +318,112 @@ end
 @locals(60)
 pub proc point_add
     # Stack: [out_addr, p1_addr, p2_addr, ...]
-    loc_store.40                                          # cache out_addr; [p1_addr, p2_addr, ...]
+    loc_store.PA_OUT_ADDR                                  # cache out_addr; [p1_addr, p2_addr, ...]
 
-    # Load P1 to mem[0..20].
-    padw  dup.4              mem_loadw_le  loc_storew_le.0
-    dup.4 add.4              mem_loadw_le  loc_storew_le.4
-    dup.4 add.8              mem_loadw_le  loc_storew_le.8
-    dup.4 add.12             mem_loadw_le  loc_storew_le.12
-    dup.4 add.16             mem_loadw_le  loc_storew_le.16  dropw
-    drop                                                  # drop p1_addr; [p2_addr, ...]
+    # Load P1 to mem[PA_P1_X_LO..PA_P2_X_LO].
+    padw  dup.4              mem_loadw_le  loc_storew_le.PA_P1_X_LO
+    dup.4 add.4              mem_loadw_le  loc_storew_le.PA_P1_X_HI
+    dup.4 add.8              mem_loadw_le  loc_storew_le.PA_P1_Y_LO
+    dup.4 add.12             mem_loadw_le  loc_storew_le.PA_P1_Y_HI
+    dup.4 add.16             mem_loadw_le  loc_storew_le.PA_P1_FLAG  dropw
+    drop                                                   # drop p1_addr; [p2_addr, ...]
 
-    # Load P2 to mem[20..40].
-    padw  dup.4              mem_loadw_le  loc_storew_le.20
-    dup.4 add.4              mem_loadw_le  loc_storew_le.24
-    dup.4 add.8              mem_loadw_le  loc_storew_le.28
-    dup.4 add.12             mem_loadw_le  loc_storew_le.32
-    dup.4 add.16             mem_loadw_le  loc_storew_le.36  dropw
-    drop                                                  # drop p2_addr; [...]
+    # Load P2 to mem[PA_P2_X_LO..PA_OUT_ADDR].
+    padw  dup.4              mem_loadw_le  loc_storew_le.PA_P2_X_LO
+    dup.4 add.4              mem_loadw_le  loc_storew_le.PA_P2_X_HI
+    dup.4 add.8              mem_loadw_le  loc_storew_le.PA_P2_Y_LO
+    dup.4 add.12             mem_loadw_le  loc_storew_le.PA_P2_Y_HI
+    dup.4 add.16             mem_loadw_le  loc_storew_le.PA_P2_FLAG  dropw
+    drop                                                   # drop p2_addr; [...]
 
-    loc_load.16
+    loc_load.PA_P1_FLAG
     if.true
         # P1 = identity: out = P2.
-        padw loc_loadw_le.20   loc_load.40         mem_storew_le
-        loc_loadw_le.24        loc_load.40 add.4   mem_storew_le
-        loc_loadw_le.28        loc_load.40 add.8   mem_storew_le
-        loc_loadw_le.32        loc_load.40 add.12  mem_storew_le
-        loc_loadw_le.36        loc_load.40 add.16  mem_storew_le  dropw
+        padw loc_loadw_le.PA_P2_X_LO   loc_load.PA_OUT_ADDR         mem_storew_le
+        loc_loadw_le.PA_P2_X_HI        loc_load.PA_OUT_ADDR add.4   mem_storew_le
+        loc_loadw_le.PA_P2_Y_LO        loc_load.PA_OUT_ADDR add.8   mem_storew_le
+        loc_loadw_le.PA_P2_Y_HI        loc_load.PA_OUT_ADDR add.12  mem_storew_le
+        loc_loadw_le.PA_P2_FLAG        loc_load.PA_OUT_ADDR add.16  mem_storew_le  dropw
     else
-        loc_load.36
+        loc_load.PA_P2_FLAG
         if.true
             # P2 = identity: out = P1.
-            padw loc_loadw_le.0    loc_load.40         mem_storew_le
-            loc_loadw_le.4         loc_load.40 add.4   mem_storew_le
-            loc_loadw_le.8         loc_load.40 add.8   mem_storew_le
-            loc_loadw_le.12        loc_load.40 add.12  mem_storew_le
-            loc_loadw_le.16        loc_load.40 add.16  mem_storew_le  dropw
+            padw loc_loadw_le.PA_P1_X_LO   loc_load.PA_OUT_ADDR         mem_storew_le
+            loc_loadw_le.PA_P1_X_HI        loc_load.PA_OUT_ADDR add.4   mem_storew_le
+            loc_loadw_le.PA_P1_Y_LO        loc_load.PA_OUT_ADDR add.8   mem_storew_le
+            loc_loadw_le.PA_P1_Y_HI        loc_load.PA_OUT_ADDR add.12  mem_storew_le
+            loc_loadw_le.PA_P1_FLAG        loc_load.PA_OUT_ADDR add.16  mem_storew_le  dropw
         else
             # Both finite. Test X1 == X2.
-            padw loc_loadw_le.4   padw loc_loadw_le.0     # X1
-            padw loc_loadw_le.24  padw loc_loadw_le.20    # X2
+            padw loc_loadw_le.PA_P1_X_HI   padw loc_loadw_le.PA_P1_X_LO   # X1
+            padw loc_loadw_le.PA_P2_X_HI   padw loc_loadw_le.PA_P2_X_LO   # X2
             exec.::miden::core::math::u256::eq
             if.true
                 # X1 == X2. Test Y1 == Y2.
-                padw loc_loadw_le.12  padw loc_loadw_le.8     # Y1
-                padw loc_loadw_le.32  padw loc_loadw_le.28    # Y2
+                padw loc_loadw_le.PA_P1_Y_HI   padw loc_loadw_le.PA_P1_Y_LO   # Y1
+                padw loc_loadw_le.PA_P2_Y_HI   padw loc_loadw_le.PA_P2_Y_LO   # Y2
                 exec.::miden::core::math::u256::eq
                 if.true
                     # P1 == P2: out = [2] * P1.
-                    locaddr.0  loc_load.40
+                    locaddr.PA_P1_X_LO  loc_load.PA_OUT_ADDR
                     exec.point_double
                 else
                     # P1 == -P2: out = identity.
-                    loc_load.40  exec.write_identity
+                    loc_load.PA_OUT_ADDR  exec.write_identity
                 end
             else
                 # X1 != X2: generic affine addition.
 
-                # ----- Y2 - Y1 -> mem[44..52] -----
-                padw loc_loadw_le.32  padw loc_loadw_le.28    # Y2 (a)
-                padw loc_loadw_le.12  padw loc_loadw_le.8     # Y1 (b)
-                exec.f_k1::sub                                # Y2 - Y1
-                loc_storew_le.44 swapw  loc_storew_le.48      # mem[44..52] = Y2-Y1
+                # ----- Y2 - Y1 -> mem[PA_NUM_LO..PA_M_LO] -----
+                padw loc_loadw_le.PA_P2_Y_HI   padw loc_loadw_le.PA_P2_Y_LO   # Y2 (a)
+                padw loc_loadw_le.PA_P1_Y_HI   padw loc_loadw_le.PA_P1_Y_LO   # Y1 (b)
+                exec.f_k1::sub                                                # Y2 - Y1
+                loc_storew_le.PA_NUM_LO  swapw  loc_storew_le.PA_NUM_HI       # mem[PA_NUM_LO..PA_M_LO] = Y2-Y1
 
                 # ----- X2 - X1 (kept on stack, consumed by inv_unsafe) -----
-                loc_loadw_le.24  swapw  loc_loadw_le.20       # X2 (a)
-                padw loc_loadw_le.4    padw loc_loadw_le.0    # X1 (b)
-                exec.f_k1::sub                                # X2 - X1
+                loc_loadw_le.PA_P2_X_HI   swapw  loc_loadw_le.PA_P2_X_LO      # X2 (a)
+                padw loc_loadw_le.PA_P1_X_HI    padw loc_loadw_le.PA_P1_X_LO  # X1 (b)
+                exec.f_k1::sub                                                # X2 - X1
 
                 # ----- inv(X2 - X1) (kept on stack, consumed by m mul) -----
                 # inv_unsafe is sound here: its result is immediately consumed by f_k1::mul, which
                 # accepts u32-bounded operands and canonicalizes the product.
-                exec.f_k1::inv_unsafe                         # [inv, ...]
+                exec.f_k1::inv_unsafe                                         # [inv, ...]
 
-                # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[52..60] -----
-                padw loc_loadw_le.48  padw loc_loadw_le.44    # [Y2-Y1, inv, ...]
-                exec.f_k1::mul                                # [m, ...]
-                loc_storew_le.52  swapw  loc_storew_le.56  swapw
+                # ----- m = (Y2 - Y1) * inv(X2 - X1) -> mem[PA_M_LO..PA_M_LO+8] -----
+                padw loc_loadw_le.PA_NUM_HI   padw loc_loadw_le.PA_NUM_LO     # [Y2-Y1, inv, ...]
+                exec.f_k1::mul                                                # [m, ...]
+                loc_storew_le.PA_M_LO  swapw  loc_storew_le.PA_M_HI  swapw
 
                 # ----- m^2 (kept on stack) -----
-                dupw.1 dupw.1                                 # duplicate m on stack; [m, m, ...]
-                exec.f_k1::mul                                # [m^2, ...]
+                dupw.1 dupw.1                                                 # duplicate m on stack; [m, m, ...]
+                exec.f_k1::mul                                                # [m^2, ...]
 
                 # ----- X3 = m^2 - X1 - X2 -> out_addr[0..8], kept on stack for the (X1 - X3) step -----
-                padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, m^2, ...]
-                exec.f_k1::sub                                # [m^2 - X1, ...]
-                padw loc_loadw_le.24  padw loc_loadw_le.20    # [X2, m^2-X1, ...]
-                exec.f_k1::sub                                # [X3, ...]
-                loc_load.40         mem_storew_le             # mem[out_addr+0..4] = X3_low; kept
-                swapw                                         # [X3_high, X3_low, ...]
-                loc_load.40 add.4   mem_storew_le             # mem[out_addr+4..8] = X3_high; kept
-                swapw                                         # [X3_low, X3_high, ...] restored
+                padw loc_loadw_le.PA_P1_X_HI   padw loc_loadw_le.PA_P1_X_LO   # [X1, m^2, ...]
+                exec.f_k1::sub                                                # [m^2 - X1, ...]
+                padw loc_loadw_le.PA_P2_X_HI   padw loc_loadw_le.PA_P2_X_LO   # [X2, m^2-X1, ...]
+                exec.f_k1::sub                                                # [X3, ...]
+                loc_load.PA_OUT_ADDR         mem_storew_le                    # mem[out_addr+0..4] = X3_low; kept
+                swapw                                                         # [X3_high, X3_low, ...]
+                loc_load.PA_OUT_ADDR add.4   mem_storew_le                    # mem[out_addr+4..8] = X3_high; kept
+                swapw                                                         # [X3_low, X3_high, ...] restored
 
                 # ----- (X1 - X3) kept on stack for Y3 -----
-                padw loc_loadw_le.4   padw loc_loadw_le.0     # [X1, X3, ...]
-                swapdw                                        # [X3, X1, ...]
-                exec.f_k1::sub                                # [X1 - X3, ...]
+                padw loc_loadw_le.PA_P1_X_HI   padw loc_loadw_le.PA_P1_X_LO   # [X1, X3, ...]
+                swapdw                                                        # [X3, X1, ...]
+                exec.f_k1::sub                                                # [X1 - X3, ...]
 
                 # ----- Y3 = m * (X1 - X3) - Y1 -> out_addr[8..16] -----
-                padw loc_loadw_le.56  padw loc_loadw_le.52    # [m, X1-X3, ...]
-                exec.f_k1::mul                                # [m*(X1-X3), ...]
-                padw loc_loadw_le.12  padw loc_loadw_le.8     # [Y1, m*(X1-X3), ...]
-                exec.f_k1::sub                                # [Y3, ...]
-                loc_load.40 add.8   mem_storew_le  dropw      # mem[out_addr+8..12] = Y3_low; drop
-                loc_load.40 add.12  mem_storew_le  dropw      # mem[out_addr+12..16] = Y3_high; drop
+                padw loc_loadw_le.PA_M_HI    padw loc_loadw_le.PA_M_LO        # [m, X1-X3, ...]
+                exec.f_k1::mul                                                # [m*(X1-X3), ...]
+                padw loc_loadw_le.PA_P1_Y_HI padw loc_loadw_le.PA_P1_Y_LO     # [Y1, m*(X1-X3), ...]
+                exec.f_k1::sub                                                # [Y3, ...]
+                loc_load.PA_OUT_ADDR add.8   mem_storew_le  dropw             # mem[out_addr+8..12] = Y3_low; drop
+                loc_load.PA_OUT_ADDR add.12  mem_storew_le  dropw             # mem[out_addr+12..16] = Y3_high; drop
 
                 # ----- Clear flag word at out_addr+16 -----
-                padw  loc_load.40 add.16  mem_storew_le  dropw
+                padw  loc_load.PA_OUT_ADDR add.16  mem_storew_le  dropw
             end
         end
     end
@@ -883,50 +971,50 @@ end
 @locals(348)
 pub proc msm_4_128_glv_k1
     # Cache caller args for local access during LUT setup and the inner loop.
-    loc_store.345                                       # sign_a_u1
-    loc_store.346                                       # sign_b_u1
-    loc_store.336                                       # out_addr
-    loc_store.344                                       # k_4_addr
-    loc_store.343                                       # k_3_addr
-    loc_store.342                                       # k_2_addr
-    loc_store.341                                       # k_1_addr
-    loc_store.340                                       # P_4_addr
-    loc_store.339                                       # P_3_addr
-    loc_store.338                                       # P_2_addr
-    loc_store.337                                       # P_1_addr
-    loc_store.347                                       # lut12_endo
+    loc_store.MSM_SIGN_A                                       # sign_a_u1
+    loc_store.MSM_SIGN_B                                       # sign_b_u1
+    loc_store.MSM_OUT_ADDR                                       # out_addr
+    loc_store.MSM_K4_ADDR                                       # k_4_addr
+    loc_store.MSM_K3_ADDR                                       # k_3_addr
+    loc_store.MSM_K2_ADDR                                       # k_2_addr
+    loc_store.MSM_K1_ADDR                                       # k_1_addr
+    loc_store.MSM_P4_ADDR                                       # P_4_addr
+    loc_store.MSM_P3_ADDR                                       # P_3_addr
+    loc_store.MSM_P2_ADDR                                       # P_2_addr
+    loc_store.MSM_P1_ADDR                                       # P_1_addr
+    loc_store.MSM_LUT12_ENDO                                       # lut12_endo
 
     # ----- Copy P_1, P_2, P_3, P_4 into LUT[1], LUT[2], LUT[4], LUT[8] -----
     # Copy each 5-word point; keep the loaded word between adjacent loads.
-    padw  loc_load.337            mem_loadw_le  loc_storew_le.0
-          loc_load.337 add.4      mem_loadw_le  loc_storew_le.4
-          loc_load.337 add.8      mem_loadw_le  loc_storew_le.8
-          loc_load.337 add.12     mem_loadw_le  loc_storew_le.12
-          loc_load.337 add.16     mem_loadw_le  loc_storew_le.16   dropw
+    padw  loc_load.MSM_P1_ADDR            mem_loadw_le  loc_storew_le.MSM_LUT_1
+          loc_load.MSM_P1_ADDR add.4      mem_loadw_le  loc_storew_le.4
+          loc_load.MSM_P1_ADDR add.8      mem_loadw_le  loc_storew_le.8
+          loc_load.MSM_P1_ADDR add.12     mem_loadw_le  loc_storew_le.12
+          loc_load.MSM_P1_ADDR add.16     mem_loadw_le  loc_storew_le.16   dropw
 
-    padw  loc_load.338            mem_loadw_le  loc_storew_le.20
-          loc_load.338 add.4      mem_loadw_le  loc_storew_le.24
-          loc_load.338 add.8      mem_loadw_le  loc_storew_le.28
-          loc_load.338 add.12     mem_loadw_le  loc_storew_le.32
-          loc_load.338 add.16     mem_loadw_le  loc_storew_le.36   dropw
+    padw  loc_load.MSM_P2_ADDR            mem_loadw_le  loc_storew_le.MSM_LUT_2
+          loc_load.MSM_P2_ADDR add.4      mem_loadw_le  loc_storew_le.24
+          loc_load.MSM_P2_ADDR add.8      mem_loadw_le  loc_storew_le.28
+          loc_load.MSM_P2_ADDR add.12     mem_loadw_le  loc_storew_le.32
+          loc_load.MSM_P2_ADDR add.16     mem_loadw_le  loc_storew_le.36   dropw
 
-    padw  loc_load.339            mem_loadw_le  loc_storew_le.60
-          loc_load.339 add.4      mem_loadw_le  loc_storew_le.64
-          loc_load.339 add.8      mem_loadw_le  loc_storew_le.68
-          loc_load.339 add.12     mem_loadw_le  loc_storew_le.72
-          loc_load.339 add.16     mem_loadw_le  loc_storew_le.76   dropw
+    padw  loc_load.MSM_P3_ADDR            mem_loadw_le  loc_storew_le.MSM_LUT_4
+          loc_load.MSM_P3_ADDR add.4      mem_loadw_le  loc_storew_le.64
+          loc_load.MSM_P3_ADDR add.8      mem_loadw_le  loc_storew_le.68
+          loc_load.MSM_P3_ADDR add.12     mem_loadw_le  loc_storew_le.72
+          loc_load.MSM_P3_ADDR add.16     mem_loadw_le  loc_storew_le.76   dropw
 
-    padw  loc_load.340            mem_loadw_le  loc_storew_le.140
-          loc_load.340 add.4      mem_loadw_le  loc_storew_le.144
-          loc_load.340 add.8      mem_loadw_le  loc_storew_le.148
-          loc_load.340 add.12     mem_loadw_le  loc_storew_le.152
-          loc_load.340 add.16     mem_loadw_le  loc_storew_le.156  dropw
+    padw  loc_load.MSM_P4_ADDR            mem_loadw_le  loc_storew_le.MSM_LUT_8
+          loc_load.MSM_P4_ADDR add.4      mem_loadw_le  loc_storew_le.144
+          loc_load.MSM_P4_ADDR add.8      mem_loadw_le  loc_storew_le.148
+          loc_load.MSM_P4_ADDR add.12     mem_loadw_le  loc_storew_le.152
+          loc_load.MSM_P4_ADDR add.16     mem_loadw_le  loc_storew_le.156  dropw
 
     # ----- Copy k_1, k_2, k_3, k_4 (4 u32 limbs each) into mem[320..336] -----
-    padw  loc_load.341  mem_loadw_le  loc_storew_le.320
-          loc_load.342  mem_loadw_le  loc_storew_le.324
-          loc_load.343  mem_loadw_le  loc_storew_le.328
-          loc_load.344  mem_loadw_le  loc_storew_le.332  dropw
+    padw  loc_load.MSM_K1_ADDR  mem_loadw_le  loc_storew_le.MSM_K1_L0
+          loc_load.MSM_K2_ADDR  mem_loadw_le  loc_storew_le.MSM_K2_L0
+          loc_load.MSM_K3_ADDR  mem_loadw_le  loc_storew_le.MSM_K3_L0
+          loc_load.MSM_K4_ADDR  mem_loadw_le  loc_storew_le.MSM_K4_L0  dropw
 
     # ----- Build the 11 derived LUT entries -----
     # LUT[3] = P_1 + P_2 = (±G) + (±φ(G)). Selected from 4 precomputed constants:
@@ -934,33 +1022,33 @@ pub proc msm_4_128_glv_k1
     #   (sa=0, sb=0) -> +A  (sa=0, sb=1) -> +B
     #   (sa=1, sb=1) -> -A  (sa=1, sb=0) -> -B
     # Constants pinned by `lut3_constants_match_runtime` in `tests/math/k1_point.rs`.
-    loc_load.346                                        # sign_b_u1
+    loc_load.MSM_SIGN_B                                        # sign_b_u1
     if.true
-        loc_load.345                                    # sign_a_u1
+        loc_load.MSM_SIGN_A                                    # sign_a_u1
         if.true
             # (sa=1, sb=1) -> -A = -(G + φ(G))
-            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.40  dropw
+            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.MSM_LUT_3  dropw
             push.0xc994b697.0x68832bcb.0xff5e9ab3.0x9ae8d1d3  loc_storew_le.44  dropw
             push.0xfd17b448.0xa6855419.0x9c47d08f.0xfb10d4b8  loc_storew_le.48  dropw
             push.0x483ada77.0x26a3c465.0x5da4fbfc.0x0e1108a8  loc_storew_le.52  dropw
         else
             # (sa=0, sb=1) -> +B = G - φ(G)
-            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.40  dropw
+            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.MSM_LUT_3  dropw
             push.0x93c4d65b.0x4cc437be.0x9f2b0aa7.0x2325ba6c  loc_storew_le.44  dropw
             push.0x5d419b1b.0x625309ca.0x50730fbc.0x03706352  loc_storew_le.48  dropw
             push.0xde87653b.0x1778d37f.0x77e94036.0x92bd956f  loc_storew_le.52  dropw
         end
     else
-        loc_load.345                                    # sign_a_u1
+        loc_load.MSM_SIGN_A                                    # sign_a_u1
         if.true
             # (sa=1, sb=0) -> -B = -(G - φ(G))
-            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.40  dropw
+            push.0xe5015022.0x596e21f2.0xea6eadae.0x415a87b0  loc_storew_le.MSM_LUT_3  dropw
             push.0x93c4d65b.0x4cc437be.0x9f2b0aa7.0x2325ba6c  loc_storew_le.44  dropw
             push.0xa2be64e4.0x9dacf635.0xaf8cf042.0xfc8f98dd  loc_storew_le.48  dropw
             push.0x21789ac4.0xe8872c80.0x8816bfc9.0x6d426a90  loc_storew_le.52  dropw
         else
             # (sa=0, sb=0) -> +A = G + φ(G)
-            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.40  dropw
+            push.0x763bbf1e.0x531bed98.0xfe51de5e.0xe84f50fb  loc_storew_le.MSM_LUT_3  dropw
             push.0xc994b697.0x68832bcb.0xff5e9ab3.0x9ae8d1d3  loc_storew_le.44  dropw
             push.0x02e84bb7.0x597aabe6.0x63b82f6f.0x04ef2777  loc_storew_le.48  dropw
             push.0xb7c52588.0xd95c3b9a.0xa25b0403.0xf1eef757  loc_storew_le.52  dropw
@@ -970,27 +1058,27 @@ pub proc msm_4_128_glv_k1
     padw  loc_storew_le.56  dropw
 
     # LUT[5] = P_1 + P_3.
-    locaddr.0    locaddr.60   locaddr.80    exec.point_add
+    locaddr.MSM_LUT_1    locaddr.MSM_LUT_4   locaddr.MSM_LUT_5    exec.point_add
     # LUT[6] = P_2 + P_3.
-    locaddr.20   locaddr.60   locaddr.100   exec.point_add
+    locaddr.MSM_LUT_2   locaddr.MSM_LUT_4   locaddr.MSM_LUT_6   exec.point_add
     # LUT[7] = LUT[3] + P_3.
-    locaddr.40   locaddr.60   locaddr.120   exec.point_add
+    locaddr.MSM_LUT_3   locaddr.MSM_LUT_4   locaddr.MSM_LUT_7   exec.point_add
     # LUT[9] = P_1 + P_4.
-    locaddr.0    locaddr.140  locaddr.160   exec.point_add
+    locaddr.MSM_LUT_1    locaddr.MSM_LUT_8  locaddr.MSM_LUT_9   exec.point_add
     # LUT[10] = P_2 + P_4.
-    locaddr.20   locaddr.140  locaddr.180   exec.point_add
+    locaddr.MSM_LUT_2   locaddr.MSM_LUT_8  locaddr.MSM_LUT_10   exec.point_add
     # LUT[11] = LUT[3] + P_4.
-    locaddr.40   locaddr.140  locaddr.200   exec.point_add
+    locaddr.MSM_LUT_3   locaddr.MSM_LUT_8  locaddr.MSM_LUT_11   exec.point_add
     # LUT[12] = P_3 + P_4. If P_4 = φ(P_3), use P_3 + φ(P_3) = -φ²(P_3).
-    loc_load.347
+    loc_load.MSM_LUT12_ENDO
     if.true
         # P_3.x at mem[60..68]; P_4.x at mem[140..148]. Load order: hi word first (deeper),
         # then lo word on top, so depth 0..7 = limbs 0..7.
-        padw loc_loadw_le.64   padw loc_loadw_le.60      # P_3.x (a)
-        padw loc_loadw_le.144  padw loc_loadw_le.140     # P_4.x (b) on top
+        padw loc_loadw_le.64   padw loc_loadw_le.MSM_LUT_4      # P_3.x (a)
+        padw loc_loadw_le.144  padw loc_loadw_le.MSM_LUT_8     # P_4.x (b) on top
         exec.f_k1::add                                   # P_3.x + P_4.x
         exec.f_k1::neg                                   # -(P_3.x + P_4.x) = LUT[12].x
-        loc_storew_le.220 swapw  loc_storew_le.224       # mem[220..228] = -sum
+        loc_storew_le.MSM_LUT_12 swapw  loc_storew_le.224       # mem[220..228] = -sum
 
         # LUT[12].y = -P_3.y. P_3.y at mem[68..76].
         loc_loadw_le.72   swapw  loc_loadw_le.68         # => [P_3.y_lo, P_3.y_hi, ...]
@@ -1001,29 +1089,29 @@ pub proc msm_4_128_glv_k1
         # derive from Q); reserved = 0.
         push.0.0.0  loc_load.76  loc_storew_le.236  dropw
     else
-        locaddr.60   locaddr.140  locaddr.220   exec.point_add
+        locaddr.MSM_LUT_4   locaddr.MSM_LUT_8  locaddr.MSM_LUT_12   exec.point_add
     end
     # LUT[13] = LUT[5] + P_4.
-    locaddr.80   locaddr.140  locaddr.240   exec.point_add
+    locaddr.MSM_LUT_5   locaddr.MSM_LUT_8  locaddr.MSM_LUT_13   exec.point_add
     # LUT[14] = LUT[6] + P_4.
-    locaddr.100  locaddr.140  locaddr.260   exec.point_add
+    locaddr.MSM_LUT_6  locaddr.MSM_LUT_8  locaddr.MSM_LUT_14   exec.point_add
     # LUT[15] = LUT[7] + P_4.
-    locaddr.120  locaddr.140  locaddr.280   exec.point_add
+    locaddr.MSM_LUT_7  locaddr.MSM_LUT_8  locaddr.MSM_LUT_15   exec.point_add
 
     # ----- Initialize accum to identity at mem[300..320]: (X, Y, is_infinity=1, reserved=0) -----
     # The X, Y limbs are not interpreted while is_infinity = 1, so we leave them as zeros.
     padw
-    loc_storew_le.300                                   # X[0..3] = 0
-    loc_storew_le.304                                   # X[4..7] = 0
-    loc_storew_le.308                                   # Y[0..3] = 0
-    loc_storew_le.312 dropw                             # Y[4..7] = 0
-    push.0.0.0.1 loc_storew_le.316 dropw                # is_infinity = 1; reserved = 0,0,0
+    loc_storew_le.MSM_ACC                                   # X[0..3] = 0
+    loc_storew_le.MSM_ACC_X_HI                                   # X[4..7] = 0
+    loc_storew_le.MSM_ACC_Y_LO                                   # Y[0..3] = 0
+    loc_storew_le.MSM_ACC_Y_HI dropw                             # Y[4..7] = 0
+    push.0.0.0.1 loc_storew_le.MSM_ACC_FLAG dropw                # is_infinity = 1; reserved = 0,0,0
 
     # ----- Main loop: 128 iterations MSB-first across the four scalars -----
     # Per inner iter (stack [k4_limb, k3_limb, k2_limb, k1_limb, ...]):
     #   1. Extract the MSB of each limb to form code = bit(k1) + 2*bit(k2) + 4*bit(k3) + 8*bit(k4).
     #   2. Double accum.
-    #   3. If code != 0, add LUT[code] to accum. LUT[code]_addr = (code-1) * 20 + locaddr.0.
+    #   3. If code != 0, add LUT[code] to accum. LUT[code]_addr = (code-1) * 20 + locaddr.MSM_LUT_1.
     #   4. Shift each limb left by 1 (expose next bit at position 31).
     # 128 iterations split as 4 limbs * 32 iters each. k_i's limb j is at mem[320 + 4*(i-1) + j].
     #
@@ -1032,10 +1120,10 @@ pub proc msm_4_128_glv_k1
     # Horner code-build folds left-to-right without any intervening movup.
 
     # ----- Limb 3 (bits 127..96 of each scalar) -----
-    loc_load.323
-    loc_load.327
-    loc_load.331
-    loc_load.335
+    loc_load.MSM_K1_L3
+    loc_load.MSM_K2_L3
+    loc_load.MSM_K3_L3
+    loc_load.MSM_K4_L3
     repeat.32
         # Extract bit_k1, bit_k2, bit_k3, bit_k4; form code = b1 + 2*b2 + 4*b3 + 8*b4.
         dup.3 u32shr.31                                 # bit_k1
@@ -1045,15 +1133,15 @@ pub proc msm_4_128_glv_k1
         mul.2 add  mul.2 add  mul.2 add                 # LUT index = 8*b4 + 4*b3 + 2*b2 + b1 (Horner)
 
         # Double accum: point_double(out=accum, in=accum).
-        locaddr.300 dup
+        locaddr.MSM_ACC dup
         exec.point_double
 
         # Conditional add LUT[code]. point_add(out=accum, p1=accum, p2=LUT[code]).
         # Operand order relies on point_add commutativity to skip the swap before exec.point_add.
         dup neq.0
         if.true
-            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base; [LUT_addr, ...]
-            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]
+            sub.1 mul.20   locaddr.MSM_LUT_1 add                # LUT_addr = (code-1)*20 + base; [LUT_addr, ...]
+            locaddr.MSM_ACC  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]
             exec.point_add
         else
             drop
@@ -1070,22 +1158,22 @@ pub proc msm_4_128_glv_k1
     drop drop drop drop
 
     # ----- Limb 2 (bits 95..64) -----
-    loc_load.322
-    loc_load.326
-    loc_load.330
-    loc_load.334
+    loc_load.MSM_K1_L2
+    loc_load.MSM_K2_L2
+    loc_load.MSM_K3_L2
+    loc_load.MSM_K4_L2
     repeat.32
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         mul.2 add  mul.2 add  mul.2 add                 # LUT index = 8*b4 + 4*b3 + 2*b2 + b1 (Horner)
-        locaddr.300 dup
+        locaddr.MSM_ACC dup
         exec.point_double
         dup neq.0
         if.true
-            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
+            sub.1 mul.20   locaddr.MSM_LUT_1 add                # LUT_addr = (code-1)*20 + base
+            locaddr.MSM_ACC  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
@@ -1100,22 +1188,22 @@ pub proc msm_4_128_glv_k1
     drop drop drop drop
 
     # ----- Limb 1 (bits 63..32) -----
-    loc_load.321
-    loc_load.325
-    loc_load.329
-    loc_load.333
+    loc_load.MSM_K1_L1
+    loc_load.MSM_K2_L1
+    loc_load.MSM_K3_L1
+    loc_load.MSM_K4_L1
     repeat.32
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         mul.2 add  mul.2 add  mul.2 add                 # LUT index = 8*b4 + 4*b3 + 2*b2 + b1 (Horner)
-        locaddr.300 dup
+        locaddr.MSM_ACC dup
         exec.point_double
         dup neq.0
         if.true
-            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
+            sub.1 mul.20   locaddr.MSM_LUT_1 add                # LUT_addr = (code-1)*20 + base
+            locaddr.MSM_ACC  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
@@ -1130,22 +1218,22 @@ pub proc msm_4_128_glv_k1
     drop drop drop drop
 
     # ----- Limb 0 (bits 31..0) -----
-    loc_load.320
-    loc_load.324
-    loc_load.328
-    loc_load.332
+    loc_load.MSM_K1_L0
+    loc_load.MSM_K2_L0
+    loc_load.MSM_K3_L0
+    loc_load.MSM_K4_L0
     repeat.32
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         dup.3 u32shr.31
         mul.2 add  mul.2 add  mul.2 add                 # LUT index = 8*b4 + 4*b3 + 2*b2 + b1 (Horner)
-        locaddr.300 dup
+        locaddr.MSM_ACC dup
         exec.point_double
         dup neq.0
         if.true
-            sub.1 mul.20   locaddr.0 add                # LUT_addr = (code-1)*20 + base
-            locaddr.300  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
+            sub.1 mul.20   locaddr.MSM_LUT_1 add                # LUT_addr = (code-1)*20 + base
+            locaddr.MSM_ACC  dup                             # [accum (out), accum (p1), LUT_addr (p2), ...]; relies on point_add commutativity
             exec.point_add
         else
             drop
@@ -1160,11 +1248,11 @@ pub proc msm_4_128_glv_k1
     drop drop drop drop
 
     # ----- Copy accum from mem[300..320] to caller mem[out_addr..out_addr+20] -----
-    padw  loc_loadw_le.300  loc_load.336           mem_storew_le
-    loc_loadw_le.304        loc_load.336 add.4     mem_storew_le
-    loc_loadw_le.308        loc_load.336 add.8     mem_storew_le
-    loc_loadw_le.312        loc_load.336 add.12    mem_storew_le
-    loc_loadw_le.316        loc_load.336 add.16    mem_storew_le  dropw
+    padw  loc_loadw_le.MSM_ACC  loc_load.MSM_OUT_ADDR           mem_storew_le
+    loc_loadw_le.MSM_ACC_X_HI        loc_load.MSM_OUT_ADDR add.4     mem_storew_le
+    loc_loadw_le.MSM_ACC_Y_LO        loc_load.MSM_OUT_ADDR add.8     mem_storew_le
+    loc_loadw_le.MSM_ACC_Y_HI        loc_load.MSM_OUT_ADDR add.12    mem_storew_le
+    loc_loadw_le.MSM_ACC_FLAG        loc_load.MSM_OUT_ADDR add.16    mem_storew_le  dropw
 end
 
 # ===== HINTED VERIFICATION DRIVER (GLV + 4-WAY MSM) =============================================
