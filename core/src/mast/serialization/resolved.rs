@@ -156,9 +156,12 @@ impl<'a> ResolvedSerializedForest<'a> {
             })?;
         }
 
+        let mut roots = Vec::with_capacity(self.procedure_root_count());
         for index in 0..self.procedure_root_count() {
-            mast_forest.make_root(self.procedure_root_at(index)?);
+            roots.push(self.procedure_root_at(index)?);
         }
+        mast_forest.roots = roots;
+        mast_forest.commitment = mast_forest.compute_nodes_commitment(&mast_forest.roots);
 
         mast_forest.advice_map = advice_map;
         Ok(mast_forest)
