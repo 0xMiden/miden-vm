@@ -110,6 +110,46 @@ const MSM_LUT12_ENDO = 347
 # Mirrors the canonical declaration in `u256.masm`; kept in sync by convention.
 pub type u256 = struct { lo: u128, hi: u128 }
 
+# ===== CONSTANT HELPERS =========================================================================
+
+#! Pushes the secp256k1 generator G's affine x-coordinate onto the operand stack as 8 u32 LE
+#! limbs (limb 0 on top, limb 7 deepest).
+#!
+#! Stack: [...]  ->  [G_x[0], G_x[1], ..., G_x[7], ...]
+proc push_g_x
+    push.0x79BE667E.0xF9DCBBAC.0x55A06295.0xCE870B07
+    push.0x029BFCDB.0x2DCE28D9.0x59F2815B.0x16F81798
+end
+
+#! Pushes the secp256k1 generator G's affine y-coordinate onto the operand stack as 8 u32 LE
+#! limbs (limb 0 on top, limb 7 deepest).
+#!
+#! Stack: [...]  ->  [G_y[0], G_y[1], ..., G_y[7], ...]
+proc push_g_y
+    push.0x483ADA77.0x26A3C465.0x5DA4FBFC.0x0E1108A8
+    push.0xFD17B448.0xA6855419.0x9C47D08F.0xFB10D4B8
+end
+
+#! Pushes the precomputed value `phi(G).x = beta * G_x mod p` as 8 u32 LE limbs
+#! (limb 0 on top, limb 7 deepest). `phi((x, y)) = (beta * x mod p, y)`.
+#! Checked by `crates/lib/core/tests/math/k1_point.rs::phi_g_x_constant_matches_runtime`.
+#!
+#! Stack: [...]  ->  [phi_G_x[0], phi_G_x[1], ..., phi_G_x[7], ...]
+proc push_phi_g_x
+    push.0xbcace2e9.0x9da01887.0xab0102b6.0x96902325
+    push.0x87284406.0x7f15e98d.0xa7bba044.0x00b88fcb
+end
+
+#! Pushes the secp256k1 base-field endomorphism constant `beta` as 8 u32 LE limbs
+#! (limb 0 on top, limb 7 deepest). `beta` is the chosen nontrivial cube root of 1 used by
+#! `phi((x, y)) = (beta * x mod p, y)`.
+#!
+#! Stack: [...]  ->  [beta[0], beta[1], ..., beta[7], ...]
+proc push_beta
+    push.0x7ae96a2b.0x657c0710.0x6e64479e.0xac3434e9
+    push.0x9cf04975.0x12f58995.0xc1396c28.0x719501ee
+end
+
 # ===== MEMORY HELPERS ===========================================================================
 
 #! Writes the canonical point-at-infinity to `out_addr`: (X = 0, Y = 0, is_infinity = 1,
@@ -1296,28 +1336,19 @@ pub proc verify_glv_hinted
     loc_store.121                                        # u_1_addr
 
     # ----- Load G into mem[0..20] -----
-    # G_x (LE u32 limbs): [0x16F81798, 0x59F2815B, 0x2DCE28D9, 0x029BFCDB,
-    #                      0xCE870B07, 0x55A06295, 0xF9DCBBAC, 0x79BE667E].
-    push.0x029BFCDB.0x2DCE28D9.0x59F2815B.0x16F81798
+    exec.push_g_x
     loc_storew_le.0 dropw
-    push.0x79BE667E.0xF9DCBBAC.0x55A06295.0xCE870B07
     loc_storew_le.4 dropw
-    # G_y (LE u32 limbs): [0xFB10D4B8, 0x9C47D08F, 0xA6855419, 0xFD17B448,
-    #                      0x0E1108A8, 0x5DA4FBFC, 0x26A3C465, 0x483ADA77].
-    push.0xFD17B448.0xA6855419.0x9C47D08F.0xFB10D4B8
+    exec.push_g_y
     loc_storew_le.8 dropw
-    push.0x483ADA77.0x26A3C465.0x5DA4FBFC.0x0E1108A8
     loc_storew_le.12 dropw
     # is_infinity = 0; reserved zeros.
     padw
     loc_storew_le.16 dropw
 
     # ----- φ(G) = (β·G_x mod p, G_y, 0) into mem[20..40] -----
-    # φ(G).x is the precomputed constant β·G_x mod p. Pinned by
-    # `crates/lib/core/tests/math/k1_point.rs::phi_g_x_constant_matches_runtime`.
-    push.0x87284406.0x7f15e98d.0xa7bba044.0x00b88fcb
+    exec.push_phi_g_x
     loc_storew_le.20 dropw
-    push.0xbcace2e9.0x9da01887.0xab0102b6.0x96902325
     loc_storew_le.24
     # φ(G).y = G_y, φ(G).is_infinity = 0.
     loc_loadw_le.8        loc_storew_le.28
@@ -1332,8 +1363,7 @@ pub proc verify_glv_hinted
     loc_load.123 add.16         mem_loadw_le  loc_storew_le.56  dropw
 
     # ----- Compute φ(Q) into mem[60..80]. Same shape as φ(G), with Q_x loaded from local mem. -----
-    push.0x7ae96a2b.0x657c0710.0x6e64479e.0xac3434e9
-    push.0x9cf04975.0x12f58995.0xc1396c28.0x719501ee
+    exec.push_beta
     padw loc_loadw_le.44  padw loc_loadw_le.40
     exec.f_k1::mul
     loc_storew_le.60 dropw

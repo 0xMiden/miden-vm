@@ -34,7 +34,7 @@ const VGS_K_HI       = 44    # k, high word
 const VGS_OUT_ADDR   = 48    # out_addr cached
 const VGS_K_ADDR     = 49    # k_addr cached
 
-# ===== MODULUS HELPERS ==========================================================================
+# ===== CONSTANT HELPERS =========================================================================
 
 #! Pushes the secp256k1 group order `n` onto the operand stack as 8 u32 LE limbs (n[0] on top,
 #! n[7] deepest).
@@ -43,6 +43,16 @@ const VGS_K_ADDR     = 49    # k_addr cached
 pub proc push_n
     push.0xffffffff dup dup push.0xfffffffe
     push.0xbaaedce6.0xaf48a03b.0xbfd25e8c.0xd0364141
+end
+
+#! Pushes the secp256k1 GLV eigenvalue `lambda` as 8 u32 LE limbs (lambda[0] on top,
+#! lambda[7] deepest). `lambda` is the chosen nontrivial cube root of 1 used by the GLV relation:
+#! multiplying a scalar by lambda mod n corresponds to applying `phi` to the point.
+#!
+#! Stack: [...]  ->  [lambda[0], lambda[1], ..., lambda[7], ...]
+proc push_lambda
+    push.0x5363ad4c.0xc05c30e0.0xa5261c02.0x8812645a
+    push.0x122e22ea.0x20816678.0xdf02967c.0x1b23bd72
 end
 
 # ===== ADDITION =================================================================================
@@ -281,10 +291,8 @@ pub proc verify_glv_split
     end
     loc_storew_le.VGS_CANON_B_LO swapw  loc_storew_le.VGS_CANON_B_HI  swapw
 
-    # sum = c_a + c_b * lambda mod n. lambda is the secp256k1 GLV eigenvalue.
-    # lambda = 0x5363ad4c c05c30e0 a5261c02 8812645a 122e22ea 20816678 df02967c 1b23bd72
-    push.0x5363ad4c.0xc05c30e0.0xa5261c02.0x8812645a
-    push.0x122e22ea.0x20816678.0xdf02967c.0x1b23bd72
+    # sum = c_a + c_b * lambda mod n.
+    exec.push_lambda
     exec.mul                                              # [lambda * c_b, c_a, ...]
     exec.add                                              # [sum, ...]
 
