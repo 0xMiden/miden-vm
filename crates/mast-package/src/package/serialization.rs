@@ -26,7 +26,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
+use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf, Visibility};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -36,7 +36,10 @@ use miden_core::{
     },
 };
 
-use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
+use super::{
+    ConstantExport, PackageId, PackageModule, PackageSubmodule, ProcedureExport, TargetType,
+    TypeExport,
+};
 use crate::{
     Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
 };
@@ -50,7 +53,7 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [5, 0, 0];
+const VERSION: [u8; 3] = [6, 0, 0];
 
 /// Byte-read budget multiplier for package deserialization from a byte slice.
 ///
@@ -271,8 +274,26 @@ impl serde::Serialize for PackageManifest {
             }
         }
 
-        let mut serializer = serializer.serialize_struct("PackageManifest", 2)?;
+        struct PackageModules<'a>(&'a BTreeMap<Arc<Path>, PackageModule>);
+
+        impl serde::Serialize for PackageModules<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeSeq;
+
+                let mut serializer = serializer.serialize_seq(Some(self.0.len()))?;
+                for value in self.0.values() {
+                    serializer.serialize_element(value)?;
+                }
+                serializer.end()
+            }
+        }
+
+        let mut serializer = serializer.serialize_struct("PackageManifest", 4)?;
         serializer.serialize_field("exports", &PackageExports(&self.exports))?;
+        serializer.serialize_field("modules", &PackageModules(&self.modules))?;
         serializer.serialize_field("dependencies", &self.dependencies)?;
         serializer.serialize_field("entrypoint", &self.entrypoint)?;
         serializer.end()
@@ -289,6 +310,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
             Exports,
+            Modules,
             Dependencies,
             Entrypoint,
         }
@@ -309,12 +331,16 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let exports = seq
                     .next_element::<Vec<PackageExport>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let modules = seq
+                    .next_element::<Vec<PackageModule>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
                 let dependencies = seq
                     .next_element::<Vec<Dependency>>()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
                 let entrypoint =
                     seq.next_element::<PathBuf>().map(|p| p.map(Arc::<ast::Path>::from))?;
                 PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
                     .and_then(|manifest| {
                         if let Some(entrypoint) = entrypoint {
@@ -331,6 +357,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 A: serde::de::MapAccess<'de>,
             {
                 let mut exports = None;
+                let mut modules = None;
                 let mut dependencies = None;
                 let mut entrypoint = None;
                 while let Some(key) = map.next_key()? {
@@ -340,6 +367,12 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                                 return Err(serde::de::Error::duplicate_field("exports"));
                             }
                             exports = Some(map.next_value::<Vec<PackageExport>>()?);
+                        },
+                        Field::Modules => {
+                            if modules.is_some() {
+                                return Err(serde::de::Error::duplicate_field("modules"));
+                            }
+                            modules = Some(map.next_value::<Vec<PackageModule>>()?);
                         },
                         Field::Dependencies => {
                             if dependencies.is_some() {
@@ -357,9 +390,11 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                     }
                 }
                 let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
+                let modules = modules.ok_or_else(|| serde::de::Error::missing_field("modules"))?;
                 let dependencies =
                     dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
                 PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
                     .and_then(|manifest| {
                         if let Some(entrypoint) = entrypoint {
@@ -374,7 +409,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
 
         deserializer.deserialize_struct(
             "PackageManifest",
-            &["exports", "dependencies", "entrypoint"],
+            &["exports", "modules", "dependencies", "entrypoint"],
             PackageManifestVisitor,
         )
     }
@@ -386,6 +421,12 @@ impl Serializable for PackageManifest {
         target.write_usize(self.num_exports());
         for export in self.exports() {
             export.write_into(target);
+        }
+
+        // Write module surfaces
+        target.write_usize(self.num_modules());
+        for module in self.modules() {
+            module.write_into(target);
         }
 
         // Write dependencies
@@ -422,6 +463,16 @@ impl PackageManifest {
             exports.push(PackageExport::read_from_safe(source, mast)?);
         }
 
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let max_modules = source.max_alloc(PackageModule::min_serialized_size());
+        if modules_len > max_modules {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {modules_len} elements but reader can provide at most {max_modules}"
+            )));
+        }
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
@@ -433,6 +484,7 @@ impl PackageManifest {
         };
 
         PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
             .and_then(|manifest| manifest.with_dependencies(dependencies))
             .and_then(|manifest| {
                 if let Some(entrypoint) = entrypoint {
@@ -451,6 +503,10 @@ impl Deserializable for PackageManifest {
         let exports_len = source.read_usize()?;
         let exports = source.read_many_iter(exports_len)?.collect::<Result<Vec<_>, _>>()?;
 
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
@@ -462,6 +518,7 @@ impl Deserializable for PackageManifest {
         };
 
         PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
             .and_then(|manifest| manifest.with_dependencies(dependencies))
             .and_then(|manifest| {
                 if let Some(entrypoint) = entrypoint {
@@ -471,6 +528,46 @@ impl Deserializable for PackageManifest {
                 }
             })
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
+    }
+}
+
+// PACKAGE MODULE SURFACE SERIALIZATION/DESERIALIZATION
+// ================================================================================================
+
+impl Serializable for PackageModule {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.path.write_into(target);
+        target.write_usize(self.submodules.len());
+        for submodule in self.submodules.iter() {
+            submodule.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for PackageModule {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let submodules = Vec::<PackageSubmodule>::read_from(source)?;
+        Ok(Self { path, submodules })
+    }
+}
+
+impl Serializable for PackageSubmodule {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.name.write_into(target);
+        target.write_bool(self.visibility.is_public());
+    }
+}
+
+impl Deserializable for PackageSubmodule {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let name = ast::Ident::read_from(source)?;
+        let visibility = if source.read_bool()? {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
+        Ok(Self { name, visibility })
     }
 }
 
@@ -650,7 +747,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
+    use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName, Visibility};
     use miden_core::{
         Felt, Word, assert_matches,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
@@ -666,8 +763,8 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
-        TargetType,
+        Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
+        PackageSubmodule, ProcedureExport, SectionId, TargetType,
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -838,6 +935,7 @@ mod tests {
     fn package_manifest_rejects_over_budget_dependencies() {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
+        bytes.write_usize(0);
         bytes.write_usize(2);
 
         let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 2);
@@ -961,9 +1059,39 @@ mod tests {
     }
 
     #[test]
+    fn package_manifest_roundtrips_module_surfaces() {
+        let export = PackageExport::Procedure(ProcedureExport::new(
+            absolute_path("test::api::foo"),
+            None,
+            Word::default(),
+            None,
+        ));
+        let module = PackageModule::new(
+            absolute_path("test"),
+            [PackageSubmodule::new(Ident::new("api").unwrap(), Visibility::Public)],
+        );
+        let child = PackageModule::new(absolute_path("test::api"), []);
+
+        let manifest = PackageManifest::new([export])
+            .and_then(|manifest| manifest.with_modules([module, child]))
+            .expect("manifest should be valid");
+        let bytes = manifest.to_bytes();
+        let decoded = PackageManifest::read_from_bytes(&bytes).expect("manifest should roundtrip");
+
+        let root = decoded
+            .get_module(absolute_path("test").as_ref())
+            .expect("root module surface should be present");
+        assert_eq!(root.submodules().len(), 1);
+        assert_eq!(root.submodules()[0].name.as_str(), "api");
+        assert!(root.submodules()[0].visibility.is_public());
+        assert!(decoded.get_module(absolute_path("test::api").as_ref()).is_some());
+    }
+
+    #[test]
     fn package_manifest_add_dependency_rejects_duplicate_dependencies() {
         let mut manifest = PackageManifest {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };
@@ -989,6 +1117,8 @@ mod tests {
         export.write_into(&mut bytes);
         export.write_into(&mut bytes);
         bytes.write_usize(0);
+        bytes.write_usize(0);
+        bytes.write_bool(false);
 
         let mut reader = SliceReader::new(&bytes);
         let err = PackageManifest::read_from(&mut reader)
@@ -1002,9 +1132,11 @@ mod tests {
 
         let mut bytes = Vec::new();
         bytes.write_usize(0);
+        bytes.write_usize(0);
         bytes.write_usize(2);
         dependency.write_into(&mut bytes);
         dependency.write_into(&mut bytes);
+        bytes.write_bool(false);
 
         let mut reader = SliceReader::new(&bytes);
         let err = PackageManifest::read_from(&mut reader)
@@ -1022,6 +1154,7 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };
@@ -1053,6 +1186,7 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };
@@ -1082,6 +1216,7 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };

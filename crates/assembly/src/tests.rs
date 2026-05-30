@@ -5132,6 +5132,58 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 }
 
 #[test]
+fn package_module_surface_allows_downstream_import_of_root_module() -> TestResult {
+    let context = TestContext::new();
+    let dep_root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace pkg::lib
+
+        pub mod api
+        "#
+    ))?;
+    let dep_api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace pkg::lib::api
+
+        pub proc foo
+            push.1
+        end
+        "#
+    ))?;
+
+    let dep =
+        Assembler::new(context.source_manager()).assemble_library("dep", dep_root, [dep_api])?;
+    assert!(dep.manifest.get_module(Path::new("::pkg::lib")).is_some());
+    assert!(dep.manifest.get_module(Path::new("::pkg::lib::api")).is_some());
+
+    let dep_bytes = dep.to_bytes();
+    let dep = Arc::new(Package::read_from_bytes(&dep_bytes).map_err(Report::msg)?);
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace consumer
+
+        use pkg::lib
+
+        pub proc call
+            exec.lib::api::foo
+        end
+        "#
+    ))?;
+
+    let package = Assembler::new(context.source_manager())
+        .with_package(dep, Linkage::Static)?
+        .assemble_library("consumer", consumer, None::<Box<Module>>)?;
+    let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+
+    assert!(exports.contains(&Arc::from(Path::new("::consumer::call"))));
+
+    Ok(())
+}
+
+#[test]
 fn imported_error_message_alias_is_resolved_without_panicking() {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},

@@ -2,7 +2,13 @@ pub(super) mod debuginfo;
 mod error;
 mod product;
 
-use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
+};
 
 use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
@@ -23,8 +29,8 @@ use miden_core::{
     serde::Serializable,
 };
 use miden_mast_package::{
-    ConstantExport, Package, PackageExport, PackageId, ProcedureExport, Section, SectionId,
-    TypeExport,
+    ConstantExport, Package, PackageExport, PackageId, PackageModule, PackageSubmodule,
+    ProcedureExport, Section, SectionId, TypeExport,
 };
 use miden_project::{Linkage, TargetType};
 
@@ -608,7 +614,38 @@ impl Assembler {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-        self.finish_library_product(name, mast_forest, exports, kind)
+        let modules = self.package_modules(module_indices);
+        self.finish_library_product(name, mast_forest, exports, modules, kind)
+    }
+
+    fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
+        let mut visited = BTreeSet::new();
+        let mut stack = module_indices.to_vec();
+        let mut modules = BTreeMap::new();
+
+        while let Some(module_idx) = stack.pop() {
+            if !visited.insert(module_idx) {
+                continue;
+            }
+
+            let module = &self.linker[module_idx];
+            let mut submodules = Vec::new();
+            for decl in module.submodules() {
+                submodules.push(PackageSubmodule::new(decl.name.clone(), decl.visibility));
+
+                let child_path = module.path().join(&decl.name);
+                if let Some(child_idx) = self.linker.find_module_index(child_path.as_path()) {
+                    stack.push(child_idx);
+                }
+            }
+
+            modules.insert(
+                module.path().clone(),
+                PackageModule::new(module.path().clone(), submodules),
+            );
+        }
+
+        modules.into_values().collect()
     }
 
     /// The purpose of this function is, for any given symbol in the set of modules being compiled
@@ -903,18 +940,20 @@ impl Assembler {
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
         exports: BTreeMap<Arc<Path>, PackageExport>,
+        modules: Vec<PackageModule>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
         let mast_forest = self.apply_debug_options(mast_forest);
 
         let mast = Arc::new(mast_forest);
         let package = Box::new(
-            Package::create(
+            Package::create_with_modules(
                 name,
                 miden_mast_package::Version::new(0, 0, 0),
                 kind,
                 mast,
                 exports.into_values(),
+                modules,
                 None,
             )
             .map_err(Report::msg)?,

@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt;
 
 use miden_assembly_syntax::ast::{
@@ -20,9 +25,13 @@ use crate::{Dependency, PackageId};
 // ================================================================================================
 
 /// The manifest of a package, containing the set of package dependencies (libraries or packages)
-/// and exported items (procedures, constants, types), if known.
+/// exported items (procedures, constants, types), and module surface information, if known.
 ///
 /// Exports declared in the package manifest are keyed by their fully-qualified path.
+///
+/// Module surface entries describe the module tree independently from item exports. This lets
+/// downstream linkers validate `use module` and submodule traversal without treating modules as
+/// exported items.
 ///
 /// Dependencies must each specify a unique package identifier, i.e. it is not allowed to have
 /// multiple dependencies on the same package identifier, even if they are different versions.
@@ -41,6 +50,9 @@ pub struct PackageManifest {
         )
     )]
     pub(super) exports: BTreeMap<Arc<Path>, PackageExport>,
+    /// The module surface declared by this package.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Default::default()"))]
+    pub(super) modules: BTreeMap<Arc<Path>, PackageModule>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
     pub(super) dependencies: Vec<Dependency>,
@@ -53,6 +65,10 @@ pub struct PackageManifest {
 pub enum ManifestValidationError {
     #[error("duplicate export path '{0}' in package manifest")]
     DuplicateExport(Arc<Path>),
+    #[error("duplicate module path '{0}' in package manifest")]
+    DuplicateModule(Arc<Path>),
+    #[error("duplicate submodule '{name}' in module '{module}' in package manifest")]
+    DuplicateSubmodule { module: Arc<Path>, name: String },
     #[error("duplicate dependency '{0}' in package manifest")]
     DuplicateDependency(PackageId),
     #[error("multiple entrypoint procedures found: '{duplicate}' conflicts with '{original}'")]
@@ -80,6 +96,8 @@ pub enum ManifestValidationError {
     InvalidProcedureExport { path: Arc<Path> },
     #[error("invalid export path '{path}': {error}")]
     InvalidExportPath { path: Arc<Path>, error: ast::PathError },
+    #[error("invalid module path '{path}': {error}")]
+    InvalidModulePath { path: Arc<Path>, error: ast::PathError },
     #[error("package must contain at least one exported procedure")]
     NoProcedures,
 }
@@ -92,6 +110,7 @@ impl PackageManifest {
     ) -> Result<Self, ManifestValidationError> {
         let mut manifest = Self {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };
@@ -188,6 +207,29 @@ impl PackageManifest {
         Ok(self)
     }
 
+    /// Extend this manifest with module surface information.
+    pub fn with_modules(
+        mut self,
+        modules: impl IntoIterator<Item = PackageModule>,
+    ) -> Result<Self, ManifestValidationError> {
+        for module in modules {
+            self.add_module(module)?;
+        }
+
+        Ok(self)
+    }
+
+    /// Add module surface information to the manifest.
+    pub fn add_module(&mut self, mut module: PackageModule) -> Result<(), ManifestValidationError> {
+        normalize_module(&mut module)?;
+        let path = module.path.clone();
+        if self.modules.insert(path.clone(), module).is_some() {
+            return Err(ManifestValidationError::DuplicateModule(path));
+        }
+
+        Ok(())
+    }
+
     /// Add a dependency to the manifest
     pub fn add_dependency(
         &mut self,
@@ -226,6 +268,21 @@ impl PackageManifest {
         self.exports.get(name.as_ref())
     }
 
+    /// Get the number of module surface entries in this manifest.
+    pub fn num_modules(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Get an iterator over the module surfaces in this manifest.
+    pub fn modules(&self) -> impl Iterator<Item = &PackageModule> {
+        self.modules.values()
+    }
+
+    /// Get information about a module surface by its qualified path.
+    pub fn get_module(&self, name: impl AsRef<Path>) -> Option<&PackageModule> {
+        self.modules.get(name.as_ref())
+    }
+
     /// Get information about all exported procedures of this package with the given MAST root
     /// digest
     pub fn get_procedures_by_digest(
@@ -252,6 +309,54 @@ impl PackageManifest {
         }
 
         Ok(())
+    }
+}
+
+/// Represents a module surface declared by a package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PackageModule {
+    /// The fully-qualified path of this module.
+    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
+    pub path: Arc<Path>,
+    /// The submodules declared by this module.
+    pub submodules: Vec<PackageSubmodule>,
+}
+
+impl PackageModule {
+    pub fn new(path: Arc<Path>, submodules: impl IntoIterator<Item = PackageSubmodule>) -> Self {
+        Self {
+            path,
+            submodules: submodules.into_iter().collect(),
+        }
+    }
+
+    /// Get the module path.
+    #[inline]
+    pub fn path(&self) -> &Arc<Path> {
+        &self.path
+    }
+
+    /// Get the submodule declarations for this module.
+    #[inline]
+    pub fn submodules(&self) -> &[PackageSubmodule] {
+        &self.submodules
+    }
+}
+
+/// Represents a submodule declaration in a package module surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PackageSubmodule {
+    /// The name of the submodule.
+    pub name: ast::Ident,
+    /// The visibility declared for the submodule edge.
+    pub visibility: ast::Visibility,
+}
+
+impl PackageSubmodule {
+    pub fn new(name: ast::Ident, visibility: ast::Visibility) -> Self {
+        Self { name, visibility }
     }
 }
 
@@ -559,6 +664,35 @@ fn normalize_export(export: &mut PackageExport) -> Result<(), ManifestValidation
     }
 
     Ok(())
+}
+
+fn normalize_module(module: &mut PackageModule) -> Result<(), ManifestValidationError> {
+    use alloc::collections::BTreeSet;
+    let canonical_path = canonicalize_module_path(module.path.as_ref())?;
+    let mut declared = BTreeSet::new();
+
+    for submodule in module.submodules.iter() {
+        let name = submodule.name.as_str();
+        if !declared.insert(name.to_string()) {
+            return Err(ManifestValidationError::DuplicateSubmodule {
+                module: canonical_path,
+                name: name.to_string(),
+            });
+        }
+    }
+
+    module.path = canonical_path;
+    Ok(())
+}
+
+fn canonicalize_module_path(path: &Path) -> Result<Arc<Path>, ManifestValidationError> {
+    let canonical =
+        path.canonicalize()
+            .map_err(|error| ManifestValidationError::InvalidModulePath {
+                error,
+                path: path.to_path_buf().into(),
+            })?;
+    Ok(Arc::<Path>::from(canonical.into_boxed_path()))
 }
 
 fn canonicalize_export_path(path: &Path) -> Result<Arc<Path>, ManifestValidationError> {

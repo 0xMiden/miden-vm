@@ -219,6 +219,7 @@ impl Linker {
         }
 
         let module_index = self.next_module_id();
+        let submodules = module.submodules().to_vec();
         let items = module.items();
         let mut symbols = Vec::with_capacity(items.len());
         for (idx, item) in items {
@@ -245,6 +246,7 @@ impl Linker {
             ModuleSource::Mast,
             module_path.into(),
         )
+        .with_submodules(submodules)
         .with_symbols(symbols);
 
         self.modules.push(link_module);

@@ -5,6 +5,7 @@ use core::fmt;
 
 /// Represents the visibility of an item (procedure, constant, etc.) globally.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum Visibility {
     /// The item is visible outside its defining module

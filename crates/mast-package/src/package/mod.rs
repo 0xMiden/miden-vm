@@ -35,8 +35,8 @@ use miden_core::{
 pub use self::{
     id::PackageId,
     manifest::{
-        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, ProcedureExport,
-        TypeExport,
+        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
+        PackageSubmodule, ProcedureExport, TypeExport,
     },
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
@@ -98,7 +98,22 @@ impl Package {
         exports: impl IntoIterator<Item = PackageExport>,
         dependencies: impl IntoIterator<Item = Dependency>,
     ) -> Result<Self, ManifestValidationError> {
-        let manifest = PackageManifest::new(exports)?.with_dependencies(dependencies)?;
+        Self::create_with_modules(name, version, kind, mast, exports, [], dependencies)
+    }
+
+    /// Construct a [Package] from its essential component parts and module surface metadata.
+    pub fn create_with_modules(
+        name: PackageId,
+        version: Version,
+        kind: TargetType,
+        mast: Arc<MastForest>,
+        exports: impl IntoIterator<Item = PackageExport>,
+        modules: impl IntoIterator<Item = PackageModule>,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> Result<Self, ManifestValidationError> {
+        let manifest = PackageManifest::new(exports)?
+            .with_modules(modules)?
+            .with_dependencies(dependencies)?;
 
         if manifest.entrypoint().is_some() && !kind.is_executable() {
             return Err(ManifestValidationError::NonExecutableEntrypoint);
@@ -338,6 +353,17 @@ impl Package {
     /// Returns an iterator over the module infos of the library.
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+
+        for module in self.manifest.modules() {
+            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            for submodule in module.submodules() {
+                module_info.add_submodule(ast::SubmoduleDecl {
+                    visibility: submodule.visibility,
+                    name: submodule.name.clone(),
+                });
+            }
+            modules_by_path.insert(module.path.clone(), module_info);
+        }
 
         for export in self.manifest.exports() {
             let module_name =
@@ -757,6 +783,7 @@ mod tests {
         let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
         package.manifest = PackageManifest {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
             entrypoint: None,
         };
