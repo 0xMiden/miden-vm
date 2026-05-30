@@ -506,7 +506,6 @@ pub enum Token<'input> {
     CryptoStream,
     Cswap,
     Cswapw,
-    Debug,
     Div,
     Drop,
     Dropw,
@@ -608,7 +607,6 @@ pub enum Token<'input> {
     Swapw,
     Swapdw,
     Syscall,
-    Trace,
     True,
     Type,
     Use,
@@ -735,7 +733,7 @@ impl fmt::Display for Token<'_> {
             Token::CryptoStream => write!(f, "crypto_stream"),
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
-            Token::Debug => write!(f, "debug"),
+
             Token::Div => write!(f, "div"),
             Token::Drop => write!(f, "drop"),
             Token::Dropw => write!(f, "dropw"),
@@ -836,7 +834,6 @@ impl fmt::Display for Token<'_> {
             Token::Swapw => write!(f, "swapw"),
             Token::Swapdw => write!(f, "swapdw"),
             Token::Syscall => write!(f, "syscall"),
-            Token::Trace => write!(f, "trace"),
             Token::True => write!(f, "true"),
             Token::Type => write!(f, "type"),
             Token::Use => write!(f, "use"),
@@ -967,7 +964,6 @@ impl<'input> Token<'input> {
                 | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
-                | Token::Debug
                 | Token::Div
                 | Token::Drop
                 | Token::Dropw
@@ -1049,7 +1045,6 @@ impl<'input> Token<'input> {
                 | Token::Swapw
                 | Token::Swapdw
                 | Token::Syscall
-                | Token::Trace
                 | Token::U32And
                 | Token::U32Assert
                 | Token::U32Assert2
@@ -1157,7 +1152,6 @@ impl<'input> Token<'input> {
         ("crypto_stream", Token::CryptoStream),
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
-        ("debug", Token::Debug),
         ("div", Token::Div),
         ("drop", Token::Drop),
         ("dropw", Token::Dropw),
@@ -1258,7 +1252,6 @@ impl<'input> Token<'input> {
         ("swapw", Token::Swapw),
         ("swapdw", Token::Swapdw),
         ("syscall", Token::Syscall),
-        ("trace", Token::Trace),
         ("true", Token::True),
         ("type", Token::Type),
         ("use", Token::Use),

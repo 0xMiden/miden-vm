@@ -602,7 +602,6 @@ begin
     adv.insert_hdword
     adv.push_mapvaln
     emit
-    debug.stack
     mem_load
     u32div
     add.1
@@ -640,7 +639,6 @@ begin
     u32wrapping_mul.0
     u32and.MASK
     u32shl.SHIFT
-    debug.stack.4
     push.1
 end
 ",
@@ -724,15 +722,8 @@ begin
     call.foo::bar
     syscall.0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a
     procref.foo::bar
-    debug.adv_stack
-    debug.adv_stack.2
-    debug.mem.1
-    debug.mem.1.2
-    debug.local.3
-    debug.local.3.4
     emit.EVENT_ID
     emit.event(\"abc\")
-    trace.7
     assert.err=\"oops\"
     u32assert.err=ERR_CODE
 end
@@ -1090,4 +1081,20 @@ fn cst_backend_reports_cst_parse_errors() {
         .expect_err("cst backend should surface a parse error");
 
     assert_matches!(render_diagnostic(err), diag if diag.contains("expected `end`"));
+}
+
+#[test]
+fn parser_backends_reject_debug_instructions() {
+    // All debug.* instructions should be rejected by every exposed parser backend.
+    for spelling in ["debug.stack.4", "debug.mem", "debug.local.0.2", "debug.adv_stack.4"] {
+        for backend in [ParserBackend::Cst, ParserBackend::Legacy] {
+            let source = test_source_file(&format!("begin\n    {spelling}\nend\n"));
+            let err =
+                parse_forms_with_backend(source, backend).expect_err("debug.* should be rejected");
+            assert_matches!(
+                render_diagnostic(err),
+                diag if diag.contains("invalid syntax") || diag.contains("invalid instruction")
+            );
+        }
+    }
 }

@@ -15,6 +15,11 @@ use crate::{
 // ================================================================================================
 
 /// Executes a Loop node from the start.
+///
+/// LoopNode has do-while semantics: the body is entered unconditionally and the condition is only
+/// inspected at the end of each iteration (REPEAT/END). Source-level guarding (`while.true`) is
+/// implemented by the assembler wrapping the LOOP in a SPLIT that selects the loop on a true
+/// condition and skips it on false.
 #[inline(always)]
 pub(super) fn start_loop_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
@@ -36,80 +41,31 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)?;
+    // Unconditionally enter the loop body for the first iteration.
+    //
+    // WARNING: if we eventually push another continuation in between the `FinishLoop` and the
+    // `StartNode` continuations, then the logic in `ExecutionTracer::start_clock_cycle()` that
+    // computes the value for the `is_loop_body` flag will be incorrect and needs to be adjusted.
+    state.continuation_stack.push_finish_loop(current_node_id);
+    state.continuation_stack.push_start_node(loop_node.body());
 
-    let condition = state.processor.stack().get(0);
-
-    // drop the condition from the stack
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+    // Finalize the clock cycle corresponding to the LOOP operation.
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
         current_forest,
-        current_node_id,
-        state.host,
-    ) {
-        return ControlFlow::Break(BreakReason::Err(err));
-    }
-
-    // execute the loop body as long as the condition is true
-    if condition == ONE {
-        // Push the loop to check condition again after body executes.
-        //
-        // WARNING: if we eventually push another continuation in between the `FinishLoop` and the
-        // `StartNode` continuations, then the logic in `ExecutionTracer::start_clock_cycle()` that
-        // computes the value for the `is_loop_body` flag will be incorrect and needs to be
-        // adjusted.
-        state.continuation_stack.push_finish_loop_entered(current_node_id);
-        state.continuation_stack.push_start_node(loop_node.body());
-
-        // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle(
-            state.processor,
-            state.tracer,
-            state.stopper,
-            state.continuation_stack,
-            current_forest,
-        )
-    } else if condition == ZERO {
-        // Start and exit the loop immediately - corresponding to adding a LOOP and END row
-        // immediately since there is no body to execute.
-
-        // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle_with_continuation(
-            state.processor,
-            state.tracer,
-            state.stopper,
-            state.continuation_stack,
-            || {
-                Some(Continuation::FinishLoop {
-                    node_id: current_node_id,
-                    was_entered: false,
-                })
-            },
-            current_forest,
-        )?;
-
-        finish_loop_node(state, false, current_node_id, current_forest)
-    } else {
-        let err = OperationError::NotBinaryValueLoop { value: condition };
-        ControlFlow::Break(BreakReason::Err(err.with_context(
-            current_forest,
-            current_node_id,
-            state.host,
-        )))
-    }
+    )
 }
 
-/// Executes the finish phase of a Loop node.
+/// Executes the finish phase of a Loop node, called once the loop body has finished executing.
 ///
-/// This function is called either after the loop body has executed (in which case
-/// `loop_was_entered` is true), or when the loop condition was found to be ZERO at the start of
-/// the loop (in which case `loop_was_entered` is false).
+/// Reads the boolean condition the body left on top of the stack. If `ONE`, fires REPEAT and
+/// re-enters the body; if `ZERO`, fires END and exits the loop. Any other value is an error.
 #[inline(always)]
 pub(super) fn finish_loop_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
-    loop_was_entered: bool,
     current_node_id: MastNodeId,
     current_forest: &F,
 ) -> ControlFlow<BreakReason<F>>
@@ -120,14 +76,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    // This happens after loop body execution or when the loop condition was ZERO at the start.
-    // Check condition again to see if we should continue looping. If the loop was never entered, we
-    // know the condition is ZERO.
-    let condition = if loop_was_entered {
-        state.processor.stack().get(0)
-    } else {
-        ZERO
-    };
+    let condition = state.processor.stack().get(0);
     let loop_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id),
         "loop node not found in current forest",
@@ -139,16 +88,12 @@ where
         // body.
         state.tracer.start_clock_cycle(
             state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: true,
-            },
+            Continuation::FinishLoop(current_node_id),
             state.continuation_stack,
             current_forest,
         );
 
-        // Drop the condition from the stack (we know the loop was entered since condition is
-        // ONE).
+        // Drop the condition from the stack.
         if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
             current_forest,
             current_node_id,
@@ -157,7 +102,7 @@ where
             return ControlFlow::Break(BreakReason::Err(err));
         }
 
-        state.continuation_stack.push_finish_loop_entered(current_node_id);
+        state.continuation_stack.push_finish_loop(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
@@ -172,26 +117,18 @@ where
         // Exit the loop - start the clock cycle corresponding to the END operation.
         state.tracer.start_clock_cycle(
             state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: loop_was_entered,
-            },
+            Continuation::FinishLoop(current_node_id),
             state.continuation_stack,
             current_forest,
         );
 
-        // The END operation only drops the condition from the stack if the loop was entered. This
-        // is because if the loop was never entered, then the condition will have already been
-        // dropped by the LOOP operation. Compare this with when the loop body *is* entered, then
-        // the loop body is responsible for pushing the condition back onto the stack, and therefore
-        // the END instruction must drop it.
-        if loop_was_entered
-            && let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-                current_forest,
-                current_node_id,
-                state.host,
-            )
-        {
+        // The END operation drops the condition from the stack; the loop body always leaves the
+        // condition there.
+        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+            current_forest,
+            current_node_id,
+            state.host,
+        ) {
             return ControlFlow::Break(BreakReason::Err(err));
         }
 
@@ -201,13 +138,9 @@ where
             state.tracer,
             state.stopper,
             state.continuation_stack,
-            || Some(Continuation::AfterExitDecorators(current_node_id)),
+            || None,
             current_forest,
-        )?;
-
-        state
-            .processor
-            .execute_after_exit_decorators(current_node_id, current_forest, state.host)
+        )
     } else {
         let err = OperationError::NotBinaryValueLoop { value: condition };
         ControlFlow::Break(BreakReason::Err(err.with_context(

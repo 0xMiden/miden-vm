@@ -830,9 +830,7 @@ fn check_memoized_trace(
 fn make_basic_block_batches(ops: Vec<miden_core::operations::Operation>) -> Vec<OpBatch> {
     use miden_core::mast::BasicBlockNodeBuilder;
 
-    let node = BasicBlockNodeBuilder::new(ops, Vec::new())
-        .build()
-        .expect("failed to build basic block");
+    let node = BasicBlockNodeBuilder::new(ops).build().expect("failed to build basic block");
     node.op_batches().to_vec()
 }
 

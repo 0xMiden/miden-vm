@@ -2,11 +2,11 @@ use std::{path::Path, process::Command, string::String};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
-    serde::{Deserializable, SliceReader},
+    serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,
 };
 use miden_mast_package::{
-    SectionId,
+    Section, SectionId,
     debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
 };
 use miden_package_registry::PackageRegistry;
@@ -49,12 +49,12 @@ end
     assert_eq!(dev.version.to_string(), "1.2.3");
     assert_eq!(dev.description.as_deref(), Some("sample library"));
     assert_eq!(dev.kind, TargetType::Library);
-    assert!(dev.mast.mast_forest().debug_info().num_asm_ops() > 0);
+    assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
         .expect("failed to assemble under release profile");
-    assert_eq!(release.mast.mast_forest().debug_info().num_asm_ops(), 0);
+    assert_eq!(release.mast_forest().debug_info().num_asm_ops(), 0);
 }
 
 #[test]
@@ -200,7 +200,7 @@ end
         .expect("kernel build should succeed");
 
     assert_eq!(package.kind, TargetType::Kernel);
-    assert!(package.try_into_kernel_library().is_ok());
+    assert!(package.to_kernel().is_ok());
 }
 
 #[test]
@@ -300,7 +300,6 @@ end
     let tempdir_prefix = tempdir.path().display().to_string();
 
     let asm_op_path = package
-        .mast
         .mast_forest()
         .debug_info()
         .asm_ops()
@@ -578,14 +577,8 @@ end
         context.source_manager(),
     )
     .unwrap();
-    let registered_library = context.assemble_library([registered_module]).unwrap();
-    let registered = MastPackage::from_library(
-        "predep".into(),
-        "1.0.0".parse().unwrap(),
-        TargetType::Library,
-        registered_library,
-        std::iter::empty::<miden_mast_package::Dependency>(),
-    );
+    let registered =
+        context.assemble_library("predep", Some("1.0.0"), [registered_module]).unwrap();
     let registered_digest = registered.digest();
     context.registry_mut().add_package(registered.into());
 
@@ -2149,10 +2142,8 @@ fn executable_packages_preserve_kernel_when_converted_back_to_program() {
         .assemble_library_package(&manifest_path, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .try_into_kernel_library()
-        .expect("kernel package should round-trip as a kernel library")
-        .kernel()
-        .clone();
+        .to_kernel()
+        .expect("kernel package should round-trip as a kernel library");
     let package = context
         .assemble_executable_package(&manifest_path, Some("main"), None)
         .expect("executable package build should succeed");
@@ -2191,11 +2182,10 @@ fn executable_packages_preserve_transitive_kernel_when_converted_back_to_program
     let kernel_package = context
         .assemble_library_package(&kernel_manifest, None)
         .expect("kernel package build should succeed");
+    assert!(kernel_package.is_kernel());
     let expected_kernel = kernel_package
-        .try_into_kernel_library()
-        .expect("kernel package should round-trip as a kernel library")
-        .kernel()
-        .clone();
+        .to_kernel()
+        .expect("kernel package should round-trip as a kernel library");
     let package = context
         .assemble_executable_package(&root_manifest, Some("main"), None)
         .expect("executable package build should succeed");
@@ -2257,10 +2247,8 @@ fn preassembled_libraries_prefer_store_kernel_over_embedded_copy() {
         .assemble_library_package(&kernel_manifest, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .try_into_kernel_library()
-        .expect("kernel package should round-trip as a kernel library")
-        .kernel()
-        .clone();
+        .to_kernel()
+        .expect("kernel package should round-trip as a kernel library");
     let mut mid_package = MastPackage::read_from_bytes(
         &build_context
             .assemble_library_package(&mid_manifest, None)
@@ -2345,10 +2333,8 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
         .assemble_library_package(&kernel_manifest, None)
         .expect("kernel package build should succeed");
     let expected_kernel = kernel_package
-        .try_into_kernel_library()
-        .expect("kernel package should round-trip as a kernel library")
-        .kernel()
-        .clone();
+        .to_kernel()
+        .expect("kernel package should round-trip as a kernel library");
     let kernel_version = miden_package_registry::Version::new(
         kernel_package.version.clone(),
         kernel_package.digest(),
@@ -2612,18 +2598,20 @@ fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
         [],
     ));
     let dep_package_path = tempdir.path().join("dep.masp");
-    let dep_v1 = MastPackage::from_library(
+    let dep_v1 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime_v1.mast.clone(),
+        runtime_v1.mast_forest().clone(),
+        runtime_v1.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v1.version.clone(),
             kind: TargetType::Library,
             digest: runtime_v1.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v1.write_to_file(&dep_package_path).unwrap();
 
     let root_dir = tempdir.path().join("root");
@@ -2652,18 +2640,20 @@ end
     let mut context = TestContext::new();
     context.registry_mut().add_package(runtime_v1.clone());
     let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
-    let dep_v2 = MastPackage::from_library(
+    let dep_v2 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime_v1.mast.clone(),
+        runtime_v1.mast_forest().clone(),
+        runtime_v1.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime_v2.version.clone(),
             kind: TargetType::Library,
             digest: runtime_v2.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v2.write_to_file(&dep_package_path).unwrap();
 
     let error = project_assembler.assemble(ProjectTargetSelector::Library, "dev").expect_err(
@@ -2686,18 +2676,20 @@ fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
         [],
     ));
     let dep_package_path = tempdir.path().join("dep.masp");
-    let dep_v1 = MastPackage::from_library(
+    let dep_v1 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
+        runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
             digest: runtime.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v1.write_to_file(&dep_package_path).unwrap();
 
     let root_dir = tempdir.path().join("root");
@@ -2726,18 +2718,20 @@ end
     let mut context = TestContext::new();
     context.registry_mut().add_package(runtime.clone());
     let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
-    let dep_v2 = MastPackage::from_library(
+    let dep_v2 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
+        runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Kernel,
             digest: runtime.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v2.write_to_file(&dep_package_path).unwrap();
 
     let error = project_assembler
@@ -2760,18 +2754,20 @@ fn preassembled_package_must_match_graph_selected_target_kind() {
         [],
     ));
     let dep_package_path = tempdir.path().join("dep.masp");
-    let dep_v1 = MastPackage::from_library(
+    let dep_v1 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
+        runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
             digest: runtime.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v1.write_to_file(&dep_package_path).unwrap();
 
     let root_dir = tempdir.path().join("root");
@@ -2800,18 +2796,20 @@ end
     let mut context = TestContext::new();
     context.registry_mut().add_package(runtime.clone());
     let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
-    let dep_v2 = MastPackage::from_library(
+    let dep_v2 = MastPackage::create(
         "dep".into(),
         "1.0.0".parse().unwrap(),
         TargetType::Kernel,
-        runtime.mast.clone(),
+        runtime.mast_forest().clone(),
+        runtime.manifest.exports().cloned(),
         [miden_mast_package::Dependency {
             name: PackageId::from("runtime"),
             version: runtime.version.clone(),
             kind: TargetType::Library,
             digest: runtime.digest(),
         }],
-    );
+    )
+    .unwrap();
     dep_v2.write_to_file(&dep_package_path).unwrap();
 
     let error = project_assembler

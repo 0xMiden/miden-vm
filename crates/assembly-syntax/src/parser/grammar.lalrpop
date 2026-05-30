@@ -90,7 +90,7 @@ extern {
         "crypto_stream" => Token::CryptoStream,
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
-        "debug" => Token::Debug,
+
         "div" => Token::Div,
         "drop" => Token::Drop,
         "dropw" => Token::Dropw,
@@ -191,7 +191,6 @@ extern {
         "swapw" => Token::Swapw,
         "swapdw" => Token::Swapdw,
         "syscall" => Token::Syscall,
-        "trace" => Token::Trace,
         "true" => Token::True,
         "type" => Token::Type,
         "use" => Token::Use,
@@ -1117,33 +1116,6 @@ Call: Instruction = {
 
 #[inline]
 Debug: Instruction = {
-    "debug" "." "stack" <n:MaybeImm<U8>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::StackTop(n.map(|spanned| spanned.into_inner()))),
-            None => Instruction::Debug(DebugOptions::StackAll),
-        }
-    },
-    "debug" "." "mem" <n:Imm<U32>> <m:Imm<U32>> => Instruction::Debug(DebugOptions::MemInterval(n, m)),
-    "debug" "." "mem" <n:MaybeImm<U32>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::MemInterval(n.clone(), n)),
-            None => Instruction::Debug(DebugOptions::MemAll),
-        }
-    },
-    "debug" "." "local" <n:Imm<U16>> <m:Imm<U16>> => Instruction::Debug(DebugOptions::LocalInterval(n, m)),
-    "debug" "." "local" <n:MaybeImm<U16>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::LocalRangeFrom(n)),
-            None => Instruction::Debug(DebugOptions::LocalAll),
-        }
-    },
-    "debug" "." "adv_stack" <n:MaybeImm<U16>> => {
-        match n {
-            Some(n) => Instruction::Debug(DebugOptions::AdvStackTop(n)),
-            None => // length 0 means print the whole stack
-            Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
-        }
-    },
     "emit" => Instruction::Emit,
     // emit.EVENT_CONST  where EVENT_CONST is defined via const EVENT_CONST = event("...")
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
@@ -1152,7 +1124,6 @@ Debug: Instruction = {
         let event_id = miden_core::events::EventId::from_name(s).as_felt();
         Instruction::EmitImm(Immediate::Value(Span::new(span!(source_id, l, r), event_id)))
     },
-    "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
 
 #[inline]
@@ -2006,7 +1977,13 @@ MaybeQualifiedProcedureOrTypePath: Span<Arc<Path>> = {
         path.push_component(&name);
 
         let path = if is_absolute {
-            path.to_absolute().into_owned()
+            let abs = path.to_absolute().map_err(|e| ParseError::User {
+                error: ParsingError::InvalidSyntax {
+                    span,
+                    message: format!("invalid path component: {e:?}"),
+                },
+            })?;
+            abs.into_owned()
         } else {
             path
         };
@@ -2033,7 +2010,13 @@ MaybeQualifiedConstantPath: Span<Arc<Path>> = {
         path.push_component(&name);
 
         let path = if is_absolute {
-            path.to_absolute().into_owned()
+            let abs = path.to_absolute().map_err(|e| ParseError::User {
+                error: ParsingError::InvalidSyntax {
+                    span,
+                    message: format!("invalid path component: {e:?}"),
+                },
+            })?;
+            abs.into_owned()
         } else {
             path
         };
@@ -2148,7 +2131,6 @@ Opcode: &'static str = {
     "crypto_stream" => "crypto_stream",
     "cswap" => "cswap",
     "cswapw" => "cswapw",
-    "debug" => "debug",
     "div" => "div",
     "drop" => "drop",
     "dropw" => "dropw",
@@ -2227,7 +2209,6 @@ Opcode: &'static str = {
     "swapw" => "swapw",
     "swapdw" => "swapdw",
     "syscall" => "syscall",
-    "trace" => "trace",
     "u32and" => "u32and",
     "u32assert" => "u32assert",
     "u32assert2" => "u32assert2",

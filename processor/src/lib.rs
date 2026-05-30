@@ -37,7 +37,7 @@ use crate::{
 #[cfg(any(test, feature = "testing"))]
 mod test_utils;
 #[cfg(any(test, feature = "testing"))]
-pub use test_utils::{ProcessorStateSnapshot, TestHost, TraceCollector};
+pub use test_utils::{ProcessorStateSnapshot, TestHost};
 
 #[cfg(test)]
 mod tests;
@@ -51,9 +51,8 @@ pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
-    debug::DefaultDebugHandler,
+    debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
-    handlers::{DebugError, DebugHandler, TraceError},
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,

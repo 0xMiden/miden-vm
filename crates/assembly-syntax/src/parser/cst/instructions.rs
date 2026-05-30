@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     Felt, Word,
-    ast::{self, DebugOptions, Immediate, Instruction, SystemEventNode},
+    ast::{self, Immediate, Instruction, SystemEventNode},
     parser::{LiteralErrorKind, ParsingError, PushValue},
 };
 
@@ -176,7 +176,7 @@ fn accepts_single_suffix(name: &str) -> bool {
     COMPACT_SUFFIX_SPECS
         .iter()
         .any(|spec| spec.prefix.len() == 1 && spec.prefix[0] == name)
-        || matches!(name, "debug" | "emit" | "trace")
+        || matches!(name, "debug" | "emit")
 }
 
 /// Returns the compact legacy expected-token set for block-local syntax errors.
@@ -242,22 +242,6 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         spelling: "adv.push_mtnode",
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
-    },
-    PrimitiveSpec {
-        spelling: "debug.adv_stack",
-        build: || Instruction::Debug(DebugOptions::AdvStackTop(0u16.into())),
-    },
-    PrimitiveSpec {
-        spelling: "debug.local",
-        build: || Instruction::Debug(DebugOptions::LocalAll),
-    },
-    PrimitiveSpec {
-        spelling: "debug.mem",
-        build: || Instruction::Debug(DebugOptions::MemAll),
-    },
-    PrimitiveSpec {
-        spelling: "debug.stack",
-        build: || Instruction::Debug(DebugOptions::StackAll),
     },
     PrimitiveSpec {
         spelling: "add",
@@ -1252,9 +1236,8 @@ fn lower_extended_instruction(
         ExtendedInstructionKind::Invocation(build) => {
             lower_invocation_instruction(context, span, &tokens, build)
         },
-        ExtendedInstructionKind::Debug => lower_debug_instruction(context, span, &tokens),
+
         ExtendedInstructionKind::Emit => lower_emit_instruction(context, span, &tokens),
-        ExtendedInstructionKind::Trace => lower_trace_instruction(context, span, &tokens),
         ExtendedInstructionKind::ErrorCode(build) => {
             lower_error_code_instruction(context, span, &tokens, spec.keyword, build)
         },
@@ -1270,9 +1253,7 @@ struct ExtendedInstructionSpec {
 enum ExtendedInstructionKind {
     Push,
     Invocation(fn(ast::InvocationTarget) -> Instruction),
-    Debug,
     Emit,
-    Trace,
     ErrorCode(fn(ast::ErrorMsg) -> Instruction),
 }
 
@@ -1298,16 +1279,8 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
         kind: ExtendedInstructionKind::Invocation(Instruction::ProcRef),
     },
     ExtendedInstructionSpec {
-        keyword: "debug",
-        kind: ExtendedInstructionKind::Debug,
-    },
-    ExtendedInstructionSpec {
         keyword: "emit",
         kind: ExtendedInstructionKind::Emit,
-    },
-    ExtendedInstructionSpec {
-        keyword: "trace",
-        kind: ExtendedInstructionKind::Trace,
     },
     ExtendedInstructionSpec {
         keyword: "assert",
@@ -1400,114 +1373,6 @@ fn lower_invocation_instruction(
     Ok(Some(vec![inst_op(instruction_span, build(target))]))
 }
 
-/// Lowers all `debug.*` forms, including interval/range variants.
-fn lower_debug_instruction(
-    context: &mut LoweringContext<'_>,
-    instruction_span: SourceSpan,
-    tokens: &[SyntaxToken],
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    if tokens.len() < 3
-        || tokens[0].kind() != SyntaxKind::Ident
-        || tokens[0].text() != "debug"
-        || tokens[1].kind() != SyntaxKind::Dot
-        || tokens[2].kind() != SyntaxKind::Ident
-    {
-        return Ok(None);
-    }
-
-    let option = match tokens[2].text() {
-        "stack" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u8_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u8 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::StackTop(imm)
-            },
-            _ => return Ok(None),
-        },
-        "mem" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u32_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::MemInterval(imm.clone(), imm)
-            },
-            [dot1, first, dot2, second]
-                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
-            {
-                let first = lower_u32_immediate(context, first)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(first),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                let second = lower_u32_immediate(context, second)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(second),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::MemInterval(first, second)
-            },
-            _ => return Ok(None),
-        },
-        "local" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::LocalRangeFrom(imm)
-            },
-            [dot1, first, dot2, second]
-                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
-            {
-                let first = lower_u16_immediate(context, first)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(first),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                let second = lower_u16_immediate(context, second)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(second),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::LocalInterval(first, second)
-            },
-            _ => return Ok(None),
-        },
-        "adv_stack" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::AdvStackTop(imm)
-            },
-            _ => return Ok(None),
-        },
-        _ => return Ok(None),
-    };
-
-    Ok(Some(vec![inst_op(instruction_span, Instruction::Debug(option))]))
-}
-
 /// Lowers `emit.<const>` and `emit.event("name")`.
 fn lower_emit_instruction(
     context: &mut LoweringContext<'_>,
@@ -1546,27 +1411,6 @@ fn lower_emit_instruction(
         },
         _ => Ok(None),
     }
-}
-
-/// Lowers `trace.<u32>` immediates.
-fn lower_trace_instruction(
-    context: &mut LoweringContext<'_>,
-    instruction_span: SourceSpan,
-    tokens: &[SyntaxToken],
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    if !matches!(tokens, [trace, dot, _value] if trace.kind() == SyntaxKind::Ident
-        && trace.text() == "trace"
-        && dot.kind() == SyntaxKind::Dot)
-    {
-        return Ok(None);
-    }
-
-    let value =
-        lower_u32_immediate(context, &tokens[2])?.ok_or_else(|| ParsingError::InvalidSyntax {
-            span: context.parse().span_for_token(&tokens[2]),
-            message: "expected a u32 literal or constant reference".to_string(),
-        })?;
-    Ok(Some(vec![inst_op(instruction_span, Instruction::Trace(value))]))
 }
 
 /// Lowers `.err=` forms for assertion-like instructions.
@@ -1874,30 +1718,6 @@ fn lower_error_msg(
             span,
             message: "expected a quoted string or constant reference".to_string(),
         }),
-    }
-}
-
-/// Lowers a token that must represent a `u8` immediate or constant reference.
-fn lower_u8_immediate(
-    context: &mut LoweringContext<'_>,
-    token: &SyntaxToken,
-) -> Result<Option<ast::ImmU8>, ParsingError> {
-    let span = context.parse().span_for_token(token);
-    match token.kind() {
-        SyntaxKind::Ident => {
-            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
-        },
-        SyntaxKind::Number => {
-            let Some(value) = parse_decimal_u64(token.text()) else {
-                return Ok(None);
-            };
-            let value = u8::try_from(value).map_err(|_| ParsingError::ImmediateOutOfRange {
-                span,
-                range: 0..(u8::MAX as usize + 1),
-            })?;
-            Ok(Some(Immediate::Value(Span::new(span, value))))
-        },
-        _ => Ok(None),
     }
 }
 

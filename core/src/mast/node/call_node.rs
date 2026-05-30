@@ -3,21 +3,16 @@ use core::fmt;
 
 use miden_formatting::{
     hex::ToHex,
-    prettier::{Document, PrettyPrint, const_text, nl, text},
+    prettier::{Document, PrettyPrint, const_text, text},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
-#[cfg(debug_assertions)]
-use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
-    mast::{
-        DecoratorId, DecoratorStore, ExecutableMastForest, MastForest, MastForestError,
-        MastNodeFingerprint, MastNodeId,
-    },
+    mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
     utils::{Idx, LookupByIdx},
 };
@@ -38,7 +33,6 @@ pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,
     digest: Word,
-    decorator_store: DecoratorStore,
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -94,75 +88,18 @@ struct CallNodePrettyPrint<'a> {
     mast_forest: &'a MastForest,
 }
 
-impl CallNodePrettyPrint<'_> {
-    /// Concatenates the provided decorators in a single line. If the list of decorators is not
-    /// empty, prepends `prepend` and appends `append` to the decorator document.
-    fn concatenate_decorators(
-        &self,
-        decorator_ids: &[DecoratorId],
-        prepend: Document,
-        append: Document,
-    ) -> Document {
-        let decorators = decorator_ids
-            .iter()
-            .map(|&decorator_id| self.mast_forest[decorator_id].render())
-            .reduce(|acc, doc| acc + const_text(" ") + doc)
-            .unwrap_or_default();
-
-        if decorators.is_empty() {
-            decorators
-        } else {
-            prepend + decorators + append
-        }
-    }
-
-    fn single_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.before_enter(self.mast_forest),
-            Document::Empty,
-            const_text(" "),
-        )
-    }
-
-    fn single_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.after_exit(self.mast_forest),
-            const_text(" "),
-            Document::Empty,
-        )
-    }
-
-    fn multi_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.before_enter(self.mast_forest), Document::Empty, nl())
-    }
-
-    fn multi_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.after_exit(self.mast_forest), nl(), Document::Empty)
-    }
-}
-
 impl PrettyPrint for CallNodePrettyPrint<'_> {
     fn render(&self) -> Document {
-        let call_or_syscall = {
-            let callee_digest = self.mast_forest[self.node.callee].digest();
-            if self.node.is_syscall {
-                const_text("syscall")
-                    + const_text(".")
-                    + text(callee_digest.as_bytes().to_hex_with_prefix())
-            } else {
-                const_text("call")
-                    + const_text(".")
-                    + text(callee_digest.as_bytes().to_hex_with_prefix())
-            }
-        };
-
-        let single_line = self.single_line_pre_decorators()
-            + call_or_syscall.clone()
-            + self.single_line_post_decorators();
-        let multi_line =
-            self.multi_line_pre_decorators() + call_or_syscall + self.multi_line_post_decorators();
-
-        single_line | multi_line
+        let callee_digest = self.mast_forest[self.node.callee].digest();
+        if self.node.is_syscall {
+            const_text("syscall")
+                + const_text(".")
+                + text(callee_digest.as_bytes().to_hex_with_prefix())
+        } else {
+            const_text("call")
+                + const_text(".")
+                + text(callee_digest.as_bytes().to_hex_with_prefix())
+        }
     }
 }
 
@@ -199,26 +136,6 @@ impl MastNodeExt for CallNode {
         self.digest
     }
 
-    /// Returns the decorators to be executed before this node is executed.
-    fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        #[cfg(debug_assertions)]
-        self.verify_node_in_forest(forest);
-        self.decorator_store.before_enter(forest)
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [DecoratorId]
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        #[cfg(debug_assertions)]
-        self.verify_node_in_forest(forest);
-        self.decorator_store.after_exit(forest)
-    }
-
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
         Box::new(CallNode::to_display(self, mast_forest))
     }
@@ -248,53 +165,19 @@ impl MastNodeExt for CallNode {
 
     type Builder = CallNodeBuilder;
 
-    fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = if self.is_syscall {
-                    CallNodeBuilder::new_syscall(self.callee)
-                } else {
-                    CallNodeBuilder::new(self.callee)
-                };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = if self.is_syscall {
-                    CallNodeBuilder::new_syscall(self.callee)
-                } else {
-                    CallNodeBuilder::new(self.callee)
-                };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
+    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
+        if self.is_syscall {
+            CallNodeBuilder::new_syscall(self.callee)
+        } else {
+            CallNodeBuilder::new(self.callee)
         }
     }
 
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
+    fn verify_node_in_forest<F>(&self, _forest: &F)
     where
-        F: ExecutableMastForest + ?Sized,
+        F: crate::mast::ExecutableMastForest + ?Sized,
     {
-        if let Some(id) = self.decorator_store.linked_id() {
-            // Verify that this node is the one stored at the given ID in the forest
-            let self_ptr = self as *const Self;
-            let forest_node =
-                forest.get_node_by_id(id).expect("linked node id must be present in forest");
-            let forest_node_ptr = match forest_node {
-                MastNode::Call(call_node) => call_node as *const CallNode as *const (),
-                _ => panic!("Node type mismatch at {id:?}"),
-            };
-            let self_as_void = self_ptr as *const ();
-            debug_assert_eq!(
-                self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {id:?} to be self"
-            );
-        }
     }
 }
 
@@ -320,7 +203,6 @@ impl proptest::prelude::Arbitrary for CallNode {
                     callee,
                     is_syscall,
                     digest,
-                    decorator_store: DecoratorStore::default(),
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
@@ -331,40 +213,26 @@ impl proptest::prelude::Arbitrary for CallNode {
 }
 
 // ------------------------------------------------------------------------------------------------
-/// Builder for creating [`CallNode`] instances with decorators.
+/// Builder for creating [`CallNode`] instances.
 #[derive(Debug)]
 pub struct CallNodeBuilder {
     callee: MastNodeId,
     is_syscall: bool,
-    before_enter: Vec<DecoratorId>,
-    after_exit: Vec<DecoratorId>,
     digest: Option<Word>,
 }
 
 impl CallNodeBuilder {
     /// Creates a new builder for a CallNode with the specified callee.
     pub fn new(callee: MastNodeId) -> Self {
-        Self {
-            callee,
-            is_syscall: false,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-            digest: None,
-        }
+        Self { callee, is_syscall: false, digest: None }
     }
 
     /// Creates a new builder for a syscall CallNode with the specified callee.
     pub fn new_syscall(callee: MastNodeId) -> Self {
-        Self {
-            callee,
-            is_syscall: true,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-            digest: None,
-        }
+        Self { callee, is_syscall: true, digest: None }
     }
 
-    /// Builds the CallNode with the specified decorators.
+    /// Builds the CallNode.
     pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
         if self.callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
@@ -388,10 +256,6 @@ impl CallNodeBuilder {
             callee: self.callee,
             is_syscall: self.is_syscall,
             digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
         })
     }
 }
@@ -401,9 +265,6 @@ impl MastForestContributor for CallNodeBuilder {
         if self.callee.to_usize() >= forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, forest.nodes.len()));
         }
-
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Use the forced digest if provided, otherwise compute the digest directly
         let digest = if let Some(forced_digest) = self.digest {
@@ -419,9 +280,6 @@ impl MastForestContributor for CallNodeBuilder {
             hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
         };
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate Owned node creation
         let node_id = forest
@@ -431,7 +289,6 @@ impl MastForestContributor for CallNodeBuilder {
                     callee: self.callee,
                     is_syscall: self.is_syscall,
                     digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
                 .into(),
             )
@@ -440,60 +297,27 @@ impl MastForestContributor for CallNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(
-        &self,
-        forest: &MastForest,
-        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // Use the fingerprint_from_parts helper function
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            forest,
-            hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
-            &[self.callee],
-            // Use the forced digest if available, otherwise compute the digest
-            if let Some(forced_digest) = self.digest {
-                forced_digest
+    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
+        Ok(if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
+            let callee_digest = forest[self.callee].digest();
+            let domain = if self.is_syscall {
+                CallNode::SYSCALL_DOMAIN
             } else {
-                let callee_digest = forest[self.callee].digest();
-                let domain = if self.is_syscall {
-                    CallNode::SYSCALL_DOMAIN
-                } else {
-                    CallNode::CALL_DOMAIN
-                };
+                CallNode::CALL_DOMAIN
+            };
 
-                hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
-            },
-        )
+            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+        })
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         CallNodeBuilder {
             callee: *remapping.get(self.callee).unwrap_or(&self.callee),
             is_syscall: self.is_syscall,
-            before_enter: self.before_enter,
-            after_exit: self.after_exit,
             digest: self.digest,
         }
-    }
-
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.before_enter.extend(decorators);
-    }
-
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.after_exit.extend(decorators);
     }
 
     fn with_digest(mut self, digest: Word) -> Self {
@@ -522,10 +346,7 @@ impl CallNodeBuilder {
             return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
         // Create the node in the forest with Linked variant from the start
-        // Note: Decorators are already in forest.debug_info from deserialization
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
@@ -534,7 +355,6 @@ impl CallNodeBuilder {
                     callee: self.callee,
                     is_syscall: self.is_syscall,
                     digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
                 .into(),
             )
@@ -546,51 +366,20 @@ impl CallNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for CallNodeBuilder {
-    type Parameters = CallNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        (
-            any::<MastNodeId>(),
-            any::<bool>(),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-        )
-            .prop_map(|(callee, is_syscall, before_enter, after_exit)| {
-                let mut builder = if is_syscall {
+        (any::<MastNodeId>(), any::<bool>())
+            .prop_map(|(callee, is_syscall)| {
+                if is_syscall {
                     Self::new_syscall(callee)
                 } else {
                     Self::new(callee)
-                };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
+                }
             })
             .boxed()
-    }
-}
-
-/// Parameters for generating CallNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug)]
-pub struct CallNodeBuilderParams {
-    pub max_decorators: usize,
-    pub max_decorator_id_u32: u32,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl Default for CallNodeBuilderParams {
-    fn default() -> Self {
-        Self {
-            max_decorators: 4,
-            max_decorator_id_u32: 10,
-        }
     }
 }

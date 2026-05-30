@@ -60,7 +60,7 @@ where
         Continuation::FinishCall(parent_node_id)
         | Continuation::FinishJoin(parent_node_id)
         | Continuation::FinishSplit(parent_node_id)
-        | Continuation::FinishLoop { node_id: parent_node_id, .. } => parent_node_id,
+        | Continuation::FinishLoop(parent_node_id) => parent_node_id,
         _ => return original_err,
     };
 

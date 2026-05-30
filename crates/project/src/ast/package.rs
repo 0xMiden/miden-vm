@@ -294,8 +294,10 @@ impl ProjectFile {
         if self.lib.is_none() && self.bins.is_empty() {
             let project_name = &self.package.name;
             let span = project_name.span();
-            let namespace: Span<Arc<MasmPath>> =
-                Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
+            let namespace: Span<Arc<MasmPath>> = Span::new(
+                span,
+                MasmPath::new(project_name.inner()).to_absolute().map_err(Report::msg)?.into(),
+            );
             let name = project_name.clone();
             return Ok(Some(Span::new(
                 span,
@@ -324,7 +326,9 @@ impl ProjectFile {
                     .namespace
                     .clone()
                     .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
-                ns.map(|ns| MasmPath::new(&ns).to_absolute().into())
+                let path = MasmPath::new(ns.inner());
+                let abs = path.to_absolute().map_err(Report::msg)?;
+                Span::new(ns.span(), abs.into())
             },
         };
         Ok(Some(Span::new(

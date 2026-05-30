@@ -65,7 +65,7 @@ use miden_vm::{
 let mut assembler = Assembler::default();
 
 // compile Miden assembly source code into a program
-let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
+let program = assembler.assemble_program("prg", "begin push.3 push.5 add swap drop end").unwrap();
 
 // use an empty list as initial stack
 let stack_inputs = StackInputs::default();
@@ -81,7 +81,7 @@ let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
 let output =
-    execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+    execute_sync(&program.unwrap_program(), stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
@@ -119,11 +119,11 @@ use miden_vm::{
 let mut assembler = Assembler::default();
 
 // this is our program, we compile it from assembly code
-let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
+let program = assembler.assemble_program("prg", "begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
 let (outputs, proof) = prove_sync(
-    &program,
+    &program.unwrap_program(),
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
     &mut DefaultHost::default(),  // we'll be using a default host
@@ -215,7 +215,7 @@ let source = format!(
     n - 1
 );
 let mut assembler = Assembler::default();
-let program = assembler.assemble_program(&source).unwrap();
+let program = assembler.assemble_program("prg", &source).unwrap();
 
 // initialize a default host (with an empty advice provider)
 let mut host = DefaultHost::default();
@@ -225,7 +225,7 @@ let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
 // execute the program
 let (outputs, proof) = miden_vm::prove_sync(
-    &program,
+    &program.unwrap_program(),
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
     &mut host,
