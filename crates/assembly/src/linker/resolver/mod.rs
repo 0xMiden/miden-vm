@@ -117,20 +117,10 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
             module: self.current_module,
             kind: None,
         };
-        let gid = match self.resolver.resolve_local(&context, name)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(index) => self.current_module + index.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(self.invalid_constant_ref(context.span));
-            },
-            SymbolResolution::External(path) => {
-                return Err(LinkerError::UndefinedSymbol {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                    path: path.into_inner(),
-                });
-            },
-        };
+        let path = Path::from_ident(name);
+        let gid = self
+            .resolver
+            .resolve_constant_path(&context, Span::new(name.span(), path.as_ref()))?;
 
         self.get_constant_by_gid(gid, name.span())
     }
@@ -144,20 +134,7 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
             module: self.current_module,
             kind: None,
         };
-        let gid = match self.resolver.resolve_path(&context, path)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(index) => self.current_module + index.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(self.invalid_constant_ref(context.span));
-            },
-            SymbolResolution::External(path) => {
-                return Err(LinkerError::UndefinedSymbol {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                    path: path.into_inner(),
-                });
-            },
-        };
+        let gid = self.resolver.resolve_constant_path(&context, path)?;
 
         self.get_constant_by_gid(gid, path.span())
     }
@@ -175,7 +152,6 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
         };
         let gid = match self.resolver.resolve_path(&context, path) {
             Ok(SymbolResolution::Exact { gid, .. }) => gid,
-            Ok(SymbolResolution::Local(index)) => self.current_module + index.into_inner(),
             _ => return,
         };
         self.cache.constants.insert(gid, value);
@@ -274,26 +250,10 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
             module: self.current_module,
             kind: None,
         };
-        match self.resolver.resolve_path(&context, ty)? {
-            exact @ SymbolResolution::Exact { .. } => Ok(exact),
-            SymbolResolution::Local(index) => {
-                let (span, index) = index.into_parts();
-                let current_module = &self.resolver.linker()[self.current_module];
-                let item = current_module[index].name();
-                let path = Span::new(span, current_module.path().join(item).into());
-                Ok(SymbolResolution::Exact { gid: self.current_module + index, path })
-            },
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                Err(LinkerError::InvalidTypeRef {
-                    span: ty.span(),
-                    source_file: self.get_source_file_for(ty.span()),
-                })
-            },
-            SymbolResolution::External(path) => Err(LinkerError::UndefinedSymbol {
-                span: ty.span(),
-                source_file: self.get_source_file_for(ty.span()),
-                path: path.into_inner(),
-            }),
-        }
+        let gid = self.resolver.resolve_type_path(&context, ty)?;
+        Ok(SymbolResolution::Exact {
+            gid,
+            path: Span::new(ty.span(), self.resolver.item_path(gid)),
+        })
     }
 }

@@ -224,41 +224,6 @@ impl Assembler {
         self.trim_paths = yes;
         self
     }
-
-    pub(crate) fn invalid_invoke_target_report(
-        &self,
-        kind: InvokeKind,
-        callee: &InvocationTarget,
-        caller: GlobalItemIndex,
-    ) -> Report {
-        let span = callee.span();
-        let source_file = self.source_manager.get(span.source_id()).ok();
-        let context = SymbolResolutionContext {
-            span,
-            module: caller.module,
-            kind: Some(kind),
-        };
-
-        let path = match self.linker.resolve_invoke_target(&context, callee) {
-            Ok(
-                SymbolResolution::Exact { path, .. }
-                | SymbolResolution::Module { path, .. }
-                | SymbolResolution::External(path),
-            ) => Some(path.into_inner()),
-            Ok(SymbolResolution::Local(_) | SymbolResolution::MastRoot(_)) => None,
-            Err(err) => return Report::new(err),
-        }
-        .or_else(|| match callee {
-            InvocationTarget::Symbol(symbol) => Some(Path::from_ident(symbol).into_owned().into()),
-            InvocationTarget::Path(path) => Some(path.clone().into_inner()),
-            InvocationTarget::MastRoot(_) => None,
-        });
-
-        match path {
-            Some(path) => Report::new(LinkerError::InvalidInvokeTarget { span, source_file, path }),
-            None => Report::msg("invalid procedure reference: target is not a procedure"),
-        }
-    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -731,7 +696,7 @@ impl Assembler {
                     .expect("compilation succeeded but root not found in cache");
                 let digest = proc.mast_root();
                 let signature = self.linker.resolve_signature(gid)?;
-                let attributes = self.linker.resolve_attributes(gid)?;
+                let attributes = self.linker.resolve_attributes(gid);
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
@@ -1169,7 +1134,7 @@ impl Assembler {
                     // We must resolve aliases at this point to their real definition, in order to
                     // know whether we need to emit a MAST node for a foreign procedure item. If
                     // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_ref, signature }) = self
+                    let ResolvedProcedure { node: proc_node_ref, signature } = self
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
@@ -1499,8 +1464,6 @@ impl Assembler {
 
     /// Resolves the specified target to the corresponding procedure root [`MastNodeRef`].
     ///
-    /// If the resolved target is a non-procedure item, this returns `Ok(None)`.
-    ///
     /// If no [`MastNodeRef`] exists for that procedure root, we wrap the root in an
     /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeRef`].
     pub(super) fn resolve_target(
@@ -1509,7 +1472,7 @@ impl Assembler {
         target: &InvocationTarget,
         caller_module: ModuleIndex,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<Option<ResolvedProcedure>, Report> {
+    ) -> Result<ResolvedProcedure, Report> {
         let caller = SymbolResolutionContext {
             span: target.span(),
             module: caller_module,
@@ -1526,14 +1489,14 @@ impl Assembler {
                     None,
                     mast_forest_builder,
                 )?;
-                Ok(Some(ResolvedProcedure { node, signature: None }))
+                Ok(ResolvedProcedure { node, signature: None })
             },
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => Ok(Some(ResolvedProcedure {
+                    Some(proc) => Ok(ResolvedProcedure {
                         node: proc.body_node_ref(),
                         signature: proc.signature(),
-                    })),
+                    }),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
                     None => match self.linker[gid].item() {
@@ -1546,13 +1509,13 @@ impl Assembler {
                                 p.source_root_id(),
                                 mast_forest_builder,
                             )?;
-                            Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
+                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
                         },
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
                         ),
                         SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
-                            Ok(None)
+                            unreachable!("invoke resolver should reject non-procedure targets")
                         },
                     },
                 }

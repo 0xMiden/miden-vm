@@ -848,15 +848,12 @@ impl Linker {
     }
 
     /// Resolves a [GlobalProcedureIndex] to the known attributes of that procedure
-    pub(super) fn resolve_attributes(
-        &self,
-        gid: GlobalItemIndex,
-    ) -> Result<AttributeSet, LinkerError> {
+    pub(super) fn resolve_attributes(&self, gid: GlobalItemIndex) -> AttributeSet {
         match self[gid].item() {
-            SymbolItem::Compiled(ItemInfo::Procedure(proc)) => Ok(proc.attributes.clone()),
+            SymbolItem::Compiled(ItemInfo::Procedure(proc)) => proc.attributes.clone(),
             SymbolItem::Procedure(proc) => {
                 let proc = proc.borrow();
-                Ok(proc.attributes().clone())
+                proc.attributes().clone()
             },
             SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                 panic!("procedure index unexpectedly refers to non-procedure item")

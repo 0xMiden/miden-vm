@@ -145,20 +145,8 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
             Ok(SymbolResolution::Module { id, path }) => {
                 log::debug!(target: "linker", "    | target resolved to module {id}: '{path}'");
             },
-            Ok(SymbolResolution::Local(item)) => {
-                log::debug!(target: "linker", "    | target is already resolved locally to {item}");
-            },
-            Ok(SymbolResolution::External(path)) => {
-                log::debug!(target: "linker", "    | target is externally defined at {path}");
-                match target {
-                    InvocationTarget::MastRoot(_) => unreachable!(),
-                    InvocationTarget::Path(old_path) => {
-                        *old_path = path.with_span(old_path.span());
-                    },
-                    target @ InvocationTarget::Symbol(_) => {
-                        *target = InvocationTarget::Path(path.with_span(target.span()));
-                    },
-                }
+            Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => {
+                unreachable!("link-time namespace resolution should produce exact ids")
             },
         }
 
@@ -287,16 +275,8 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             module: self.module_id,
             kind: None,
         };
-        let gid = match self.resolver.resolve_local(&context, &name)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
-            SymbolResolution::External(path) => {
-                return self.get_by_path(path.as_deref());
-            },
-            SymbolResolution::Module { .. } | SymbolResolution::MastRoot(_) => {
-                return Err(self.invalid_constant_ref(name.span()));
-            },
-        };
+        let path = ast::Path::new(name.inner());
+        let gid = self.resolver.resolve_constant_path(&context, Span::new(name.span(), path))?;
 
         self.get_constant_by_gid(gid, name.span())
     }
@@ -310,14 +290,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             module: self.module_id,
             kind: None,
         };
-        let gid = match self.resolver.resolve_path(&context, path)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(self.invalid_constant_ref(path.span()));
-            },
-            SymbolResolution::External(_) => unreachable!(),
-        };
+        let gid = self.resolver.resolve_constant_path(&context, path)?;
 
         self.get_constant_by_gid(gid, path.span())
     }

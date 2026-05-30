@@ -6,13 +6,14 @@ use miden_assembly_syntax::{
         SymbolResolutionError,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    module::ItemInfo,
 };
 use miden_core::Word;
 
 use crate::{
     GlobalItemIndex, LinkerError, ModuleIndex,
     linker::{
-        Linker,
+        Linker, SymbolItem,
         namespaces::{NamespaceGraph, ResolvedImports, ResolvedUse},
     },
 };
@@ -99,6 +100,103 @@ impl<'a> SymbolResolver<'a> {
             ResolvedUse::Item(gid) => SymbolResolution::Exact {
                 gid,
                 path: Span::new(span, self.item_path(gid)),
+            },
+        }
+    }
+
+    fn source_file(
+        &self,
+        span: SourceSpan,
+    ) -> Option<Arc<miden_assembly_syntax::debuginfo::SourceFile>> {
+        self.source_manager().get(span.source_id()).ok()
+    }
+
+    fn is_procedure(&self, gid: GlobalItemIndex) -> bool {
+        matches!(
+            self.graph[gid].item(),
+            SymbolItem::Procedure(_) | SymbolItem::Compiled(ItemInfo::Procedure(_))
+        )
+    }
+
+    fn is_constant(&self, gid: GlobalItemIndex) -> bool {
+        matches!(
+            self.graph[gid].item(),
+            SymbolItem::Constant(_) | SymbolItem::Compiled(ItemInfo::Constant(_))
+        )
+    }
+
+    fn is_type(&self, gid: GlobalItemIndex) -> bool {
+        matches!(
+            self.graph[gid].item(),
+            SymbolItem::Type(_) | SymbolItem::Compiled(ItemInfo::Type(_))
+        )
+    }
+
+    fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
+        LinkerError::InvalidConstantRef {
+            span,
+            source_file: self.source_file(span),
+        }
+    }
+
+    fn invalid_type_ref(&self, span: SourceSpan) -> LinkerError {
+        LinkerError::InvalidTypeRef {
+            span,
+            source_file: self.source_file(span),
+        }
+    }
+
+    fn ensure_procedure_target(
+        &self,
+        context: &SymbolResolutionContext,
+        resolution: SymbolResolution,
+    ) -> Result<SymbolResolution, LinkerError> {
+        match resolution {
+            resolution @ SymbolResolution::MastRoot(_) => Ok(resolution),
+            resolution @ SymbolResolution::Exact { gid, .. } if self.is_procedure(gid) => {
+                Ok(resolution)
+            },
+            SymbolResolution::Exact { path, .. } | SymbolResolution::Module { path, .. } => {
+                Err(LinkerError::InvalidInvokeTarget {
+                    span: context.span,
+                    source_file: self.source_file(context.span),
+                    path: path.into_inner(),
+                })
+            },
+            SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                unreachable!("link-time namespace resolution should produce exact ids")
+            },
+        }
+    }
+
+    pub(crate) fn resolve_constant_path(
+        &self,
+        context: &SymbolResolutionContext,
+        path: Span<&Path>,
+    ) -> Result<GlobalItemIndex, LinkerError> {
+        match self.resolve_path(context, path)? {
+            SymbolResolution::Exact { gid, .. } if self.is_constant(gid) => Ok(gid),
+            SymbolResolution::Exact { .. }
+            | SymbolResolution::Module { .. }
+            | SymbolResolution::MastRoot(_) => Err(self.invalid_constant_ref(path.span())),
+            SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                unreachable!("link-time namespace resolution should produce exact ids")
+            },
+        }
+    }
+
+    pub(crate) fn resolve_type_path(
+        &self,
+        context: &SymbolResolutionContext,
+        path: Span<&Path>,
+    ) -> Result<GlobalItemIndex, LinkerError> {
+        match self.resolve_path(context, path)? {
+            SymbolResolution::Exact { gid, .. } if self.is_type(gid) => Ok(gid),
+            SymbolResolution::Exact { .. }
+            | SymbolResolution::Module { .. }
+            | SymbolResolution::MastRoot(_) => Err(self.invalid_type_ref(path.span())),
+            SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                unreachable!("link-time namespace resolution should produce exact ids")
             },
         }
     }
@@ -236,6 +334,7 @@ impl<'a> SymbolResolver<'a> {
                 resolution => Ok(resolution),
             },
         }?;
+        let resolution = self.ensure_procedure_target(context, resolution)?;
         self.enforce_kernel_export_syscall_only(context, target, resolution)
     }
 
