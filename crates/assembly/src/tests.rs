@@ -1588,54 +1588,46 @@ fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[6..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[2..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_VALUE = 6
     begin
         push.SAMPLE_VALUE[1..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     begin
         push.5[0..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 }
