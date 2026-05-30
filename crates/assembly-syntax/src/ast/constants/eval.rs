@@ -44,6 +44,14 @@ pub enum ConstEvalError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
+    #[error("invalid constant expression: value is larger than expected range")]
+    #[diagnostic()]
+    ConstExprOverflow {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
         #[label]
@@ -363,19 +371,19 @@ where
                         let rhs = rhs.into_inner();
                         let result = match op {
                             ConstantOp::Add => lhs.checked_add(rhs).ok_or_else(|| {
-                                ConstEvalError::ImmediateOverflow {
+                                ConstEvalError::ConstExprOverflow {
                                     span,
                                     source_file: env.get_source_file_for(span),
                                 }
                             })?,
                             ConstantOp::Sub => lhs.checked_sub(rhs).ok_or_else(|| {
-                                ConstEvalError::ImmediateOverflow {
+                                ConstEvalError::ConstExprOverflow {
                                     span,
                                     source_file: env.get_source_file_for(span),
                                 }
                             })?,
                             ConstantOp::Mul => lhs.checked_mul(rhs).ok_or_else(|| {
-                                ConstEvalError::ImmediateOverflow {
+                                ConstEvalError::ConstExprOverflow {
                                     span,
                                     source_file: env.get_source_file_for(span),
                                 }
