@@ -1,7 +1,8 @@
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Linkage,
+    Assembler, DefaultSourceManager, Linkage, Path as MasmPath,
+    ast::{Module, ModuleKind},
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
 use miden_core::program::Program;
@@ -51,8 +52,14 @@ pub fn get_masm_program(
             "masm" => {
                 // Compile kernel from assembly source
                 // Assembler debug mode is always enabled (issue #1821)
-                Assembler::default()
-                    .assemble_kernel("kernel", kernel_path)
+                let mut parser = Module::parser(Some(ModuleKind::Kernel));
+                let kernel = parser.parse_file(
+                    Some(MasmPath::KERNEL),
+                    kernel_path,
+                    source_manager.clone(),
+                )?;
+                Assembler::new(source_manager.clone())
+                    .assemble_kernel("kernel", kernel)
                     .map(Arc::from)
                     .wrap_err_with(|| {
                         format!("Failed to compile kernel from `{}`", kernel_path.display())
@@ -84,7 +91,7 @@ pub fn get_masm_program(
 
         // Compile the program
         assembler
-            .assemble_program("program", program_file.ast())
+            .assemble_program("program", program_file.ast().clone())
             .wrap_err("Failed to compile program")?
             .unwrap_program()
     } else {

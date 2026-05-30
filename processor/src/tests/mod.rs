@@ -1,4 +1,9 @@
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, Path, PathBuf,
@@ -10,10 +15,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_debug_types::SourceManager;
-use miden_utils_testing::{
-    build_test, build_test_by_mode,
-    crypto::{init_merkle_leaves, init_merkle_store},
-};
+use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
@@ -60,6 +62,28 @@ fn parse_library_module(
 fn parse_kernel_module(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
+
+fn exec_source(source: impl AsRef<str>) -> String {
+    miden_utils_testing::executable_source(source)
+}
+
+macro_rules! build_test {
+    ($source:expr) => {{
+        miden_utils_testing::build_test!(&exec_source($source))
+    }};
+    ($source:expr, $($tail:tt)+) => {{
+        miden_utils_testing::build_test!(exec_source($source), $($tail)+)
+    }};
+}
+
+macro_rules! build_test_by_mode {
+    ($mode:expr, $source:expr) => {{
+        miden_utils_testing::build_test_by_mode!($mode, &exec_source($source))
+    }};
+    ($mode:expr, $source:expr, $($tail:tt)+) => {{
+        miden_utils_testing::build_test_by_mode!($mode, exec_source($source), $($tail)+)
+    }};
 }
 
 // AdviceMap inlined in the script
@@ -190,7 +214,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
         end"
     );
     let program = Assembler::new(source_manager.clone())
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -205,7 +229,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
         err,
         format!("  x error during processing of event '{event}' (ID: {})", event.to_event_id()),
         "  `-> dummy host event failure",
-        regex!(r#",-\[::\$exec:3:20\]"#),
+        regex!(r#",-\[.*:3:20\]"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
@@ -225,7 +249,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
         end"
     );
     let program = Assembler::new(source_manager.clone())
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -239,7 +263,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     assert_diagnostic_lines!(
         err,
         "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
-        regex!(r#",-\[::\$exec:3:20\]"#),
+        regex!(r#",-\[.*:3:20\]"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
@@ -840,7 +864,7 @@ fn test_diagnostic_procedure_not_found_call() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
+        .assemble_program("program", exec_source(program_source))
         .unwrap()
         .unwrap_program();
 
@@ -853,7 +877,7 @@ fn test_diagnostic_procedure_not_found_call() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[::\$exec:5:13\]"#),
+        regex!(r#",-\[.*:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^^^",
@@ -892,7 +916,7 @@ fn test_diagnostic_procedure_not_found_join() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
+        .assemble_program("program", exec_source(program_source))
         .unwrap()
         .unwrap_program();
 
@@ -905,7 +929,7 @@ fn test_diagnostic_procedure_not_found_join() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[::\$exec:4:9\]"#),
+        regex!(r#",-\[.*:4:9\]"#),
         " 3 |",
         " 4 | ,->         begin",
         " 5 | |               exec.bar::dummy_proc",
@@ -948,7 +972,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
+        .assemble_program("program", exec_source(program_source))
         .unwrap()
         .unwrap_program();
 
@@ -961,7 +985,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[::\$exec:6:13\]"#),
+        regex!(r#",-\[.*:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             while.true",
         "  7 | |                   exec.bar::dummy_proc",
@@ -1005,7 +1029,7 @@ fn test_diagnostic_procedure_not_found_split() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", program_source)
+        .assemble_program("program", exec_source(program_source))
         .unwrap()
         .unwrap_program();
 
@@ -1018,7 +1042,7 @@ fn test_diagnostic_procedure_not_found_split() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
-        regex!(r#",-\[::\$exec:6:13\]"#),
+        regex!(r#",-\[.*:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             if.true",
         "  7 | |                   exec.bar::dummy_proc",
@@ -1235,7 +1259,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let program = {
         let program = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
             .unwrap()
-            .assemble_program("program", program_source)
+            .assemble_program("program", exec_source(program_source))
             .unwrap()
             .unwrap_program();
 
@@ -1252,7 +1276,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
-        regex!(r#",-\[::\$exec:3:13\]"#),
+        regex!(r#",-\[.*:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^",

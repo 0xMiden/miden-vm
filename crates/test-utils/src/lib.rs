@@ -73,6 +73,29 @@ mod test_builders;
 
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
+
+pub fn executable_source(source: impl AsRef<str>) -> String {
+    let source = source.as_ref();
+    if source.trim_start().starts_with("namespace ") {
+        source.to_string()
+    } else if source.starts_with('\n') {
+        format!("namespace $exec{source}")
+    } else {
+        format!("namespace $exec\n{source}")
+    }
+}
+
+pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
+    let source = source.to_string();
+    if source.trim_start().starts_with("namespace ") {
+        source
+    } else {
+        let path = path.as_ref().to_string();
+        let namespace = path.strip_prefix("::").unwrap_or(&path);
+        format!("namespace {namespace}\n\n{source}")
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -303,7 +326,9 @@ impl Test {
 
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
-        self.add_modules.push((path.as_ref().into(), source.to_string()));
+        let path = path.as_ref();
+        let source = module_source(path, source);
+        self.add_modules.push((path.into(), source));
     }
 
     /// Add a handler for a specific event when running the `Host`.
@@ -466,9 +491,9 @@ impl Test {
         };
 
         let mut assembler =
-            self.add_modules.iter().fold(assembler, |mut assembler, (_path, source)| {
+            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
                 let module = Module::parser(None)
-                    .parse_str(None, source, self.source_manager.clone())
+                    .parse_str(Some(path.as_ref()), source, self.source_manager.clone())
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler

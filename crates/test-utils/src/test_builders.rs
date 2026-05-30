@@ -137,7 +137,8 @@ macro_rules! build_debug_test {
 macro_rules! build_test_by_mode {
     ($in_tracing_mode:expr, $source:expr) => {{
         let name = format!("test{}", line!());
-        $crate::Test::new(&name, $source, $in_tracing_mode)
+        let source = $crate::executable_source($source);
+        $crate::Test::new(&name, &source, $in_tracing_mode)
     }};
     ($in_tracing_mode:expr, $source:expr, $stack_inputs:expr) => {{
         use $crate::SourceManager;
@@ -147,11 +148,8 @@ macro_rules! build_test_by_mode {
         let advice_inputs = $crate::AdviceInputs::default();
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = $crate::executable_source($source);
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), source);
 
         $crate::Test {
             source_manager,
@@ -178,11 +176,8 @@ macro_rules! build_test_by_mode {
             .with_merkle_store(store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = $crate::executable_source($source);
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), source);
 
         $crate::Test {
             source_manager,
@@ -214,11 +209,8 @@ macro_rules! build_test_by_mode {
             .with_merkle_store($advice_merkle_store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = $crate::executable_source($source);
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), source);
 
         $crate::Test {
             source_manager,
@@ -252,11 +244,8 @@ macro_rules! build_test_by_mode {
             .with_map($advice_map);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = $crate::executable_source($source);
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), source);
 
         $crate::Test {
             source_manager,

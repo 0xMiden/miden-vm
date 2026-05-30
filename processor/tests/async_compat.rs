@@ -20,6 +20,10 @@ impl YieldingAsyncHost {
     }
 }
 
+fn exec_source(source: impl AsRef<str>) -> String {
+    miden_utils_testing::executable_source(source)
+}
+
 impl BaseHost for YieldingAsyncHost {
     fn get_label_and_source_file(
         &self,
@@ -53,12 +57,14 @@ fn simple_program() -> miden_processor::Program {
     Assembler::default()
         .assemble_program(
             "program",
-            r#"
+            exec_source(
+                r#"
             begin
                 push.2
                 add
             end
             "#,
+            ),
         )
         .expect("program should compile")
         .unwrap_program()
@@ -126,7 +132,7 @@ async fn execute_async_supports_async_only_host_events() {
     let event_name = EventName::new("test::async::emit");
     let event_id = event_name.to_event_id().as_u64();
     let program = Assembler::default()
-        .assemble_program("program", format!("begin push.{event_id} emit drop end"))
+        .assemble_program("program", exec_source(format!("begin push.{event_id} emit drop end")))
         .expect("program should compile")
         .unwrap_program();
 

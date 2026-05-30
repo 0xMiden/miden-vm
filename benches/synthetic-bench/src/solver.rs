@@ -212,6 +212,6 @@ mod tests {
             assert_eq!(plan.iters(snippet.name), 0, "{}", snippet.name);
         }
         let source = emit(&plan);
-        assert_eq!(source.trim(), "begin\nend");
+        assert_eq!(source.trim(), "namespace $exec\n\nbegin\nend");
     }
 }

@@ -69,8 +69,7 @@ impl BundleCmd {
                     return Err(Report::msg("`kernel` must be a file"));
                 };
                 assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-                let library =
-                    assembler.assemble_kernel_from_dir(namespace, kernel, Some(&self.dir))?;
+                let library = assembler.assemble_kernel_from_root(namespace, kernel)?;
                 library.write_to_file(output_file).into_diagnostic()?;
                 println!(
                     "Built kernel module {} with library {}",
@@ -81,7 +80,9 @@ impl BundleCmd {
             None => {
                 let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
                 assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-                let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
+                let root = self.dir.join("mod.masm");
+                let library =
+                    assembler.assemble_library_from_root(root, Some(&library_namespace))?;
                 library.write_to_file(output_file).into_diagnostic()?;
                 println!("Built library {namespace}");
             },

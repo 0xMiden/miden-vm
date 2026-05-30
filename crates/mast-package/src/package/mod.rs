@@ -14,7 +14,6 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
-    vec,
     vec::Vec,
 };
 
@@ -589,7 +588,7 @@ impl Package {
 
         let entrypoint =
             Arc::<MasmPath>::from(entrypoint.to_absolute().map_err(Report::msg)?.to_path_buf());
-        if let Some(export) = self.manifest.get_export(&entrypoint) {
+        if let Some(export) = self.get_export_by_lookup_path(&entrypoint) {
             match export {
                 PackageExport::Constant(_) | PackageExport::Type(_) => {
                     let actual = match export {
@@ -604,12 +603,16 @@ impl Package {
                     }))
                 },
                 PackageExport::Procedure(procedure) => {
+                    let executable_entrypoint: Arc<MasmPath> =
+                        MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+                    let mut procedure = procedure.clone();
+                    procedure.path = executable_entrypoint;
                     let mut package = Self::create(
                         self.name.clone(),
                         self.version.clone(),
                         TargetType::Executable,
                         self.mast.clone(),
-                        [PackageExport::Procedure(procedure.clone())],
+                        [PackageExport::Procedure(procedure)],
                         self.manifest.dependencies.clone(),
                     )
                     .map_err(Report::msg)?;
@@ -934,5 +937,30 @@ mod tests {
                 .context_name(),
             "alias_b"
         );
+    }
+
+    #[test]
+    fn make_executable_accepts_relative_entrypoint_export_path() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = relative_path("app::entry");
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, Some(node_id), digest, None));
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            [export],
+            None,
+        )
+        .expect("package should be valid");
+
+        let entrypoint = QualifiedProcedureName::from_str("app::entry").unwrap();
+        let executable = package.make_executable(&entrypoint).unwrap();
+
+        let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+        assert_eq!(executable.get_procedure_root_by_path(&main_path), Some(digest));
+        assert_eq!(executable.get_procedure_node_by_path(&main_path), Some(node_id));
     }
 }

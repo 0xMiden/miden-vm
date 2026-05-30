@@ -3,6 +3,10 @@ use miden_processor::{ExecutionOptions, Program, StackInputs, advice::AdviceInpu
 
 use super::TestHost;
 
+fn exec_source(source: impl AsRef<str>) -> String {
+    miden_utils_testing::executable_source(source)
+}
+
 #[test]
 fn test_event_handling() {
     let source = "\
@@ -18,7 +22,7 @@ fn test_event_handling() {
 
     // compile and execute program
     let program: Program = Assembler::default()
-        .assemble_program("program", source)
+        .assemble_program("program", exec_source(source))
         .unwrap()
         .unwrap_program();
     let mut host = TestHost::default();

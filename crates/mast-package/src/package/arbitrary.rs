@@ -1,3 +1,5 @@
+use alloc::vec;
+
 use super::*;
 
 impl Package {
@@ -46,8 +48,6 @@ impl proptest::arbitrary::Arbitrary for Package {
     type Parameters = ArbitraryPackageParams;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        use alloc::vec;
-
         use miden_core::{
             mast::{BasicBlockNodeBuilder, MastForestContributor, MastNodeExt},
             operations::Operation,
