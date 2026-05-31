@@ -242,7 +242,7 @@ where
             .iter()
             .map(|&air| log_quotient_degree::<L::F, EF, _>(air))
             .max()
-            .unwrap_or(1);
+            .expect("TraceOrder construction rejects empty AIR sets");
         if max_log_quotient_degree > log_blowup {
             return Err(DomainError::ConstraintDegreeTooHigh {
                 log_quotient: max_log_quotient_degree,

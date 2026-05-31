@@ -162,7 +162,11 @@ where
         .iter()
         .map(|&(air, _)| log_quotient_degree::<F, EF, _>(air))
         .collect();
-    let log_quotient_degree = log_quotient_degrees.iter().copied().max().unwrap_or(1);
+    let log_quotient_degree = log_quotient_degrees
+        .iter()
+        .copied()
+        .max()
+        .expect("TraceOrder construction rejects empty AIR sets");
     if log_quotient_degree > log_blowup {
         return Err(DomainError::ConstraintDegreeTooHigh {
             log_quotient: log_quotient_degree,

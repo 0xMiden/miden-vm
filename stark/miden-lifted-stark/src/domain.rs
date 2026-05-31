@@ -554,7 +554,7 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 // ============================================================================
 
 /// Log₂ of the number of quotient chunks for `air`, clamped so the quotient
-/// degree `D = 2^log_quotient_degree` is always ≥ 2.
+/// degree `D = 2^log_quotient_degree` is always ≥ 1.
 ///
 /// # Why `M − 1` chunks?
 ///
@@ -576,9 +576,9 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 /// # Low symbolic degrees
 ///
 /// Quotient construction still needs at least one chunk. The prover and
-/// verifier therefore clamp the derived quotient degree to `D = 2`
-/// (`log_quotient_degree ≥ 1`). The air crate reports raw symbolic degrees;
-/// this STARK-layer helper applies the protocol clamp.
+/// verifier therefore clamp the derived quotient degree to `D = 1`. The air
+/// crate reports raw symbolic degrees; this STARK-layer helper applies the
+/// protocol clamp.
 pub fn log_quotient_degree<F, EF, A>(air: &A) -> u8
 where
     F: Field,
@@ -588,8 +588,8 @@ where
     let constraint_degree = air.constraint_degree().max();
     // Subtract one quotient chunk for division by the vanishing polynomial.
     let quotient_chunks = constraint_degree.saturating_sub(1);
-    // Clamp to the protocol minimum of two quotient chunks.
-    let quotient_chunks = quotient_chunks.max(2);
+    // Clamp to the protocol minimum of one quotient chunk.
+    let quotient_chunks = quotient_chunks.max(1);
     // Return the log₂ quotient chunk count.
     log2_ceil_u8(quotient_chunks)
 }

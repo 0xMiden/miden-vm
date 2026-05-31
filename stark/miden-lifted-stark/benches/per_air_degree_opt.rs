@@ -153,10 +153,9 @@ struct OverrideConstraintDegree<A> {
     constraint_degree: usize,
 }
 
-/// Constraint degree that yields `log_quotient_degree == l` for `l > 0`:
+/// Constraint degree that yields `log_quotient_degree == l`:
 /// `log2_ceil(((1 << l) + 1) - 1) == log2_ceil(1 << l) == l`.
 fn constraint_degree_for_log_qd(l: usize) -> usize {
-    debug_assert!(l > 0);
     (1 << l) + 1
 }
 

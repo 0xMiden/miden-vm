@@ -16,6 +16,7 @@ use crate::{
         AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement,
         WindowAccess,
     },
+    domain::log_quotient_degree,
     testing::configs::goldilocks_poseidon2::{Felt, QuadFelt, prove_and_verify_statement},
 };
 
@@ -194,6 +195,22 @@ fn generate_pow_trace(power: u64, start: Felt, height: usize) -> RowMajorMatrix<
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[test]
+fn quadratic_air_uses_one_quotient_chunk() {
+    assert_eq!(log_quotient_degree::<Felt, QuadFelt, _>(&PowerAir { power: 2 }), 0);
+}
+
+#[test]
+fn one_chunk_quadratic_quotient_proves() {
+    let air = PowerAir { power: 2 };
+    let trace = generate_pow_trace(2, Felt::from_u64(7), 16);
+
+    let statement =
+        Statement::new(TwoTraceMultiAir::new(vec![air]), Vec::new(), Vec::new()).unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![trace]).unwrap();
+    prove_and_verify_statement(&prover_statement);
+}
 
 fn run_upsample_case(low_power: u64, low_height: usize, high_power: u64, high_height: usize) {
     let low = PowerAir { power: low_power };
