@@ -122,6 +122,39 @@ pub enum LinkerError {
         path: Arc<Path>,
         alias: String,
     },
+    #[error("self-referential import of module '{path}'")]
+    #[diagnostic(help(
+        "a module cannot import itself; reference local items directly or use absolute paths in code"
+    ))]
+    SelfReferentialImport {
+        #[label("this import resolves to the module that contains it")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
+    #[error("cannot import submodule '{path}' declared in the same module")]
+    #[diagnostic(help(
+        "reference the submodule directly with a submodule-qualified path instead of importing it"
+    ))]
+    ImportTargetIsLocalSubmodule {
+        #[label("this import resolves to a submodule declared in the same scope")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
+    #[error("invalid relative item path '{path}'")]
+    #[diagnostic(help(
+        "item paths must be absolute, local, or qualified by an import or submodule in the current module"
+    ))]
+    InvalidRelativePath {
+        #[label("this path does not start with a local item, import, or submodule")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
     #[error("undefined item '{path}'")]
     #[diagnostic(help(
         "you might be missing an import, or the containing library has not been linked"

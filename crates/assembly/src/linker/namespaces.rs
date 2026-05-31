@@ -169,8 +169,12 @@ impl NamespaceGraph {
                 let AliasTarget::Path(path) = import.target() else {
                     continue;
                 };
-                let resolved =
-                    self.resolve_import_target(import.owner(), path.as_deref(), linker)?;
+                let resolved = self.resolve_import_target(
+                    import.owner(),
+                    import.alias(),
+                    path.as_deref(),
+                    linker,
+                )?;
 
                 if import.visibility().is_public()
                     && let ResolvedUse::Module(id) = resolved
@@ -192,6 +196,7 @@ impl NamespaceGraph {
     fn resolve_import_target(
         &self,
         owner: ModuleIndex,
+        current_alias: &str,
         path: Span<&Path>,
         linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
@@ -203,26 +208,58 @@ impl NamespaceGraph {
             if rest.is_empty() {
                 return Err(undefined_symbol(linker, path));
             }
-            return self.resolve_self_relative_path(owner, rest, path.span(), linker);
+            let resolved = self.resolve_self_relative_path(owner, rest, path.span(), linker)?;
+            return self.validate_import_target_module(owner, resolved, path, linker);
+        }
+
+        let owner_module = self.module(owner);
+        if !path.is_absolute()
+            && let Some(import) = owner_module.import(first)
+            && import.alias() != current_alias
+        {
+            return Err(LinkerError::ImportTargetUsesImport {
+                span: path.span(),
+                source_file: source_file(linker.source_manager.as_ref(), path.span()),
+                path: path.into_inner().to_path_buf().into_boxed_path().into(),
+                alias: first.to_string(),
+            });
         }
 
         match self.resolve_global_path(owner, path.into_inner(), path.span(), None, linker) {
-            Ok(resolved) => Ok(resolved),
-            Err(LinkerError::UndefinedSymbol { .. }) => {
-                let owner_module = self.module(owner);
-                if owner_module.import(first).is_some() {
-                    Err(LinkerError::ImportTargetUsesImport {
-                        span: path.span(),
-                        source_file: source_file(linker.source_manager.as_ref(), path.span()),
-                        path: path.into_inner().to_path_buf().into_boxed_path().into(),
-                        alias: first.to_string(),
-                    })
-                } else {
-                    Err(undefined_symbol(linker, path))
-                }
-            },
+            Ok(resolved) => self.validate_import_target_module(owner, resolved, path, linker),
+            Err(LinkerError::UndefinedSymbol { .. }) => Err(undefined_symbol(linker, path)),
             Err(err) => Err(err),
         }
+    }
+
+    fn validate_import_target_module(
+        &self,
+        owner: ModuleIndex,
+        resolved: ResolvedUse,
+        path: Span<&Path>,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        let ResolvedUse::Module(module) = resolved else {
+            return Ok(resolved);
+        };
+
+        if module == owner {
+            return Err(LinkerError::SelfReferentialImport {
+                span: path.span(),
+                source_file: source_file(linker.source_manager.as_ref(), path.span()),
+                path: path.into_inner().to_path_buf().into_boxed_path().into(),
+            });
+        }
+
+        if self.module(module).parent() == Some(owner) {
+            return Err(LinkerError::ImportTargetIsLocalSubmodule {
+                span: path.span(),
+                source_file: source_file(linker.source_manager.as_ref(), path.span()),
+                path: self.module(module).path.clone(),
+            });
+        }
+
+        Ok(resolved)
     }
 
     /// Resolve a path referenced from code in `owner`.
@@ -267,6 +304,11 @@ impl NamespaceGraph {
             if let Some(resolved) = imports.get(owner, first) {
                 return Ok(resolved);
             }
+
+            if let Some(edge) = owner_module.submodule(first) {
+                self.ensure_submodule_visible(owner, owner, edge, path.span(), linker)?;
+                return Ok(ResolvedUse::Module(edge.child()));
+            }
         } else {
             if let Some(item) = owner_module.item(first) {
                 return Err(SymbolResolutionError::invalid_sub_path(
@@ -295,9 +337,29 @@ impl NamespaceGraph {
                     .into()),
                 };
             }
+
+            if let Some(edge) = owner_module.submodule(first) {
+                self.ensure_submodule_visible(owner, owner, edge, path.span(), linker)?;
+                return self.resolve_path_from_module(
+                    owner,
+                    edge.child(),
+                    rest,
+                    path.span(),
+                    imports,
+                    linker,
+                );
+            }
         }
 
-        self.resolve_global_path(owner, path.into_inner(), path.span(), Some(imports), linker)
+        if rest.is_empty() {
+            Err(undefined_symbol(linker, path))
+        } else {
+            Err(LinkerError::InvalidRelativePath {
+                span: path.span(),
+                source_file: source_file(linker.source_manager.as_ref(), path.span()),
+                path: path.into_inner().to_path_buf().into_boxed_path().into(),
+            })
+        }
     }
 
     fn resolve_self_relative_path(
@@ -318,7 +380,7 @@ impl NamespaceGraph {
 
             if rest.is_empty() {
                 if let Some(edge) = module.submodule(component) {
-                    self.ensure_submodule_visible(edge, span, linker)?;
+                    self.ensure_submodule_visible(owner, current, edge, span, linker)?;
                     return Ok(ResolvedUse::Module(edge.child()));
                 }
 
@@ -331,7 +393,7 @@ impl NamespaceGraph {
             }
 
             if let Some(edge) = module.submodule(component) {
-                self.ensure_submodule_visible(edge, span, linker)?;
+                self.ensure_submodule_visible(owner, current, edge, span, linker)?;
                 current = edge.child();
                 remaining = rest;
                 continue;
@@ -375,7 +437,7 @@ impl NamespaceGraph {
                 }
 
                 if let Some(edge) = module.submodule(component) {
-                    self.ensure_submodule_visible(edge, span, linker)?;
+                    self.ensure_submodule_visible(owner, current, edge, span, linker)?;
                     return Ok(ResolvedUse::Module(edge.child()));
                 }
 
@@ -390,7 +452,7 @@ impl NamespaceGraph {
             }
 
             if let Some(edge) = module.submodule(component) {
-                self.ensure_submodule_visible(edge, span, linker)?;
+                self.ensure_submodule_visible(owner, current, edge, span, linker)?;
                 current = edge.child();
                 remaining = rest;
                 continue;
@@ -418,7 +480,7 @@ impl NamespaceGraph {
         linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
         if let Some(module) = self.find_global_module_index(path) {
-            self.ensure_module_visible(module, span, linker)?;
+            self.ensure_module_visible(owner, module, span, linker)?;
             return Ok(ResolvedUse::Module(module));
         }
 
@@ -436,7 +498,7 @@ impl NamespaceGraph {
             }
             return Err(undefined_symbol_from_path(linker, span, path));
         };
-        self.ensure_module_visible(parent, span, linker)?;
+        self.ensure_module_visible(owner, parent, span, linker)?;
         let module = self.module(parent);
 
         if let Some(item) = module.item(name) {
@@ -445,7 +507,7 @@ impl NamespaceGraph {
         }
 
         if let Some(edge) = module.submodule(name) {
-            self.ensure_submodule_visible(edge, span, linker)?;
+            self.ensure_submodule_visible(owner, parent, edge, span, linker)?;
             return Ok(ResolvedUse::Module(edge.child()));
         }
 
@@ -513,6 +575,7 @@ impl NamespaceGraph {
 
     fn ensure_module_visible(
         &self,
+        owner: ModuleIndex,
         module: ModuleIndex,
         span: SourceSpan,
         linker: &Linker,
@@ -525,7 +588,7 @@ impl NamespaceGraph {
                 .values()
                 .find(|edge| edge.child == child)
                 .expect("child parent edge must exist");
-            self.ensure_submodule_visible(edge, span, linker)?;
+            self.ensure_submodule_visible(owner, parent, edge, span, linker)?;
             child = parent;
         }
 
@@ -534,11 +597,13 @@ impl NamespaceGraph {
 
     fn ensure_submodule_visible(
         &self,
+        owner: ModuleIndex,
+        parent: ModuleIndex,
         edge: &ModuleEdge,
         span: SourceSpan,
         linker: &Linker,
     ) -> Result<(), LinkerError> {
-        if edge.visibility().is_public() {
+        if edge.visibility().is_public() || self.is_module_in_scope_of(owner, parent) {
             return Ok(());
         }
 
@@ -555,6 +620,18 @@ impl NamespaceGraph {
                     .with_source_file(defined_source_file),
             ),
         })
+    }
+
+    fn is_module_in_scope_of(&self, module: ModuleIndex, ancestor: ModuleIndex) -> bool {
+        let mut current = Some(module);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = self.module(id).parent();
+        }
+
+        false
     }
 
     fn ensure_item_visible(

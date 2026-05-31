@@ -416,7 +416,6 @@ macro_rules! assert_parse_diagnostic {
     }};
 }
 
-#[expect(unused_macros)]
 macro_rules! assert_parse_diagnostic_lines {
     ($source:expr, $($expected:literal),+) => {{
         let source = $source.clone();
@@ -912,7 +911,17 @@ fn test_use_in_proc_body() {
     end"#
     );
 
-    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
+    assert_parse_diagnostic_lines!(
+        source,
+        "syntax error",
+        regex!(r#",-\[test[\d]+:5:9\]"#),
+        "4 |         loc_load.0",
+        "5 |         use",
+        " :         ^|^",
+        "  :          `-- expected `end` to close procedure before top-level item",
+        "6 |     end",
+        "`----"
+    );
 }
 
 #[test]
@@ -920,7 +929,15 @@ fn test_unterminated_proc() {
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
 
-    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
+    assert_parse_diagnostic_lines!(
+        source,
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
+        "1 | proc foo add mul begin push.1 end",
+        "  :                  ^^|^^",
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "`----"
+    );
 }
 
 #[test]
@@ -928,7 +945,23 @@ fn test_unterminated_if() {
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, "proc foo add mul if.true add.2 begin push.1 end");
 
-    assert_parse_diagnostic!(source, "expected `end` to close `if` before top-level item");
+    assert_parse_diagnostic_lines!(
+        source,
+        "invalid syntax",
+        "help: Multiple syntax errors were identified, see diagnostics for more details",
+        "Error:   x syntax error",
+        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "1 | proc foo add mul if.true add.2 begin push.1 end",
+        "  :                                ^^|^^",
+        "  :                                  `-- expected `end` to close `if` before top-level item",
+        "`----",
+        "Error:   x syntax error",
+        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "1 | proc foo add mul if.true add.2 begin push.1 end",
+        "  :                                ^^|^^",
+        "  :                                  `-- expected `end` to close procedure before top-level item",
+        "`----"
+    );
 }
 
 #[test]
@@ -936,9 +969,14 @@ fn test_invalid_mapvaln_pad() {
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, "begin adv.push_mapvaln.3 end");
 
-    assert_parse_diagnostic!(
+    assert_parse_diagnostic_lines!(
         source,
-        "invalid padding value for the `adv.push_mapvaln` instruction: 3"
+        "invalid padding value for the `adv.push_mapvaln` instruction: 3",
+        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "1 | begin adv.push_mapvaln.3 end",
+        "  :                        ^",
+        "`----",
+        "help: valid padding values are 0, 4, and 8"
     );
 }
 

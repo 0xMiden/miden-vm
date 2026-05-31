@@ -68,7 +68,7 @@ name = "app"
 version = "1.0.0"
 
 [lib]
-path = "lib.masm"
+path = "library/root.masm"
 
 [[bin]]
 name = "primary"
@@ -80,6 +80,13 @@ path = "main2.masm"
 "#,
     );
     write_file(
+        &tempdir.path().join("library/root.masm"),
+        r#"pub proc helper
+    push.0
+end
+"#,
+    );
+    write_file(
         &tempdir.path().join("lib.masm"),
         r#"pub proc helper
     push.1
@@ -87,13 +94,20 @@ end
 "#,
     );
     write_file(
+        &tempdir.path().join("shared.masm"),
+        r#"pub proc helper
+    push.2
+end
+"#,
+    );
+    write_file(
         &tempdir.path().join("main.masm"),
         r#"pub mod lib
-
-use self::lib->lib_api
+pub mod shared
 
 begin
-    exec.lib_api::helper
+    exec.lib::helper
+    exec.shared::helper
 end
 "#,
     );

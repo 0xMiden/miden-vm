@@ -303,14 +303,12 @@ fn library_exports() -> Result<(), Report> {
 
         pub mod foo
 
-        use self::foo->foo_api
-
         pub use lib1::baz::baz1->bar1
 
         pub use self::foo::foo2->bar2
 
         pub proc bar3
-            exec.foo_api::foo2
+            exec.foo::foo2
         end
 
         proc bar4
@@ -319,7 +317,7 @@ fn library_exports() -> Result<(), Report> {
 
         pub proc bar5
             push.3 sub
-            exec.foo_api::foo2
+            exec.foo::foo2
             exec.bar1
             exec.bar2
             exec.bar4
@@ -3145,8 +3143,8 @@ fn missing_import() {
     );
 
     let err = context.assemble(source).expect_err("expected missing import to be rejected");
-    assert_diagnostic!(&err, "undefined item 'u64::add'");
-    assert_diagnostic!(&err, "you might be missing an import");
+    assert_diagnostic!(&err, "invalid relative item path 'u64::add'");
+    assert_diagnostic!(&err, "absolute, local, or qualified by an import or submodule");
     assert_diagnostic!(&err, "exec.u64::add");
 }
 
@@ -5117,6 +5115,108 @@ fn link_diagnostic_for_private_submodule_import() -> TestResult {
 }
 
 #[test]
+fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        mod internal
+        pub mod api
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let internal = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::internal
+
+        pub const VALUE = 1
+        pub proc internal_entry
+            nop
+        end
+        "#
+    ))?;
+    let api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::api
+
+        use diag::root::internal::VALUE
+        use diag::root::internal->internal_api
+
+        pub proc entry
+            push.VALUE
+            exec.internal_api::internal_entry
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("diag", root, [internal, api])?;
+
+    Ok(())
+}
+
+#[test]
+fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod parent
+        pub mod sibling
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let parent = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::parent
+
+        mod hidden
+        "#
+    ))?;
+    let hidden = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::parent::hidden
+
+        pub const VALUE = 1
+        "#
+    ))?;
+    let sibling = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::sibling
+
+        use diag::root::parent::hidden::VALUE
+
+        pub proc entry
+            push.VALUE
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [parent, hidden, sibling])
+        .expect_err("private nested submodule should not be visible to sibling of its parent");
+
+    assert_diagnostic!(&err, "private submodule '::diag::root::parent::hidden'");
+    assert_diagnostic!(&err, "only public submodules can be imported from another module");
+
+    Ok(())
+}
+
+#[test]
 fn link_diagnostic_for_module_reexport() -> TestResult {
     let context = TestContext::new();
     let root = context.parse_module(source_file!(
@@ -5218,6 +5318,311 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
 }
 
 #[test]
+fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> TestResult {
+    let context = TestContext::new();
+    let imported = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::dep::child
+
+        pub proc p
+            push.1
+        end
+        "#
+    ))?;
+    let global = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace child
+
+        pub proc p
+            push.2
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        use diag::dep::child
+        pub use child::p->alias
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", consumer, [imported, global])
+        .expect_err("pub use through another import should be rejected before global lookup");
+
+    assert_diagnostic!(&err, "import target 'child::p' cannot be resolved through import 'child'");
+    assert_diagnostic!(&err, "imports are resolved independently");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_self_referential_module_import() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        use diag::root::child
+
+        pub proc child_entry
+            exec.child::child_entry
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child])
+        .expect_err("module import of itself should be rejected");
+
+    assert_diagnostic!(&err, "self-referential import of module 'diag::root::child'");
+    assert_diagnostic!(&err, "a module cannot import itself");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+        use diag::root::child->child_api
+
+        pub proc entry
+            exec.child_api::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child])
+        .expect_err("same-scope submodule imports should be rejected even when aliased");
+
+    assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
+    assert_diagnostic!(&err, "submodule-qualified path");
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+        use self::child->child_api
+
+        pub proc entry
+            exec.child_api::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child])
+        .expect_err("self-relative same-scope submodule imports should be rejected");
+
+    assert_diagnostic!(&err, "cannot import submodule '::diag::root::child'");
+    assert_diagnostic!(&err, "submodule-qualified path");
+
+    Ok(())
+}
+
+#[test]
+fn code_paths_can_reference_current_and_descendant_items_absolutely() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        mod child
+
+        proc local_helper
+            nop
+        end
+
+        pub proc entry
+            exec.::diag::root::local_helper
+            exec.::diag::root::child::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+
+    Ok(())
+}
+
+#[test]
+fn code_paths_can_reference_local_submodules_without_imports() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        mod child
+
+        pub proc entry
+            exec.child::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("diag", root, [child])?;
+
+    Ok(())
+}
+
+#[test]
+fn link_diagnostic_for_relative_global_like_code_path() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root
+
+        pub mod child
+
+        pub proc entry
+            exec.diag::root::child::child_entry
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::root::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("diag", root, [child])
+        .expect_err("relative paths should not fall back to the global namespace");
+
+    assert_diagnostic!(&err, "invalid relative item path 'diag::root::child::child_entry'");
+    assert_diagnostic!(&err, "absolute, local, or qualified by an import or submodule");
+
+    Ok(())
+}
+
+#[test]
+fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::dep
+
+        pub mod child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::dep::child
+
+        pub proc child_entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace diag::consumer
+
+        use diag::dep->dep
+
+        pub proc entry
+            exec.dep::child::child_entry
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("diag", consumer, [dep, child])?;
+
+    Ok(())
+}
+
+#[test]
 fn self_relative_import_walks_public_submodules() -> TestResult {
     let context = TestContext::new();
     let root = context.parse_module(source_file!(
@@ -5227,10 +5632,10 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
 
         pub mod child
 
-        use self::child->child_api
+        use self::child::child_entry->child_entry
 
         pub proc entry
-            exec.child_api::child_entry
+            exec.child_entry
         end
         "#
     ))?;
@@ -6821,17 +7226,9 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     let assembler = Assembler::new(context.source_manager());
     let lib = assembler.assemble_library("lib", lib, None::<Box<Module>>)?;
 
-    // This program triggers a pathological edge case in symbol resolution, caused by the
-    // import-relative reference `exec.lib::lib_proc`. This causes the following to occur:
-    //
-    // 1. We attempt to expand `lib` to an import, which succeeds, giving us a new relative path,
-    //    `lib::lib::lib_proc`.
-    // 2. Because imports can refer to other imported items, we attempt to resolve `lib` as an
-    //    import again, resulting in us expanding the path to `lib::lib::lib::lib::lib_proc`, and so
-    //    on until we blow the stack
-    //
-    // The fix for this is to disregard import expansions of the same import in the same module
-    // after the first time an import is expanded.
+    // This import's default alias is `lib`, which is also the first component of its global
+    // target. That must still resolve globally rather than being mistaken for an import-through-
+    // import attempt.
     let assembler = Assembler::new(context.source_manager());
     let _ = assembler.with_package(Arc::from(lib), Linkage::Static)?.assemble_program(
         "program",
