@@ -69,6 +69,26 @@ pub enum ManifestValidationError {
     DuplicateModule(Arc<Path>),
     #[error("duplicate submodule '{name}' in module '{module}' in package manifest")]
     DuplicateSubmodule { module: Arc<Path>, name: String },
+    #[error(
+        "package manifest declares export '{export}' in module '{module}', but no module surface was provided for that module"
+    )]
+    MissingExportModuleSurface { export: Arc<Path>, module: Arc<Path> },
+    #[error(
+        "package manifest declares submodule '{module}' from module '{parent}', but no module surface was provided for it"
+    )]
+    MissingDeclaredSubmoduleSurface {
+        parent: Arc<Path>,
+        name: String,
+        module: Arc<Path>,
+    },
+    #[error(
+        "package manifest contains module surface '{module}', but parent module '{parent}' does not declare submodule '{name}'"
+    )]
+    UndeclaredModuleSurface {
+        module: Arc<Path>,
+        parent: Arc<Path>,
+        name: String,
+    },
     #[error("duplicate dependency '{0}' in package manifest")]
     DuplicateDependency(PackageId),
     #[error("multiple entrypoint procedures found: '{duplicate}' conflicts with '{original}'")]

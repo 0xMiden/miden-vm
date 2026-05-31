@@ -264,7 +264,9 @@ impl Package {
 
     /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
     pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
-        self.module_infos()
+        self.try_module_infos()
+            .map_err(Report::msg)?
+            .into_iter()
             .find(|mi| mi.path().is_kernel_path())
             .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
     }
@@ -403,6 +405,98 @@ impl Package {
         }
 
         modules_by_path.into_values()
+    }
+
+    /// Returns module infos after validating that manifest module-surface metadata is complete.
+    ///
+    /// Unlike [`Self::module_infos`], this method does not synthesize missing module surfaces from
+    /// item export paths. Link-time resolution relies on explicit module metadata so that modules
+    /// remain distinct from exported items.
+    pub fn try_module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+
+        for module in self.manifest.modules() {
+            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            for submodule in module.submodules() {
+                module_info.add_submodule(ast::SubmoduleDecl {
+                    visibility: submodule.visibility,
+                    name: submodule.name.clone(),
+                });
+            }
+            modules_by_path.insert(module.path.clone(), module_info);
+        }
+
+        for module in self.manifest.modules() {
+            for submodule in module.submodules() {
+                let child_path: Arc<Path> =
+                    Arc::from(module.path.join(&submodule.name).into_boxed_path());
+                if !modules_by_path.contains_key(child_path.as_ref()) {
+                    return Err(ManifestValidationError::MissingDeclaredSubmoduleSurface {
+                        parent: module.path.clone(),
+                        name: submodule.name.to_string(),
+                        module: child_path,
+                    });
+                }
+            }
+        }
+
+        for module in self.manifest.modules() {
+            let Some(parent_path) = module.path.parent() else {
+                continue;
+            };
+            let parent_path: Arc<Path> = Arc::from(parent_path.to_path_buf().into_boxed_path());
+            let Some(parent) = self.manifest.get_module(parent_path.as_ref()) else {
+                continue;
+            };
+            let name = module.path.last().expect("module paths have at least one component");
+            if !parent.submodules().iter().any(|submodule| submodule.name.as_str() == name) {
+                return Err(ManifestValidationError::UndeclaredModuleSurface {
+                    module: module.path.clone(),
+                    parent: parent.path.clone(),
+                    name: name.to_string(),
+                });
+            }
+        }
+
+        for export in self.manifest.exports() {
+            let module_name: Arc<Path> =
+                Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
+            let module = modules_by_path.get_mut(module_name.as_ref()).ok_or_else(|| {
+                ManifestValidationError::MissingExportModuleSurface {
+                    export: export.path(),
+                    module: module_name.clone(),
+                }
+            })?;
+            match export {
+                PackageExport::Procedure(ProcedureExport {
+                    node,
+                    digest,
+                    path,
+                    signature,
+                    attributes,
+                }) => {
+                    let name = path.last().unwrap();
+                    module.add_procedure_with_provenance(
+                        ast::ProcedureName::new(name).expect("valid procedure name"),
+                        *digest,
+                        signature.clone().map(Arc::new),
+                        attributes.clone(),
+                        *node,
+                        Some(self.mast.commitment()),
+                    );
+                },
+                PackageExport::Constant(ConstantExport { path, value }) => {
+                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_constant(name, value.clone());
+                },
+                PackageExport::Type(TypeExport { path, ty }) => {
+                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_type(name, ty.clone());
+                },
+            }
+        }
+
+        Ok(modules_by_path.into_values().collect())
     }
 }
 

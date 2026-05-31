@@ -45,6 +45,9 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("invalid module surface metadata for package '{package}': {reason}")]
+    #[diagnostic()]
+    InvalidPackageModuleSurface { package: String, reason: String },
     #[error("ambiguous module path resolution for '{path}'")]
     #[diagnostic(help("matching module prefixes: {}", matches.join(", ")))]
     AmbiguousModulePath {

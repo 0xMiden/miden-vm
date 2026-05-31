@@ -166,10 +166,16 @@ impl Linker {
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
+        let module_infos =
+            library.module_infos().map_err(|err| LinkerError::InvalidPackageModuleSurface {
+                package: library.package.name.to_string(),
+                reason: err.to_string(),
+            })?;
+
         match self.libraries.entry(library.mast().commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.module_infos())
+                self.link_assembled_modules(module_infos)
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
@@ -392,7 +398,13 @@ impl Linker {
         log::debug!(target: "linker", "modifying linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
         let mut kernel_index = None;
-        for module_info in kernel_package.module_infos() {
+        let module_infos = kernel_package.try_module_infos().map_err(|err| {
+            LinkerError::InvalidPackageModuleSurface {
+                package: kernel_package.name.to_string(),
+                reason: err.to_string(),
+            }
+        })?;
+        for module_info in module_infos {
             let is_kernel_module = module_info.path().is_kernel_path();
             let module_index = self.link_assembled_module(module_info)?;
             if is_kernel_module {
