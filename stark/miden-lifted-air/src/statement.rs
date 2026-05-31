@@ -164,6 +164,9 @@ where
         }
         for (idx, trace) in traces.iter().enumerate() {
             let h = trace.height();
+            if h < 2 {
+                return Err(InstanceError::TraceHeightTooSmall { air: idx, height: h });
+            }
             if !h.is_power_of_two() {
                 return Err(InstanceError::TraceHeightNotPowerOfTwo { air: idx, height: h });
             }
@@ -253,6 +256,9 @@ pub enum InstanceError {
         expected: usize,
         actual: usize,
     },
+
+    #[error("AIR {air}: trace height = {height} is too small; expected at least 2 rows")]
+    TraceHeightTooSmall { air: usize, height: usize },
 
     #[error("AIR {air}: trace height = {height} is not a power of two")]
     TraceHeightNotPowerOfTwo { air: usize, height: usize },

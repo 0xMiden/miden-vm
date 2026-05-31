@@ -96,13 +96,13 @@ pub enum VerifierError {
 /// ordering deterministically from those heights. The caller's challenger
 /// must already be bound to protocol parameters and AIR configurations —
 /// see the prover module-level docs. The statement's inputs are absorbed via
-/// [`Statement::observe`], then the proof's log trace heights are observed in
-/// instance order.
+/// [`Statement::observe`], then the instance count and proof's log trace heights
+/// are observed in instance order.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
-/// 1. Validate runtime statement/proof shape data, absorb statement-owned inputs, and observe log
-///    trace heights in instance order
+/// 1. Validate runtime statement/proof shape data, absorb statement-owned inputs, and observe the
+///    instance count plus log trace heights in instance order
 /// 2. Receive commitments and sample challenges in the same order as the prover
 /// 3. For each AIR (in proof order), evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
 /// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ

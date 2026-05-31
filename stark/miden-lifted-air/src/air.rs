@@ -310,7 +310,8 @@ where
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// The default order is `air_inputs`, then `aux_inputs`. The protocol
+    /// The default order is `air_inputs.len()`, `air_inputs`,
+    /// `max_aux_inputs()`, `aux_inputs.len()`, then `aux_inputs`. The protocol
     /// observes the instance count and `log_trace_heights` separately after this
     /// hook, but passes the heights here so custom bindings can include AIR
     /// metadata that depends on the prover-chosen trace ordering or heights.
@@ -330,9 +331,12 @@ where
         aux_inputs: &[F],
         log_trace_heights: &[u8],
     ) {
+        challenger.observe(F::from_usize(air_inputs.len()));
         for &v in air_inputs {
             challenger.observe(v);
         }
+        challenger.observe(F::from_usize(self.max_aux_inputs()));
+        challenger.observe(F::from_usize(aux_inputs.len()));
         for &v in aux_inputs {
             challenger.observe(v);
         }

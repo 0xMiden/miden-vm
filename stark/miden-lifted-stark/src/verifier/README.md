@@ -2,7 +2,7 @@
 
 End-to-end verification for the lifted STARK protocol using LMCS
 commitments and the lifted FRI PCS. Supports multiple traces of different
-power-of-two heights via virtual lifting.
+power-of-two heights of at least 2 rows via virtual lifting.
 
 Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
@@ -20,7 +20,7 @@ verify(config, &statement, proof, challenger)
 ```
 
 The `statement` carries its `MultiAir` (the AIRs and the cross-AIR
-`eval_external` check) plus the proof's `air_inputs` and (if any)
+`eval_external` check) plus the statement-owned `air_inputs` and (if any)
 `aux_inputs`. The framework absorbs both `air_inputs` and `aux_inputs` into
 Fiat-Shamir automatically via `Statement::observe` — callers must pass a
 `Statement` carrying the same data on prover and verifier sides.
@@ -41,7 +41,7 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 ## Protocol flow
 
 0. Reconstruct `TraceOrder` from the proof's log trace heights and reorder caller AIRs into the proof's ascending-height ordering.
-1. Absorb the caller-supplied statement via `Statement::observe` (which itself absorbs the heights) into the challenger.
+1. Absorb statement-owned inputs via `Statement::observe`, then absorb the instance count and per-instance log trace heights into the challenger.
 2. Receive main trace commitment.
 3. Sample aux randomness.
 4. Receive aux trace commitment.

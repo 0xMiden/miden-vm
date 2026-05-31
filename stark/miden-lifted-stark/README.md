@@ -21,9 +21,9 @@ miden-lifted-stark              ← this crate
 └── miden-lifted-air            ← AIR traits (aux columns, periodic columns)
 ```
 
-The system supports **multiple traces of different power-of-two heights**.
-Shorter traces are virtually lifted to the maximum height via LMCS upsampling,
-so the PCS and verifier operate on a single uniform view.
+The system supports **multiple traces of different power-of-two heights of at
+least 2 rows**. Shorter traces are virtually lifted to the maximum height via
+LMCS upsampling, so the PCS and verifier operate on a single uniform view.
 
 ## Notation
 
@@ -231,7 +231,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
   internally from the heights stored on `StarkProof`; the ordering type is
   crate-private. The caller must bind the AIR list into the Fiat-Shamir
   challenger. See the prover module-level docs.
-- **Power-of-two heights** — All trace heights are powers of two.
+- **Power-of-two heights** — All trace heights are powers of two and at least 2 rows.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Derived per AIR from symbolic analysis
   (`log_quotient_degree`); the proof uses the max over AIRs. Each AIR must

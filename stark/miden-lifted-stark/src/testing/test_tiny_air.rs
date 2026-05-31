@@ -177,6 +177,18 @@ fn trace_of_height(height: usize) -> RowMajorMatrix<Felt> {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn prover_statement_rejects_one_row_trace() {
+    assert!(matches!(
+        tiny_prover_statement(
+            vec![TinyAir::new(vec![])],
+            vec![trace_of_height(1)],
+            vec![Felt::from_u64(START)],
+        ),
+        Err(InstanceError::TraceHeightTooSmall { air: 0, height: 1 })
+    ));
+}
+
+#[test]
 fn single_trace() {
     let pv = vec![Felt::from_u64(START)];
     prove_and_verify(&TinyAir::new(vec![]), &pv, &[trace_of_height(8)]);

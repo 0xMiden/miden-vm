@@ -22,7 +22,7 @@
 //!    trace heights (stable sort on `(log_trace_height, instance_index)`), so callers do not need
 //!    to commit to it separately as long as they commit to the AIR list and trace heights match.
 //!
-//! The proof's `air_inputs` and `aux_inputs` are absorbed automatically by
+//! The statement's `air_inputs` and `aux_inputs` are absorbed automatically by
 //! [`Statement::observe`](crate::air::Statement::observe), followed by protocol-level
 //! absorption of the instance count and each AIR's log trace height in instance
 //! order. Callers do not bind these themselves.

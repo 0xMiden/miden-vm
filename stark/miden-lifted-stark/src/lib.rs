@@ -31,8 +31,9 @@
 //!   log_blowup` bounded by the field's two-adicity and the host's `usize` width.
 //! - **Compat** — `log_quotient_degree(air) ≤ log_blowup`, per AIR.
 //! - **Per-AIR instance dimensions** — public values length matches `num_public_values()`, trace
-//!   height ≥ max periodic column length, trace width matches `width()` (prover-only), height is a
-//!   power of two (prover-only), `aux_inputs.len() ≤ max_aux_inputs`.
+//!   height is at least 2 rows, trace height ≥ max periodic column length, trace width matches
+//!   `width()` (prover-only), raw height is a power of two (prover-only), `aux_inputs.len() ≤
+//!   max_aux_inputs`.
 //!
 //! ## Trusted AIR contracts
 //!
