@@ -1,4 +1,4 @@
 
-## miden::core::mod
+## miden::core::collections::mod
 | Procedure | Description |
 | ----------- | ------------- |

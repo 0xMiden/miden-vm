@@ -1,4 +1,4 @@
 
-## miden::core::mod
+## miden::core::pcs::fri::mod
 | Procedure | Description |
 | ----------- | ------------- |

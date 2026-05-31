@@ -1,4 +1,4 @@
 
-## miden::core::mod
+## miden::core::crypto::hashes::mod
 | Procedure | Description |
 | ----------- | ------------- |
