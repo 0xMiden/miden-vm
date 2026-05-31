@@ -20,28 +20,31 @@ much like the Rust compiler.
 
 ### Example
 
-```rust
+```rust,ignore
 use std::path::Path;
-use miden_assembly::Assembler;
-use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+use miden_assembly::{
+    Assembler,
+    debuginfo::{DefaultSourceManager, SourceManager},
+};
 use std::sync::Arc;
 
-let source_manager = Arc::new(DefaultSourceManager::default());
+let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 
 // Instantiate a default, empty assembler
 let assembler = Assembler::new(source_manager.clone());
 
 // Emit an executable package, named `prg` which pushes values 3 and 5 onto the
 // stack and adds them
-let _ = assembler.assemble_program("prg", "begin push.3 push.5 add end")
+let _ = assembler.assemble_program("prg", "namespace $exec\n\nbegin push.3 push.5 add end")
     .unwrap();
 
 // Note: assemble_program() consumes the assembler, so create a new one for the
 // next program
 let assembler2 = Assembler::new(source_manager.clone());
 
-// Emit a program from some source file on disk (requires the `std` feature)
-let _ = assembler2.assemble_program("prg", Path::new("../../miden-vm/masm-examples/fib/fib.masm"))
+// Emit a program from some source file on disk (requires the `std` feature).
+// Standalone source files must declare their module path, e.g. `namespace $exec`.
+let _ = assembler2.assemble_program("prg", Path::new("path/to/program.masm"))
     .unwrap();
 ```
 
@@ -58,11 +61,41 @@ will want to either use projects (see `miden-project` for more info), or factor 
 We'll look at a few of these in more detail below. See the module documentation
 for the full set of APIs and how to use them.
 
+### Standalone Source Declarations
+
+When source files are assembled through a `miden-project.toml` project, the project manifest provides the root module path and external package requirements. When assembling standalone source files directly through parser or assembler APIs, that information can be written in MASM source.
+
+The canonical order for these top-level declarations is:
+
+```masm
+namespace my_package
+extern package "miden-core@0.1.0"
+
+pub mod api
+mod internal
+
+use miden::core::math::u64
+
+pub proc add64
+    exec.u64::wrapping_add
+end
+```
+
+The `namespace` declaration gives the module its fully-qualified path. It is optional when the caller or project manifest already provides the module path, but if both are present they must agree. It must appear before any item, import, submodule, or external package declaration.
+
+The `extern package "<package-id>"` declaration records an external package dependency for a standalone root module. It is optional when the module is assembled as part of a project, because the manifest supplies the dependency set. When reading a module tree from a root source file, `namespace` and `extern package` declarations belong in that root source file.
+
+The `mod foo` and `pub mod foo` declarations define the direct child modules of the current module. Linked descendants must be declared by their parent modules. A private `mod` child is visible inside the declaring module and its descendants; a `pub mod` child is also visible through public module paths outside that internal scope. Module visibility is separate from item visibility, so public procedures, constants, and types still require `pub` or `pub use`.
+
+Imports are resolved independently. `use path::to::module` and `pub use path::to::item` resolve from the global module tree, whether or not the path has a leading `::`. Descendants of the current module are imported with `use self::child::grandchild`. Import targets may not resolve through another import alias, and modules may not be re-exported with `pub use`; expose modules with `pub mod` instead.
+
+Code references follow the same model: an item path is either absolute, such as `exec.::miden::core::math::u64::wrapping_add`, local, or qualified by an import alias or declared submodule in the current module. Unresolved relative-looking paths are not retried as global paths.
+
 ### Libraries/Packages
 
 A Miden package (stored on disk with the `.masp` extension), is a binary artifact that contains assembled code, debug information, useful metadata about the package itself, and optional custom sections that can attach tool-specific data to a package. Packages provide the common unit of distribution and reuse of Miden Assembly code.
 
-Naturally, the first use case that you are likely to encounter when building a Miden program, is the desire to factor out some shared code into a _library_. A library is a package containing reusable modules and functions, typically belonging to a common namespace. The [core library](../../crates/lib/core) is an example of this.
+Naturally, the first use case that you are likely to encounter when building a Miden program, is the desire to factor out some shared code into a _library_. A library is a package containing reusable modules and functions, typically belonging to a common module path. The [core library](../../crates/lib/core) is an example of this.
 
 To call code in a library from your program entrypoint, you must add the
 library to the instance of the assembler you will compile the program with,
@@ -74,21 +107,23 @@ To link against the core library, you could do the following:
 
 ```rust,ignore
 # use miden_assembly::{Assembler, Linkage};
-# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use miden_assembly::debuginfo::{DefaultSourceManager, SourceManager};
 # use miden_core_lib::CoreLibrary;
 # use std::sync::Arc;
 #
 # // Create a source manager
-# let source_manager = Arc::new(DefaultSourceManager::default());
+# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 let assembler = Assembler::new(Arc::clone(&source_manager))
     .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
     .unwrap();
 ```
 
-The resulting assembler can now compile code that invokes any of the core library procedures by importing them from the namespace of the library, as shown next:
+The resulting assembler can now compile code that invokes any of the core library procedures by importing them from the module path exported by the library, as shown next:
 
 ```masm
-use core::math::u64
+namespace $exec
+
+use miden::core::math::u64
 
 begin
     push.1.0
@@ -108,16 +143,26 @@ You can provide a kernel in one of two ways: a precompiled kernel package,
 or by assembling a kernel module from source, as shown below:
 
 ```rust
-# use miden_assembly::Assembler;
-# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use miden_assembly::{
+#     Assembler, Path,
+#     ast::{Module, ModuleKind},
+#     debuginfo::{DefaultSourceManager, SourceManager},
+# };
 # use std::sync::Arc;
 #
 # // Create a source manager
-# let source_manager = Arc::new(DefaultSourceManager::default());
+# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 
-// First, assemble the kernel library
+// First, parse and assemble the kernel library
+let mut parser = Module::parser(Some(ModuleKind::Kernel));
+let kernel = parser.parse_str(
+    Some(Path::KERNEL),
+    "pub proc foo add end",
+    source_manager.clone(),
+).unwrap();
+
 let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel("my-kernel", "pub proc foo add end")
+    .assemble_kernel("my-kernel", kernel)
     .unwrap();
 
 // Create assembler with the kernel
@@ -128,22 +173,33 @@ Programs compiled by this assembler will be able to make calls to the
 `foo` procedure by executing the `syscall` instruction, like so:
 
 ```rust
-# use miden_assembly::Assembler;
-# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use miden_assembly::{
+#     Assembler, Path,
+#     ast::{Module, ModuleKind},
+#     debuginfo::{DefaultSourceManager, SourceManager},
+# };
 # use std::sync::Arc;
 #
 # // Create a source manager
-# let source_manager = Arc::new(DefaultSourceManager::default());
+# let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 #
-# // First, assemble the kernel library
+# // First, parse and assemble the kernel library
+# let mut parser = Module::parser(Some(ModuleKind::Kernel));
+# let kernel = parser.parse_str(
+#     Some(Path::KERNEL),
+#     "pub proc foo add end",
+#     source_manager.clone(),
+# ).unwrap();
 # let kernel_lib = Assembler::new(source_manager.clone())
-#     .assemble_kernel("my-kernel", "pub proc foo add end")
+#     .assemble_kernel("my-kernel", kernel)
 #     .unwrap();
 #
 // Create assembler with the kernel and assemble program
-let program = Assembler::with_kernel(source_manager, kernel_lib.into())
+let _program = Assembler::with_kernel(source_manager, kernel_lib.into())
     .unwrap()
     .assemble_program("prg", "
+namespace $exec
+
 begin
     syscall.foo
 end
@@ -152,8 +208,9 @@ end
 
 > **Note:** An unqualified `syscall` target is assumed to be defined in the kernel module.
 > This is unlike the `exec` and `call` instructions, which require that callees
-> resolve to a local procedure; a procedure defined in an explicitly imported
-> module; or the hash of a MAST root corresponding to the compiled procedure.
+> resolve to a local procedure; a procedure reached through an absolute,
+> imported, or declared submodule path; or the hash of a MAST root corresponding
+> to the compiled procedure.
 >
 > These options are also available to `syscall`, with the caveat that whatever
 > method is used, it _must_ resolve to a procedure in the kernel specified to
@@ -165,8 +222,11 @@ To help illustrate how all of the topics we discussed above can be combined
 together, let's look at one last example:
 
 ```rust
-use miden_assembly::Assembler;
-use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+use miden_assembly::{
+    Assembler, Path,
+    ast::{Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceManager},
+};
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -174,9 +234,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kernel = "pub proc foo add end";
 
     // Create a source manager
-    let source_manager = Arc::new(DefaultSourceManager::default());
+    let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
 
-    // First, assemble the kernel library
+    // First, parse and assemble the kernel library
+    let mut parser = Module::parser(Some(ModuleKind::Kernel));
+    let kernel = parser.parse_str(Some(Path::KERNEL), kernel, source_manager.clone())?;
     let kernel_lib = Assembler::new(source_manager.clone())
         .assemble_kernel("my-kernel", kernel)?;
 
@@ -186,7 +248,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // with: `.with_package(miden_core_lib::CoreLibrary::default().package(), Linkage::Dynamic)?;`
 
     // Assemble our program
-    let program = assembler.assemble_program("prg", "
+    let _program = assembler.assemble_program("prg", "
+namespace $exec
+
 begin
     push.1.2
     syscall.foo

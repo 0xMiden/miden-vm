@@ -5,9 +5,9 @@ sidebar_position: 11
 
 # Debugging
 
-Miden assembly provides event-based debugging procedures through the `core::debug` module. These procedures emit well-known events which the host handles by printing the requested piece of VM state (operand stack, memory, advice stack, or advice map).
+Miden assembly provides event-based debugging procedures through the `miden::core::debug` module. These procedures emit well-known events which the host handles by printing the requested piece of VM state (operand stack, memory, advice stack, or advice map).
 
-The `core::debug` module provides the following procedures:
+The `miden::core::debug` module provides the following procedures:
 
 - `print_stack` prints the entire operand stack (3 cycles).
 - `print_mem` prints memory in the range `[start, end)` (5 cycles). Consumes `start` and `end` from the stack.
@@ -21,7 +21,7 @@ These procedures emit ordinary events and print whenever invoked, regardless of 
 
 Default core handlers print stack and memory state. Advice stack and advice map printers require hosts to register `advice_debug_handlers()`, because they can reveal witness data.
 
-To use these procedures, import the `core::debug` module and call the appropriate procedure:
+To use these procedures, import the `miden::core::debug` module and call the appropriate procedure:
 
 ```masm
 use miden::core::debug
