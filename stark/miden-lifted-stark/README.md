@@ -64,18 +64,17 @@ See the "Mathematical background" in `src/prover/README.md` and
    channel. Build and commit auxiliary traces.
 4. **Sample challenges** — `alpha` (constraint folding) and `beta`
    (cross-trace accumulation).
-5. **Evaluate constraints** — For each trace in ascending height order,
-   evaluate AIR constraints on the quotient domain using SIMD-packed
-   arithmetic. Produces a numerator N_j per trace (no vanishing division).
-6. **Accumulate numerators** — Fold across traces:
-   `acc = cyclic_extend(acc) * beta + N_j`.
-7. **Divide by vanishing polynomial** — One pass on the full quotient domain,
-   exploiting Z_H periodicity for batch inverse.
-8. **Commit quotient** — Decompose Q into D chunks via fused iDFT + coefficient
+5. **Evaluate per-AIR quotients** — For each trace in ascending height order,
+   evaluate AIR constraints on that AIR's native quotient domain using
+   SIMD-packed arithmetic and divide by its trace vanishing polynomial.
+   Produces Q_j per trace.
+6. **Accumulate quotients** — Fold across traces:
+   `acc = cyclic_extend(acc) * beta + Q_j`.
+7. **Commit quotient** — Decompose Q into D chunks via fused iDFT + coefficient
    scaling + flatten + DFT pipeline. Commit via LMCS.
-9. **Sample OOD point z** — Rejection-sampled to lie outside H and the LDE
+8. **Sample OOD point z** — Rejection-sampled to lie outside H and the LDE
    coset.
-10. **Open via PCS** — Delegate to the internal `pcs` modules.
+9. **Open via PCS** — Delegate to the internal `pcs` modules.
 
 ### Verifier (`verify`)
 
@@ -119,31 +118,20 @@ constraint count ahead of time.
 
 ### Cross-Trace Accumulation
 
-Numerators from traces of increasing height are combined:
+Per-AIR quotients from traces of increasing height are combined:
 
 ```
-acc = cyclic_extend(acc) * beta + N_j
+acc = cyclic_extend(acc) * beta + Q_j
 ```
 
-where `cyclic_extend` repeats the accumulator via modular indexing
-(`i & (len - 1)`) to match the next trace's quotient domain size.
-This works because:
+where `Q_j` is the AIR's folded constraint numerator divided by its trace
+vanishing polynomial on the native quotient coset `gJ_j`. If an AIR uses a
+smaller quotient degree than the batch maximum, `Q_j` is first low-degree
+extended along the quotient-degree axis. `cyclic_extend` then repeats the
+accumulator via modular indexing (`i & (len - 1)`) to match the next trace's
+quotient domain size.
 
-```
-Z_H(x) = Z_{H^r}(x) * Phi_r(x)
-```
-
-so cyclic extension of a polynomial divisible by `Z_{H^r}` preserves
-divisibility by `Z_H`.
-
-### Vanishing Division
-
-After accumulation, the combined numerator is divided by `Z_H(x) = x^N - 1`
-once on the full quotient domain.
-
-On the quotient coset `gJ` (where `|J| = N * D`), the values `x^N` range over a
-size-`D` subgroup, so `Z_H(x)` takes only `D` distinct values. The prover can
-batch-invert those `D` values once and index them by `i mod D`.
+Vanishing division is therefore per-AIR, not a final global division pass.
 
 ### Quotient Decomposition
 
@@ -179,8 +167,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Fused quotient pipeline** — iDFT, coefficient scaling by `(omega^t)^{-k}`,
   flatten to base field, zero-pad, forward DFT — all in one pass, no redundant
   coset operations.
-- **Periodic vanishing exploit** — On the quotient coset `gJ`, `Z_H(x)` takes
-  only `D` distinct values; batch inverse computes those once.
+- **Periodic vanishing exploit** — On each AIR's quotient coset `gJ_j`,
+  `Z_{H_j}(x)` takes only `D_j` distinct values; batch inverse computes those
+  once.
 - **Zero-copy quotient domain** — `split_rows().bit_reverse_rows()` gives a
   natural-order view of committed LDE data without copying.
 - **Efficient periodic columns** — Only `max_period * blowup` LDE values
@@ -188,7 +177,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Cyclic extension** — Cross-trace accumulation uses bitwise AND for
   modular indexing (power-of-two sizes).
 - **Parallel execution** — Rayon parallelism throughout constraint evaluation
-  and vanishing division (gated by `parallel` feature).
+  and per-AIR quotient division (gated by `parallel` feature).
 
 ## Entry Points
 
@@ -216,7 +205,7 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |
 | `src/prover/constraints/` | Constraint evaluation (SIMD) and layout discovery |
 | `src/prover/periodic.rs` | `PeriodicLde` — precomputed periodic column LDEs |
-| `src/prover/quotient.rs` | Quotient construction, cyclic extension, vanishing division |
+| `src/prover/quotient.rs` | Quotient upsampling, cyclic extension, and commitment |
 | `src/verifier/mod.rs` | `verify` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
@@ -233,8 +222,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
   challenger. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two and at least 2 rows.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
-- **Constraint degree** — Derived per AIR from symbolic analysis
-  (`log_quotient_degree`); the proof uses the max over AIRs. Each AIR must
+- **Quotient degree** — Derived per AIR from symbolic constraint-degree analysis
+  (`log_quotient_degree`); the proof uses the max over AIRs. Degree-2 AIRs are
+  valid and use the protocol's minimum quotient chunk count. Each AIR must
   satisfy `log_quotient_degree(air) ≤ log_blowup`.
 - **Transcript ordering** — `Statement::observe` absorbs statement-owned inputs;
   prover and verifier then observe the instance count and log trace heights in
