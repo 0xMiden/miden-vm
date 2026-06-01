@@ -84,7 +84,7 @@ impl PrecompileRegistry {
                 return Err(DeferredError::ConflictingNode.into());
             }
             for node in nodes {
-                state.intern(node);
+                state.intern(self, node)?;
             }
             seen.extend(local);
         }
@@ -135,7 +135,7 @@ impl PrecompileRegistry {
         self.decode_node_type(tag).map_err(|_| IntegrityError::UnknownTag)
     }
 
-    /// Decodes the type of a materialized wire node while rejecting attempts to serialize TRUE.
+    /// Decodes the type of a materialized wire node while rejecting malformed TRUE payloads.
     pub(crate) fn decode_wire_node_type(&self, node: &Node) -> Result<NodeType, IntegrityError> {
         let node_type = self.decode_wire_tag_type(node.tag)?;
         if node.tag == Tag::TRUE && !node.is_true_node() {

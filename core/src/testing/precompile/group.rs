@@ -132,8 +132,8 @@ impl Precompile for Group {
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
                 // Mint new field leaves for the result coordinates.
-                let h_x3 = witness.intern(Uint::leaf_node(x3));
-                let h_y3 = witness.intern(Uint::leaf_node(y3));
+                let h_x3 = witness.intern(Uint::leaf_node(x3))?;
+                let h_y3 = witness.intern(Uint::leaf_node(y3))?;
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
