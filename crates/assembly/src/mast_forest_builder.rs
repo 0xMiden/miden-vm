@@ -400,17 +400,60 @@ impl MastForestBuilder {
         child_refs: Vec<SourceMastNodeRef>,
         draft: &PendingMastNodeDraft,
     ) -> Result<SourceMastNodeRef, Report> {
+        let (op_start, op_end) = self.source_op_range_for_draft(draft);
+        self.push_source_occurrence(
+            exec_ref,
+            child_refs,
+            op_start,
+            op_end,
+            draft.asm_ops.clone(),
+            draft.debug_vars.clone(),
+            true,
+        )
+    }
+
+    fn source_op_range_for_draft(&self, draft: &PendingMastNodeDraft) -> (usize, usize) {
+        let op_count = if let Some(op_batches) = draft.kind.basic_block_op_batches() {
+            op_batches.iter().flat_map(OpBatch::raw_ops).count()
+        } else {
+            draft
+                .asm_ops
+                .iter()
+                .map(|(op_idx, _)| op_idx + 1)
+                .chain(draft.debug_vars.iter().map(|(op_idx, _)| op_idx + 1))
+                .max()
+                .unwrap_or(0)
+        };
+
+        (0, op_count)
+    }
+
+    fn push_source_occurrence(
+        &mut self,
+        exec_ref: MastNodeRef,
+        child_refs: Vec<SourceMastNodeRef>,
+        op_start: usize,
+        op_end: usize,
+        asm_ops: Vec<(usize, AsmOpRef)>,
+        debug_vars: Vec<(usize, DebugVarRef)>,
+        update_latest: bool,
+    ) -> Result<SourceMastNodeRef, Report> {
         let source_ref = self
             .source_nodes
             .push(PendingSourceMastNode {
                 exec_ref,
                 child_refs,
-                asm_ops: draft.asm_ops.clone(),
-                debug_vars: draft.debug_vars.clone(),
+                is_root_candidate: update_latest,
+                op_start,
+                op_end,
+                asm_ops,
+                debug_vars,
             })
             .into_diagnostic()
             .wrap_err("assembler created too many source MAST node refs")?;
-        self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
+        if update_latest {
+            self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
+        }
         Ok(source_ref)
     }
 
@@ -770,6 +813,42 @@ impl MastForestBuilder {
         Ok(merged_node_refs)
     }
 
+    fn record_merged_source_occurrences(
+        &mut self,
+        merged_ref: MastNodeRef,
+        merged_source_occurrences: &[(SourceMastNodeRef, usize)],
+    ) -> Result<(), Report> {
+        for &(source_ref, new_start) in merged_source_occurrences {
+            let source_node = self.source_nodes[source_ref].clone();
+            let old_start = source_node.op_start;
+            let op_len = source_node.op_end.saturating_sub(old_start);
+            let remap_op_idx = |op_idx: usize| {
+                debug_assert!(op_idx >= old_start);
+                op_idx - old_start + new_start
+            };
+
+            self.push_source_occurrence(
+                merged_ref,
+                source_node.child_refs,
+                new_start,
+                new_start + op_len,
+                source_node
+                    .asm_ops
+                    .into_iter()
+                    .map(|(op_idx, asm_op_ref)| (remap_op_idx(op_idx), asm_op_ref))
+                    .collect(),
+                source_node
+                    .debug_vars
+                    .into_iter()
+                    .map(|(op_idx, debug_var_ref)| (remap_op_idx(op_idx), debug_var_ref))
+                    .collect(),
+                false,
+            )?;
+        }
+
+        Ok(())
+    }
+
     fn merge_basic_block_refs(
         &mut self,
         contiguous_basic_block_refs: &[MastNodeRef],
@@ -785,6 +864,7 @@ impl MastForestBuilder {
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpRef)> = Vec::new();
         let mut merged_debug_vars: Vec<(usize, DebugVarRef)> = Vec::new();
+        let mut merged_source_occurrences: Vec<(SourceMastNodeRef, usize)> = Vec::new();
 
         let mut merged_basic_block_refs: Vec<MastNodeRef> = Vec::new();
 
@@ -806,6 +886,10 @@ impl MastForestBuilder {
                     op_batches.iter().flat_map(|b| b.raw_ops().copied()).collect::<Vec<_>>()
                 };
                 let ops_offset = operations.len();
+
+                if let Some(source_ref) = self.latest_source_ref_by_node_ref.get(&basic_block_ref) {
+                    merged_source_occurrences.push((*source_ref, ops_offset));
+                }
 
                 let pending_node = &self.nodes[basic_block_ref];
                 merged_asm_ops.extend(
@@ -829,8 +913,13 @@ impl MastForestBuilder {
                     let block_ops = core::mem::take(&mut operations);
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
                     let block_debug_vars = core::mem::take(&mut merged_debug_vars);
+                    let block_source_occurrences = core::mem::take(&mut merged_source_occurrences);
                     let merged_basic_block_ref =
                         self.ensure_block_ref(block_ops, block_asm_ops, block_debug_vars)?;
+                    self.record_merged_source_occurrences(
+                        merged_basic_block_ref,
+                        &block_source_occurrences,
+                    )?;
 
                     merged_basic_block_refs.push(merged_basic_block_ref);
                 }
@@ -841,6 +930,7 @@ impl MastForestBuilder {
         if !operations.is_empty() {
             let merged_basic_block =
                 self.ensure_block_ref(operations, merged_asm_ops, merged_debug_vars)?;
+            self.record_merged_source_occurrences(merged_basic_block, &merged_source_occurrences)?;
             merged_basic_block_refs.push(merged_basic_block);
         }
 
@@ -1190,6 +1280,61 @@ mod tests {
 
         assert!(forest.is_procedure_root(final_root_id));
         assert_eq!(forest[final_root_id].digest(), root_digest);
+    }
+
+    #[test]
+    fn test_source_graph_preserves_pre_merge_block_ranges() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
+        let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "mul"));
+        let first_block_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .unwrap();
+        let second_block_ref = builder
+            .ensure_block_ref(vec![Operation::Mul], vec![(0, second_asm_op)], vec![])
+            .unwrap();
+
+        let merged_blocks =
+            builder.merge_basic_block_refs(&[first_block_ref, second_block_ref]).unwrap();
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_ref = record_test_root(&mut builder, merged_blocks[0]);
+
+        let (_, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_merged_id = remapping[&merged_ref];
+        let source_nodes = source_graph
+            .source_nodes_for_exec_node(final_merged_id)
+            .map(|(_, source_node)| source_node)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            source_graph.roots().len(),
+            1,
+            "pre-merge source blocks should not become procedure roots",
+        );
+        assert!(
+            source_nodes.iter().any(|source_node| {
+                source_node.op_start() == 0
+                    && source_node.op_end() == 1
+                    && source_node
+                        .asm_ops()
+                        .iter()
+                        .any(|(_, asm_op)| asm_op.context_name() == "merge::first")
+            }),
+            "first pre-merge source block should survive as range 0..1",
+        );
+        assert!(
+            source_nodes.iter().any(|source_node| {
+                source_node.op_start() == 1
+                    && source_node.op_end() == 2
+                    && source_node
+                        .asm_ops()
+                        .iter()
+                        .any(|(_, asm_op)| asm_op.context_name() == "merge::second")
+            }),
+            "second pre-merge source block should survive as range 1..2",
+        );
     }
 
     #[test]

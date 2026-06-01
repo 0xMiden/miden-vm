@@ -3,9 +3,9 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use miden_core::{
     advice::AdviceMap,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
     },
     operations::{AssemblyOp, DebugVarInfo},
     utils::IndexVec,
@@ -333,8 +333,15 @@ impl MastForestFinalizer {
                 .into_iter()
                 .map(|(op_idx, debug_var_ref)| (op_idx, debug_vars[debug_var_ref].clone()))
                 .collect();
+            let (op_start, op_end) = adjust_source_op_range(
+                node,
+                pending_source_node.op_start,
+                pending_source_node.op_end,
+            );
             let inserted_id = finalized_nodes
-                .push(SourceMastNode::new(exec_node, children, asm_ops, debug_vars))
+                .push(SourceMastNode::new(
+                    exec_node, children, op_start, op_end, asm_ops, debug_vars,
+                ))
                 .map_err(|_| {
                     Report::new(MastForestBuilderError::AddSourceNode {
                         source_ref,
@@ -347,12 +354,31 @@ impl MastForestFinalizer {
         let roots = live_source_refs
             .iter()
             .filter_map(|source_ref| {
-                let exec_ref = source_nodes[*source_ref].exec_ref;
-                procedure_root_refs.contains(&exec_ref).then_some(source_id_by_ref[source_ref])
+                let source_node = &source_nodes[*source_ref];
+                (source_node.is_root_candidate
+                    && procedure_root_refs.contains(&source_node.exec_ref))
+                .then_some(source_id_by_ref[source_ref])
             })
             .collect();
 
         Ok((SourceDebugGraph::new(finalized_nodes, roots), source_id_by_ref))
+    }
+}
+
+fn adjust_source_op_range(node: &MastNode, op_start: usize, op_end: usize) -> (usize, usize) {
+    if op_start == op_end {
+        return (op_start, op_end);
+    }
+
+    match node {
+        MastNode::Block(block) => {
+            let adjusted = BasicBlockNode::adjust_asm_op_indices(
+                vec![(op_start, ()), (op_end - 1, ())],
+                block.op_batches(),
+            );
+            (adjusted[0].0, adjusted[1].0 + 1)
+        },
+        _ => (op_start, op_end),
     }
 }
 
