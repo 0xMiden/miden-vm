@@ -25,6 +25,8 @@ mod debug_metadata_merge_policy;
 use debug_metadata_merge_policy::DebugMetadataMergePolicy;
 mod finalizer;
 use finalizer::{BuiltMastForest, MastForestBuilderError, MastForestFinalizer};
+mod metadata_ref_allocator;
+use metadata_ref_allocator::MetadataRefAllocator;
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
