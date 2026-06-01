@@ -121,12 +121,17 @@ where
     // --- Trust boundary (see doc-block above). -------------------------------
     let statement = prover_statement.statement();
     let airs = statement.airs();
-
-    let traces = prover_statement.traces();
     let air_inputs = statement.air_inputs();
+    let traces = prover_statement.traces();
     let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
     let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
         .expect("ProverStatement::new should reject malformed heights");
+
+    // Bind statement-owned inputs and shape as soon as the validated trace order
+    // is known, before any prover messages are written to the transcript.
+    statement.observe(&mut challenger, trace_order.log_heights());
+    trace_order.observe_shape::<F, _>(&mut challenger);
+    let mut channel = ProverTranscript::new(challenger);
 
     // Borrow each AIR and trace, then reorder both into ascending-height (proof)
     // order. AIRs are passed as `&MA::Air` (the existing constraint code expects
@@ -149,13 +154,6 @@ where
         .iter()
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
-
-    // `Statement::observe` absorbs statement-owned inputs. The protocol then
-    // binds the instance count and each log trace height in instance order.
-    statement.observe(&mut challenger, trace_order.log_heights());
-    trace_order.observe_shape::<F, _>(&mut challenger);
-
-    let mut channel = ProverTranscript::new(challenger);
 
     // Infer per-AIR quotient degrees from symbolic analysis (per-AIR optimization).
     let log_quotient_degrees: Vec<u8> = proof_ordered
@@ -213,13 +211,32 @@ where
         .map(|_| channel.sample_algebra_element::<EF>())
         .collect();
 
-    // Build all aux traces in one call (instance-ordered), then reorder in
-    // place to the proof's AIR ordering to match the rest of the prover loop.
-    //
-    // The output shapes are trusted (see trust contract above); a malformed
-    // output is caught downstream by the LDE/commit or by verification.
-    let (mut aux_traces_ef, mut all_aux_values) =
-        info_span!("build aux traces").in_scope(|| prover_statement.build_aux_traces(&randomness));
+    // Build aux traces in instance order. The output shapes are trusted (see
+    // trust contract above); a malformed output is caught downstream by the
+    // LDE/commit or by verification.
+    let (mut aux_traces_ef, mut all_aux_values) = info_span!("build aux traces").in_scope(|| {
+        let mut aux_traces = Vec::with_capacity(airs.len());
+        let mut aux_values = Vec::with_capacity(airs.len());
+        for (air, main) in airs.iter().zip(traces.iter()) {
+            let num_randomness = air.num_randomness();
+            debug_assert!(
+                randomness.len() >= num_randomness,
+                "AIR requested more aux randomness than the shared challenge pool contains",
+            );
+            let (trace, values) = air.build_aux_trace(
+                main,
+                air_inputs,
+                statement.aux_inputs(),
+                &randomness[..num_randomness],
+            );
+            debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
+            debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
+            debug_assert_eq!(values.len(), air.num_aux_values(), "aux values length mismatch");
+            aux_traces.push(trace);
+            aux_values.push(values);
+        }
+        (aux_traces, aux_values)
+    });
 
     // Mirror the verifier's external assertion evaluation while aux values are
     // still in instance order. This is cheap and catches malformed statements
@@ -235,6 +252,8 @@ where
         }
     }
 
+    // External assertions are defined in instance-order terms; now reorder aux
+    // traces and aux values to proof order for commitment and the prover loop.
     trace_order.reorder_to_proof_in_place(&mut aux_traces_ef);
     trace_order.reorder_to_proof_in_place(&mut all_aux_values);
 

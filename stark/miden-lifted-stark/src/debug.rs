@@ -75,6 +75,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
     let airs = statement.airs();
     let traces = prover_statement.traces();
     let air_inputs = statement.air_inputs();
+    let aux_inputs = statement.aux_inputs();
     assert!(!airs.is_empty(), "no instances provided");
     assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
 
@@ -90,20 +91,10 @@ pub fn check_constraints<F, EF, MA, Ch>(
         .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
         .collect();
 
-    let (aux_traces, aux_values_per_air) = prover_statement.build_aux_traces(&challenges);
-    assert_eq!(aux_traces.len(), airs.len(), "build_aux_traces returned wrong number of traces");
-    assert_eq!(
-        aux_values_per_air.len(),
-        airs.len(),
-        "build_aux_traces returned wrong number of aux values"
-    );
-
-    for (i, ((air, main), (aux_trace, aux_values))) in airs
-        .iter()
-        .zip(traces.iter())
-        .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
-        .enumerate()
-    {
+    for (i, (air, main)) in airs.iter().zip(traces.iter()).enumerate() {
+        let num_randomness = air.num_randomness();
+        let (aux_trace, aux_values) =
+            air.build_aux_trace(main, air_inputs, aux_inputs, &challenges[..num_randomness]);
         // `check_builder_shape` validates row-window widths per row, but aux trace
         // height is invisible to a single row window — check it here so a short aux
         // trace fails cleanly rather than via an opaque row-slice panic.
@@ -115,7 +106,7 @@ pub fn check_constraints<F, EF, MA, Ch>(
             aux_trace.height()
         );
 
-        check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
+        check_single_trace(air, main, &aux_trace, &aux_values, air_inputs, &challenges, i);
     }
 }
 

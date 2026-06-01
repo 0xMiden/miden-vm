@@ -311,14 +311,9 @@ where
         accumulated = accumulated * beta + folder.accumulator;
     }
 
-    // 11. Evaluate the proof's external assertions and check each one is zero.
-    // No batching: each assertion is already a concrete EF value (not a
-    // polynomial), so an individual zero-check is equivalent to any
-    // randomized fold and gives precise error reporting.
-    //
-    // Aux values came off the wire in proof order; reorder them back to
-    // instance order before handing them to `eval_external`, which is
-    // defined in instance-order terms.
+    // 11. Evaluate the proof's external assertions. Aux values came off the
+    // wire in proof order; reorder them back to instance order before handing
+    // them to `eval_external`, which is defined in instance-order terms.
     let aux_instance = trace_order.to_instance_order(&all_aux_values);
     let aux_views: Vec<&[EF]> = aux_instance.iter().map(Vec::as_slice).collect();
     let assertions = statement

@@ -151,6 +151,8 @@ where
         statement: Statement<F, EF, MA>,
         traces: Vec<RowMajorMatrix<F>>,
     ) -> Result<Self, InstanceError> {
+        // TraceOrder stores instance indices as u8, so it can represent 256
+        // instances: indices 0 through u8::MAX.
         let max_instances = u8::MAX as usize + 1;
         if traces.len() > max_instances {
             return Err(InstanceError::TooManyInstances { count: traces.len() });
@@ -198,32 +200,6 @@ where
 
     pub fn traces(&self) -> &[RowMajorMatrix<F>] {
         &self.traces
-    }
-
-    /// Build every AIR's aux trace + aux values via [`LiftedAir::build_aux_trace`].
-    pub fn build_aux_traces(&self, challenges: &[EF]) -> (Vec<RowMajorMatrix<EF>>, Vec<Vec<EF>>) {
-        let airs = self.statement.airs();
-        let mut aux_traces = Vec::with_capacity(airs.len());
-        let mut aux_values = Vec::with_capacity(airs.len());
-        for (air, main) in airs.iter().zip(self.traces.iter()) {
-            let num_randomness = air.num_randomness();
-            debug_assert!(
-                challenges.len() >= num_randomness,
-                "AIR requested more aux randomness than the shared challenge pool contains",
-            );
-            let (trace, values) = air.build_aux_trace(
-                main,
-                &self.statement.air_inputs,
-                &self.statement.aux_inputs,
-                &challenges[..num_randomness],
-            );
-            debug_assert_eq!(trace.height(), main.height(), "aux trace height mismatch");
-            debug_assert_eq!(trace.width(), air.aux_width(), "aux trace width mismatch");
-            debug_assert_eq!(values.len(), air.num_aux_values(), "aux values length mismatch");
-            aux_traces.push(trace);
-            aux_values.push(values);
-        }
-        (aux_traces, aux_values)
     }
 }
 

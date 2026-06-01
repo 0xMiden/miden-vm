@@ -39,10 +39,12 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 /// STARK proof: per-AIR log trace heights (instance order) plus the raw
 /// transcript data.
 ///
-/// The proof's AIR ordering — used internally by the prover and verifier to
-/// fold multi-AIR constraints — is *not* stored. Both sides reconstruct it
-/// deterministically from the heights via the internal trace-order helper,
-/// so the proof commits to heights only.
+/// The proof's AIR ordering is *not* stored. Both sides reconstruct it with a
+/// stable sort by `(log_trace_height, instance_index)`, where `instance_index`
+/// is the AIR's position in [`Statement::airs`]. The derived order then drives
+/// commitment grouping, aux-value layout, quotient accumulation, and PCS
+/// opening widths. The proof therefore commits to the instance-order heights,
+/// not an explicit ordering permutation.
 ///
 /// The heights themselves are not exposed as a direct accessor: parse the
 /// proof through [`StarkProof::from_data`] and read them via
