@@ -339,6 +339,14 @@ impl PackageDebugInfo {
             .flat_map(move |source_map| source_map.asm_ops_for_source_node(source_node))
     }
 
+    /// Returns the first assembly operation row for `source_node`, if present.
+    pub fn first_asm_op_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> Option<&DebugSourceAsmOp> {
+        self.source_map.as_ref()?.first_asm_op_for_source_node(source_node)
+    }
+
     /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
     pub fn asm_op_for_operation(
         &self,
@@ -576,6 +584,14 @@ impl DebugSourceMapSection {
         source_node: DebugSourceMastNodeId,
     ) -> impl Iterator<Item = &DebugSourceAsmOp> {
         self.asm_ops.iter().filter(move |row| row.source_node == source_node)
+    }
+
+    /// Returns the first assembly operation row for `source_node`, if present.
+    pub fn first_asm_op_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> Option<&DebugSourceAsmOp> {
+        self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
     }
 
     /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
@@ -1079,6 +1095,7 @@ mod tests {
             asm_ops: alloc::vec![
                 DebugSourceAsmOp::new(source_a, 0, None, "alias_a".into(), "add".into(), 1),
                 DebugSourceAsmOp::new(source_b, 0, None, "alias_b".into(), "add".into(), 1),
+                DebugSourceAsmOp::new(source_b, 2, None, "alias_b_later".into(), "mul".into(), 1),
             ],
             debug_vars: alloc::vec![
                 DebugSourceVar::new(
@@ -1096,6 +1113,10 @@ mod tests {
 
         assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name, "alias_a",);
         assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name, "alias_b",);
+        assert_eq!(
+            source_map.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            "alias_b",
+        );
         let vars_b = source_map.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();
         assert_eq!(vars_b.len(), 1);
         assert_eq!(vars_b[0].var.name(), "y");

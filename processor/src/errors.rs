@@ -4,7 +4,8 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::program::MIN_STACK_DEPTH;
-use miden_debug_types::{SourceFile, SourceSpan};
+use miden_debug_types::{Location, SourceFile, SourceSpan};
+use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
@@ -379,6 +380,21 @@ impl OperationError {
         let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
         ExecutionError::OperationError { label, source_file, err: self }
     }
+
+    /// Wraps this error with package-owned source-occurrence execution context.
+    ///
+    /// Unlike [`Self::with_context`], this resolves source metadata from package debug sections
+    /// keyed by a source/debug MAST occurrence rather than by the reduced execution MAST node.
+    pub fn with_package_source_context(
+        self,
+        context: PackageSourceDebugContext<'_>,
+        host: &impl BaseHost,
+        op_idx: Option<usize>,
+    ) -> ExecutionError {
+        let (label, source_file) =
+            label_and_source_file_from_location(context.assembly_location(op_idx), host);
+        ExecutionError::OperationError { label, source_file, err: self }
+    }
 }
 
 /// Inner data for `OperationError::MerklePathVerificationFailed`.
@@ -396,6 +412,52 @@ pub struct MerklePathVerificationFailedInner {
 // EXTENSION TRAITS
 // ================================================================================================
 
+/// Source-occurrence debug context decoded from package debug sections.
+///
+/// This keeps diagnostic lookup keyed by [`DebugSourceMastNodeId`] so two source occurrences that
+/// reduce to the same executable MAST node can still report distinct source locations.
+#[derive(Clone, Copy, Debug)]
+pub struct PackageSourceDebugContext<'a> {
+    debug_info: &'a PackageDebugInfo,
+    source_node: DebugSourceMastNodeId,
+}
+
+impl<'a> PackageSourceDebugContext<'a> {
+    /// Creates a source debug context for one package-owned source/debug MAST occurrence.
+    pub fn new(debug_info: &'a PackageDebugInfo, source_node: DebugSourceMastNodeId) -> Self {
+        Self { debug_info, source_node }
+    }
+
+    /// Returns the source/debug MAST occurrence associated with this context.
+    pub fn source_node(&self) -> DebugSourceMastNodeId {
+        self.source_node
+    }
+
+    /// Returns source location metadata for `op_idx`, if present.
+    ///
+    /// If `op_idx` is absent, this falls back to the first operation row for the source occurrence.
+    pub fn assembly_location(&self, op_idx: Option<usize>) -> Option<&'a Location> {
+        let assembly_op = match op_idx {
+            Some(op_idx) => u32::try_from(op_idx)
+                .ok()
+                .and_then(|op_idx| self.debug_info.asm_op_for_operation(self.source_node, op_idx)),
+            None => self.debug_info.first_asm_op_for_source_node(self.source_node),
+        }?;
+
+        assembly_op.location.as_ref()
+    }
+}
+
+fn label_and_source_file_from_location(
+    location: Option<&Location>,
+    host: &impl BaseHost,
+) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    location.map_or_else(
+        || (SourceSpan::UNKNOWN, None),
+        |location| host.get_label_and_source_file(location),
+    )
+}
+
 /// Computes the label and source file for error context.
 ///
 /// This function is called by the extension traits to compute source location
@@ -410,13 +472,11 @@ fn get_label_and_source_file<F>(
 where
     F: ExecutableMastForest,
 {
-    mast_forest
+    let location = mast_forest
         .get_assembly_op(node_id, op_idx)
-        .and_then(|assembly_op| assembly_op.location())
-        .map_or_else(
-            || (SourceSpan::UNKNOWN, None),
-            |location| host.get_label_and_source_file(location),
-        )
+        .and_then(|assembly_op| assembly_op.location());
+
+    label_and_source_file_from_location(location, host)
 }
 
 /// Wraps an `AdviceError` with execution context to produce an `ExecutionError`.
@@ -434,6 +494,18 @@ where
     F: ExecutableMastForest,
 {
     let (label, source_file) = get_label_and_source_file(op_idx, mast_forest, node_id, host);
+    ExecutionError::AdviceError { label, source_file, err }
+}
+
+/// Wraps an `AdviceError` with package-owned source-occurrence execution context.
+pub fn advice_error_with_package_source_context(
+    err: AdviceError,
+    context: PackageSourceDebugContext<'_>,
+    host: &impl BaseHost,
+    op_idx: Option<usize>,
+) -> ExecutionError {
+    let (label, source_file) =
+        label_and_source_file_from_location(context.assembly_location(op_idx), host);
     ExecutionError::AdviceError { label, source_file, err }
 }
 
@@ -463,6 +535,26 @@ where
     }
 }
 
+/// Wraps an `EventError` with package-owned source-occurrence execution context.
+pub fn event_error_with_package_source_context(
+    error: EventError,
+    context: PackageSourceDebugContext<'_>,
+    host: &impl BaseHost,
+    op_idx: Option<usize>,
+    event_id: EventId,
+    event_name: Option<EventName>,
+) -> ExecutionError {
+    let (label, source_file) =
+        label_and_source_file_from_location(context.assembly_location(op_idx), host);
+    ExecutionError::EventError {
+        label,
+        source_file,
+        event_id,
+        event_name,
+        error,
+    }
+}
+
 /// Creates a `ProcedureNotFound` error with execution context.
 pub fn procedure_not_found_with_context<F>(
     root_digest: Word,
@@ -474,6 +566,17 @@ where
     F: ExecutableMastForest,
 {
     let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
+    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
+}
+
+/// Creates a `ProcedureNotFound` error with package-owned source-occurrence execution context.
+pub fn procedure_not_found_with_package_source_context(
+    root_digest: Word,
+    context: PackageSourceDebugContext<'_>,
+    host: &impl BaseHost,
+) -> ExecutionError {
+    let (label, source_file) =
+        label_and_source_file_from_location(context.assembly_location(None), host);
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
 }
 
@@ -829,11 +932,147 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
 #[cfg(test)]
 mod error_assertions {
     use super::*;
+    use alloc::sync::Arc;
+
+    use miden_debug_types::{ByteIndex, SourceId, Uri};
+    use miden_mast_package::debug_info::{
+        DebugSourceAsmOp, DebugSourceMapSection, PackageDebugInfo,
+    };
 
     /// Asserts at compile time that the passed error has Send + Sync + 'static bounds.
     fn _assert_error_is_send_sync_static<E: core::error::Error + Send + Sync + 'static>(_: E) {}
 
     fn _assert_execution_error_bounds(err: ExecutionError) {
         _assert_error_is_send_sync_static(err);
+    }
+
+    struct RecordingHost {
+        expected_location: Location,
+        returned_span: SourceSpan,
+    }
+
+    impl BaseHost for RecordingHost {
+        fn get_label_and_source_file(
+            &self,
+            location: &Location,
+        ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+            assert_eq!(location, &self.expected_location);
+            (self.returned_span, None)
+        }
+    }
+
+    #[test]
+    fn package_source_context_resolves_by_source_occurrence() {
+        let source_a = DebugSourceMastNodeId::from(0);
+        let source_b = DebugSourceMastNodeId::from(1);
+        let location_a = Location::new(
+            Uri::new("file://pkg/first.masm"),
+            ByteIndex::new(10),
+            ByteIndex::new(13),
+        );
+        let location_b = Location::new(
+            Uri::new("file://pkg/second.masm"),
+            ByteIndex::new(20),
+            ByteIndex::new(24),
+        );
+        let later_location_b = Location::new(
+            Uri::new("file://pkg/second-later.masm"),
+            ByteIndex::new(30),
+            ByteIndex::new(35),
+        );
+        let debug_info = PackageDebugInfo {
+            source_map: Some(DebugSourceMapSection {
+                asm_ops: vec![
+                    DebugSourceAsmOp::new(
+                        source_a,
+                        0,
+                        Some(location_a),
+                        "first".into(),
+                        "add".into(),
+                        1,
+                    ),
+                    DebugSourceAsmOp::new(
+                        source_b,
+                        2,
+                        Some(later_location_b),
+                        "second_later".into(),
+                        "mul".into(),
+                        1,
+                    ),
+                    DebugSourceAsmOp::new(
+                        source_b,
+                        0,
+                        Some(location_b.clone()),
+                        "second".into(),
+                        "add".into(),
+                        1,
+                    ),
+                ],
+                ..DebugSourceMapSection::new()
+            }),
+            ..PackageDebugInfo::default()
+        };
+        let host = RecordingHost {
+            expected_location: location_b,
+            returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+        };
+        let context = PackageSourceDebugContext::new(&debug_info, source_b);
+
+        assert_eq!(context.assembly_location(None), Some(&host.expected_location));
+
+        let err = OperationError::DivideByZero.with_package_source_context(context, &host, Some(0));
+
+        match err {
+            ExecutionError::OperationError { label, source_file, err } => {
+                assert_eq!(label, host.returned_span);
+                assert!(source_file.is_none());
+                assert!(matches!(err, OperationError::DivideByZero));
+            },
+            err => panic!("expected operation error, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn package_source_context_without_location_uses_unknown_span() {
+        let source_node = DebugSourceMastNodeId::from(0);
+        let debug_info = PackageDebugInfo {
+            source_map: Some(DebugSourceMapSection {
+                asm_ops: vec![DebugSourceAsmOp::new(
+                    source_node,
+                    0,
+                    None,
+                    "missing_location".into(),
+                    "add".into(),
+                    1,
+                )],
+                ..DebugSourceMapSection::new()
+            }),
+            ..PackageDebugInfo::default()
+        };
+        let host = RecordingHost {
+            expected_location: Location::new(
+                Uri::new("file://unused.masm"),
+                ByteIndex::new(0),
+                ByteIndex::new(0),
+            ),
+            returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+        };
+        let context = PackageSourceDebugContext::new(&debug_info, source_node);
+
+        let err = advice_error_with_package_source_context(
+            AdviceError::StackReadFailed,
+            context,
+            &host,
+            Some(0),
+        );
+
+        match err {
+            ExecutionError::AdviceError { label, source_file, err } => {
+                assert_eq!(label, SourceSpan::UNKNOWN);
+                assert!(source_file.is_none());
+                assert!(matches!(err, AdviceError::StackReadFailed));
+            },
+            err => panic!("expected advice error, got {err:?}"),
+        }
     }
 }
