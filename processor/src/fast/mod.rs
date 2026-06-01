@@ -235,6 +235,7 @@ impl FastProcessor {
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        self.deferred_state = DeferredState::new(options.max_deferred_elements());
         self.options = options;
         Ok(self)
     }
@@ -274,7 +275,7 @@ impl FastProcessor {
             stack_overflow_save_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
-            deferred_state: DeferredState::new(),
+            deferred_state: DeferredState::new(options.max_deferred_elements()),
         })
     }
 

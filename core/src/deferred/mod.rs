@@ -125,7 +125,7 @@ pub enum Payload {
 
 impl Payload {
     /// Creates an expression payload from one 8-felt rate block.
-    pub const fn new(felts: [Felt; 8]) -> Self {
+    pub const fn expression(felts: [Felt; 8]) -> Self {
         Self::Expression(felts)
     }
 
@@ -194,19 +194,19 @@ impl Node {
         payload: Payload::Expression([ZERO; 8]),
     };
 
-    /// Creates an expression-bodied node from an already-shaped payload.
-    pub fn expression(tag: Tag, payload: Payload) -> Self {
+    /// Creates a node from an already-shaped payload.
+    pub fn new(tag: Tag, payload: Payload) -> Self {
         Self { tag, payload }
     }
 
     /// Creates an expression-bodied leaf from raw payload data.
     pub fn leaf(tag: Tag, felts: [Felt; 8]) -> Self {
-        Self::expression(tag, Payload::new(felts))
+        Self::new(tag, Payload::expression(felts))
     }
 
     /// Creates a join-shaped node that references two child digests.
     pub fn join(tag: Tag, lhs: Digest, rhs: Digest) -> Self {
-        Self::expression(tag, Payload::join(lhs, rhs))
+        Self::new(tag, Payload::join(lhs, rhs))
     }
 
     /// Creates a structural transcript AND step from the previous root and statement digest.
@@ -237,9 +237,11 @@ impl Node {
     pub fn num_elements(&self) -> usize {
         let payload_elements = match &self.payload {
             Payload::Expression(_) => 8,
-            Payload::Chunk(chunks) => 8usize.saturating_mul(chunks.len()),
+            Payload::Chunk(chunks) => {
+                8usize.checked_mul(chunks.len()).expect("chunk element count overflow")
+            },
         };
-        4usize.saturating_add(payload_elements)
+        4usize.checked_add(payload_elements).expect("node element count overflow")
     }
 
     /// Computes the canonical digest used by both host code and in-circuit wrappers.
@@ -286,6 +288,8 @@ pub enum DeferredError {
     InvalidPayload,
     #[error("equality assertion failed")]
     AssertionFailed,
+    #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
+    DeferredStateTooLarge { num_elements: usize, max: usize },
     #[error("operation is not supported by this handler")]
     Unsupported,
 }
@@ -306,7 +310,7 @@ mod tests {
     };
 
     fn payload(seed: u64) -> Payload {
-        Payload::new([
+        Payload::expression([
             Felt::new_unchecked(seed),
             Felt::new_unchecked(seed.wrapping_add(1)),
             Felt::new_unchecked(seed.wrapping_add(2)),

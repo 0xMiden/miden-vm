@@ -67,7 +67,7 @@ pub enum ExecutionError {
         err: PrecompileError,
     },
     /// Deferred system events exceeded the configured state-size budget.
-    #[error("deferred state size {num_elements} exceeds the configured maximum {max}")]
+    #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     #[diagnostic()]
     DeferredStateTooLarge {
         #[label]

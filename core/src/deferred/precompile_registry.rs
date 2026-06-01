@@ -68,6 +68,15 @@ impl PrecompileRegistry {
         }
     }
 
+    /// Creates a deferred state booted with constants contributed by installed precompiles.
+    ///
+    /// This is explicit so callers can choose when constants affect node counts.
+    pub fn new_state(&self, max_elements: usize) -> Result<DeferredState, PrecompileError> {
+        let mut state = DeferredState::new(max_elements);
+        self.init(&mut state)?;
+        Ok(state)
+    }
+
     /// Boots a state with constants contributed by installed precompiles.
     ///
     /// This is explicit so callers can choose when constants affect node counts. A digest
@@ -83,7 +92,7 @@ impl PrecompileRegistry {
                 return Err(DeferredError::ConflictingNode.into());
             }
             for node in nodes {
-                state.intern(self, node)?;
+                state.register(self, node)?;
             }
             seen.extend(local);
         }
@@ -123,9 +132,9 @@ impl PrecompileRegistry {
         if node.tag == Tag::TRUE && !node.is_true_node() {
             return Err(PrecompileError::InvalidNode);
         }
-        if !node_type.matches_payload(&node.payload) {
-            return Err(PrecompileError::InvalidNode);
-        }
+        node_type
+            .validate_payload(&node.payload)
+            .map_err(|_| PrecompileError::InvalidNode)?;
         Ok(node_type)
     }
 
@@ -133,7 +142,7 @@ impl PrecompileRegistry {
     ///
     /// Failures are wrapped with the owning precompile's name so callers can distinguish routing
     /// from precompile-local validation.
-    pub fn reduce(
+    pub(crate) fn reduce(
         &self,
         node: &Node,
         witness: &mut WitnessBuilder<'_>,
@@ -266,9 +275,10 @@ mod tests {
         let tag = f.tag();
         let registry = PrecompileRegistry::default().with_precompile(f);
         let node = Node::leaf(tag, [ZERO; 8]);
-        let mut state = DeferredState::new();
+        let mut state = DeferredState::new(usize::MAX);
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
-        let canonical = state.evaluate_node(&registry, node.clone()).unwrap();
+        let digest = state.register(&registry, node.clone()).unwrap();
+        let canonical = state.evaluate(&registry, digest).unwrap();
         assert_eq!(canonical, node);
     }
 

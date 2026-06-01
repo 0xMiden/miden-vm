@@ -16,7 +16,8 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Chunk, DeferredState, Digest, Node, NodeType, Payload, PrecompileRegistry, TRUE_DIGEST, Tag,
+    Chunk, DeferredError, DeferredState, Digest, Node, NodeType, Payload, PrecompileError,
+    PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
     Felt, ZERO,
@@ -68,7 +69,7 @@ pub struct DeferredStateWire {
 
 impl DeferredStateWire {
     /// Serializes the transcript-reachable DAG into deterministic wire form.
-    pub fn from_state(
+    pub(crate) fn from_state(
         state: &DeferredState,
         precompiles: &PrecompileRegistry,
     ) -> Result<Self, IntegrityError> {
@@ -78,13 +79,14 @@ impl DeferredStateWire {
     }
 
     /// Rebuilds and verifies a deferred state from untrusted wire data.
-    pub fn rehydrate(
+    pub(crate) fn rehydrate(
         &self,
         precompiles: &PrecompileRegistry,
+        max_elements: usize,
     ) -> Result<DeferredState, IntegrityError> {
         let decoded = DecodedWire::decode(self, precompiles)?;
         let transcript = decoded.validate_transcript_and_closure()?;
-        decoded.replay_transcript(&transcript, precompiles)
+        decoded.replay_transcript(&transcript, precompiles, max_elements)
     }
 
     fn write_tag<W: ByteWriter>(tag: Tag, target: &mut W) {
@@ -171,6 +173,24 @@ struct TranscriptStep {
     stmt_digest: Digest,
     /// The transcript root after this statement was logged.
     expected_root: Digest,
+}
+
+fn budget_integrity_error(err: &PrecompileError) -> Option<IntegrityError> {
+    if let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =
+        err.root()
+    {
+        Some(IntegrityError::DeferredStateTooLarge { num_elements: *num_elements, max: *max })
+    } else {
+        None
+    }
+}
+
+fn map_replay_error(err: PrecompileError) -> IntegrityError {
+    budget_integrity_error(&err).unwrap_or(IntegrityError::PredicateFailed(err))
+}
+
+fn map_append_error(err: PrecompileError) -> IntegrityError {
+    budget_integrity_error(&err).unwrap_or(IntegrityError::BrokenChain)
 }
 
 impl DecodedWire {
@@ -299,8 +319,11 @@ impl DecodedWire {
             }
             consumed.insert(cur);
 
-            let (prev_root, stmt_digest) =
-                entry.node.payload.join_children().map_err(|_| IntegrityError::BadAndPayload)?;
+            let (prev_root, stmt_digest) = entry
+                .node_type
+                .children(&entry.node.payload)
+                .map_err(|_| IntegrityError::BadAndPayload)?
+                .ok_or(IntegrityError::BadAndPayload)?;
             if !self.contains_digest(&stmt_digest) {
                 return Err(IntegrityError::MissingStatement);
             }
@@ -342,12 +365,11 @@ impl DecodedWire {
             let entry = self.entry(&digest).ok_or(IntegrityError::MissingChild)?;
             consumed.insert(digest);
 
-            if entry.node_type == NodeType::Join {
-                let (lhs, rhs) = entry
-                    .node
-                    .payload
-                    .join_children()
-                    .map_err(|_| IntegrityError::ShapeMismatch)?;
+            if let Some((lhs, rhs)) = entry
+                .node_type
+                .children(&entry.node.payload)
+                .map_err(|_| IntegrityError::ShapeMismatch)?
+            {
                 Self::push_materialized(&mut stack, lhs);
                 Self::push_materialized(&mut stack, rhs);
             }
@@ -360,8 +382,9 @@ impl DecodedWire {
         &self,
         transcript: &DecodedTranscript,
         precompiles: &PrecompileRegistry,
+        max_elements: usize,
     ) -> Result<DeferredState, IntegrityError> {
-        let mut state = DeferredState::new();
+        let mut state = DeferredState::new(max_elements);
 
         // Register all reachable entries in original wire order. Since the wire stream is
         // topological, join children are already materialized when a parent is registered.
@@ -370,17 +393,10 @@ impl DecodedWire {
                 continue;
             }
 
-            match state.nodes().get(&entry.digest) {
-                Some(existing) if existing == &entry.node => {},
-                Some(_) => return Err(IntegrityError::DuplicateNode),
-                None => {
-                    let registered = state
-                        .register(precompiles, entry.node.clone())
-                        .map_err(IntegrityError::PredicateFailed)?;
-                    if registered != entry.digest {
-                        return Err(IntegrityError::DuplicateNode);
-                    }
-                },
+            let registered =
+                state.register(precompiles, entry.node.clone()).map_err(map_replay_error)?;
+            if registered != entry.digest {
+                return Err(IntegrityError::DuplicateNode);
             }
         }
 
@@ -391,20 +407,23 @@ impl DecodedWire {
                 return Err(IntegrityError::BrokenChain);
             }
 
-            let canonical = state
-                .evaluate_statement_digest(precompiles, step.stmt_digest)
-                .map_err(IntegrityError::PredicateFailed)?;
+            let expected_root = Node::and(state.root(), step.stmt_digest).digest();
+            if expected_root != step.expected_root {
+                return Err(IntegrityError::BrokenChain);
+            }
+
+            let canonical =
+                state.evaluate(precompiles, step.stmt_digest).map_err(map_replay_error)?;
             if !canonical.is_true_node() {
                 return Err(IntegrityError::PredicateNotTrue);
             }
 
-            state
-                .append_statement_with_expected_root(
-                    precompiles,
-                    step.stmt_digest,
-                    step.expected_root,
-                )
-                .map_err(|_| IntegrityError::BrokenChain)?;
+            let appended = state
+                .append_statement(precompiles, step.stmt_digest)
+                .map_err(map_append_error)?;
+            if appended != step.expected_root {
+                return Err(IntegrityError::BrokenChain);
+            }
         }
 
         if state.root() != self.root {
@@ -446,11 +465,11 @@ impl WireBuild {
             return Ok(());
         }
 
-        let node = state.nodes().get(&digest).ok_or(IntegrityError::MissingChild)?;
+        let node = state.node(&digest).ok_or(IntegrityError::MissingChild)?;
         let node_type = decode_wire_node_type(precompiles, node)?;
-        if !node_type.matches_payload(&node.payload) {
-            return Err(IntegrityError::ShapeMismatch);
-        }
+        node_type
+            .validate_payload(&node.payload)
+            .map_err(|_| IntegrityError::ShapeMismatch)?;
 
         let entry = match (node_type, &node.payload) {
             (NodeType::Value, Payload::Expression(felts)) => {
@@ -461,8 +480,10 @@ impl WireBuild {
                 blocks: chunks.iter().copied().collect(),
             },
             (NodeType::Join, Payload::Expression(_)) => {
-                let (lhs, rhs) =
-                    node.payload.join_children().map_err(|_| IntegrityError::ShapeMismatch)?;
+                let (lhs, rhs) = node_type
+                    .children(&node.payload)
+                    .map_err(|_| IntegrityError::ShapeMismatch)?
+                    .ok_or(IntegrityError::ShapeMismatch)?;
                 self.visit_state_digest(state, lhs, precompiles)?;
                 self.visit_state_digest(state, rhs, precompiles)?;
                 let lhs = self.index_for(lhs)?;
@@ -640,6 +661,9 @@ pub enum IntegrityError {
     /// The wire reconstructs data outside the transcript root's reachable closure.
     #[error("wire reconstructs a node not reachable from the transcript root")]
     DanglingNode,
+    /// Replaying the wire transcript would exceed the configured deferred-state budget.
+    #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
+    DeferredStateTooLarge { num_elements: usize, max: usize },
 }
 
 #[cfg(test)]

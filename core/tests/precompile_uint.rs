@@ -14,7 +14,7 @@ use miden_core::{
 #[test]
 fn end_to_end_register_evaluate_assert_extract() {
     let registry = PrecompileRegistry::default().with_precompile(Uint);
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
 
     let a = state.register(&registry, leaf(3)).unwrap();
     let b = state.register(&registry, leaf(4)).unwrap();
@@ -23,19 +23,17 @@ fn end_to_end_register_evaluate_assert_extract() {
     let add = state.register(&registry, Node::join(Uint::add_tag(), a, b)).unwrap();
     let mul = state.register(&registry, Node::join(Uint::mul_tag(), add, c)).unwrap();
 
-    let canonical = state.evaluate_digest(&registry, mul).unwrap();
+    let canonical = state.evaluate(&registry, mul).unwrap();
     assert_eq!(canonical, leaf(35));
 
     // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
     let assertion = Node::join(Uint::eq_tag(), mul, expected);
-    state.register(&registry, assertion.clone()).unwrap();
-    let result = state.evaluate_node(&registry, assertion).unwrap();
+    let assertion_digest = state.register(&registry, assertion).unwrap();
+    let result = state.evaluate(&registry, assertion_digest).unwrap();
     assert!(result.is_true_node());
 
-    // 6 registered expression nodes + 1 registered eq predicate, plus canonicals interned by
-    // evaluate: canonical(add)=leaf(7) and canonical(assertion)=TRUE.
-    assert_eq!(state.nodes().len(), 9);
-    assert!(state.contains(&leaf(7).digest()));
+    // Evaluating the tree interns canonical(add)=leaf(7) into the durable node store.
+    assert_eq!(state.evaluate(&registry, leaf(7).digest()).unwrap(), leaf(7));
 
     // Log the proven equality and round-trip the whole transcript.
     common::log_and_verify(&registry, &mut state, Node::join(Uint::eq_tag(), mul, expected));
@@ -44,19 +42,18 @@ fn end_to_end_register_evaluate_assert_extract() {
 #[test]
 fn empty_registry_rejects_all_uint_nodes() {
     let registry = PrecompileRegistry::default();
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
     let err = state.register(&registry, leaf(0));
     assert!(matches!(err, Err(PrecompileError::InvalidNode)));
 }
 
 #[test]
-fn init_pre_registers_uint_constants() {
+fn new_state_pre_registers_uint_constants() {
     let registry = PrecompileRegistry::default().with_precompile(Uint);
-    let mut state = DeferredState::new();
-    registry.init(&mut state).unwrap();
+    let mut state = registry.new_state(usize::MAX).unwrap();
     // TRUE plus three uint constants: ZERO, ONE, P_MINUS_1.
-    assert_eq!(state.nodes().len(), 4);
-    assert!(state.contains(&leaf(0).digest()));
-    assert!(state.contains(&leaf(1).digest()));
-    assert!(state.contains(&Uint::leaf_node([u32::MAX; 8]).digest()));
+    assert_eq!(state.evaluate(&registry, leaf(0).digest()).unwrap(), leaf(0));
+    assert_eq!(state.evaluate(&registry, leaf(1).digest()).unwrap(), leaf(1));
+    let p_minus_1 = Uint::leaf_node([u32::MAX; 8]);
+    assert_eq!(state.evaluate(&registry, p_minus_1.digest()).unwrap(), p_minus_1);
 }

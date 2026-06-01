@@ -2,6 +2,7 @@
 
 mod common;
 
+use common::register_and_evaluate;
 use miden_core::{
     Felt, ZERO,
     deferred::{DeferredState, NodeType, Precompile, PrecompileError, PrecompileRegistry},
@@ -15,13 +16,16 @@ fn chunks(n: u32) -> Vec<[Felt; 8]> {
 }
 
 fn fresh() -> (PrecompileRegistry, DeferredState) {
-    (PrecompileRegistry::default().with_precompile(Hash), DeferredState::new())
+    (
+        PrecompileRegistry::default().with_precompile(Hash),
+        DeferredState::new(usize::MAX),
+    )
 }
 
 #[test]
 fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let registry = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash);
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
     registry.init(&mut state).unwrap();
 
     // Build a 64-byte preimage (two 32-byte chunks) and the digest the mock hash should yield.
@@ -33,11 +37,12 @@ fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
     let h_preimage = state.register(&registry, Hash::preimage_node(64, preimage_chunks)).unwrap();
 
     // Evaluating the preimage produces the digest leaf.
-    let canonical = state.evaluate_digest(&registry, h_preimage).unwrap();
+    let canonical = state.evaluate(&registry, h_preimage).unwrap();
     assert_eq!(canonical, expected_digest);
 
     // eq predicate ties the preimage's hash to the pre-registered expected digest.
-    let result = state.evaluate_node(&registry, Hash::eq_node(h_preimage, h_expected)).unwrap();
+    let result =
+        register_and_evaluate(&registry, &mut state, Hash::eq_node(h_preimage, h_expected));
     assert!(result.is_true_node());
 
     // Log the proven equality and round-trip the transcript (chunk-bodied preimage included).
@@ -53,9 +58,8 @@ fn preimage_with_partial_last_chunk_is_handled_by_caller_padding() {
         [Felt::from_u32(0xab), Felt::from_u32(0xcd), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
     let preimage_chunks = vec![[Felt::from_u32(1); 8], last_chunk];
     let expected = Hash::digest_node(Hash::hash(&preimage_chunks));
-    let canonical = state
-        .evaluate_node(&registry, Hash::preimage_node(40, preimage_chunks))
-        .unwrap();
+    let canonical =
+        register_and_evaluate(&registry, &mut state, Hash::preimage_node(40, preimage_chunks));
     assert_eq!(canonical, expected);
 }
 
@@ -96,6 +100,7 @@ fn eq_predicate_errors_on_mismatch() {
     let wrong = Hash::digest_node([Felt::from_u32(0xdead); 8]);
     let h_wrong = state.register(&registry, wrong).unwrap();
     let h_preimage = state.register(&registry, Hash::preimage_node(32, data)).unwrap();
-    let err = state.evaluate_node(&registry, Hash::eq_node(h_preimage, h_wrong));
+    let eq_digest = state.register(&registry, Hash::eq_node(h_preimage, h_wrong)).unwrap();
+    let err = state.evaluate(&registry, eq_digest);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
