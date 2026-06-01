@@ -1,11 +1,16 @@
 use miden_mast_package::Dependency;
+use miden_mast_package::debug_info::{
+    DebugSourceGraphSection, DebugSourceMastNode, DebugSourceMastNodeId,
+};
 
 use super::*;
+use crate::mast_forest_builder::SourceDebugGraph;
 
 pub struct AssemblyProduct {
     package: Box<Package>,
     kernel_package: Option<Arc<Package>>,
     debug_info: Option<DebugInfoSections>,
+    source_graph: Option<SourceDebugGraph>,
 }
 
 impl AssemblyProduct {
@@ -13,6 +18,7 @@ impl AssemblyProduct {
         package: Box<Package>,
         kernel: Option<Arc<Package>>,
         debug_info: Option<DebugInfoSections>,
+        source_graph: Option<SourceDebugGraph>,
     ) -> Self {
         assert!(
             kernel.is_none() || !package.is_kernel(),
@@ -22,6 +28,7 @@ impl AssemblyProduct {
             package,
             kernel_package: kernel,
             debug_info,
+            source_graph,
         }
     }
 
@@ -38,7 +45,12 @@ impl AssemblyProduct {
     }
 
     pub fn into_artifact(self) -> Result<Box<Package>, Report> {
-        let Self { mut package, kernel_package, debug_info } = self;
+        let Self {
+            mut package,
+            kernel_package,
+            debug_info,
+            source_graph,
+        } = self;
         // Section: embedded kernel package
         if package.is_program()
             && let Some(kernel_package) = kernel_package
@@ -88,10 +100,42 @@ impl AssemblyProduct {
                 .sections
                 .push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
         }
+        if let Some(source_graph) = source_graph {
+            package.sections.push(Section::new(
+                SectionId::DEBUG_SOURCE_GRAPH,
+                source_graph_section(&source_graph).to_bytes(),
+            ));
+        }
         Ok(package)
     }
 }
 
 fn linked_kernel_package_section(package: &Package) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
+}
+
+fn source_graph_section(source_graph: &SourceDebugGraph) -> DebugSourceGraphSection {
+    DebugSourceGraphSection {
+        version: miden_mast_package::debug_info::DEBUG_SOURCE_GRAPH_VERSION,
+        nodes: source_graph
+            .nodes()
+            .as_slice()
+            .iter()
+            .map(|source_node| {
+                DebugSourceMastNode::new(
+                    source_node.exec_node(),
+                    source_node
+                        .children()
+                        .iter()
+                        .map(|child| DebugSourceMastNodeId::from(u32::from(*child)))
+                        .collect(),
+                )
+            })
+            .collect(),
+        roots: source_graph
+            .roots()
+            .iter()
+            .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
+            .collect(),
+    }
 }

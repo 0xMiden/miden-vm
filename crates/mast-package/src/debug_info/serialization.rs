@@ -1,17 +1,19 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
+    mast::MastNodeId,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{ColumnNumber, LineNumber};
 
 use super::{
-    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo,
-    DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugInlinedCallInfo,
-    DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCES_VERSION,
+    DEBUG_TYPES_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection,
+    DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceGraphSection, DebugSourceMastNode,
+    DebugSourceMastNodeId, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
     DebugVariableInfo, DebugVariantInfo,
 };
 
@@ -168,6 +170,52 @@ impl Deserializable for DebugFunctionsSection {
         let functions = source.read_many_iter(functions_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, functions })
+    }
+}
+
+// DEBUG SOURCE GRAPH SECTION SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugSourceMastNode {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.exec_node.into());
+        self.children.write_into(target);
+    }
+}
+
+impl Deserializable for DebugSourceMastNode {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            exec_node: MastNodeId::new_unchecked(source.read_u32()?),
+            children: Vec::<DebugSourceMastNodeId>::read_from(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        4 + Vec::<DebugSourceMastNodeId>::min_serialized_size()
+    }
+}
+
+impl Serializable for DebugSourceGraphSection {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.version);
+        self.nodes.write_into(target);
+        self.roots.write_into(target);
+    }
+}
+
+impl Deserializable for DebugSourceGraphSection {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = source.read_u8()?;
+        if version != DEBUG_SOURCE_GRAPH_VERSION {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "unsupported debug_source_graph version: {version}, expected {DEBUG_SOURCE_GRAPH_VERSION}"
+            )));
+        }
+
+        let nodes = Vec::<DebugSourceMastNode>::read_from(source)?;
+        let roots = Vec::<DebugSourceMastNodeId>::read_from(source)?;
+        Ok(Self { version, nodes, roots })
     }
 }
 
@@ -743,10 +791,28 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_source_graph_section_roundtrip() {
+        let section = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: alloc::vec![
+                DebugSourceMastNode::new(MastNodeId::new_unchecked(0), alloc::vec![]),
+                DebugSourceMastNode::new(
+                    MastNodeId::new_unchecked(1),
+                    alloc::vec![DebugSourceMastNodeId::from(0)]
+                ),
+            ],
+            roots: alloc::vec![DebugSourceMastNodeId::from(1)],
+        };
+
+        roundtrip(&section);
+    }
+
+    #[test]
     fn test_empty_sections_roundtrip() {
         roundtrip(&DebugTypesSection::new());
         roundtrip(&DebugSourcesSection::new());
         roundtrip(&DebugFunctionsSection::new());
+        roundtrip(&DebugSourceGraphSection::new());
     }
 
     #[test]

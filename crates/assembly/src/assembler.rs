@@ -35,7 +35,7 @@ use crate::{
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceDebugGraph},
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -592,7 +592,8 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, _) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
@@ -600,7 +601,7 @@ impl Assembler {
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-        self.finish_library_product(name, mast_forest, exports, kind)
+        self.finish_library_product(name, mast_forest, source_graph, exports, kind)
     }
 
     /// The purpose of this function is, for any given symbol in the set of modules being compiled
@@ -840,18 +841,26 @@ impl Assembler {
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, _) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
 
-        self.finish_program_product(name, mast_forest, entry_node_id, self.linker.kernel_package())
+        self.finish_program_product(
+            name,
+            mast_forest,
+            source_graph,
+            entry_node_id,
+            self.linker.kernel_package(),
+        )
     }
 
     fn finish_library_product(
         &self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
@@ -879,13 +888,16 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, None, debug_info))
+        let source_graph = self.emit_debug_info.then_some(source_graph);
+
+        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
     }
 
     fn finish_program_product(
         &self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
@@ -920,7 +932,9 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, kernel, debug_info))
+        let source_graph = self.emit_debug_info.then_some(source_graph);
+
+        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
     }
 
     fn apply_debug_options(
