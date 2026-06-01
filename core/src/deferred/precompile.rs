@@ -84,17 +84,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn id_is_deterministic() {
+    fn id_derivation_is_stable_unique_and_domain_separated() {
         assert_eq!(derive("foo"), derive("foo"));
-    }
-
-    #[test]
-    fn id_changes_with_name() {
         assert_ne!(derive("foo"), derive("bar"));
-    }
 
-    #[test]
-    fn differs_from_event_id_derivation() {
         // Precompile ids and event ids share the hash_string_to_word helper but live in separate
         // namespaces: the precompile path domain-separates (domsep + length prefix), so the same
         // name must derive a different felt on each path.

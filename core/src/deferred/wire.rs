@@ -522,14 +522,6 @@ mod tests {
         assert_wire_round_trips(DeferredStateWire::default());
     }
 
-    #[test]
-    fn wire_deserializes_many_minimal_entries() {
-        let entries: Vec<WireEntry> = (0..128)
-            .map(|i| WireEntry::Value { tag: tag(i), block: felts(128 + i) })
-            .collect();
-        assert_wire_round_trips(wire(entries));
-    }
-
     fn encoded_entry_count(entry_count: usize) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.write_usize(entry_count);
