@@ -216,12 +216,13 @@ mod tests {
     }
 
     #[test]
-    fn dispatches_by_id() {
+    fn dispatches_by_id_across_inserted_and_merged_registries() {
         let a = Fixture::new("fixture-a");
         let b = Fixture::new("fixture-b");
         let tag_a = a.tag();
         let tag_b = b.tag();
-        let registry = PrecompileRegistry::default().with_precompile(a).with_precompile(b);
+        let mut registry = PrecompileRegistry::default().with_precompile(a);
+        registry.merge(PrecompileRegistry::default().with_precompile(b));
 
         assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Value);
         assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Value);
@@ -280,18 +281,5 @@ mod tests {
         let digest = state.register(&registry, node.clone()).unwrap();
         let canonical = state.evaluate(&registry, digest).unwrap();
         assert_eq!(canonical, node);
-    }
-
-    #[test]
-    fn merges_registry() {
-        let a = Fixture::new("merge-a");
-        let b = Fixture::new("merge-b");
-        let tag_a = a.tag();
-        let tag_b = b.tag();
-        let mut registry = PrecompileRegistry::default().with_precompile(a);
-        registry.merge(PrecompileRegistry::default().with_precompile(b));
-
-        assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Value);
-        assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Value);
     }
 }

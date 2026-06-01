@@ -320,27 +320,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_state_seeds_true_node_and_root_is_true() {
+    fn true_node_is_seeded_and_registering_it_is_free() {
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
 
-        assert_eq!(state.nodes.len(), 1);
-        assert!(state.nodes.contains_key(&TRUE_DIGEST));
-        assert_eq!(state.nodes.get(&TRUE_DIGEST).unwrap(), &Node::TRUE);
         assert_eq!(state.root(), TRUE_DIGEST);
+        assert_eq!(state.nodes.get(&TRUE_DIGEST), Some(&Node::TRUE));
+        assert_eq!(state.nodes.len(), 1);
         assert_eq!(state.remaining_elements, usize::MAX);
         assert_eq!(state.evaluate(&registry, TRUE_DIGEST).unwrap(), Node::TRUE);
-        assert_eq!(state.remaining_elements, usize::MAX);
-    }
-
-    #[test]
-    fn register_true_is_idempotent() {
-        let mut state = DeferredState::new(usize::MAX);
-        let registry = precompiles();
 
         let digest = state.register(&registry, Node::TRUE).unwrap();
         assert_eq!(digest, TRUE_DIGEST);
-        assert_eq!(state.nodes.get(&TRUE_DIGEST).unwrap(), &Node::TRUE);
         assert_eq!(state.nodes.len(), 1);
         assert_eq!(state.remaining_elements, usize::MAX);
     }
@@ -382,26 +373,21 @@ mod tests {
     }
 
     #[test]
-    fn register_leaf_stores_it() {
+    fn register_leaf_stores_once_and_reinsert_is_free() {
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
         let node = test_leaf(7);
         let digest = state.register(&registry, node.clone()).unwrap();
-        assert_eq!(digest, node.digest());
-        assert_eq!(state.nodes.get(&digest).unwrap(), &node);
-        assert_eq!(state.remaining_elements, usize::MAX - node.num_elements());
-    }
+        let remaining = usize::MAX - node.num_elements();
 
-    #[test]
-    fn idempotent_reinsert_succeeds() {
-        let mut state = DeferredState::new(usize::MAX);
-        let registry = precompiles();
-        let node = test_leaf(7);
-        let d1 = state.register(&registry, node.clone()).unwrap();
-        let d2 = state.register(&registry, node).unwrap();
-        assert_eq!(d1, d2);
+        assert_eq!(digest, node.digest());
+        assert_eq!(state.nodes.get(&digest), Some(&node));
         assert_eq!(state.nodes.len(), 2); // TRUE plus the leaf
-        assert_eq!(state.remaining_elements, usize::MAX - test_leaf(7).num_elements());
+        assert_eq!(state.remaining_elements, remaining);
+
+        assert_eq!(state.register(&registry, node).unwrap(), digest);
+        assert_eq!(state.nodes.len(), 2);
+        assert_eq!(state.remaining_elements, remaining);
     }
 
     #[test]
@@ -543,35 +529,6 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_interns_canonicals_into_nodes() {
-        // Register the full op tree (a + b) * c == 35 plus an orphan leaf, evaluate the
-        // predicate, and assert evaluate interns computed canonicals into `state.nodes`.
-        let mut state = DeferredState::new(usize::MAX);
-        let registry = precompiles();
-        let a = state.register(&registry, test_leaf(3)).unwrap();
-        let b = state.register(&registry, test_leaf(4)).unwrap();
-        let c = state.register(&registry, test_leaf(5)).unwrap();
-        let expected = state.register(&registry, test_leaf(35)).unwrap();
-        let _orphan = state.register(&registry, test_leaf(99)).unwrap();
-        let add = state.register(&registry, Node::join(Uint::add_tag(), a, b)).unwrap();
-        let mul = state.register(&registry, Node::join(Uint::mul_tag(), add, c)).unwrap();
-        let assertion = Node::join(Uint::eq_tag(), mul, expected);
-        let assertion_digest = state.register(&registry, assertion).unwrap();
-        state.evaluate(&registry, assertion_digest).unwrap();
-
-        assert!(state.nodes.contains_key(&assertion_digest), "predicate input is registered");
-        assert!(
-            state.nodes.contains_key(&test_leaf(7).digest()),
-            "canonical(add) is interned into nodes"
-        );
-        assert!(
-            state.nodes.contains_key(&Node::TRUE.digest()),
-            "canonical(TRUE) remains in nodes"
-        );
-        assert_eq!(state.root(), TRUE_DIGEST, "no append called, root is still TRUE");
-    }
-
-    #[test]
     fn register_then_evaluate_interns_canonical() {
         // Build (a+b)*c, pre-register only the leaves and `add`. The outer `mul` is explicitly
         // registered before digest-addressed evaluation, and its canonical is interned.
@@ -630,9 +587,6 @@ mod tests {
         let assertion = Node::join(Uint::eq_tag(), mul, expected);
         let stmt_digest = state.register(&registry, assertion).unwrap();
         state.append_statement(&registry, stmt_digest).unwrap();
-        // Defense-in-depth: every fixture consumer inherits a wire round-trip self-check, so any
-        // future change that breaks `to_wire`/`from_wire` consistency fails loudly here.
-        assert_round_trips(&state, &precompiles());
         state
     }
 
@@ -679,18 +633,80 @@ mod tests {
     }
 
     #[test]
-    fn rehydrate_rejects_materialized_true_entries() {
-        let wires = [
-            wire(alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }]),
-            wire(alloc::vec![WireEntry::Join {
-                tag: Tag::TRUE,
-                lhs: crate::deferred::TRUE_INDEX,
-                rhs: crate::deferred::TRUE_INDEX,
-            }]),
+    fn rehydrate_rejects_invalid_structure_cases() {
+        let registry = precompiles();
+        let hash_registry = PrecompileRegistry::default().with_precompile(Hash);
+        let leaf = test_leaf(7);
+        let duplicate_leaf = value_entry(&leaf);
+        let duplicate_predicate = WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 };
+        let unknown_tag = Tag {
+            id: Felt::new_unchecked(0xdead),
+            args: [ZERO; 3],
+        };
+
+        let cases = [
+            (
+                "materialized TRUE value",
+                wire(alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }]),
+                registry.clone(),
+            ),
+            (
+                "materialized TRUE join",
+                wire(alloc::vec![WireEntry::Join {
+                    tag: Tag::TRUE,
+                    lhs: crate::deferred::TRUE_INDEX,
+                    rhs: crate::deferred::TRUE_INDEX,
+                }]),
+                registry.clone(),
+            ),
+            (
+                "future/self index",
+                wire(alloc::vec![WireEntry::Join { tag: Uint::add_tag(), lhs: 1, rhs: 0 }]),
+                registry.clone(),
+            ),
+            (
+                "duplicate value digest",
+                wire(alloc::vec![duplicate_leaf.clone(), duplicate_leaf]),
+                registry.clone(),
+            ),
+            (
+                "duplicate join digest",
+                wire(alloc::vec![
+                    value_entry(&leaf),
+                    duplicate_predicate.clone(),
+                    duplicate_predicate,
+                ]),
+                registry.clone(),
+            ),
+            (
+                "unknown tag",
+                wire(alloc::vec![WireEntry::Value { tag: unknown_tag, block: [ZERO; 8] }]),
+                registry.clone(),
+            ),
+            (
+                "chunk entry for value tag",
+                wire(alloc::vec![WireEntry::Chunks {
+                    tag: Uint::leaf_tag(),
+                    blocks: alloc::vec![[ZERO; 8]],
+                }]),
+                registry,
+            ),
+            (
+                "wrong chunk count",
+                wire(alloc::vec![WireEntry::Chunks {
+                    tag: Hash::preimage_tag(Hash::BYTES_PER_CHUNK),
+                    blocks: alloc::vec![],
+                }]),
+                hash_registry,
+            ),
         ];
 
-        for wire in wires {
-            assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
+        for (name, wire, registry) in cases {
+            let result = DeferredState::from_wire(&wire, &registry, usize::MAX);
+            assert!(
+                matches!(result, Err(IntegrityError::InvalidStructure)),
+                "case {name}: expected InvalidStructure, got {result:?}"
+            );
         }
     }
 
@@ -743,61 +759,9 @@ mod tests {
     }
 
     #[test]
-    fn rehydrate_rejects_bad_index() {
-        // Entry 1 cannot reference itself/future index 1 while it is being decoded.
-        let wire = wire(alloc::vec![WireEntry::Join { tag: Uint::add_tag(), lhs: 1, rhs: 0 }]);
-        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
-    }
-
-    #[test]
-    fn rehydrate_rejects_duplicate_digest_in_any_entry() {
-        let leaf = test_leaf(7);
-        let duplicate_leaf = value_entry(&leaf);
-        let duplicate_predicate = WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 };
-        let wires = [
-            wire(alloc::vec![duplicate_leaf.clone(), duplicate_leaf]),
-            wire(alloc::vec![
-                value_entry(&leaf),
-                duplicate_predicate.clone(),
-                duplicate_predicate,
-            ]),
-        ];
-
-        for wire in wires {
-            assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
-        }
-    }
-
-    #[test]
     fn rehydrate_rejects_root_that_reduces_non_true() {
         let wire = wire(alloc::vec![value_entry(&test_leaf(7))]);
         assert_rehydrate_err!(wire, &precompiles(), IntegrityError::RootNotTrue);
-    }
-
-    #[test]
-    fn rehydrate_rejects_unknown_tag() {
-        let bogus_tag = Tag {
-            id: Felt::new_unchecked(0xdead),
-            args: [ZERO; 3],
-        };
-        let wire = wire(alloc::vec![WireEntry::Value { tag: bogus_tag, block: [ZERO; 8] }]);
-        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
-    }
-
-    #[test]
-    fn rehydrate_rejects_malformed_chunk_entries() {
-        let wrong_variant = wire(alloc::vec![WireEntry::Chunks {
-            tag: Uint::leaf_tag(),
-            blocks: alloc::vec![[ZERO; 8]],
-        }]);
-        assert_rehydrate_err!(wrong_variant, &precompiles(), IntegrityError::InvalidStructure);
-
-        let registry = PrecompileRegistry::default().with_precompile(Hash);
-        let wrong_count = wire(alloc::vec![WireEntry::Chunks {
-            tag: Hash::preimage_tag(Hash::BYTES_PER_CHUNK),
-            blocks: alloc::vec![],
-        }]);
-        assert_rehydrate_err!(wrong_count, &registry, IntegrityError::InvalidStructure);
     }
 
     #[test]

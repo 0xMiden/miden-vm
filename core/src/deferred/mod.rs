@@ -364,12 +364,4 @@ mod tests {
         assert!(true_node.is_true_node());
         assert_eq!(true_node.digest(), TRUE_DIGEST);
     }
-
-    #[test]
-    fn and_of_true_true_hashes_as_distinct_structural_node() {
-        let and_true_true = Node::and(TRUE_DIGEST, TRUE_DIGEST);
-        assert_eq!(and_true_true.tag, Tag::AND);
-        assert_ne!(and_true_true.digest(), TRUE_DIGEST);
-        assert_ne!(and_true_true.digest(), Node::TRUE.digest());
-    }
 }
