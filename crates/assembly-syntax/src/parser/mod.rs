@@ -1,31 +1,8 @@
-/// Simple macro used in the grammar definition for constructing spans
-macro_rules! span {
-    ($id:expr, $l:expr, $r:expr) => {
-        ::miden_debug_types::SourceSpan::new($id, $l..$r)
-    };
-    ($id:expr, $i:expr) => {
-        ::miden_debug_types::SourceSpan::at($id, $i)
-    };
-}
-
-lalrpop_util::lalrpop_mod!(
-    #[expect(clippy::all)]
-    #[expect(clippy::redundant_closure_for_method_calls)]
-    #[expect(clippy::trivially_copy_pass_by_ref)]
-    #[expect(clippy::unnecessary_wraps)]
-    #[expect(unused_lifetimes)]
-    #[expect(unused_qualifications)]
-    grammar,
-    "/parser/grammar.rs"
-);
-
 mod cst;
 mod error;
-mod lexer;
-mod scanner;
 #[cfg(test)]
 mod tests;
-mod token;
+mod value;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
@@ -35,28 +12,9 @@ use miden_utils_diagnostics::Report;
 pub use self::{
     cst::parse_inline_masm,
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
-    lexer::Lexer,
-    scanner::Scanner,
-    token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
+    value::{IntValue, PushValue, WordValue},
 };
 use crate::{Path, ast, sema};
-
-// TYPE ALIASES
-// ================================================================================================
-
-type ParseError<'a> = lalrpop_util::ParseError<u32, Token<'a>, ParsingError>;
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-/// Selects which raw parser implementation to use when parsing forms in tests or differential
-/// validation.
-pub enum ParserBackend {
-    /// Uses the original LALRPOP-based parser.
-    Legacy,
-    /// Uses the lossless CST parser followed by CST-to-AST lowering.
-    #[default]
-    Cst,
-}
 
 // MODULE PARSER
 // ================================================================================================
@@ -176,19 +134,6 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, Report> {
     parse_forms_internal(source, &mut interned)
 }
 
-/// Parses raw forms with an explicitly selected backend.
-///
-/// This is intended for tests and differential validation. Ordinary callers should use
-/// [`parse_forms`] or [`ModuleParser`] and accept the default backend.
-#[cfg(any(test, feature = "testing"))]
-pub fn parse_forms_with_backend(
-    source: Arc<SourceFile>,
-    backend: ParserBackend,
-) -> Result<Vec<ast::Form>, Report> {
-    let mut interned = BTreeSet::default();
-    parse_forms_internal_with_backend(source, &mut interned, backend)
-}
-
 /// Parse `source` as a set of [ast::Form]s
 ///
 /// Aside from catching syntax errors, this does little validation of the resulting forms, that is
@@ -197,35 +142,7 @@ fn parse_forms_internal(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
 ) -> Result<Vec<ast::Form>, Report> {
-    parse_forms_internal_with_backend(source, interned, ParserBackend::default())
-}
-
-fn parse_forms_internal_with_backend(
-    source: Arc<SourceFile>,
-    interned: &mut BTreeSet<Arc<str>>,
-    backend: ParserBackend,
-) -> Result<Vec<ast::Form>, Report> {
-    match backend {
-        ParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
-        ParserBackend::Cst => cst::parse_forms(source, interned),
-    }
-}
-
-fn parse_forms_with_lalrpop(
-    source: Arc<SourceFile>,
-    interned: &mut BTreeSet<Arc<str>>,
-) -> Result<Vec<ast::Form>, Report> {
-    let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
-    let source_id = source.id();
-    let scanner = Scanner::new(source.as_str());
-    let lexer = Lexer::new(source_id, scanner);
-    let source_code = source.clone();
-    grammar::FormsParser::new()
-        .parse(source_id, interned, &felt_type, core::marker::PhantomData, lexer)
-        .map_err(move |err| {
-            Report::from(ParsingError::from_parse_error(source_id, err))
-                .with_source_code(source_code)
-        })
+    cst::parse_forms(source, interned)
 }
 
 // DIRECTORY PARSER

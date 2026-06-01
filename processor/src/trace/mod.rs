@@ -4,10 +4,7 @@ use core::ops::Range;
 
 use miden_air::{
     AirWitness, MidenAir, PublicInputs, debug,
-    trace::{
-        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
-        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    },
+    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
@@ -16,11 +13,11 @@ use crate::{
     fast::ExecutionOutput,
     field::QuadFelt,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    utils::{Matrix, RowMajorMatrix},
+    utils::RowMajorMatrix,
 };
 
 pub(crate) mod utils;
-use utils::TraceFragment;
+use utils::ChipletTraceFragment;
 
 pub mod chiplets;
 pub(crate) mod execution_tracer;
@@ -289,7 +286,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
+            *result = self.main_trace.helper_register(i, row);
         }
         result
     }
@@ -348,13 +345,6 @@ impl ExecutionTrace {
         );
     }
 
-    /// Returns the main trace as a row-major matrix for proving.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let row_major = self.main_trace.to_row_major();
-        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
-        row_major
-    }
-
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
     /// multi-AIR `prove_multi` path. Strips the Poseidon2 rate-alignment padding columns
     /// before returning.
@@ -371,20 +361,9 @@ impl ExecutionTrace {
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the index of the last row in the trace.
+    /// Returns the index of the last row in the Core trace.
     fn last_step(&self) -> usize {
-        self.length() - 1
-    }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-    #[cfg(feature = "std")]
-    pub fn print(&self) {
-        let mut row = [ZERO; TRACE_WIDTH];
-        for i in 0..self.length() {
-            self.main_trace.read_row_into(i, &mut row);
-            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
-        }
+        self.main_trace.core_height() - 1
     }
 
     #[cfg(any(test, feature = "testing"))]

@@ -1,16 +1,11 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
 use core::{fmt, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
-
-use super::ParseError;
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -177,24 +172,6 @@ pub enum ParsingError {
     },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("constant expression nesting depth exceeded")]
-    #[diagnostic(help("constant expression folding exceeded the maximum depth of {max_depth}"))]
-    ConstExprDepthExceeded {
-        #[label]
-        span: SourceSpan,
-        max_depth: usize,
-    },
-    #[error("invalid constant expression: value is larger than expected range")]
-    ConstantOverflow {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("unexpected string in an arithmetic expression")]
-    #[diagnostic()]
-    StringInArithmeticExpression {
         #[label]
         span: SourceSpan,
     },
@@ -427,92 +404,4 @@ impl ParsingError {
             },
         }
     }
-
-    pub fn from_parse_error(source_id: SourceId, err: ParseError<'_>) -> Self {
-        use super::Token;
-
-        match err {
-            ParseError::InvalidToken { location: at } => {
-                Self::InvalidToken { span: SourceSpan::at(source_id, at) }
-            },
-            ParseError::UnrecognizedToken { token: (l, Token::Eof, r), expected } => {
-                Self::UnrecognizedEof {
-                    span: SourceSpan::new(source_id, l..r),
-                    expected: simplify_expected_tokens(expected),
-                }
-            },
-            ParseError::UnrecognizedToken { token: (l, tok, r), expected } => {
-                Self::UnrecognizedToken {
-                    span: SourceSpan::new(source_id, l..r),
-                    token: tok.to_string(),
-                    expected: simplify_expected_tokens(expected),
-                }
-            },
-            ParseError::ExtraToken { token: (l, tok, r) } => Self::ExtraToken {
-                span: SourceSpan::new(source_id, l..r),
-                token: tok.to_string(),
-            },
-            ParseError::UnrecognizedEof { location: at, expected } => Self::UnrecognizedEof {
-                span: SourceSpan::new(source_id, at..at),
-                expected: simplify_expected_tokens(expected),
-            },
-            ParseError::User { error } => error,
-        }
-    }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-// The parser generator will show every token that is expected in some scenarios, so to avoid
-// cluttering the diagnostic output with all of the instruction opcodes, we collapse them into a
-// single token.
-fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
-    use super::Token;
-    let mut has_instruction = false;
-    let mut has_ctrl = false;
-    let mut has_type = false;
-    expected
-        .into_iter()
-        .filter_map(|t| {
-            let tok = match t.as_str() {
-                "bare_ident" => return Some("identifier".to_string()),
-                "const_ident" => return Some("constant identifier".to_string()),
-                "quoted_ident" => return Some("quoted identifier".to_string()),
-                "doc_comment" => return Some("doc comment".to_string()),
-                "hex_value" => return Some("hex-encoded literal".to_string()),
-                "bin_value" => return Some("bin-encoded literal".to_string()),
-                "uint" => return Some("integer literal".to_string()),
-                "EOF" => return Some("end of file".to_string()),
-                other => other[1..].strip_suffix('"').and_then(Token::parse),
-            };
-            match tok {
-                Some(Token::If | Token::While | Token::Repeat) => {
-                    if !has_ctrl {
-                        has_ctrl = true;
-                        Some("control flow opcode (e.g. \"if.true\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                Some(tok) if tok.is_instruction() => {
-                    if !has_instruction {
-                        has_instruction = true;
-                        Some("primitive opcode (e.g. \"add\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                Some(tok) if tok.is_type_keyword() => {
-                    if !has_type {
-                        has_type = true;
-                        Some("type (e.g. \"felt\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                _ => Some(t),
-            }
-        })
-        .collect()
 }

@@ -937,6 +937,8 @@ fn constant_err_div_by_zero() {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5/0 begin push.TEST_CONSTANT end",
@@ -954,6 +956,8 @@ fn constant_err_div_by_zero() {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5//0 begin push.TEST_CONSTANT end",
@@ -1179,18 +1183,12 @@ fn constants_defined_in_global_scope() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:11\]"#),
-        "1 |",
-        "2 |     begin const CONSTANT = 12",
-        "  :           ^^|^^",
-        "  :             `-- expected `end` to close `begin` block before top-level item",
-        "3 |     push.CONSTANT end",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected block-local constants to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before top-level item");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -1590,54 +1588,46 @@ fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[6..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[2..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_VALUE = 6
     begin
         push.SAMPLE_VALUE[1..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     begin
         push.5[0..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 }
@@ -2668,18 +2658,12 @@ fn module_alias() -> TestResult {
             exec.bigint->invalidname::checked_add
         end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:37\]"#),
-        "1 |",
-        "2 |         use dummy::math::u64->bigint->invalidname",
-        "  :                                     ^|",
-        "  :                                      `-- unexpected top-level token",
-        "3 |",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected chained module alias to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "use dummy::math::u64->bigint->invalidname");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     Ok(())
 }
@@ -3093,16 +3077,12 @@ fn missing_import() {
 fn invalid_proc_invalid_numeric_name() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc 123 add mul end begin push.1 exec.123 end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:6\]"#),
-        "1 | proc 123 add mul end begin push.1 exec.123 end",
-        "  :      ^|^",
-        "  :       `-- expected a procedure name",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected numeric procedure name to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected a procedure name");
+    assert_diagnostic!(&err, "unexpected token in block");
 }
 
 #[test]
@@ -3145,28 +3125,16 @@ fn invalid_if_missing_end_no_else() {
 fn invalid_else_with_no_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add else mul end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:18\]"#),
-        "1 | begin push.1 add else mul end",
-        "  :                  ^^|^",
-        "  :                    `-- expected `end` to close `begin` block before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected unmatched else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
-        "1 | begin push.1 while.true add else mul end end",
-        "  :                             ^^|^",
-        "  :                               `-- expected `end` to close `while` before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected while-local else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `while` before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -3175,16 +3143,11 @@ fn invalid_unmatched_else_within_if_else() {
 
     let source =
         source_file!(&context, "begin push.1 if.true add else mul else push.1 end end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:35\]"#),
-        "1 | begin push.1 if.true add else mul else push.1 end end end",
-        "  :                                   ^^|^",
-        "  :                                     `-- expected `end` to close `if` before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected duplicate else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `if` before `else`");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]

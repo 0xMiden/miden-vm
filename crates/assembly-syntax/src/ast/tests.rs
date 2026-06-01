@@ -75,6 +75,9 @@ macro_rules! call {
 }
 
 macro_rules! block {
+    () => {
+        Block::new(Default::default(), Vec::new())
+    };
     ($($insts:expr),+) => {
         Block::new(Default::default(), Vec::from([$($insts),*]))
     }
@@ -475,7 +478,7 @@ fn test_ast_parsing_program_simple() -> Result<(), Report> {
     let forms = module!(begin!(
         inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0).into())))),
         inst!(Assertz),
-        inst!(Incr)
+        inst!(AddImm(Immediate::Value(Span::unknown(Felt::ONE))))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);
@@ -747,7 +750,7 @@ fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
                         )
                     )
                 ),
-                block!(inst!(Nop))
+                block!()
             )
         )
     ));
@@ -787,7 +790,7 @@ fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
                     inst!(Push(Immediate::Value(Span::unknown(5u8.into())))),
                     inst!(Push(Immediate::Value(Span::unknown(1u8.into()))))
                 ),
-                block!(inst!(Nop))
+                block!()
             ),
             if_true!(
                 block!(inst!(Push(Immediate::Value(Span::unknown(0u8.into())))), inst!(Sub)),
@@ -824,7 +827,7 @@ fn test_ast_parsing_while_if_body() {
         inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
         while_true!(block!(inst!(Mul))),
         inst!(Add),
-        if_true!(block!(inst!(Div)), block!(inst!(Nop))),
+        if_true!(block!(inst!(Div)), block!()),
         inst!(Mul)
     ));
 

@@ -191,7 +191,7 @@ fn div_b() {
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
         "12 |",
         "13 | begin div.0 exec.truncate_stack end",
-        "   :       ^^^^^",
+        "   :           ^",
         "   `----"
     );
 
@@ -255,10 +255,9 @@ fn neg_fail() {
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
         "12 |",
         "13 | begin neg.1 exec.truncate_stack end",
-        "   :          |",
-        "   :          `-- found a . here",
-        "   `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "   :       ^^|^^",
+        "   :         `-- invalid instruction `neg` or malformed operands",
+        "   `----"
     );
 }
 
@@ -297,10 +296,9 @@ fn inv_fail() {
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
         "12 |",
         "13 | begin inv.1 exec.truncate_stack end",
-        "   :          |",
-        "   :          `-- found a . here",
-        "   `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "   :       ^^|^^",
+        "   :         `-- invalid instruction `inv` or malformed operands",
+        "   `----"
     );
 }
 

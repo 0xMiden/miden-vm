@@ -33,7 +33,7 @@ use miden_core::{
 
 use crate::constraints::{decoder::columns::DecoderCols, stack::columns::StackCols};
 #[cfg(test)]
-use crate::trace::decoder::{NUM_OP_BITS, OP_BITS_RANGE};
+use crate::trace::decoder::NUM_OP_BITS;
 
 // CONSTANTS
 // ================================================================================================
@@ -1053,32 +1053,31 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 /// - All other columns are zero
 #[cfg(test)]
 pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols<miden_core::Felt> {
+    use core::borrow::{Borrow, BorrowMut};
+
     use miden_core::{Felt, ZERO};
 
-    use crate::{constraints::columns::NUM_CORE_COLS, trace::decoder::OP_BITS_EXTRA_COLS_RANGE};
+    use crate::constraints::columns::{CoreCols, NUM_CORE_COLS};
 
     let op_bits = get_op_bits(opcode);
 
-    // Build a flat zeroed Core row, then set the decoder op bits via the col map.
-    let mut row = [ZERO; NUM_CORE_COLS];
-    for (i, &bit) in op_bits.iter().enumerate() {
-        row[OP_BITS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET + i] = bit;
+    let mut row_data = [ZERO; NUM_CORE_COLS];
+    {
+        let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+        for (i, &bit) in op_bits.iter().enumerate() {
+            row.decoder.op_bits[i] = bit;
+        }
+
+        // Compute and set op bits extra columns for degree reduction.
+        let bit_6 = op_bits[6];
+        let bit_5 = op_bits[5];
+        let bit_4 = op_bits[4];
+        row.decoder.extra[0] = bit_6 * (Felt::ONE - bit_5) * bit_4;
+        row.decoder.extra[1] = bit_6 * bit_5;
     }
 
-    // Compute and set op bits extra columns for degree reduction.
-    let bit_6 = op_bits[6];
-    let bit_5 = op_bits[5];
-    let bit_4 = op_bits[4];
-    row[OP_BITS_EXTRA_COLS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET] =
-        bit_6 * (Felt::ONE - bit_5) * bit_4;
-    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
-
-    // Safety: `CoreCols` is `#[repr(C)]` with the same layout as `[Felt; NUM_CORE_COLS]`.
-    unsafe {
-        core::mem::transmute::<[Felt; NUM_CORE_COLS], crate::constraints::columns::CoreCols<Felt>>(
-            row,
-        )
-    }
+    let row: &CoreCols<Felt> = row_data.as_slice().borrow();
+    row.clone()
 }
 
 /// Returns a 7-bit array representation of an opcode.
