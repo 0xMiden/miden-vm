@@ -181,6 +181,8 @@ impl Serializable for DebugSourceMastNode {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.exec_node.into());
         self.children.write_into(target);
+        target.write_u32(self.op_start);
+        target.write_u32(self.op_end);
     }
 }
 
@@ -189,11 +191,13 @@ impl Deserializable for DebugSourceMastNode {
         Ok(Self {
             exec_node: MastNodeId::new_unchecked(source.read_u32()?),
             children: Vec::<DebugSourceMastNodeId>::read_from(source)?,
+            op_start: source.read_u32()?,
+            op_end: source.read_u32()?,
         })
     }
 
     fn min_serialized_size() -> usize {
-        4 + Vec::<DebugSourceMastNodeId>::min_serialized_size()
+        12 + Vec::<DebugSourceMastNodeId>::min_serialized_size()
     }
 }
 
@@ -902,10 +906,12 @@ mod tests {
         let section = DebugSourceGraphSection {
             version: DEBUG_SOURCE_GRAPH_VERSION,
             nodes: alloc::vec![
-                DebugSourceMastNode::new(MastNodeId::new_unchecked(0), alloc::vec![]),
+                DebugSourceMastNode::new(MastNodeId::new_unchecked(0), alloc::vec![], 0, 1),
                 DebugSourceMastNode::new(
                     MastNodeId::new_unchecked(1),
-                    alloc::vec![DebugSourceMastNodeId::from(0)]
+                    alloc::vec![DebugSourceMastNodeId::from(0)],
+                    1,
+                    3,
                 ),
             ],
             roots: alloc::vec![DebugSourceMastNodeId::from(1)],

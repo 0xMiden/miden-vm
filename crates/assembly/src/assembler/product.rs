@@ -104,7 +104,7 @@ impl AssemblyProduct {
         if let Some(source_graph) = source_graph {
             package.sections.push(Section::new(
                 SectionId::DEBUG_SOURCE_GRAPH,
-                source_graph_section(&source_graph).to_bytes(),
+                source_graph_section(&source_graph)?.to_bytes(),
             ));
             package.sections.push(Section::new(
                 SectionId::DEBUG_SOURCE_MAP,
@@ -119,30 +119,39 @@ fn linked_kernel_package_section(package: &Package) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
 }
 
-fn source_graph_section(source_graph: &SourceDebugGraph) -> DebugSourceGraphSection {
-    DebugSourceGraphSection {
+fn source_graph_section(
+    source_graph: &SourceDebugGraph,
+) -> Result<DebugSourceGraphSection, Report> {
+    Ok(DebugSourceGraphSection {
         version: miden_mast_package::debug_info::DEBUG_SOURCE_GRAPH_VERSION,
         nodes: source_graph
             .nodes()
             .as_slice()
             .iter()
             .map(|source_node| {
-                DebugSourceMastNode::new(
+                Ok(DebugSourceMastNode::new(
                     source_node.exec_node(),
                     source_node
                         .children()
                         .iter()
                         .map(|child| DebugSourceMastNodeId::from(u32::from(*child)))
                         .collect(),
-                )
+                    source_node.op_start().try_into().map_err(|_| {
+                        Report::msg("source node start operation index exceeds u32")
+                    })?,
+                    source_node
+                        .op_end()
+                        .try_into()
+                        .map_err(|_| Report::msg("source node end operation index exceeds u32"))?,
+                ))
             })
-            .collect(),
+            .collect::<Result<_, Report>>()?,
         roots: source_graph
             .roots()
             .iter()
             .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
             .collect(),
-    }
+    })
 }
 
 fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapSection, Report> {

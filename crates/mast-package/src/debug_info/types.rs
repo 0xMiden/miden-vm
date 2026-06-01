@@ -337,12 +337,21 @@ pub struct DebugSourceMastNode {
     pub exec_node: MastNodeId,
     /// Child source occurrences.
     pub children: Vec<DebugSourceMastNodeId>,
+    /// Inclusive start operation index in the reduced execution node.
+    pub op_start: u32,
+    /// Exclusive end operation index in the reduced execution node.
+    pub op_end: u32,
 }
 
 impl DebugSourceMastNode {
     /// Creates a source/debug occurrence record.
-    pub fn new(exec_node: MastNodeId, children: Vec<DebugSourceMastNodeId>) -> Self {
-        Self { exec_node, children }
+    pub fn new(
+        exec_node: MastNodeId,
+        children: Vec<DebugSourceMastNodeId>,
+        op_start: u32,
+        op_end: u32,
+    ) -> Self {
+        Self { exec_node, children, op_start, op_end }
     }
 }
 

@@ -32,6 +32,8 @@ impl Idx for SourceMastNodeId {}
 pub(crate) struct SourceMastNode {
     exec_node: MastNodeId,
     children: Vec<SourceMastNodeId>,
+    op_start: usize,
+    op_end: usize,
     asm_ops: Vec<(usize, AssemblyOp)>,
     debug_vars: Vec<(usize, DebugVarInfo)>,
 }
@@ -40,10 +42,19 @@ impl SourceMastNode {
     pub(super) fn new(
         exec_node: MastNodeId,
         children: Vec<SourceMastNodeId>,
+        op_start: usize,
+        op_end: usize,
         asm_ops: Vec<(usize, AssemblyOp)>,
         debug_vars: Vec<(usize, DebugVarInfo)>,
     ) -> Self {
-        Self { exec_node, children, asm_ops, debug_vars }
+        Self {
+            exec_node,
+            children,
+            op_start,
+            op_end,
+            asm_ops,
+            debug_vars,
+        }
     }
 
     pub(crate) fn exec_node(&self) -> MastNodeId {
@@ -52,6 +63,14 @@ impl SourceMastNode {
 
     pub(crate) fn children(&self) -> &[SourceMastNodeId] {
         &self.children
+    }
+
+    pub(crate) fn op_start(&self) -> usize {
+        self.op_start
+    }
+
+    pub(crate) fn op_end(&self) -> usize {
+        self.op_end
     }
 
     pub(crate) fn asm_ops(&self) -> &[(usize, AssemblyOp)] {
