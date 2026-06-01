@@ -475,7 +475,7 @@ pub enum IntegrityError {
     InvalidStructure,
     /// Root evaluation failed under the installed precompile registry.
     #[error("deferred root failed evaluation: {0}")]
-    EvaluationFailed(#[from] super::PrecompileError),
+    EvaluationFailed(#[from] PrecompileError),
     /// The root reduced, but not to the canonical TRUE node.
     #[error("deferred root reduced to a non-TRUE canonical form")]
     RootNotTrue,
