@@ -24,7 +24,7 @@ pub use self::{
     package::{
         ConstantExport, InvalidSectionIdError, InvalidTargetTypeError, ManifestValidationError,
         Package, PackageExport, PackageId, PackageManifest, PackageModule, PackageSubmodule,
-        PackageStripError, ProcedureExport,
-        Section, SectionId, TargetType, TypeExport,
+        PackageDebugInfoError, PackageStripError, ProcedureExport, Section, SectionId, TargetType,
+        TypeExport,
     },
 };

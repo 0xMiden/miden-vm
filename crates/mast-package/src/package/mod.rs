@@ -29,7 +29,9 @@ use miden_core::{
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNodeId},
     program::Kernel,
-    serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 
 pub use self::{
@@ -41,7 +43,7 @@ pub use self::{
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
 };
-use crate::{Dependency, Version};
+use crate::{Dependency, Version, debug_info::PackageDebugInfo};
 
 /// Errors raised while stripping package-owned debug information.
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +52,29 @@ pub enum PackageStripError {
     DecodeEmbeddedKernel {
         #[source]
         source: DeserializationError,
+    },
+}
+
+/// Errors raised while decoding trusted package-owned debug information.
+#[derive(Debug, thiserror::Error)]
+pub enum PackageDebugInfoError {
+    #[error("package contains multiple '{id}' debug sections")]
+    DuplicateSection {
+        /// Duplicated section identifier.
+        id: SectionId,
+    },
+    #[error("failed to decode '{id}' debug section: {source}")]
+    DecodeSection {
+        /// Section identifier being decoded.
+        id: SectionId,
+        /// Underlying section deserialization error.
+        #[source]
+        source: DeserializationError,
+    },
+    #[error("'{id}' debug section has trailing bytes")]
+    TrailingBytes {
+        /// Section identifier with unused bytes after decoding.
+        id: SectionId,
     },
 }
 
@@ -340,6 +365,23 @@ impl Package {
         self.mast.procedure_names()
     }
 
+    /// Decodes trusted package-owned debug sections, if any are present.
+    ///
+    /// This does not read legacy debug metadata from the embedded [`MastForest`]. During the
+    /// migration, forest debug info may still exist as compatibility data, but package-owned debug
+    /// consumers should use this section-backed API.
+    pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
+        let debug_info = PackageDebugInfo {
+            types: self.read_debug_section(SectionId::DEBUG_TYPES)?,
+            sources: self.read_debug_section(SectionId::DEBUG_SOURCES)?,
+            functions: self.read_debug_section(SectionId::DEBUG_FUNCTIONS)?,
+            source_graph: self.read_debug_section(SectionId::DEBUG_SOURCE_GRAPH)?,
+            source_map: self.read_debug_section(SectionId::DEBUG_SOURCE_MAP)?,
+        };
+
+        Ok((!debug_info.is_empty()).then_some(debug_info))
+    }
+
     /// Returns a MAST node ID associated with the specified exported procedure.
     ///
     /// # Panics
@@ -533,6 +575,34 @@ impl Package {
 
         Ok(modules_by_path.into_values().collect())
     }
+
+    fn read_debug_section<T>(&self, id: SectionId) -> Result<Option<T>, PackageDebugInfoError>
+    where
+        T: Deserializable,
+    {
+        let mut sections = self.sections.iter().filter(|section| section.id == id);
+        let Some(section) = sections.next() else {
+            return Ok(None);
+        };
+        if sections.next().is_some() {
+            return Err(PackageDebugInfoError::DuplicateSection { id });
+        }
+
+        read_section_payload(&id, section.data.as_ref()).map(Some)
+    }
+}
+
+fn read_section_payload<T>(id: &SectionId, bytes: &[u8]) -> Result<T, PackageDebugInfoError>
+where
+    T: Deserializable,
+{
+    let mut reader = SliceReader::new(bytes);
+    let section = T::read_from(&mut reader)
+        .map_err(|source| PackageDebugInfoError::DecodeSection { id: id.clone(), source })?;
+    if reader.has_more_bytes() {
+        return Err(PackageDebugInfoError::TrailingBytes { id: id.clone() });
+    }
+    Ok(section)
 }
 
 /// Conversions
@@ -825,7 +895,13 @@ mod tests {
     };
 
     use super::*;
-    use crate::{Dependency, Version};
+    use crate::{
+        Dependency, Version,
+        debug_info::{
+            DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
+            DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+        },
+    };
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
@@ -932,6 +1008,87 @@ mod tests {
             Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![10, 11, 12]),
             Section::new(SectionId::DEBUG_SOURCE_MAP, vec![13, 14, 15]),
         ]
+    }
+
+    #[test]
+    fn package_without_debug_sections_has_no_package_debug_info() {
+        let package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+
+        assert!(package.debug_info().unwrap().is_none());
+    }
+
+    #[test]
+    fn package_debug_info_decodes_source_graph_and_map() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceMastNodeId::from(0);
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            roots: vec![source_node],
+        };
+        let source_map = DebugSourceMapSection {
+            asm_ops: vec![DebugSourceAsmOp::new(
+                source_node,
+                0,
+                None,
+                "app::entry".into(),
+                "add".into(),
+                1,
+            )],
+            ..DebugSourceMapSection::new()
+        };
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let debug_info = package
+            .debug_info()
+            .expect("debug sections should decode")
+            .expect("debug sections should be present");
+
+        assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, exec_node);
+        assert_eq!(
+            debug_info
+                .source_nodes_for_exec_node(exec_node)
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            vec![source_node]
+        );
+        assert_eq!(
+            debug_info.asm_op_for_operation(source_node, 0).unwrap().context_name,
+            "app::entry"
+        );
+    }
+
+    #[test]
+    fn package_debug_info_rejects_duplicate_debug_sections() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_MAP, DebugSourceMapSection::new().to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, DebugSourceMapSection::new().to_bytes()),
+        ];
+
+        let error = package.debug_info().expect_err("duplicate debug sections should be rejected");
+
+        assert!(matches!(
+            error,
+            PackageDebugInfoError::DuplicateSection { id } if id == SectionId::DEBUG_SOURCE_MAP
+        ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_malformed_debug_sections() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![u8::MAX])];
+
+        let error = package.debug_info().expect_err("malformed debug sections should be rejected");
+
+        assert!(matches!(
+            error,
+            PackageDebugInfoError::DecodeSection { id, .. } if id == SectionId::DEBUG_SOURCE_GRAPH
+        ));
     }
 
     #[test]
