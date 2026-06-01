@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     mast::{AsmOpId, DebugInfo, MastNode, MastNodeId},
@@ -6,20 +6,20 @@ use miden_core::{
     utils::IndexVec,
 };
 
-use super::{AsmOpRef, MastForestBuilderError, compute_operations_and_adjust_mappings};
+use super::{
+    AsmOpRef, MastForestBuilderError, MetadataRefAllocator, compute_operations_and_adjust_mappings,
+};
 use crate::diagnostics::Report;
 
 /// Registers live assembly-op metadata while preserving ref-level deduplication.
 pub(super) struct AsmOpMergePolicy<'a> {
-    asm_op_by_ref: &'a IndexVec<AsmOpRef, AssemblyOp>,
-    asm_op_id_by_ref: BTreeMap<AsmOpRef, AsmOpId>,
+    asm_op_ids: MetadataRefAllocator<'a, AsmOpRef, AssemblyOp, AsmOpId>,
 }
 
 impl<'a> AsmOpMergePolicy<'a> {
     pub(super) fn new(asm_op_by_ref: &'a IndexVec<AsmOpRef, AssemblyOp>) -> Self {
         Self {
-            asm_op_by_ref,
-            asm_op_id_by_ref: BTreeMap::new(),
+            asm_op_ids: MetadataRefAllocator::new(asm_op_by_ref),
         }
     }
 
@@ -56,15 +56,10 @@ impl<'a> AsmOpMergePolicy<'a> {
         node_id: MastNodeId,
         asm_op_ref: AsmOpRef,
     ) -> Result<AsmOpId, Report> {
-        if let Some(asm_op_id) = self.asm_op_id_by_ref.get(&asm_op_ref).copied() {
-            return Ok(asm_op_id);
-        }
-
-        let asm_op_id = debug_info
-            .add_asm_op(self.asm_op_by_ref[asm_op_ref].clone())
-            .map_err(|source| Report::new(MastForestBuilderError::AddAsmOp { node_id, source }))?;
-        self.asm_op_id_by_ref.insert(asm_op_ref, asm_op_id);
-
-        Ok(asm_op_id)
+        self.asm_op_ids.get_or_insert(asm_op_ref, |asm_op| {
+            debug_info
+                .add_asm_op(asm_op)
+                .map_err(|source| Report::new(MastForestBuilderError::AddAsmOp { node_id, source }))
+        })
     }
 }

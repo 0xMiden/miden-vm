@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::ToString, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     mast::{DebugInfo, DebugVarId, MastNode, MastNodeId},
@@ -6,20 +6,21 @@ use miden_core::{
     utils::IndexVec,
 };
 
-use super::{DebugVarRef, MastForestBuilderError, compute_operations_and_adjust_mappings};
+use super::{
+    DebugVarRef, MastForestBuilderError, MetadataRefAllocator,
+    compute_operations_and_adjust_mappings,
+};
 use crate::diagnostics::Report;
 
 /// Registers live debug-variable metadata while preserving ref-level deduplication.
 pub(super) struct DebugMetadataMergePolicy<'a> {
-    debug_vars: &'a IndexVec<DebugVarRef, DebugVarInfo>,
-    debug_var_id_by_ref: BTreeMap<DebugVarRef, DebugVarId>,
+    debug_var_ids: MetadataRefAllocator<'a, DebugVarRef, DebugVarInfo, DebugVarId>,
 }
 
 impl<'a> DebugMetadataMergePolicy<'a> {
     pub(super) fn new(debug_vars: &'a IndexVec<DebugVarRef, DebugVarInfo>) -> Self {
         Self {
-            debug_vars,
-            debug_var_id_by_ref: BTreeMap::new(),
+            debug_var_ids: MetadataRefAllocator::new(debug_vars),
         }
     }
 
@@ -54,17 +55,10 @@ impl<'a> DebugMetadataMergePolicy<'a> {
         node_id: MastNodeId,
         debug_var_ref: DebugVarRef,
     ) -> Result<DebugVarId, Report> {
-        if let Some(debug_var_id) = self.debug_var_id_by_ref.get(&debug_var_ref).copied() {
-            return Ok(debug_var_id);
-        }
-
-        let debug_var_id = debug_info
-            .add_debug_var(self.debug_vars[debug_var_ref].clone())
-            .map_err(|source| {
+        self.debug_var_ids.get_or_insert(debug_var_ref, |debug_var| {
+            debug_info.add_debug_var(debug_var).map_err(|source| {
                 Report::new(MastForestBuilderError::AddDebugVar { node_id, source })
-            })?;
-        self.debug_var_id_by_ref.insert(debug_var_ref, debug_var_id);
-
-        Ok(debug_var_id)
+            })
+        })
     }
 }
