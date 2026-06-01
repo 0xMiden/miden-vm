@@ -8,9 +8,17 @@ use miden_assembly::{
 use miden_core::{
     ONE, assert_matches,
     events::SystemEvent,
-    mast::{BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForestContributor},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForestContributor,
+        SplitNodeBuilder,
+    },
     operations::Operation,
     program::StackInputs,
+};
+use miden_debug_types::{ByteIndex, Location, SourceContent, SourceManager, SourceSpan, Uri};
+use miden_mast_package::debug_info::{
+    DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+    DebugSourceMastNodeId, PackageDebugInfo,
 };
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
@@ -207,6 +215,78 @@ fn test_syscall_fail() {
             err: OperationError::SyscallTargetNotInKernel { .. },
             ..
         }
+    );
+}
+
+#[test]
+fn package_source_debug_execution_distinguishes_same_exec_node_split_children() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(7))])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let root_id = SplitNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(root_id);
+    let program = Program::new(forest.into(), root_id);
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let uri = Uri::new("file://pkg/same-node.masm");
+    let source_file = source_manager.load_from_raw_parts(
+        uri.clone(),
+        SourceContent::new("masm", uri.clone(), "true;\nfalse;\n"),
+    );
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+
+    let source_root = DebugSourceMastNodeId::from(0);
+    let source_true = DebugSourceMastNodeId::from(1);
+    let source_false = DebugSourceMastNodeId::from(2);
+    let package_debug_info = PackageDebugInfo {
+        source_graph: Some(DebugSourceGraphSection {
+            nodes: vec![
+                DebugSourceMastNode::new(root_id, vec![source_true, source_false], 0, 1),
+                DebugSourceMastNode::new(block_id, vec![], 0, 1),
+                DebugSourceMastNode::new(block_id, vec![], 0, 1),
+            ],
+            roots: vec![source_root],
+            ..DebugSourceGraphSection::new()
+        }),
+        source_map: Some(DebugSourceMapSection {
+            asm_ops: vec![
+                DebugSourceAsmOp::new(
+                    source_true,
+                    0,
+                    Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(5))),
+                    "true_branch".into(),
+                    "assert".into(),
+                    1,
+                ),
+                DebugSourceAsmOp::new(
+                    source_false,
+                    0,
+                    Some(Location::new(uri, ByteIndex::new(6), ByteIndex::new(12))),
+                    "false_branch".into(),
+                    "assert".into(),
+                    2,
+                ),
+            ],
+            ..DebugSourceMapSection::new()
+        }),
+        ..PackageDebugInfo::default()
+    };
+
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &package_debug_info, &mut host)
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::new(source_file.id(), 6u32..12)
+            && actual_source_file.id() == source_file.id()
+            && err_code == Felt::from_u32(7)
     );
 }
 

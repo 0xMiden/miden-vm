@@ -283,6 +283,7 @@ where
                     node_id,
                     state.host,
                     state.tracer,
+                    state.package_source_context(),
                 ) {
                     Ok(operation_helpers) => operation_helpers,
                     Err(err) => {

@@ -617,6 +617,27 @@ pub trait MapExecErrWithOpIdx<T> {
     ) -> Result<T, ExecutionError>
     where
         F: ExecutableMastForest;
+
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+        Self: Sized,
+    {
+        if context.is_some() {
+            return Err(ExecutionError::Internal(
+                "package source context is unsupported for this error type",
+            ));
+        }
+
+        self.map_exec_err_with_op_idx(mast_forest, node_id, host, op_idx)
+    }
 }
 
 /// Extension trait for mapping errors to `ExecutionError` without context.
@@ -665,6 +686,31 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(ExecutionError::OperationError { label, source_file, err })
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(err), Some(context)) => {
+                Err(err.with_package_source_context(context, host, Some(op_idx)))
+            },
+            (Err(err), None) => {
                 let (label, source_file) =
                     get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(ExecutionError::OperationError { label, source_file, err })
@@ -764,6 +810,35 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
             },
         }
     }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(err), Some(context)) => {
+                let (label, source_file) = label_and_source_file_from_location(
+                    context.assembly_location(Some(op_idx)),
+                    host,
+                );
+                Err(ExecutionError::MemoryError { label, source_file, err })
+            },
+            (Err(err), None) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(ExecutionError::MemoryError { label, source_file, err })
+            },
+        }
+    }
 }
 
 // SystemEventError implementations
@@ -830,6 +905,55 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
             },
         }
     }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(err), Some(context)) => {
+                let (label, source_file) = label_and_source_file_from_location(
+                    context.assembly_location(Some(op_idx)),
+                    host,
+                );
+                Err(match err {
+                    SystemEventError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    SystemEventError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    SystemEventError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+            (Err(err), None) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(match err {
+                    SystemEventError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    SystemEventError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    SystemEventError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+        }
+    }
 }
 
 // IoError implementations
@@ -858,6 +982,50 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                     },
                     // Execution errors are already fully formed with their own message.
                     IoError::Execution(boxed_err) => *boxed_err,
+                })
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(IoError::Execution(boxed_err)), _) => Err(*boxed_err),
+            (Err(err), Some(context)) => {
+                let (label, source_file) = label_and_source_file_from_location(
+                    context.assembly_location(Some(op_idx)),
+                    host,
+                );
+                Err(match err {
+                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    IoError::Execution(_) => unreachable!("handled above"),
+                })
+            },
+            (Err(err), None) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(match err {
+                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    IoError::Execution(_) => unreachable!("handled above"),
                 })
             },
         }
@@ -893,6 +1061,49 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
             },
         }
     }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(err), Some(context)) => {
+                let (label, source_file) = label_and_source_file_from_location(
+                    context.assembly_location(Some(op_idx)),
+                    host,
+                );
+                Err(match err {
+                    CryptoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    CryptoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                })
+            },
+            (Err(err), None) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(match err {
+                    CryptoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    CryptoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                })
+            },
+        }
+    }
 }
 
 // AceEvalError implementations
@@ -911,6 +1122,49 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(match err {
+                    AceEvalError::Ace(error) => {
+                        ExecutionError::AceChipError { label, source_file, error }
+                    },
+                    AceEvalError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn map_exec_err_with_package_source_op_idx<F>(
+        self,
+        context: Option<PackageSourceDebugContext<'_>>,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match (self, context) {
+            (Ok(v), _) => Ok(v),
+            (Err(err), Some(context)) => {
+                let (label, source_file) = label_and_source_file_from_location(
+                    context.assembly_location(Some(op_idx)),
+                    host,
+                );
+                Err(match err {
+                    AceEvalError::Ace(error) => {
+                        ExecutionError::AceChipError { label, source_file, error }
+                    },
+                    AceEvalError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+            (Err(err), None) => {
                 let (label, source_file) =
                     get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(match err {

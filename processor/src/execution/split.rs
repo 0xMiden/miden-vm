@@ -47,11 +47,17 @@ where
     }
 
     // execute the appropriate branch
-    state.continuation_stack.push_finish_split(node_id);
+    state
+        .continuation_stack
+        .push_finish_split_with_source(node_id, state.current_source_node());
     if condition == ONE {
-        state.continuation_stack.push_start_node(split_node.on_true());
+        state
+            .continuation_stack
+            .push_start_node_with_source(split_node.on_true(), state.child_source_node(0));
     } else if condition == ZERO {
-        state.continuation_stack.push_start_node(split_node.on_false());
+        state
+            .continuation_stack
+            .push_start_node_with_source(split_node.on_false(), state.child_source_node(1));
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
         return ControlFlow::Break(BreakReason::Err(err.with_context(

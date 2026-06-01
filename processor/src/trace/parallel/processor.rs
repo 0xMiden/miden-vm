@@ -148,9 +148,16 @@ impl ReplayProcessor {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
 
-        while let ControlFlow::Break(internal_break_reason) =
-            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
-        {
+        while let ControlFlow::Break(internal_break_reason) = execute_impl(
+            self,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+            None,
+        ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
                 InternalBreakReason::Emit {
