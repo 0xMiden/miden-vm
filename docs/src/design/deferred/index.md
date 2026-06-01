@@ -21,6 +21,9 @@ of the nodes.
 > DAG during execution and exposes it on the execution output, but it is not yet folded into the
 > STARK proof. The proof-model cutover — and the migration of the existing precompiles onto this
 > model — lands separately. See [Status and scope](#status-and-scope).
+>
+> For the precise `DeferredState`, `evals`, precompile, and public API contract, see
+> [Deferred state semantics and API contract](./semantics.md).
 
 ## Motivation
 
@@ -83,7 +86,9 @@ fields.
 A precompile supplies three things:
 
 - `decode(args) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
-  structural shape does it carry (`Value`, `Join`, or `Chunks(n)`)? Tag inspection only.
+  structural shape does it carry (`Value`, `Join`, or `Chunks(n)`)? Tag inspection only. For
+  chunk-bodied tags, this is also the precompile-owned size gate: returning `Chunks(n)` authorizes
+  the host to read exactly `n` chunks, so oversized chunk tags should be rejected here.
 - `reduce(args, payload, …) -> Result<Node>` — *normalizes* a node to its **canonical form**. The
   common roles are: validate a value leaf (its canonical is itself), evaluate an operation (resolve
   the child canonicals, then combine), or check a predicate (resolve operands, return the `TRUE`
@@ -137,7 +142,8 @@ composes with the verifier:
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
 - once the deferred root is threaded into proof public inputs, the **deferred-commitment root
   match** will bind that digest to the wire the verifier rehydrates;
-- `DeferredState::rehydrate` then re-reduces every logged statement from wire data.
+- `DeferredState::from_wire` then rehydrates the canonical wire opening and reduces the expected
+  root from wire data.
 
 Once the root is public, these pieces bind the wire — and therefore every reduction the verifier
 re-checks — to the data the circuit actually committed to.
@@ -146,7 +152,7 @@ re-checks — to the data the circuit actually committed to.
 
 `evaluate_deferred`'s output is a *deferred reduction* the circuit cannot perform, so it must come
 through advice — but that makes it an **unbound host hint**. Using it soundly requires re-hashing
-the returned `tag || payload` in-circuit and logging a predicate that `rehydrate` re-checks; an
+the returned `tag || payload` in-circuit and logging a predicate that `from_wire` re-checks; an
 in-circuit `eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
 precompile-specific (which predicate to log is the precompile's business), `evaluate_deferred` is
 intentionally *not* wrapped as a safe `sys` proc: each precompile wraps the raw event itself. The
@@ -164,15 +170,15 @@ which is also the digest of the always-present canonical `Node::TRUE`. To fold a
 **statement** — any materialized digest that reduces to `TRUE`, not necessarily a primitive
 predicate node — the framework interns an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
-The checked append path first evaluates the statement under the installed registry and rejects
-missing or non-`TRUE` statements; an explicit unchecked append remains for replay / in-circuit-root
-mirroring. The digest is structural: even `AND(TRUE, TRUE)` hashes under the distinct capacity
-`[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates semantically to `TRUE`.
+The append path first evaluates the statement under the installed registry and rejects missing or
+non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
+implicit root and reduces that root directly. The digest is structural: even `AND(TRUE, TRUE)` hashes
+under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
+semantically to `TRUE`.
 
-> **The fold reuses the existing `log_precompile` opcode.** Folding a statement is one framework
-> AND step, so the `sys::log_node_digest` helper feeds a node digest straight into
-> `log_precompile`. The opcode name is historical; in this branch it is doing
-> *deferred-commitment* work, not anything precompile-specific.
+> **Scope note.** This state/API simplification does not change `log_precompile` behavior. The
+> deferred DAG state is accumulated host-side and verified through `DeferredStateWire`; the legacy
+> precompile transcript path remains documented separately.
 
 The verifier's obligation collapses to a single fixed point: **reduce the root to `TRUE`, and every
 logged statement holds.** There is no separate finalization step.
@@ -180,41 +186,41 @@ logged statement holds.** There is no separate finalization step.
 ## Wire format and verification
 
 The intended proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`.
-`to_wire` lowers state to a passive, topologically ordered entry stream. Wire index `0` is the
-implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by index
-and may reference only `0` or earlier entries. Empty `entries` means the root is `TRUE_DIGEST`; a
-non-empty wire's root is the digest of the last entry. `to_wire` emits a deterministic child-first
-DFS of the root-reachable closure, so unreferenced orphans are dropped, but accepted wire is not
-required to be byte-for-byte identical to that deterministic output.
+`to_wire` lowers state to a passive, canonical, topologically ordered entry stream. Wire index `0`
+is the implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by
+index and may reference only `0` or earlier entries. Empty `entries` opens `TRUE_DIGEST`; a non-empty
+wire opens the digest of the last entry. `to_wire` emits a deterministic child-first DFS of the
+root-reachable closure, so unreferenced orphans are dropped.
 
-`rehydrate` is the only trusted path from wire bytes back to a validated state. It runs as a
-structural decode, a reachability gate, and a semantic replay:
+`DeferredState::from_wire(wire, registry, max_elements)` is the only trusted path from wire bytes
+back to a validated state. It runs as a structural decode, a canonicality check, and a root
+evaluation. This validates the wire's own implicit root; proof plumbing must separately compare the
+returned `state.root()` against the externally committed root.
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each materialized
    entry (translating child indices back to digests), decode its tag, check that the entry variant
    and payload shape match the declared `NodeType`, reject materialized `TRUE`, reject duplicate
    digests, and require join children to reference only earlier entries;
-2. **reachability** — require the root to be `TRUE_DIGEST` or a framework `Tag::AND` node, walk the
-   right-spined AND transcript, mark every logged statement's structural closure, and reject any
-   dangling entry outside that closure;
-3. **semantic** — register reachable entries in topological order, then replay the transcript by
-   **re-evaluating each statement to the `TRUE` node** under the installed precompiles and appending
-   the corresponding AND step.
+2. **canonicality** — register decoded entries into a fresh state, set the implicit wire root as
+   `state.root`, and require `state.to_wire(registry) == wire`; this rejects dangling nodes,
+   non-root-last encodings, and equivalent-but-reordered topological wire;
+3. **semantic** — evaluate the implicit wire root under the installed precompiles and require it to
+   reduce to the canonical `TRUE` node. Evaluation repopulates `evals` and may materialize
+   canonical/helper nodes in addition to the wire nodes.
 
-A wire that yields any integrity error is rejected; a faithful one reconstructs a state equivalent
-to the prover's. Equivalent-but-reordered topological wire may be accepted even though `to_wire`
-would serialize it differently.
+A wire that yields any integrity error is rejected; a faithful one reconstructs a state whose root is
+the wire's implicit root and whose canonical wire output is byte-for-byte identical to the input
+wire.
 
 ## Status and scope
 
 This framework is an additive substrate. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
-- the deferred DAG root is **not** yet threaded into the STARK proof; this branch only reuses the
-  existing `log_precompile` transcript path and changes that fold to the framework-AND digest;
+- the deferred DAG root is **not** yet threaded into the STARK proof;
+- this state/API simplification does not change existing `log_precompile` behavior;
 - the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
-  wrapper) now shares the same framework-AND transcript fold and is still documented under
-  [Precompiles](../stack/precompiles.md).
+  wrapper) remains documented under [Precompiles](../stack/precompiles.md).
 
 The proof-model cutover — threading the deferred commitment into the proof, migrating the existing
 precompiles onto this model, and retiring the request-list transcript — lands in a follow-up. The
