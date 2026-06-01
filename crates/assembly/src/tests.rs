@@ -4230,11 +4230,16 @@ fn nested_blocks() -> Result<(), Report> {
             )
             .unwrap();
 
+        let asm_op = AssemblyOp::new(None, "test".into(), 1, "while.true".into());
+        let loop_node_ref = expected_mast_forest_builder
+            .ensure_loop_node_ref(body_node_ref, asm_op.clone())
+            .unwrap();
+        let noop_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(vec![Operation::Noop], vec![], vec![])
+            .unwrap();
+
         expected_mast_forest_builder
-            .ensure_loop_node_ref(
-                body_node_ref,
-                AssemblyOp::new(None, "test".into(), 1, "while.true".into()),
-            )
+            .ensure_split_node_ref([loop_node_ref, noop_node_ref], asm_op)
             .unwrap()
     };
     let push_13_basic_block_ref = expected_mast_forest_builder
