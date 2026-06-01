@@ -140,6 +140,30 @@ struct DecodedTranscript {
     reachable: BTreeSet<Digest>,
 }
 
+fn decode_wire_tag_type(
+    precompiles: &PrecompileRegistry,
+    tag: Tag,
+) -> Result<NodeType, IntegrityError> {
+    if tag == Tag::TRUE {
+        Ok(NodeType::Value)
+    } else if tag == Tag::AND {
+        Ok(NodeType::Join)
+    } else {
+        precompiles.decode(tag).map_err(|_| IntegrityError::UnknownTag)
+    }
+}
+
+fn decode_wire_node_type(
+    precompiles: &PrecompileRegistry,
+    node: &Node,
+) -> Result<NodeType, IntegrityError> {
+    let node_type = decode_wire_tag_type(precompiles, node.tag)?;
+    if node.tag == Tag::TRUE && !node.is_true_node() {
+        return Err(IntegrityError::ShapeMismatch);
+    }
+    Ok(node_type)
+}
+
 struct TranscriptStep {
     /// The transcript root before this statement was logged.
     prev_root: Digest,
@@ -169,11 +193,11 @@ impl DecodedWire {
             match entry {
                 WireEntry::Value { tag, block } => {
                     let node = Node::leaf(*tag, *block);
-                    let node_type = precompiles.decode_wire_node_type(&node)?;
+                    let node_type = decode_wire_node_type(precompiles, &node)?;
                     decoded.push_typed_entry(node, node_type, NodeType::Value)?;
                 },
                 WireEntry::Chunks { tag, blocks } => {
-                    let node_type = precompiles.decode_wire_tag_type(*tag)?;
+                    let node_type = decode_wire_tag_type(precompiles, *tag)?;
                     let NodeType::Chunks(n) = node_type else {
                         return Err(IntegrityError::ShapeMismatch);
                     };
@@ -186,7 +210,7 @@ impl DecodedWire {
                     let lhs_d = decoded.resolve_index(*lhs)?;
                     let rhs_d = decoded.resolve_index(*rhs)?;
                     let node = Node::join(*tag, lhs_d, rhs_d);
-                    let node_type = precompiles.decode_wire_node_type(&node)?;
+                    let node_type = decode_wire_node_type(precompiles, &node)?;
                     decoded.push_typed_entry(node, node_type, NodeType::Join)?;
                 },
             }
@@ -423,7 +447,7 @@ impl WireBuild {
         }
 
         let node = state.nodes().get(&digest).ok_or(IntegrityError::MissingChild)?;
-        let node_type = precompiles.decode_wire_node_type(node)?;
+        let node_type = decode_wire_node_type(precompiles, node)?;
         if !node_type.matches_payload(&node.payload) {
             return Err(IntegrityError::ShapeMismatch);
         }
