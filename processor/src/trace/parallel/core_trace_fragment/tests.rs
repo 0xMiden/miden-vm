@@ -66,9 +66,8 @@ fn test_basic_block_one_group_decoding() {
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
         let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
         mast_forest.make_root(basic_block_id);
 
@@ -120,9 +119,8 @@ fn test_basic_block_small_decoding() {
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
         let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
         mast_forest.make_root(basic_block_id);
 
@@ -184,9 +182,8 @@ fn test_basic_block_small_with_emit_decoding() {
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
         let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
         mast_forest.make_root(basic_block_id);
 
@@ -255,9 +252,8 @@ fn test_basic_block_decoding() {
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
         let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
         mast_forest.make_root(basic_block_id);
 
@@ -363,9 +359,8 @@ fn test_basic_block_with_respan_decoding() {
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut mast_forest).unwrap();
         let basic_block = mast_forest[basic_block_id].unwrap_basic_block().clone();
         mast_forest.make_root(basic_block_id);
 
@@ -453,10 +448,10 @@ fn test_join_node_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let basic_block1 = mast_forest[basic_block1_id].unwrap_basic_block().clone();
@@ -525,10 +520,10 @@ fn test_split_node_true_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let basic_block1 = mast_forest[basic_block1_id].unwrap_basic_block().clone();
@@ -584,10 +579,10 @@ fn test_split_node_false_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let basic_block1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let basic_block2_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let basic_block1 = mast_forest[basic_block1_id].unwrap_basic_block().clone();
@@ -646,10 +641,9 @@ fn test_loop_node_decoding() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
-        let loop_body_id =
-            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
-                .add_to_forest(&mut mast_forest)
-                .unwrap();
+        let loop_body_id = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         let loop_body = mast_forest[loop_body_id].unwrap_basic_block().clone();
         let loop_node_id =
             LoopNodeBuilder::new(loop_body_id).add_to_forest(&mut mast_forest).unwrap();
@@ -658,8 +652,9 @@ fn test_loop_node_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    // Input [1, 0]: position 0 (top) = 1 (loop enters), position 1 = 0 (loop exits after body)
-    let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
+    // Input [0]: do-while LOOP enters the body unconditionally; after the Pad+Drop net-zero body,
+    // the trailing condition on top of the stack is 0, so the loop exits after one iteration.
+    let (trace, trace_len) = build_trace_helper(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let body_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
@@ -699,60 +694,13 @@ fn test_loop_node_decoding() {
 }
 
 #[test]
-fn test_loop_node_skip_decoding() {
-    let (loop_body, program) = {
-        let mut mast_forest = MastForest::new();
-
-        let loop_body_id =
-            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
-                .add_to_forest(&mut mast_forest)
-                .unwrap();
-        let loop_body = mast_forest[loop_body_id].unwrap_basic_block().clone();
-        let loop_node_id =
-            LoopNodeBuilder::new(loop_body_id).add_to_forest(&mut mast_forest).unwrap();
-        mast_forest.make_root(loop_node_id);
-
-        (loop_body, Program::new(mast_forest.into(), loop_node_id))
-    };
-
-    let (trace, trace_len) = build_trace_helper(&[0], &program);
-
-    // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::END, 0, 0, 0);
-    check_op_decoding(&trace, 2, ZERO, opcodes::HALT, 0, 0, 0);
-
-    // --- check hasher state columns -------------------------------------------------------------
-
-    // in the first row, the hasher state is set to the hash of the loop's body
-    let loop_body_hash = loop_body.digest();
-    assert_eq!(loop_body_hash, get_hasher_state1(&trace, 0));
-    assert_eq!(EMPTY_WORD, get_hasher_state2(&trace, 0));
-
-    // the hash of the program is located in the last END row; is_loop is not set to ONE because
-    // we didn't enter the loop's body
-    let program_hash = program.hash();
-    assert_eq!(program_hash, get_hasher_state1(&trace, 1));
-    assert_eq!(EMPTY_WORD, get_hasher_state2(&trace, 1));
-
-    // HALT opcode and program hash gets propagated to the last row
-    for i in 3..trace_len {
-        assert!(contains_op(&trace, i, opcodes::HALT));
-        assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
-        assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
-        assert_eq!(program_hash, get_hasher_state1(&trace, i));
-    }
-}
-
-#[test]
 fn test_loop_node_repeat_decoding() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
-        let loop_body_id =
-            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
-                .add_to_forest(&mut mast_forest)
-                .unwrap();
+        let loop_body_id = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         let loop_body = mast_forest[loop_body_id].unwrap_basic_block().clone();
         let loop_node_id =
             LoopNodeBuilder::new(loop_body_id).add_to_forest(&mut mast_forest).unwrap();
@@ -761,10 +709,10 @@ fn test_loop_node_repeat_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
-    // After Pad+Drop: position 0 = 1 (2nd iteration enters)
-    // After Pad+Drop: position 0 = 0 (loop exits)
-    let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program);
+    // Input [1, 0]: do-while LOOP enters the body unconditionally; Pad+Drop is net-zero, so the
+    // top of the stack after the first iteration is 1 → REPEAT, after the second iteration is 0 →
+    // END.
+    let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let iter1_addr = INIT_ADDR + CONTROLLER_ROWS_PER_PERM_FELT;
@@ -826,7 +774,7 @@ fn test_loop_node_repeat_decoding() {
 #[test]
 #[rustfmt::skip]
 fn test_call_decoding() {
-    
+
     // build a program which looks like this:
     //
     // pub proc foo
@@ -848,7 +796,7 @@ fn test_call_decoding() {
     let mut mast_forest = MastForest::new();
 
     // build foo procedure body
-    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let foo_root = mast_forest[foo_root_id].clone();
@@ -856,7 +804,7 @@ fn test_call_decoding() {
     let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
-    let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let bar_basic_block = mast_forest[bar_basic_block_id].clone();
@@ -874,10 +822,10 @@ fn test_call_decoding() {
     let first_basic_block_id = BasicBlockNodeBuilder::new(vec![
         Operation::Push(ONE),
         Operation::Push(TWO),
-    ], Vec::new()).add_to_forest(&mut mast_forest).unwrap();
+    ]).add_to_forest(&mut mast_forest).unwrap();
     let first_basic_block = mast_forest[first_basic_block_id].clone();
 
-    let last_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Drop, Operation::Drop], Vec::new())
+    let last_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Drop, Operation::Drop])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let last_basic_block = mast_forest[last_basic_block_id].clone();
@@ -1143,7 +1091,7 @@ fn test_syscall_decoding() {
     let mut mast_forest = MastForest::new();
 
     // build foo procedure body
-    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let foo_root = mast_forest[foo_root_id].clone();
@@ -1151,7 +1099,7 @@ fn test_syscall_decoding() {
     let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
-    let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let bar_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let bar_basic_block = mast_forest[bar_basic_block_id].clone();
@@ -1171,10 +1119,10 @@ fn test_syscall_decoding() {
     let first_basic_block_id = BasicBlockNodeBuilder::new(vec![
         Operation::Push(ONE),
         Operation::Push(TWO),
-    ], Vec::new()).add_to_forest(&mut mast_forest).unwrap();
+    ]).add_to_forest(&mut mast_forest).unwrap();
     let first_basic_block = mast_forest[first_basic_block_id].clone();
 
-    let last_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Drop, Operation::Drop], Vec::new())
+    let last_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Drop, Operation::Drop])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let last_basic_block = mast_forest[last_basic_block_id].clone();
@@ -1428,19 +1376,18 @@ fn test_dyn_node_decoding() {
 
     let mut mast_forest = MastForest::new();
 
-    let foo_root_node_id =
-        BasicBlockNodeBuilder::new(vec![Operation::Push(ONE), Operation::Add], Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+    let foo_root_node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(ONE), Operation::Add])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let foo_root_node = mast_forest[foo_root_node_id].clone();
     mast_forest.make_root(foo_root_node_id);
 
-    let mstorew_node_id = BasicBlockNodeBuilder::new(vec![Operation::MStoreW], Vec::new())
+    let mstorew_node_id = BasicBlockNodeBuilder::new(vec![Operation::MStoreW])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let mstorew_node = mast_forest[mstorew_node_id].clone();
 
-    let push_node_id = BasicBlockNodeBuilder::new(vec![PUSH_40_OP], Vec::new())
+    let push_node_id = BasicBlockNodeBuilder::new(vec![PUSH_40_OP])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let push_node = mast_forest[push_node_id].clone();
@@ -1565,7 +1512,7 @@ fn set_user_op_helpers_many() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::U32div])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         mast_forest.make_root(basic_block_id);

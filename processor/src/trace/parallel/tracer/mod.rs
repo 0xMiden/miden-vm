@@ -299,7 +299,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation<Arc<SparseMastForest>>,
         processor: &ReplayProcessor,
     ) -> Option<bool> {
-        if let Continuation::FinishLoop { .. } = &continuation {
+        if let Continuation::FinishLoop(_) = &continuation {
             let condition = processor.stack.get(0);
             return Some(condition == ONE);
         }
@@ -317,9 +317,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         let is_loop_body = self.is_loop_body;
 
         match continuation {
-            Continuation::FinishLoop { was_entered, .. } => {
-                // The Loop node itself is ending. `loop_entered` = `was_entered`.
-                Ok(NodeFlags::new(is_loop_body, *was_entered, false, false))
+            Continuation::FinishLoop(_) => {
+                // The Loop node itself is ending. With do-while semantics every loop is entered, so
+                // the `is_loop` flag is unconditionally true here.
+                Ok(NodeFlags::new(is_loop_body, true, false, false))
             },
             Continuation::FinishCall(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
@@ -415,7 +416,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             // whether the next clock-incrementing continuation is a FinishLoop.
             self.is_loop_body = matches!(
                 continuation_stack.iter_continuations_for_next_clock().last(),
-                Some(Continuation::FinishLoop { was_entered: true, .. })
+                Some(Continuation::FinishLoop(_))
             );
 
             // Store state for finalizing the clock cycle later.
@@ -475,7 +476,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                FinishLoop { node_id, was_entered: _ } => {
+                FinishLoop(node_id) => {
                     let loop_condition = self.finish_loop_condition.take().ok_or(
                         ExecutionError::Internal(
                             "loop condition not stored at start of clock cycle for FinishLoop continuation",
@@ -609,9 +610,9 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                FinishExternal(_) | EnterForest(_) | AfterExitDecorators(_) => {
+                EnterForest(_) => {
                     unreachable!(
-                        "Tracer contract guarantees that these continuations do not occur here"
+                        "Tracer contract guarantees that EnterForest continuations do not occur here"
                     )
                 },
             }

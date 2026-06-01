@@ -107,8 +107,6 @@ pub fn derive_mast_node_ext(input: TokenStream) -> TokenStream {
 fn get_mast_node_ext_methods() -> Vec<&'static str> {
     vec![
         "digest",
-        "before_enter",
-        "after_exit",
         "to_display",
         "to_pretty_print",
         "has_children",
@@ -133,26 +131,6 @@ fn generate_method_impl_for_trait_method(
             fn digest(&self) -> miden_crypto::Word {
                 match self {
                     #(#enum_name::#variant_names(field) => field.digest()),*
-                }
-            }
-        },
-        "before_enter" => quote! {
-            fn before_enter<'a, F>(&'a self, forest: &'a F) -> &'a [crate::mast::DecoratorId]
-            where
-                F: crate::mast::ExecutableMastForest + ?Sized,
-            {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.before_enter(forest)),*
-                }
-            }
-        },
-        "after_exit" => quote! {
-            fn after_exit<'a, F>(&'a self, forest: &'a F) -> &'a [crate::mast::DecoratorId]
-            where
-                F: crate::mast::ExecutableMastForest + ?Sized,
-            {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
                 }
             }
         },
@@ -274,7 +252,7 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Parse the data to ensure it's an enum
     let enum_data = match &input.data {
         Data::Enum(data) => data,
-        _ => panic!("EnumThispatch can only be derived for enums"),
+        _ => panic!("MastForestContributor can only be derived for enums"),
     };
 
     // Extract variant information
@@ -315,40 +293,15 @@ fn generate_mast_forest_contributor_impl(
             fn fingerprint_for_node(
                 &self,
                 forest: &crate::mast::MastForest,
-                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeFingerprint>,
-            ) -> Result<crate::mast::MastNodeFingerprint, crate::mast::MastForestError> {
+            ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
+                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest)),*
                 }
             }
 
             fn remap_children(self, remapping: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>) -> Self {
                 match self {
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.remap_children(remapping))),*
-                }
-            }
-
-            fn with_before_enter(self, decorators: impl Into<alloc::vec::Vec<crate::mast::DecoratorId>>) -> Self {
-                match self {
-                    #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_before_enter(decorators))),*
-                }
-            }
-
-            fn with_after_exit(self, decorators: impl Into<alloc::vec::Vec<crate::mast::DecoratorId>>) -> Self {
-                match self {
-                    #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_after_exit(decorators))),*
-                }
-            }
-
-            fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.append_before_enter(decorators)),*
-                }
-            }
-
-            fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.append_after_exit(decorators)),*
                 }
             }
 

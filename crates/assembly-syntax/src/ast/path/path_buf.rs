@@ -104,7 +104,7 @@ impl PathBuf {
         S: AsRef<str> + ?Sized,
     {
         let source = source.as_ref();
-        Path::new(source).to_absolute().into_owned()
+        Path::new(source).to_absolute().unwrap().into_owned()
     }
 
     /// Create a relative [Path] from a pre-validated string

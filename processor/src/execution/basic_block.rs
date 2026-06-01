@@ -38,12 +38,6 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
-
     // Finalize the clock cycle corresponding to the SPAN operation.
     finalize_clock_cycle_with_continuation(
         state.processor,
@@ -65,7 +59,7 @@ where
     // starting from the RESPAN preceding the batch (and there is no such RESPAN before the first
     // batch).
     if !basic_block_node.op_batches().is_empty() {
-        execute_op_batch(state, basic_block_node, 0, 0, 0, current_forest)?;
+        execute_op_batch(state, basic_block_node, node_id, 0, 0, 0, current_forest)?;
     }
 
     // Execute the rest of the batches.
@@ -101,6 +95,7 @@ where
     execute_op_batch(
         state,
         basic_block_node,
+        node_id,
         start_batch_index,
         start_op_idx_in_batch,
         batch_offset_in_block,
@@ -180,6 +175,7 @@ where
         execute_op_batch(
             state,
             basic_block_node,
+            node_id,
             batch_index,
             0,
             batch_offset_in_block,
@@ -218,13 +214,9 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }
 
 // HELPERS
@@ -236,6 +228,7 @@ where
 fn execute_op_batch<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block: &BasicBlockNode,
+    node_id: MastNodeId,
     batch_index: usize,
     start_op_idx: usize,
     batch_offset_in_block: usize,
@@ -250,11 +243,6 @@ where
 {
     let batch = &basic_block.op_batches()[batch_index];
 
-    // Get the node ID once since it doesn't change within the loop
-    let node_id = basic_block
-        .linked_id()
-        .expect("basic block node should be linked when executing operations");
-
     // Execute operations in the batch one by one
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
         let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
@@ -265,11 +253,6 @@ where
             state.continuation_stack,
             current_forest,
         );
-
-        state
-            .processor
-            .execute_decorators_for_op(node_id, op_idx_in_block, current_forest, state.host)
-            .map_break(InternalBreakReason::from)?;
 
         // Execute the operation.
         let operation_helpers = match op {

@@ -3,7 +3,7 @@ use core::cell::{Cell, RefCell};
 
 use miden_assembly_syntax::{
     ast::{self, GlobalItemIndex, Ident, Visibility},
-    library::ItemInfo,
+    module::ItemInfo,
 };
 
 use super::LinkStatus;

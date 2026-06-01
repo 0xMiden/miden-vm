@@ -564,7 +564,7 @@ fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
 fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
     let core_lib = CoreLibrary::default();
     miden_utils_testing::build_test_by_mode!(false, source, op_stack)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
 }
 
 // Signatures match the event-handler callback type required by `with_event_handler`.

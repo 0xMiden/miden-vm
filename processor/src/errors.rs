@@ -8,7 +8,7 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
-    BaseHost, ContextId, DebugError, Felt, TraceError, Word,
+    BaseHost, ContextId, Felt, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
@@ -153,24 +153,13 @@ pub enum AceEvalError {
 // HOST ERROR
 // ================================================================================================
 
-/// Error type for host-related operations (event handlers, debug handlers, trace handlers).
+/// Error type for host-related operations.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error("debug handler error: {err}")]
-    DebugHandlerError {
-        #[source]
-        err: DebugError,
-    },
-    #[error("trace handler error for trace ID {trace_id}: {err}")]
-    TraceHandlerError {
-        trace_id: u32,
-        #[source]
-        err: TraceError,
-    },
 }
 
 // IO ERROR
@@ -403,8 +392,8 @@ pub struct MerklePathVerificationFailedInner {
 /// Computes the label and source file for error context.
 ///
 /// This function is called by the extension traits to compute source location
-/// only when an error occurs. Since errors are rare, the cost of decorator
-/// traversal is acceptable.
+/// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
+/// acceptable.
 fn get_label_and_source_file<F>(
     op_idx: Option<usize>,
     mast_forest: &F,

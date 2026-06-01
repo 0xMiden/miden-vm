@@ -79,18 +79,6 @@ impl SyntaxTestContext {
         crate::parser::parse_forms(source)
     }
 
-    /// Parse the given source file into a vector of top-level [Form]s using a specific parser
-    /// backend.
-    #[cfg(any(test, feature = "testing"))]
-    #[track_caller]
-    pub fn parse_forms_with_backend(
-        &self,
-        source: Arc<SourceFile>,
-        backend: crate::parser::ParserBackend,
-    ) -> Result<Vec<Form>, Report> {
-        crate::parser::parse_forms_with_backend(source, backend)
-    }
-
     /// Parse the given source file into an executable [Module].
     ///
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically

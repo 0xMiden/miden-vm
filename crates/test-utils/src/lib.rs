@@ -14,7 +14,7 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -33,13 +33,14 @@ use miden_core::{
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
 };
+use miden_mast_package::Package;
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
     trace::ExecutionTrace,
 };
-#[cfg(not(target_family = "wasm"))]
-use miden_processor::{DefaultDebugHandler, trace::build_trace};
 use miden_processor::{
     DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
@@ -117,7 +118,7 @@ struct SourceCacheKey {
 }
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
-type CompileCacheValue = (Program, Option<KernelLibrary>);
+type CompileCacheValue = (Program, Option<Arc<Package>>);
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 type CompileCache = std::collections::HashMap<CompileCacheKey, CompileCacheValue>;
@@ -216,26 +217,10 @@ pub struct Test {
     pub kernel_source: Option<Arc<SourceFile>>,
     pub stack_inputs: StackInputs,
     pub advice_inputs: AdviceInputs,
-    pub in_debug_mode: bool,
-    pub libraries: Vec<Library>,
+    pub in_tracing_mode: bool,
+    pub libraries: Vec<Arc<Package>>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(Arc<Path>, String)>,
-}
-
-// BUFFER WRITER FOR TESTING
-// ================================================================================================
-
-/// A writer that buffers output in a String for testing debug output.
-#[derive(Default)]
-pub struct BufferWriter {
-    pub buffer: String,
-}
-
-impl core::fmt::Write for BufferWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.buffer.push_str(s);
-        Ok(())
-    }
 }
 
 impl Test {
@@ -243,7 +228,7 @@ impl Test {
     // --------------------------------------------------------------------------------------------
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
-    pub fn new(name: &str, source: &str, in_debug_mode: bool) -> Self {
+    pub fn new(name: &str, source: &str, in_tracing_mode: bool) -> Self {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
         Self {
@@ -252,7 +237,7 @@ impl Test {
             kernel_source: None,
             stack_inputs: StackInputs::default(),
             advice_inputs: AdviceInputs::default(),
-            in_debug_mode,
+            in_tracing_mode,
             libraries: Vec::default(),
             handlers: Vec::new(),
             add_modules: Vec::default(),
@@ -290,8 +275,8 @@ impl Test {
     }
 
     /// Adds a library to link in during assembly.
-    pub fn with_library(mut self, library: impl Into<Library>) -> Self {
-        self.libraries.push(library.into());
+    pub fn with_library(mut self, package: Arc<Package>) -> Self {
+        self.libraries.push(package);
         self
     }
 
@@ -372,9 +357,7 @@ impl Test {
         // execute the test
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_debugging(self.in_debug_mode)
-            .with_tracing(self.in_debug_mode);
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -442,7 +425,7 @@ impl Test {
     ///
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
-    pub fn compile(&self) -> Result<(Program, Option<KernelLibrary>), Report> {
+    pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
         use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
@@ -464,11 +447,13 @@ impl Test {
         }
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
-            let kernel_lib =
-                Assembler::new(self.source_manager.clone()).assemble_kernel(kernel).unwrap();
+            let kernel_lib = Assembler::new(self.source_manager.clone())
+                .assemble_kernel("kernel", kernel)
+                .map(Arc::<Package>::from)
+                .unwrap();
 
             (
-                Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone()),
+                Assembler::with_kernel(self.source_manager.clone(), kernel_lib.clone())?,
                 Some(kernel_lib),
             )
         } else {
@@ -487,11 +472,14 @@ impl Test {
                 assembler
             });
         // Debug mode is now always enabled
-        for library in &self.libraries {
-            assembler.link_dynamic_library(library).unwrap();
+        for package in &self.libraries {
+            assembler.link_package(package.clone(), Linkage::Dynamic).unwrap();
         }
 
-        let result = (assembler.assemble_program(self.source.clone())?, kernel_lib);
+        let result = (
+            assembler.assemble_program("program", self.source.clone())?.unwrap_program(),
+            kernel_lib,
+        );
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
@@ -547,7 +535,6 @@ impl Test {
                 stack_inputs,
                 self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
-                    .with_debugging(self.in_debug_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
@@ -576,45 +563,9 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true);
+            .map_err(ExecutionError::advice_error_no_context)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
-    }
-
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
-    /// the [`StackOutputs`] and a [`String`] containing all debug output.
-    ///
-    /// If the execution fails, the output is printed `stderr`.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
-        let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
-
-        let (program, host) = self.get_program_and_host();
-        let mut host = host
-            .with_source_manager(self.source_manager.clone())
-            .with_debug_handler(debug_handler);
-
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_debugging(true)
-            .with_tracing(true);
-
-        let stack_result = processor.execute_sync(&program, &mut host);
-
-        let debug_output = host.debug_handler().writer().buffer.clone();
-
-        match stack_result {
-            Ok(exec_output) => Ok((exec_output.stack, debug_output)),
-            Err(err) => {
-                // If we get an error, we print the output as an error
-                #[cfg(feature = "std")]
-                std::eprintln!("{debug_output}");
-                Err(err)
-            },
-        }
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -764,9 +715,7 @@ impl Test {
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_debugging(self.in_debug_mode)
-                .with_tracing(self.in_debug_mode);
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 
@@ -789,7 +738,7 @@ impl Test {
                 .iter()
                 .map(|(path, source)| (path.to_string(), source.clone()))
                 .collect(),
-            library_digests: self.libraries.iter().map(|library| *library.digest()).collect(),
+            library_digests: self.libraries.iter().map(|library| library.digest()).collect(),
         }
     }
 }

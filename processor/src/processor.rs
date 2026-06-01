@@ -1,14 +1,8 @@
-use core::ops::ControlFlow;
-
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, Felt, MemoryError, Word,
-    advice::AdviceError,
-    crypto::merkle::MerklePath,
-    errors::OperationError,
-    mast::{ExecutableMastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
+    ContextId, ExecutionError, Felt, MemoryError, Word, advice::AdviceError,
+    crypto::merkle::MerklePath, errors::OperationError, precompile::PrecompileTranscriptState,
 };
 
 // PROCESSOR
@@ -65,38 +59,6 @@ pub(crate) trait Processor: Sized {
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest;
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest;
-
-    /// Executes any decorator in a basic block that is to be executed before the operation at the
-    /// given index in the block.
-    fn execute_decorators_for_op<F>(
-        &self,
-        node_id: MastNodeId,
-        op_idx_in_block: usize,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest;
 }
 
 // SYSTEM INTERFACE

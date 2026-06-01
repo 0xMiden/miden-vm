@@ -75,7 +75,10 @@ mod tests;
 /// use miden_assembly::Assembler;
 /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 ///
-/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+/// let program = Assembler::default()
+///     .assemble_program("prg", "begin push.1 drop end")
+///     .unwrap()
+///     .unwrap_program();
 /// let mut host = DefaultHost::default();
 ///
 /// let trace_inputs = FastProcessor::new(StackInputs::default())
@@ -771,12 +774,9 @@ fn translate_snapshot_continuation_stack(
             Continuation::StartNode(id) => Continuation::StartNode(id),
             Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
             Continuation::FinishSplit(id) => Continuation::FinishSplit(id),
-            Continuation::FinishLoop { node_id, was_entered } => {
-                Continuation::FinishLoop { node_id, was_entered }
-            },
+            Continuation::FinishLoop(node_id) => Continuation::FinishLoop(node_id),
             Continuation::FinishCall(id) => Continuation::FinishCall(id),
             Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
-            Continuation::FinishExternal(id) => Continuation::FinishExternal(id),
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
             },
@@ -784,7 +784,6 @@ fn translate_snapshot_continuation_stack(
                 Continuation::Respan { node_id, batch_index }
             },
             Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
-            Continuation::AfterExitDecorators(id) => Continuation::AfterExitDecorators(id),
         };
         out.push_continuation(translated);
     }

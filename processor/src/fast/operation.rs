@@ -1,5 +1,3 @@
-use core::ops::ControlFlow;
-
 use miden_air::{
     Felt,
     trace::{RowIndex, chiplets::hasher::HasherState},
@@ -7,13 +5,11 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    mast::{ExecutableMastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
-use super::step::BreakReason;
 use crate::{
-    AdviceProvider, BaseHost, ContextId, ExecutionError,
+    AdviceProvider, ContextId, ExecutionError,
     errors::OperationError,
     fast::{FastProcessor, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
@@ -84,58 +80,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.pc_transcript = PrecompileTranscript::from_state(state);
-    }
-
-    #[inline(always)]
-    fn execute_before_enter_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        self.execute_before_enter_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_after_exit_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        self.execute_after_exit_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_decorators_for_op<F>(
-        &self,
-        node_id: MastNodeId,
-        op_idx_in_block: usize,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if self.should_execute_decorators() {
-            #[cfg(test)]
-            self.record_decorator_retrieval();
-
-            for &decorator_id in current_forest.decorator_indices_for_op(node_id, op_idx_in_block) {
-                let decorator = current_forest
-                    .decorator_by_id(decorator_id)
-                    .expect("decorator id must be valid");
-                self.execute_decorator(decorator, host)?;
-            }
-        }
-
-        ControlFlow::Continue(())
     }
 }
 

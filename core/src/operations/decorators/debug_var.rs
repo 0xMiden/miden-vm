@@ -15,7 +15,7 @@ use crate::{
 
 /// Debug information for tracking a source-level variable.
 ///
-/// This decorator provides debuggers with information about where a variable's
+/// This record provides debuggers with information about where a variable's
 /// value can be found at a particular point in the program execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -28,8 +28,8 @@ pub struct DebugVarInfo {
     /// If this is a function parameter, its 1-based index.
     arg_index: Option<NonZeroU32>,
     /// Source file location (file:line:column).
-    /// This should only be set when the location differs from the AssemblyOp decorator
-    /// location associated with the same instruction, to avoid package bloat.
+    /// This should only be set when the location differs from the AssemblyOp location associated
+    /// with the same instruction, to avoid package bloat.
     location: Option<FileLineCol>,
     /// Where to find the variable's value at this point
     value_location: DebugVarLocation,
@@ -78,13 +78,13 @@ impl DebugVarInfo {
     }
 
     /// Returns the source location if set.
-    /// This is only set when the location differs from the AssemblyOp decorator location.
+    /// This is only set when the location differs from the AssemblyOp location.
     pub fn location(&self) -> Option<&FileLineCol> {
         self.location.as_ref()
     }
 
     /// Sets the source location for this variable.
-    /// Only set this when the location differs from the AssemblyOp decorator location
+    /// Only set this when the location differs from the AssemblyOp location
     /// to avoid package bloat.
     pub fn set_location(&mut self, location: FileLineCol) {
         self.location = Some(location);
@@ -160,9 +160,9 @@ pub enum DebugVarLocation {
     /// global (typically `__stack_pointer`). The byte offset is divided by the
     /// element size (4 for i32) to get the Miden memory element address.
     FrameBase {
-        /// WASM global index whose runtime value provides the base address
+        /// WASM global index whose runtime value provides the base address.
         global_index: u32,
-        /// Byte offset from the base (may be positive or negative)
+        /// Byte offset from the base (may be positive or negative).
         byte_offset: i64,
     },
     /// Complex location described by expression bytes.
@@ -217,14 +217,14 @@ impl Serializable for DebugVarLocation {
                 target.write_u8(3);
                 target.write_bytes(&offset.to_le_bytes());
             },
+            Self::Expression(bytes) => {
+                target.write_u8(4);
+                bytes.write_into(target);
+            },
             Self::FrameBase { global_index, byte_offset } => {
                 target.write_u8(5);
                 target.write_u32(*global_index);
                 target.write_bytes(&byte_offset.to_le_bytes());
-            },
-            Self::Expression(bytes) => {
-                target.write_u8(4);
-                bytes.write_into(target);
             },
         }
     }
@@ -335,6 +335,10 @@ mod tests {
         assert_eq!(DebugVarLocation::Const(Felt::new_unchecked(42)).to_string(), "const(42)");
         assert_eq!(DebugVarLocation::Local(-3).to_string(), "FMP-3");
         assert_eq!(
+            DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 }.to_string(),
+            "global[20]-12"
+        );
+        assert_eq!(
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]).to_string(),
             "expr(10 20 30)"
         );
@@ -376,5 +380,15 @@ mod tests {
         let mut reader = SliceReader::new(&bytes);
         let deser = DebugVarInfo::read_from(&mut reader).unwrap();
         assert_eq!(deser, var);
+    }
+
+    #[test]
+    fn debug_var_info_set_value_location() {
+        let mut var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
+        var.set_value_location(DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 });
+        assert_eq!(
+            var.value_location(),
+            &DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 }
+        );
     }
 }

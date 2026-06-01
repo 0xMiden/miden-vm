@@ -208,9 +208,11 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
+            "program",
             r#"begin push.4294967296 push.1 u32assert2.err="value exceeded u32 range" end"#,
         )
-        .expect("program should assemble");
+        .expect("program should assemble")
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default());
@@ -246,8 +248,12 @@ fn test_u32assert_err_wrapper_assembled() {
     // error message makes it through the full execute_sync pipeline.
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
-        .assemble_program(r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#)
-        .expect("program should assemble");
+        .assemble_program(
+            "program",
+            r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#,
+        )
+        .expect("program should assemble")
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let exec_err = FastProcessor::new(StackInputs::default())
@@ -280,9 +286,11 @@ fn test_u32assertw_err_wrapper_assembled() {
     // Stack (top->bottom): 1 2 2^32 4 — element at position 2 is out of range
     let program = Assembler::new(source_manager)
         .assemble_program(
+            "program",
             r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
         )
-        .expect("program should assemble");
+        .expect("program should assemble")
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let exec_err = FastProcessor::new(StackInputs::default())
@@ -578,9 +586,7 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
     ];
 
     let mut forest = MastForest::new();
-    let node_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id = BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut forest).unwrap();
 
     for (op_idx, op) in ops.iter().enumerate() {
         let _ = execute_op(&mut processor, op, op_idx, &forest, node_id, &mut host, &mut tracer)?;

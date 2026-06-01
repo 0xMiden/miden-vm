@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use miden_assembly::{Library, serde::Deserializable};
+use miden_assembly::{package::Package, serde::Deserializable};
 use miden_core_lib::CoreLibrary;
 
 fn deserialize_core_lib(c: &mut Criterion) {
@@ -9,8 +9,8 @@ fn deserialize_core_lib(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(15));
     group.bench_function("read_from_bytes", |bench| {
         bench.iter(|| {
-            let _ = Library::read_from_bytes(CoreLibrary::SERIALIZED)
-                .expect("failed to read std masl!");
+            let _ = Package::read_from_bytes(CoreLibrary::SERIALIZED)
+                .expect("failed to read std package!");
         });
     });
 

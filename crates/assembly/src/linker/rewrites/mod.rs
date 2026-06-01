@@ -1,6 +1,6 @@
 mod module;
 
-use miden_assembly_syntax::{ast::GlobalItemIndex, library::ItemInfo};
+use miden_assembly_syntax::{ast::GlobalItemIndex, module::ItemInfo};
 
 pub use self::module::ModuleRewriter;
 use super::*;

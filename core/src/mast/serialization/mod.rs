@@ -11,24 +11,24 @@
 //! non-external digests before use. If a non-hashless payload is sent down the untrusted path,
 //! validation recomputes those digests and requires them to match the serialized values.
 //! Budgeted untrusted reads always bound wire counts during layout scanning via
-//! [`ByteReader::max_alloc`]. Callers that opt into validation budgeting also get a second check:
-//! - later stripped/hashless helper allocations are charged against an explicit validation budget
-//!   before the corresponding `Vec` or CSR scaffolding is created
-//! - the default convenience path uses a coarse validation budget derived from the input size; this
-//!   is intentionally a simple bound for common callers, not an exact peak-memory formula
+//! [`ByteReader::max_alloc`]. Validation also gets a second check:
+//! - later stripped/hashless helper allocations are charged against a validation budget before the
+//!   corresponding `Vec` or CSR scaffolding is created
+//! - that budget is derived from the wire budget by a coarse multiplier; this is intentionally a
+//!   simple bound for common callers, not an exact peak-memory formula
 //!
 //! The main layers fit together like this:
 //!
 //! ```text
 //! wire bytes
 //!     |
-//!     +--> ForestLayout -----------> SerializedMastForest --+
-//!     |        absolute offsets         structural view      |
+//!     +--> ForestLayout -----------> MastForestWireView ----+
+//!     |        absolute offsets         trusted cache view   |
 //!     |                                                     v
 //!     +--> UntrustedMastForest ----validate----> ResolvedSerializedForest ---> MastForest
 //!              bytes + parsed state                digest-backed view            trusted runtime
 //!
-//! MastForestView is the shared random-access API implemented by SerializedMastForest and
+//! MastForestView is the shared random-access API implemented by MastForestWireView and
 //! MastForest.
 //! ```
 //!
@@ -38,7 +38,6 @@
 //! - MAGIC (4 bytes) + FLAGS (1 byte) + VERSION (3 bytes)
 //!
 //! (Counts)
-//! - nodes count (`usize`)
 //! - internal nodes count (`usize`)
 //! - external nodes count (`usize`)
 //!
@@ -64,13 +63,14 @@
 //! - Advice map (`AdviceMap`)
 //!
 //! (DebugInfo section - omitted if FLAGS bit 0 is set)
-//! - Decorator data (raw bytes for decorator payloads)
-//! - String table (deduplicated strings)
-//! - Decorator infos (`Vec<DecoratorInfo>`)
 //! - Error codes map (`BTreeMap<u64, String>`)
-//! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
-//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
 //! - Procedure names map (`BTreeMap<Word, String>`)
+//! - Assembly operation data (raw bytes for AssemblyOp payloads)
+//! - Assembly operation string table (deduplicated strings)
+//! - Assembly operation infos (`Vec<AsmOpInfo>`)
+//! - OpToAsmOpId CSR (operation-indexed AssemblyOp metadata)
+//! - Debug variables (`Vec<DebugVarInfo>`)
+//! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
 //! In stripped format, the `DebugInfo` section is omitted and readers materialize an empty
 //! `DebugInfo`.
@@ -88,20 +88,21 @@
 //!
 //! Public entry points adopt these policies:
 //! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
-//! - [`SerializedMastForest::new`]: structural inspection for local tooling, including hashless
-//!   payloads; not an untrusted-validation entry point.
+//! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless payloads.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
-//!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted parsing plus
+//!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
 
 #[cfg(test)]
 use alloc::string::ToString;
 use alloc::{format, vec::Vec};
+use core::mem::size_of;
 
 use miden_utils_sync::OnceLockCompat;
 
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
+    Word,
     advice::AdviceMap,
     mast::node::MastNodeExt,
     serde::{
@@ -111,13 +112,14 @@ use crate::{
 };
 
 pub(crate) mod asm_op;
-pub(crate) mod decorator;
+use asm_op::AsmOpInfo;
 
 mod info;
 pub use info::{MastNodeEntry, MastNodeInfo};
 
 mod view;
-pub use view::MastForestView;
+use view::WireAdviceMapView;
+pub use view::{AdviceMapView, AdviceValueView, MastForestView};
 
 mod layout;
 pub(super) use layout::ForestLayout;
@@ -144,9 +146,6 @@ mod tests;
 /// Specifies an offset into the `node_data` section of an encoded [`MastForest`].
 type NodeDataOffset = u32;
 
-/// Specifies an offset into the `decorator_data` section of an encoded [`MastForest`].
-type DecoratorDataOffset = u32;
-
 /// Specifies an offset into the `strings_data` section of an encoded [`MastForest`].
 type StringDataOffset = usize;
 
@@ -169,8 +168,8 @@ type StringIndex = usize;
 /// It is deliberately conservative and exists to make the default
 /// [`crate::mast::UntrustedMastForest::read_from_bytes`] path usable without forcing callers to
 /// size each helper allocation themselves. Callers with stricter limits should use
-/// [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`] and choose explicit parsing
-/// and validation budgets.
+/// [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`] and choose an explicit wire
+/// budget; the validation helper budget is derived from it.
 const DEFAULT_UNTRUSTED_ALLOCATION_BUDGET_MULTIPLIER: usize = 7;
 
 /// Byte-read budget multiplier for trusted full deserialization from a byte slice.
@@ -200,8 +199,7 @@ const FLAG_STRIPPED: u8 = 0x01;
 /// External digests still remain serialized in their own section because they cannot be rebuilt
 /// from local structure. This flag implies [`FLAG_STRIPPED`] because no supported consumer treats
 /// wire `DebugInfo` as trusted in hashless mode: [`crate::mast::MastForest`] rejects `HASHLESS`,
-/// [`SerializedMastForest::new`] accepts it only for structural inspection, and the untrusted path
-/// rebuilds the data it actually trusts before use.
+/// and the untrusted path rebuilds the data it actually trusts before use.
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
 /// Mask for reserved flag bits that must be zero.
@@ -230,7 +228,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Dropped the serialized decorator-count field because it was not used by the wire layout or
 ///   deserializers. Before any public release on this branch, the same unreleased wire version also
 ///   grew explicit internal/external node counts in the header.
-const VERSION: [u8; 3] = [0, 0, 3];
+/// - [0, 0, 4]: Removed debug and trace decorator variants from serialized decorators, then dropped
+///   the unreleased decorator wire slots entirely.
+const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -275,7 +275,7 @@ impl MastForest {
         roots.write_into(target);
 
         let mut mast_node_entries = Vec::with_capacity(self.nodes.len());
-        let mut external_digests = Vec::new();
+        let mut external_digests = Vec::with_capacity(external_node_count);
         let mut node_hashes = Vec::new();
 
         for mast_node in self.nodes.iter() {
@@ -353,9 +353,9 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     size += basic_block_len.get_size_hint() + basic_block_len;
 
     size += node_count * MastNodeEntry::SERIALIZED_SIZE;
-    size += external_count * crate::Word::min_serialized_size();
+    size += external_count * Word::min_serialized_size();
     if !hashless {
-        size += non_external_count * crate::Word::min_serialized_size();
+        size += non_external_count * Word::min_serialized_size();
     }
     size += forest.advice_map.serialized_size_hint();
     if !stripped {
@@ -365,11 +365,29 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     size
 }
 
-/// A zero-copy structural view over serialized MAST forest bytes.
+/// Trusted read backing mode for read-only MAST forest access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MastForestReadMode {
+    /// Deserialize the full trusted cache into a materialized [`MastForest`].
+    Materialized,
+    /// Borrow complete trusted cache bytes and serve read-only data by random access.
+    WireBacked,
+}
+
+/// Read-only trusted MAST forest handle.
+#[derive(Debug)]
+pub enum MastForestReadView<'a> {
+    /// A fully materialized forest.
+    Materialized(MastForest),
+    /// A trusted wire-backed cache view.
+    WireBacked(MastForestWireView<'a>),
+}
+
+/// A trusted wire-backed view over serialized MAST forest bytes.
 ///
-/// This view accepts full, stripped, and hashless payloads. It validates the header and the
-/// fixed-width structural sections needed for random access, but it does not fully materialize the
-/// forest.
+/// This view accepts complete full or stripped payloads with hashes. It validates the header and
+/// the fixed-width structural sections needed for random access, but it does not fully materialize
+/// the forest. Hashless payloads are rejected because trusted cache bytes must be complete.
 ///
 /// Use this when callers need random access to roots or node metadata without deserializing the
 /// full forest. For strict trusted deserialization, use
@@ -379,12 +397,12 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 ///
 /// ```
 /// use miden_core::{
-///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
 ///     operations::Operation,
 /// };
 ///
 /// let mut forest = MastForest::new();
-/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
 ///     .add_to_forest(&mut forest)
 ///     .unwrap();
 /// forest.make_root(block_id);
@@ -392,30 +410,31 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 /// let mut bytes = Vec::new();
 /// forest.write_stripped(&mut bytes);
 ///
-/// let view = SerializedMastForest::new(&bytes).unwrap();
+/// let view = MastForestWireView::new(&bytes).unwrap();
 /// assert_eq!(view.node_count(), forest.nodes().len());
 /// assert!(view.node_info_at(0).is_ok());
 /// ```
 #[derive(Debug)]
-pub struct SerializedMastForest<'a> {
+pub struct MastForestWireView<'a> {
     bytes: &'a [u8],
     flags: WireFlags,
     layout: ForestLayout,
+    advice_map: WireAdviceMapView<'a>,
     resolved: OnceLockCompat<Result<ResolvedSerializedForest<'a>, DeserializationError>>,
 }
 
-impl<'a> SerializedMastForest<'a> {
+impl<'a> MastForestWireView<'a> {
     /// Creates a new view from serialized bytes.
     ///
-    /// The input may be full, stripped, or hashless format.
+    /// The input may be full or stripped format, but must include all node hashes.
     /// Structural parsing is delegated to the same single-pass scanner used by reader-based
     /// deserialization paths.
     ///
-    /// This constructor is layout-oriented: it validates the header and sections needed for
-    /// node/roots/random-access metadata only. It does not validate or fully parse trailing
-    /// `AdviceMap` / `DebugInfo` payloads.
+    /// This constructor validates the header and sections needed for node/roots/random-access
+    /// metadata, indexes `AdviceMap` keys for on-demand lookup, and length-walks any trailing
+    /// `DebugInfo` payload before ignoring it.
     ///
-    /// Treat this as a trusted inspection API, not as an untrusted-validation entry point. It is
+    /// Treat this as a trusted cache API, not as an untrusted-validation entry point. It is
     /// appropriate for local tools that need random access over serialized structure, but callers
     /// handling adversarial bytes should use [`crate::mast::UntrustedMastForest`] instead.
     ///
@@ -424,32 +443,25 @@ impl<'a> SerializedMastForest<'a> {
     /// - verify that serialized non-external digests match the structure they describe
     /// - check topological ordering / forward-reference constraints
     /// - validate basic-block batch invariants or procedure-name-root consistency
-    /// - fully parse or validate trailing `AdviceMap` / `DebugInfo` payloads
-    /// - provide a bounded-work guarantee for hashless digest-backed inspection
+    /// - materialize or expose trailing `DebugInfo` payloads
     ///
     /// For strict full-payload validation, use
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
-    /// Wire flags describe serializer intent, not trust policy. This constructor accepts
-    /// hashless payloads for inspection even though trusted [`crate::mast::MastForest`]
-    /// deserialization rejects them.
-    ///
     /// Digest lookup follows the wire layout:
-    /// - If the internal-hash section is present, non-external node digests are read from it.
-    /// - If the internal-hash section is absent, the first digest-backed access rebuilds all
-    ///   non-external node digests from structure and caches them.
-    /// - External node digests are always read from the external-digest section.
+    /// - Non-external node digests are read from the internal-hash section.
+    /// - External node digests are read from the external-digest section.
     ///
     /// # Examples
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
     /// };
     ///
     /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
     ///     .add_to_forest(&mut forest)
     ///     .unwrap();
     /// forest.make_root(block_id);
@@ -457,18 +469,21 @@ impl<'a> SerializedMastForest<'a> {
     /// let mut bytes = Vec::new();
     /// forest.write_stripped(&mut bytes);
     ///
-    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// let view = MastForestWireView::new(&bytes).unwrap();
     /// assert_eq!(view.node_count(), 1);
     /// ```
     pub fn new(bytes: &'a [u8]) -> Result<Self, DeserializationError> {
         let mut reader = SliceReader::new(bytes);
         let mut scanner = TrackingReader::new(&mut reader);
-        let (flags, layout) = read_header_and_scan_layout(&mut scanner, true)?;
+        let (flags, layout) = read_header_and_scan_layout(&mut scanner, false)?;
+        let advice_map = WireAdviceMapView::new(bytes, layout.advice_map_offset())?;
+        check_ignored_debug_payload(bytes, flags, advice_map.end_offset())?;
 
         Ok(Self {
             bytes,
             flags,
             layout,
+            advice_map,
             resolved: OnceLockCompat::new(),
         })
     }
@@ -476,11 +491,6 @@ impl<'a> SerializedMastForest<'a> {
     /// Returns the number of nodes in the serialized forest.
     pub fn node_count(&self) -> usize {
         self.layout.node_count
-    }
-
-    /// Returns `true` when the wire header says that the internal-hash section is omitted.
-    pub fn is_hashless(&self) -> bool {
-        self.flags.is_hashless()
     }
 
     /// Returns `true` when the wire header says that the `DebugInfo` section is omitted.
@@ -502,21 +512,18 @@ impl<'a> SerializedMastForest<'a> {
 
     /// Returns the `MastNodeInfo` at the specified index.
     ///
-    /// On hashless payloads, this may trigger the first digest-backed access and therefore the
-    /// one-time rebuild of the non-external digest table described in [`Self::node_digest_at`].
-    ///
     /// Returns an error if `index >= self.node_count()`.
     ///
     /// # Examples
     ///
     /// ```
     /// use miden_core::{
-    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
     /// };
     ///
     /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
     ///     .add_to_forest(&mut forest)
     ///     .unwrap();
     /// forest.make_root(block_id);
@@ -524,7 +531,7 @@ impl<'a> SerializedMastForest<'a> {
     /// let mut bytes = Vec::new();
     /// forest.write_stripped(&mut bytes);
     ///
-    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// let view = MastForestWireView::new(&bytes).unwrap();
     /// assert!(view.node_info_at(0).is_ok());
     /// ```
     pub fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
@@ -543,18 +550,14 @@ impl<'a> SerializedMastForest<'a> {
 
     /// Returns the digest for the node at the specified index.
     ///
-    /// This resolves digests lazily. If the internal-hash section is absent, the first
-    /// digest-backed access rebuilds all non-external node digests and caches them.
-    ///
-    /// This means the hashless cost model is:
-    /// - `node_count()`, `node_entry_at()`, and `procedure_root_at()` stay cheap and structural
-    /// - the first `node_digest_at()` / `node_info_at()` call does `O(node_count)` digest rebuild
-    ///   work and allocates the cached digest table
-    /// - later digest lookups reuse that cache
-    ///
     /// Returns an error if `index >= self.node_count()`.
-    pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
+    pub fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
+    }
+
+    /// Returns a read-only view over the serialized forest advice map.
+    pub fn advice_map(&self) -> AdviceMapView<'_> {
+        AdviceMapView::wire(&self.advice_map)
     }
 
     fn resolved(&self) -> Result<&ResolvedSerializedForest<'a>, DeserializationError> {
@@ -565,25 +568,289 @@ impl<'a> SerializedMastForest<'a> {
     }
 }
 
-impl MastForestView for SerializedMastForest<'_> {
+fn check_ignored_debug_payload(
+    bytes: &[u8],
+    flags: WireFlags,
+    debug_info_offset: usize,
+) -> Result<(), DeserializationError> {
+    let payload = bytes.get(debug_info_offset..).ok_or(DeserializationError::UnexpectedEOF)?;
+    if flags.is_stripped() {
+        if payload.is_empty() {
+            return Ok(());
+        }
+        log::warn!(
+            "MastForestWireView ignored {} trailing bytes after a STRIPPED MastForest payload",
+            payload.len()
+        );
+        return Ok(());
+    }
+
+    if payload.is_empty() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+
+    let mut reader = SliceReader::new(payload);
+    skip_debug_info(&mut reader)?;
+    if reader.has_more_bytes() {
+        return Err(DeserializationError::InvalidValue(
+            "extra bytes after DebugInfo section".into(),
+        ));
+    }
+
+    log::warn!(
+        "MastForestWireView ignored {} bytes of DebugInfo because MastForestView is debug-less",
+        payload.len()
+    );
+    Ok(())
+}
+
+fn skip_debug_info<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    skip_btree_map_u64_string(source)?;
+    skip_btree_map_word_string(source)?;
+    skip_len_prefixed_bytes(source)?; // asm_op_data
+    skip_string_table(source)?;
+    skip_fixed_vec(source, AsmOpInfo::min_serialized_size())?;
+    skip_csr_operation_id_pairs(source)?;
+    skip_debug_var_infos(source)?;
+    skip_op_to_u32_ids(source)?;
+    Ok(())
+}
+
+fn skip_string_table<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    skip_usize_vec(source)?;
+    skip_len_prefixed_bytes(source)
+}
+
+fn skip_fixed_vec<R: ByteReader>(
+    source: &mut R,
+    element_size: usize,
+) -> Result<(), DeserializationError> {
+    let len = source.read_usize()?;
+    let byte_len = len.checked_mul(element_size).ok_or_else(|| {
+        DeserializationError::InvalidValue("fixed-width vector length overflow".into())
+    })?;
+    source.read_slice(byte_len).map(|_| ())
+}
+
+fn skip_btree_map_u64_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let len = source.read_usize()?;
+    for _ in 0..len {
+        source.read_u64()?;
+        skip_string(source)?;
+    }
+    Ok(())
+}
+
+fn skip_btree_map_word_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let len = source.read_usize()?;
+    for _ in 0..len {
+        Word::read_from(source)?;
+        skip_string(source)?;
+    }
+    Ok(())
+}
+
+fn skip_op_to_u32_ids<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    skip_u32_vec(source)?;
+    skip_usize_vec(source)?;
+    skip_usize_vec(source)
+}
+
+fn skip_csr_operation_id_pairs<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let data_len = source.read_usize()?;
+    for _ in 0..data_len {
+        source.read_usize()?;
+        source.read_u32()?;
+    }
+    skip_usize_vec(source)
+}
+
+fn skip_debug_var_infos<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let len = source.read_usize()?;
+    for _ in 0..len {
+        skip_string(source)?;
+        skip_debug_var_location(source)?;
+        skip_option(source, |source| source.read_u32().map(|_| ()))?;
+        skip_option(source, |source| {
+            let value = source.read_u32()?;
+            if value == 0 {
+                return Err(DeserializationError::InvalidValue(
+                    "arg_index must be non-zero".into(),
+                ));
+            }
+            Ok(())
+        })?;
+        skip_option(source, skip_file_line_col)?;
+    }
+    Ok(())
+}
+
+fn skip_debug_var_location<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    match source.read_u8()? {
+        0 => source.read_u8().map(|_| ()),
+        1 => source.read_u32().map(|_| ()),
+        2 => source.read_u64().map(|_| ()),
+        3 => source.read_array::<2>().map(|_| ()),
+        4 => skip_len_prefixed_bytes(source),
+        5 => {
+            source.read_u32()?;
+            source.read_array::<8>().map(|_| ())
+        },
+        tag => Err(DeserializationError::InvalidValue(format!(
+            "invalid DebugVarLocation tag: {tag}"
+        ))),
+    }
+}
+
+fn skip_file_line_col<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    skip_string(source)?;
+    for label in ["line", "column"] {
+        let value = source.read_u32()?;
+        if value == 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "{label} number cannot be zero"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn skip_option<R, F>(source: &mut R, skip_value: F) -> Result<(), DeserializationError>
+where
+    R: ByteReader,
+    F: FnOnce(&mut R) -> Result<(), DeserializationError>,
+{
+    if source.read_bool()? {
+        skip_value(source)
+    } else {
+        Ok(())
+    }
+}
+
+fn skip_u32_vec<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    skip_fixed_vec(source, size_of::<u32>())
+}
+
+fn skip_usize_vec<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let len = source.read_usize()?;
+    for _ in 0..len {
+        source.read_usize()?;
+    }
+    Ok(())
+}
+
+fn skip_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    let bytes = read_len_prefixed_bytes(source)?;
+    core::str::from_utf8(bytes)
+        .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
+    Ok(())
+}
+
+fn skip_len_prefixed_bytes<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
+    read_len_prefixed_bytes(source).map(|_| ())
+}
+
+fn read_len_prefixed_bytes<R: ByteReader>(source: &mut R) -> Result<&[u8], DeserializationError> {
+    let len = source.read_usize()?;
+    source.read_slice(len)
+}
+
+impl MastForest {
+    /// Reads trusted MAST forest bytes using the requested backing mode.
+    ///
+    /// [`MastForestReadMode::Materialized`] is equivalent to [`Self::read_from_bytes`].
+    /// [`MastForestReadMode::WireBacked`] returns a trusted random-access cache view and rejects
+    /// hashless payloads because trusted cache bytes must be complete.
+    pub fn read_view_from_bytes(
+        bytes: &[u8],
+        mode: MastForestReadMode,
+    ) -> Result<MastForestReadView<'_>, DeserializationError> {
+        match mode {
+            MastForestReadMode::Materialized => {
+                Self::read_from_bytes(bytes).map(MastForestReadView::Materialized)
+            },
+            MastForestReadMode::WireBacked => {
+                MastForestWireView::new(bytes).map(MastForestReadView::WireBacked)
+            },
+        }
+    }
+}
+
+impl MastForestView for MastForestWireView<'_> {
     fn node_count(&self) -> usize {
-        SerializedMastForest::node_count(self)
+        MastForestWireView::node_count(self)
     }
 
     fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
-        SerializedMastForest::node_entry_at(self, index)
+        MastForestWireView::node_entry_at(self, index)
     }
 
-    fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
-        SerializedMastForest::node_digest_at(self, index)
+    fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
+        MastForestWireView::node_digest_at(self, index)
     }
 
     fn procedure_root_count(&self) -> usize {
-        SerializedMastForest::procedure_root_count(self)
+        MastForestWireView::procedure_root_count(self)
     }
 
     fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError> {
-        SerializedMastForest::procedure_root_at(self, index)
+        MastForestWireView::procedure_root_at(self, index)
+    }
+
+    fn advice_map(&self) -> AdviceMapView<'_> {
+        MastForestWireView::advice_map(self)
+    }
+}
+
+impl MastForestView for MastForestReadView<'_> {
+    fn node_count(&self) -> usize {
+        match self {
+            MastForestReadView::Materialized(forest) => MastForestView::node_count(forest),
+            MastForestReadView::WireBacked(view) => view.node_count(),
+        }
+    }
+
+    fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
+        match self {
+            MastForestReadView::Materialized(forest) => {
+                MastForestView::node_entry_at(forest, index)
+            },
+            MastForestReadView::WireBacked(view) => view.node_entry_at(index),
+        }
+    }
+
+    fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
+        match self {
+            MastForestReadView::Materialized(forest) => {
+                MastForestView::node_digest_at(forest, index)
+            },
+            MastForestReadView::WireBacked(view) => view.node_digest_at(index),
+        }
+    }
+
+    fn procedure_root_count(&self) -> usize {
+        match self {
+            MastForestReadView::Materialized(forest) => {
+                MastForestView::procedure_root_count(forest)
+            },
+            MastForestReadView::WireBacked(view) => view.procedure_root_count(),
+        }
+    }
+
+    fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError> {
+        match self {
+            MastForestReadView::Materialized(forest) => {
+                MastForestView::procedure_root_at(forest, index)
+            },
+            MastForestReadView::WireBacked(view) => view.procedure_root_at(index),
+        }
+    }
+
+    fn advice_map(&self) -> AdviceMapView<'_> {
+        match self {
+            MastForestReadView::Materialized(forest) => MastForestView::advice_map(forest),
+            MastForestReadView::WireBacked(view) => view.advice_map(),
+        }
     }
 }
 
@@ -605,7 +872,7 @@ impl MastForestView for MastForest {
         Ok(MastNodeEntry::new(node, ops_offset))
     }
 
-    fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
+    fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError> {
         self.nodes.as_slice().get(index).map(MastNode::digest).ok_or_else(|| {
             DeserializationError::InvalidValue(format!("node index {index} out of bounds"))
         })
@@ -624,23 +891,31 @@ impl MastForestView for MastForest {
             ))
         })
     }
+
+    fn advice_map(&self) -> AdviceMapView<'_> {
+        AdviceMapView::materialized(&self.advice_map)
+    }
 }
 
 // TEST HELPERS
 // ================================================================================================
 
 #[cfg(test)]
-impl SerializedMastForest<'_> {
-    fn advice_map_offset(&self) -> usize {
-        self.layout.advice_map_offset()
+impl MastForestWireView<'_> {
+    fn debug_info_offset(&self) -> usize {
+        self.advice_map.end_offset()
     }
 
     fn node_entry_offset(&self) -> usize {
-        self.layout.node_entry_offset
+        self.layout.node_entry_offset()
+    }
+
+    fn external_digest_offset(&self) -> usize {
+        self.layout.external_digest_offset()
     }
 
     fn node_hash_offset(&self) -> Option<usize> {
-        self.layout.node_hash_offset
+        self.layout.node_hash_offset()
     }
 
     fn digest_slot_at(&self, index: usize) -> usize {
@@ -788,7 +1063,7 @@ fn decode_from_reader_inner<R: ByteReader>(
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
-    debug_assert_eq!(recording.offset(), layout.advice_map_offset);
+    debug_assert_eq!(recording.offset(), layout.advice_map_offset());
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {

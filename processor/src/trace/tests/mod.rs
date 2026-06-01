@@ -70,9 +70,8 @@ pub fn build_trace_from_program_with_stack(
 pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
 
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let basic_block_id =
+        BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -90,9 +89,8 @@ pub fn build_trace_from_ops_with_inputs(
     advice_inputs: AdviceInputs,
 ) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let basic_block_id =
+        BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);

@@ -2,6 +2,16 @@ const U32_MAX = 0xFFFFFFFF
 
 # ===== ADDITION ==================================================================================
 
+#! Performs addition of two unsigned 128 bit integers discarding the overflow.
+#!
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a + b) % 2^128
+pub proc wrapping_add(b: u128, a: u128) -> u128
+    exec.overflowing_add
+    drop
+end
+
 #! Performs addition of two unsigned 128 bit integers preserving the overflow.
 #!
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
@@ -51,17 +61,17 @@ pub proc widening_add(b: u128, a: u128) -> (u128, i1)
     movdn.4
 end
 
-#! Performs addition of two unsigned 128 bit integers discarding the overflow.
+# ===== SUBTRACTION ===============================================================================
+
+#! Performs subtraction of two unsigned 128 bit integers discarding the underflow.
 #!
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a + b) % 2^128
-pub proc wrapping_add(b: u128, a: u128) -> u128
-    exec.overflowing_add
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a - b) % 2^128
+pub proc wrapping_sub(b: u128, a: u128) -> u128
+    exec.overflowing_sub
     drop
 end
-
-# ===== SUBTRACTION ===============================================================================
 
 #! Performs subtraction of two unsigned 128 bit integers preserving the underflow.
 #!
@@ -128,17 +138,127 @@ pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
     movup.4                     # [underflow, c0, c1, c2, c3]
 end
 
-#! Performs subtraction of two unsigned 128 bit integers discarding the underflow.
-#!
+# ===== MULTIPLICATION ============================================================================
+
+#! Performs multiplication of two unsigned 128 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a - b) % 2^128
-pub proc wrapping_sub(b: u128, a: u128) -> u128
-    exec.overflowing_sub
-    drop
-end
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a * b) % 2^128
+#!
+#! Uses schoolbook multiplication with u32wrapping_madd for products contributing to c3
+#! since overflow there doesn't affect the result.
+pub proc wrapping_mul(b: u128, a: u128) -> u128
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # position:  0     1     2     3     4     5     6     7
+    #
+    # u32widening_mul: [b, a] -> [lo, hi] computes a*b
+    # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
-# ===== MULTIPLICATION ============================================================================
+    # move a limbs to front for easier access
+    movup.7 movup.7 movup.7 movup.7
+    # now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
+    # position: 0     1     2     3     4     5     6     7
+
+    # === column 0: c0 ===
+    # a0 * b0
+    dup.4 dup.1                 # [a0, b0, a0, a1, a2, a3, b0, b1, b2, b3]
+    u32widening_mul             # [c0, o0, a0, a1, a2, a3, b0, b1, b2, b3]
+    movdn.9                     # [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    # stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    # position: 0   1     2     3     4     5     6     7     8     9
+
+    # === column 1: c1 ===
+    # a1 * b0 + o0: [c, b, a] for madd where c=o0, b=b0, a=a1
+    dup.5 dup.3                 # [a1, b0, o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    u32widening_madd            # [p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+
+    # a0 * b1 + p1: [c, b, a] where c=p1, b=b1, a=a0
+    dup.7 dup.3                 # [a0, b1, p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    u32widening_madd            # [c1, o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    movdn.11                    # [o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
+    # sum o1a + o1b, tracking carry for column 2
+    u32widening_add             # [o1_sum, o1_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
+    swap movdn.11               # [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    # stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    # position:   0      1     2     3     4     5     6     7     8     9    10        11
+
+    # === column 2: c2 ===
+    # a2 * b0 + o1_sum: [c, b, a] where c=o1_sum, b=b0, a=a2
+    dup.5 dup.4                 # [a2, b0, o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    u32widening_madd            # [p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+
+    # a1 * b1 + p2a
+    dup.7 dup.4                 # [a1, b1, p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    u32widening_madd            # [p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+
+    # a0 * b2 + p2b
+    dup.9 dup.4                 # [a0, b2, p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    u32widening_madd            # [c2, o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    movdn.13                    # [o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
+    # stack has 15 elements: o1_carry at position 14, c2 at position 13
+    # sum o2a + o2b + o2c + o1_carry for carry into column 3
+    u32widening_add3            # [o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
+    # stack has 14 elements: o1_carry at position 13, c2 at position 12
+    movup.13                    # [o1_carry, o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    u32widening_add             # [o2_sum, o2_carry2, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # combine carries: o2_carry1 + o2_carry2 (will be at most 2, fits in u32)
+    swap movup.2 add            # [o2_total_carry, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    swap                        # [o2_sum, o2_total_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+
+    # === column 3: c3 (overflow discarded) ===
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # 13 elements
+    # for wrapping_mul, o2_carry represents overflow beyond 128 bits - discard it now
+    swap drop                   # [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # stack: [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0      1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements
+
+    # a3 * b0 + o2_sum
+    dup.5 dup.5                 # dup.5 gets b0, then dup.5 gets a3
+                                # [a3, b0, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    u32wrapping_madd            # [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # stack: [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:  0    1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements
+
+    # a2 * b1 + p3a
+    dup.6 dup.4                 # dup.6 gets b1, then dup.4 gets a2
+                                # [a2, b1, p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    u32wrapping_madd            # [p3b, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+
+    # a1 * b2 + p3b
+    dup.7 dup.3                 # dup.7 gets b2, then dup.3 gets a1
+                                # [a1, b2, p3b, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    u32wrapping_madd            # [p3c, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+
+    # a0 * b3 + p3c
+    dup.8 dup.2                 # dup.8 gets b3, then dup.2 gets a0
+                                # [a0, b3, p3c, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    u32wrapping_madd            # [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # stack: [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements; extract c0, c1, c2 from positions 9, 10, 11
+    movup.9                     # [c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c1, c2]
+    movup.10                    # [c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c2]
+    movup.11                    # [c2, c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3]
+    movup.3                     # [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
+    # stack: [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
+    # position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements; need to drop 8 elements (a and b limbs)
+    swapw                       # [a0, a1, a2, a3, c3, c2, c1, c0, b0, b1, b2, b3]
+    dropw                       # [c3, c2, c1, c0, b0, b1, b2, b3]
+    swapw                       # [b0, b1, b2, b3, c3, c2, c1, c0]
+    dropw                       # [c3, c2, c1, c0]
+
+    # rearrange from [c3, c2, c1, c0] to [c0, c1, c2, c3]
+    movdn.3                     # [c2, c1, c0, c3]
+    movdn.2                     # [c1, c0, c2, c3]
+    swap                        # [c0, c1, c2, c3]
+end
 
 #! Performs multiplication of two unsigned 128 bit integers preserving the overflow.
 #!
@@ -322,126 +442,6 @@ end
 pub proc widening_mul(b: u128, a: u128) -> (u128, i1)
     exec.overflowing_mul
     movdn.4
-end
-
-#! Performs multiplication of two unsigned 128 bit integers discarding the overflow.
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a * b) % 2^128
-#!
-#! Uses schoolbook multiplication with u32wrapping_madd for products contributing to c3
-#! since overflow there doesn't affect the result.
-pub proc wrapping_mul(b: u128, a: u128) -> u128
-    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # position:  0     1     2     3     4     5     6     7
-    #
-    # u32widening_mul: [b, a] -> [lo, hi] computes a*b
-    # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
-
-    # move a limbs to front for easier access
-    movup.7 movup.7 movup.7 movup.7
-    # now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
-    # position: 0     1     2     3     4     5     6     7
-
-    # === column 0: c0 ===
-    # a0 * b0
-    dup.4 dup.1                 # [a0, b0, a0, a1, a2, a3, b0, b1, b2, b3]
-    u32widening_mul             # [c0, o0, a0, a1, a2, a3, b0, b1, b2, b3]
-    movdn.9                     # [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # position: 0   1     2     3     4     5     6     7     8     9
-
-    # === column 1: c1 ===
-    # a1 * b0 + o0: [c, b, a] for madd where c=o0, b=b0, a=a1
-    dup.5 dup.3                 # [a1, b0, o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    u32widening_madd            # [p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-
-    # a0 * b1 + p1: [c, b, a] where c=p1, b=b1, a=a0
-    dup.7 dup.3                 # [a0, b1, p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    u32widening_madd            # [c1, o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    movdn.11                    # [o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
-    # sum o1a + o1b, tracking carry for column 2
-    u32widening_add             # [o1_sum, o1_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
-    swap movdn.11               # [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # position:   0      1     2     3     4     5     6     7     8     9    10        11
-
-    # === column 2: c2 ===
-    # a2 * b0 + o1_sum: [c, b, a] where c=o1_sum, b=b0, a=a2
-    dup.5 dup.4                 # [a2, b0, o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    u32widening_madd            # [p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-
-    # a1 * b1 + p2a
-    dup.7 dup.4                 # [a1, b1, p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    u32widening_madd            # [p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-
-    # a0 * b2 + p2b
-    dup.9 dup.4                 # [a0, b2, p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    u32widening_madd            # [c2, o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    movdn.13                    # [o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # stack has 15 elements: o1_carry at position 14, c2 at position 13
-    # sum o2a + o2b + o2c + o1_carry for carry into column 3
-    u32widening_add3            # [o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # stack has 14 elements: o1_carry at position 13, c2 at position 12
-    movup.13                    # [o1_carry, o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    u32widening_add             # [o2_sum, o2_carry2, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # combine carries: o2_carry1 + o2_carry2 (will be at most 2, fits in u32)
-    swap movup.2 add            # [o2_total_carry, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    swap                        # [o2_sum, o2_total_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
-
-    # === column 3: c3 (overflow discarded) ===
-    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
-    # 13 elements
-    # for wrapping_mul, o2_carry represents overflow beyond 128 bits - discard it now
-    swap drop                   # [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # stack: [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # position:   0      1     2     3     4     5     6     7     8     9    10    11
-    # 12 elements
-
-    # a3 * b0 + o2_sum
-    dup.5 dup.5                 # dup.5 gets b0, then dup.5 gets a3
-                                # [a3, b0, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    u32wrapping_madd            # [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # stack: [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # position:  0    1     2     3     4     5     6     7     8     9    10    11
-    # 12 elements
-
-    # a2 * b1 + p3a
-    dup.6 dup.4                 # dup.6 gets b1, then dup.4 gets a2
-                                # [a2, b1, p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    u32wrapping_madd            # [p3b, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-
-    # a1 * b2 + p3b
-    dup.7 dup.3                 # dup.7 gets b2, then dup.3 gets a1
-                                # [a1, b2, p3b, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    u32wrapping_madd            # [p3c, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-
-    # a0 * b3 + p3c
-    dup.8 dup.2                 # dup.8 gets b3, then dup.2 gets a0
-                                # [a0, b3, p3c, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    u32wrapping_madd            # [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # stack: [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # position: 0     1     2     3     4     5     6     7     8     9    10    11
-    # 12 elements; extract c0, c1, c2 from positions 9, 10, 11
-    movup.9                     # [c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c1, c2]
-    movup.10                    # [c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c2]
-    movup.11                    # [c2, c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3]
-    movup.3                     # [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
-    # stack: [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
-    # position: 0     1     2     3     4     5     6     7     8     9    10    11
-    # 12 elements; need to drop 8 elements (a and b limbs)
-    swapw                       # [a0, a1, a2, a3, c3, c2, c1, c0, b0, b1, b2, b3]
-    dropw                       # [c3, c2, c1, c0, b0, b1, b2, b3]
-    swapw                       # [b0, b1, b2, b3, c3, c2, c1, c0]
-    dropw                       # [c3, c2, c1, c0]
-
-    # rearrange from [c3, c2, c1, c0] to [c0, c1, c2, c3]
-    movdn.3                     # [c2, c1, c0, c3]
-    movdn.2                     # [c1, c0, c2, c3]
-    swap                        # [c0, c1, c2, c3]
 end
 
 # ===== COMPARISONS ===============================================================================

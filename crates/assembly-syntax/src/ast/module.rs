@@ -167,7 +167,7 @@ impl Module {
     /// Creates a new [Module] with the specified `kind` and fully-qualified path, e.g.
     /// `std::math::u64`.
     pub fn new(kind: ModuleKind, path: impl AsRef<Path>) -> Self {
-        let path = path.as_ref().to_absolute().into_owned();
+        let path = path.as_ref().to_absolute().unwrap().into_owned();
         Self {
             span: Default::default(),
             docs: None,

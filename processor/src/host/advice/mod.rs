@@ -360,6 +360,11 @@ impl AdviceProvider {
         self.map.get(key).map(AsRef::as_ref)
     }
 
+    /// Returns the current advice map.
+    pub fn map(&self) -> &AdviceMap {
+        &self.map
+    }
+
     fn validate_map_values(map: &AdviceMap, max_value_size: usize) -> Result<(), AdviceError> {
         for (_, values) in map.iter() {
             if values.len() > max_value_size {

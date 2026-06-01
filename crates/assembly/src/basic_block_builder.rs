@@ -13,8 +13,8 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt,
     events::SystemEvent,
-    mast::{DebugVarId, DecoratorId, MastNodeId},
-    operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
+    mast::{DebugVarId, MastNodeId},
+    operations::{AssemblyOp, DebugVarInfo, Operation},
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
@@ -44,9 +44,8 @@ struct PendingAsmOp {
 
 /// A helper struct for constructing basic blocks while compiling procedure bodies.
 ///
-/// Operations and decorators can be added to a basic block builder via various `add_*()` and
-/// `push_*()` methods, and then basic blocks can be extracted from the builder via `extract_*()`
-/// methods.
+/// Operations and debug metadata can be added to a basic block builder, and then basic blocks can
+/// be extracted from the builder via `extract_*()` methods.
 ///
 /// The same basic block builder can be used to construct many blocks. It is expected that when the
 /// last basic block in a procedure's body is constructed [`Self::try_into_basic_block`] will be
@@ -54,14 +53,13 @@ struct PendingAsmOp {
 #[derive(Debug)]
 pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
-    decorators: DecoratorList,
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
     /// Finalized AssemblyOps with their operation indices (op_idx, AssemblyOp).
     asm_ops: Vec<(usize, AssemblyOp)>,
     /// Debug variables attached to operations in this block.
-    /// Each entry is (op_index, debug_var_id) similar to decorators.
+    /// Each entry is (op_index, debug_var_id).
     debug_vars: Vec<(usize, DebugVarId)>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
@@ -80,7 +78,6 @@ impl<'a> BasicBlockBuilder<'a> {
         match wrapper {
             Some(wrapper) => Self {
                 ops: wrapper.prologue,
-                decorators: Vec::new(),
                 epilogue: wrapper.epilogue,
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
@@ -89,7 +86,6 @@ impl<'a> BasicBlockBuilder<'a> {
             },
             None => Self {
                 ops: Default::default(),
-                decorators: Default::default(),
                 epilogue: Default::default(),
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
@@ -143,16 +139,8 @@ impl BasicBlockBuilder<'_> {
     }
 }
 
-/// Decorators
+/// Assembly metadata
 impl BasicBlockBuilder<'_> {
-    /// Add the specified decorator to the list of basic block decorators.
-    pub fn push_decorator(&mut self, decorator: Decorator) -> Result<(), Report> {
-        let decorator_id = self.mast_forest_builder.ensure_decorator(decorator)?;
-        self.decorators.push((self.ops.len(), decorator_id));
-
-        Ok(())
-    }
-
     /// Tracks an instruction for AssemblyOp metadata collection.
     ///
     /// This stores the instruction's metadata in a pending state. The cycle count will be
@@ -178,8 +166,8 @@ impl BasicBlockBuilder<'_> {
     /// [`Self::track_instruction`] and creates an [`AssemblyOp`] with that cycle count.
     ///
     /// If the cycle count is 0 (instruction did not contribute any operations to the basic block,
-    /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a node-level
-    /// decorator. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
+    /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a control
+    /// node. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
     /// registration with the node's debug info.
     pub fn set_instruction_cycle_count(&mut self) -> Option<AssemblyOp> {
         let pending = self.pending_asm_op.take().expect("no pending asm op to finalize");
@@ -213,39 +201,20 @@ impl BasicBlockBuilder<'_> {
 
 /// Basic Block Constructors
 impl BasicBlockBuilder<'_> {
-    /// Creates and returns a new basic block node from the operations and decorators currently in
-    /// this builder.
+    /// Creates and returns a new basic block node from the operations currently in this builder.
     ///
-    /// If there are no operations however, then no node is created, the decorators are left
-    /// untouched and `None` is returned. Use [`Self::drain_decorators`] to retrieve the decorators
-    /// in this case.
+    /// If there are no operations however, then no node is created and `None` is returned.
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
     pub fn make_basic_block(&mut self) -> Result<Option<MastNodeId>, Report> {
         if !self.ops.is_empty() {
-            let op_count = self.ops.len();
             let ops = self.ops.drain(..).collect();
-            let mut decorators = DecoratorList::new();
-            let mut after_exit = Vec::new();
-            for (op_idx, decorator_id) in self.decorators.drain(..) {
-                if op_idx == op_count {
-                    after_exit.push(decorator_id);
-                } else {
-                    decorators.push((op_idx, decorator_id));
-                }
-            }
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
 
-            let basic_block_node_id = self.mast_forest_builder.ensure_block(
-                ops,
-                decorators,
-                asm_ops,
-                debug_vars,
-                vec![],
-                after_exit,
-            )?;
+            let basic_block_node_id =
+                self.mast_forest_builder.ensure_block(ops, asm_ops, debug_vars)?;
 
             Ok(Some(basic_block_node_id))
         } else {
@@ -253,52 +222,18 @@ impl BasicBlockBuilder<'_> {
         }
     }
 
-    /// Creates and returns a new basic block node from the operations and decorators currently in
-    /// this builder. If there are no operations however, we return the decorators that were
-    /// accumulated up until this point. If the builder is empty, then no node is created and
-    /// `Nothing` is returned.
+    /// Creates and returns a new basic block node from the operations currently in this builder.
+    /// If the builder is empty, then no node is created.
     ///
     /// The main differences with [`Self::make_basic_block`] are:
     /// - Operations contained in the epilogue of the builder are appended to the list of ops which
     ///   go into the new BASIC BLOCK node.
     /// - The builder is consumed in the process.
-    /// - Hence, any remaining decorators if no basic block was created are drained and returned.
-    pub fn try_into_basic_block(mut self) -> Result<BasicBlockOrDecorators, Report> {
+    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeId>, Report> {
         self.ops.append(&mut self.epilogue);
 
-        if let Some(basic_block_node_id) = self.make_basic_block()? {
-            Ok(BasicBlockOrDecorators::BasicBlock(basic_block_node_id))
-        } else if let Some(decorator_ids) = self.drain_decorators() {
-            Ok(BasicBlockOrDecorators::Decorators(decorator_ids))
-        } else {
-            Ok(BasicBlockOrDecorators::Nothing)
-        }
+        self.make_basic_block()
     }
-
-    /// Drains and returns the decorators in the builder, if any.
-    ///
-    /// This should only be called after [`Self::make_basic_block`], when no blocks were created.
-    /// In other words, there MUST NOT be any operations left in the builder when this is called.
-    ///
-    /// # Panics
-    ///
-    /// Panics if there are still operations left in the builder.
-    pub fn drain_decorators(&mut self) -> Option<Vec<DecoratorId>> {
-        assert!(self.ops.is_empty());
-        if !self.decorators.is_empty() {
-            Some(self.decorators.drain(..).map(|(_, decorator_id)| decorator_id).collect())
-        } else {
-            None
-        }
-    }
-}
-
-/// Holds either the node id of a basic block, or a list of decorators that are currently not
-/// attached to any node.
-pub enum BasicBlockOrDecorators {
-    BasicBlock(MastNodeId),
-    Decorators(Vec<DecoratorId>),
-    Nothing,
 }
 
 impl BasicBlockBuilder<'_> {

@@ -3,17 +3,13 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::ops::Index;
 
 use miden_utils_indexing::newtype_id;
 
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    mast::{
-        DebugInfo, Decorator, DecoratorId, ExecutableMastForest, MastForest, MastNode, MastNodeExt,
-        MastNodeId,
-    },
+    mast::{DebugInfo, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
     operations::AssemblyOp,
 };
 
@@ -67,7 +63,7 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Debug information including decorators and error codes.
+    /// Debug information, including source metadata and error codes.
     debug_info: DebugInfo,
 
     /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
@@ -139,28 +135,8 @@ impl ExecutableMastForest for SparseMastForest {
     }
 
     #[inline(always)]
-    fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
-        self.debug_info.decorator(decorator_id)
-    }
-
-    #[inline(always)]
     fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
-    }
-
-    #[inline(always)]
-    fn linked_before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
-        self.debug_info.before_enter_decorators(node_id)
-    }
-
-    #[inline(always)]
-    fn linked_after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
-        self.debug_info.after_exit_decorators(node_id)
-    }
-
-    #[inline(always)]
-    fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId] {
-        self.debug_info.decorators_for_operation(node_id, local_op_idx)
     }
 
     #[inline(always)]
@@ -178,17 +154,6 @@ impl ExecutableMastForest for SparseMastForest {
     #[inline(always)]
     fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
         self.debug_info.error_message(code.as_canonical_u64())
-    }
-}
-
-impl Index<DecoratorId> for SparseMastForest {
-    type Output = Decorator;
-
-    #[inline(always)]
-    fn index(&self, decorator_id: DecoratorId) -> &Self::Output {
-        self.debug_info
-            .decorator(decorator_id)
-            .expect("DecoratorId out of bounds in sparse forest")
     }
 }
 

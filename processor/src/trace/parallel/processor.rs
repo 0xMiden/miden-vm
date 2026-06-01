@@ -5,7 +5,7 @@ use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
-    mast::{ExecutableMastForest, MastNodeId, SparseMastForest},
+    mast::SparseMastForest,
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, Stopper,
+    BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -471,46 +471,6 @@ impl Processor for ReplayProcessor {
 
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.system.pc_transcript_state = state;
-    }
-
-    fn execute_before_enter_decorators<F>(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_after_exit_decorators<F>(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_decorators_for_op<F>(
-        &self,
-        _node_id: MastNodeId,
-        _op_idx_in_block: usize,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
     }
 }
 

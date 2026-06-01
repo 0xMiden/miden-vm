@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2004
 expression: program
 ---
 begin
@@ -9,7 +10,10 @@ begin
         mstore
         drop
         pad
-        u32assert2(13948122101519563734)
+        u32assert2(17575088163785490049)
+        drop
+        pad
+        u32assert2(17575088163785490049)
         drop
         pad
         u32assert2(17575088163785490049)
@@ -21,15 +25,12 @@ begin
         u32assert2(17575088163785490049)
         drop
         pad
-        u32assert2(17575088163785490049)
-        drop
-        pad
         u32assert2(13948122101519563734)
         drop
-        assert(13948122101519563734)
+        assert(17575088163785490049)
+        assert(17575088163785490049)
         assert(17575088163785490049)
         assert(13948122101519563734)
-        assert(17575088163785490049)
         assert(17575088163785490049)
         assert(13948122101519563734)
         assert(13948122101519563734)

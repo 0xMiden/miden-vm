@@ -39,7 +39,6 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
     for &blocks_per_forest in sizes {
         // Generator knobs for this input size.
         let gen_params = MastForestParams {
-            decorators: 32,                                // IDs in [0, 32)
             blocks: blocks_per_forest..=blocks_per_forest, // fixed size per forest
             max_joins: blocks_per_forest.min(8),
             max_splits: blocks_per_forest.min(8),
