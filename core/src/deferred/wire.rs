@@ -495,45 +495,39 @@ mod tests {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
     }
 
+    fn tag(seed: u64) -> Tag {
+        Tag::from_word(felts(seed)[..4].try_into().unwrap())
+    }
+
+    fn wire(entries: Vec<WireEntry>) -> DeferredStateWire {
+        DeferredStateWire { entries }
+    }
+
+    fn assert_wire_round_trips(wire: DeferredStateWire) {
+        let decoded = DeferredStateWire::read_from_bytes(&wire.to_bytes()).unwrap();
+        assert_eq!(decoded, wire);
+    }
+
     /// The proof-transit format must round-trip every entry variant and the empty root opening.
     #[test]
     fn wire_serialize_round_trip_all_entries() {
-        let wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Value {
-                    tag: Tag::from_word(felts(1)[..4].try_into().unwrap()),
-                    block: felts(10),
-                },
-                WireEntry::Chunks {
-                    tag: Tag::from_word(felts(2)[..4].try_into().unwrap()),
-                    blocks: alloc::vec![felts(20), felts(30)],
-                },
-                WireEntry::Join {
-                    tag: Tag::from_word(felts(3)[..4].try_into().unwrap()),
-                    lhs: 1,
-                    rhs: TRUE_INDEX,
-                },
-            ],
-        };
-        let decoded = DeferredStateWire::read_from_bytes(&wire.to_bytes()).unwrap();
-        assert_eq!(decoded, wire);
-
-        let empty = DeferredStateWire::default();
-        assert_eq!(DeferredStateWire::read_from_bytes(&empty.to_bytes()).unwrap(), empty);
+        assert_wire_round_trips(wire(alloc::vec![
+            WireEntry::Value { tag: tag(1), block: felts(10) },
+            WireEntry::Chunks {
+                tag: tag(2),
+                blocks: alloc::vec![felts(20), felts(30)],
+            },
+            WireEntry::Join { tag: tag(3), lhs: 1, rhs: TRUE_INDEX },
+        ]));
+        assert_wire_round_trips(DeferredStateWire::default());
     }
 
     #[test]
     fn wire_deserializes_many_minimal_entries() {
         let entries: Vec<WireEntry> = (0..128)
-            .map(|i| WireEntry::Value {
-                tag: Tag::from_word(felts(i)[..4].try_into().unwrap()),
-                block: felts(128 + i),
-            })
+            .map(|i| WireEntry::Value { tag: tag(i), block: felts(128 + i) })
             .collect();
-        let wire = DeferredStateWire { entries };
-
-        let decoded = DeferredStateWire::read_from_bytes(&wire.to_bytes()).unwrap();
-        assert_eq!(decoded, wire);
+        assert_wire_round_trips(wire(entries));
     }
 
     fn encoded_entry_count(entry_count: usize) -> Vec<u8> {
@@ -552,7 +546,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(1);
-        write_tag(Tag::from_word(felts(1)[..4].try_into().unwrap()), &mut bytes);
+        write_tag(tag(1), &mut bytes);
         bytes.write_usize(usize::MAX);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());

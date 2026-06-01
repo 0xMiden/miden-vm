@@ -223,8 +223,8 @@ mod tests {
         let tag_b = b.tag();
         let registry = PrecompileRegistry::default().with_precompile(a).with_precompile(b);
 
-        assert!(matches!(registry.decode(tag_a).unwrap(), NodeType::Value));
-        assert!(matches!(registry.decode(tag_b).unwrap(), NodeType::Value));
+        assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Value);
+        assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Value);
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
         let mut registry = PrecompileRegistry::default().with_precompile(a);
         registry.merge(PrecompileRegistry::default().with_precompile(b));
 
-        assert!(matches!(registry.decode(tag_a).unwrap(), NodeType::Value));
-        assert!(matches!(registry.decode(tag_b).unwrap(), NodeType::Value));
+        assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Value);
+        assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Value);
     }
 }

@@ -276,6 +276,8 @@ impl<'a> WitnessBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::*;
     use crate::{
         Felt, Word, ZERO,
@@ -296,6 +298,25 @@ mod tests {
 
     fn dummy_digest(seed: u64) -> Word {
         Word::new(core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64)))
+    }
+
+    fn value_entry(node: &Node) -> WireEntry {
+        WireEntry::Value {
+            tag: node.tag,
+            block: *node.payload.as_felts().expect("test node is expression-bodied"),
+        }
+    }
+
+    fn wire(entries: Vec<WireEntry>) -> DeferredStateWire {
+        DeferredStateWire { entries }
+    }
+
+    macro_rules! assert_rehydrate_err {
+        ($wire:expr, $registry:expr, $pat:pat $(,)?) => {{
+            let result = DeferredState::from_wire(&$wire, $registry, usize::MAX);
+            let expected = stringify!($pat);
+            assert!(matches!(&result, Err($pat)), "expected {expected}, got {result:?}");
+        }};
     }
 
     #[test]
@@ -660,24 +681,16 @@ mod tests {
     #[test]
     fn rehydrate_rejects_materialized_true_entries() {
         let wires = [
-            DeferredStateWire {
-                entries: alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }],
-            },
-            DeferredStateWire {
-                entries: alloc::vec![WireEntry::Join {
-                    tag: Tag::TRUE,
-                    lhs: crate::deferred::TRUE_INDEX,
-                    rhs: crate::deferred::TRUE_INDEX,
-                }],
-            },
+            wire(alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }]),
+            wire(alloc::vec![WireEntry::Join {
+                tag: Tag::TRUE,
+                lhs: crate::deferred::TRUE_INDEX,
+                rhs: crate::deferred::TRUE_INDEX,
+            }]),
         ];
 
         for wire in wires {
-            let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-            assert!(
-                matches!(err, Err(IntegrityError::InvalidStructure)),
-                "expected InvalidStructure, got {err:?}"
-            );
+            assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
         }
     }
 
@@ -718,15 +731,10 @@ mod tests {
     #[test]
     fn rehydrate_accepts_predicate_root() {
         let a = test_leaf(7);
-        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
         let pred_digest = pred.digest();
-        let wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Value { tag: a.tag, block: a_payload },
-                WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },
-            ],
-        };
+        let wire =
+            wire(alloc::vec![value_entry(&a), WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },]);
 
         let rehydrated = DeferredState::from_wire(&wire, &precompiles(), usize::MAX).unwrap();
         assert_eq!(rehydrated.root(), pred_digest);
@@ -737,54 +745,33 @@ mod tests {
     #[test]
     fn rehydrate_rejects_bad_index() {
         // Entry 1 cannot reference itself/future index 1 while it is being decoded.
-        let wire = DeferredStateWire {
-            entries: alloc::vec![WireEntry::Join { tag: Uint::add_tag(), lhs: 1, rhs: 0 }],
-        };
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
+        let wire = wire(alloc::vec![WireEntry::Join { tag: Uint::add_tag(), lhs: 1, rhs: 0 }]);
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
     }
 
     #[test]
     fn rehydrate_rejects_duplicate_digest_in_any_entry() {
         let leaf = test_leaf(7);
-        let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
+        let duplicate_leaf = value_entry(&leaf);
+        let duplicate_predicate = WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 };
         let wires = [
-            DeferredStateWire {
-                entries: alloc::vec![
-                    WireEntry::Value { tag: leaf.tag, block: payload },
-                    WireEntry::Value { tag: leaf.tag, block: payload },
-                ],
-            },
-            DeferredStateWire {
-                entries: alloc::vec![
-                    WireEntry::Value { tag: leaf.tag, block: payload },
-                    WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 },
-                    WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 },
-                ],
-            },
+            wire(alloc::vec![duplicate_leaf.clone(), duplicate_leaf]),
+            wire(alloc::vec![
+                value_entry(&leaf),
+                duplicate_predicate.clone(),
+                duplicate_predicate,
+            ]),
         ];
 
         for wire in wires {
-            let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-            assert!(
-                matches!(err, Err(IntegrityError::InvalidStructure)),
-                "expected InvalidStructure, got {err:?}"
-            );
+            assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
         }
     }
 
     #[test]
     fn rehydrate_rejects_root_that_reduces_non_true() {
-        let leaf = test_leaf(7);
-        let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
-        let wire = DeferredStateWire {
-            entries: alloc::vec![WireEntry::Value { tag: leaf.tag, block: payload }],
-        };
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::RootNotTrue)),
-            "expected RootNotTrue, got {err:?}"
-        );
+        let wire = wire(alloc::vec![value_entry(&test_leaf(7))]);
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::RootNotTrue);
     }
 
     #[test]
@@ -793,33 +780,24 @@ mod tests {
             id: Felt::new_unchecked(0xdead),
             args: [ZERO; 3],
         };
-        let wire = DeferredStateWire {
-            entries: alloc::vec![WireEntry::Value { tag: bogus_tag, block: [ZERO; 8] }],
-        };
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
+        let wire = wire(alloc::vec![WireEntry::Value { tag: bogus_tag, block: [ZERO; 8] }]);
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
     }
 
     #[test]
     fn rehydrate_rejects_malformed_chunk_entries() {
-        let wrong_variant = DeferredStateWire {
-            entries: alloc::vec![WireEntry::Chunks {
-                tag: Uint::leaf_tag(),
-                blocks: alloc::vec![[ZERO; 8]],
-            }],
-        };
-        let err = DeferredState::from_wire(&wrong_variant, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
+        let wrong_variant = wire(alloc::vec![WireEntry::Chunks {
+            tag: Uint::leaf_tag(),
+            blocks: alloc::vec![[ZERO; 8]],
+        }]);
+        assert_rehydrate_err!(wrong_variant, &precompiles(), IntegrityError::InvalidStructure);
 
         let registry = PrecompileRegistry::default().with_precompile(Hash);
-        let wrong_count = DeferredStateWire {
-            entries: alloc::vec![WireEntry::Chunks {
-                tag: Hash::preimage_tag(Hash::BYTES_PER_CHUNK),
-                blocks: alloc::vec![],
-            }],
-        };
-        let err = DeferredState::from_wire(&wrong_count, &registry, usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
+        let wrong_count = wire(alloc::vec![WireEntry::Chunks {
+            tag: Hash::preimage_tag(Hash::BYTES_PER_CHUNK),
+            blocks: alloc::vec![],
+        }]);
+        assert_rehydrate_err!(wrong_count, &registry, IntegrityError::InvalidStructure);
     }
 
     #[test]
@@ -851,33 +829,25 @@ mod tests {
     fn rehydrate_rejects_noncanonical_but_topological_wire() {
         let a = test_leaf(3);
         let b = test_leaf(4);
-        let a_payload = *a.payload.as_felts().unwrap();
-        let b_payload = *b.payload.as_felts().unwrap();
         let pred_a = Node::join(Uint::eq_tag(), a.digest(), a.digest());
         let pred_b = Node::join(Uint::eq_tag(), b.digest(), b.digest());
 
         // This is semantically equivalent to canonical output, but it emits `b` before the first
         // transcript step's closure. Strict wire rejects the non-canonical order.
-        let wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Value { tag: b.tag, block: b_payload },
-                WireEntry::Value { tag: a.tag, block: a_payload },
-                WireEntry::Join { tag: pred_a.tag, lhs: 2, rhs: 2 },
-                WireEntry::Join {
-                    tag: Tag::AND,
-                    lhs: crate::deferred::TRUE_INDEX,
-                    rhs: 3,
-                },
-                WireEntry::Join { tag: pred_b.tag, lhs: 1, rhs: 1 },
-                WireEntry::Join { tag: Tag::AND, lhs: 4, rhs: 5 },
-            ],
-        };
+        let wire = wire(alloc::vec![
+            value_entry(&b),
+            value_entry(&a),
+            WireEntry::Join { tag: pred_a.tag, lhs: 2, rhs: 2 },
+            WireEntry::Join {
+                tag: Tag::AND,
+                lhs: crate::deferred::TRUE_INDEX,
+                rhs: 3,
+            },
+            WireEntry::Join { tag: pred_b.tag, lhs: 1, rhs: 1 },
+            WireEntry::Join { tag: Tag::AND, lhs: 4, rhs: 5 },
+        ]);
 
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::InvalidStructure)),
-            "expected InvalidStructure, got {err:?}"
-        );
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
     }
 
     #[test]
@@ -896,11 +866,7 @@ mod tests {
         state.root = and_digest;
 
         let wire = state.to_wire(&registry).unwrap();
-        let err = DeferredState::from_wire(&wire, &registry, usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
-            "expected EvaluationFailed, got {err:?}"
-        );
+        assert_rehydrate_err!(wire, &registry, IntegrityError::EvaluationFailed(_));
     }
 
     #[test]
@@ -914,57 +880,38 @@ mod tests {
         state.root = and_digest;
 
         let wire = state.to_wire(&registry).unwrap();
-        let err = DeferredState::from_wire(&wire, &registry, usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
-            "expected EvaluationFailed, got {err:?}"
-        );
+        assert_rehydrate_err!(wire, &registry, IntegrityError::EvaluationFailed(_));
     }
 
     #[test]
     fn rehydrate_rejects_and_with_non_true_lhs() {
         let a = test_leaf(7);
-        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let wire = wire(alloc::vec![
+            value_entry(&a),
+            WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },
+            WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 2 },
+        ]);
 
-        let wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Value { tag: a.tag, block: a_payload },
-                WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },
-                WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 2 },
-            ],
-        };
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
-            "expected EvaluationFailed, got {err:?}"
-        );
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::EvaluationFailed(_));
     }
 
     #[test]
     fn rehydrate_rejects_dangling_entry_as_noncanonical() {
         let a = test_leaf(7);
-        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
-        let orphan_payload = *orphan.payload.as_felts().expect("leaf is expression-bodied");
         let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let wire = wire(alloc::vec![
+            value_entry(&orphan),
+            value_entry(&a),
+            WireEntry::Join { tag: pred.tag, lhs: 2, rhs: 2 },
+            WireEntry::Join {
+                tag: Tag::AND,
+                lhs: crate::deferred::TRUE_INDEX,
+                rhs: 3,
+            },
+        ]);
 
-        let wire = DeferredStateWire {
-            entries: alloc::vec![
-                WireEntry::Value { tag: orphan.tag, block: orphan_payload },
-                WireEntry::Value { tag: a.tag, block: a_payload },
-                WireEntry::Join { tag: pred.tag, lhs: 2, rhs: 2 },
-                WireEntry::Join {
-                    tag: Tag::AND,
-                    lhs: crate::deferred::TRUE_INDEX,
-                    rhs: 3,
-                },
-            ],
-        };
-        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(
-            matches!(err, Err(IntegrityError::InvalidStructure)),
-            "expected InvalidStructure, got {err:?}"
-        );
+        assert_rehydrate_err!(wire, &precompiles(), IntegrityError::InvalidStructure);
     }
 }

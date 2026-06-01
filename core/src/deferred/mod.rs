@@ -309,25 +309,16 @@ mod tests {
         args: [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)],
     };
 
-    fn payload(seed: u64) -> Payload {
-        Payload::expression([
-            Felt::new_unchecked(seed),
-            Felt::new_unchecked(seed.wrapping_add(1)),
-            Felt::new_unchecked(seed.wrapping_add(2)),
-            Felt::new_unchecked(seed.wrapping_add(3)),
-            Felt::new_unchecked(seed.wrapping_add(4)),
-            Felt::new_unchecked(seed.wrapping_add(5)),
-            Felt::new_unchecked(seed.wrapping_add(6)),
-            Felt::new_unchecked(seed.wrapping_add(7)),
-        ])
+    fn block(seed: u64) -> Chunk {
+        core::array::from_fn(|i| Felt::new_unchecked(seed.wrapping_add(i as u64)))
     }
 
     #[test]
     fn digest_binds_tag_and_payload() {
-        let p = *payload(7).as_felts().unwrap();
+        let p = block(7);
         let same = Node::leaf(TAG_A, p);
         let different_tag = Node::leaf(TAG_B, p);
-        let different_payload = Node::leaf(TAG_A, *payload(8).as_felts().unwrap());
+        let different_payload = Node::leaf(TAG_A, block(8));
 
         assert_ne!(same.digest(), different_tag.digest());
         assert_ne!(same.digest(), different_payload.digest());
@@ -337,7 +328,7 @@ mod tests {
     fn chunk_n1_matches_expression_with_same_tag_and_payload() {
         // Single-chunk digest is the same body as Expression: rate := payload, capacity := tag,
         // one permutation, take state[0..4].
-        let felts = *payload(123).as_felts().unwrap();
+        let felts = block(123);
         let expr = Node::leaf(TAG_A, felts);
         let chunk = Node::chunk(TAG_A, vec![felts]);
         assert_eq!(expr.digest(), chunk.digest());
@@ -345,8 +336,7 @@ mod tests {
 
     #[test]
     fn chunk_n3_matches_manual_linear_hash() {
-        let chunks: Vec<Chunk> =
-            (0..3).map(|i| *payload(100 + i * 8).as_felts().unwrap()).collect();
+        let chunks: Vec<Chunk> = (0..3).map(|i| block(100 + i * 8)).collect();
         let chunk = Node::chunk(TAG_A, chunks.clone());
 
         // Manual computation: capacity = tag, iterate over chunks overwriting rate.
