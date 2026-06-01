@@ -1,19 +1,20 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
     mast::MastNodeId,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{ColumnNumber, LineNumber};
+use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
 use super::{
-    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCES_VERSION,
-    DEBUG_TYPES_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection,
-    DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceGraphSection, DebugSourceMastNode,
-    DebugSourceMastNodeId, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCE_MAP_VERSION,
+    DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
+    DebugFunctionsSection, DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceAsmOp,
+    DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+    DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
     DebugVariableInfo, DebugVariantInfo,
 };
 
@@ -217,6 +218,110 @@ impl Deserializable for DebugSourceGraphSection {
         let roots = Vec::<DebugSourceMastNodeId>::read_from(source)?;
         Ok(Self { version, nodes, roots })
     }
+}
+
+// DEBUG SOURCE MAP SECTION SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugSourceAsmOp {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.source_node.write_into(target);
+        target.write_u32(self.op_idx);
+        write_location(&self.location, target);
+        self.context_name.write_into(target);
+        self.op.write_into(target);
+        target.write_u8(self.num_cycles);
+    }
+}
+
+impl Deserializable for DebugSourceAsmOp {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let source_node = DebugSourceMastNodeId::read_from(source)?;
+        let op_idx = source.read_u32()?;
+        let location = read_location(source)?;
+        let context_name = String::read_from(source)?;
+        let op = String::read_from(source)?;
+        let num_cycles = source.read_u8()?;
+        Ok(Self {
+            source_node,
+            op_idx,
+            location,
+            context_name,
+            op,
+            num_cycles,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        DebugSourceMastNodeId::min_serialized_size() + 4 + 1 + 1 + 1 + 1
+    }
+}
+
+impl Serializable for DebugSourceVar {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.source_node.write_into(target);
+        target.write_u32(self.op_idx);
+        self.var.write_into(target);
+    }
+}
+
+impl Deserializable for DebugSourceVar {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            source_node: DebugSourceMastNodeId::read_from(source)?,
+            op_idx: source.read_u32()?,
+            var: Deserializable::read_from(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        DebugSourceMastNodeId::min_serialized_size() + 4
+    }
+}
+
+impl Serializable for DebugSourceMapSection {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.version);
+        self.asm_ops.write_into(target);
+        self.debug_vars.write_into(target);
+    }
+}
+
+impl Deserializable for DebugSourceMapSection {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = source.read_u8()?;
+        if version != DEBUG_SOURCE_MAP_VERSION {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "unsupported debug_source_map version: {version}, expected {DEBUG_SOURCE_MAP_VERSION}"
+            )));
+        }
+
+        let asm_ops = Vec::<DebugSourceAsmOp>::read_from(source)?;
+        let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
+        Ok(Self { version, asm_ops, debug_vars })
+    }
+}
+
+fn write_location<W: ByteWriter>(location: &Option<Location>, target: &mut W) {
+    if let Some(location) = location {
+        target.write_bool(true);
+        location.uri.write_into(target);
+        target.write_u32(location.start.to_u32());
+        target.write_u32(location.end.to_u32());
+    } else {
+        target.write_bool(false);
+    }
+}
+
+fn read_location<R: ByteReader>(source: &mut R) -> Result<Option<Location>, DeserializationError> {
+    if !source.read_bool()? {
+        return Ok(None);
+    }
+
+    let uri = Uri::read_from(source)?;
+    let start = ByteIndex::new(source.read_u32()?);
+    let end = ByteIndex::new(source.read_u32()?);
+    Ok(Some(Location::new(uri, start, end)))
 }
 
 // DEBUG TYPE INFO SERIALIZATION
@@ -612,6 +717,8 @@ fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, Deserializatio
 
 #[cfg(test)]
 mod tests {
+    use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
     use super::*;
 
     struct FixedBudgetReader<'a> {
@@ -808,11 +915,35 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_source_map_section_roundtrip() {
+        let source_node = DebugSourceMastNodeId::from(0);
+        let section = DebugSourceMapSection {
+            version: DEBUG_SOURCE_MAP_VERSION,
+            asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                source_node,
+                2,
+                None,
+                "test::ctx".into(),
+                "add".into(),
+                1,
+            )],
+            debug_vars: alloc::vec![DebugSourceVar::new(
+                source_node,
+                2,
+                DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
+            )],
+        };
+
+        roundtrip(&section);
+    }
+
+    #[test]
     fn test_empty_sections_roundtrip() {
         roundtrip(&DebugTypesSection::new());
         roundtrip(&DebugSourcesSection::new());
         roundtrip(&DebugFunctionsSection::new());
         roundtrip(&DebugSourceGraphSection::new());
+        roundtrip(&DebugSourceMapSection::new());
     }
 
     #[test]

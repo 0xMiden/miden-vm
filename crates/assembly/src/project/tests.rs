@@ -8,7 +8,8 @@ use miden_core::{
 use miden_mast_package::{
     Section, SectionId,
     debug_info::{
-        DebugFunctionsSection, DebugSourceGraphSection, DebugSourcesSection, DebugTypesSection,
+        DebugFunctionsSection, DebugSourceGraphSection, DebugSourceMapSection,
+        DebugSourceMastNodeId, DebugSourcesSection, DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -53,6 +54,7 @@ end
     assert_eq!(dev.kind, TargetType::Library);
     assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
@@ -64,6 +66,7 @@ end
             .iter()
             .any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
     );
+    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
 }
 
 #[test]
@@ -260,6 +263,11 @@ end
         .iter()
         .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
         .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
 
     let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
     let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
@@ -284,6 +292,79 @@ end
     assert_eq!(debug_source_graph.version, 1);
     assert!(!debug_source_graph.nodes.is_empty());
     assert!(!debug_source_graph.roots.is_empty());
+
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+    assert_eq!(debug_source_map.version, 1);
+    assert!(!debug_source_map.asm_ops.is_empty());
+}
+
+#[test]
+fn source_debug_sections_distinguish_same_execution_metadata_occurrences() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "source-rows"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc alias_a
+    push.1
+    drop
+end
+
+pub proc alias_b
+    push.1
+    drop
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("debug build should succeed");
+
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+
+    let mut source_nodes_by_exec = std::collections::BTreeMap::new();
+    for row in &debug_source_map.asm_ops {
+        let source_node = row.source_node.as_u32() as usize;
+        let exec_node = debug_source_graph.nodes[source_node].exec_node;
+        source_nodes_by_exec
+            .entry(exec_node)
+            .or_insert_with(std::collections::BTreeSet::<DebugSourceMastNodeId>::new)
+            .insert(row.source_node);
+    }
+
+    assert!(
+        source_nodes_by_exec.values().any(|source_nodes| source_nodes.len() >= 2),
+        "source-keyed asm-op rows should preserve multiple metadata occurrences for one execution node",
+    );
 }
 
 #[test]

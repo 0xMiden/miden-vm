@@ -15,14 +15,15 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
     mast::MastNodeId,
+    operations::DebugVarInfo,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{ColumnNumber, LineNumber};
+use miden_debug_types::{ColumnNumber, LineNumber, Location};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -227,6 +228,8 @@ impl DebugSourcesSection {
 pub const DEBUG_FUNCTIONS_VERSION: u8 = 1;
 /// The version of the debug_source_graph section format.
 pub const DEBUG_SOURCE_GRAPH_VERSION: u8 = 1;
+/// The version of the debug_source_map section format.
+pub const DEBUG_SOURCE_MAP_VERSION: u8 = 1;
 
 /// Debug functions section containing function metadata, variables, and inlined calls.
 ///
@@ -368,6 +371,93 @@ impl DebugSourceGraphSection {
     /// Returns true if the section contains no source occurrences.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty() && self.roots.is_empty()
+    }
+}
+
+/// Assembly operation metadata keyed by a source/debug MAST occurrence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourceAsmOp {
+    /// Source/debug occurrence that owns this operation row.
+    pub source_node: DebugSourceMastNodeId,
+    /// Operation index local to the reduced execution node.
+    pub op_idx: u32,
+    /// Optional source location for the assembly operation.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub location: Option<Location>,
+    /// Assembly context name.
+    pub context_name: String,
+    /// Assembly operation text.
+    pub op: String,
+    /// Number of VM cycles taken by the operation.
+    pub num_cycles: u8,
+}
+
+impl DebugSourceAsmOp {
+    /// Creates a source-keyed assembly operation metadata row.
+    pub fn new(
+        source_node: DebugSourceMastNodeId,
+        op_idx: u32,
+        location: Option<Location>,
+        context_name: String,
+        op: String,
+        num_cycles: u8,
+    ) -> Self {
+        Self {
+            source_node,
+            op_idx,
+            location,
+            context_name,
+            op,
+            num_cycles,
+        }
+    }
+}
+
+/// Debug variable metadata keyed by a source/debug MAST occurrence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourceVar {
+    /// Source/debug occurrence that owns this variable row.
+    pub source_node: DebugSourceMastNodeId,
+    /// Operation index local to the reduced execution node.
+    pub op_idx: u32,
+    /// Debug variable metadata.
+    pub var: DebugVarInfo,
+}
+
+impl DebugSourceVar {
+    /// Creates a source-keyed debug variable metadata row.
+    pub fn new(source_node: DebugSourceMastNodeId, op_idx: u32, var: DebugVarInfo) -> Self {
+        Self { source_node, op_idx, var }
+    }
+}
+
+/// Package-owned source-keyed debug metadata rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourceMapSection {
+    /// Version of the debug source map format.
+    pub version: u8,
+    /// Source-keyed assembly operation rows.
+    pub asm_ops: Vec<DebugSourceAsmOp>,
+    /// Source-keyed debug variable rows.
+    pub debug_vars: Vec<DebugSourceVar>,
+}
+
+impl DebugSourceMapSection {
+    /// Creates an empty source-keyed debug metadata section.
+    pub fn new() -> Self {
+        Self {
+            version: DEBUG_SOURCE_MAP_VERSION,
+            asm_ops: Vec::new(),
+            debug_vars: Vec::new(),
+        }
+    }
+
+    /// Returns true if the section contains no metadata rows.
+    pub fn is_empty(&self) -> bool {
+        self.asm_ops.is_empty() && self.debug_vars.is_empty()
     }
 }
 
