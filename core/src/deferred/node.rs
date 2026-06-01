@@ -7,7 +7,7 @@
 use alloc::boxed::Box;
 use core::num::NonZeroU32;
 
-use super::Payload;
+use super::{DeferredError, Digest, Payload};
 
 // NODE TYPE
 // ================================================================================================
@@ -28,12 +28,23 @@ pub enum NodeType {
 }
 
 impl NodeType {
-    /// Returns whether a payload variant matches this declared shape.
-    pub(crate) fn matches_payload(self, payload: &Payload) -> bool {
+    /// Validates that a payload variant matches this declared shape.
+    pub(crate) fn validate_payload(self, payload: &Payload) -> Result<(), DeferredError> {
         match (self, payload) {
-            (Self::Value | Self::Join, Payload::Expression(_)) => true,
-            (Self::Chunks(n), Payload::Chunk(chunks)) => chunks.len() == n.get() as usize,
-            _ => false,
+            (Self::Value | Self::Join, Payload::Expression(_)) => Ok(()),
+            (Self::Chunks(n), Payload::Chunk(chunks)) if chunks.len() == n.get() as usize => Ok(()),
+            _ => Err(DeferredError::InvalidPayload),
+        }
+    }
+
+    /// Returns this payload's structural children, if the shape declares child references.
+    pub(crate) fn children(
+        self,
+        payload: &Payload,
+    ) -> Result<Option<(Digest, Digest)>, DeferredError> {
+        match self {
+            Self::Join => payload.join_children().map(Some),
+            Self::Value | Self::Chunks(_) => Ok(None),
         }
     }
 }

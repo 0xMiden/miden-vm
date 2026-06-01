@@ -20,8 +20,7 @@ pub struct ExecutionOptions {
     max_adv_map_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
-    /// Maximum approximate number of field elements allowed in deferred-state nodes and eval
-    /// memos.
+    /// Maximum approximate number of field elements allowed in durable deferred-state nodes.
     max_deferred_elements: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.

@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::leaf;
+use common::{leaf, register_and_evaluate};
 use miden_core::{
     deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry},
     testing::precompile::{Group, Uint},
@@ -11,7 +11,7 @@ use miden_core::{
 /// Builds a uint+group registry with an empty state for tests that assert node counts.
 fn fresh() -> (PrecompileRegistry, DeferredState) {
     let registry = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Group);
-    (registry, DeferredState::new())
+    (registry, DeferredState::new(usize::MAX))
 }
 
 /// Builds the same registry with uint constants pre-registered.
@@ -40,18 +40,18 @@ fn add_produces_minted_new_and_passes_eq_against_expected() {
     let h_g2 = register_group(&registry, &mut state, 10, 20);
 
     // Evaluate add: returns new(h_x3_leaf, h_y3_leaf) where leaves are minted.
-    let add_canonical = state.evaluate_node(&registry, Group::add_node(h_g1, h_g2)).unwrap();
+    let add_canonical = register_and_evaluate(&registry, &mut state, Group::add_node(h_g1, h_g2));
     let expected = Group::new_node(leaf(13).digest(), leaf(24).digest());
     assert_eq!(add_canonical, expected);
 
     // Both minted field leaves must be in the DAG.
-    assert!(state.contains(&leaf(13).digest()));
-    assert!(state.contains(&leaf(24).digest()));
+    assert_eq!(state.evaluate(&registry, leaf(13).digest()).unwrap(), leaf(13));
+    assert_eq!(state.evaluate(&registry, leaf(24).digest()).unwrap(), leaf(24));
 
     // Build expected group element via registration, then assert eq.
     let h_expected = register_group(&registry, &mut state, 13, 24);
     let h_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
-    let eq_result = state.evaluate_node(&registry, Group::eq_node(h_add, h_expected)).unwrap();
+    let eq_result = register_and_evaluate(&registry, &mut state, Group::eq_node(h_add, h_expected));
     assert!(eq_result.is_true_node());
 
     // Defense-in-depth: log the proven equality and round-trip the transcript — this re-runs
@@ -70,7 +70,7 @@ fn sub_chains_through_add_with_mint_at_every_step() {
     let h_sum = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
     let h_diff = state.register(&registry, Group::sub_node(h_sum, h_g1)).unwrap();
 
-    let canonical = state.evaluate_digest(&registry, h_diff).unwrap();
+    let canonical = state.evaluate(&registry, h_diff).unwrap();
     assert_eq!(canonical, Group::new_node(leaf(100).digest(), leaf(200).digest()));
 }
 
@@ -88,7 +88,7 @@ fn new_preserves_field_expression_commitments() {
 
     let h_group = state.register(&registry, Group::new_node(h_x_expr, h_y_expr)).unwrap();
 
-    let canonical = state.evaluate_digest(&registry, h_group).unwrap();
+    let canonical = state.evaluate(&registry, h_group).unwrap();
 
     assert_eq!(
         canonical,
@@ -115,7 +115,8 @@ fn eq_predicate_errors_on_mismatch() {
     let (registry, mut state) = fresh();
     let h_g1 = register_group(&registry, &mut state, 7, 11);
     let h_g2 = register_group(&registry, &mut state, 7, 12);
-    let err = state.evaluate_node(&registry, Group::eq_node(h_g1, h_g2));
+    let eq_digest = state.register(&registry, Group::eq_node(h_g1, h_g2)).unwrap();
+    let err = state.evaluate(&registry, eq_digest);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -132,15 +133,13 @@ fn eq_compares_coordinate_values_not_coordinate_commitments() {
 
     let h_value_group = register_group(&registry, &mut state, 7, 5);
 
-    let result = state
-        .evaluate_node(&registry, Group::eq_node(h_expr_group, h_value_group))
-        .unwrap();
+    let result =
+        register_and_evaluate(&registry, &mut state, Group::eq_node(h_expr_group, h_value_group));
 
     assert!(result.is_true_node(), "new(add(3, 4), 5) must equal new(7, 5)");
 
-    let swapped = state
-        .evaluate_node(&registry, Group::eq_node(h_value_group, h_expr_group))
-        .unwrap();
+    let swapped =
+        register_and_evaluate(&registry, &mut state, Group::eq_node(h_value_group, h_expr_group));
 
     assert!(swapped.is_true_node(), "group equality should not depend on operand order");
 
@@ -164,13 +163,13 @@ fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
 
     let h_g2 = register_group(&registry, &mut state, 10, 20);
 
-    let canonical = state.evaluate_node(&registry, Group::add_node(h_g1, h_g2)).unwrap();
+    let canonical = register_and_evaluate(&registry, &mut state, Group::add_node(h_g1, h_g2));
 
     let expected = Group::new_node(leaf(17).digest(), leaf(31).digest());
     assert_eq!(canonical, expected);
 
-    assert!(state.contains(&leaf(17).digest()));
-    assert!(state.contains(&leaf(31).digest()));
+    assert_eq!(state.evaluate(&registry, leaf(17).digest()).unwrap(), leaf(17));
+    assert_eq!(state.evaluate(&registry, leaf(31).digest()).unwrap(), leaf(31));
 
     let h_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
     let h_expected = register_group(&registry, &mut state, 17, 31);
@@ -193,7 +192,7 @@ fn new_requires_coordinate_expression_commitments_to_be_registered() {
 
     state.register(&registry, x_expr).unwrap();
     let h_group = state.register(&registry, Group::new_node(h_x_expr, h_y)).unwrap();
-    let canonical = state.evaluate_digest(&registry, h_group).unwrap();
+    let canonical = state.evaluate(&registry, h_group).unwrap();
     assert_eq!(canonical, Group::new_node(h_x_expr, h_y));
 }
 
@@ -210,19 +209,21 @@ fn eq_predicate_commutes_over_minted_children() {
     let h_g_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
 
     // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
-    state.evaluate_digest(&registry, h_g_add).unwrap();
+    state.evaluate(&registry, h_g_add).unwrap();
     let h_val = state
         .register(&registry, Group::new_node(leaf(13).digest(), leaf(24).digest()))
         .unwrap();
-    assert!(state.contains(&leaf(13).digest()), "x3 minted into nodes");
-    assert!(state.contains(&leaf(24).digest()), "y3 minted into nodes");
+    assert_eq!(state.evaluate(&registry, leaf(13).digest()).unwrap(), leaf(13));
+    assert_eq!(state.evaluate(&registry, leaf(24).digest()).unwrap(), leaf(24));
 
     let mut state_normal = state.clone();
-    let normal = state_normal.evaluate_node(&registry, Group::eq_node(h_g_add, h_val)).unwrap();
+    let normal =
+        register_and_evaluate(&registry, &mut state_normal, Group::eq_node(h_g_add, h_val));
     assert!(normal.is_true_node(), "Eq(g_add, val) holds");
 
     let mut state_swapped = state.clone();
-    let swapped = state_swapped.evaluate_node(&registry, Group::eq_node(h_val, h_g_add)).unwrap();
+    let swapped =
+        register_and_evaluate(&registry, &mut state_swapped, Group::eq_node(h_val, h_g_add));
     assert!(swapped.is_true_node(), "Eq(val, g_add) holds — operand order doesn't matter");
 }
 
@@ -233,8 +234,8 @@ fn reduce_rejects_new_with_non_field_leaf_children() {
     let (registry, mut state) = fresh();
     let h_g = register_group(&registry, &mut state, 1, 1);
     let h_y = state.register(&registry, leaf(2)).unwrap();
-    let bad_new = Group::new_node(h_g, h_y);
-    let err = state.evaluate_node(&registry, bad_new);
+    let bad_new = state.register(&registry, Group::new_node(h_g, h_y)).unwrap();
+    let err = state.evaluate(&registry, bad_new);
     assert!(matches!(
         err.unwrap_err().root(),
         PrecompileError::Other(_) | PrecompileError::InvalidNode

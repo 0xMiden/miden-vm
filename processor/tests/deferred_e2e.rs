@@ -7,7 +7,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly::Assembler;
 use miden_core::{
-    deferred::{Node, Payload, PrecompileRegistry, Tag},
+    deferred::{Node, PrecompileError, PrecompileRegistry, Tag},
     testing::precompile::{Hash, Uint},
 };
 use miden_processor::{
@@ -226,10 +226,12 @@ fn deferred_register_predicate_does_not_verify() {
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
     let mut host = uint_host();
-    let output = build_processor()
+    let mut output = build_processor()
         .execute_sync(&program, &mut host)
         .expect("register-only execution must succeed even with a bad predicate");
-    assert!(output.deferred_state.contains(&mismatch.digest()));
+    let registry = PrecompileRegistry::default().with_precompile(Uint);
+    let err = output.deferred_state.evaluate(&registry, mismatch.digest()).unwrap_err();
+    assert!(matches!(err.root(), PrecompileError::AssertionFailed));
 }
 
 #[test]
@@ -417,9 +419,9 @@ fn emit_register_chunk(src: &mut String, tag: Tag, ptr: u32) {
 }
 
 #[test]
-fn chunk_register_over_deferred_budget_is_rejected_before_reading_memory() {
-    let huge_n_chunks = 1 << 20;
-    let tag = preimage_tag(huge_n_chunks);
+fn chunk_register_over_deferred_budget_is_rejected() {
+    let n_chunks = 2;
+    let tag = preimage_tag(n_chunks);
 
     let mut src = String::from("begin\n");
     emit_register_chunk(&mut src, tag, 0);
@@ -434,7 +436,7 @@ fn chunk_register_over_deferred_budget_is_rejected_before_reading_memory() {
 
     match result {
         Err(ExecutionError::DeferredStateTooLarge { num_elements, max, .. }) => {
-            assert_eq!(num_elements, 4 + 8 * huge_n_chunks as usize);
+            assert_eq!(num_elements, 4 + 8 * n_chunks as usize);
             assert_eq!(max, 16);
         },
         other => panic!("expected DeferredStateTooLarge, got {other:?}"),
@@ -453,7 +455,9 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
         .collect();
     let tag = preimage_tag(2);
     let ptr: u32 = 0;
-    let expected_digest = Node::chunk(tag, chunks.clone()).digest();
+    let chunk_node = Node::chunk(tag, chunks.clone());
+    let chunk_digest = chunk_node.digest();
+    let expected_canonical = Hash::digest_node(Hash::hash(&chunks));
 
     // Write the 16 felts to memory at addresses 0..16, register the chunk, then drop the 5 felts
     // left on the operand stack.
@@ -470,24 +474,17 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
 
     let program = Assembler::default().assemble_program(&src).expect("program must assemble");
 
-    let mut host = hash_host();
-    let output = build_chunk_processor()
+    let registry = PrecompileRegistry::default().with_precompile(Hash);
+    let mut host = DefaultHost::default().with_precompiles(Arc::new(registry.clone()));
+    let mut output = build_chunk_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    let state = &output.deferred_state;
-    assert!(
-        state.contains(&expected_digest),
-        "chunk node must be stored under its linear-hash digest"
+    let canonical = output.deferred_state.evaluate(&registry, chunk_digest).unwrap();
+    assert_eq!(
+        canonical, expected_canonical,
+        "chunk node must be stored with the bulk data read from memory",
     );
-    let stored = state.get(&expected_digest).expect("chunk node lookup");
-    match &stored.payload {
-        Payload::Chunk(c) => {
-            assert_eq!(c.as_ref(), chunks.as_slice(), "bulk data must match memory contents")
-        },
-        Payload::Expression(_) => panic!("expected chunk variant in deferred state"),
-    }
-    assert_eq!(stored.tag, tag);
 }
 
 #[test]

@@ -28,10 +28,21 @@ pub fn log_and_verify(registry: &PrecompileRegistry, state: &mut DeferredState, 
 /// Asserts that wire round-tripping preserves the verified transcript root and nodes.
 pub fn assert_round_trips(state: &DeferredState, registry: &PrecompileRegistry) {
     let wire = state.to_wire(registry).unwrap();
-    let rehydrated = DeferredState::rehydrate(&wire, registry).unwrap();
+    let rehydrated = DeferredState::from_wire(&wire, registry, usize::MAX).unwrap();
     assert_eq!(rehydrated.root(), state.root());
-    assert!(
-        rehydrated.nodes().iter().all(|(d, n)| state.nodes().get(d) == Some(n)),
-        "wire round-trip changed a reachable node",
+    assert_eq!(
+        rehydrated.to_wire(registry).unwrap(),
+        wire,
+        "wire round-trip changed canonical output",
     );
+}
+
+/// Registers a node and evaluates it by digest.
+pub fn register_and_evaluate(
+    registry: &PrecompileRegistry,
+    state: &mut DeferredState,
+    node: Node,
+) -> Node {
+    let digest = state.register(registry, node).unwrap();
+    state.evaluate(registry, digest).unwrap()
 }

@@ -11,14 +11,7 @@ use miden_core::{
 };
 
 use super::SystemEventError;
-use crate::{MemoryError, advice::AdviceError, fast::FastProcessor};
-
-fn check_deferred_budget(num_elements: usize, max: usize) -> Result<(), SystemEventError> {
-    if num_elements > max {
-        return Err(SystemEventError::DeferredStateTooLarge { num_elements, max });
-    }
-    Ok(())
-}
+use crate::{MemoryError, fast::FastProcessor};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
@@ -56,7 +49,7 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
     let hi = processor.stack_get_word(DEFERRED_PAYLOAD_HI_OFFSET);
     let tag = Tag::from_word(processor.stack_get_word(DEFERRED_TAG_OFFSET).into());
-    let payload = Payload::new([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
+    let payload = Payload::expression([lo[0], lo[1], lo[2], lo[3], hi[0], hi[1], hi[2], hi[3]]);
     (tag, payload)
 }
 
@@ -70,9 +63,8 @@ pub(super) fn handle_deferred_register(
     precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
-    let max_deferred_elements = processor.options.max_deferred_elements();
-    processor.deferred_state.register(precompiles, Node::expression(tag, payload))?;
-    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)
+    processor.deferred_state.register(precompiles, Node::new(tag, payload))?;
+    Ok(())
 }
 
 /// Handles deferred-node evaluation and returns the canonical node as advice.
@@ -87,9 +79,7 @@ pub(super) fn handle_deferred_evaluate(
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
-    let max_deferred_elements = processor.options.max_deferred_elements();
-    let canonical = processor.deferred_state.evaluate_digest(precompiles, digest)?;
-    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)?;
+    let canonical = processor.deferred_state.evaluate(precompiles, digest)?;
 
     // Serialize the canonical as `tag || payload` in natural order.
     let mut value: Vec<Felt> = Vec::new();
@@ -124,13 +114,11 @@ pub(super) fn handle_deferred_register_chunk(
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
 
     // Decode `n` from the tag before any memory reads — the precompile is the source of truth
-    // for chunk length, and reading otherwise would let a malformed tag waste work.
+    // for chunk length and for rejecting oversized chunk tags.
+    // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by the registry.
     let n = match precompiles.decode(tag)? {
-        // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by `decode`.
         NodeType::Chunks(n) => n.get(),
-        NodeType::Value | NodeType::Join => {
-            return Err(PrecompileError::InvalidNode.into());
-        },
+        NodeType::Value | NodeType::Join => return Err(PrecompileError::InvalidNode.into()),
     };
 
     // Bounds + alignment validation.
@@ -149,27 +137,6 @@ pub(super) fn handle_deferred_register_chunk(
     if end > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: end }.into());
     }
-    let max_deferred_elements = processor.options.max_deferred_elements();
-    let chunk_elements = (n as usize)
-        .checked_mul(8)
-        .and_then(|payload_elements| payload_elements.checked_add(4))
-        .unwrap_or(usize::MAX);
-    let projected = processor
-        .deferred_state()
-        .num_elements()
-        .checked_add(chunk_elements)
-        .unwrap_or(usize::MAX);
-    check_deferred_budget(projected, max_deferred_elements)?;
-
-    let max_value_size = processor.options.max_adv_map_value_size();
-    if total as usize > max_value_size {
-        return Err(AdviceError::AdvMapValueSizeExceeded {
-            size: total as usize,
-            max: max_value_size,
-        }
-        .into());
-    }
-
     // Read `n` rate-sized chunks from memory.
     let ctx = processor.ctx;
     let mut chunks: Vec<[Felt; 8]> = Vec::with_capacity(n as usize);
@@ -183,7 +150,7 @@ pub(super) fn handle_deferred_register_chunk(
     }
 
     processor.deferred_state.register(precompiles, Node::chunk(tag, chunks))?;
-    check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -198,8 +165,7 @@ mod tests {
     /// A processor with the given deferred element budget.
     fn processor_with_budget(max_deferred_elements: usize) -> FastProcessor {
         let options = ExecutionOptions::default().with_max_deferred_elements(max_deferred_elements);
-        FastProcessor::new(StackInputs::default())
-            .with_options(options)
+        FastProcessor::new_with_options(StackInputs::default(), Default::default(), options)
             .expect("default advice inputs fit the configured limits")
     }
 
@@ -224,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_chunk_registration_is_charged_as_attempted_growth() {
+    fn duplicate_chunk_registration_at_limit_is_free() {
         let chunks = vec![core::array::from_fn(|i| Felt::from_u32(1 + i as u32))];
         let tag = Hash::preimage_tag(Hash::BYTES_PER_CHUNK);
         let ptr = 0;
@@ -236,15 +202,8 @@ mod tests {
 
         write_chunk_stack(&mut processor, tag, ptr);
         handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
-        assert_eq!(processor.deferred_state.num_elements(), exact_budget);
 
         write_chunk_stack(&mut processor, tag, ptr);
-        let err = handle_deferred_register_chunk(&mut processor, &precompiles).unwrap_err();
-        assert!(matches!(
-            err,
-            SystemEventError::DeferredStateTooLarge { num_elements, max }
-                if num_elements == exact_budget * 2 && max == exact_budget
-        ));
-        assert_eq!(processor.deferred_state.num_elements(), exact_budget);
+        handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
     }
 }

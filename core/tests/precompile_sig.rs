@@ -2,6 +2,7 @@
 
 mod common;
 
+use common::register_and_evaluate;
 use miden_core::{
     Felt, ZERO,
     deferred::{DeferredState, Node, NodeType, Precompile, PrecompileError, PrecompileRegistry},
@@ -20,11 +21,11 @@ fn verify_passes_in_multi_precompile_registry() {
         .with_precompile(Uint)
         .with_precompile(Hash)
         .with_precompile(Sig);
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
     registry.init(&mut state).unwrap();
 
     let node = Sig::verify_node(three_chunks(Felt::from_u32(7)));
-    let result = state.evaluate_node(&registry, node).unwrap();
+    let result = register_and_evaluate(&registry, &mut state, node);
     assert!(result.is_true_node());
 
     // Log the proven signature predicate and round-trip the transcript.
@@ -38,9 +39,10 @@ fn verify_passes_in_multi_precompile_registry() {
 #[test]
 fn verify_fails_for_zeroed_placeholder_sig() {
     let registry = PrecompileRegistry::default().with_precompile(Sig);
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
     let node = Sig::verify_node(three_chunks(ZERO));
-    let err = state.evaluate_node(&registry, node);
+    let digest = state.register(&registry, node).unwrap();
+    let err = state.evaluate(&registry, digest);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -54,7 +56,7 @@ fn decode_classifies_verify_tag_only() {
 #[test]
 fn verify_rejects_wrong_chunk_count() {
     let registry = PrecompileRegistry::default().with_precompile(Sig);
-    let mut state = DeferredState::new();
+    let mut state = DeferredState::new(usize::MAX);
     let node = Node::chunk(Sig::verify_tag(), vec![[Felt::from_u32(1); 8]; 2]);
     assert!(matches!(state.register(&registry, node), Err(PrecompileError::InvalidNode)));
 }

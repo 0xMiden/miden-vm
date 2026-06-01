@@ -239,7 +239,8 @@ impl From<&Arc<MastForest>> for HostLibrary {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        deferred::PrecompileError,
+        ZERO,
+        deferred::{DeferredState, PrecompileError},
         testing::precompile::{Hash, Uint},
     };
 
@@ -257,8 +258,14 @@ mod tests {
 
         host.load_library(library).unwrap();
 
-        assert!(host.precompiles().decode(Uint::leaf_tag()).is_ok());
-        assert!(host.precompiles().decode(Hash::digest_tag()).is_ok());
-        assert!(matches!(original.decode(Hash::digest_tag()), Err(PrecompileError::InvalidNode)));
+        let mut merged_state = DeferredState::new(usize::MAX);
+        assert!(merged_state.register(host.precompiles(), Uint::leaf_node([0; 8])).is_ok());
+        assert!(merged_state.register(host.precompiles(), Hash::digest_node([ZERO; 8])).is_ok());
+
+        let mut original_state = DeferredState::new(usize::MAX);
+        assert!(matches!(
+            original_state.register(&original, Hash::digest_node([ZERO; 8])),
+            Err(PrecompileError::InvalidNode)
+        ));
     }
 }
