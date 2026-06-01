@@ -2,6 +2,7 @@
 
 use alloc::vec::Vec;
 
+use miden_assembly_syntax::debuginfo::{FileLineCol, Location};
 use miden_core::{
     mast::MastNodeId,
     operations::{AssemblyOp, DebugVarInfo},
@@ -80,6 +81,23 @@ impl SourceMastNode {
     pub(crate) fn debug_vars(&self) -> &[(usize, DebugVarInfo)] {
         &self.debug_vars
     }
+
+    fn rewrite_source_locations(
+        &mut self,
+        rewrite_location: &mut impl FnMut(Location) -> Location,
+        rewrite_file_line_col: &mut impl FnMut(FileLineCol) -> FileLineCol,
+    ) {
+        for (_, asm_op) in self.asm_ops.iter_mut() {
+            if let Some(location) = asm_op.location().cloned() {
+                asm_op.set_location(rewrite_location(location));
+            }
+        }
+        for (_, debug_var) in self.debug_vars.iter_mut() {
+            if let Some(location) = debug_var.location().cloned() {
+                debug_var.set_location(rewrite_file_line_col(location));
+            }
+        }
+    }
 }
 
 /// Source/debug occurrence graph produced alongside a reduced execution MAST forest.
@@ -117,5 +135,16 @@ impl SourceDebugGraph {
                 (source_node.exec_node() == exec_node)
                     .then_some((SourceMastNodeId::from(index as u32), source_node))
             })
+    }
+
+    pub(crate) fn with_rewritten_source_locations(
+        mut self,
+        mut rewrite_location: impl FnMut(Location) -> Location,
+        mut rewrite_file_line_col: impl FnMut(FileLineCol) -> FileLineCol,
+    ) -> Self {
+        for source_node in self.nodes.iter_mut() {
+            source_node.rewrite_source_locations(&mut rewrite_location, &mut rewrite_file_line_col);
+        }
+        self
     }
 }

@@ -880,7 +880,8 @@ impl Assembler {
             debug_info
         });
 
-        let source_graph = self.emit_debug_info.then_some(source_graph);
+        let source_graph =
+            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
 
         Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
     }
@@ -925,7 +926,8 @@ impl Assembler {
             debug_info
         });
 
-        let source_graph = self.emit_debug_info.then_some(source_graph);
+        let source_graph =
+            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
 
         Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
     }
@@ -949,6 +951,20 @@ impl Assembler {
         }
 
         mast_forest
+    }
+
+    fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
+        if self.trim_paths {
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                return source_graph.with_rewritten_source_locations(
+                    |location| trimmer.trim_location(location),
+                    |location| trimmer.trim_file_line_col(location),
+                );
+            }
+        }
+
+        source_graph
     }
 
     #[cfg(feature = "std")]

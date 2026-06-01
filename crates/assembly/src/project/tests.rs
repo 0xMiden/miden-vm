@@ -52,14 +52,26 @@ end
     assert_eq!(dev.version.to_string(), "1.2.3");
     assert_eq!(dev.description.as_deref(), Some("sample library"));
     assert_eq!(dev.kind, TargetType::Library);
-    assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
+    assert!(
+        dev.debug_info()
+            .expect("dev package debug info should decode")
+            .expect("dev package should contain debug info")
+            .source_map
+            .as_ref()
+            .is_some_and(|source_map| !source_map.asm_ops.is_empty())
+    );
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
         .expect("failed to assemble under release profile");
-    assert_eq!(release.mast_forest().debug_info().num_asm_ops(), 0);
+    assert!(
+        release
+            .debug_info()
+            .expect("release package debug info should decode")
+            .is_none()
+    );
     assert!(
         !release
             .sections
@@ -370,11 +382,14 @@ end
     let tempdir_prefix = tempdir.path().display().to_string();
 
     let asm_op_path = package
-        .mast_forest()
         .debug_info()
-        .asm_ops()
-        .iter()
-        .find_map(|asm_op| asm_op.location().map(|location| location.uri.path().to_string()))
+        .expect("package debug info should decode")
+        .expect("package should contain debug info")
+        .source_map
+        .expect("package should contain source map")
+        .asm_ops
+        .into_iter()
+        .find_map(|asm_op| asm_op.location.map(|location| location.uri.path().to_string()))
         .expect("assembled package should contain asm-op locations");
     assert!(
         !asm_op_path.contains(tempdir_prefix.as_str()),
