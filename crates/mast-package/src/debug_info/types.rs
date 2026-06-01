@@ -381,6 +381,22 @@ impl DebugSourceGraphSection {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty() && self.roots.is_empty()
     }
+
+    /// Returns a source/debug occurrence by ID.
+    pub fn source_node(&self, source_node: DebugSourceMastNodeId) -> Option<&DebugSourceMastNode> {
+        self.nodes.get(source_node.as_u32() as usize)
+    }
+
+    /// Returns all source/debug occurrences that point at `exec_node`.
+    pub fn source_nodes_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> {
+        self.nodes.iter().enumerate().filter_map(move |(index, source_node)| {
+            (source_node.exec_node == exec_node)
+                .then_some((DebugSourceMastNodeId::from(index as u32), source_node))
+        })
+    }
 }
 
 /// Assembly operation metadata keyed by a source/debug MAST occurrence.
@@ -467,6 +483,41 @@ impl DebugSourceMapSection {
     /// Returns true if the section contains no metadata rows.
     pub fn is_empty(&self) -> bool {
         self.asm_ops.is_empty() && self.debug_vars.is_empty()
+    }
+
+    /// Returns assembly operation rows for a source/debug occurrence.
+    pub fn asm_ops_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> impl Iterator<Item = &DebugSourceAsmOp> {
+        self.asm_ops.iter().filter(move |row| row.source_node == source_node)
+    }
+
+    /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
+    pub fn asm_op_for_operation(
+        &self,
+        source_node: DebugSourceMastNodeId,
+        op_idx: u32,
+    ) -> Option<&DebugSourceAsmOp> {
+        self.asm_ops_for_source_node(source_node).find(|row| row.op_idx == op_idx)
+    }
+
+    /// Returns debug variable rows for a source/debug occurrence.
+    pub fn debug_vars_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> impl Iterator<Item = &DebugSourceVar> {
+        self.debug_vars.iter().filter(move |row| row.source_node == source_node)
+    }
+
+    /// Returns debug variable rows for `source_node` at `op_idx`.
+    pub fn debug_vars_for_operation(
+        &self,
+        source_node: DebugSourceMastNodeId,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceVar> {
+        self.debug_vars_for_source_node(source_node)
+            .filter(move |row| row.op_idx == op_idx)
     }
 }
 
@@ -917,6 +968,52 @@ mod tests {
         assert_eq!(idx2, 1);
         assert_eq!(idx3, 0); // Should return same index
         assert_eq!(section.strings.len(), 2);
+    }
+
+    #[test]
+    fn test_source_debug_lookup_uses_source_node_identity() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let exec_node = MastNodeId::new_unchecked(7);
+        let source_a = DebugSourceMastNodeId::from(0);
+        let source_b = DebugSourceMastNodeId::from(1);
+        let graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: alloc::vec![
+                DebugSourceMastNode::new(exec_node, alloc::vec![], 0, 1),
+                DebugSourceMastNode::new(exec_node, alloc::vec![], 0, 1),
+            ],
+            roots: alloc::vec![source_a, source_b],
+        };
+        let source_nodes = graph.source_nodes_for_exec_node(exec_node).collect::<Vec<_>>();
+        assert_eq!(source_nodes.len(), 2);
+        assert_eq!(graph.source_node(source_a).unwrap().exec_node, exec_node);
+
+        let source_map = DebugSourceMapSection {
+            version: DEBUG_SOURCE_MAP_VERSION,
+            asm_ops: alloc::vec![
+                DebugSourceAsmOp::new(source_a, 0, None, "alias_a".into(), "add".into(), 1),
+                DebugSourceAsmOp::new(source_b, 0, None, "alias_b".into(), "add".into(), 1),
+            ],
+            debug_vars: alloc::vec![
+                DebugSourceVar::new(
+                    source_a,
+                    0,
+                    DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
+                ),
+                DebugSourceVar::new(
+                    source_b,
+                    0,
+                    DebugVarInfo::new("y", DebugVarLocation::Stack(1)),
+                ),
+            ],
+        };
+
+        assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name, "alias_a",);
+        assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name, "alias_b",);
+        let vars_b = source_map.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();
+        assert_eq!(vars_b.len(), 1);
+        assert_eq!(vars_b[0].var.name(), "y");
     }
 
     #[test]
