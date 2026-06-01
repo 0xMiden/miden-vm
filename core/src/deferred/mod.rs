@@ -52,12 +52,12 @@ impl Tag {
     pub const AND: Tag = Tag { id: ONE, args: [ZERO; 3] };
 
     /// Returns whether an id is reserved by the deferred framework.
-    pub fn is_framework_reserved_id(id: Felt) -> bool {
+    fn is_framework_reserved_id(id: Felt) -> bool {
         id == ZERO || id == ONE
     }
 
     /// Returns whether this tag belongs to the framework namespace.
-    pub fn is_framework_reserved(&self) -> bool {
+    fn is_framework_reserved(&self) -> bool {
         Self::is_framework_reserved_id(self.id)
     }
 
