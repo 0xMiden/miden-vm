@@ -31,6 +31,7 @@ pub(crate) struct BuiltMastForest {
 }
 
 impl BuiltMastForest {
+    #[allow(dead_code)]
     pub(crate) fn into_parts(self) -> (MastForest, BTreeMap<MastNodeRef, MastNodeId>) {
         (self.mast_forest, self.node_id_by_ref)
     }

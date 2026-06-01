@@ -19,6 +19,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
+    mast::MastNodeId,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{ColumnNumber, LineNumber};
@@ -224,6 +225,8 @@ impl DebugSourcesSection {
 
 /// The version of the debug_functions section format.
 pub const DEBUG_FUNCTIONS_VERSION: u8 = 1;
+/// The version of the debug_source_graph section format.
+pub const DEBUG_SOURCE_GRAPH_VERSION: u8 = 1;
 
 /// Debug functions section containing function metadata, variables, and inlined calls.
 ///
@@ -276,6 +279,95 @@ impl DebugFunctionsSection {
     /// Returns true if the section is empty (no functions).
     pub fn is_empty(&self) -> bool {
         self.functions.is_empty()
+    }
+}
+
+// DEBUG SOURCE GRAPH SECTION
+// ================================================================================================
+
+/// A strongly-typed index into the source/debug MAST occurrence graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct DebugSourceMastNodeId(u32);
+
+impl DebugSourceMastNodeId {
+    /// Returns the inner value as a `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for DebugSourceMastNodeId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<DebugSourceMastNodeId> for u32 {
+    fn from(value: DebugSourceMastNodeId) -> Self {
+        value.0
+    }
+}
+
+impl Serializable for DebugSourceMastNodeId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.0);
+    }
+}
+
+impl Deserializable for DebugSourceMastNodeId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self(source.read_u32()?))
+    }
+
+    fn min_serialized_size() -> usize {
+        4
+    }
+}
+
+/// A source/debug MAST occurrence that points at a reduced execution node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourceMastNode {
+    /// The reduced execution MAST node represented by this source occurrence.
+    pub exec_node: MastNodeId,
+    /// Child source occurrences.
+    pub children: Vec<DebugSourceMastNodeId>,
+}
+
+impl DebugSourceMastNode {
+    /// Creates a source/debug occurrence record.
+    pub fn new(exec_node: MastNodeId, children: Vec<DebugSourceMastNodeId>) -> Self {
+        Self { exec_node, children }
+    }
+}
+
+/// Package-owned source/debug MAST occurrence graph.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourceGraphSection {
+    /// Version of the debug source graph format.
+    pub version: u8,
+    /// Source/debug occurrence nodes.
+    pub nodes: Vec<DebugSourceMastNode>,
+    /// Source/debug occurrence roots.
+    pub roots: Vec<DebugSourceMastNodeId>,
+}
+
+impl DebugSourceGraphSection {
+    /// Creates an empty source/debug occurrence graph section.
+    pub fn new() -> Self {
+        Self {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: Vec::new(),
+            roots: Vec::new(),
+        }
+    }
+
+    /// Returns true if the section contains no source occurrences.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.roots.is_empty()
     }
 }
 

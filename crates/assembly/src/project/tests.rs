@@ -7,7 +7,9 @@ use miden_core::{
 };
 use miden_mast_package::{
     Section, SectionId,
-    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
+    debug_info::{
+        DebugFunctionsSection, DebugSourceGraphSection, DebugSourcesSection, DebugTypesSection,
+    },
 };
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
@@ -50,11 +52,18 @@ end
     assert_eq!(dev.description.as_deref(), Some("sample library"));
     assert_eq!(dev.kind, TargetType::Library);
     assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
         .expect("failed to assemble under release profile");
     assert_eq!(release.mast_forest().debug_info().num_asm_ops(), 0);
+    assert!(
+        !release
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+    );
 }
 
 #[test]
@@ -214,6 +223,11 @@ end
         .iter()
         .find(|section| section.id == SectionId::DEBUG_TYPES)
         .expect("package should contain DEBUG_TYPES");
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
 
     let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
     let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
@@ -231,6 +245,13 @@ end
     let debug_types =
         DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
     assert_eq!(debug_types.version, 1);
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    assert_eq!(debug_source_graph.version, 1);
+    assert!(!debug_source_graph.nodes.is_empty());
+    assert!(!debug_source_graph.roots.is_empty());
 }
 
 #[test]

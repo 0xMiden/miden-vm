@@ -41,7 +41,7 @@ use crate::{
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceDebugGraph},
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -570,7 +570,8 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, _) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
@@ -579,7 +580,7 @@ impl Assembler {
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         let modules = self.package_modules(module_indices);
-        self.finish_library_product(name, mast_forest, exports, modules, kind)
+        self.finish_library_product(name, mast_forest, source_graph, exports, modules, kind)
     }
 
     fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
@@ -829,7 +830,8 @@ impl Assembler {
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, _) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
@@ -838,6 +840,7 @@ impl Assembler {
             name,
             namespace,
             mast_forest,
+            source_graph,
             entry_node_id,
             self.linker.kernel_package(),
         )
@@ -847,6 +850,7 @@ impl Assembler {
         &self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         modules: Vec<PackageModule>,
         kind: TargetType,
@@ -876,7 +880,9 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, None, debug_info))
+        let source_graph = self.emit_debug_info.then_some(source_graph);
+
+        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
     }
 
     fn finish_program_product(
@@ -884,6 +890,7 @@ impl Assembler {
         name: PackageId,
         namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
@@ -918,7 +925,9 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, kernel, debug_info))
+        let source_graph = self.emit_debug_info.then_some(source_graph);
+
+        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
     }
 
     fn apply_debug_options(
