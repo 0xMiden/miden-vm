@@ -31,7 +31,12 @@ mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
 pub(crate) use pending_record::{AsmOpRef, DebugVarRef, MastNodeRef};
-use pending_record::{MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind};
+use pending_record::{
+    MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind, PendingSourceMastNode,
+    SourceMastNodeRef,
+};
+mod source_debug_graph;
+pub(crate) use source_debug_graph::{SourceDebugGraph, SourceMastNode, SourceMastNodeId};
 mod static_import;
 
 // CONSTANTS
@@ -75,6 +80,10 @@ pub struct MastForestBuilder {
     node_ref_by_key: BTreeMap<MastNodeKey, MastNodeRef>,
     /// Builder-owned dense storage for node refs.
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
+    /// Builder-owned dense storage for source/debug occurrences.
+    source_nodes: IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
+    /// Most recent source occurrence for each execution node ref.
+    latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceMastNodeRef>,
     /// Builder-owned dense storage for assembly op refs.
     asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
     /// Builder-owned dense storage for debug variable refs.
@@ -165,14 +174,18 @@ impl MastForestBuilder {
 
     fn intern_pending_node(&mut self, draft: PendingMastNodeDraft) -> Result<MastNodeRef, Report> {
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        if let Some(node_ref) = self.find_node_ref_by_key(&dedup_key) {
+        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
+        let node_ref = if let Some(node_ref) = self.find_node_ref_by_key(&dedup_key) {
             if self.should_replace_pending_node(node_ref, &draft) {
-                self.replace_pending_node_record_ref(node_ref, dedup_key, draft);
+                self.replace_pending_node_record_ref(node_ref, dedup_key, draft.clone());
             }
-            Ok(node_ref)
+            node_ref
         } else {
-            self.insert_pending_node_record_ref(dedup_key, draft)
-        }
+            self.insert_pending_node_record_ref(dedup_key, draft.clone())?
+        };
+
+        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+        Ok(node_ref)
     }
 
     fn insert_pending_node_with_allocated_metadata_refs(
@@ -340,19 +353,65 @@ impl MastForestBuilder {
         asm_op: AssemblyOp,
     ) -> Result<MastNodeRef, Report> {
         let dedup_key = self.dedup_key_for_pending_data(&draft);
-        if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
-            return Ok(node_ref);
-        }
+        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
 
         let asm_op_checkpoint = self.asm_op_by_ref.len();
         let debug_var_checkpoint = self.debug_vars.len();
         draft.asm_ops = self.indexed_asm_op_refs(vec![(0, asm_op)])?;
-        self.insert_pending_node_with_allocated_metadata_refs(
-            dedup_key,
-            draft,
-            asm_op_checkpoint,
-            debug_var_checkpoint,
-        )
+        let node_ref =
+            if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
+                node_ref
+            } else {
+                self.insert_pending_node_with_allocated_metadata_refs(
+                    dedup_key,
+                    draft.clone(),
+                    asm_op_checkpoint,
+                    debug_var_checkpoint,
+                )?
+            };
+
+        if let Err(err) = self.record_source_occurrence(node_ref, source_child_refs, &draft) {
+            truncate_index_vec(&mut self.asm_op_by_ref, asm_op_checkpoint);
+            truncate_index_vec(&mut self.debug_vars, debug_var_checkpoint);
+            return Err(err);
+        }
+
+        Ok(node_ref)
+    }
+
+    fn source_child_refs_for_node_refs(
+        &self,
+        child_refs: &[MastNodeRef],
+    ) -> Vec<SourceMastNodeRef> {
+        child_refs
+            .iter()
+            .map(|child_ref| {
+                *self
+                    .latest_source_ref_by_node_ref
+                    .get(child_ref)
+                    .expect("child execution ref must have a source occurrence")
+            })
+            .collect()
+    }
+
+    fn record_source_occurrence(
+        &mut self,
+        exec_ref: MastNodeRef,
+        child_refs: Vec<SourceMastNodeRef>,
+        draft: &PendingMastNodeDraft,
+    ) -> Result<SourceMastNodeRef, Report> {
+        let source_ref = self
+            .source_nodes
+            .push(PendingSourceMastNode {
+                exec_ref,
+                child_refs,
+                asm_ops: draft.asm_ops.clone(),
+                debug_vars: draft.debug_vars.clone(),
+            })
+            .into_diagnostic()
+            .wrap_err("assembler created too many source MAST node refs")?;
+        self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
+        Ok(source_ref)
     }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
@@ -392,6 +451,9 @@ impl MastForestBuilder {
 
         finalizer.into_built_forest(
             &layout.procedure_root_refs,
+            &self.source_nodes,
+            &self.asm_op_by_ref,
+            &self.debug_vars,
             self.advice_map,
             core::mem::take(&mut self.error_codes),
         )
@@ -871,7 +933,10 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeSet, string::String};
+    use alloc::{
+        collections::BTreeSet,
+        string::{String, ToString},
+    };
 
     use miden_core::{
         mast::{DebugInfo, MastNodeBuilder, MastNodeId},
@@ -1231,6 +1296,48 @@ mod tests {
         assert_eq!(final_block_a, final_block_b);
     }
 
+    #[test]
+    fn test_source_graph_distinguishes_same_exec_debug_var_occurrences() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_x_ref = builder
+            .add_debug_var_ref(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let var_y_ref = builder
+            .add_debug_var_ref(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+            .unwrap();
+
+        let block_a_ref = builder
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_x_ref)])
+            .unwrap();
+        let block_b_ref = builder
+            .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, var_y_ref)])
+            .unwrap();
+
+        assert_eq!(block_a_ref, block_b_ref);
+
+        record_test_root(&mut builder, block_a_ref);
+        let (forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_block = remapping[&block_a_ref];
+        let debug_var_names = source_graph
+            .source_nodes_for_exec_node(final_block)
+            .flat_map(|(_, source_node)| {
+                source_node
+                    .debug_vars()
+                    .iter()
+                    .map(|(_, debug_var)| debug_var.name().to_string())
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(final_block, remapping[&block_b_ref]);
+        assert_eq!(forest.num_nodes(), 1);
+        assert_eq!(source_graph.roots().len(), 2);
+        assert_eq!(debug_var_names, BTreeSet::from(["x".to_string(), "y".to_string()]));
+    }
+
     /// Same-content debug vars should not prevent block dedup just because they
     /// were allocated different builder refs.
     #[test]
@@ -1404,6 +1511,44 @@ mod tests {
             "ctx_a"
         );
         assert_eq!(final_block_a, remapping[&block_b_ref]);
+    }
+
+    #[test]
+    fn test_source_graph_distinguishes_same_exec_asm_op_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let asm_op_a =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()));
+        let asm_op_b =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()));
+
+        let block_a_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_a)], Vec::new())
+            .unwrap();
+        let block_b_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_b)], Vec::new())
+            .unwrap();
+
+        assert_eq!(block_a_ref, block_b_ref);
+
+        record_test_root(&mut builder, block_a_ref);
+        let (forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_block = remapping[&block_a_ref];
+        let asm_contexts = source_graph
+            .source_nodes_for_exec_node(final_block)
+            .flat_map(|(_, source_node)| {
+                source_node
+                    .asm_ops()
+                    .iter()
+                    .map(|(_, asm_op)| asm_op.context_name().to_string())
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(final_block, remapping[&block_b_ref]);
+        assert_eq!(forest.num_nodes(), 1);
+        assert_eq!(source_graph.roots().len(), 2);
+        assert_eq!(asm_contexts, BTreeSet::from(["ctx_a".to_string(), "ctx_b".to_string()]));
     }
 
     /// Non-block nodes with different AssemblyOps use the same execution node identity.
@@ -1703,6 +1848,40 @@ mod tests {
                 .context_name(),
             "alias_a"
         );
+    }
+
+    #[test]
+    fn test_source_graph_distinguishes_same_digest_alias_roots() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let alias_a_asm_op =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()));
+        let alias_b_asm_op =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()));
+        let alias_a_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_a_asm_op)], vec![])
+            .unwrap();
+        let alias_b_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, alias_b_asm_op)], vec![])
+            .unwrap();
+        record_test_root(&mut builder, alias_a_ref);
+        record_test_root(&mut builder, alias_b_ref);
+
+        let (forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_alias_a = remapping[&alias_a_ref];
+        let final_alias_b = remapping[&alias_b_ref];
+        let root_contexts = source_graph
+            .roots()
+            .iter()
+            .flat_map(|source_root| source_graph.nodes()[*source_root].asm_ops())
+            .map(|(_, asm_op)| asm_op.context_name().to_string())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(final_alias_a, final_alias_b);
+        assert_eq!(forest.num_nodes(), 1);
+        assert_eq!(source_graph.roots().len(), 2);
+        assert_eq!(root_contexts, BTreeSet::from(["alias_a".to_string(), "alias_b".to_string()]));
     }
 
     /// Digest-based linking imports only the selected alias, not all

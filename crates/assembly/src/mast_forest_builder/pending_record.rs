@@ -41,6 +41,34 @@ impl fmt::Display for MastNodeRef {
 
 impl Idx for MastNodeRef {}
 
+/// Stable assembly-time reference to a source/debug occurrence of a MAST node.
+///
+/// Multiple source occurrences may point at the same [`MastNodeRef`] when they have identical
+/// execution content but distinct source metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct SourceMastNodeRef(u32);
+
+impl From<u32> for SourceMastNodeRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<SourceMastNodeRef> for u32 {
+    fn from(value: SourceMastNodeRef) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for SourceMastNodeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SourceMastNodeRef({})", self.0)
+    }
+}
+
+impl Idx for SourceMastNodeRef {}
+
 /// Stable assembly-time reference to assembly operation metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
@@ -89,6 +117,15 @@ pub(super) struct PendingMastNode {
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,
     pub(super) child_refs: Vec<MastNodeRef>,
+    pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
+    pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
+}
+
+/// Builder-owned source/debug occurrence record used before final source IDs exist.
+#[derive(Clone, Debug)]
+pub(super) struct PendingSourceMastNode {
+    pub(super) exec_ref: MastNodeRef,
+    pub(super) child_refs: Vec<SourceMastNodeRef>,
     pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
     pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
 }
@@ -152,6 +189,7 @@ impl PendingMastNodeKind {
 /// Mutable node record used while deriving a new pending node from an existing one.
 ///
 /// A draft becomes immutable once it is interned as a [`PendingMastNode`].
+#[derive(Clone)]
 pub(super) struct PendingMastNodeDraft {
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,

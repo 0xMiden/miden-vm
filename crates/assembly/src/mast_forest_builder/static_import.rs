@@ -72,16 +72,20 @@ impl MastForestBuilder {
         let (draft, asm_op_checkpoint, debug_var_checkpoint) = self
             .pending_draft_for_statically_linked_source(source_node_id, source_node, child_refs)?;
         let dedup_key = self.dedup_key_for_pending_data(&draft);
+        let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
         if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
+            self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
             return Ok(node_ref);
         }
 
-        self.insert_pending_node_with_allocated_metadata_refs(
+        let node_ref = self.insert_pending_node_with_allocated_metadata_refs(
             dedup_key,
-            draft,
+            draft.clone(),
             asm_op_checkpoint,
             debug_var_checkpoint,
-        )
+        )?;
+        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+        Ok(node_ref)
     }
 
     fn pending_asm_ops_for_statically_linked_source(
