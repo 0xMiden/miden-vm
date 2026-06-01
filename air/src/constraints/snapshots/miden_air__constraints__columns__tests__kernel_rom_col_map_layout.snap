@@ -1,0 +1,13 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(KernelRomCols)
+---
+KernelRomCols {
+    multiplicity: 0,
+    root: [
+        1,
+        2,
+        3,
+        4,
+    ],
+}

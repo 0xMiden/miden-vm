@@ -1,9 +1,9 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::collections::BTreeMap;
 
 use miden_air::trace::{RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
-use miden_core::{Felt, ZERO};
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
-use crate::trace::TraceFragment;
+use crate::trace::ChipletTraceFragment;
 
 mod trace;
 pub use trace::CircuitEvaluation;
@@ -35,16 +35,13 @@ impl Ace {
     }
 
     /// Fills the portion of the main trace allocated to the ACE chiplet.
-    pub(crate) fn fill_trace(self, trace: &mut TraceFragment) {
+    pub(crate) fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(ACE_CHIPLET_NUM_COLS, trace.width(), "inconsistent trace widths");
 
-        let mut gen_trace: [Vec<Felt>; ACE_CHIPLET_NUM_COLS] = (0..ACE_CHIPLET_NUM_COLS)
-            .map(|_| vec![ZERO; self.trace_len()])
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("failed to convert vector to array");
+        // Row-major scratch: `ACE_CHIPLET_NUM_COLS` contiguous cells per row.
+        let mut gen_trace = Felt::zero_vec(self.trace_len() * ACE_CHIPLET_NUM_COLS);
 
         let mut offset = 0;
         for eval_ctx in self.circuit_evaluations.into_values() {
@@ -52,9 +49,7 @@ impl Ace {
             offset += eval_ctx.num_rows();
         }
 
-        for (out_column, column) in trace.columns().zip(gen_trace) {
-            out_column.copy_from_slice(&column);
-        }
+        trace.copy_rows_from(&gen_trace);
     }
 
     /// Adds an entry resulting from a call to the ACE chiplet.

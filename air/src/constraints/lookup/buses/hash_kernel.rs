@@ -41,13 +41,7 @@ use crate::{
         utils::BoolNot,
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
-    trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{
-            MEMORY_WORD_ADDR_HI_COL_IDX, MEMORY_WORD_ADDR_LO_COL_IDX,
-            ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-        },
-    },
+    trace::chiplets::ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
@@ -135,8 +129,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let mem = local.memory();
     let mem_d0 = mem.d0;
     let mem_d1 = mem.d1;
-    let mem_w0 = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET];
-    let mem_w1 = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET];
+    let mem_w0 = local.memory_word_addr_lo();
+    let mem_w1 = local.memory_word_addr_hi();
 
     builder.next_column(
         |col| {

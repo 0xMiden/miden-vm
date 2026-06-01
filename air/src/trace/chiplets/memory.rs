@@ -1,6 +1,4 @@
-use miden_core::WORD_SIZE;
-
-use super::{Felt, ONE, Range, ZERO, create_range};
+use super::{Felt, ONE, ZERO};
 
 // CONSTANTS
 // ================================================================================================
@@ -18,44 +16,3 @@ pub const MEMORY_READ: Felt = ONE;
 pub const MEMORY_ACCESS_ELEMENT: Felt = ZERO;
 /// Specifies the value of the `ELEMENT_OR_WORD` column when the operation is over a word.
 pub const MEMORY_ACCESS_WORD: Felt = ONE;
-
-// --- COLUMN ACCESSOR INDICES WITHIN THE CHIPLET -------------------------------------------------
-
-/// Column to hold whether the operation is a read or write.
-pub const IS_READ_COL_IDX: usize = 0;
-/// Column to hold the whether the operation was over an element or a word.
-pub const IS_WORD_ACCESS_COL_IDX: usize = IS_READ_COL_IDX + 1;
-/// Column to hold the context ID of the current memory context.
-pub const CTX_COL_IDX: usize = IS_WORD_ACCESS_COL_IDX + 1;
-/// Column to hold the word (i.e. group of 4 memory slots, referred to by the address of the first
-/// slot in the word).
-pub const WORD_COL_IDX: usize = CTX_COL_IDX + 1;
-/// Column to hold the first bit of the index of the address in the word.
-pub const IDX0_COL_IDX: usize = WORD_COL_IDX + 1;
-/// Column to hold the second bit of the index of the address in the word.
-pub const IDX1_COL_IDX: usize = IDX0_COL_IDX + 1;
-/// Column for the clock cycle in which the memory operation occurred.
-pub const CLK_COL_IDX: usize = IDX1_COL_IDX + 1;
-/// Columns to hold the values stored at a given memory context, word, and clock cycle after
-/// the memory operation. When reading from a new word, these are initialized to zero.
-pub const V_COL_RANGE: Range<usize> = create_range(CLK_COL_IDX + 1, WORD_SIZE);
-/// Column for the lower 16-bits of the delta between two consecutive context IDs, addresses, or
-/// clock cycles.
-pub const D0_COL_IDX: usize = V_COL_RANGE.end;
-/// Column for the upper 16-bits of the delta between two consecutive context IDs, addresses, or
-/// clock cycles.
-pub const D1_COL_IDX: usize = D0_COL_IDX + 1;
-/// Column for the inverse of the delta between two consecutive context IDs, addresses, or clock
-/// cycles, used to enforce that changes are correctly constrained.
-pub const D_INV_COL_IDX: usize = D1_COL_IDX + 1;
-/// Column to hold the flag indicating whether the current memory operation is in the same word and
-/// same context as the previous operation.
-pub const FLAG_SAME_CONTEXT_AND_WORD: usize = D_INV_COL_IDX + 1;
-
-/// Column for the lower 16 bits of the word index (word_addr / 4).
-/// Used for range-checking that memory addresses are valid 32-bit values.
-pub const WORD_ADDR_LO_COL_IDX: usize = FLAG_SAME_CONTEXT_AND_WORD + 1;
-
-/// Column for the upper 16 bits of the word index (word_addr / 4).
-/// Used for range-checking that memory addresses are valid 32-bit values.
-pub const WORD_ADDR_HI_COL_IDX: usize = WORD_ADDR_LO_COL_IDX + 1;
