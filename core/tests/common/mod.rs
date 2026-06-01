@@ -25,7 +25,7 @@ pub fn log_and_verify(registry: &PrecompileRegistry, state: &mut DeferredState, 
     assert_round_trips(state, registry);
 }
 
-/// Asserts that wire round-tripping preserves the verified transcript root and nodes.
+/// Asserts that wire round-tripping preserves the verified root and canonical wire nodes.
 pub fn assert_round_trips(state: &DeferredState, registry: &PrecompileRegistry) {
     let wire = state.to_wire(registry).unwrap();
     let rehydrated = DeferredState::from_wire(&wire, registry, usize::MAX).unwrap();

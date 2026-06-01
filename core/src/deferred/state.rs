@@ -10,12 +10,12 @@ use super::{
 /// The state keeps committed nodes, host-side reduction memos, and the current transcript root.
 /// Reduction memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
 /// them. The state is intentionally not serialized directly: proofs carry [`DeferredStateWire`],
-/// and [`Self::from_wire`] rebuilds this state only after `PrecompileRegistry` checks,
-/// reachability checks, and transcript re-evaluation.
+/// and [`Self::from_wire`] rebuilds this state only after registry checks, canonical wire checks,
+/// expected-root matching, and root evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeferredState {
     nodes: BTreeMap<Digest, Node>,
-    root: Digest,
+    pub(super) root: Digest,
     evals: BTreeMap<Digest, Digest>,
     remaining_elements: usize,
 }
@@ -179,7 +179,7 @@ impl DeferredState {
         Ok(canonical)
     }
 
-    /// Serializes the transcript-reachable DAG into compact wire form.
+    /// Serializes the root-reachable DAG into compact canonical wire form.
     ///
     /// Only nodes reachable from `root` are emitted; registered or memoized orphans are dropped.
     /// The installed `PrecompileRegistry` determines each node's shape, so graph edges are never
@@ -193,9 +193,11 @@ impl DeferredState {
 
     /// Rebuilds and verifies a deferred state from untrusted wire data.
     ///
-    /// Rehydration first reconstructs digest-addressed nodes under `PrecompileRegistry` and shape
-    /// checks, then rejects reconstructed nodes outside the transcript root's reachable closure,
-    /// and finally walks the AND-chain while re-evaluating every logged statement.
+    /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
+    /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
+    /// evaluates the implicit root to TRUE under the installed precompiles. Callers that need
+    /// proof binding should compare the returned [`Self::root`] against the externally
+    /// committed root.
     pub fn from_wire(
         wire: &DeferredStateWire,
         precompiles: &PrecompileRegistry,
@@ -235,13 +237,6 @@ impl DeferredState {
         out
     }
 }
-
-// SERIALIZATION
-// ================================================================================================
-// `DeferredState` is intentionally NOT `Serializable` / `Deserializable`. Wire-level transit
-// goes through [`DeferredStateWire`]; in-memory construction from bytes goes through
-// `DeferredState::from_wire(&wire, precompiles, max_elements)`. This keeps the only path from
-// untrusted bytes to an in-memory state through the registry-validated, chain-walked constructor.
 
 // WITNESS BUILDER
 // ================================================================================================
@@ -585,7 +580,7 @@ mod tests {
     // REHYDRATE TESTS
     // ============================================================================================
 
-    /// Asserts that wire round-tripping preserves the verified transcript root and nodes.
+    /// Asserts that wire round-tripping preserves the verified root and canonical wire nodes.
     fn assert_round_trips(state: &DeferredState, precompiles: &PrecompileRegistry) {
         let wire = state.to_wire(precompiles).unwrap();
         let rehydrated = DeferredState::from_wire(&wire, precompiles, usize::MAX).unwrap();
@@ -601,7 +596,7 @@ mod tests {
         );
     }
 
-    /// Builds a logged `(a+b)*c == 35` transcript used by round-trip tests.
+    /// Builds a logged `(a+b)*c == 35` root used by round-trip tests.
     fn built_state_with_logged_predicate() -> DeferredState {
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
@@ -680,8 +675,8 @@ mod tests {
         for wire in wires {
             let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
             assert!(
-                matches!(err, Err(IntegrityError::MaterializedTrue)),
-                "expected MaterializedTrue, got {err:?}"
+                matches!(err, Err(IntegrityError::InvalidStructure)),
+                "expected InvalidStructure, got {err:?}"
             );
         }
     }
@@ -721,13 +716,32 @@ mod tests {
     }
 
     #[test]
+    fn rehydrate_accepts_predicate_root() {
+        let a = test_leaf(7);
+        let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let pred_digest = pred.digest();
+        let wire = DeferredStateWire {
+            entries: alloc::vec![
+                WireEntry::Value { tag: a.tag, block: a_payload },
+                WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },
+            ],
+        };
+
+        let rehydrated = DeferredState::from_wire(&wire, &precompiles(), usize::MAX).unwrap();
+        assert_eq!(rehydrated.root(), pred_digest);
+        assert_eq!(rehydrated.evals.get(&pred_digest), Some(&TRUE_DIGEST));
+        assert_eq!(rehydrated.to_wire(&precompiles()).unwrap(), wire);
+    }
+
+    #[test]
     fn rehydrate_rejects_bad_index() {
         // Entry 1 cannot reference itself/future index 1 while it is being decoded.
         let wire = DeferredStateWire {
             entries: alloc::vec![WireEntry::Join { tag: Uint::add_tag(), lhs: 1, rhs: 0 }],
         };
         let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::BadIndex)));
+        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
     }
 
     #[test]
@@ -753,14 +767,14 @@ mod tests {
         for wire in wires {
             let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
             assert!(
-                matches!(err, Err(IntegrityError::DuplicateNode)),
-                "expected DuplicateNode, got {err:?}"
+                matches!(err, Err(IntegrityError::InvalidStructure)),
+                "expected InvalidStructure, got {err:?}"
             );
         }
     }
 
     #[test]
-    fn rehydrate_rejects_non_and_root() {
+    fn rehydrate_rejects_root_that_reduces_non_true() {
         let leaf = test_leaf(7);
         let payload = *leaf.payload.as_felts().expect("leaf is expression-bodied");
         let wire = DeferredStateWire {
@@ -768,8 +782,8 @@ mod tests {
         };
         let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
         assert!(
-            matches!(err, Err(IntegrityError::NonAndNode)),
-            "expected NonAndNode, got {err:?}"
+            matches!(err, Err(IntegrityError::RootNotTrue)),
+            "expected RootNotTrue, got {err:?}"
         );
     }
 
@@ -783,7 +797,7 @@ mod tests {
             entries: alloc::vec![WireEntry::Value { tag: bogus_tag, block: [ZERO; 8] }],
         };
         let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::UnknownTag)));
+        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
     }
 
     #[test]
@@ -795,7 +809,7 @@ mod tests {
             }],
         };
         let err = DeferredState::from_wire(&wrong_variant, &precompiles(), usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::ShapeMismatch)));
+        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
 
         let registry = PrecompileRegistry::default().with_precompile(Hash);
         let wrong_count = DeferredStateWire {
@@ -805,7 +819,7 @@ mod tests {
             }],
         };
         let err = DeferredState::from_wire(&wrong_count, &registry, usize::MAX);
-        assert!(matches!(err, Err(IntegrityError::ShapeMismatch)));
+        assert!(matches!(err, Err(IntegrityError::InvalidStructure)));
     }
 
     #[test]
@@ -834,20 +848,16 @@ mod tests {
     }
 
     #[test]
-    fn rehydrate_accepts_noncanonical_but_topological_wire() {
+    fn rehydrate_rejects_noncanonical_but_topological_wire() {
         let a = test_leaf(3);
         let b = test_leaf(4);
         let a_payload = *a.payload.as_felts().unwrap();
         let b_payload = *b.payload.as_felts().unwrap();
         let pred_a = Node::join(Uint::eq_tag(), a.digest(), a.digest());
-        let pred_a_digest = pred_a.digest();
-        let root_a = Node::and(TRUE_DIGEST, pred_a_digest).digest();
         let pred_b = Node::join(Uint::eq_tag(), b.digest(), b.digest());
-        let pred_b_digest = pred_b.digest();
-        let root_b = Node::and(root_a, pred_b_digest).digest();
 
         // This is semantically equivalent to canonical output, but it emits `b` before the first
-        // transcript step's closure. The stream remains topological and root-last.
+        // transcript step's closure. Strict wire rejects the non-canonical order.
         let wire = DeferredStateWire {
             entries: alloc::vec![
                 WireEntry::Value { tag: b.tag, block: b_payload },
@@ -856,16 +866,18 @@ mod tests {
                 WireEntry::Join {
                     tag: Tag::AND,
                     lhs: crate::deferred::TRUE_INDEX,
-                    rhs: 3
+                    rhs: 3,
                 },
                 WireEntry::Join { tag: pred_b.tag, lhs: 1, rhs: 1 },
                 WireEntry::Join { tag: Tag::AND, lhs: 4, rhs: 5 },
             ],
         };
 
-        let rehydrated = DeferredState::from_wire(&wire, &precompiles(), usize::MAX).unwrap();
-        assert_eq!(rehydrated.root(), root_b);
-        assert_eq!(rehydrated.statements(), alloc::vec![pred_a_digest, pred_b_digest]);
+        let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
+        assert!(
+            matches!(err, Err(IntegrityError::InvalidStructure)),
+            "expected InvalidStructure, got {err:?}"
+        );
     }
 
     #[test]
@@ -886,13 +898,13 @@ mod tests {
         let wire = state.to_wire(&registry).unwrap();
         let err = DeferredState::from_wire(&wire, &registry, usize::MAX);
         assert!(
-            matches!(err, Err(IntegrityError::PredicateFailed(_))),
-            "expected PredicateFailed, got {err:?}"
+            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
+            "expected EvaluationFailed, got {err:?}"
         );
     }
 
     #[test]
-    fn rehydrate_rejects_predicate_not_true() {
+    fn rehydrate_rejects_and_with_non_true_child() {
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
         let leaf = state.register(&registry, test_leaf(3)).unwrap();
@@ -904,13 +916,13 @@ mod tests {
         let wire = state.to_wire(&registry).unwrap();
         let err = DeferredState::from_wire(&wire, &registry, usize::MAX);
         assert!(
-            matches!(err, Err(IntegrityError::PredicateNotTrue)),
-            "expected PredicateNotTrue, got {err:?}"
+            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
+            "expected EvaluationFailed, got {err:?}"
         );
     }
 
     #[test]
-    fn rehydrate_rejects_non_and_prev_root() {
+    fn rehydrate_rejects_and_with_non_true_lhs() {
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
@@ -924,13 +936,13 @@ mod tests {
         };
         let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
         assert!(
-            matches!(err, Err(IntegrityError::NonAndNode)),
-            "expected NonAndNode, got {err:?}"
+            matches!(err, Err(IntegrityError::EvaluationFailed(_))),
+            "expected EvaluationFailed, got {err:?}"
         );
     }
 
     #[test]
-    fn rehydrate_rejects_dangling_entry() {
+    fn rehydrate_rejects_dangling_entry_as_noncanonical() {
         let a = test_leaf(7);
         let a_payload = *a.payload.as_felts().expect("leaf is expression-bodied");
         let orphan = test_leaf(99);
@@ -951,8 +963,8 @@ mod tests {
         };
         let err = DeferredState::from_wire(&wire, &precompiles(), usize::MAX);
         assert!(
-            matches!(err, Err(IntegrityError::DanglingNode)),
-            "expected DanglingNode, got {err:?}"
+            matches!(err, Err(IntegrityError::InvalidStructure)),
+            "expected InvalidStructure, got {err:?}"
         );
     }
 }

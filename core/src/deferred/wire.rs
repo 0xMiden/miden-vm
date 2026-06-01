@@ -1,10 +1,14 @@
 //! Compact wire format for deferred-state witnesses.
 //!
-//! Proofs carry a topologically ordered stream of materialized DAG entries. Wire index 0 is
-//! reserved for the implicit TRUE node; entry `i` has wire index `i + 1`, and join entries may only
-//! reference TRUE or earlier entries. Rehydration first decodes this untrusted representation into
-//! a temporary arena, then replays the transcript through [`DeferredState`]'s ordinary
-//! registration/evaluation/append API before accepting it as trusted state.
+//! Proofs carry a canonical, topologically ordered stream of the materialized DAG entries needed to
+//! open an externally committed deferred root. Wire index 0 is reserved for the implicit TRUE node;
+//! entry `i` has wire index `i + 1`, and join entries may only reference TRUE or earlier entries.
+//! Empty wire opens [`TRUE_DIGEST`]; otherwise the root is the digest of the final entry.
+//!
+//! Rehydration decodes the untrusted stream into ordinary [`DeferredState`] nodes, rejects
+//! non-canonical/dangling wire by comparing with [`DeferredState::to_wire`], and finally evaluates
+//! the implicit root to repopulate evaluation memos. Binding that root to execution is a caller
+//! responsibility: compare the returned state's root to the externally committed root.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -54,13 +58,12 @@ pub enum WireEntry {
 // DEFERRED STATE WIRE
 // ================================================================================================
 
-/// Wire representation of a deferred state.
+/// Wire representation of a deferred root opening.
 ///
-/// The root is implicit: empty `entries` means [`TRUE_DIGEST`], otherwise the root is the digest of
+/// The root is implicit: empty `entries` opens [`TRUE_DIGEST`], otherwise the root is the digest of
 /// the last entry. Accepted wire must be topologically ordered, root-last, duplicate-free,
-/// reachable from the transcript root, and semantically valid under the installed
-/// [`PrecompileRegistry`]. It does not need to be byte-for-byte identical to [`Self::from_state`]'s
-/// deterministic output.
+/// canonical, and semantically valid under the installed [`PrecompileRegistry`]. Callers bind the
+/// wire to execution by comparing the returned state's root to an externally committed root.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeferredStateWire {
@@ -68,12 +71,12 @@ pub struct DeferredStateWire {
 }
 
 impl DeferredStateWire {
-    /// Serializes the transcript-reachable DAG into deterministic wire form.
+    /// Serializes the root-reachable DAG into deterministic wire form.
     pub(crate) fn from_state(
         state: &DeferredState,
         precompiles: &PrecompileRegistry,
     ) -> Result<Self, IntegrityError> {
-        let mut build = WireBuild::default();
+        let mut build = WireEncoder::default();
         build.visit_state_digest(state, state.root(), precompiles)?;
         Ok(Self { entries: build.entries })
     }
@@ -84,63 +87,13 @@ impl DeferredStateWire {
         precompiles: &PrecompileRegistry,
         max_elements: usize,
     ) -> Result<DeferredState, IntegrityError> {
-        let decoded = DecodedWire::decode(self, precompiles)?;
-        let transcript = decoded.validate_transcript_and_closure()?;
-        decoded.replay_transcript(&transcript, precompiles, max_elements)
-    }
-
-    fn write_tag<W: ByteWriter>(tag: Tag, target: &mut W) {
-        // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]`.
-        tag.write_into(target);
-    }
-
-    fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> {
-        Tag::read_from(source)
-    }
-
-    fn write_block<W: ByteWriter>(block: &Chunk, target: &mut W) {
-        for felt in block {
-            felt.write_into(target);
-        }
-    }
-
-    fn read_block<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationError> {
-        let mut block = [ZERO; 8];
-        for felt in &mut block {
-            *felt = Felt::read_from(source)?;
-        }
-        Ok(block)
+        let (entries, root) = decode_wire_entries(self, precompiles)?;
+        rebuild_state_from_wire(self, entries, root, precompiles, max_elements)
     }
 }
 
-// DECODED WIRE ARENA
+// WIRE REHYDRATION
 // ================================================================================================
-
-/// Temporary reconstruction arena for untrusted wire data.
-///
-/// The arena is not a trusted [`DeferredState`]. It only gives rehydration a digest-addressed view
-/// of the wire so it can validate transcript reachability and replay ordinary state transitions.
-struct DecodedWire {
-    entries: Vec<DecodedEntry>,
-    /// Parallel to the global wire index space. Index 0 is always [`TRUE_DIGEST`].
-    index_to_digest: Vec<Digest>,
-    /// Maps a materialized digest to its entry position in `entries`.
-    by_digest: BTreeMap<Digest, usize>,
-    root: Digest,
-}
-
-struct DecodedEntry {
-    digest: Digest,
-    node: Node,
-    node_type: NodeType,
-}
-
-struct DecodedTranscript {
-    /// Transcript steps in execution order.
-    steps: Vec<TranscriptStep>,
-    /// All materialized digests consumed by the transcript root and logged statement closures.
-    reachable: BTreeSet<Digest>,
-}
 
 fn decode_wire_tag_type(
     precompiles: &PrecompileRegistry,
@@ -151,7 +104,7 @@ fn decode_wire_tag_type(
     } else if tag == Tag::AND {
         Ok(NodeType::Join)
     } else {
-        precompiles.decode(tag).map_err(|_| IntegrityError::UnknownTag)
+        precompiles.decode(tag).map_err(|_| IntegrityError::InvalidStructure)
     }
 }
 
@@ -161,297 +114,169 @@ fn decode_wire_node_type(
 ) -> Result<NodeType, IntegrityError> {
     let node_type = decode_wire_tag_type(precompiles, node.tag)?;
     if node.tag == Tag::TRUE && !node.is_true_node() {
-        return Err(IntegrityError::ShapeMismatch);
+        return Err(IntegrityError::InvalidStructure);
     }
     Ok(node_type)
 }
 
-struct TranscriptStep {
-    /// The transcript root before this statement was logged.
-    prev_root: Digest,
-    /// The logged statement digest.
-    stmt_digest: Digest,
-    /// The transcript root after this statement was logged.
-    expected_root: Digest,
-}
-
-fn budget_integrity_error(err: &PrecompileError) -> Option<IntegrityError> {
+fn map_rehydrate_error(err: PrecompileError) -> IntegrityError {
     if let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =
         err.root()
     {
-        Some(IntegrityError::DeferredStateTooLarge { num_elements: *num_elements, max: *max })
+        IntegrityError::DeferredStateTooLarge { num_elements: *num_elements, max: *max }
     } else {
-        None
+        IntegrityError::EvaluationFailed(err)
     }
 }
 
-fn map_replay_error(err: PrecompileError) -> IntegrityError {
-    budget_integrity_error(&err).unwrap_or(IntegrityError::PredicateFailed(err))
+fn decode_wire_entries(
+    wire: &DeferredStateWire,
+    precompiles: &PrecompileRegistry,
+) -> Result<(Vec<(Digest, Node)>, Digest), IntegrityError> {
+    let total_nodes =
+        1usize.checked_add(wire.entries.len()).ok_or(IntegrityError::InvalidStructure)?;
+
+    let mut entries = Vec::with_capacity(wire.entries.len());
+    let mut index_to_digest = Vec::with_capacity(total_nodes);
+    let mut seen_digests = BTreeSet::new();
+    index_to_digest.push(TRUE_DIGEST);
+    seen_digests.insert(TRUE_DIGEST);
+
+    for entry in &wire.entries {
+        let node = decode_wire_entry(entry, &index_to_digest, precompiles)?;
+        push_decoded_entry(&mut entries, &mut index_to_digest, &mut seen_digests, node)?;
+    }
+
+    let root = *index_to_digest.last().expect("digest table is seeded with TRUE_DIGEST");
+    Ok((entries, root))
 }
 
-fn map_append_error(err: PrecompileError) -> IntegrityError {
-    budget_integrity_error(&err).unwrap_or(IntegrityError::BrokenChain)
-}
-
-impl DecodedWire {
-    fn decode(
-        wire: &DeferredStateWire,
-        precompiles: &PrecompileRegistry,
-    ) -> Result<Self, IntegrityError> {
-        let total_nodes =
-            1usize.checked_add(wire.entries.len()).ok_or(IntegrityError::ShapeMismatch)?;
-
-        let mut decoded = Self {
-            entries: Vec::with_capacity(wire.entries.len()),
-            index_to_digest: Vec::with_capacity(total_nodes),
-            by_digest: BTreeMap::new(),
-            root: TRUE_DIGEST,
-        };
-        decoded.index_to_digest.push(TRUE_DIGEST);
-
-        for entry in &wire.entries {
-            match entry {
-                WireEntry::Value { tag, block } => {
-                    let node = Node::leaf(*tag, *block);
-                    let node_type = decode_wire_node_type(precompiles, &node)?;
-                    decoded.push_typed_entry(node, node_type, NodeType::Value)?;
-                },
-                WireEntry::Chunks { tag, blocks } => {
-                    let node_type = decode_wire_tag_type(precompiles, *tag)?;
-                    let NodeType::Chunks(n) = node_type else {
-                        return Err(IntegrityError::ShapeMismatch);
-                    };
-                    if blocks.len() != n.get() as usize {
-                        return Err(IntegrityError::ShapeMismatch);
-                    }
-                    decoded.push_entry(Node::chunk(*tag, blocks.clone()), node_type)?;
-                },
-                WireEntry::Join { tag, lhs, rhs } => {
-                    let lhs_d = decoded.resolve_index(*lhs)?;
-                    let rhs_d = decoded.resolve_index(*rhs)?;
-                    let node = Node::join(*tag, lhs_d, rhs_d);
-                    let node_type = decode_wire_node_type(precompiles, &node)?;
-                    decoded.push_typed_entry(node, node_type, NodeType::Join)?;
-                },
+fn decode_wire_entry(
+    entry: &WireEntry,
+    index_to_digest: &[Digest],
+    precompiles: &PrecompileRegistry,
+) -> Result<Node, IntegrityError> {
+    match entry {
+        WireEntry::Value { tag, block } => {
+            let node = Node::leaf(*tag, *block);
+            let node_type = decode_wire_node_type(precompiles, &node)?;
+            expect_wire_type(&node, node_type, NodeType::Value)?;
+            Ok(node)
+        },
+        WireEntry::Chunks { tag, blocks } => {
+            let node_type = decode_wire_tag_type(precompiles, *tag)?;
+            let NodeType::Chunks(n) = node_type else {
+                return Err(IntegrityError::InvalidStructure);
+            };
+            if blocks.len() != n.get() as usize {
+                return Err(IntegrityError::InvalidStructure);
             }
-        }
-
-        decoded.root =
-            *decoded.index_to_digest.last().expect("digest table is seeded with TRUE_DIGEST");
-
-        // A non-empty transcript must end in a framework-owned AND node. Empty wire is the only
-        // accepted representation of the TRUE transcript root.
-        if decoded.root != TRUE_DIGEST {
-            let root = decoded.entry(&decoded.root).ok_or(IntegrityError::BrokenChain)?;
-            if root.node.tag != Tag::AND {
-                return Err(IntegrityError::NonAndNode);
-            }
-        }
-
-        Ok(decoded)
-    }
-
-    fn push_entry(&mut self, node: Node, node_type: NodeType) -> Result<(), IntegrityError> {
-        if node.is_true_node() {
-            return Err(IntegrityError::MaterializedTrue);
-        }
-
-        let digest = node.digest();
-        if self.contains_digest(&digest) {
-            return Err(IntegrityError::DuplicateNode);
-        }
-
-        let index = self.index_to_digest.len();
-        if index > u32::MAX as usize {
-            return Err(IntegrityError::ShapeMismatch);
-        }
-
-        let entry_pos = self.entries.len();
-        self.entries.push(DecodedEntry { digest, node, node_type });
-        self.index_to_digest.push(digest);
-        self.by_digest.insert(digest, entry_pos);
-        Ok(())
-    }
-
-    fn push_typed_entry(
-        &mut self,
-        node: Node,
-        node_type: NodeType,
-        expected_type: NodeType,
-    ) -> Result<(), IntegrityError> {
-        if node.is_true_node() {
-            return Err(IntegrityError::MaterializedTrue);
-        }
-        if node_type != expected_type {
-            return Err(IntegrityError::ShapeMismatch);
-        }
-        self.push_entry(node, node_type)
-    }
-
-    fn entry(&self, digest: &Digest) -> Option<&DecodedEntry> {
-        self.by_digest.get(digest).map(|idx| &self.entries[*idx])
-    }
-
-    fn resolve_index(&self, idx: u32) -> Result<Digest, IntegrityError> {
-        self.index_to_digest.get(idx as usize).copied().ok_or(IntegrityError::BadIndex)
-    }
-
-    fn contains_digest(&self, digest: &Digest) -> bool {
-        *digest == TRUE_DIGEST || self.by_digest.contains_key(digest)
-    }
-
-    fn validate_transcript_and_closure(&self) -> Result<DecodedTranscript, IntegrityError> {
-        let mut steps = Vec::new();
-        let mut consumed = BTreeSet::new();
-        let mut chain_nodes = BTreeSet::new();
-        let mut cur = self.root;
-
-        while cur != TRUE_DIGEST {
-            let entry = self.entry(&cur).ok_or(IntegrityError::BrokenChain)?;
-            if entry.node.tag != Tag::AND {
-                return Err(IntegrityError::NonAndNode);
-            }
-            if entry.node_type != NodeType::Join {
-                return Err(IntegrityError::BadAndPayload);
-            }
-            if !chain_nodes.insert(cur) {
-                return Err(IntegrityError::BrokenChain);
-            }
-            consumed.insert(cur);
-
-            let (prev_root, stmt_digest) = entry
-                .node_type
-                .children(&entry.node.payload)
-                .map_err(|_| IntegrityError::BadAndPayload)?
-                .ok_or(IntegrityError::BadAndPayload)?;
-            if !self.contains_digest(&stmt_digest) {
-                return Err(IntegrityError::MissingStatement);
-            }
-            steps.push(TranscriptStep {
-                prev_root,
-                stmt_digest,
-                expected_root: cur,
-            });
-            cur = prev_root;
-        }
-
-        steps.reverse();
-
-        for step in &steps {
-            self.mark_structural_closure(step.stmt_digest, &mut consumed)?;
-        }
-
-        if consumed.len() != self.entries.len() {
-            return Err(IntegrityError::DanglingNode);
-        }
-
-        Ok(DecodedTranscript { steps, reachable: consumed })
-    }
-
-    fn mark_structural_closure(
-        &self,
-        root: Digest,
-        consumed: &mut BTreeSet<Digest>,
-    ) -> Result<(), IntegrityError> {
-        let mut stack = Vec::new();
-        let mut visited = BTreeSet::new();
-        Self::push_materialized(&mut stack, root);
-
-        while let Some(digest) = stack.pop() {
-            if !visited.insert(digest) {
-                continue;
-            }
-
-            let entry = self.entry(&digest).ok_or(IntegrityError::MissingChild)?;
-            consumed.insert(digest);
-
-            if let Some((lhs, rhs)) = entry
-                .node_type
-                .children(&entry.node.payload)
-                .map_err(|_| IntegrityError::ShapeMismatch)?
-            {
-                Self::push_materialized(&mut stack, lhs);
-                Self::push_materialized(&mut stack, rhs);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn replay_transcript(
-        &self,
-        transcript: &DecodedTranscript,
-        precompiles: &PrecompileRegistry,
-        max_elements: usize,
-    ) -> Result<DeferredState, IntegrityError> {
-        let mut state = DeferredState::new(max_elements);
-
-        // Register all reachable entries in original wire order. Since the wire stream is
-        // topological, join children are already materialized when a parent is registered.
-        for entry in &self.entries {
-            if !transcript.reachable.contains(&entry.digest) {
-                continue;
-            }
-
-            let registered =
-                state.register(precompiles, entry.node.clone()).map_err(map_replay_error)?;
-            if registered != entry.digest {
-                return Err(IntegrityError::DuplicateNode);
-            }
-        }
-
-        for step in &transcript.steps {
-            // The decoded chain already says what the previous root must be. Check before doing
-            // expensive evaluation so malformed chains fail at the transcript boundary.
-            if state.root() != step.prev_root {
-                return Err(IntegrityError::BrokenChain);
-            }
-
-            let expected_root = Node::and(state.root(), step.stmt_digest).digest();
-            if expected_root != step.expected_root {
-                return Err(IntegrityError::BrokenChain);
-            }
-
-            let canonical =
-                state.evaluate(precompiles, step.stmt_digest).map_err(map_replay_error)?;
-            if !canonical.is_true_node() {
-                return Err(IntegrityError::PredicateNotTrue);
-            }
-
-            let appended = state
-                .append_statement(precompiles, step.stmt_digest)
-                .map_err(map_append_error)?;
-            if appended != step.expected_root {
-                return Err(IntegrityError::BrokenChain);
-            }
-        }
-
-        if state.root() != self.root {
-            return Err(IntegrityError::BrokenChain);
-        }
-
-        Ok(state)
-    }
-
-    fn push_materialized(stack: &mut Vec<Digest>, digest: Digest) {
-        if digest != TRUE_DIGEST {
-            stack.push(digest);
-        }
+            Ok(Node::chunk(*tag, blocks.clone()))
+        },
+        WireEntry::Join { tag, lhs, rhs } => {
+            let lhs = resolve_wire_index(index_to_digest, *lhs)?;
+            let rhs = resolve_wire_index(index_to_digest, *rhs)?;
+            let node = Node::join(*tag, lhs, rhs);
+            let node_type = decode_wire_node_type(precompiles, &node)?;
+            expect_wire_type(&node, node_type, NodeType::Join)?;
+            Ok(node)
+        },
     }
 }
 
-// WIRE BUILD
+fn expect_wire_type(
+    node: &Node,
+    actual: NodeType,
+    expected: NodeType,
+) -> Result<(), IntegrityError> {
+    if node.is_true_node() {
+        return Err(IntegrityError::InvalidStructure);
+    }
+    if actual != expected {
+        return Err(IntegrityError::InvalidStructure);
+    }
+    Ok(())
+}
+
+fn resolve_wire_index(index_to_digest: &[Digest], idx: u32) -> Result<Digest, IntegrityError> {
+    index_to_digest
+        .get(idx as usize)
+        .copied()
+        .ok_or(IntegrityError::InvalidStructure)
+}
+
+fn push_decoded_entry(
+    entries: &mut Vec<(Digest, Node)>,
+    index_to_digest: &mut Vec<Digest>,
+    seen_digests: &mut BTreeSet<Digest>,
+    node: Node,
+) -> Result<(), IntegrityError> {
+    if node.is_true_node() {
+        return Err(IntegrityError::InvalidStructure);
+    }
+
+    let digest = node.digest();
+    if !seen_digests.insert(digest) {
+        return Err(IntegrityError::InvalidStructure);
+    }
+
+    let index = index_to_digest.len();
+    if index > u32::MAX as usize {
+        return Err(IntegrityError::InvalidStructure);
+    }
+
+    entries.push((digest, node));
+    index_to_digest.push(digest);
+    Ok(())
+}
+
+fn rebuild_state_from_wire(
+    wire: &DeferredStateWire,
+    entries: Vec<(Digest, Node)>,
+    root: Digest,
+    precompiles: &PrecompileRegistry,
+    max_elements: usize,
+) -> Result<DeferredState, IntegrityError> {
+    let mut state = DeferredState::new(max_elements);
+
+    // Register entries in strict topological wire order. Join children have already been decoded to
+    // earlier digests, so ordinary DeferredState registration enforces the same child-closure and
+    // budget rules as execution.
+    for (digest, node) in entries {
+        let registered = state.register(precompiles, node).map_err(map_rehydrate_error)?;
+        if registered != digest {
+            return Err(IntegrityError::InvalidStructure);
+        }
+    }
+
+    state.root = root;
+
+    // `to_wire` emits the deterministic root-reachable closure. Equality makes the accepted format
+    // strict: root-last, canonical DFS order, and no dangling or duplicate entries.
+    if state.to_wire(precompiles)? != *wire {
+        return Err(IntegrityError::InvalidStructure);
+    }
+
+    let canonical = state.evaluate(precompiles, root).map_err(map_rehydrate_error)?;
+    if !canonical.is_true_node() {
+        return Err(IntegrityError::RootNotTrue);
+    }
+
+    Ok(state)
+}
+
+// WIRE ENCODING
 // ================================================================================================
 
-/// Builder for the topological wire format used by [`super::DeferredState::to_wire`].
+/// Encoder for the canonical topological wire format used by [`super::DeferredState::to_wire`].
 #[derive(Default)]
-struct WireBuild {
+struct WireEncoder {
     seen: BTreeSet<Digest>,
     by_digest: BTreeMap<Digest, u32>,
     entries: Vec<WireEntry>,
 }
 
-impl WireBuild {
+impl WireEncoder {
     fn visit_state_digest(
         &mut self,
         state: &DeferredState,
@@ -465,11 +290,11 @@ impl WireBuild {
             return Ok(());
         }
 
-        let node = state.node(&digest).ok_or(IntegrityError::MissingChild)?;
+        let node = state.node(&digest).ok_or(IntegrityError::InvalidStructure)?;
         let node_type = decode_wire_node_type(precompiles, node)?;
         node_type
             .validate_payload(&node.payload)
-            .map_err(|_| IntegrityError::ShapeMismatch)?;
+            .map_err(|_| IntegrityError::InvalidStructure)?;
 
         let entry = match (node_type, &node.payload) {
             (NodeType::Value, Payload::Expression(felts)) => {
@@ -482,15 +307,15 @@ impl WireBuild {
             (NodeType::Join, Payload::Expression(_)) => {
                 let (lhs, rhs) = node_type
                     .children(&node.payload)
-                    .map_err(|_| IntegrityError::ShapeMismatch)?
-                    .ok_or(IntegrityError::ShapeMismatch)?;
+                    .map_err(|_| IntegrityError::InvalidStructure)?
+                    .ok_or(IntegrityError::InvalidStructure)?;
                 self.visit_state_digest(state, lhs, precompiles)?;
                 self.visit_state_digest(state, rhs, precompiles)?;
                 let lhs = self.index_for(lhs)?;
                 let rhs = self.index_for(rhs)?;
                 WireEntry::Join { tag: node.tag, lhs, rhs }
             },
-            _ => return Err(IntegrityError::ShapeMismatch),
+            _ => return Err(IntegrityError::InvalidStructure),
         };
 
         self.push_entry(digest, entry)
@@ -500,12 +325,13 @@ impl WireBuild {
         if digest == TRUE_DIGEST {
             return Ok(TRUE_INDEX);
         }
-        self.by_digest.get(&digest).copied().ok_or(IntegrityError::MissingChild)
+        self.by_digest.get(&digest).copied().ok_or(IntegrityError::InvalidStructure)
     }
 
     fn push_entry(&mut self, digest: Digest, entry: WireEntry) -> Result<(), IntegrityError> {
-        let next_index = self.entries.len().checked_add(1).ok_or(IntegrityError::ShapeMismatch)?;
-        let next_index = u32::try_from(next_index).map_err(|_| IntegrityError::ShapeMismatch)?;
+        let next_index =
+            self.entries.len().checked_add(1).ok_or(IntegrityError::InvalidStructure)?;
+        let next_index = u32::try_from(next_index).map_err(|_| IntegrityError::InvalidStructure)?;
         self.entries.push(entry);
         self.by_digest.insert(digest, next_index);
         Ok(())
@@ -515,25 +341,48 @@ impl WireBuild {
 // SERIALIZATION
 // ================================================================================================
 
+fn write_tag<W: ByteWriter>(tag: Tag, target: &mut W) {
+    // Wire layout is the 4-felt capacity `[id, arg0, arg1, arg2]`.
+    tag.write_into(target);
+}
+
+fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> {
+    Tag::read_from(source)
+}
+
+fn write_block<W: ByteWriter>(block: &Chunk, target: &mut W) {
+    for felt in block {
+        felt.write_into(target);
+    }
+}
+
+fn read_block<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationError> {
+    let mut block = [ZERO; 8];
+    for felt in &mut block {
+        *felt = Felt::read_from(source)?;
+    }
+    Ok(block)
+}
+
 impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
             Self::Value { tag, block } => {
                 target.write_u8(0);
-                DeferredStateWire::write_tag(*tag, target);
-                DeferredStateWire::write_block(block, target);
+                write_tag(*tag, target);
+                write_block(block, target);
             },
             Self::Chunks { tag, blocks } => {
                 target.write_u8(1);
-                DeferredStateWire::write_tag(*tag, target);
+                write_tag(*tag, target);
                 target.write_usize(blocks.len());
                 for block in blocks {
-                    DeferredStateWire::write_block(block, target);
+                    write_block(block, target);
                 }
             },
             Self::Join { tag, lhs, rhs } => {
                 target.write_u8(2);
-                DeferredStateWire::write_tag(*tag, target);
+                write_tag(*tag, target);
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
             },
@@ -546,12 +395,12 @@ impl Deserializable for WireEntry {
         let discriminant = source.read_u8()?;
         match discriminant {
             0 => {
-                let tag = DeferredStateWire::read_tag(source)?;
-                let block = DeferredStateWire::read_block(source)?;
+                let tag = read_tag(source)?;
+                let block = read_block(source)?;
                 Ok(Self::Value { tag, block })
             },
             1 => {
-                let tag = DeferredStateWire::read_tag(source)?;
+                let tag = read_tag(source)?;
                 let block_count = source.read_usize()?;
                 let blocks = source
                     .read_many_iter::<WireBlock>(block_count)?
@@ -560,7 +409,7 @@ impl Deserializable for WireEntry {
                 Ok(Self::Chunks { tag, blocks })
             },
             2 => {
-                let tag = DeferredStateWire::read_tag(source)?;
+                let tag = read_tag(source)?;
                 let lhs = source.read_u32()?;
                 let rhs = source.read_u32()?;
                 Ok(Self::Join { tag, lhs, rhs })
@@ -580,7 +429,7 @@ struct WireBlock(Chunk);
 
 impl Deserializable for WireBlock {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        DeferredStateWire::read_block(source).map(Self)
+        read_block(source).map(Self)
     }
 
     fn min_serialized_size() -> usize {
@@ -615,53 +464,22 @@ impl Deserializable for DeferredStateWire {
 
 /// Reasons untrusted wire data failed deferred-state rehydration.
 ///
-/// Any variant rejects the proof witness under the installed `PrecompileRegistry`. The enum is not
-/// `Clone`/`Eq` because predicate failures carry opaque precompile errors.
+/// Any variant rejects the proof witness under the installed `PrecompileRegistry`. Structural wire
+/// details intentionally collapse into [`Self::InvalidStructure`]; callers only need to distinguish
+/// malformed/non-canonical openings, root mismatches, semantic root failures, and budget failures.
+/// The enum is not `Clone`/`Eq` because evaluation failures carry opaque precompile errors.
 #[derive(Debug, thiserror::Error)]
 pub enum IntegrityError {
-    /// A join child index is outside the currently reconstructed index space.
-    #[error("wire join entry references an out-of-range child index")]
-    BadIndex,
-    /// A non-framework tag is not claimed by the installed registry.
-    #[error("wire contains a node with a tag the installed registry does not recognise")]
-    UnknownTag,
-    /// A reconstructed payload shape or chunk count does not match the tag's declared node type.
-    #[error(
-        "wire reconstructs a node whose payload shape disagrees with its tag's declared NodeType"
-    )]
-    ShapeMismatch,
-    /// A join node in the committed DAG references a child digest that is not materialized.
-    #[error("deferred DAG contains a join node whose child digest is not materialized")]
-    MissingChild,
-    /// The wire explicitly materializes the framework TRUE node, which is implicit index 0.
-    #[error("wire explicitly materializes the implicit TRUE node")]
-    MaterializedTrue,
-    /// Two wire indices reconstruct to the same node digest.
-    #[error("wire assigns multiple indices to the same node digest")]
-    DuplicateNode,
-    /// The transcript chain references a previous root missing from the reconstructed closure.
-    #[error("AND-chain walk encountered a prev_root digest not present in the reconstructed nodes")]
-    BrokenChain,
-    /// A transcript-chain step is not tagged with the framework AND tag.
-    #[error("AND-chain walk encountered a node whose tag is not Tag::AND")]
-    NonAndNode,
-    /// A transcript-chain step does not carry `(prev_root, statement_digest)`.
-    #[error("AND-chain walk encountered a node whose payload is not in join shape")]
-    BadAndPayload,
-    /// A logged statement digest is absent from the wire closure.
-    #[error("AND-chain walk references a statement digest that is not in the node set")]
-    MissingStatement,
-
-    /// A logged statement failed while being re-evaluated by its precompile.
-    #[error("AND-chain statement failed re-evaluation: {0}")]
-    PredicateFailed(#[from] super::PrecompileError),
-    /// A logged statement reduced, but not to the canonical TRUE node.
-    #[error("AND-chain statement reduced to a non-TRUE canonical form")]
-    PredicateNotTrue,
-    /// The wire reconstructs data outside the transcript root's reachable closure.
-    #[error("wire reconstructs a node not reachable from the transcript root")]
-    DanglingNode,
-    /// Replaying the wire transcript would exceed the configured deferred-state budget.
+    /// The wire/state structure is malformed or not the canonical root-last opening.
+    #[error("invalid or non-canonical deferred wire/state structure")]
+    InvalidStructure,
+    /// Root evaluation failed under the installed precompile registry.
+    #[error("deferred root failed evaluation: {0}")]
+    EvaluationFailed(#[from] super::PrecompileError),
+    /// The root reduced, but not to the canonical TRUE node.
+    #[error("deferred root reduced to a non-TRUE canonical form")]
+    RootNotTrue,
+    /// Rehydrating the wire would exceed the configured deferred-state budget.
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
 }
@@ -677,7 +495,7 @@ mod tests {
         core::array::from_fn(|i| Felt::new_unchecked(seed + i as u64))
     }
 
-    /// The proof-transit format must round-trip every entry variant and the empty transcript.
+    /// The proof-transit format must round-trip every entry variant and the empty root opening.
     #[test]
     fn wire_serialize_round_trip_all_entries() {
         let wire = DeferredStateWire {
@@ -734,7 +552,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
         bytes.write_u8(1);
-        DeferredStateWire::write_tag(Tag::from_word(felts(1)[..4].try_into().unwrap()), &mut bytes);
+        write_tag(Tag::from_word(felts(1)[..4].try_into().unwrap()), &mut bytes);
         bytes.write_usize(usize::MAX);
 
         assert!(DeferredStateWire::read_from_bytes(&bytes).is_err());
