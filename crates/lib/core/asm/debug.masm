@@ -24,8 +24,8 @@ const MAX_FELT_VALUE = 18446744069414584320
 
 #! Prints the entire operand stack.
 #!
-#! Inputs:  [...]
-#! Outputs: [...]
+#! Inputs:  []
+#! Outputs: []
 #!
 #! Cycles: 3
 pub proc print_stack
@@ -35,8 +35,8 @@ end
 #! Prints the contents of memory in the range `[start, end)` of the current context, consuming the
 #! two range arguments.
 #!
-#! Inputs:  [start, end, ...]
-#! Outputs: [...]
+#! Inputs:  [start, end]
+#! Outputs: []
 #!
 #! Where:
 #! - start is the (inclusive) start address of the range to print.
@@ -52,8 +52,8 @@ end
 #! Prints the contents of the single memory cell at `addr` in the current context, consuming the
 #! address argument.
 #!
-#! Inputs:  [addr, ...]
-#! Outputs: [...]
+#! Inputs:  [addr]
+#! Outputs: []
 #!
 #! Where:
 #! - addr is the address of the memory cell to print.
@@ -68,8 +68,8 @@ end
 
 #! Prints the full memory of the current context.
 #!
-#! Inputs:  [...]
-#! Outputs: [...]
+#! Inputs:  []
+#! Outputs: []
 #!
 #! Cycles: 7
 pub proc print_mem_all
@@ -81,8 +81,8 @@ end
 
 #! Prints the advice stack in the range `[start, end)`, consuming the two range arguments.
 #!
-#! Inputs:  [start, end, ...]
-#! Outputs: [...]
+#! Inputs:  [start, end]
+#! Outputs: []
 #!
 #! Where:
 #! - start is the (inclusive) start index of the range to print.
@@ -97,8 +97,8 @@ end
 
 #! Prints the full advice stack.
 #!
-#! Inputs:  [...]
-#! Outputs: [...]
+#! Inputs:  []
+#! Outputs: []
 #!
 #! Cycles: 7
 pub proc print_adv_stack_all
@@ -110,8 +110,8 @@ end
 
 #! Prints the full advice map.
 #!
-#! Inputs:  [...]
-#! Outputs: [...]
+#! Inputs:  []
+#! Outputs: []
 #!
 #! Cycles: 3
 pub proc print_adv_map_all
@@ -121,8 +121,8 @@ end
 #! Looks up the WORD key in the advice map and prints the associated list of field elements,
 #! consuming the key.
 #!
-#! Inputs:  [KEY, ...]
-#! Outputs: [...]
+#! Inputs:  [KEY]
+#! Outputs: []
 #!
 #! Where:
 #! - KEY is the word used as the advice map key.
