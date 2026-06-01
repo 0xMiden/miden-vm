@@ -27,6 +27,29 @@ use miden_debug_types::{ColumnNumber, LineNumber, Location};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+// DEBUG SOURCE GRAPH LOOKUP ERROR
+// ================================================================================================
+
+/// Error returned when a caller needs a unique source/debug occurrence but the graph cannot supply
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DebugSourceGraphLookupError {
+    /// The requested parent source/debug occurrence is not present.
+    #[error("source/debug occurrence {source_node:?} is not present")]
+    MissingSourceNode { source_node: DebugSourceMastNodeId },
+    /// Multiple source/debug roots point at the same executable MAST node.
+    #[error("multiple source/debug roots point at executable MAST node {exec_node:?}")]
+    AmbiguousRoot { exec_node: MastNodeId },
+    /// Multiple children of one source/debug occurrence point at the same executable MAST node.
+    #[error(
+        "multiple children of source/debug occurrence {parent:?} point at executable MAST node {exec_node:?}"
+    )]
+    AmbiguousChild {
+        parent: DebugSourceMastNodeId,
+        exec_node: MastNodeId,
+    },
+}
+
 // DEBUG TYPE INDEX
 // ================================================================================================
 
@@ -329,6 +352,45 @@ impl PackageDebugInfo {
             .flat_map(move |source_graph| source_graph.source_nodes_for_exec_node(exec_node))
     }
 
+    /// Returns all source/debug roots that point at `exec_node`.
+    pub fn source_roots_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> {
+        self.source_graph
+            .iter()
+            .flat_map(move |source_graph| source_graph.source_roots_for_exec_node(exec_node))
+    }
+
+    /// Returns the unique source/debug root that points at `exec_node`.
+    ///
+    /// Returns `Ok(None)` if no source graph is present, or if no root points at `exec_node`.
+    pub fn unique_source_root_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+        self.source_graph
+            .as_ref()
+            .map(|source_graph| source_graph.unique_source_root_for_exec_node(exec_node))
+            .unwrap_or(Ok(None))
+    }
+
+    /// Returns the unique child of `parent` that points at `exec_node`.
+    ///
+    /// Returns `Ok(None)` if no source graph is present, or if no child points at `exec_node`.
+    pub fn unique_child_source_node_for_exec_node(
+        &self,
+        parent: DebugSourceMastNodeId,
+        exec_node: MastNodeId,
+    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+        self.source_graph
+            .as_ref()
+            .map(|source_graph| {
+                source_graph.unique_child_source_node_for_exec_node(parent, exec_node)
+            })
+            .unwrap_or(Ok(None))
+    }
+
     /// Returns assembly operation rows for a source/debug occurrence.
     pub fn asm_ops_for_source_node(
         &self,
@@ -489,6 +551,69 @@ impl DebugSourceGraphSection {
             (source_node.exec_node == exec_node)
                 .then_some((DebugSourceMastNodeId::from(index as u32), source_node))
         })
+    }
+
+    /// Returns all source/debug roots that point at `exec_node`.
+    pub fn source_roots_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> {
+        self.roots.iter().copied().filter_map(move |source_node_id| {
+            self.source_node(source_node_id)
+                .filter(|source_node| source_node.exec_node == exec_node)
+                .map(|source_node| (source_node_id, source_node))
+        })
+    }
+
+    /// Returns the unique source/debug root that points at `exec_node`.
+    pub fn unique_source_root_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+        let mut roots = self
+            .source_roots_for_exec_node(exec_node)
+            .map(|(source_node_id, _)| source_node_id);
+        let first = roots.next();
+        if roots.next().is_some() {
+            return Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node });
+        }
+        Ok(first)
+    }
+
+    /// Returns children of `parent` that point at `exec_node`.
+    pub fn child_source_nodes_for_exec_node(
+        &self,
+        parent: DebugSourceMastNodeId,
+        exec_node: MastNodeId,
+    ) -> Result<
+        impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> + '_,
+        DebugSourceGraphLookupError,
+    > {
+        let parent_node = self
+            .source_node(parent)
+            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: parent })?;
+
+        Ok(parent_node.children.iter().copied().filter_map(move |source_node_id| {
+            self.source_node(source_node_id)
+                .filter(|source_node| source_node.exec_node == exec_node)
+                .map(|source_node| (source_node_id, source_node))
+        }))
+    }
+
+    /// Returns the unique child of `parent` that points at `exec_node`.
+    pub fn unique_child_source_node_for_exec_node(
+        &self,
+        parent: DebugSourceMastNodeId,
+        exec_node: MastNodeId,
+    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+        let mut children = self
+            .child_source_nodes_for_exec_node(parent, exec_node)?
+            .map(|(source_node_id, _)| source_node_id);
+        let first = children.next();
+        if children.next().is_some() {
+            return Err(DebugSourceGraphLookupError::AmbiguousChild { parent, exec_node });
+        }
+        Ok(first)
     }
 }
 
@@ -1120,6 +1245,65 @@ mod tests {
         let vars_b = source_map.debug_vars_for_operation(source_b, 0).collect::<Vec<_>>();
         assert_eq!(vars_b.len(), 1);
         assert_eq!(vars_b[0].var.name(), "y");
+    }
+
+    #[test]
+    fn test_source_graph_unique_navigation_reports_ambiguity() {
+        let root_exec = MastNodeId::new_unchecked(7);
+        let child_exec = MastNodeId::new_unchecked(8);
+        let other_exec = MastNodeId::new_unchecked(9);
+        let root = DebugSourceMastNodeId::from(0);
+        let child_a = DebugSourceMastNodeId::from(1);
+        let child_b = DebugSourceMastNodeId::from(2);
+        let other_root = DebugSourceMastNodeId::from(3);
+        let graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: alloc::vec![
+                DebugSourceMastNode::new(root_exec, alloc::vec![child_a, child_b], 0, 1),
+                DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
+                DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
+                DebugSourceMastNode::new(root_exec, alloc::vec![], 0, 1),
+            ],
+            roots: alloc::vec![root],
+        };
+
+        assert_eq!(graph.unique_source_root_for_exec_node(root_exec).unwrap(), Some(root));
+        assert_eq!(graph.unique_source_root_for_exec_node(other_exec).unwrap(), None);
+        assert_eq!(graph.child_source_nodes_for_exec_node(root, child_exec).unwrap().count(), 2,);
+        assert_eq!(
+            graph.unique_child_source_node_for_exec_node(root, child_exec),
+            Err(DebugSourceGraphLookupError::AmbiguousChild {
+                parent: root,
+                exec_node: child_exec
+            }),
+        );
+        assert_eq!(
+            graph.unique_child_source_node_for_exec_node(
+                DebugSourceMastNodeId::from(99),
+                child_exec,
+            ),
+            Err(DebugSourceGraphLookupError::MissingSourceNode {
+                source_node: DebugSourceMastNodeId::from(99),
+            }),
+        );
+
+        let ambiguous_roots = DebugSourceGraphSection {
+            roots: alloc::vec![root, other_root],
+            ..graph
+        };
+        assert_eq!(
+            ambiguous_roots.unique_source_root_for_exec_node(root_exec),
+            Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
+        );
+
+        let package_debug = PackageDebugInfo {
+            source_graph: Some(ambiguous_roots),
+            ..PackageDebugInfo::default()
+        };
+        assert_eq!(
+            package_debug.unique_source_root_for_exec_node(root_exec),
+            Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
+        );
     }
 
     #[test]
