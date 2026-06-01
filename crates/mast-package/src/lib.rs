@@ -23,7 +23,7 @@ pub use self::{
     dependency::Dependency,
     package::{
         ConstantExport, InvalidSectionIdError, InvalidTargetTypeError, ManifestValidationError,
-        Package, PackageExport, PackageId, PackageManifest, PackageStripError, ProcedureExport,
-        Section, SectionId, TargetType, TypeExport,
+        Package, PackageDebugInfoError, PackageExport, PackageId, PackageManifest,
+        PackageStripError, ProcedureExport, Section, SectionId, TargetType, TypeExport,
     },
 };

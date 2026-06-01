@@ -285,6 +285,91 @@ impl DebugFunctionsSection {
     }
 }
 
+// PACKAGE DEBUG INFO
+// ================================================================================================
+
+/// Trusted package-owned debug information decoded from well-known debug sections.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PackageDebugInfo {
+    /// Type definitions for source-level debug consumers.
+    pub types: Option<DebugTypesSection>,
+    /// Source file table.
+    pub sources: Option<DebugSourcesSection>,
+    /// Function metadata.
+    pub functions: Option<DebugFunctionsSection>,
+    /// Source/debug MAST occurrence graph.
+    pub source_graph: Option<DebugSourceGraphSection>,
+    /// Source-keyed assembly operation and debug variable rows.
+    pub source_map: Option<DebugSourceMapSection>,
+}
+
+impl PackageDebugInfo {
+    /// Returns true if no package debug sections were decoded.
+    pub fn is_empty(&self) -> bool {
+        self.types.is_none()
+            && self.sources.is_none()
+            && self.functions.is_none()
+            && self.source_graph.is_none()
+            && self.source_map.is_none()
+    }
+
+    /// Returns a source/debug occurrence by ID.
+    pub fn source_node(&self, source_node: DebugSourceMastNodeId) -> Option<&DebugSourceMastNode> {
+        self.source_graph.as_ref()?.source_node(source_node)
+    }
+
+    /// Returns all source/debug occurrences that point at `exec_node`.
+    pub fn source_nodes_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> {
+        self.source_graph
+            .iter()
+            .flat_map(move |source_graph| source_graph.source_nodes_for_exec_node(exec_node))
+    }
+
+    /// Returns assembly operation rows for a source/debug occurrence.
+    pub fn asm_ops_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> impl Iterator<Item = &DebugSourceAsmOp> {
+        self.source_map
+            .iter()
+            .flat_map(move |source_map| source_map.asm_ops_for_source_node(source_node))
+    }
+
+    /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
+    pub fn asm_op_for_operation(
+        &self,
+        source_node: DebugSourceMastNodeId,
+        op_idx: u32,
+    ) -> Option<&DebugSourceAsmOp> {
+        self.source_map.as_ref()?.asm_op_for_operation(source_node, op_idx)
+    }
+
+    /// Returns debug variable rows for a source/debug occurrence.
+    pub fn debug_vars_for_source_node(
+        &self,
+        source_node: DebugSourceMastNodeId,
+    ) -> impl Iterator<Item = &DebugSourceVar> {
+        self.source_map
+            .iter()
+            .flat_map(move |source_map| source_map.debug_vars_for_source_node(source_node))
+    }
+
+    /// Returns debug variable rows for `source_node` at `op_idx`.
+    pub fn debug_vars_for_operation(
+        &self,
+        source_node: DebugSourceMastNodeId,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceVar> {
+        self.source_map
+            .iter()
+            .flat_map(move |source_map| source_map.debug_vars_for_operation(source_node, op_idx))
+    }
+}
+
 // DEBUG SOURCE GRAPH SECTION
 // ================================================================================================
 
