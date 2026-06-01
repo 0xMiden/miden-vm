@@ -34,6 +34,23 @@ use crate::{
 
 type TestResult = Result<(), Report>;
 
+fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
+    let mut reachable = BTreeSet::new();
+    let mut worklist = forest.procedure_roots().to_vec();
+
+    while let Some(node_id) = worklist.pop() {
+        if reachable.insert(node_id) {
+            forest[node_id].append_children_to(&mut worklist);
+        }
+    }
+
+    assert_eq!(
+        reachable.len(),
+        forest.num_nodes() as usize,
+        "finalized MAST forest contains nodes unreachable from any procedure root",
+    );
+}
+
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
 //
 // - For tests against expected values that can't be expressed as a string literal, we still use
@@ -289,6 +306,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure foo2, bar2, and bar3 map to the same MastNode
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar2));
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar3));
+    assert_all_nodes_reachable_from_roots(lib2.mast_forest());
 
     // make sure there are 6 roots in the MAST (foo1, foo2, foo3, bar1, bar4, and bar5)
     assert_eq!(lib2.mast_forest().num_procedures(), 6);

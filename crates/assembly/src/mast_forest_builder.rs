@@ -496,8 +496,8 @@ impl MastForestBuilder {
 impl MastForestBuilder {
     /// Inserts a procedure into this MAST forest builder.
     ///
-    /// If the procedure with the same ID already exists in this forest builder, this will have
-    /// no effect.
+    /// If the procedure with the same ID already exists in this forest builder, this will have no
+    /// effect.
     pub fn insert_procedure(
         &mut self,
         gid: GlobalItemIndex,
@@ -507,14 +507,19 @@ impl MastForestBuilder {
         //
         // If there is already a cache entry, but it conflicts with what we're trying to cache,
         // then raise an error.
-        if self.procedures.contains_key(&gid) {
-            // The global procedure index and the MAST root resolve to an already cached version of
-            // this procedure, or an alias of it, nothing to do.
-            //
-            // TODO: We should emit a warning for this, because while it is not an error per se, it
-            // does reflect that we're doing work we don't need to be doing. However, emitting a
-            // warning only makes sense if this is controllable by the user, and it isn't yet
-            // clear whether this edge case will ever happen in practice anyway.
+        if let Some(cached) = self.procedures.get(&gid) {
+            if cached.mast_root() != procedure.mast_root() {
+                return Err(report!(
+                    "procedure '{}' was compiled more than once with different MAST roots",
+                    procedure.path()
+                ));
+            }
+
+            log::warn!(
+                target: "assembler::mast_forest_builder",
+                "procedure '{}' was compiled more than once; reusing the cached MAST root",
+                procedure.path(),
+            );
             return Ok(());
         }
 
@@ -1058,6 +1063,22 @@ mod tests {
             let (forest, remapping) = builder.build().unwrap().into_parts();
             assert_finalization_invariants(&forest, &remapping);
         }
+    }
+
+    #[test]
+    fn test_build_prunes_unreachable_nodes() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let root_ref = builder.ensure_block_ref(vec![Operation::Add], vec![], vec![]).unwrap();
+        let dead_ref = builder.ensure_block_ref(vec![Operation::Mul], vec![], vec![]).unwrap();
+        builder.record_procedure_root_ref(root_ref);
+
+        let (forest, remapping) = builder.build().unwrap().into_parts();
+
+        assert!(remapping.contains_key(&root_ref));
+        assert!(!remapping.contains_key(&dead_ref));
+        assert_eq!(forest.num_nodes(), 1);
+        assert_eq!(forest.procedure_roots().len(), 1);
     }
 
     #[test]

@@ -13,44 +13,39 @@ pub(super) struct FinalForestLayout {
 impl FinalForestLayout {
     pub(super) fn plan(
         procedure_root_refs: Vec<MastNodeRef>,
-        removable_node_refs: BTreeSet<MastNodeRef>,
+        _removable_node_refs: BTreeSet<MastNodeRef>,
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
     ) -> Self {
-        let node_refs_to_remove =
-            Self::node_refs_to_remove(removable_node_refs, &procedure_root_refs, nodes);
+        let node_refs_to_remove = Self::unreachable_node_refs(&procedure_root_refs, nodes);
         let live_node_refs = Self::live_node_refs_in_final_order(nodes, &node_refs_to_remove);
         Self { procedure_root_refs, live_node_refs }
     }
 
-    fn node_refs_to_remove(
-        candidate_node_refs: BTreeSet<MastNodeRef>,
+    fn unreachable_node_refs(
         procedure_root_refs: &[MastNodeRef],
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
     ) -> BTreeSet<MastNodeRef> {
-        // Pruning is intentionally candidate-based. A reachability sweep is only equivalent if it
-        // starts from every procedure root in the final forest, not just from the entrypoint or
-        // static call graph. `dynexec`/`dyncall` nodes do not have child edges to their runtime
-        // targets; the processor resolves the target digest by looking it up among procedure
-        // roots. Therefore, a procedure used only dynamically is live because it remains a
-        // procedure root even though no static child edge points to it.
-        //
-        // The builder already knows which refs were made obsolete by local rewrites, such as
-        // basic-block merging. Finalization removes only those candidates,
-        // and only after filtering out candidates that are still procedure roots or children of
-        // another retained node.
-        let mut nodes_to_remove: BTreeSet<MastNodeRef> = candidate_node_refs
-            .iter()
-            .filter(|&&node_ref| !procedure_root_refs.contains(&node_ref))
-            .copied()
-            .collect();
+        if procedure_root_refs.is_empty() {
+            return BTreeSet::new();
+        }
 
-        for node in nodes {
-            for child_ref in &node.child_refs {
-                nodes_to_remove.remove(child_ref);
+        // Start from every procedure root, not just from an executable entrypoint or static call
+        // graph. `dynexec`/`dyncall` nodes do not have child edges to their runtime targets; the
+        // processor resolves those targets by looking them up among procedure roots. Therefore, a
+        // procedure used only dynamically is live because it remains a procedure root.
+        let mut reachable_node_refs = BTreeSet::new();
+        let mut worklist = procedure_root_refs.to_vec();
+
+        while let Some(node_ref) = worklist.pop() {
+            if reachable_node_refs.insert(node_ref) {
+                worklist.extend(nodes[node_ref].child_refs.iter().copied());
             }
         }
 
-        nodes_to_remove
+        (0..nodes.len())
+            .map(|index| MastNodeRef::from(index as u32))
+            .filter(|node_ref| !reachable_node_refs.contains(node_ref))
+            .collect()
     }
 
     fn live_node_refs_in_final_order(
