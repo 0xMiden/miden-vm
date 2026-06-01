@@ -1,6 +1,6 @@
-//! Tests the cross-AIR `eval_external` reduction: aux values committed to the
-//! transcript are tied to public `aux_inputs` by extension-field assertions the
-//! verifier checks outside the per-row AIR constraints.
+//! Tests cross-AIR assertions from `eval_external`: aux values committed to the
+//! transcript are tied to public `aux_inputs` by extension-field assertion
+//! expressions checked outside the per-row AIR constraints.
 
 use alloc::{vec, vec::Vec};
 
@@ -23,7 +23,7 @@ use crate::{
 // ---------------------------------------------------------------------------
 // ExternalAir: a power-of-4 main trace plus a single constant aux column equal
 // to `challenge + input`. The committed aux value is that constant, bound to
-// the aux column's last row in-circuit; `eval_external` then ties it to
+// the aux column's last row by AIR constraints; `eval_external` then ties it to
 // `aux_inputs[0]` shifted by the challenge.
 // ---------------------------------------------------------------------------
 

@@ -91,7 +91,7 @@ where
         &self.aux_inputs
     }
 
-    /// Evaluate the cross-AIR external assertions via [`MultiAir::eval_external`].
+    /// Evaluate cross-AIR assertions via [`MultiAir::eval_external`].
     pub fn eval_external(
         &self,
         challenges: &[EF],

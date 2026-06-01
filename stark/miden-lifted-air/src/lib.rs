@@ -4,9 +4,9 @@
 //! - [`LiftedAir`]: super-trait for AIR definitions (inherits upstream + adds aux trace support and
 //!   periodic column data)
 //! - [`LiftedAirBuilder`]: super-trait for constraint builders
-//! - [`MultiAir`]: trusted application AIR collection plus cross-AIR hooks
+//! - [`MultiAir`]: trusted statement definition for a multi-AIR proof
 //! - [`Statement`]: validated per-proof caller inputs over a `MultiAir`
-//! - [`ProverStatement`]: validated prover-side companion with per-AIR main traces
+//! - [`ProverStatement`]: validated proving input — a `Statement` plus per-AIR main witness traces
 //! - [`debug`]: panic-based AIR structural checks for tests / setup
 
 #![no_std]

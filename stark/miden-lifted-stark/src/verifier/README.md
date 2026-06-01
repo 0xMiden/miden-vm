@@ -12,15 +12,15 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 |------|---------|
 | `verify` | Verify a `Statement` |
 | `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
-| `MultiAir` | The circuit — AIRs (`type Air`/`fn airs`), the cross-AIR `eval_external`, the aux-trace builder, and a Fiat-Shamir `observe` hook |
+| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and a Fiat-Shamir `observe` hook |
 | `StarkProof` | Log trace heights + raw transcript data |
 
 ```text
 verify(config, &statement, proof, challenger)
 ```
 
-The `statement` carries its `MultiAir` (the AIRs and the cross-AIR
-`eval_external` check) plus the statement-owned `air_inputs` and (if any)
+The `statement` carries its `MultiAir` (the AIRs and the cross-AIR assertions
+from `eval_external`) plus the statement-owned `air_inputs` and (if any)
 `aux_inputs`. The framework absorbs both `air_inputs` and `aux_inputs` into
 Fiat-Shamir automatically via `Statement::observe` — callers must pass a
 `Statement` carrying the same data on prover and verifier sides.

@@ -11,9 +11,9 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 | Item | Purpose |
 |------|---------|
 | `prove` | Prove one or more AIR instances |
-| `ProverStatement` | A `Statement` plus per-AIR main traces and aux construction |
+| `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
 | `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
-| `MultiAir` | The circuit — AIRs (`type Air`/`fn airs`), the cross-AIR `eval_external`, the aux-trace builder, and a Fiat-Shamir `observe` hook |
+| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and a Fiat-Shamir `observe` hook |
 
 ```text
 prove(config, &prover_statement, challenger)
@@ -21,7 +21,7 @@ prove(config, &prover_statement, challenger)
 
 A `MultiAir` impl exposes its AIRs via `type Air` + `fn airs() -> &[Self::Air]`
 and optionally overrides `max_aux_inputs()`, `eval_external(...)`, and
-`observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no assertions,
+`observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no cross-AIR assertions,
 and framed observation of `air_inputs.len()`, `air_inputs`, `max_aux_inputs()`,
 `aux_inputs.len()`, then `aux_inputs`; the protocol observes instance count and
 `log_heights` after that hook). Each AIR builds its
@@ -29,7 +29,7 @@ own auxiliary trace via `LiftedAir::build_aux_trace(main, air_inputs, aux_inputs
 challenges)`. A `Statement` wraps a `MultiAir` with the
 `air_inputs` shared by every AIR and the optional `aux_inputs`; `Statement::new`
 validates the inputs against the AIRs. A `ProverStatement` wraps a `Statement`
-with `traces()` (per-AIR main traces in instance order); `ProverStatement::new`
+with `traces()` (per-AIR main witness traces in instance order); `ProverStatement::new`
 validates the trace shape. The same `MultiAir` drives both proving and
 verification — the verifier takes the `Statement`, the prover the `ProverStatement`.
 

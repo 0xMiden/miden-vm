@@ -214,8 +214,10 @@ pub type ReductionError = Box<dyn core::error::Error + Send + Sync>;
 // MultiAir trait
 // ============================================================================
 
-/// The circuit for a multi-AIR statement: the AIR collection plus the
-/// cross-AIR behavior that operates on it.
+/// Trusted statement definition for a multi-AIR proof.
+///
+/// A `MultiAir` owns the AIR instances and defines the cross-AIR assertions and
+/// Fiat-Shamir binding hook for the statement.
 ///
 /// Methods take `&self` so an impl can carry the AIRs and any protocol-level
 /// state (closures, lookup tables, shared parameters). Because the AIRs are
@@ -263,31 +265,41 @@ where
         n
     }
 
-    /// Upper bound on `aux_inputs().len()` accepted by [`Self::eval_external`].
+    /// Upper bound on the extra statement inputs accepted by
+    /// [`Self::eval_external`].
     ///
-    /// Validated by [`Statement::new`](crate::Statement::new) before any
-    /// cryptographic work. Default `0`; implementations that consume
-    /// `aux_inputs` must override so the budget matches the schema their
-    /// `eval_external` decodes.
+    /// These inputs are public/verifier-visible, but are not passed to each AIR
+    /// as `air_inputs` and are unrelated to aux trace columns. They are
+    /// available only to the statement-level cross-AIR assertions. Validated by
+    /// [`Statement::new`](crate::Statement::new) before any cryptographic work.
+    /// Default `0`; implementations that consume `aux_inputs` must override so
+    /// the budget matches the schema their `eval_external` decodes.
     fn max_aux_inputs(&self) -> usize {
         0
     }
 
-    /// Cross-AIR external assertions.
+    /// Evaluate statement-level cross-AIR assertions.
     ///
-    /// Returns a flat vector of extension-field values, each of which must
-    /// equal zero for the proof to be accepted. The caller (verifier) checks
-    /// each value against zero — individually, or batched via a random linear
-    /// combination — and is responsible for ensuring the supplied inputs match
-    /// what the AIRs describe.
+    /// Returns one value per assertion expression. Each expression is expected
+    /// to vanish for a valid statement; the prover/verifier accept only if every
+    /// returned value is zero. Implementations should return `Ok(Vec::new())`
+    /// when the statement has no cross-AIR assertions.
+    ///
+    /// An implementation could perform zero checks internally, but returning
+    /// assertion expression values keeps this hook close to the AIR constraint
+    /// model: build the algebraic expression for each assertion, then let the
+    /// protocol batch or individually assert those expressions equal zero. This
+    /// also keeps the logic usable by a future symbolic-expression pipeline that
+    /// extracts the assertion polynomials.
     ///
     /// # Arguments
     /// - `challenges`: shared extension-field challenge pool; each AIR consumes the prefix of
     ///   length `air.num_randomness()`.
     /// - `air_inputs`, `aux_inputs`: the inputs from the [`Statement`](crate::Statement).
-    /// - `aux_values`: per-AIR aux values in instance order. `aux_values[i]` belongs to
-    ///   `self.airs()[i]`.
-    /// - `log_trace_heights`: per-AIR log₂ trace heights in instance order.
+    /// - `aux_values`, `log_trace_heights`: parallel per-AIR slices in instance order.
+    ///   `aux_values[i]` and `log_trace_heights[i]` both describe `self.airs()[i]`. The protocol
+    ///   derives proof order by stable-sorting instance indices by `(log_trace_height,
+    ///   instance_index)`.
     ///
     /// Default: refuses to be called with non-empty `aux_inputs`; otherwise
     /// emits no assertions.
@@ -319,7 +331,7 @@ where
     /// # Soundness gap (TODO)
     ///
     /// The default binds inputs but does NOT canonically bind the `MultiAir`
-    /// itself — neither its AIR collection nor `eval_external` — into
+    /// itself — neither its AIR collection nor `eval_external` logic — into
     /// Fiat-Shamir. Until the symbolic-graph binding lands (tracked in
     /// <https://github.com/0xMiden/crypto/issues/970>), callers MUST observe the
     /// `MultiAir`'s AIR configurations into the challenger before calling the

@@ -184,13 +184,13 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | Item | Purpose |
 |------|---------|
 | `prover::prove` | Prove one or more AIR instances |
-| `ProverStatement` | A `Statement` plus per-AIR traces and aux construction |
+| `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
 | `Statement` | A `MultiAir` plus validated per-proof caller inputs (`air_inputs`, optional `aux_inputs`) |
-| `MultiAir` | Trusted AIR collection plus cross-AIR assertions and statement observation hooks |
+| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and statement observation hooks |
 | `verifier::verify` | Verify a multi-trace proof |
-| `MultiAir::eval_external` | Cross-AIR external-assertions hook (default: no assertions) |
+| `MultiAir::eval_external` | Cross-AIR assertion hook: returns assertion expression values to be checked for zero (default: no assertions) |
 | `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
-| `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` / `air_order()` expose the proof's heights and derived order |
+| `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` exposes instance-order heights and `air_order()` exposes the derived proof-order mapping |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `pcs` | Structured PCS sub-proof types (DEEP / FRI) for inspection and error matching |
 

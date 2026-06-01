@@ -51,9 +51,9 @@
 //!    trace of width `aux_width()`, height matching the main trace, and exactly `num_aux_values()`
 //!    aux values. A malformed output is caught by the prover (LDE/commit panic) or by verification,
 //!    since the verifier re-derives these shapes from the AIR contract.
-//! 5. **Sound [`Statement::eval_external`](air::Statement::eval_external)** — Returns external
-//!    assertions that are satisfied (equal zero) iff the proof's cross-AIR interactions are
-//!    well-formed for the given aux values and public inputs.
+//! 5. **Sound [`Statement::eval_external`](air::Statement::eval_external)** — Returns cross-AIR
+//!    assertion values that are zero iff the proof's cross-AIR interactions are well-formed for the
+//!    given aux values and public inputs.
 
 #![no_std]
 
@@ -88,7 +88,7 @@ pub use verifier::{VerifierError, verify};
 // Namespaced re-exports from upstream crates
 // ============================================================================
 
-/// AIR traits, statement/witness types, and upstream `p3-air` re-exports.
+/// AIR traits, statement/proving-input types, and upstream `p3-air` re-exports.
 ///
 /// This module re-exports items from [`miden_lifted_air`], which in turn
 /// re-exports `p3-air` types. Consumers should never need to depend on `p3-air`
