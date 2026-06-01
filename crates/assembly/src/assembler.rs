@@ -407,7 +407,7 @@ impl Assembler {
 
     /// Assemble a library [`Package`] from the set of modules reachable from `root`.
     ///
-    /// See [Assembler::compile_and_link_statically_from_root] for details on how modules are
+    /// See [Assembler::compile_and_statically_link_from_root] for details on how modules are
     /// discovered and linked from `root`.
     #[cfg(feature = "std")]
     pub fn assemble_library_from_root(

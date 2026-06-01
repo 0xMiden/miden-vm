@@ -99,7 +99,7 @@ impl Item {
         self.name().as_str() == Ident::MAIN
     }
 
-    /// Unwraps this [Export] as a [Procedure], or panic.
+    /// Unwraps this [Item] as a [Procedure], or panic.
     #[track_caller]
     pub fn unwrap_procedure(&self) -> &Procedure {
         match self {

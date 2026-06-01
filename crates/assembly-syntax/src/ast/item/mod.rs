@@ -28,7 +28,7 @@ impl Spanned for Declaration<'_> {
     }
 }
 
-/// Represents a submodule declaration in a [Module], i.e. `mod foo` or `pub mod foo`
+/// Represents a submodule declaration in a [super::Module], i.e. `mod foo` or `pub mod foo`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmoduleDecl {
     /// The visibility of the submodule outside the containing namespace.
