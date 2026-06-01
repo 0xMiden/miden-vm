@@ -68,6 +68,18 @@ impl SectionId {
     pub fn as_str(&self) -> &str {
         self.0.as_ref()
     }
+
+    /// Returns true if this section contains package debug metadata.
+    pub fn is_debug(&self) -> bool {
+        matches!(
+            self.as_str(),
+            "debug_types"
+                | "debug_sources"
+                | "debug_functions"
+                | "debug_source_graph"
+                | "debug_source_map"
+        )
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

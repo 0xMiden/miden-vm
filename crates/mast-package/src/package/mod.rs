@@ -9,6 +9,7 @@ mod serialization;
 mod target_type;
 
 use alloc::{
+    borrow::Cow,
     boxed::Box,
     collections::BTreeMap,
     format,
@@ -28,7 +29,7 @@ use miden_core::{
     crypto::hash::Poseidon2,
     mast::{MastForest, MastNodeId},
     program::Kernel,
-    serde::{ByteWriter, Deserializable, Serializable},
+    serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 pub use self::{
@@ -41,6 +42,16 @@ pub use self::{
     target_type::{InvalidTargetTypeError, TargetType},
 };
 use crate::{Dependency, Version};
+
+/// Errors raised while stripping package-owned debug information.
+#[derive(Debug, thiserror::Error)]
+pub enum PackageStripError {
+    #[error("failed to decode embedded kernel package while stripping debug info: {source}")]
+    DecodeEmbeddedKernel {
+        #[source]
+        source: DeserializationError,
+    },
+}
 
 // PACKAGE
 // ================================================================================================
@@ -178,6 +189,30 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
+    }
+
+    /// Removes all package-owned debug information from this package.
+    ///
+    /// This clears the embedded MAST forest debug info, removes well-known package debug sections,
+    /// and recursively strips an embedded kernel package if one is present.
+    pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
+        self.mast = Arc::new(self.mast.as_ref().clone().without_debug_info());
+
+        for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
+            let mut kernel_package = Self::read_from_bytes(section.data.as_ref())
+                .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
+            kernel_package.strip_debug_info()?;
+            section.data = Cow::Owned(kernel_package.to_bytes());
+        }
+
+        self.sections.retain(|section| !section.id.is_debug());
+        Ok(())
+    }
+
+    /// Returns this package with package-owned debug information removed.
+    pub fn without_debug_info(mut self) -> Result<Self, PackageStripError> {
+        self.strip_debug_info()?;
+        Ok(self)
     }
 }
 
@@ -883,6 +918,22 @@ mod tests {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
     }
 
+    fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
+        let (mast, exports) = build_same_digest_package_exports(&[(export, context)]);
+        Package::create(PackageId::from(name), Version::new(1, 0, 0), kind, mast, exports, None)
+            .unwrap()
+    }
+
+    fn debug_sections() -> Vec<Section> {
+        vec![
+            Section::new(SectionId::DEBUG_SOURCES, vec![1, 2, 3]),
+            Section::new(SectionId::DEBUG_FUNCTIONS, vec![4, 5, 6]),
+            Section::new(SectionId::DEBUG_TYPES, vec![7, 8, 9]),
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![10, 11, 12]),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, vec![13, 14, 15]),
+        ]
+    }
+
     #[test]
     fn to_kernel_rejects_empty_kernel_exports() {
         let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
@@ -952,6 +1003,54 @@ mod tests {
             .expect_err("multiple kernel runtime dependencies should be rejected");
 
         assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+
+    #[test]
+    fn strip_debug_info_removes_package_and_embedded_kernel_debug() {
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections = debug_sections();
+        kernel
+            .sections
+            .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![42, 43, 44]));
+        assert!(kernel.mast_forest().debug_info().num_asm_ops() > 0);
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        let digest = package.digest();
+        package.sections = debug_sections();
+        package
+            .sections
+            .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 3, 5]));
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+        let content_digest = package.content_digest();
+        assert!(package.mast_forest().debug_info().num_asm_ops() > 0);
+
+        package.strip_debug_info().expect("strip should succeed");
+
+        assert_eq!(package.digest(), digest);
+        assert_eq!(package.content_digest(), content_digest);
+        assert!(package.mast_forest().debug_info().is_empty());
+        assert!(!package.sections.iter().any(|section| section.id.is_debug()));
+        assert!(
+            package
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+        );
+
+        let stripped_kernel = package
+            .embedded_kernel_package()
+            .unwrap()
+            .expect("kernel should remain embedded");
+        assert!(stripped_kernel.mast_forest().debug_info().is_empty());
+        assert!(!stripped_kernel.sections.iter().any(|section| section.id.is_debug()));
+        assert!(
+            stripped_kernel
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+        );
     }
 
     #[test]
