@@ -391,6 +391,21 @@ impl PackageDebugInfo {
             .unwrap_or(Ok(None))
     }
 
+    /// Returns `parent`'s source/debug child at `child_index`, if present.
+    ///
+    /// Returns `Ok(None)` if no source graph is present, or if `child_index` is out of range.
+    pub fn child_source_node(
+        &self,
+        parent: DebugSourceMastNodeId,
+        child_index: usize,
+    ) -> Result<Option<(DebugSourceMastNodeId, &DebugSourceMastNode)>, DebugSourceGraphLookupError>
+    {
+        self.source_graph
+            .as_ref()
+            .map(|source_graph| source_graph.child_source_node(parent, child_index))
+            .unwrap_or(Ok(None))
+    }
+
     /// Returns assembly operation rows for a source/debug occurrence.
     pub fn asm_ops_for_source_node(
         &self,
@@ -614,6 +629,26 @@ impl DebugSourceGraphSection {
             return Err(DebugSourceGraphLookupError::AmbiguousChild { parent, exec_node });
         }
         Ok(first)
+    }
+
+    /// Returns `parent`'s source/debug child at `child_index`, if present.
+    pub fn child_source_node(
+        &self,
+        parent: DebugSourceMastNodeId,
+        child_index: usize,
+    ) -> Result<Option<(DebugSourceMastNodeId, &DebugSourceMastNode)>, DebugSourceGraphLookupError>
+    {
+        let parent_node = self
+            .source_node(parent)
+            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: parent })?;
+        let Some(child) = parent_node.children.get(child_index).copied() else {
+            return Ok(None);
+        };
+        let child_node = self
+            .source_node(child)
+            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: child })?;
+
+        Ok(Some((child, child_node)))
     }
 }
 
@@ -1270,6 +1305,9 @@ mod tests {
         assert_eq!(graph.unique_source_root_for_exec_node(root_exec).unwrap(), Some(root));
         assert_eq!(graph.unique_source_root_for_exec_node(other_exec).unwrap(), None);
         assert_eq!(graph.child_source_nodes_for_exec_node(root, child_exec).unwrap().count(), 2,);
+        assert_eq!(graph.child_source_node(root, 0).unwrap().unwrap().0, child_a);
+        assert_eq!(graph.child_source_node(root, 1).unwrap().unwrap().0, child_b);
+        assert!(graph.child_source_node(root, 2).unwrap().is_none());
         assert_eq!(
             graph.unique_child_source_node_for_exec_node(root, child_exec),
             Err(DebugSourceGraphLookupError::AmbiguousChild {
@@ -1304,6 +1342,7 @@ mod tests {
             package_debug.unique_source_root_for_exec_node(root_exec),
             Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
         );
+        assert_eq!(package_debug.child_source_node(root, 1).unwrap().unwrap().0, child_b);
     }
 
     #[test]
