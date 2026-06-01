@@ -556,7 +556,7 @@ impl MastForestBuilder {
         Ok(())
     }
 
-    fn record_procedure_root_ref(&mut self, root_ref: MastNodeRef) {
+    pub(crate) fn record_procedure_root_ref(&mut self, root_ref: MastNodeRef) {
         if !self.procedure_root_refs.contains(&root_ref) {
             self.procedure_root_refs.push(root_ref);
         }
@@ -1218,6 +1218,7 @@ mod tests {
 
         assert_eq!(block_a_ref, block_b_ref);
 
+        record_test_root(&mut builder, block_a_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_a = remapping[&block_a_ref];
         let final_block_b = remapping[&block_b_ref];
@@ -1361,6 +1362,7 @@ mod tests {
             .ensure_block_ref(vec![Operation::Add], Vec::new(), vec![(0, used_var)])
             .unwrap();
 
+        record_test_root(&mut builder, block_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_id = remapping[&block_ref];
         let vars = forest.debug_info().debug_vars_for_node(final_block_id);
@@ -1392,6 +1394,7 @@ mod tests {
             "AssemblyOp payload must not affect execution node identity"
         );
 
+        record_test_root(&mut builder, block_a_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_a = remapping[&block_a_ref];
         assert_eq!(
@@ -1427,6 +1430,7 @@ mod tests {
             "AssemblyOp payload must not affect execution node identity"
         );
 
+        record_test_root(&mut builder, call_a_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_call_a = remapping[&call_a_ref];
         assert_eq!(
@@ -1502,6 +1506,7 @@ mod tests {
             "source metadata must not affect execution node identity"
         );
 
+        record_test_root(&mut builder, copied_block_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_copied_block_id = remapping[&copied_block_ref];
         assert_eq!(
@@ -1574,6 +1579,7 @@ mod tests {
             "copied padded blocks should dedup with equivalent local blocks",
         );
 
+        record_test_root(&mut builder, copied_block_ref);
         let (forest, remapping) = builder.build().unwrap().into_parts();
         let final_block_id = remapping[&copied_block_ref];
 
@@ -1684,6 +1690,7 @@ mod tests {
                 .ensure_node_from_statically_linked_source_ref(final_alias_b, node, child_refs)
                 .unwrap()
         };
+        record_test_root(&mut exact_builder, exact_alias_b_ref);
         let (exact_forest, exact_remapping) = exact_builder.build().unwrap().into_parts();
         let final_exact_alias_b = exact_remapping[&exact_alias_b_ref];
         assert_eq!(
@@ -1823,6 +1830,7 @@ mod tests {
                 .ensure_node_from_statically_linked_source_ref(final_alias_b, node, child_refs)
                 .unwrap()
         };
+        record_test_root(&mut exact_builder, exact_alias_b_ref);
         let (exact_forest, exact_remapping) = exact_builder.build().unwrap().into_parts();
         let final_exact_alias_b = exact_remapping[&exact_alias_b_ref];
 
@@ -1834,6 +1842,7 @@ mod tests {
                 Some(final_alias_b),
             )
             .unwrap();
+        record_test_root(&mut provenance_builder, linked_alias_b_ref);
         let (linked_forest, linked_remapping) = provenance_builder.build().unwrap().into_parts();
         let final_linked_alias_b = linked_remapping[&linked_alias_b_ref];
 

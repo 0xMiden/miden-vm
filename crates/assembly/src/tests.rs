@@ -4288,6 +4288,7 @@ fn nested_blocks() -> Result<(), Report> {
         )
         .unwrap();
 
+    expected_mast_forest_builder.record_procedure_root_ref(combined_node_ref);
     let (mut expected_mast_forest, node_remapping) =
         expected_mast_forest_builder.build().unwrap().into_parts();
     expected_mast_forest.make_root(node_remapping[&combined_node_ref]);

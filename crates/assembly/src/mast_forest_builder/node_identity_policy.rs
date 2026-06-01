@@ -25,10 +25,6 @@ impl FinalForestLayout {
         procedure_root_refs: &[MastNodeRef],
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
     ) -> BTreeSet<MastNodeRef> {
-        if procedure_root_refs.is_empty() {
-            return BTreeSet::new();
-        }
-
         // Start from every procedure root, not just from an executable entrypoint or static call
         // graph. `dynexec`/`dyncall` nodes do not have child edges to their runtime targets; the
         // processor resolves those targets by looking them up among procedure roots. Therefore, a
