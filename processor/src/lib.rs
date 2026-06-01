@@ -46,7 +46,11 @@ mod tests;
 // ================================================================================================
 
 pub use continuation_stack::Continuation;
-pub use errors::{AceError, ExecutionError, HostError, MemoryError};
+pub use errors::{
+    AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
+    advice_error_with_package_source_context, event_error_with_package_source_context,
+    procedure_not_found_with_package_source_context,
+};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
