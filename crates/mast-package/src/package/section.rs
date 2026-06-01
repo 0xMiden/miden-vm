@@ -34,6 +34,8 @@ impl SectionId {
     pub const DEBUG_FUNCTIONS: Self = Self(Cow::Borrowed("debug_functions"));
     /// The section containing source/debug MAST occurrence graph topology
     pub const DEBUG_SOURCE_GRAPH: Self = Self(Cow::Borrowed("debug_source_graph"));
+    /// The section containing source-keyed assembly operation and debug variable rows
+    pub const DEBUG_SOURCE_MAP: Self = Self(Cow::Borrowed("debug_source_map"));
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
@@ -88,6 +90,7 @@ impl FromStr for SectionId {
             "debug_sources" => Ok(Self::DEBUG_SOURCES),
             "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
             "debug_source_graph" => Ok(Self::DEBUG_SOURCE_GRAPH),
+            "debug_source_map" => Ok(Self::DEBUG_SOURCE_MAP),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             "project_source_provenance" => Ok(Self::PROJECT_SOURCE_PROVENANCE),
             "kernel" => Ok(Self::KERNEL),
@@ -179,6 +182,7 @@ impl Arbitrary for SectionId {
             Self::DEBUG_SOURCES,
             Self::DEBUG_FUNCTIONS,
             Self::DEBUG_SOURCE_GRAPH,
+            Self::DEBUG_SOURCE_MAP,
             Self::ACCOUNT_COMPONENT_METADATA,
             Self::PROJECT_SOURCE_PROVENANCE,
             Self::KERNEL,

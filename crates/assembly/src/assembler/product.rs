@@ -1,6 +1,7 @@
 use miden_mast_package::Dependency;
 use miden_mast_package::debug_info::{
-    DebugSourceGraphSection, DebugSourceMastNode, DebugSourceMastNodeId,
+    DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+    DebugSourceMastNodeId, DebugSourceVar,
 };
 
 use super::*;
@@ -105,6 +106,10 @@ impl AssemblyProduct {
                 SectionId::DEBUG_SOURCE_GRAPH,
                 source_graph_section(&source_graph).to_bytes(),
             ));
+            package.sections.push(Section::new(
+                SectionId::DEBUG_SOURCE_MAP,
+                source_map_section(&source_graph)?.to_bytes(),
+            ));
         }
         Ok(package)
     }
@@ -138,4 +143,40 @@ fn source_graph_section(source_graph: &SourceDebugGraph) -> DebugSourceGraphSect
             .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
             .collect(),
     }
+}
+
+fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapSection, Report> {
+    let mut asm_ops = Vec::new();
+    let mut debug_vars = Vec::new();
+
+    for (source_index, source_node) in source_graph.nodes().as_slice().iter().enumerate() {
+        let source_node_id = DebugSourceMastNodeId::from(source_index as u32);
+        for (op_idx, asm_op) in source_node.asm_ops() {
+            asm_ops.push(DebugSourceAsmOp::new(
+                source_node_id,
+                (*op_idx)
+                    .try_into()
+                    .map_err(|_| Report::msg("source asm-op index exceeds u32"))?,
+                asm_op.location().cloned(),
+                asm_op.context_name().to_string(),
+                asm_op.op().to_string(),
+                asm_op.num_cycles(),
+            ));
+        }
+        for (op_idx, debug_var) in source_node.debug_vars() {
+            debug_vars.push(DebugSourceVar::new(
+                source_node_id,
+                (*op_idx)
+                    .try_into()
+                    .map_err(|_| Report::msg("source debug-var index exceeds u32"))?,
+                debug_var.clone(),
+            ));
+        }
+    }
+
+    Ok(DebugSourceMapSection {
+        version: miden_mast_package::debug_info::DEBUG_SOURCE_MAP_VERSION,
+        asm_ops,
+        debug_vars,
+    })
 }
