@@ -1066,6 +1066,19 @@ mod tests {
     }
 
     #[test]
+    fn test_build_without_roots_prunes_all_nodes() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let dead_ref = builder.ensure_block_ref(vec![Operation::Add], vec![], vec![]).unwrap();
+
+        let (forest, remapping) = builder.build().unwrap().into_parts();
+
+        assert!(!remapping.contains_key(&dead_ref));
+        assert_eq!(forest.num_nodes(), 0);
+        assert_eq!(forest.procedure_roots().len(), 0);
+    }
+
+    #[test]
     fn test_build_prunes_unreachable_nodes() {
         let mut builder = MastForestBuilder::new(&[]).unwrap();
 
