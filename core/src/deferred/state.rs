@@ -223,7 +223,7 @@ impl DeferredState {
                 .expect("statements(): AND-chain references a node not in state");
             debug_assert_eq!(
                 and_node.tag,
-                super::Tag::AND,
+                Tag::AND,
                 "statements(): AND-chain step is not tagged Tag::AND"
             );
             let (prev_root, stmt_digest) = and_node

@@ -69,7 +69,7 @@ pub enum PrecompileError {
 
     /// A framework-level error surfaced by a precompile reducer.
     #[error(transparent)]
-    Other(#[from] super::DeferredError),
+    Other(#[from] DeferredError),
 
     /// Adds the owning precompile's name to a tag or reduction failure.
     ///
