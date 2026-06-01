@@ -8,47 +8,45 @@ impl ProjectSourceProvider for MasmSourceProvider {
     fn file_type(&self) -> &'static str {
         "masm"
     }
+
     fn provide_sources(
         &self,
         context: &TargetAssemblyContext<'_>,
     ) -> Result<ProjectSourceInputs, Report> {
-        load_target_sources(context)
+        let ProjectSourceProvenanceInputs { root, support } = resolve_target_source_paths(context)?;
+
+        let TargetAssemblyContext { target, resolved_target_root, .. } = context;
+
+        let root_dir = resolved_target_root.parent().expect("already known to have a parent");
+        let root = parse_module_file(
+            &root.path,
+            target_root_module_kind(target.ty),
+            target.namespace.inner().as_ref(),
+            context,
+        )?;
+        let support = support
+            .into_iter()
+            .map(|source| {
+                let relative = source.path.strip_prefix(root_dir).map_err(|error| {
+                    Report::msg(format!(
+                        "failed to derive module path for '{}': {error}",
+                        source.path.display()
+                    ))
+                })?;
+                let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
+                parse_module_file(&source.path, ModuleKind::Library, module_path.as_ref(), context)
+            })
+            .collect::<Result<Vec<_>, Report>>()?;
+
+        Ok(ProjectSourceInputs { root, support })
     }
+
     fn provide_source_provenance(
         &self,
         context: &TargetAssemblyContext<'_>,
     ) -> Result<ProjectSourceProvenanceInputs, Report> {
         resolve_target_source_paths(context)
     }
-}
-
-fn load_target_sources(context: &TargetAssemblyContext<'_>) -> Result<ProjectSourceInputs, Report> {
-    let ProjectSourceProvenanceInputs { root, support } = resolve_target_source_paths(context)?;
-
-    let TargetAssemblyContext { target, resolved_target_root, .. } = context;
-
-    let root_dir = resolved_target_root.parent().expect("already known to have a parent");
-    let root = parse_module_file(
-        &root.path,
-        target_root_module_kind(target.ty),
-        target.namespace.inner().as_ref(),
-        context,
-    )?;
-    let support = support
-        .into_iter()
-        .map(|source| {
-            let relative = source.path.strip_prefix(root_dir).map_err(|error| {
-                Report::msg(format!(
-                    "failed to derive module path for '{}': {error}",
-                    source.path.display()
-                ))
-            })?;
-            let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
-            parse_module_file(&source.path, ModuleKind::Library, module_path.as_ref(), context)
-        })
-        .collect::<Result<Vec<_>, Report>>()?;
-
-    Ok(ProjectSourceInputs { root, support })
 }
 
 fn resolve_target_source_paths(
@@ -141,6 +139,10 @@ fn collect_module_files(dir: &FsPath, paths: &mut Vec<PathBuf>) -> Result<(), Re
     Ok(())
 }
 
+// TODO(pauls): Remove after https://github.com/0xMiden/miden-vm/pull/3220 is merged
+//
+// This function ensures that we do not pull in the root modules of other targets in the same
+// Miden project.
 fn excluded_target_roots(context: &TargetAssemblyContext<'_>) -> BTreeSet<PathBuf> {
     let mut excluded = BTreeSet::new();
     if context.target.is_executable()
