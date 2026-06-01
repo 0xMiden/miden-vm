@@ -564,6 +564,35 @@ mod tests {
     }
 
     #[test]
+    fn evaluated_digests_charge_eval_memos_once() {
+        let mut state = DeferredState::new();
+        let registry = precompiles();
+        let first = test_leaf(7);
+        let second = test_leaf(8);
+        let first_digest = state.register(&registry, first.clone()).unwrap();
+        let second_digest = state.register(&registry, second.clone()).unwrap();
+        let registered_elements = first.num_elements() + second.num_elements();
+        assert_eq!(state.num_elements(), registered_elements);
+
+        assert_eq!(state.evaluate_digest(&registry, first_digest).unwrap(), first);
+        assert_eq!(state.num_elements(), registered_elements + first.num_elements());
+
+        assert_eq!(state.evaluate_digest(&registry, first_digest).unwrap(), first);
+        assert_eq!(
+            state.num_elements(),
+            registered_elements + first.num_elements(),
+            "re-evaluating the same digest must not double-charge its eval memo",
+        );
+
+        assert_eq!(state.evaluate_digest(&registry, second_digest).unwrap(), second);
+        assert_eq!(
+            state.num_elements(),
+            registered_elements + first.num_elements() + second.num_elements(),
+            "distinct evaluated digests account for distinct eval memo entries",
+        );
+    }
+
+    #[test]
     fn chunk_nodes_contribute_payload_length_to_num_elements() {
         let mut state = DeferredState::new();
         let registry = PrecompileRegistry::default().with_precompile(Hash);
