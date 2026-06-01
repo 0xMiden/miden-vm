@@ -185,3 +185,66 @@ pub(super) fn handle_deferred_register_chunk(
     processor.deferred_state.register(precompiles, Node::chunk(tag, chunks))?;
     check_deferred_budget(processor.deferred_state.num_elements(), max_deferred_elements)
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use miden_core::testing::precompile::Hash;
+
+    use super::*;
+    use crate::{ExecutionOptions, StackInputs};
+
+    /// A processor with the given deferred element budget.
+    fn processor_with_budget(max_deferred_elements: usize) -> FastProcessor {
+        let options = ExecutionOptions::default().with_max_deferred_elements(max_deferred_elements);
+        FastProcessor::new(StackInputs::default())
+            .with_options(options)
+            .expect("default advice inputs fit the configured limits")
+    }
+
+    fn test_precompiles() -> PrecompileRegistry {
+        PrecompileRegistry::default().with_precompile(Hash)
+    }
+
+    fn write_chunk_stack(processor: &mut FastProcessor, tag: Tag, ptr: u32) {
+        for (i, felt) in tag.as_word().iter().enumerate() {
+            processor.stack_write(CHUNK_TAG_OFFSET + i, *felt);
+        }
+        processor.stack_write(CHUNK_PTR_OFFSET, Felt::from_u32(ptr));
+    }
+
+    fn write_chunk_memory(processor: &mut FastProcessor, ptr: u32, chunks: &[[Felt; 8]]) {
+        for (i, felt) in chunks.iter().flatten().enumerate() {
+            processor
+                .memory
+                .write_element(processor.ctx, Felt::from_u32(ptr + i as u32), *felt)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn duplicate_chunk_registration_is_charged_as_attempted_growth() {
+        let chunks = vec![core::array::from_fn(|i| Felt::from_u32(1 + i as u32))];
+        let tag = Hash::preimage_tag(Hash::BYTES_PER_CHUNK);
+        let ptr = 0;
+        let node = Node::chunk(tag, chunks.clone());
+        let exact_budget = node.num_elements();
+        let precompiles = test_precompiles();
+        let mut processor = processor_with_budget(exact_budget);
+        write_chunk_memory(&mut processor, ptr, &chunks);
+
+        write_chunk_stack(&mut processor, tag, ptr);
+        handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
+        assert_eq!(processor.deferred_state.num_elements(), exact_budget);
+
+        write_chunk_stack(&mut processor, tag, ptr);
+        let err = handle_deferred_register_chunk(&mut processor, &precompiles).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::DeferredStateTooLarge { num_elements, max }
+                if num_elements == exact_budget * 2 && max == exact_budget
+        ));
+        assert_eq!(processor.deferred_state.num_elements(), exact_budget);
+    }
+}
