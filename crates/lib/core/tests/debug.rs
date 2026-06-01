@@ -151,6 +151,21 @@ fn print_mem_outputs_range() {
 }
 
 #[test]
+fn print_mem_reports_empty_range() {
+    // An explicit empty range (`start == end`) hits the empty branch and must not panic; this
+    // guards the `start == end == 0` underflow path when converting to the inclusive range.
+    let source = "
+    use miden::core::debug
+    begin
+        push.0 push.0   # [start=0, end=0]
+        exec.debug::print_mem
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("range is empty"), "expected empty-range message; got:\n{out}");
+}
+
+#[test]
 fn print_mem_addr_outputs_procedure_local() {
     // Exercises the intended use case: `locaddr` turns a procedure local into an absolute
     // address that `print_mem_addr` can print.
