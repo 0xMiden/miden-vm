@@ -17,8 +17,8 @@ use miden_project::{
 };
 
 use super::{
-    PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs, SourceProvider,
-    providers::TargetAssemblyContext,
+    PackageBuildProvenance, PackageBuildSettings, ProjectSourceProvenanceInputs,
+    SourceProviderRegistry, providers::TargetAssemblyContext,
 };
 use crate::SourceManager;
 
@@ -91,7 +91,7 @@ impl DependencyGraph {
         project: &ProjectPackage,
         target: &Target,
         profile_name: &str,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
     ) -> Result<Option<PackageBuildProvenance>, Report> {
         let Some(node) = self.dependency_graph.get(package_id) else {
             return Ok(None);
@@ -124,7 +124,7 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
     ) -> Result<PackageBuildProvenance, Report> {
         self.expected_source_provenance_with_visited(
             package_id,
@@ -149,7 +149,7 @@ impl DependencyGraph {
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash = self.compute_dependency_closure_hash(
@@ -216,7 +216,7 @@ impl DependencyGraph {
         &self,
         package_id: &PackageId,
         profile_name: &str,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<Word, Report> {
         if !visiting.insert(package_id.clone()) {
@@ -266,7 +266,7 @@ impl DependencyGraph {
         &self,
         package_id: &PackageId,
         profile_name: &str,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<String, Report> {
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
@@ -339,7 +339,7 @@ impl DependencyGraph {
     fn compute_path_source_hash(
         &self,
         context: &TargetAssemblyContext<'_>,
-        source_provider: &SourceProvider,
+        source_provider: &SourceProviderRegistry,
     ) -> Result<Word, Report> {
         let Some(extension) = context.resolved_target_root.extension().and_then(|ext| ext.to_str())
         else {

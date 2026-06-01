@@ -74,7 +74,7 @@ impl Assembler {
         Ok(ProjectAssembler {
             assembler: self,
             project: package,
-            source_provider: SourceProvider::new(providers),
+            source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
             store,
         })
@@ -109,7 +109,7 @@ impl Assembler {
         Ok(ProjectAssembler {
             assembler: self,
             project,
-            source_provider: SourceProvider::new(providers),
+            source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
             store,
         })
@@ -146,11 +146,11 @@ impl SourceFileProvenance {
     }
 }
 
-pub struct SourceProvider {
+pub struct SourceProviderRegistry {
     registered: BTreeMap<&'static str, Box<dyn ProjectSourceProvider>>,
 }
 
-impl Default for SourceProvider {
+impl Default for SourceProviderRegistry {
     fn default() -> Self {
         Self {
             registered: BTreeMap::from_iter([(
@@ -161,7 +161,7 @@ impl Default for SourceProvider {
     }
 }
 
-impl SourceProvider {
+impl SourceProviderRegistry {
     pub fn new(providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>) -> Self {
         let mut this = Self {
             registered: providers.into_iter().map(|p| (p.file_type(), p)).collect(),
@@ -196,7 +196,7 @@ pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
-    source_provider: SourceProvider,
+    source_provider: SourceProviderRegistry,
     store: &'a mut S,
 }
 
