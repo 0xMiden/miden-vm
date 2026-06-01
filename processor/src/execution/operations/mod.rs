@@ -1,6 +1,6 @@
 use crate::{
     BaseHost, ExecutionError, Felt,
-    errors::MapExecErrWithOpIdx,
+    errors::{MapExecErrWithOpIdx, PackageSourceDebugContext},
     mast::{ExecutableMastForest, MastNodeId},
     operation::Operation,
     processor::{Processor, StackInterface},
@@ -47,6 +47,7 @@ pub(crate) fn execute_op<P, T, F>(
     node_id: MastNodeId,
     host: &mut impl BaseHost,
     tracer: &mut T,
+    package_source_context: Option<PackageSourceDebugContext<'_>>,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
@@ -57,7 +58,13 @@ where
         // ----- system operations ------------------------------------------------------------
         Operation::Noop => OperationHelperRegisters::Empty,
         Operation::Assert(err_code) => sys_ops::op_assert(processor, *err_code, current_forest)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
         Operation::SDepth => sys_ops::op_sdepth(processor)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
         Operation::Clk => sys_ops::op_clk(processor)?,
@@ -66,45 +73,52 @@ where
         },
 
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => field_ops::op_add(processor).map_exec_err_with_op_idx(
+        Operation::Add => field_ops::op_add(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
         Operation::Neg => field_ops::op_neg(processor),
-        Operation::Mul => field_ops::op_mul(processor).map_exec_err_with_op_idx(
+        Operation::Mul => field_ops::op_mul(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Inv => field_ops::op_inv(processor).map_exec_err_with_op_idx(
+        Operation::Inv => field_ops::op_inv(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
         Operation::Incr => field_ops::op_incr(processor),
-        Operation::And => field_ops::op_and(processor).map_exec_err_with_op_idx(
+        Operation::And => field_ops::op_and(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Or => field_ops::op_or(processor).map_exec_err_with_op_idx(
+        Operation::Or => field_ops::op_or(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Not => field_ops::op_not(processor).map_exec_err_with_op_idx(
+        Operation::Not => field_ops::op_not(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Eq => field_ops::op_eq(processor).map_exec_err_with_op_idx(
+        Operation::Eq => field_ops::op_eq(processor).map_exec_err_with_package_source_op_idx(
+            package_source_context,
             current_forest,
             node_id,
             host,
@@ -118,63 +132,86 @@ where
 
         // ----- u32 operations ---------------------------------------------------------------
         Operation::U32split => u32_ops::op_u32split(processor, tracer)?,
-        Operation::U32add => u32_ops::op_u32add(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32add3 => u32_ops::op_u32add3(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32sub => u32_ops::op_u32sub(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32mul => u32_ops::op_u32mul(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32madd => u32_ops::op_u32madd(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32div => u32_ops::op_u32div(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32and => u32_ops::op_u32and(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::U32xor => u32_ops::op_u32xor(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
+        Operation::U32add => u32_ops::op_u32add(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32add3 => u32_ops::op_u32add3(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32sub => u32_ops::op_u32sub(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32mul => u32_ops::op_u32mul(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32madd => u32_ops::op_u32madd(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32div => u32_ops::op_u32div(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32and => u32_ops::op_u32and(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::U32xor => u32_ops::op_u32xor(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
         Operation::U32assert2(err_code) => {
             u32_ops::op_u32assert2(processor, *err_code, tracer, current_forest)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
+                .map_exec_err_with_package_source_op_idx(
+                    package_source_context,
+                    current_forest,
+                    node_id,
+                    host,
+                    op_idx,
+                )?
         },
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor)?,
         Operation::Drop => {
-            processor.stack_mut().decrement_size().map_exec_err_with_op_idx(
+            processor.stack_mut().decrement_size().map_exec_err_with_package_source_op_idx(
+                package_source_context,
                 current_forest,
                 node_id,
                 host,
@@ -264,106 +301,168 @@ where
             processor.stack_mut().rotate_right(9);
             OperationHelperRegisters::Empty
         },
-        Operation::CSwap => stack_ops::op_cswap(processor).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::CSwapW => stack_ops::op_cswapw(processor).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-
-        // ----- input / output ---------------------------------------------------------------
-        Operation::Push(value) => stack_ops::op_push(processor, *value)?,
-        Operation::AdvPop => io_ops::op_advpop(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MLoadW => io_ops::op_mloadw(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MStoreW => io_ops::op_mstorew(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MLoad => io_ops::op_mload(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MStore => io_ops::op_mstore(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MStream => io_ops::op_mstream(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::Pipe => io_ops::op_pipe(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-
-        // ----- cryptographic operations -----------------------------------------------------
-        Operation::HPerm => crypto_ops::op_hperm(processor, tracer).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::MpVerify(err_code) => {
-            crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
-        },
-        Operation::MrUpdate => crypto_ops::op_mrupdate(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
-        Operation::FriE2F4 => fri_ops::op_fri_ext2fold4(processor).map_exec_err_with_op_idx(
-            current_forest,
-            node_id,
-            host,
-            op_idx,
-        )?,
-        Operation::HornerBase => crypto_ops::op_horner_eval_base(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
-        Operation::HornerExt => crypto_ops::op_horner_eval_ext(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
-        Operation::EvalCircuit => {
-            eval_circuit::op_eval_circuit(processor, tracer).map_exec_err_with_op_idx(
+        Operation::CSwap => stack_ops::op_cswap(processor)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
                 current_forest,
                 node_id,
                 host,
                 op_idx,
-            )?;
+            )?,
+        Operation::CSwapW => stack_ops::op_cswapw(processor)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+
+        // ----- input / output ---------------------------------------------------------------
+        Operation::Push(value) => stack_ops::op_push(processor, *value)?,
+        Operation::AdvPop => io_ops::op_advpop(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MLoadW => io_ops::op_mloadw(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MStoreW => io_ops::op_mstorew(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MLoad => io_ops::op_mload(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MStore => io_ops::op_mstore(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MStream => io_ops::op_mstream(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::Pipe => io_ops::op_pipe(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+
+        // ----- cryptographic operations -----------------------------------------------------
+        Operation::HPerm => crypto_ops::op_hperm(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::MpVerify(err_code) => {
+            crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
+                .map_exec_err_with_package_source_op_idx(
+                    package_source_context,
+                    current_forest,
+                    node_id,
+                    host,
+                    op_idx,
+                )?
+        },
+        Operation::MrUpdate => crypto_ops::op_mrupdate(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::FriE2F4 => fri_ops::op_fri_ext2fold4(processor)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::HornerBase => crypto_ops::op_horner_eval_base(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::HornerExt => crypto_ops::op_horner_eval_ext(processor, tracer)
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
+        Operation::EvalCircuit => {
+            eval_circuit::op_eval_circuit(processor, tracer)
+                .map_exec_err_with_package_source_op_idx(
+                    package_source_context,
+                    current_forest,
+                    node_id,
+                    host,
+                    op_idx,
+                )?;
             OperationHelperRegisters::Empty
         },
         Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
         Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+            .map_exec_err_with_package_source_op_idx(
+                package_source_context,
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?,
     };
 
     Ok(user_op_helpers)

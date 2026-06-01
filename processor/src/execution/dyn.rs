@@ -103,7 +103,9 @@ where
 
     // Update continuation stack
     // -----------------------------
-    state.continuation_stack.push_finish_dyn(current_node_id);
+    state
+        .continuation_stack
+        .push_finish_dyn_with_source(current_node_id, state.current_source_node());
 
     // if the callee is not in the program's MAST forest, then we need to break to allow the
     // implementing processor to fetch it (possibly asynchronously in an external library in the

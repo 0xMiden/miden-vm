@@ -3,10 +3,12 @@ use core::ops::ControlFlow;
 use crate::{
     BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::PackageSourceDebugContext,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
+use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 mod basic_block;
 mod call;
@@ -41,6 +43,32 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub host: &'a mut H,
     pub tracer: &'a mut T,
     pub stopper: &'a S,
+    pub source_debug_info: Option<&'a PackageDebugInfo>,
+    pub current_source_node: Option<DebugSourceMastNodeId>,
+}
+
+impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
+    pub fn current_source_node(&self) -> Option<DebugSourceMastNodeId> {
+        self.current_source_node
+    }
+
+    pub fn child_source_node(&self, child_index: usize) -> Option<DebugSourceMastNodeId> {
+        let source_debug_info = self.source_debug_info?;
+        let current_source_node = self.current_source_node?;
+
+        source_debug_info
+            .child_source_node(current_source_node, child_index)
+            .ok()
+            .flatten()
+            .map(|(source_node, _)| source_node)
+    }
+
+    pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'a>> {
+        Some(PackageSourceDebugContext::new(
+            self.source_debug_info?,
+            self.current_source_node?,
+        ))
+    }
 }
 
 // MAIN EXECUTION FUNCTION
@@ -134,6 +162,7 @@ pub(crate) fn execute_impl<P, S, T, F>(
     host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
+    source_debug_info: Option<&PackageDebugInfo>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -148,9 +177,14 @@ where
         host,
         tracer,
         stopper,
+        source_debug_info,
+        current_source_node: None,
     };
 
-    while let Some(continuation) = state.continuation_stack.pop_continuation() {
+    while let Some((continuation, source_node)) =
+        state.continuation_stack.pop_continuation_with_source()
+    {
+        state.current_source_node = source_node;
         match continuation {
             Continuation::StartNode(node_id) => {
                 let node = current_forest.get_node_by_id(node_id).unwrap();

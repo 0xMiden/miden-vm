@@ -6,6 +6,7 @@ use miden_core::{
     mast::{MastForest, MastNodeId},
     program::{Kernel, MIN_STACK_DEPTH, Program, StackOutputs},
 };
+use miden_mast_package::debug_info::{DebugSourceCursor, PackageDebugInfo};
 use tracing::instrument;
 
 use super::{
@@ -38,6 +39,21 @@ impl FastProcessor {
         self.execute_with_tracer_sync(program, host, &mut NoopTracer)
     }
 
+    /// Executes the given program synchronously with package-owned source/debug context.
+    pub fn execute_with_package_debug_info_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute_with_package_debug_info_and_tracer_sync(
+            program,
+            package_debug_info,
+            host,
+            &mut NoopTracer,
+        )
+    }
+
     /// Async variant of [`Self::execute_sync`] for hosts that need async callbacks.
     #[inline(always)]
     pub async fn execute(
@@ -46,6 +62,23 @@ impl FastProcessor {
         host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
         self.execute_with_tracer(program, host, &mut NoopTracer).await
+    }
+
+    /// Async variant of [`Self::execute_with_package_debug_info_sync`].
+    #[inline(always)]
+    pub async fn execute_with_package_debug_info(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute_with_package_debug_info_and_tracer(
+            program,
+            package_debug_info,
+            host,
+            &mut NoopTracer,
+        )
+        .await
     }
 
     /// Executes the given program synchronously and returns the bundled trace inputs required by
@@ -121,6 +154,38 @@ impl FastProcessor {
                 host,
                 tracer,
                 &NeverStopper,
+                None,
+            )
+            .await;
+        Self::execution_result_from_flow(flow, self)
+    }
+
+    /// Executes the given program with package-owned source/debug context and the provided tracer
+    /// using an async host.
+    pub async fn execute_with_package_debug_info_and_tracer<T>(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+        tracer: &mut T,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+    {
+        let mut continuation_stack =
+            Self::source_aware_continuation_stack(program, package_debug_info)?;
+        let mut current_forest = program.mast_forest().clone();
+
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        let flow = self
+            .execute_impl_async(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                tracer,
+                &NeverStopper,
+                Some(package_debug_info),
             )
             .await;
         Self::execution_result_from_flow(flow, self)
@@ -147,6 +212,36 @@ impl FastProcessor {
             host,
             tracer,
             &NeverStopper,
+            None,
+        );
+        Self::execution_result_from_flow(flow, self)
+    }
+
+    /// Executes the given program with package-owned source/debug context and the provided tracer
+    /// using a sync host.
+    pub fn execute_with_package_debug_info_and_tracer_sync<T>(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+        tracer: &mut T,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
+    {
+        let mut continuation_stack =
+            Self::source_aware_continuation_stack(program, package_debug_info)?;
+        let mut current_forest = program.mast_forest().clone();
+
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+        let flow = self.execute_impl(
+            &mut continuation_stack,
+            &mut current_forest,
+            program.kernel(),
+            host,
+            tracer,
+            &NeverStopper,
+            Some(package_debug_info),
         );
         Self::execution_result_from_flow(flow, self)
     }
@@ -170,6 +265,7 @@ impl FastProcessor {
             host,
             &mut NoopTracer,
             &StepStopper,
+            None,
         );
         Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
     }
@@ -195,6 +291,7 @@ impl FastProcessor {
                 host,
                 &mut NoopTracer,
                 &StepStopper,
+                None,
             )
             .await;
         Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
@@ -212,6 +309,26 @@ impl FastProcessor {
             execution_output,
             tracer.into_trace_generation_context(),
         )
+    }
+
+    fn source_aware_continuation_stack(
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+    ) -> Result<ContinuationStack<Arc<MastForest>>, ExecutionError> {
+        let Some(root_cursor) = DebugSourceCursor::from_unique_root_for_exec_node(
+            package_debug_info,
+            program.entrypoint(),
+        )
+        .map_err(|_| {
+            ExecutionError::Internal(
+                "package debug source graph has ambiguous or malformed entrypoint roots",
+            )
+        })?
+        else {
+            return Ok(ContinuationStack::new(program));
+        };
+
+        Ok(ContinuationStack::new_with_source_node(program, root_cursor.source_node()))
     }
 
     /// Converts a step-wise execution result into the next resume context, if execution stopped.
@@ -267,14 +384,22 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         tracer: &mut T,
         stopper: &S,
+        package_debug_info: Option<&PackageDebugInfo>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        while let ControlFlow::Break(internal_break_reason) =
-            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
-        {
+        while let ControlFlow::Break(internal_break_reason) = execute_impl(
+            self,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+            package_debug_info,
+        ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
                 InternalBreakReason::Emit {
@@ -372,14 +497,22 @@ impl FastProcessor {
         host: &mut impl Host,
         tracer: &mut T,
         stopper: &S,
+        package_debug_info: Option<&PackageDebugInfo>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
         S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        while let ControlFlow::Break(internal_break_reason) =
-            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
-        {
+        while let ControlFlow::Break(internal_break_reason) = execute_impl(
+            self,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+            package_debug_info,
+        ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
                 InternalBreakReason::Emit {
@@ -591,6 +724,7 @@ impl FastProcessor {
             host,
             &mut NoopTracer,
             &NeverStopper,
+            None,
         );
         Self::stack_result_from_flow(flow)
     }
@@ -616,6 +750,7 @@ impl FastProcessor {
                 host,
                 &mut NoopTracer,
                 &NeverStopper,
+                None,
             )
             .await;
         Self::stack_result_from_flow(flow)

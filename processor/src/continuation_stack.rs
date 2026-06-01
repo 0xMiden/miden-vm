@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{mast::MastNodeId, program::Program};
+use miden_mast_package::debug_info::DebugSourceMastNodeId;
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -98,11 +99,12 @@ impl<F> Continuation<F> {
 #[derive(Debug, Clone)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
+    source_nodes: Option<Vec<Option<DebugSourceMastNodeId>>>,
 }
 
 impl<F> Default for ContinuationStack<F> {
     fn default() -> Self {
-        Self { stack: Vec::new() }
+        Self { stack: Vec::new(), source_nodes: None }
     }
 }
 
@@ -115,7 +117,20 @@ impl<F> ContinuationStack<F> {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
-        Self { stack }
+        Self { stack, source_nodes: None }
+    }
+
+    pub(crate) fn new_with_source_node(
+        program: &Program,
+        source_node: DebugSourceMastNodeId,
+    ) -> Self {
+        let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
+        stack.push(Continuation::StartNode(program.entrypoint()));
+
+        let mut source_nodes = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
+        source_nodes.push(Some(source_node));
+
+        Self { stack, source_nodes: Some(source_nodes) }
     }
 
     // STATE MUTATORS
@@ -124,6 +139,7 @@ impl<F> ContinuationStack<F> {
     /// Pushes a continuation onto the continuation stack.
     pub fn push_continuation(&mut self, continuation: Continuation<F>) {
         self.stack.push(continuation);
+        self.push_source_node(None);
     }
 
     /// Pushes a continuation to enter the given MAST forest on the continuation stack.
@@ -132,31 +148,82 @@ impl<F> ContinuationStack<F> {
     /// * `forest` - The MAST forest to enter
     pub fn push_enter_forest(&mut self, forest: F) {
         self.stack.push(Continuation::EnterForest(forest));
+        self.push_source_node(None);
     }
 
     /// Pushes a join finish continuation onto the stack.
     pub fn push_finish_join(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishJoin(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_finish_join_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::FinishJoin(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pushes a split finish continuation onto the stack.
     pub fn push_finish_split(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishSplit(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_finish_split_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::FinishSplit(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pushes a loop finish continuation onto the stack.
     pub fn push_finish_loop(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishLoop(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_finish_loop_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::FinishLoop(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pushes a call finish continuation onto the stack.
     pub fn push_finish_call(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishCall(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_finish_call_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::FinishCall(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pushes a dyn finish continuation onto the stack.
     pub fn push_finish_dyn(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishDyn(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_finish_dyn_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::FinishDyn(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pushes a continuation to start processing the given node.
@@ -165,18 +232,46 @@ impl<F> ContinuationStack<F> {
     /// * `node_id` - The ID of the node to process
     pub fn push_start_node(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::StartNode(node_id));
+        self.push_source_node(None);
+    }
+
+    pub(crate) fn push_start_node_with_source(
+        &mut self,
+        node_id: MastNodeId,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(Continuation::StartNode(node_id));
+        self.push_source_node(source_node);
     }
 
     /// Pops the next continuation from the continuation stack, and returns it along with its
     /// associated MAST forest.
     pub fn pop_continuation(&mut self) -> Option<Continuation<F>> {
-        self.stack.pop()
+        let continuation = self.stack.pop()?;
+        if let Some(source_nodes) = &mut self.source_nodes {
+            source_nodes.pop();
+        }
+        Some(continuation)
+    }
+
+    pub(crate) fn pop_continuation_with_source(
+        &mut self,
+    ) -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)> {
+        let continuation = self.stack.pop()?;
+        let source_node = self.source_nodes.as_mut().and_then(Vec::pop).flatten();
+        Some((continuation, source_node))
     }
 
     /// Consumes this stack and returns its continuations in bottom-to-top order (i.e. the order in
     /// which they were originally pushed).
     pub fn into_inner(self) -> Vec<Continuation<F>> {
         self.stack
+    }
+
+    fn push_source_node(&mut self, source_node: Option<DebugSourceMastNodeId>) {
+        if let Some(source_nodes) = &mut self.source_nodes {
+            source_nodes.push(source_node);
+        }
     }
 
     // PUBLIC ACCESSORS

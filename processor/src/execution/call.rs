@@ -88,8 +88,12 @@ where
 
     // Update the continuation stack: first push the finish call continuation, then the callee node
     // (to be executed next).
-    state.continuation_stack.push_finish_call(current_node_id);
-    state.continuation_stack.push_start_node(call_node.callee());
+    state
+        .continuation_stack
+        .push_finish_call_with_source(current_node_id, state.current_source_node());
+    state
+        .continuation_stack
+        .push_start_node_with_source(call_node.callee(), state.child_source_node(0));
 
     // Finalize the clock cycle corresponding to the CALL or SYSCALL operation.
     finalize_clock_cycle(

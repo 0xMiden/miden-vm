@@ -34,9 +34,15 @@ where
         current_forest,
     );
 
-    state.continuation_stack.push_finish_join(node_id);
-    state.continuation_stack.push_start_node(join_node.second());
-    state.continuation_stack.push_start_node(join_node.first());
+    state
+        .continuation_stack
+        .push_finish_join_with_source(node_id, state.current_source_node());
+    state
+        .continuation_stack
+        .push_start_node_with_source(join_node.second(), state.child_source_node(1));
+    state
+        .continuation_stack
+        .push_start_node_with_source(join_node.first(), state.child_source_node(0));
 
     // Finalize the clock cycle corresponding to the JOIN operation.
     finalize_clock_cycle(
