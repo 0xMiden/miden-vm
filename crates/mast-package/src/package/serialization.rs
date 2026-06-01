@@ -123,11 +123,14 @@ impl Package {
         validate_mast_forest: bool,
     ) -> Result<Arc<MastForest>, DeserializationError> {
         if validate_mast_forest {
-            UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
-                DeserializationError::InvalidValue(format!(
-                    "library contains an invalid untrusted MAST forest: {err}"
-                ))
-            })
+            UntrustedMastForest::read_from(source)?
+                .validate()
+                .map(MastForest::without_debug_info)
+                .map_err(|err| {
+                    DeserializationError::InvalidValue(format!(
+                        "library contains an invalid untrusted MAST forest: {err}"
+                    ))
+                })
         } else {
             MastForest::read_from(source)
         }
@@ -590,13 +593,19 @@ mod tests {
 
     use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
     use miden_core::{
-        Felt, Word, assert_matches,
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
-        operations::Operation,
+        Felt, Word,
+        advice::AdviceMap,
+        assert_matches,
+        mast::{
+            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestContributor, MastNode,
+            MastNodeExt, MastNodeId,
+        },
+        operations::{AssemblyOp, Operation},
         serde::{
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
             SliceReader,
         },
+        utils::IndexVec,
     };
 
     use super::{
@@ -646,6 +655,45 @@ mod tests {
         .expect("test package should be valid")
     }
 
+    fn build_package_with_debug_info() -> Package {
+        let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
+        let mut debug_info = DebugInfo::new();
+        let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .build()
+            .expect("failed to build basic block");
+        let digest = node.digest();
+        let node_id = nodes.push(node.into()).expect("failed to add basic block");
+        let asm_op = debug_info
+            .add_asm_op(AssemblyOp::new(None, "trusted".into(), 1, "add".into()))
+            .expect("asm op should be added");
+        debug_info
+            .register_asm_ops(node_id, 1, vec![(0, asm_op)])
+            .expect("asm op should be registered");
+
+        let mast = Arc::new(
+            MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default(), debug_info)
+                .expect("forest should be valid"),
+        );
+        let path = absolute_path("test::proc");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            path,
+            Some(node_id),
+            digest,
+            None,
+        ))];
+        let mut package = Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("test package should be valid");
+        package.sections.push(Section::new(SectionId::DEBUG_SOURCE_MAP, vec![1, 2, 3]));
+        package
+    }
+
     fn build_dependency() -> Dependency {
         Dependency {
             name: PackageId::from("dep"),
@@ -686,12 +734,46 @@ mod tests {
             .run(&any::<Package>(), move |package| {
                 let bytes = package.to_bytes();
                 let deserialized = Package::read_from_bytes(&bytes).unwrap();
-                prop_assert_eq!(package, deserialized);
+                let mut expected = package;
+                expected.mast = Arc::new(expected.mast.as_ref().clone().without_debug_info());
+                prop_assert_eq!(expected, deserialized);
                 Ok(())
             })
             .unwrap_or_else(|err| {
                 panic!("{err}");
             });
+    }
+
+    #[test]
+    fn package_checked_deserialization_strips_forest_debug_but_preserves_sections() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes(&bytes).unwrap();
+
+        assert!(deserialized.mast_forest().debug_info().is_empty());
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
+    }
+
+    #[test]
+    fn package_unchecked_deserialization_preserves_trusted_forest_debug() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
+
+        assert_eq!(deserialized.mast_forest().debug_info().num_asm_ops(), 1);
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
     }
 
     #[test]
