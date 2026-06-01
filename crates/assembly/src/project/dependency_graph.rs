@@ -318,6 +318,24 @@ impl DependencyGraph {
         }
     }
 
+    /// This function computes a hash for a project dependency in source form that is used in
+    /// source provenance tracking.
+    ///
+    /// The hash is derived from a string built by this function that contains the following
+    /// information encoded as plain text:
+    ///
+    /// * The project-relative path to the root module, and its content
+    /// * The project-relative path of each supporting submodule, and its content
+    /// * The source provenance material derived from the project file for the current target and
+    ///   build profile.
+    ///
+    /// This hash allows us to reuse the same artifact for a given source dependency, so long as
+    /// the hash has not changed. As a result, it is necessary to make sure that all relevant
+    /// information that contributes to the build output be represented in the hash. For now, this
+    /// assumes that only relevant fields of `miden-project.toml` and the raw content of the source
+    /// files that are built matter for this purpose. Source providers can contribute additional
+    /// non-source code material by returning them as extra support files, whose content contains
+    /// the information/metadata that should contribute to the hash.
     fn compute_path_source_hash(
         &self,
         context: &TargetAssemblyContext<'_>,
