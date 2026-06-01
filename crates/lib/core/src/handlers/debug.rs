@@ -234,10 +234,7 @@ fn write_mem_range<W: fmt::Write>(
 ) -> fmt::Result {
     let (ctx, clk) = (process.ctx(), process.clock());
     if range.is_empty() {
-        return writeln!(
-            w,
-            "Memory state before step {clk} for context {ctx}: range is empty."
-        );
+        return writeln!(w, "Memory state before step {clk} for context {ctx}: range is empty.");
     }
     let (start, end) = (range.start(), range.end());
     let items: Vec<_> = process
