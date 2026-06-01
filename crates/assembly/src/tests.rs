@@ -9,7 +9,7 @@ use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{
     MAX_REPEAT_COUNT,
-    ast::{Ident, Path, Visibility},
+    ast::{Ident, Path},
     diagnostics::WrapErr,
 };
 use miden_core::{
@@ -5014,6 +5014,80 @@ fn package_module_surface_allows_downstream_import_of_root_module() -> TestResul
     Ok(())
 }
 
+#[test]
+fn package_module_surface_omits_private_submodules() -> TestResult {
+    let context = TestContext::new();
+    let dep_root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace pkg::lib
+
+        pub mod api
+        mod internal
+        "#
+    ))?;
+    let dep_api = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace pkg::lib::api
+
+        use pkg::lib::internal
+
+        pub proc foo
+            exec.internal::hidden
+        end
+        "#
+    ))?;
+    let dep_internal = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace pkg::lib::internal
+
+        pub proc hidden
+            push.1
+        end
+        "#
+    ))?;
+
+    let dep = Assembler::new(context.source_manager()).assemble_library(
+        "dep",
+        dep_root,
+        [dep_api, dep_internal],
+    )?;
+    let root_surface = dep
+        .manifest
+        .get_module(Path::new("::pkg::lib"))
+        .expect("root surface should be present");
+    let submodules = root_surface
+        .submodules()
+        .iter()
+        .map(|submodule| submodule.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(submodules, vec!["api"]);
+    assert!(dep.manifest.get_module(Path::new("::pkg::lib::api")).is_some());
+    assert!(dep.manifest.get_module(Path::new("::pkg::lib::internal")).is_none());
+
+    let dep = Arc::new(Package::read_from_bytes(&dep.to_bytes()).map_err(Report::msg)?);
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace consumer
+
+        use pkg::lib
+
+        pub proc call
+            exec.lib::api::foo
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager())
+        .with_package(dep, Linkage::Static)?
+        .assemble_library("consumer", consumer, None::<Box<Module>>)?;
+
+    Ok(())
+}
+
 fn package_with_single_proc_export(
     context: &TestContext,
     export_path: &'static str,
@@ -5085,7 +5159,7 @@ fn package_link_rejects_incomplete_declared_submodule_surface_metadata() -> Test
         "::dep::api::foo",
         [PackageModule::new(
             Arc::from(Path::new("::dep")),
-            [PackageSubmodule::new(Ident::new("api").unwrap(), Visibility::Public)],
+            [PackageSubmodule::new(Ident::new("api").unwrap())],
         )],
     )?;
 

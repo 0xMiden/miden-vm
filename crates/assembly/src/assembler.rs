@@ -596,7 +596,11 @@ impl Assembler {
             let module = &self.linker[module_idx];
             let mut submodules = Vec::new();
             for decl in module.submodules() {
-                submodules.push(PackageSubmodule::new(decl.name.clone(), decl.visibility));
+                if !decl.visibility.is_public() {
+                    continue;
+                }
+
+                submodules.push(PackageSubmodule::new(decl.name.clone()));
 
                 let child_path = module.path().join(&decl.name);
                 if let Some(child_idx) = self.linker.find_module_index(child_path.as_path()) {

@@ -362,7 +362,7 @@ impl Package {
             let mut module_info = ModuleInfo::new(module.path.clone(), None);
             for submodule in module.submodules() {
                 module_info.add_submodule(ast::SubmoduleDecl {
-                    visibility: submodule.visibility,
+                    visibility: ast::Visibility::Public,
                     name: submodule.name.clone(),
                 });
             }
@@ -419,7 +419,7 @@ impl Package {
             let mut module_info = ModuleInfo::new(module.path.clone(), None);
             for submodule in module.submodules() {
                 module_info.add_submodule(ast::SubmoduleDecl {
-                    visibility: submodule.visibility,
+                    visibility: ast::Visibility::Public,
                     name: submodule.name.clone(),
                 });
             }

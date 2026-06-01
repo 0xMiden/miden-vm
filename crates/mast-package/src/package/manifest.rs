@@ -339,7 +339,7 @@ pub struct PackageModule {
     /// The fully-qualified path of this module.
     #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
     pub path: Arc<Path>,
-    /// The submodules declared by this module.
+    /// The public submodules declared by this module.
     pub submodules: Vec<PackageSubmodule>,
 }
 
@@ -370,13 +370,11 @@ impl PackageModule {
 pub struct PackageSubmodule {
     /// The name of the submodule.
     pub name: ast::Ident,
-    /// The visibility declared for the submodule edge.
-    pub visibility: ast::Visibility,
 }
 
 impl PackageSubmodule {
-    pub fn new(name: ast::Ident, visibility: ast::Visibility) -> Self {
-        Self { name, visibility }
+    pub fn new(name: ast::Ident) -> Self {
+        Self { name }
     }
 }
 

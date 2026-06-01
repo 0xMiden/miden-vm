@@ -26,7 +26,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf, Visibility};
+use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -555,19 +555,13 @@ impl Deserializable for PackageModule {
 impl Serializable for PackageSubmodule {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.name.write_into(target);
-        target.write_bool(self.visibility.is_public());
     }
 }
 
 impl Deserializable for PackageSubmodule {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let name = ast::Ident::read_from(source)?;
-        let visibility = if source.read_bool()? {
-            Visibility::Public
-        } else {
-            Visibility::Private
-        };
-        Ok(Self { name, visibility })
+        Ok(Self { name })
     }
 }
 
@@ -747,7 +741,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName, Visibility};
+    use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName};
     use miden_core::{
         Felt, Word, assert_matches,
         mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
@@ -1095,7 +1089,7 @@ mod tests {
         ));
         let module = PackageModule::new(
             absolute_path("test"),
-            [PackageSubmodule::new(Ident::new("api").unwrap(), Visibility::Public)],
+            [PackageSubmodule::new(Ident::new("api").unwrap())],
         );
         let child = PackageModule::new(absolute_path("test::api"), []);
 
@@ -1110,7 +1104,6 @@ mod tests {
             .expect("root module surface should be present");
         assert_eq!(root.submodules().len(), 1);
         assert_eq!(root.submodules()[0].name.as_str(), "api");
-        assert!(root.submodules()[0].visibility.is_public());
         assert!(decoded.get_module(absolute_path("test::api").as_ref()).is_some());
     }
 
