@@ -16,6 +16,15 @@ pub enum PcsParamsError {
     ZeroBlowup,
     #[error("num_queries must be > 0")]
     ZeroQueries,
+    #[error(
+        "log_final_degree + log_blowup must be at least log_folding_arity - 1 \
+         (got {log_final_degree} + {log_blowup} < {min_target})"
+    )]
+    FinalDegreeUnreachable {
+        log_final_degree: u8,
+        log_blowup: u8,
+        min_target: u8,
+    },
 }
 
 /// Complete PCS parameters combining DEEP and FRI parameters.
@@ -47,9 +56,11 @@ impl PcsParams {
     /// - [`PcsParamsError::InvalidFoldingArity`] if `log_folding_arity` is not 1, 2, or 3.
     /// - [`PcsParamsError::ZeroBlowup`] if `log_blowup` is 0.
     /// - [`PcsParamsError::ZeroQueries`] if `num_queries` is 0.
+    /// - [`PcsParamsError::FinalDegreeUnreachable`] if the final target domain is too small to be
+    ///   reachable by fixed-arity FRI folding for all valid domains.
     ///
     /// Field-relative bound checking (`log_final_degree + log_blowup ≤ F::TWO_ADICITY`)
-    /// is deferred to [`crate::domain::TwoAdicSubgroup::new`] at the point a
+    /// is deferred to `TwoAdicSubgroup::new` at the point a
     /// concrete domain is constructed; `PcsParams` itself is field-agnostic.
     pub fn new(
         log_blowup: u8,
@@ -68,6 +79,16 @@ impl PcsParams {
         if num_queries == 0 {
             return Err(PcsParamsError::ZeroQueries);
         }
+
+        let min_target = fold.log_arity() - 1;
+        if log_final_degree.saturating_add(log_blowup) < min_target {
+            return Err(PcsParamsError::FinalDegreeUnreachable {
+                log_final_degree,
+                log_blowup,
+                min_target,
+            });
+        }
+
         Ok(Self {
             log_blowup,
             deep: DeepParams { deep_pow_bits },
@@ -117,5 +138,32 @@ impl PcsParams {
     #[inline]
     pub fn log_final_degree(&self) -> u8 {
         self.fri.log_final_degree
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_final_target_too_small_for_fixed_arity_folding() {
+        let err = PcsParams::new(1, 3, 0, 0, 0, 1, 0).unwrap_err();
+        assert!(matches!(
+            err,
+            PcsParamsError::FinalDegreeUnreachable {
+                log_final_degree: 0,
+                log_blowup: 1,
+                min_target: 2,
+            }
+        ));
+    }
+
+    #[test]
+    fn accepts_minimum_universally_reachable_final_target() {
+        let params = PcsParams::new(1, 3, 1, 0, 0, 1, 0)
+            .expect("final target log size equals log_folding_arity - 1");
+        assert_eq!(params.log_blowup(), 1);
+        assert_eq!(params.log_folding_arity(), 3);
+        assert_eq!(params.log_final_degree(), 1);
     }
 }

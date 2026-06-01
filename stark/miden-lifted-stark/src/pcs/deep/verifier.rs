@@ -32,7 +32,7 @@ use crate::{
 ///
 /// Lifting is transparent at this layer: the prover commits to lifted codewords, so
 /// every opened column is interpreted as a polynomial over the same max domain.
-pub struct DeepOracle<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> {
+pub(in crate::pcs) struct DeepOracle<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> {
     /// Trace commitments with their widths (one per trace tree).
     ///
     /// Widths must match the committed rows (including any alignment padding if

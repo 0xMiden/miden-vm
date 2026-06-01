@@ -140,7 +140,7 @@ where
 /// lifted polynomial `f_lift(X) = f(Xʳ)` on the max LDE coset. This is achieved by
 /// evaluating the original trace on a *nested* coset with shift gʳ: the map
 /// `(g·ω)ʳ = gʳ·ωʳ` sends the max domain down to the smaller one.
-pub fn commit_traces<F, EF, SC>(
+pub(super) fn commit_traces<F, EF, SC>(
     config: &SC,
     domains: &[LiftedDomain<F>],
     traces: Vec<RowMajorMatrix<F>>,

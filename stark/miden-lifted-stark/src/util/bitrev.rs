@@ -96,7 +96,7 @@ where
 /// [`Lmcs::build_aligned_tree`](crate::lmcs::Lmcs::build_aligned_tree).
 ///
 /// Remove alongside [`BitReversibleMatrix`] when upstream impls cover all DFT output types.
-pub fn materialize_bitrev<T: Clone + Send + Sync>(
+pub(crate) fn materialize_bitrev<T: Clone + Send + Sync>(
     evals: impl p3_matrix::bitrev::BitReversibleMatrix<T>,
 ) -> BitReversedMatrixView<RowMajorMatrix<T>> {
     BitReversalPerm::new_view(evals.bit_reverse_rows().to_row_major_matrix())

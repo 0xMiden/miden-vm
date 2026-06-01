@@ -1,4 +1,4 @@
-//! DEEP transcript data structures.
+//! DEEP structured proof types — parsed view of the DEEP sub-transcript.
 
 use alloc::vec::Vec;
 
@@ -14,7 +14,7 @@ use crate::pcs::deep::{DeepParams, read_eval_matrices};
 /// where `g` is the commitment group index and `m` the matrix index within that group.
 pub type OpenedValues<EF> = Vec<Vec<RowMajorMatrix<EF>>>;
 
-/// Structured transcript view for the DEEP interaction.
+/// Structured view of the DEEP sub-proof.
 ///
 /// This records the prover's PoW witness and the two challenges sampled
 /// from the Fiat-Shamir transcript after observing evaluations.
@@ -22,7 +22,7 @@ pub type OpenedValues<EF> = Vec<Vec<RowMajorMatrix<EF>>>;
 /// `evals[g][m]` is a `RowMajorMatrix<EF>` with `num_eval_points` rows for
 /// commitment group `g`, matrix `m`. Widths include alignment padding (matching
 /// the committed rows).
-pub struct DeepTranscript<F: Field, EF: ExtensionField<F>> {
+pub struct DeepProof<F: Field, EF: ExtensionField<F>> {
     /// `evals[g][m]` is a `RowMajorMatrix` with `num_eval_points` rows.
     pub evals: OpenedValues<EF>,
     /// Proof-of-work witness sampled before DEEP challenges.
@@ -33,19 +33,19 @@ pub struct DeepTranscript<F: Field, EF: ExtensionField<F>> {
     pub challenge_points: EF,
 }
 
-impl<F, EF> DeepTranscript<F, EF>
+impl<F, EF> DeepProof<F, EF>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
 {
-    /// Parse DEEP transcript data from a verifier channel.
+    /// Parse a [`DeepProof`] from a verifier channel.
     ///
     /// Reads OOD evaluations, verifies the PoW witness, and samples batching
     /// challenges. Does not verify the DEEP quotient itself; that validation
     /// happens in the DEEP verifier. Commitment widths must match the
     /// committed rows (including any alignment padding).
-    pub fn from_verifier_channel<Ch>(
-        params: &DeepParams,
+    pub(in crate::pcs) fn read_from_channel<Ch>(
+        params: DeepParams,
         commitments: &[(<Ch as Channel>::Commitment, Vec<usize>)],
         num_eval_points: usize,
         channel: &mut Ch,

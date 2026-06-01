@@ -14,9 +14,7 @@ pub mod configs;
 pub mod params;
 
 #[cfg(test)]
-mod test_aux_shape;
-#[cfg(test)]
-mod test_bus;
+mod test_external_assertions;
 #[cfg(test)]
 mod test_multi_aux_alignment;
 #[cfg(test)]
@@ -27,7 +25,11 @@ mod test_tiny_air;
 // Re-export commonly used params at the module level for convenience.
 use alloc::vec::Vec;
 
-use p3_field::Field;
+// Re-exports for integration benches (which consume `miden_lifted_stark` as an
+// external crate via the `testing` feature). Gated so production callers don't
+// see this surface.
+pub use miden_lifted_air::{MultiAir, ProverStatement, Statement, log2_strict_u8};
+use p3_field::{Field, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 pub use params::{
     BENCH_PCS_PARAMS, FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8, LOG_HEIGHTS,
@@ -38,6 +40,32 @@ use rand::{
     distr::{Distribution, StandardUniform},
     rngs::SmallRng,
 };
+
+pub use crate::{
+    domain::{Coset, LiftedDomain},
+    lmcs::{Lmcs, LmcsTree},
+    pcs::{
+        deep::interpolate::PointQuotients, fri::fold::FriFold, params::PcsParams,
+        prover::open_with_channel,
+    },
+    prover::quotient::commit_quotient,
+};
+
+// =============================================================================
+// Domain fixtures
+// =============================================================================
+
+/// Build the canonical [`LiftedDomain`] for `(log_trace_height, log_blowup)`,
+/// panicking on out-of-range parameters.
+///
+/// Fixtures pick their own sizes, so an out-of-range pair is a programmer error
+/// rather than a recoverable condition; this wraps the validated
+/// [`LiftedDomain::try_canonical`] so tests and benches don't repeat the
+/// `.expect(...)`.
+pub fn canonical_domain<F: TwoAdicField>(log_trace_height: u8, log_blowup: u8) -> LiftedDomain<F> {
+    LiftedDomain::try_canonical(log_trace_height, log_blowup)
+        .expect("canonical domain parameters out of range")
+}
 
 // =============================================================================
 // Matrix generation
@@ -139,11 +167,3 @@ macro_rules! define_lmcs_test_helpers {
 }
 
 pub(crate) use define_lmcs_test_helpers;
-
-// =============================================================================
-// Internal re-exports for benchmarks
-// =============================================================================
-pub use crate::pcs::{
-    deep::interpolate::PointQuotients, fri::fold::FriFold, prover::open_with_channel,
-};
-pub use crate::prover::quotient::commit_quotient;

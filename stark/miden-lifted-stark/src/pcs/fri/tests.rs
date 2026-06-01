@@ -9,7 +9,7 @@ use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_util::{log2_strict_usize, reverse_bits_len};
-use proof::FriTranscript;
+use proof::FriProof;
 use prover::FriPolys;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 use verifier::{FriError, FriOracle};
@@ -19,6 +19,7 @@ use crate::{
     domain::LiftedDomain,
     lmcs::tree_indices::TreeIndices,
     testing::{
+        canonical_domain,
         configs::goldilocks_poseidon2::{
             Challenger, Felt, Lmcs as BaseLmcs, QuadFelt, TestDigest, TestTranscriptData,
             prover_channel, random_lde_matrix, test_challenger, test_lmcs, verifier_channel,
@@ -157,7 +158,7 @@ fn run_roundtrip_case(case: &FriRoundtripCase, seed: u64) -> Result<(), FriError
     .values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
-    let domain = LiftedDomain::<Felt>::canonical(case.log_poly_degree, case.log_blowup);
+    let domain = canonical_domain::<Felt>(case.log_poly_degree, case.log_blowup);
     // Sample domain indices (no bit-reversal needed — tree is in domain order)
     let tree_indices =
         TreeIndices::new(sample_indices(&mut rng, lde_size, case.num_queries), log_domain_size)
@@ -170,14 +171,10 @@ fn run_roundtrip_case(case: &FriRoundtripCase, seed: u64) -> Result<(), FriError
         verify_queries(&params, &lmcs, &transcript, &domain, &initial_evals, tree_indices, None)?;
     assert_eq!(prover_digest, verifier_digest);
 
-    // Re-parse FriTranscript (commit phase only) from a fresh channel.
+    // Re-parse FriProof (commit phase only) from a fresh channel.
     let mut reparse_channel = verifier_channel(&transcript);
-    FriTranscript::<Felt, QuadFelt, _>::from_verifier_channel(
-        &params,
-        &domain,
-        &mut reparse_channel,
-    )
-    .expect("FriTranscript re-parse should succeed");
+    FriProof::<Felt, QuadFelt, _>::read_from_channel(&params, &domain, &mut reparse_channel)
+        .expect("FriProof re-parse should succeed");
 
     Ok(())
 }
@@ -212,7 +209,7 @@ fn test_fri_verify_wrong_eval() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
-    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
+    let domain = canonical_domain::<Felt>(log_poly_degree, log_blowup);
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
         .expect("indices are in range");
     let mut initial_evals = build_initial_evals(&evals, &tree_indices);
@@ -264,7 +261,7 @@ fn test_fri_verify_wrong_beta() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals1.len();
     let log_domain_size = log2_strict_u8(lde_size);
-    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
+    let domain = canonical_domain::<Felt>(log_poly_degree, log_blowup);
 
     // Prover 1: generate FRI transcript (grinds per-round internally).
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
@@ -327,7 +324,7 @@ fn test_fri_zero_rounds_final_poly_only() {
         random_lde_matrix::<QuadFelt>(&mut rng, log_poly_degree, log_blowup, 1, Felt::ONE).values;
     let lde_size = evals.len();
     let log_domain_size = log2_strict_u8(lde_size);
-    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
+    let domain = canonical_domain::<Felt>(log_poly_degree, log_blowup);
     let tree_indices = TreeIndices::new(sample_indices(&mut rng, lde_size, 2), log_domain_size)
         .expect("indices are in range");
     let initial_evals = build_initial_evals(&evals, &tree_indices);
@@ -335,8 +332,8 @@ fn test_fri_zero_rounds_final_poly_only() {
         prove_queries(&params, &lmcs, &domain, evals, tree_indices.clone());
 
     let mut channel = verifier_channel(&transcript);
-    let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, &domain, &mut channel)
+    let fri_transcript: FriProof<Felt, QuadFelt, _> =
+        FriProof::read_from_channel(&params, &domain, &mut channel)
             .expect("transcript parsing should succeed");
 
     assert!(fri_transcript.rounds.is_empty(), "expected zero folding rounds");
@@ -387,7 +384,7 @@ fn test_final_polynomial_correctness() {
     let lde = dft.coset_lde_algebra_batch(evals_h, log_blowup as usize, Felt::ONE);
     let evals = lde.bit_reverse_rows().to_row_major_matrix().values;
 
-    let domain = LiftedDomain::<Felt>::canonical(log_poly_degree, log_blowup);
+    let domain = canonical_domain::<Felt>(log_poly_degree, log_blowup);
 
     let mut prover_channel = prover_channel();
     let _fri_polys =
@@ -395,8 +392,8 @@ fn test_final_polynomial_correctness() {
     let (_, transcript) = prover_channel.finalize();
 
     let mut v_channel = verifier_channel(&transcript);
-    let fri_transcript: FriTranscript<Felt, QuadFelt, _> =
-        FriTranscript::from_verifier_channel(&params, &domain, &mut v_channel)
+    let fri_transcript: FriProof<Felt, QuadFelt, _> =
+        FriProof::read_from_channel(&params, &domain, &mut v_channel)
             .expect("transcript parsing should succeed");
 
     assert_eq!(

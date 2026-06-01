@@ -5,17 +5,18 @@
 //! the codebase's pre-PR state; it isolates the speedup attributable to evaluating
 //! a low-degree AIR on its native quotient domain rather than the global one.
 //!
-//! Runs `prove_multi` with two AIRs:
+//! Runs `prove` with two AIRs:
 //! - Core AIR: width 72, max constraint degree 9 (so `D = 8`).
 //! - Chip AIR: width 72, max constraint degree 5 (so `D = 4`).
 //!
 //! Two variants:
-//! - **Baseline**: both AIRs report `log_quotient_degree = 3` (`D = 8`). Chip's constraints are
-//!   evaluated on `chip_height * 8` points (the full target domain) rather than its natural
+//! - **Baseline**: both AIRs are forced to `constraint_degree = 9` (so `D = 8`). Chip's constraints
+//!   are evaluated on `chip_height * 8` points (the full target domain) rather than its natural
 //!   `chip_height * 4`.
-//! - **Optimized**: Core reports `log_qd = 3`, Chip reports `log_qd = 2`. Chip evaluates on its
-//!   native domain (size `chip_height * 4`), divides by the native vanishing polynomial, and
-//!   `upsample_evals` lifts the resulting quotient to the target (`chip_height * 8`).
+//! - **Optimized**: Core forced to `constraint_degree = 9` (`D = 8`), Chip to `constraint_degree =
+//!   5` (`D = 4`). Chip evaluates on its native domain (size `chip_height * 4`), divides by the
+//!   native vanishing polynomial, and `upsample_evals` lifts the resulting quotient to the target
+//!   (`chip_height * 8`).
 //!
 //! Run:
 //! ```bash
@@ -26,11 +27,14 @@
 use std::time::Instant;
 
 use miden_lifted_air::{
-    AirBuilder, AuxBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+    AirBuilder, BaseAir, ConstraintDegrees, LiftedAir, LiftedAirBuilder, WindowAccess,
 };
 use miden_lifted_stark::{
-    AirWitness, GenericStarkConfig, PcsParams, prove_multi,
-    testing::configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
+    GenericStarkConfig, prove,
+    testing::{
+        MultiAir, PcsParams, ProverStatement, Statement,
+        configs::goldilocks_poseidon2::{Dft, Felt, QuadFelt, test_challenger, test_lmcs},
+    },
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -96,8 +100,15 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Trivial aux: a single constant-challenge column.
+        (RowMajorMatrix::new(vec![challenges[0]; main.height()], 1), vec![])
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -126,21 +137,29 @@ impl LiftedAir<Felt, QuadFelt> for BenchAir {
     }
 }
 
-/// Test wrapper that forces [`LiftedAir::log_quotient_degree`] to a chosen value.
+/// Test wrapper that forces [`LiftedAir::constraint_degree`] to a chosen value
+/// (quotient chunking — and hence `log_quotient_degree` — is derived from it).
 ///
 /// Delegates everything else to the inner AIR. Used by this bench to toggle between
-/// the baseline (force `log_qd = global_max`) and the optimized path (natural `log_qd`).
+/// the baseline (force every AIR to the global-max degree) and the optimized path
+/// (each AIR at its natural degree).
 ///
 /// Overriding *higher* than the AIR actually needs is safe: the prover/verifier just
 /// use a larger quotient domain than necessary. Overriding *lower* than needed would
 /// produce an invalid proof.
 #[derive(Clone, Copy, Debug)]
-struct OverrideLogQuotientDegree<A> {
+struct OverrideConstraintDegree<A> {
     inner: A,
-    log_qd: usize,
+    constraint_degree: usize,
 }
 
-impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideLogQuotientDegree<A> {
+/// Constraint degree that yields `log_quotient_degree == l`:
+/// `log2_ceil(((1 << l) + 1) - 1) == log2_ceil(1 << l) == l`.
+fn constraint_degree_for_log_qd(l: usize) -> usize {
+    (1 << l) + 1
+}
+
+impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
     fn width(&self) -> usize {
         self.inner.width()
     }
@@ -149,7 +168,7 @@ impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideLogQuotientDegree<A> {
     }
 }
 
-impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideLogQuotientDegree<A> {
+impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         self.inner.periodic_columns()
     }
@@ -162,35 +181,39 @@ impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideLogQuot
     fn num_aux_values(&self) -> usize {
         self.inner.num_aux_values()
     }
-    fn num_var_len_public_inputs(&self) -> usize {
-        self.inner.num_var_len_public_inputs()
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        self.inner.build_aux_trace(main, air_inputs, aux_inputs, challenges)
     }
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         self.inner.eval(builder)
     }
-    fn log_quotient_degree(&self) -> u8
+    fn constraint_degree(&self) -> ConstraintDegrees
     where
         Self: Sized,
     {
-        self.log_qd as u8
+        ConstraintDegrees { base: self.constraint_degree, ext: 0 }
     }
 }
 
 // -----------------------------------------------------------------------------
-// Aux builder (trivial: constant-challenge column)
+// MultiAir (trivial: constant-challenge aux column for each trace)
 // -----------------------------------------------------------------------------
 
-struct BenchAuxBuilder;
+struct BenchMultiAir {
+    airs: Vec<OverrideConstraintDegree<BenchAir>>,
+}
 
-impl AuxBuilder<Felt, QuadFelt> for BenchAuxBuilder {
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
-        let column = vec![challenges[0]; height];
-        (RowMajorMatrix::new(column, 1), vec![])
+impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
+    type Air = OverrideConstraintDegree<BenchAir>;
+
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
     }
 }
 
@@ -246,23 +269,22 @@ fn run_prove(
     let config =
         GenericStarkConfig::new(bench_pcs_params(), test_lmcs(), Dft::default(), test_challenger());
 
-    let core_air = OverrideLogQuotientDegree {
+    let core_air = OverrideConstraintDegree {
         inner: BenchAir { kind: BenchAirKind::Core },
-        log_qd: core_log_qd,
+        constraint_degree: constraint_degree_for_log_qd(core_log_qd),
     };
-    let chip_air = OverrideLogQuotientDegree {
+    let chip_air = OverrideConstraintDegree {
         inner: BenchAir { kind: BenchAirKind::Chip },
-        log_qd: chip_log_qd,
+        constraint_degree: constraint_degree_for_log_qd(chip_log_qd),
     };
 
     let core_trace = generate_trace(BenchAirKind::Core.recurrence_power(), core_height);
     let chip_trace = generate_trace(BenchAirKind::Chip.recurrence_power(), chip_height);
 
-    let core_witness = AirWitness::new(&core_trace, &[], &[]);
-    let chip_witness = AirWitness::new(&chip_trace, &[], &[]);
-
-    let builder = BenchAuxBuilder;
-    let instances = &[(&core_air, core_witness, &builder), (&chip_air, chip_witness, &builder)];
+    let statement =
+        Statement::new(BenchMultiAir { airs: vec![core_air, chip_air] }, Vec::new(), Vec::new())
+            .unwrap();
+    let prover_statement = ProverStatement::new(statement, vec![core_trace, chip_trace]).unwrap();
 
     eprintln!("\n{}", "=".repeat(70));
     eprintln!(
@@ -271,11 +293,11 @@ fn run_prove(
     eprintln!("{}\n", "=".repeat(70));
 
     let start = Instant::now();
-    let _output = prove_multi::<Felt, QuadFelt, _, _, _>(&config, instances, test_challenger())
+    let _output = prove::<Felt, QuadFelt, _, _>(&config, &prover_statement, test_challenger())
         .expect("prove succeeds");
     let elapsed = start.elapsed();
 
-    eprintln!(">>> Total prove_multi time: {elapsed:.3?}\n");
+    eprintln!(">>> Total prove time: {elapsed:.3?}\n");
 }
 
 fn main() {

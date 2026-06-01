@@ -64,7 +64,7 @@ impl TreeIndices {
     }
 
     /// Iterator over sibling nodes absent from this leaf set, bottom-to-top.
-    pub fn missing_siblings(&self) -> MissingSiblingsIter {
+    pub(super) fn missing_siblings(&self) -> MissingSiblingsIter {
         MissingSiblingsIter::new(&self.indices, self.depth)
     }
 
@@ -122,7 +122,7 @@ impl TreeIndices {
 ///
 /// The gap never closes because each pair of siblings produces at most one
 /// parent, so `next_len` grows slower than `current.start` advances.
-pub struct MissingSiblingsIter {
+pub(super) struct MissingSiblingsIter {
     /// Shared buffer: `nodes[current]` are unprocessed nodes in the current
     /// layer; `nodes[..next_len]` accumulates their parents for the next layer.
     nodes: Vec<NodeId>,

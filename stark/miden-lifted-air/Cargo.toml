@@ -14,10 +14,11 @@ doctest = false
 test    = false
 
 [dependencies]
-p3-air.workspace    = true
-p3-field.workspace  = true
-p3-matrix.workspace = true
-p3-util.workspace   = true
+p3-air.workspace        = true
+p3-challenger.workspace = true
+p3-field.workspace      = true
+p3-matrix.workspace     = true
+p3-util.workspace       = true
 
 thiserror.workspace = true
 

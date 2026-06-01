@@ -10,13 +10,10 @@
 
 use std::time::Instant;
 
-use miden_lifted_stark::{
-    LiftedDomain, Lmcs, LmcsTree, PcsParams,
-    testing::{
-        LOG_HEIGHTS, RELATIVE_SPECS,
-        configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
-        generate_matrices_from_specs, open_with_channel,
-    },
+use miden_lifted_stark::testing::{
+    LOG_HEIGHTS, Lmcs, LmcsTree, PcsParams, RELATIVE_SPECS, canonical_domain,
+    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
+    generate_matrices_from_specs, open_with_channel,
 };
 use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
@@ -54,7 +51,7 @@ fn main() {
         eprintln!("{}\n", "=".repeat(60));
 
         // LDE coset for this batch — sole source of `F::GENERATOR`.
-        let domain = LiftedDomain::<Felt>::canonical(log_lde_height, 0);
+        let domain = canonical_domain::<Felt>(log_lde_height, 0);
         let shift = domain.lde_shift();
 
         let matrix_groups: Vec<Vec<RowMajorMatrix<Felt>>> =

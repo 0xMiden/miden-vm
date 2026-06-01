@@ -49,10 +49,10 @@
 //! - Prover LDE evaluation (`prover::DeepPoly::from_trees` via explicit dot-product with reversed
 //!   negated coefficients — see comments there)
 
-pub mod interpolate;
-pub mod proof;
-pub mod prover;
-pub mod verifier;
+pub(crate) mod interpolate;
+pub(crate) mod proof;
+pub(crate) mod prover;
+pub(crate) mod verifier;
 
 use alloc::vec::Vec;
 
@@ -66,7 +66,7 @@ use proof::OpenedValues;
 /// Controls proof-of-work grinding for DEEP challenge sampling.
 /// Column alignment is handled at the LMCS layer and by padding evaluations.
 #[derive(Clone, Copy, Debug)]
-pub struct DeepParams {
+pub(crate) struct DeepParams {
     /// Grinding bits before DEEP challenge sampling.
     pub(crate) deep_pow_bits: usize,
 }
@@ -76,7 +76,7 @@ pub struct DeepParams {
 /// The prover sends one flat slice per evaluation point containing all matrices'
 /// column values concatenated. This function splits by widths and reshapes into
 /// per-group, per-matrix `RowMajorMatrix<EF>` with `num_eval_points` rows each.
-pub fn read_eval_matrices<F, EF, Ch>(
+fn read_eval_matrices<F, EF, Ch>(
     group_widths: &[&[usize]],
     num_eval_points: usize,
     channel: &mut Ch,

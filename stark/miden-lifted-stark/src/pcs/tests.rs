@@ -7,7 +7,7 @@ use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
 use p3_challenger::CanObserve;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use params::PcsParams;
-use proof::PcsTranscript;
+use proof::PcsProof;
 use prover::open_with_channel;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 use verifier::{PcsError, verify_aligned};
@@ -16,8 +16,11 @@ use super::*;
 use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree},
-    testing::configs::goldilocks_poseidon2::{
-        self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
+    testing::{
+        canonical_domain,
+        configs::goldilocks_poseidon2::{
+            self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
+        },
     },
     util::align::aligned_widths,
 };
@@ -48,8 +51,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let lde_height = trees[0].leaves().last().map(Matrix::height).unwrap_or(0);
     let log_lde_height = log2_strict_u8(lde_height);
     let log_blowup = params.log_blowup;
-    let max_domain: LiftedDomain<Felt> =
-        LiftedDomain::canonical(log_lde_height - log_blowup, log_blowup);
+    let max_domain: LiftedDomain<Felt> = canonical_domain(log_lde_height - log_blowup, log_blowup);
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
@@ -93,7 +95,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
             verifier_channel.finalize().expect("transcript should finalize cleanly");
         assert_eq!(prover_digest, verifier_digest);
 
-        // Re-parse PcsTranscript from a fresh channel and verify digest agreement.
+        // Re-parse PcsProof from a fresh channel and verify digest agreement.
         let alignment = lmcs.alignment();
         let aligned_commitments: Vec<_> = commitments
             .iter()
@@ -106,7 +108,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
         }
         let mut reparse_channel = VerifierTranscript::from_data(challenger, &transcript);
 
-        PcsTranscript::<QuadFelt, BaseLmcs>::from_verifier_channel::<_, 2>(
+        PcsProof::<QuadFelt, BaseLmcs>::read_from_channel::<_, 2>(
             params,
             &lmcs,
             &aligned_commitments,
@@ -114,7 +116,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
             eval_points,
             &mut reparse_channel,
         )
-        .expect("PcsTranscript re-parse should succeed");
+        .expect("PcsProof re-parse should succeed");
 
         let reparse_digest = reparse_channel
             .finalize()

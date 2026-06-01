@@ -17,7 +17,7 @@ use crate::util::horner::horner_acc;
 /// Stores polynomial coefficients computed from the AIR's periodic columns.
 /// Used to evaluate periodic values at the OOD point during verification.
 #[derive(Clone, Debug)]
-pub struct PeriodicPolys<F> {
+pub(super) struct PeriodicPolys<F> {
     /// Polynomial coefficients for each column.
     polys: Vec<Vec<F>>,
 }
@@ -29,8 +29,9 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
     ///
     /// # Panics
     /// Panics if any column length is zero or not a power of two.
-    /// This is a trusted path — the AIR should pass
-    /// [`LiftedAir::validate`](miden_lifted_air::LiftedAir::validate).
+    /// This is a trusted path — the AIR is assumed structurally valid (see
+    /// [`assert_multi_air_valid`](miden_lifted_air::debug::assert_multi_air_valid) for the
+    /// debug-only check).
     pub fn new(column_evals: &[Vec<F>]) -> Self {
         let dft = NaiveDft;
         let mut polys = Vec::with_capacity(column_evals.len());

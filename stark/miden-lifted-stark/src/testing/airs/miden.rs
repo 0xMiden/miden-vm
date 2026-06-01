@@ -4,9 +4,11 @@
 //! single degree-9 base constraint producing 8 quotient chunks, and 8 extension-field
 //! auxiliary columns (= 16 base-field columns with Goldilocks `ext_degree=2`).
 
+use alloc::vec::Vec;
+
 use miden_lifted_air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -74,8 +76,17 @@ impl<F: Field, EF: Field> LiftedAir<F, EF> for DummyMidenAir {
         self.num_aux_cols
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // Constraints touch only the main trace: emit an all-zero aux trace.
+        let aux =
+            RowMajorMatrix::new(EF::zero_vec(main.height() * self.num_aux_cols), self.num_aux_cols);
+        (aux, EF::zero_vec(self.num_aux_cols))
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {

@@ -83,7 +83,7 @@ fn batched_base_linear_combination<P: PackedField>(coeffs: &[P::Scalar], values:
 /// - `EF`: Extension field scalar
 /// - `P`: Packed base field (with `P::Scalar = F`)
 /// - `PE`: Packed extension field (must implement appropriate algebra traits)
-pub struct ProverConstraintFolder<'a, F, EF, P, PE>
+pub(super) struct ProverConstraintFolder<'a, F, EF, P, PE>
 where
     F: Field,
     EF: ExtensionField<F>,

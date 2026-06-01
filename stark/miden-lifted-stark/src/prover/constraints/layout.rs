@@ -24,14 +24,15 @@ use tracing::instrument;
 /// for all variables. This discovers which constraints are base-field vs extension-field
 /// without building symbolic expression trees — only the emission order matters.
 #[instrument(name = "compute constraint layout", skip_all, level = "debug")]
-pub fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
+pub(crate) fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
 where
     F: Field,
     EF: ExtensionField<F>,
     A: LiftedAir<F, EF>,
 {
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
-    debug_assert!(air.is_valid_builder(&builder).is_ok());
+    #[cfg(debug_assertions)]
+    miden_lifted_air::debug::check_builder_shape(air, &builder);
     air.eval(&mut builder);
     builder.into_layout()
 }

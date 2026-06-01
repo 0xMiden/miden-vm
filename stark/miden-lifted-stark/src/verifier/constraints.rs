@@ -30,7 +30,7 @@ use crate::selectors::Selectors;
 /// `Σₖ α^{K−1−k}·Cₖ(z)`, but is cheaper for a single-point evaluation.
 /// The prover computes an equivalent fold over the whole quotient domain, optimized
 /// with base-field SIMD where possible.
-pub struct ConstraintFolder<'a, F, EF>
+pub(super) struct ConstraintFolder<'a, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -76,11 +76,8 @@ where
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
-        if size == 2 {
-            self.selectors.is_transition
-        } else {
-            panic!("only window size 2 supported in this prototype")
-        }
+        assert_eq!(size, 2, "AIR uses window size {size}; only 2 supported");
+        self.selectors.is_transition
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

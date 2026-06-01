@@ -54,13 +54,16 @@ mod tests {
     use super::*;
     use crate::{
         domain::{Coset, LiftedDomain},
-        testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        testing::{
+            canonical_domain,
+            configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        },
     };
 
     #[test]
     fn test_selectors_at_point() {
         let log_n = 4;
-        let domain: LiftedDomain<Felt> = LiftedDomain::canonical(log_n, 0);
+        let domain: LiftedDomain<Felt> = canonical_domain(log_n, 0);
 
         // Sample a point outside the domain
         let z = QuadFelt::from(Felt::from_u32(12345));
@@ -78,8 +81,7 @@ mod tests {
     fn test_selectors_on_coset() {
         let log_trace = 3;
         let log_blowup = 2; // 4x blowup
-        let domain =
-            LiftedDomain::<Felt>::canonical(log_trace, log_blowup).evaluation_domain(log_blowup);
+        let domain = canonical_domain::<Felt>(log_trace, log_blowup).evaluation_domain(log_blowup);
 
         let sels: Selectors<Vec<Felt>> = domain.selectors();
 

@@ -42,7 +42,7 @@ use crate::{
 /// actual degree is `>= evals.len()`, this function silently returns evaluations
 /// of a different polynomial (the unique degree-`< evals.len()` interpolant of
 /// the input). The caller is responsible for ensuring the degree bound.
-pub fn upsample_evals<F, EF, DFT>(dft: &DFT, evals: Vec<EF>, added_bits: usize) -> Vec<EF>
+pub(crate) fn upsample_evals<F, EF, DFT>(dft: &DFT, evals: Vec<EF>, added_bits: usize) -> Vec<EF>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
@@ -75,7 +75,7 @@ where
 ///   evaluations, `extended[i] = original[i mod n_old]` realises the composition `P(X) -> P(X^r)`:
 ///   iterating `gJ` in natural order and raising to the `r`-th power cycles through `(gJ)^r` with
 ///   period `|(gJ)^r|`.
-pub fn cyclic_extend_and_accumulate<EF: Field>(
+pub(super) fn cyclic_extend_and_accumulate<EF: Field>(
     accumulator: &mut Vec<EF>,
     contribution: Vec<EF>,
     beta: EF,

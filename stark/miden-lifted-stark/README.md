@@ -21,9 +21,9 @@ miden-lifted-stark              ← this crate
 └── miden-lifted-air            ← AIR traits (aux columns, periodic columns)
 ```
 
-The system supports **multiple traces of different power-of-two heights**.
-Shorter traces are virtually lifted to the maximum height via LMCS upsampling,
-so the PCS and verifier operate on a single uniform view.
+The system supports **multiple traces of different power-of-two heights of at
+least 2 rows**. Shorter traces are virtually lifted to the maximum height via
+LMCS upsampling, so the PCS and verifier operate on a single uniform view.
 
 ## Notation
 
@@ -32,7 +32,7 @@ so the PCS and verifier operate on a single uniform view.
 - `r_j = N / n_j`: lift ratio (a power of two).
 - `H`: two-adic subgroup of size `N` with generator `omega_H`.
 - `g`: multiplicative coset shift (`F::GENERATOR` by convention).
-- `D`: constraint degree blowup (here fixed at `D = 4`).
+- `D`: quotient-domain blowup, derived per AIR from its constraint degree; the batch value is the max over AIRs.
 - `gJ`: quotient-domain coset (size `N * D`).
 - `gK`: PCS/LDE coset (size `N * B`, where `B` is the FRI blowup).
 - `z`: global out-of-domain point sampled once.
@@ -48,43 +48,52 @@ view.
 
 Informally, an AIR is "liftable" if transition constraints do not rely on the
 wrap-around row (last -> first) unless that behavior is explicitly constrained.
-See `docs/lifting.md` for a deeper discussion and sufficient conditions.
+See the "Mathematical background" in `src/prover/README.md` and
+`src/verifier/README.md` for a deeper discussion and sufficient conditions.
 
 ## Protocol Summary
 
-### Prover (`prove_multi`)
+### Prover (`prove`)
 
-1. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
+1. **Validate and bind instance shape** — Validate runtime inputs, call
+   `Statement::observe`, then observe the instance count and log trace heights
+   in instance order.
+2. **Commit main traces** — LDE each trace on its lifted coset, bit-reverse
    rows, build LMCS tree. Send root.
-2. **Sample randomness** — Squeeze auxiliary randomness from the Fiat-Shamir
+3. **Sample randomness** — Squeeze auxiliary randomness from the Fiat-Shamir
    channel. Build and commit auxiliary traces.
-3. **Sample challenges** — `alpha` (constraint folding) and `beta`
+4. **Sample challenges** — `alpha` (constraint folding) and `beta`
    (cross-trace accumulation).
-4. **Evaluate constraints** — For each trace in ascending height order,
-   evaluate AIR constraints on the quotient domain using SIMD-packed
-   arithmetic. Produces a numerator N_j per trace (no vanishing division).
-5. **Accumulate numerators** — Fold across traces:
-   `acc = cyclic_extend(acc) * beta + N_j`.
-6. **Divide by vanishing polynomial** — One pass on the full quotient domain,
-   exploiting Z_H periodicity for batch inverse.
+5. **Evaluate per-AIR quotients** — For each trace in ascending height order,
+   evaluate AIR constraints on that AIR's native quotient domain using
+   SIMD-packed arithmetic and divide by its trace vanishing polynomial.
+   Produces Q_j per trace.
+6. **Accumulate quotients** — Fold across traces:
+   `acc = cyclic_extend(acc) * beta + Q_j`.
 7. **Commit quotient** — Decompose Q into D chunks via fused iDFT + coefficient
    scaling + flatten + DFT pipeline. Commit via LMCS.
 8. **Sample OOD point z** — Rejection-sampled to lie outside H and the LDE
    coset.
 9. **Open via PCS** — Delegate to the internal `pcs` modules.
 
-### Verifier (`verify_multi`)
+### Verifier (`verify`)
 
-1. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
-2. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
-3. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.
-4. **Reconstruct Q(z)** — Barycentric interpolation over the D quotient
+1. **Validate and bind instance shape** — Validate proof heights against the
+   AIRs, call `Statement::observe`, then observe the instance count and log
+   trace heights in instance order.
+2. **Receive commitments** — Main, auxiliary, and quotient roots from transcript.
+3. **Re-derive challenges** — Same `alpha`, `beta`, `z` via Fiat-Shamir.
+4. **Verify PCS openings** — At `[z, z_next]` where `z_next = z * omega_H`.
+5. **Reconstruct Q(z)** — Barycentric interpolation over the D quotient
    chunks.
-5. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
+6. **Evaluate constraints at OOD** — For each AIR at the lifted OOD point
    `y_j = z^{r_j}`: compute selectors, evaluate periodic polynomials,
    fold constraints with alpha, accumulate with beta.
-6. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
-7. **Ensure transcript is fully consumed** — Canonicality enforcement.
+7. **Evaluate external assertions** — Call `Statement::eval_external`
+   once over the global view (challenges, aux values, log heights); each
+   returned EF value must equal zero.
+8. **Check identity** — `accumulated == Q(z) * Z_H(z)`.
+9. **Ensure transcript is fully consumed** — Canonicality enforcement.
 
 ## Math Sketch
 
@@ -109,31 +118,20 @@ constraint count ahead of time.
 
 ### Cross-Trace Accumulation
 
-Numerators from traces of increasing height are combined:
+Per-AIR quotients from traces of increasing height are combined:
 
 ```
-acc = cyclic_extend(acc) * beta + N_j
+acc = cyclic_extend(acc) * beta + Q_j
 ```
 
-where `cyclic_extend` repeats the accumulator via modular indexing
-(`i & (len - 1)`) to match the next trace's quotient domain size.
-This works because:
+where `Q_j` is the AIR's folded constraint numerator divided by its trace
+vanishing polynomial on the native quotient coset `gJ_j`. If an AIR uses a
+smaller quotient degree than the batch maximum, `Q_j` is first low-degree
+extended along the quotient-degree axis. `cyclic_extend` then repeats the
+accumulator via modular indexing (`i & (len - 1)`) to match the next trace's
+quotient domain size.
 
-```
-Z_H(x) = Z_{H^r}(x) * Phi_r(x)
-```
-
-so cyclic extension of a polynomial divisible by `Z_{H^r}` preserves
-divisibility by `Z_H`.
-
-### Vanishing Division
-
-After accumulation, the combined numerator is divided by `Z_H(x) = x^N - 1`
-once on the full quotient domain.
-
-On the quotient coset `gJ` (where `|J| = N * D`), the values `x^N` range over a
-size-`D` subgroup, so `Z_H(x)` takes only `D` distinct values. The prover can
-batch-invert those `D` values once and index them by `i mod D`.
+Vanishing division is therefore per-AIR, not a final global division pass.
 
 ### Quotient Decomposition
 
@@ -169,8 +167,9 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Fused quotient pipeline** — iDFT, coefficient scaling by `(omega^t)^{-k}`,
   flatten to base field, zero-pad, forward DFT — all in one pass, no redundant
   coset operations.
-- **Periodic vanishing exploit** — On the quotient coset `gJ`, `Z_H(x)` takes
-  only `D` distinct values; batch inverse computes those once.
+- **Periodic vanishing exploit** — On each AIR's quotient coset `gJ_j`,
+  `Z_{H_j}(x)` takes only `D_j` distinct values; batch inverse computes those
+  once.
 - **Zero-copy quotient domain** — `split_rows().bit_reverse_rows()` gives a
   natural-order view of committed LDE data without copying.
 - **Efficient periodic columns** — Only `max_period * blowup` LDE values
@@ -178,55 +177,58 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 - **Cyclic extension** — Cross-trace accumulation uses bitwise AND for
   modular indexing (power-of-two sizes).
 - **Parallel execution** — Rayon parallelism throughout constraint evaluation
-  and vanishing division (gated by `parallel` feature).
+  and per-AIR quotient division (gated by `parallel` feature).
 
 ## Entry Points
 
 | Item | Purpose |
 |------|---------|
-| `prover::prove_single` | Prove a single-AIR STARK |
-| `prover::prove_multi` | Prove a multi-trace STARK |
-| `AirWitness` | Prover witness (trace + public values) |
-| `verifier::verify_single` | Verify a single-AIR proof |
-| `verifier::verify_multi` | Verify a multi-trace proof |
-| `AirInstance` | Verifier instance (public values + variable-length inputs) |
-| `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
+| `prover::prove` | Prove one or more AIR instances |
+| `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
+| `Statement` | A `MultiAir` plus validated per-proof caller inputs (`air_inputs`, optional `aux_inputs`) |
+| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and statement observation hooks |
+| `verifier::verify` | Verify a multi-trace proof |
+| `MultiAir::eval_external` | Cross-AIR assertion hook: returns assertion expression values to be checked for zero (default: no assertions) |
+| `Statement::aux_inputs` | Auxiliary public inputs consumed only by `eval_external` (empty unless provided) |
+| `StarkProof` | Structured parse-only view of the proof; `log_trace_heights()` exposes instance-order heights and `air_order()` exposes the derived proof-order mapping |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
-| `domain::LiftedDomain` | Domain operations: selectors, vanishing, coset shifts |
-| `domain::TwoAdicSubgroup` | Two-adic subgroup with generator, vanishing, membership |
-| `domain::TwoAdicCoset` | Coset of a two-adic subgroup, with shift |
+| `pcs` | Structured PCS sub-proof types (DEEP / FRI) for inspection and error matching |
 
 ## Modules
 
 | Path | Purpose |
 |------|---------|
 | `src/config.rs` | `StarkConfig` — wraps `PcsParams`, LMCS, and DFT |
-| `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy |
+| `src/domain.rs` | `TwoAdicSubgroup`, `TwoAdicCoset`, `LiftedDomain` — the domain hierarchy; `log_quotient_degree`, `DomainError` (incl. the `log_quotient_degree ≤ log_blowup` compat bound) |
 | `src/selectors.rs` | `Selectors<T>` — generic container for row selectors |
-| `src/prover/mod.rs` | `prove_single`, `prove_multi` — orchestration and protocol flow |
+| `src/prover/mod.rs` | `prove` — orchestration and protocol flow |
 | `src/prover/commit.rs` | `Committed` — LDE, bit-reverse, LMCS tree construction |
 | `src/prover/constraints/` | Constraint evaluation (SIMD) and layout discovery |
 | `src/prover/periodic.rs` | `PeriodicLde` — precomputed periodic column LDEs |
-| `src/prover/quotient.rs` | Quotient construction, cyclic extension, vanishing division |
-| `src/verifier/mod.rs` | `verify_single`, `verify_multi` — orchestration and identity check |
+| `src/prover/quotient.rs` | Quotient upsampling, cyclic extension, and commitment |
+| `src/verifier/mod.rs` | `verify` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
-| `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
-| `src/instance.rs` | `AirInstance`, `AirWitness`, `InstanceShapes` — protocol-level instance types |
+| `src/proof.rs` | `StarkProofData`, `StarkProof` — wire artifact and structured parse-only view |
+| `src/order.rs` | public `ShapeError` plus the crate-internal instance↔proof ordering helper; `TraceOrder` construction validates the proof's log heights against the AIRs |
+| `src/debug.rs` | `check_constraints` (row-by-row), structural assertion (`assert_prover_setup`) over `miden_lifted_air::debug::assert_multi_air_valid` |
 
 ## Conventions & Assumptions
 
-- **AIR ordering** — The proof defines an ordering of AIR instances
-  (queryable via `InstanceShapes::air_order`). The caller must bind AIR
-  configurations and `air_order` into the Fiat-Shamir challenger. See the
-  prover module-level docs.
-- **Power-of-two heights** — All trace heights are powers of two.
+- **AIR ordering** — The proof orders AIR instances deterministically by trace
+  height (stable sort on `(log_trace_height, instance_index)`), materialised
+  internally from the heights stored on `StarkProof`; the ordering type is
+  crate-private. The caller must bind the AIR list into the Fiat-Shamir
+  challenger. See the prover module-level docs.
+- **Power-of-two heights** — All trace heights are powers of two and at least 2 rows.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
-- **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).
-  Both prover and verifier must agree on this constant.
-- **Transcript ordering** — The Fiat-Shamir transcript follows a strict
-  observe/squeeze protocol. Prover and verifier must process commitments and
-  challenges in identical order. This is security-critical.
+- **Quotient degree** — Derived per AIR from symbolic constraint-degree analysis
+  (`log_quotient_degree`); the proof uses the max over AIRs. Degree-2 AIRs are
+  valid and use the protocol's minimum quotient chunk count. Each AIR must
+  satisfy `log_quotient_degree(air) ≤ log_blowup`.
+- **Transcript ordering** — `Statement::observe` absorbs statement-owned inputs;
+  prover and verifier then observe the instance count and log trace heights in
+  instance order. All later observe/squeeze steps must match exactly.
 - **Extension field discipline** — Main trace and preprocessed data stay in
   the base field. Only auxiliary columns, challenges, alpha powers, and the
   accumulator use the extension field.
@@ -235,17 +237,18 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Tests
 
-The end-to-end test suite lives in `tests/`:
+The end-to-end test suite lives in `src/testing/`, behind the `testing` feature:
 
-- **`tiny_air.rs`** — `TinyAir` exercising single-trace, multi-trace
+- **`test_tiny_air.rs`** — `TinyAir` exercising single-trace, multi-trace
   (same and different heights), periodic columns, and malformed transcript
   rejection.
-- **`aux_shape.rs`** — Validates that mismatched auxiliary trace dimensions
-  are caught.
+- **`test_external_assertions.rs`** — `MultiAir::eval_external` and `aux_inputs`.
+- **`test_multi_aux_alignment.rs`** — aux-trace alignment across multiple AIRs.
+- **`test_per_air_degree.rs`** — per-AIR quotient degrees.
 
 Run with:
 ```bash
-cargo test -p miden-lifted-stark
+cargo test -p miden-lifted-stark --features testing
 ```
 
 ## Security

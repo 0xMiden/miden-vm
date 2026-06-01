@@ -80,7 +80,7 @@ type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 /// it. The committed LDE coset (size `n_j * B`, with `B >= D_j`) contains `gJ_j` as a
 /// subset, so the truncated view the caller passes in is zero-copy.
 #[allow(clippy::too_many_arguments)]
-pub fn evaluate_constraints_into<F, EF, A>(
+pub(super) fn evaluate_constraints_into<F, EF, A>(
     output: &mut [EF],
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
@@ -203,7 +203,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
                 };
 
             #[cfg(debug_assertions)]
-            air.is_valid_builder(&folder).expect("builder dimensions must match AIR");
+            miden_lifted_air::debug::check_builder_shape(air, &folder);
             air.eval(&mut folder);
             let folded = folder.finalize_constraints();
 

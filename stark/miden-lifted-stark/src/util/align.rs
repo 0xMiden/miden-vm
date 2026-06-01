@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 /// Compute the aligned length for `len` given an alignment.
 #[inline]
-pub const fn aligned_len(len: usize, alignment: usize) -> usize {
+pub(crate) const fn aligned_len(len: usize, alignment: usize) -> usize {
     if alignment <= 1 {
         len
     } else {
@@ -13,7 +13,7 @@ pub const fn aligned_len(len: usize, alignment: usize) -> usize {
 }
 
 /// Align each width in place, returning the same `Vec`.
-pub fn aligned_widths(mut widths: Vec<usize>, alignment: usize) -> Vec<usize> {
+pub(crate) fn aligned_widths(mut widths: Vec<usize>, alignment: usize) -> Vec<usize> {
     for w in &mut widths {
         *w = aligned_len(*w, alignment);
     }

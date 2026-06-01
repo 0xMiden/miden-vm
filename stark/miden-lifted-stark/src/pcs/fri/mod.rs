@@ -23,10 +23,10 @@
 //! two-adic root and every multiplicative coset shift through these encapsulation types keeps
 //! `F::two_adic_generator` and `F::GENERATOR` confined to their single canonical sites.
 
-pub mod fold;
-pub mod proof;
-pub mod prover;
-pub mod verifier;
+pub(crate) mod fold;
+pub(crate) mod proof;
+pub(crate) mod prover;
+pub(crate) mod verifier;
 
 use fold::FriFold;
 use p3_field::TwoAdicField;
@@ -48,7 +48,7 @@ use crate::domain::LiftedDomain;
 /// [`FriPolys::new`](prover::FriPolys::new), and
 /// [`FriOracle::new`](verifier::FriOracle::new).
 #[derive(Clone, Copy, Debug)]
-pub struct FriParams {
+pub(crate) struct FriParams {
     /// The FRI folding strategy.
     ///
     /// Determines the folding arity (2, 4, or 8).
@@ -73,7 +73,9 @@ impl FriParams {
     /// degree is at most `2^log_final_degree`.
     ///
     /// Uses `div_ceil` to round up, ensuring we always reach the target degree even if
-    /// the domain size doesn't divide evenly by the folding factor.
+    /// the domain size doesn't divide evenly by the folding factor. `PcsParams::new`
+    /// rejects parameter sets whose target final domain is too small to be reachable by
+    /// fixed-arity folding for all valid domains.
     #[inline]
     pub fn num_rounds<F: TwoAdicField>(&self, domain: &LiftedDomain<F>) -> usize {
         // Maximum domain size needed to accommodate a degree-`2^log_final_degree` polynomial

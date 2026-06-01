@@ -1,11 +1,10 @@
 //! Lifted STARK verifier.
 //!
 //! This module provides:
-//! - [`verify_single`]: Verify a single AIR instance.
-//! - [`verify_multi`]: Verify multiple AIR instances with traces of different heights.
+//! - [`verify`]: Verify a [`Statement`].
 //!
-//! These functions take a challenger (consumed by value) and proof data, construct
-//! the verifier transcript internally, and return a [`StarkDigest`] on success.
+//! Takes a challenger (consumed by value) and proof data, constructs the
+//! verifier transcript internally, and returns a [`StarkDigest`] on success.
 //! The caller must check that the digest matches the prover's digest.
 //!
 //! # Fiat-Shamir / transcript binding
@@ -14,39 +13,39 @@
 //! prover module-level docs for the full binding contract and recommended
 //! pattern.
 //!
-//! Log trace heights are carried on the [`StarkProof`] and observed into the
-//! challenger by [`verify_multi`]. Callers must not pre-observe them.
+//! The proof's instance count and per-AIR log trace heights are carried on
+//! [`StarkProofData`] (in instance order) and observed into the challenger by
+//! [`verify`] at the protocol layer. Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
 //!
 //! The verifier accepts whatever trace heights the proof carries; it never
 //! compares them against a caller-supplied expectation. If your statement
 //! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with
-//! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-//! and check `transcript.instance_shapes.log_trace_heights()` yourself.
+//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data)
+//! and check `proof.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)
 //!
-//! [`verify_multi`] finalizes the transcript internally: it rejects proofs with
+//! [`verify`] finalizes the transcript internally: it rejects proofs with
 //! trailing data (via [`TranscriptError::TrailingData`]) and returns a binding
 //! digest that must match the prover's digest.
 //!
 //! If you want to bundle extra data alongside the proof, you must manage
 //! boundaries yourself (e.g. parse and validate that data first, then pass the
-//! remaining transcript to [`verify_multi`]).
+//! remaining transcript to [`verify`]).
 
 extern crate alloc;
 
-pub mod constraints;
-pub mod periodic;
+pub(crate) mod constraints;
+pub(crate) mod periodic;
 
 use alloc::{vec, vec::Vec};
 use core::marker::PhantomData;
 
 use constraints::ConstraintFolder;
 use miden_lifted_air::{
-    LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
+    BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -56,140 +55,133 @@ use thiserror::Error;
 
 use crate::{
     StarkConfig,
-    domain::{Coset, LiftedDomain},
-    instance::{AirInstance, InstanceValidationError, validate_air_order},
+    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    order::{ShapeError, TraceOrder},
     pcs::verifier::{PcsError, verify_aligned},
-    proof::{StarkDigest, StarkProof},
+    proof::{StarkDigest, StarkProofData},
     util::packing::row_to_packed_ext,
 };
 
-/// Errors that can occur during verification.
+/// Errors from verification — runtime instance / proof-shape failures or
+/// cryptographic verification failures. The AIR's structural contract is
+/// trusted (see the crate-level trust model).
 #[derive(Debug, Error)]
 pub enum VerifierError {
-    #[error("instance validation failed: {0}")]
-    Instance(#[from] InstanceValidationError),
-    #[error("domain construction failed: {0}")]
-    Domain(#[from] crate::domain::DomainError),
-    #[error("PCS verification failed: {0}")]
+    #[error(transparent)]
+    Instance(#[from] InstanceError),
+    #[error(transparent)]
+    Shape(#[from] ShapeError),
+    #[error(transparent)]
+    Domain(#[from] DomainError),
+    #[error(transparent)]
     Pcs(#[from] PcsError),
-    #[error("transcript error: {0}")]
+    #[error(transparent)]
     Transcript(#[from] TranscriptError),
-    #[error("invalid aux shape")]
-    InvalidAuxShape,
+    #[error("external assertion evaluation failed: {0}")]
+    Reduction(ReductionError),
     #[error("constraint mismatch: quotient * vanishing != folded constraints")]
     ConstraintMismatch,
-    #[error(
-        "constraint degree exceeds blowup: \
-         log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
-    )]
-    ConstraintDegreeTooHigh { log_quotient_degree: u8, log_blowup: u8 },
-    #[error("global reduced aux identity check failed")]
-    InvalidReducedAux,
-    #[error("aux value reduction failed: {0}")]
-    Reduction(ReductionError),
+    #[error("external assertion {assertion} is non-zero")]
+    ExternalAssertionFailed {
+        /// Index into the assertions vector returned by
+        /// [`Statement::eval_external`].
+        assertion: usize,
+    },
 }
 
-/// Verify a single AIR. Convenience wrapper around [`verify_multi`].
+/// Verify a [`Statement`].
 ///
-/// The caller's challenger must already be bound to the full statement
-/// — see the prover module-level docs.
-pub fn verify_single<F, EF, A, SC>(
-    config: &SC,
-    air: &A,
-    public_values: &[F],
-    var_len_public_inputs: VarLenPublicInputs<'_, F>,
-    proof: &StarkProof<F, EF, SC>,
-    challenger: SC::Challenger,
-) -> Result<StarkDigest<F, EF, SC>, VerifierError>
-where
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-    SC: StarkConfig<F, EF>,
-    A: LiftedAir<F, EF>,
-{
-    let instance = AirInstance { public_values, var_len_public_inputs };
-    verify_multi(config, &[(air, instance)], proof, challenger)
-}
-
-/// Verify multiple AIRs with traces of different heights.
-///
-/// The verifier uses [`InstanceShapes::air_order`](crate::InstanceShapes::air_order) from the proof
-/// to match the caller's instances to the proof's ordering. The caller's challenger
-/// must already be bound to the full statement (protocol parameters, AIR
-/// configurations, AIR ordering, and public inputs — both fixed and
-/// variable-length) — see the prover module-level docs.
+/// The verifier reads per-AIR log trace heights from the proof (in caller
+/// order, matching [`Statement::airs`]) and reconstructs the proof's AIR
+/// ordering deterministically from those heights. The caller's challenger
+/// must already be bound to protocol parameters and AIR configurations —
+/// see the prover module-level docs. The statement's inputs are absorbed via
+/// [`Statement::observe`], then the instance count and proof's log trace heights
+/// are observed in instance order.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
-/// 1. Validate instance shapes and observe log trace heights into the challenger
+/// 1. Validate runtime statement/proof shape data, absorb statement-owned inputs, and observe the
+///    instance count plus log trace heights in instance order
 /// 2. Receive commitments and sample challenges in the same order as the prover
-/// 3. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
+/// 3. For each AIR (in proof order), evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
 /// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
 /// 5. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
+/// 6. Evaluate [`Statement::eval_external`] with aux values reordered back to instance order
 ///
 /// Lifting: for a trace of height nⱼ lifted by factor rⱼ, the committed
 /// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
 /// yields the local/next row pair for the original trace domain.
 ///
-/// **Statement-bound heights:** this function does not compare the proof's
-/// declared heights against any caller expectation. If your statement fixes
-/// trace dimensions, parse via
-/// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
-/// and check `instance_shapes.log_trace_heights()` before calling this. See
-/// the module-level docs for the full contract.
-pub fn verify_multi<F, EF, A, SC>(
+/// As with [`crate::prove`], only runtime statement/proof data is validated; the
+/// AIR structural contract is trusted (see the crate-level trust model). The
+/// proof's declared heights are not compared against any caller expectation —
+/// see the module-level docs to bind them yourself.
+pub fn verify<F, EF, MA, SC>(
     config: &SC,
-    instances: &[(&A, AirInstance<'_, F>)],
-    proof: &StarkProof<F, EF, SC>,
+    statement: &Statement<F, EF, MA>,
+    proof: &StarkProofData<F, EF, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
-    A: LiftedAir<F, EF>,
+    MA: MultiAir<F, EF>,
 {
-    let instance_shapes = &proof.instance_shapes;
-    let air_order = instance_shapes.air_order();
+    // --- Trust boundary (see doc-block above). -------------------------------
+    //
+    // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
+    // against the AIRs: it bounds `log_h` within the host's `usize` width
+    // (later code dereferences `1usize << log_h` and would otherwise overflow on
+    // a malicious proof) and checks per-AIR periodic-height feasibility.
+    // Statement::new already enforced the input-side contracts before construction.
+    let trace_order = TraceOrder::from_log_heights::<F, EF, _>(
+        statement.airs(),
+        proof.log_trace_heights.clone(),
+    )?;
 
-    // Validate air_order and reorder caller instances to the proof's AIR ordering.
-    validate_air_order(air_order, instances.len())?;
-    let instances = instance_shapes.reorder(instances.to_vec())?;
+    let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
+    let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
+    let air_inputs = statement.air_inputs();
 
     let log_blowup = config.pcs().log_blowup();
+    let log_max_trace_height = trace_order.max_log_height();
+    let max_lde_domain = LiftedDomain::<F>::try_canonical(log_max_trace_height, log_blowup)?;
+    let instance_domains: Vec<_> = trace_order
+        .log_heights_proof()
+        .iter()
+        .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
+        .collect::<Result<_, _>>()?;
 
-    // Validate AIR/instance contracts.
-    instance_shapes.validate_instance_data(&instances)?;
-    let instance_domains = LiftedDomain::<F>::try_many_from_ascending_heights(
-        instance_shapes.log_trace_heights(),
-        log_blowup,
-    )?;
-    let max_lde_domain = *instance_domains
-        .last()
-        .expect("non-empty: validated by try_many_from_ascending_heights");
-
-    instance_shapes.observe_heights::<F, _>(&mut challenger);
+    // `Statement::observe` absorbs statement-owned inputs. The protocol then
+    // binds the instance count and each log trace height in instance order.
+    statement.observe(&mut challenger, trace_order.log_heights());
+    trace_order.observe_shape::<F, _>(&mut challenger);
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
-    // Clear the challenger's absorb buffer after observing instance shapes by
-    // squeezing a throwaway extension element. Must mirror the prover exactly.
-    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
-
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
-    // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is
-    // invalid. Callers must ensure `validate_inputs` (above) passes first.
-    let log_quotient_degree =
-        instances.iter().map(|(air, _)| air.log_quotient_degree()).max().unwrap_or(1);
-
-    if log_quotient_degree > log_blowup {
-        return Err(VerifierError::ConstraintDegreeTooHigh { log_quotient_degree, log_blowup });
+    // NOTE: `log_quotient_degree` runs symbolic eval and may panic if the AIR is
+    // invalid. The AIR is trusted (see `miden_lifted_air::debug::assert_multi_air_valid`
+    // for the debug-only structural check).
+    let max_log_quotient_degree = proof_ordered_airs
+        .iter()
+        .map(|&air| log_quotient_degree::<F, EF, _>(air))
+        .max()
+        .expect("TraceOrder construction rejects empty AIR sets");
+    if max_log_quotient_degree > log_blowup {
+        return Err(DomainError::ConstraintDegreeTooHigh {
+            log_quotient: max_log_quotient_degree,
+            log_blowup,
+        }
+        .into());
     }
 
     // Pair the max LDE domain with the constraint degree for the constraint layer.
-    let max_eval_domain = max_lde_domain.evaluation_domain(log_quotient_degree);
+    let max_eval_domain = max_lde_domain.evaluation_domain(max_log_quotient_degree);
 
-    let quotient_degree = 1 << log_quotient_degree as usize;
+    let quotient_degree = 1 << max_log_quotient_degree as usize;
 
     let max_trace_height = max_lde_domain.trace_height();
 
@@ -198,7 +190,7 @@ where
 
     // 2. Sample randomness for aux traces
     let max_num_randomness =
-        instances.iter().map(|(air, _)| air.num_randomness()).max().unwrap_or(0);
+        proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
 
     let randomness: Vec<EF> = (0..max_num_randomness)
         .map(|_| channel.sample_algebra_element::<EF>())
@@ -209,9 +201,9 @@ where
 
     // Receive aux values from the transcript (one EF element per aux value, per instance).
     // When no AIR has aux columns, each entry is empty so nothing is received.
-    let all_aux_values: Vec<Vec<EF>> = instances
+    let all_aux_values: Vec<Vec<EF>> = proof_ordered_airs
         .iter()
-        .map(|(air, _)| {
+        .map(|air| {
             let count = air.num_aux_values();
             (0..count)
                 .map(|_| channel.receive_algebra_element::<EF>())
@@ -232,9 +224,9 @@ where
     let z_next = z * h;
 
     // 7. Widths per commitment group (unpadded data widths).
-    let main_widths: Vec<usize> = instances.iter().map(|(air, _)| air.width()).collect();
+    let main_widths: Vec<usize> = proof_ordered_airs.iter().map(|air| air.width()).collect();
     let aux_widths: Vec<usize> =
-        instances.iter().map(|(air, _)| air.aux_width() * EF::DIMENSION).collect();
+        proof_ordered_airs.iter().map(|air| air.aux_width() * EF::DIMENSION).collect();
     let quotient_widths: Vec<usize> = vec![quotient_degree * EF::DIMENSION];
 
     // Build commitments with original (unpadded) widths.
@@ -263,25 +255,27 @@ where
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
     //
-    // Instances are in the proof's AIR ordering (ascending height), so j
-    // indexes both AIR and trace position directly.
-    debug_assert_eq!(opened[main_g].len(), instances.len());
-    debug_assert_eq!(opened[aux_g].len(), instances.len());
+    // AIRs are in the proof's ordering (ascending height), so j indexes both
+    // AIR and trace position directly.
+    debug_assert_eq!(opened[main_g].len(), proof_ordered_airs.len());
+    debug_assert_eq!(opened[aux_g].len(), proof_ordered_airs.len());
     let mut accumulated = EF::ZERO;
-    let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
-    for (j, (air, inst)) in instances.iter().enumerate() {
+    for (j, air) in proof_ordered_airs.iter().enumerate() {
         let domain_j = instance_domains[j];
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
 
         // Extract aux trace opened values (reconstitute EF from base field components).
+        // Row widths were validated against `air.aux_width() * EF::DIMENSION`
+        // by `verify_aligned` upstream; reaching here with a mismatch would
+        // indicate a framework bug.
         let aux_mat = &opened[aux_g][j];
         let aux_local = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(0).expect("aux row 0"))
-            .ok_or(VerifierError::InvalidAuxShape)?;
+            .expect("aux row width should match: PCS verify_aligned validates this upstream");
         let aux_next = row_to_packed_ext::<F, EF>(&aux_mat.row_slice(1).expect("aux row 1"))
-            .ok_or(VerifierError::InvalidAuxShape)?;
+            .expect("aux row width should match: PCS verify_aligned validates this upstream");
         let aux_window = RowWindow::from_two_rows(&aux_local, &aux_next);
 
         // Selectors at the lifted OOD point yⱼ = z^{rⱼ} (encapsulated in LiftedDomain).
@@ -300,7 +294,7 @@ where
             main: main_window,
             aux: aux_window,
             randomness: &randomness[..num_rand],
-            public_values: inst.public_values,
+            public_values: air_inputs,
             periodic_values: &periodic_values,
             permutation_values: aux_values_j,
             selectors,
@@ -309,40 +303,39 @@ where
             _phantom: PhantomData,
         };
 
-        air.is_valid_builder(&folder).map_err(InstanceValidationError::from)?;
+        #[cfg(debug_assertions)]
+        miden_lifted_air::debug::check_builder_shape(*air, &folder);
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j
         accumulated = accumulated * beta + folder.accumulator;
-
-        // Compute reduced aux contribution and accumulate.
-        let contribution = air
-            .reduced_aux_values(
-                aux_values_j,
-                &randomness[..num_rand],
-                inst.public_values,
-                inst.var_len_public_inputs,
-            )
-            .map_err(VerifierError::Reduction)?;
-        reduced_aux.combine_in_place(&contribution);
     }
 
-    // 11. Reconstruct Q(z) and check quotient identity Q(z) * Z_{H_max}(z)
+    // 11. Evaluate the proof's external assertions. Aux values came off the
+    // wire in proof order; reorder them back to instance order before handing
+    // them to `eval_external`, which is defined in instance-order terms.
+    let aux_instance = trace_order.to_instance_order(&all_aux_values);
+    let aux_views: Vec<&[EF]> = aux_instance.iter().map(Vec::as_slice).collect();
+    let assertions = statement
+        .eval_external(&randomness, &aux_views, trace_order.log_heights())
+        .map_err(VerifierError::Reduction)?;
+    for (k, assertion) in assertions.iter().enumerate() {
+        if *assertion != EF::ZERO {
+            return Err(VerifierError::ExternalAssertionFailed { assertion: k });
+        }
+    }
+
+    // 12. Reconstruct Q(z) and check quotient identity Q(z) * Z_{H_max}(z)
     // Quotient group has a single matrix; row 0 is the evaluation at z.
     let quot_row = opened[quot_g][0].row_slice(0).expect("quotient row 0");
-    let quotient_chunks =
-        row_to_packed_ext::<F, EF>(&quot_row).ok_or(VerifierError::InvalidAuxShape)?;
+    let quotient_chunks = row_to_packed_ext::<F, EF>(&quot_row)
+        .expect("quotient row width should match: PCS verify_aligned validates this upstream");
     let quotient_z = max_eval_domain.reconstruct_quotient::<EF>(z, &quotient_chunks);
 
     // `max_lde_domain` is the tallest (lift_ratio = 0), so lifted == unlifted here.
     let vanishing = max_lde_domain.trace_subgroup().vanishing_at(z);
     if accumulated != quotient_z * vanishing {
         return Err(VerifierError::ConstraintMismatch);
-    }
-
-    // 12. Check global reduced aux identity (all bus contributions combine to identity)
-    if !reduced_aux.is_identity() {
-        return Err(VerifierError::InvalidReducedAux);
     }
 
     // 13. Finalize transcript: check emptiness and return digest

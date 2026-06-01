@@ -14,7 +14,10 @@ use p3_symmetric::{Hash, TruncatedPermutation};
 use rand::{SeedableRng, rngs::SmallRng};
 
 pub use super::{Felt, PackedFelt, QuadFelt};
-use crate::{AirWitness, testing::TEST_SEED};
+use crate::{
+    air::{MultiAir, ProverStatement, Statement},
+    testing::TEST_SEED,
+};
 
 // =============================================================================
 // Base field/hash configuration
@@ -136,25 +139,19 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
     RowMajorMatrix::new(values, 1)
 }
 
-/// Prove and verify from pre-built prover instances.
-///
-/// Runs the full prove → verify → transcript-reparse cycle.
-pub fn prove_and_verify_instances<A, B>(instances: &[(&A, AirWitness<'_, Felt>, &B)])
+/// Run the full prove → verify → transcript-reparse cycle.
+pub fn prove_and_verify_statement<MA>(prover_statement: &ProverStatement<Felt, QuadFelt, MA>)
 where
-    A: crate::air::LiftedAir<Felt, QuadFelt>,
-    B: crate::air::AuxBuilder<Felt, QuadFelt>,
+    MA: MultiAir<Felt, QuadFelt>,
 {
     let config = test_config();
 
-    let output = crate::prover::prove_multi(&config, instances, test_challenger())
+    let output = crate::prover::prove(&config, prover_statement, test_challenger())
         .expect("proving should succeed");
 
-    let verifier_instances: Vec<_> =
-        instances.iter().map(|(a, w, _)| (*a, w.to_instance())).collect();
-
-    let verifier_digest = crate::verifier::verify_multi(
+    let verifier_digest = crate::verifier::verify(
         &config,
-        &verifier_instances,
+        prover_statement.statement(),
         &output.proof,
         test_challenger(),
     )
@@ -162,9 +159,9 @@ where
     assert_eq!(output.digest, verifier_digest);
 
     // Re-parse transcript from a fresh challenger and verify digest agreement.
-    let (_, reparse_digest) = crate::proof::StarkTranscript::from_proof(
+    let (_, reparse_digest) = crate::proof::StarkProof::from_data(
         &config,
-        &verifier_instances,
+        prover_statement.statement(),
         &output.proof,
         test_challenger(),
     )
@@ -172,21 +169,39 @@ where
     assert_eq!(output.digest, reparse_digest);
 }
 
-/// Prove and verify multiple traces, each with its own public values.
-///
-/// `instances` is a slice of `(trace, public_values)` pairs.
-pub fn prove_and_verify<A, B>(
-    air: &A,
-    aux_builder: &B,
-    instances: &[(RowMajorMatrix<Felt>, Vec<Felt>)],
-) where
-    A: crate::air::LiftedAir<Felt, QuadFelt>,
-    B: crate::air::AuxBuilder<Felt, QuadFelt>,
-{
-    let prover_instances: Vec<_> = instances
-        .iter()
-        .map(|(t, pv)| (air, AirWitness::new(t, pv, &[]), aux_builder))
-        .collect();
+/// Minimal [`MultiAir`] wrapper for tests: a list of AIRs, each building its own
+/// aux trace via [`LiftedAir::build_aux_trace`](crate::air::LiftedAir::build_aux_trace).
+pub struct TestMultiAir<A> {
+    pub airs: Vec<A>,
+}
 
-    prove_and_verify_instances(&prover_instances);
+impl<A> TestMultiAir<A> {
+    pub fn new(airs: Vec<A>) -> Self {
+        Self { airs }
+    }
+}
+
+impl<A> MultiAir<Felt, QuadFelt> for TestMultiAir<A>
+where
+    A: crate::air::LiftedAir<Felt, QuadFelt>,
+{
+    type Air = A;
+
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+}
+
+/// Prove and verify multiple traces sharing one AIR.
+pub fn prove_and_verify<A>(air: &A, air_inputs: &[Felt], traces: &[RowMajorMatrix<Felt>])
+where
+    A: crate::air::LiftedAir<Felt, QuadFelt> + Clone,
+{
+    let airs: Vec<A> = core::iter::repeat_n(air.clone(), traces.len()).collect();
+    let traces_owned: Vec<RowMajorMatrix<Felt>> = traces.to_vec();
+    let statement = Statement::new(TestMultiAir::new(airs), air_inputs.to_vec(), Vec::new())
+        .expect("statement inputs valid");
+    let prover_statement =
+        ProverStatement::new(statement, traces_owned).expect("trace shape valid");
+    prove_and_verify_statement(&prover_statement);
 }

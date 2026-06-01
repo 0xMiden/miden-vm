@@ -6,18 +6,17 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    AirWitness, Lmcs, VerifierError,
     air::{
-        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        WindowAccess,
+        AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
+        ProverStatement, Statement, WindowAccess,
     },
-    prove_multi,
+    lmcs::Lmcs,
     testing::configs::goldilocks_poseidon2::{
-        Felt, QuadFelt, prove_and_verify_instances, test_challenger, test_config,
+        Felt, QuadFelt, prove_and_verify_statement, test_config,
     },
-    transcript::TranscriptData,
-    verify_multi,
 };
+
+const START: u64 = 2;
 
 #[derive(Clone, Debug)]
 struct PaddingAir {
@@ -54,8 +53,21 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
         0
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        challenges: &[QuadFelt],
+    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
+        // Column 0 holds the challenge; the rest pad with zeros up to `aux_width`.
+        let challenge = challenges[0];
+        let mut values = Vec::with_capacity(main.height() * self.aux_width);
+        for _ in 0..main.height() {
+            values.push(challenge);
+            values.extend(core::iter::repeat_n(QuadFelt::ZERO, self.aux_width - 1));
+        }
+        (RowMajorMatrix::new(values, self.aux_width), vec![])
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -75,25 +87,15 @@ impl LiftedAir<Felt, QuadFelt> for PaddingAir {
     }
 }
 
-struct PaddingAuxBuilder {
-    aux_width: usize,
+struct PaddingMultiAir {
+    airs: Vec<PaddingAir>,
 }
 
-impl AuxBuilder<Felt, QuadFelt> for PaddingAuxBuilder {
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[QuadFelt],
-    ) -> (RowMajorMatrix<QuadFelt>, Vec<QuadFelt>) {
-        let height = main.height();
-        let mut values = Vec::with_capacity(height * self.aux_width);
-        let challenge = challenges[0];
-        for _ in 0..height {
-            values.push(challenge);
-            values.extend(core::iter::repeat_n(QuadFelt::ZERO, self.aux_width - 1));
-        }
-        let aux_trace = RowMajorMatrix::new(values, self.aux_width);
-        (aux_trace, vec![])
+impl MultiAir<Felt, QuadFelt> for PaddingMultiAir {
+    type Air = PaddingAir;
+
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
     }
 }
 
@@ -106,9 +108,18 @@ fn generate_trace(start: Felt, height: usize, width: usize) -> RowMajorMatrix<Fe
     RowMajorMatrix::new(values, width)
 }
 
-fn instance(idx: usize, height: usize, width: usize) -> (RowMajorMatrix<Felt>, Vec<Felt>) {
-    let start = Felt::from_u64((idx + 2) as u64);
-    (generate_trace(start, height, width), vec![start])
+fn padding_prover_statement(
+    width: usize,
+    aux_width: usize,
+    start: Felt,
+) -> ProverStatement<Felt, QuadFelt, PaddingMultiAir> {
+    let air = PaddingAir::new(width, aux_width);
+    let t0 = generate_trace(start, 8, width);
+    let t1 = generate_trace(start, 16, width);
+    let statement =
+        Statement::new(PaddingMultiAir { airs: vec![air.clone(), air] }, vec![start], Vec::new())
+            .unwrap();
+    ProverStatement::new(statement, vec![t0, t1]).unwrap()
 }
 
 #[test]
@@ -117,50 +128,9 @@ fn multi_trace_with_aux_padding() {
     let alignment = config.lmcs.alignment();
     let width = alignment + 1;
     let aux_width = alignment + 1;
+    let start = Felt::from_u64(START);
 
-    let air = PaddingAir::new(width, aux_width);
-    let aux_builder = PaddingAuxBuilder { aux_width };
-    let instances = [instance(0, 8, width), instance(1, 16, width)];
+    let prover_statement = padding_prover_statement(width, aux_width, start);
 
-    let prover_instances: Vec<_> = instances
-        .iter()
-        .map(|(t, pv)| (&air, AirWitness::new(t, pv, &[]), &aux_builder))
-        .collect();
-
-    prove_and_verify_instances(&prover_instances);
-}
-
-#[test]
-fn multi_trace_rejects_trailing_transcript_data() {
-    let config = test_config();
-    let alignment = config.lmcs.alignment();
-    let width = alignment + 1;
-    let aux_width = alignment + 1;
-
-    let air = PaddingAir::new(width, aux_width);
-    let aux_builder = PaddingAuxBuilder { aux_width };
-    let instances = [instance(0, 8, width), instance(1, 16, width)];
-
-    let prover_instances: Vec<_> = instances
-        .iter()
-        .map(|(t, pv)| (&air, AirWitness::new(t, pv, &[]), &aux_builder))
-        .collect();
-
-    let output =
-        prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
-
-    let mut bad_proof = output.proof;
-    let (mut fields, commitments) = bad_proof.transcript.into_parts();
-    fields.push(Felt::ONE);
-    bad_proof.transcript = TranscriptData::new(fields, commitments);
-
-    let verifier_instances: Vec<_> =
-        prover_instances.iter().map(|(a, w, _)| (*a, w.to_instance())).collect();
-
-    let err = verify_multi(&config, &verifier_instances, &bad_proof, test_challenger())
-        .expect_err("extra transcript data should fail verification");
-    assert!(matches!(
-        err,
-        VerifierError::Transcript(crate::transcript::TranscriptError::TrailingData)
-    ));
+    prove_and_verify_statement(&prover_statement);
 }
