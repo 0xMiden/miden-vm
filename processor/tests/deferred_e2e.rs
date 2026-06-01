@@ -8,6 +8,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly::Assembler;
 use miden_core::{
     deferred::{Node, PrecompileError, PrecompileRegistry, Tag},
+    program::Program,
     testing::precompile::{Hash, Uint},
 };
 use miden_processor::{
@@ -33,6 +34,13 @@ fn build_processor_with_options(options: ExecutionOptions) -> FastProcessor {
 fn uint_host() -> DefaultHost {
     DefaultHost::default()
         .with_precompiles(Arc::new(PrecompileRegistry::default().with_precompile(Uint)))
+}
+
+fn assemble_test_program(src: &str) -> Program {
+    Assembler::default()
+        .assemble_program("test", src)
+        .expect("program must assemble")
+        .unwrap_program()
 }
 
 // MASM BUILDERS
@@ -130,7 +138,7 @@ fn deferred_evaluate_returns_canonical_value_on_advice() {
     emit_capture_canonical_value(&mut src);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
 
     let mut host = uint_host();
     let output = build_processor()
@@ -167,7 +175,7 @@ fn deferred_evaluate_returns_true_node_for_predicate() {
     emit_capture_canonical_value(&mut src);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
 
     let mut host = uint_host();
     let output = build_processor()
@@ -196,7 +204,7 @@ fn deferred_register_over_deferred_budget_is_rejected() {
     emit_register(&mut src, leaf);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = uint_host();
     let result =
         build_processor_with_options(ExecutionOptions::default().with_max_deferred_elements(11))
@@ -224,7 +232,7 @@ fn deferred_register_predicate_does_not_verify() {
     emit_register(&mut src, mismatch.clone());
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = uint_host();
     let mut output = build_processor()
         .execute_sync(&program, &mut host)
@@ -247,7 +255,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     emit_evaluate_for_side_effect(&mut src, mismatch);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
 
     let mut host = uint_host();
     let result = build_processor().execute_sync(&program, &mut host);
@@ -277,7 +285,7 @@ fn deferred_register_expr_digest_matches_node_digest() {
     src.push_str("    mem_storew_le.0 dropw\n");
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = uint_host();
     let output = build_processor()
         .execute_sync(&program, &mut host)
@@ -314,7 +322,7 @@ fn deferred_evaluate_value_rehashes_to_canonical_digest() {
     src.push_str("    mem_storew_le.0 dropw\n");
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = uint_host();
     let output = build_processor()
         .execute_sync(&program, &mut host)
@@ -364,7 +372,7 @@ fn deferred_register_chunk_digest_matches_node_digest() {
     src.push_str("    mem_storew_le.16 dropw\n");
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = hash_host();
     let output = build_chunk_processor()
         .execute_sync(&program, &mut host)
@@ -427,7 +435,7 @@ fn chunk_register_over_deferred_budget_is_rejected() {
     emit_register_chunk(&mut src, tag, 0);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = hash_host();
     let result = build_chunk_processor_with_options(
         ExecutionOptions::default().with_max_deferred_elements(16),
@@ -472,7 +480,7 @@ fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
     }
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
 
     let registry = PrecompileRegistry::default().with_precompile(Hash);
     let mut host = DefaultHost::default().with_precompiles(Arc::new(registry.clone()));
@@ -496,7 +504,7 @@ fn chunk_register_rejects_unaligned_pointer() {
     emit_register_chunk(&mut src, tag, ptr);
     src.push_str("end\n");
 
-    let program = Assembler::default().assemble_program(&src).expect("program must assemble");
+    let program = assemble_test_program(&src);
     let mut host = hash_host();
     let result = build_chunk_processor().execute_sync(&program, &mut host);
     assert!(result.is_err(), "unaligned ptr must surface as an execution error");
