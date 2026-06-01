@@ -24,10 +24,7 @@
 
 use miden_air::{
     logup::{MemoryMsg, MemoryResponseMsg},
-    trace::{
-        MainTrace,
-        chiplets::{MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX},
-    },
+    trace::MainTrace,
 };
 use miden_core::{
     Felt, ONE, ZERO,
@@ -76,7 +73,7 @@ fn memory_chiplet_bus_request_response_pairs() {
     // the request-opcode loop iterates the trace, so no memory rows → no expectations →
     // trivial subset match.
     let mut request_exps_added = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let ctx = main.ctx(idx);
         let clk = main.clk(idx);
@@ -121,15 +118,16 @@ fn memory_chiplet_bus_request_response_pairs() {
 
     // ---- Response side: every memory chiplet row emits `+1 × MemoryResponseMsg`.
     let mut mem_rows_seen = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_memory_row(idx) {
             continue;
         }
         mem_rows_seen += 1;
 
-        let is_read = main.get(idx, MEMORY_IS_READ_COL_IDX);
-        let is_word = main.get(idx, MEMORY_IS_WORD_ACCESS_COL_IDX);
+        let mem = main.chiplet_cols(idx).memory();
+        let is_read = mem.is_read;
+        let is_word = mem.is_word;
         let mem_ctx = main.chiplet_memory_ctx(idx);
         let word_addr = main.chiplet_memory_word(idx);
         let idx0 = main.chiplet_memory_idx0(idx);

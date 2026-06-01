@@ -13,6 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
@@ -817,80 +818,74 @@ pub fn push_inputs(inputs: &[u64]) -> String {
     result
 }
 
+/// Hierarchical column-name table for the Core AIR row, used by [`get_column_name`].
+const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
+    system: SystemCols {
+        clk: "clk",
+        ctx: "ctx",
+        fn_hash: ["fn_hash[0]", "fn_hash[1]", "fn_hash[2]", "fn_hash[3]"],
+    },
+    decoder: DecoderCols {
+        addr: "decoder_addr",
+        op_bits: [
+            "op_bits[0]",
+            "op_bits[1]",
+            "op_bits[2]",
+            "op_bits[3]",
+            "op_bits[4]",
+            "op_bits[5]",
+            "op_bits[6]",
+        ],
+        hasher_state: [
+            "hasher_state[0]",
+            "hasher_state[1]",
+            "hasher_state[2]",
+            "hasher_state[3]",
+            "hasher_state[4]",
+            "hasher_state[5]",
+            "hasher_state[6]",
+            "hasher_state[7]",
+        ],
+        in_span: "in_span",
+        group_count: "group_count",
+        op_index: "op_index",
+        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
+    },
+    stack: StackCols {
+        top: [
+            "stack[0]",
+            "stack[1]",
+            "stack[2]",
+            "stack[3]",
+            "stack[4]",
+            "stack[5]",
+            "stack[6]",
+            "stack[7]",
+            "stack[8]",
+            "stack[9]",
+            "stack[10]",
+            "stack[11]",
+            "stack[12]",
+            "stack[13]",
+            "stack[14]",
+            "stack[15]",
+        ],
+        b0: "stack_b0",
+        b1: "stack_b1",
+        h0: "stack_h0",
+    },
+    range: RangeCols {
+        multiplicity: "range_check[0]",
+        value: "range_check[1]",
+    },
+};
+
 /// Helper function to get column name for debugging
 pub fn get_column_name(col_idx: usize) -> String {
-    use miden_air::trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET,
-        STACK_TRACE_OFFSET,
-        decoder::{
-            ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
-            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
-            OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
-        },
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
-    };
-
-    match col_idx {
-        // System columns
-        CLK_COL_IDX => "clk".to_string(),
-        CTX_COL_IDX => "ctx".to_string(),
-        i if (FN_HASH_OFFSET..FN_HASH_OFFSET + 4).contains(&i) => {
-            format!("fn_hash[{}]", i - FN_HASH_OFFSET)
-        },
-
-        // Decoder columns
-        i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
-            .contains(&i) =>
-        {
-            format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
-            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
-            .contains(&i) =>
-        {
-            format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
-        },
-        i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
-        i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
-        i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
-            .contains(&i) =>
-        {
-            format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
-            .contains(&i) =>
-        {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
-            .contains(&i) =>
-        {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
-        },
-
-        // Stack columns
-        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
-            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
-            .contains(&i) =>
-        {
-            format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
-        },
-        i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),
-        i if i == STACK_TRACE_OFFSET + B1_COL_IDX => "stack_b1".to_string(),
-        i if i == STACK_TRACE_OFFSET + H0_COL_IDX => "stack_h0".to_string(),
-
-        // Range check columns
-        i if i >= RANGE_CHECK_TRACE_OFFSET => {
-            format!("range_check[{}]", i - RANGE_CHECK_TRACE_OFFSET)
-        },
-
-        // Default case
-        _ => format!("unknown_col[{col_idx}]"),
+    let core_names = CORE_COL_NAMES.as_slice();
+    if let Some(name) = core_names.get(col_idx) {
+        return name.to_string();
     }
+    format!("unknown_col[{col_idx}]")
 }

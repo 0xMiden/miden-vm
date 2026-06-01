@@ -1,15 +1,27 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{
-    CTX_COL_IDX,
     chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
     decoder::{
-        ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
-        NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
-        OP_BATCH_8_GROUPS, OP_BATCH_FLAGS_RANGE, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET,
-        OP_INDEX_COL_IDX,
+        NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS,
+        OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     },
 };
+
+/// Column index of `ctx` within the per-section system trace extracted by
+/// [`extract_system_trace`]. Matches `SystemCols::ctx`.
+const SYS_CTX_COL: usize = 1;
+
+// Decoder-local column positions within `DecoderCols`, used to index the column-major
+// `DecoderTrace` returned by [`extract_decoder_trace`].
+const ADDR_COL_IDX: usize = 0;
+const OP_BITS_OFFSET: usize = 1;
+const HASHER_STATE_RANGE: core::ops::Range<usize> = 8..8 + NUM_HASHER_COLUMNS;
+const IN_SPAN_COL_IDX: usize = 16;
+const GROUP_COUNT_COL_IDX: usize = 17;
+const OP_INDEX_COL_IDX: usize = 18;
+const OP_BATCH_FLAGS_RANGE: core::ops::Range<usize> = 19..19 + NUM_OP_BATCH_FLAGS;
+const OP_BITS_EXTRA_COLS_RANGE: core::ops::Range<usize> = 22..24;
 use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     events::EventName,
@@ -997,28 +1009,28 @@ fn test_call_decoding() {
 
     // for the first 8 cycles, we are in the root context
     for i in 0..9 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], ZERO);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], ZERO);
     }
 
     // when CALL operation is executed, we switch to the new context; the ID of this context is 8
     // because we switch to it at the 9th cycle
     for i in 9..14 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], NINE);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], NINE);
     }
 
     // when CALL operation is executed, we switch to a new context (14)
     for i in 14..18 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], FOURTEEN);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], FOURTEEN);
     }
 
     // when CALL ends, we return to the previous context
     for i in 18..20 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], NINE);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], NINE);
     }
 
     // once the CALL exited, we go back to the root context
     for i in 20..trace_len {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], ZERO);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], ZERO);
     }
 
     // --- check fn hash columns ------------------------------------------------------------------
@@ -1298,28 +1310,28 @@ fn test_syscall_decoding() {
 
     // for the first 8 cycles, we are in the root context
     for i in 0..9 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], ZERO);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], ZERO);
     }
 
     // when CALL operation is executed, we switch to the new context; the ID of this context is 8
     // because we switch to it at the 9th cycle
     for i in 9..14 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], NINE);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], NINE);
     }
 
     // when SYSCALL operation is executed, we switch back to the root context (0)
     for i in 14..18 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], ZERO);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], ZERO);
     }
 
     // when SYSCALL ends, we return to the context of the CALL block
     for i in 18..20 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], NINE);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], NINE);
     }
 
     // once the CALL block exited, we go back to the root context
     for i in 20..trace_len {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], ZERO);
+        assert_eq!(sys_trace[SYS_CTX_COL][i], ZERO);
     }
 
     // --- check fn hash columns ------------------------------------------------------------------
@@ -1556,8 +1568,8 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
+    let trace_len = trace.trace_len_summary().core_trace_len();
 
     // Extract decoder trace columns
     let decoder_trace = extract_decoder_trace(&trace);
@@ -1586,8 +1598,8 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    // The trace_len_summary().core_trace_len() is the actual program row count (before padding)
+    let trace_len = trace.trace_len_summary().core_trace_len();
 
     let sys_trace = extract_system_trace(&trace);
     let decoder_trace = extract_decoder_trace(&trace);
@@ -1597,18 +1609,21 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
 
 /// Extracts the decoder trace columns from the execution trace.
 fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
-    use miden_air::trace::DECODER_TRACE_RANGE;
+    use miden_air::trace::{DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     let main_segment = trace.main_trace();
-    DECODER_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
+    let start = SYS_TRACE_WIDTH;
+    (start..start + DECODER_TRACE_WIDTH)
+        .map(|i| main_segment.get_column(i).to_vec())
+        .collect()
 }
 
 /// Extracts the system trace columns from the execution trace.
 fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
-    use miden_air::trace::SYS_TRACE_RANGE;
+    use miden_air::trace::SYS_TRACE_WIDTH;
 
     let main_segment = trace.main_trace();
-    SYS_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
+    (0..SYS_TRACE_WIDTH).map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
 // OPCODES
@@ -1731,14 +1746,11 @@ fn build_op_batch_flags(num_groups: usize) -> [Felt; NUM_OP_BATCH_FLAGS] {
 // SYSTEM REGISTERS
 // ------------------------------------------------------------------------------------------------
 
-use miden_air::trace::FN_HASH_RANGE;
-
 fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
-    // FN_HASH_RANGE is relative to the full trace, but SystemTrace only has system columns
-    // System trace columns are indexed 0..SYS_TRACE_WIDTH, and FN_HASH is columns 2-5
-    for (element, col_idx) in result.iter_mut().zip(FN_HASH_RANGE) {
-        *element = trace[col_idx][row_idx];
+    // `fn_hash` occupies the trailing 4 columns of `SystemCols` (clk, ctx, fn_hash[0..4]).
+    for (element, col_offset) in result.iter_mut().zip(2..6) {
+        *element = trace[col_offset][row_idx];
     }
     result.into()
 }

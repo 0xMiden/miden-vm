@@ -41,12 +41,21 @@ pub mod logup {
     };
 }
 
-use constraints::{
-    columns::{ChipletCols, CoreCols},
-    lookup::{
-        chiplet_air::ChipletLookupBuilder,
-        main_air::{MainLookupAir, MainLookupBuilder},
+use constraints::lookup::{
+    chiplet_air::ChipletLookupBuilder,
+    main_air::{MainLookupAir, MainLookupBuilder},
+};
+pub use constraints::{
+    chiplets::columns::{
+        AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        PermutationCols,
     },
+    columns::{ChipletCols, CoreCols},
+    decoder::columns::DecoderCols,
+    ext_field::QuadFeltExpr,
+    range::columns::RangeCols,
+    stack::columns::StackCols,
+    system::columns::SystemCols,
 };
 use logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
 use lookup::{

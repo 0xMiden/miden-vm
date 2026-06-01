@@ -1,12 +1,21 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
+use miden_air::trace::{
+    CHIPLETS_WIDTH,
+    chiplets::{
+        KERNEL_ROM_TRACE_WIDTH,
+        ace::ACE_CHIPLET_NUM_COLS,
+        bitwise::TRACE_WIDTH as BITWISE_WIDTH,
+        hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
+        memory::TRACE_WIDTH as MEMORY_WIDTH,
+    },
+};
 use miden_core::{mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    trace::{RowIndex, TraceFragment, range::RangeChecker},
+    trace::{ChipletTraceFragment, RowIndex, range::RangeChecker},
 };
 
 mod bitwise;
@@ -202,20 +211,10 @@ impl Chiplets {
     pub fn into_trace(self, trace_len: usize) -> ChipletsTrace {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
 
-        // Allocate columns for the trace of the chiplets.
-        let mut trace = (0..CHIPLETS_WIDTH)
-            .map(|_| vec![Felt::ZERO; trace_len])
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("failed to convert vector to array");
-        self.fill_trace(&mut trace);
+        let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
+        self.fill_trace(&mut trace, trace_len);
 
-        let mut row_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
-        for row_idx in 0..trace_len {
-            row_flat.extend(trace.iter().map(|column| column[row_idx]));
-        }
-
-        ChipletsTrace { trace: row_flat }
+        ChipletsTrace { trace }
     }
 
     // HELPER METHODS
@@ -225,11 +224,10 @@ impl Chiplets {
     /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
-    fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) {
-        // s_ctrl (trace[0]) is 1 on the hasher's controller rows and 0 elsewhere.
-        // The controller region is the padded prefix of the hasher region; `region_lengths`
-        // returns the same padded length that `finalize_trace` will materialize later.
-        let (hasher_ctrl_len, _hasher_perm_len) = self.hasher.region_lengths();
+    fn fill_trace(self, trace: &mut [Felt], trace_len: usize) {
+        const W: usize = CHIPLETS_WIDTH;
+        debug_assert_eq!(trace.len(), W * trace_len);
+
         let memory_start: usize = self.memory_start().into();
         let ace_start: usize = self.ace_start().into();
         let kernel_rom_start: usize = self.kernel_rom_start().into();
@@ -237,115 +235,96 @@ impl Chiplets {
 
         let Chiplets { hasher, bitwise, memory, kernel_rom, ace } = self;
 
-        // Populate external selector columns. Each is a contiguous 0/1 indicator; the trace
-        // is zero-initialized, so we only memset the regions where the selector is ONE.
-        // s_perm (trace[20]) is written row-by-row by the hasher itself during fragment fill.
-        trace[0][..hasher_ctrl_len].fill(ONE); // s_ctrl: hasher controller rows
-        trace[1][memory_start..].fill(ONE);
-        trace[2][ace_start..].fill(ONE);
-        trace[3][kernel_rom_start..].fill(ONE);
-        trace[4][padding_start..].fill(ONE);
+        // Per-chiplet row counts. Chiplets are stacked vertically, so each one's region is a
+        // contiguous band of rows: hasher [0, h), bitwise [h, h+b), and so on.
+        let hasher_len = hasher.trace_len();
+        let bitwise_len = bitwise.trace_len();
+        let memory_len = memory.trace_len();
+        let ace_len = ace.trace_len();
+        let kernel_rom_len = kernel_rom.trace_len();
 
-        // Fill the chip_clk column (last column in the chiplets segment) with the
-        // chiplet-trace row counter [1, 2, 3, ...]. This serves as the chiplet-side
-        // responder address for the hasher LogUp bus — see
-        // `air/src/constraints/chiplets/chip_clk.rs`.
-        for (row, slot) in trace[CHIPLETS_WIDTH - 1].iter_mut().enumerate() {
-            *slot = Felt::from_u32((row + 1) as u32);
-        }
+        // Chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom and begin at columns
+        // 1, 2, 3, 4, 5; the widest (hasher) fills every data column up to `chip_clk` (the
+        // final column). Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
+        // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, `s_perm`
+        // (col 20) is hasher-internal, and padding rows are filled directly below.
+        const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
 
-        // Fill chiplet traces via fragments. The block scopes the fragment borrows.
-        {
-            // allocate fragments to be filled with the respective execution traces of each chiplet
-            let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
-            let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
-            let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH, memory.trace_len());
-            let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH, ace.trace_len());
-            let mut kernel_rom_fragment =
-                TraceFragment::new(CHIPLETS_WIDTH, kernel_rom.trace_len());
+        // Carve `trace` into the per-chiplet contiguous row bands.
+        let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
+        let (bitwise_band, rest) = rest.split_at_mut(bitwise_len * W);
+        let (memory_band, rest) = rest.split_at_mut(memory_len * W);
+        let (ace_band, rest) = rest.split_at_mut(ace_len * W);
+        let (kernel_band, padding_band) = rest.split_at_mut(kernel_rom_len * W);
 
-            // add the hasher, bitwise, memory, ACE, and kernel ROM segments to their respective
-            // fragments so they can be filled with the chiplet traces
-            for (column_num, column) in trace.iter_mut().enumerate().skip(1) {
-                match column_num {
-                    1 => {
-                        // column 1 is relevant only for the hasher
-                        hasher_fragment.push_column_slice(column);
-                    },
-                    2 => {
-                        // column 2 is relevant to the hasher and to bitwise chiplet
-                        let rest = hasher_fragment.push_column_slice(column);
-                        bitwise_fragment.push_column_slice(rest);
-                    },
-                    3 => {
-                        // column 3 is relevant for hasher, bitwise, and memory chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        memory_fragment.push_column_slice(rest);
-                    },
-                    4 | 10..=14 => {
-                        // columns 4 - 10 to 14 are relevant for hasher, bitwise, memory chiplets
-                        // and ace chiplet
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    5..=9 => {
-                        // columns 5 - 9 are relevant to all chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        let rest = bitwise_fragment.push_column_slice(rest);
-                        let rest = memory_fragment.push_column_slice(rest);
-                        let rest = ace_fragment.push_column_slice(rest);
-                        kernel_rom_fragment.push_column_slice(rest);
-                    },
-                    15 | 16 => {
-                        // columns 15 and 16 are relevant for the hasher, memory and ace chiplets
-                        let rest = hasher_fragment.push_column_slice(column);
-                        // skip bitwise chiplet
-                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    17..=19 => {
-                        // columns 17-19 are relevant for hasher, memory, and ace chiplets
-                        // (hasher: mrupdate_id/is_start/is_final; memory: f_scw/w0/w1; ace cols)
-                        let rest = hasher_fragment.push_column_slice(column);
-                        // skip bitwise chiplet
-                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                        let rest = memory_fragment.push_column_slice(rest);
-                        ace_fragment.push_column_slice(rest);
-                    },
-                    20 => {
-                        // column 20 is relevant only for the hasher chiplet (s_perm)
-                        hasher_fragment.push_column_slice(column);
-                    },
-                    21 => {
-                        // column 21 (chip_clk) is filled at the master level above; skip.
-                    },
-                    _ => panic!("invalid column index"),
-                }
-            }
+        let mut hasher_fragment =
+            ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
+        let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
+            bitwise_band,
+            W,
+            2,
+            BITWISE_WIDTH,
+            hasher_len,
+            &[],
+        );
+        let mut memory_fragment = ChipletTraceFragment::with_overheads(
+            memory_band,
+            W,
+            3,
+            MEMORY_WIDTH,
+            memory_start,
+            &[1],
+        );
+        let mut ace_fragment = ChipletTraceFragment::with_overheads(
+            ace_band,
+            W,
+            4,
+            ACE_CHIPLET_NUM_COLS,
+            ace_start,
+            &[1, 2],
+        );
+        let mut kernel_rom_fragment = ChipletTraceFragment::with_overheads(
+            kernel_band,
+            W,
+            5,
+            KERNEL_ROM_TRACE_WIDTH,
+            kernel_rom_start,
+            &[1, 2, 3],
+        );
 
-            // Fill all chiplets in parallel.
-            rayon::scope(|s| {
-                s.spawn(move |_| {
-                    hasher.fill_trace(&mut hasher_fragment);
-                });
-                s.spawn(move |_| {
-                    bitwise.fill_trace(&mut bitwise_fragment);
-                });
-                s.spawn(move |_| {
-                    memory.fill_trace(&mut memory_fragment);
-                });
-                s.spawn(move |_| {
-                    kernel_rom.fill_trace(&mut kernel_rom_fragment);
-                });
-                s.spawn(move |_| {
-                    ace.fill_trace(&mut ace_fragment);
-                });
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                hasher.fill_trace(&mut hasher_fragment);
             });
-        }
+            s.spawn(move |_| {
+                bitwise.fill_trace(&mut bitwise_fragment);
+            });
+            s.spawn(move |_| {
+                memory.fill_trace(&mut memory_fragment);
+            });
+            s.spawn(move |_| {
+                kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            });
+            s.spawn(move |_| {
+                ace.fill_trace(&mut ace_fragment);
+            });
+            s.spawn(move |_| {
+                fill_padding_rows(padding_band, padding_start);
+            });
+        });
+    }
+}
+
+/// Fills padding rows after the kernel ROM region: cols 1..=4 = ONE, chip_clk = row + 1.
+fn fill_padding_rows(band: &mut [Felt], row_offset: usize) {
+    const W: usize = CHIPLETS_WIDTH;
+    let (rows, _) = band.as_chunks_mut::<W>();
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[1] = ONE;
+        row[2] = ONE;
+        row[3] = ONE;
+        row[4] = ONE;
+        row[W - 1] = Felt::from_u32((row_offset + i + 1) as u32);
     }
 }
 

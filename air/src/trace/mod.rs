@@ -1,11 +1,5 @@
-use core::ops::Range;
-
-use miden_core::utils::range;
-
 pub mod chiplets;
 pub mod decoder;
-pub mod range;
-pub mod stack;
 
 mod rows;
 pub use rows::{RowIndex, RowIndexError};
@@ -27,24 +21,11 @@ pub const MIN_TRACE_LEN: usize = 64;
 //    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
-pub const SYS_TRACE_OFFSET: usize = 0;
 pub const SYS_TRACE_WIDTH: usize = 6;
-pub const SYS_TRACE_RANGE: Range<usize> = range(SYS_TRACE_OFFSET, SYS_TRACE_WIDTH);
 
-pub const CLK_COL_IDX: usize = SYS_TRACE_OFFSET;
-pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
-pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 2;
-pub const FN_HASH_RANGE: Range<usize> = range(FN_HASH_OFFSET, 4);
-
-// decoder trace
-pub const DECODER_TRACE_OFFSET: usize = SYS_TRACE_RANGE.end;
 pub const DECODER_TRACE_WIDTH: usize = 24;
-pub const DECODER_TRACE_RANGE: Range<usize> = range(DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH);
 
-// Stack trace
-pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
-pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
 
 pub mod log_precompile {
     use core::ops::Range;
@@ -85,28 +66,19 @@ pub mod log_precompile {
 }
 
 // Range check trace
-pub const RANGE_CHECK_TRACE_OFFSET: usize = STACK_TRACE_RANGE.end;
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
-pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
-    range(RANGE_CHECK_TRACE_OFFSET, RANGE_CHECK_TRACE_WIDTH);
 
 // Chiplets trace
-pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
 // 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
 // hasher responder address on the chiplet side.
 pub const CHIPLETS_WIDTH: usize = 22;
-pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
-/// Shared chiplet selector columns at the start of the chiplets segment.
-pub const CHIPLET_SELECTORS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, 5);
-pub const CHIPLET_S0_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start;
-pub const CHIPLET_S1_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 1;
-pub const CHIPLET_S2_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 2;
-pub const CHIPLET_S3_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 3;
-pub const CHIPLET_S4_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 4;
-
-pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
+pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
+    + DECODER_TRACE_WIDTH
+    + STACK_TRACE_WIDTH
+    + RANGE_CHECK_TRACE_WIDTH
+    + CHIPLETS_WIDTH;
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------

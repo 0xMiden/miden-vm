@@ -1,10 +1,10 @@
+#[cfg(test)]
 use alloc::vec::Vec;
-use core::slice;
 
 use miden_air::trace::MIN_TRACE_LEN;
 
 use super::chiplets::Chiplets;
-use crate::{Felt, RowIndex};
+use crate::{Felt, ONE};
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 
@@ -12,44 +12,98 @@ use crate::{operation::Operation, utils::ToElements};
 // ================================================================================================
 
 /// Row-major flat buffer writer (`write_row` is a single `copy_from_slice`).
+///
+/// `payload` is the number of leading columns written per row; `stride` is the physical row
+/// width of the backing buffer. When `stride > payload`, the trailing `stride - payload`
+/// columns of each row are left untouched (callers rely on them staying zero-initialized).
 #[derive(Debug)]
 pub struct RowMajorTraceWriter<'a, E> {
     data: &'a mut [E],
-    width: usize,
+    payload: usize,
+    stride: usize,
 }
 
 impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
+    /// Creates a writer whose physical row width equals the per-row payload.
+    #[cfg(test)]
     pub fn new(data: &'a mut [E], width: usize) -> Self {
-        debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");
-        Self { data, width }
+        Self::with_stride(data, width, width)
     }
 
-    /// Writes one row; `values.len()` must equal `width`.
+    /// Creates a writer that writes `payload` columns per row into a buffer with physical row
+    /// width `stride` (`stride >= payload`).
+    pub fn with_stride(data: &'a mut [E], payload: usize, stride: usize) -> Self {
+        debug_assert!(stride >= payload, "stride must be >= payload");
+        debug_assert_eq!(data.len() % stride, 0, "buffer length must be a multiple of stride");
+        Self { data, payload, stride }
+    }
+
+    /// Writes one row's payload; `values.len()` must equal `payload`.
     #[inline(always)]
     pub fn write_row(&mut self, row: usize, values: &[E]) {
-        debug_assert_eq!(values.len(), self.width);
-        let start = row * self.width;
-        self.data[start..start + self.width].copy_from_slice(values);
+        debug_assert_eq!(values.len(), self.payload);
+        let start = row * self.stride;
+        self.data[start..start + self.payload].copy_from_slice(values);
     }
 }
 
 // TRACE FRAGMENT
 // ================================================================================================
 
-/// TODO: add docs
-pub struct TraceFragment<'a> {
-    data: Vec<&'a mut [Felt]>,
+/// A writable, row-major view over one chiplet's region of the chiplets trace.
+///
+/// A chiplet occupies a contiguous band of rows and a contiguous band of columns
+/// `[col_start, col_start + num_cols)`. [`Self::copy_rows_from`] also writes the per-row
+/// `prefix_one_cols` selectors and (when there's room) the trailing `chip_clk` column.
+pub struct ChipletTraceFragment<'a> {
+    /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
+    band: &'a mut [Felt],
+    stride: usize,
+    col_start: usize,
     num_rows: usize,
+    num_cols: usize,
+    /// Global row offset of `band[0]` in the chiplets trace; used to compute `chip_clk`.
+    row_offset: usize,
+    /// Columns `< col_start` to set to ONE on every row in this band.
+    prefix_one_cols: &'static [usize],
 }
 
-impl<'a> TraceFragment<'a> {
-    /// Creates a new [TraceFragment] with the expected number of columns and rows.
-    ///
-    /// The memory needed to hold the trace fragment data is not allocated during construction.
-    pub fn new(num_columns: usize, num_rows: usize) -> Self {
-        TraceFragment {
-            data: Vec::with_capacity(num_columns),
+impl<'a> ChipletTraceFragment<'a> {
+    /// Bare fragment with no prefix selectors or `chip_clk`. For chiplet-level unit tests.
+    pub fn row_major(
+        band: &'a mut [Felt],
+        stride: usize,
+        col_start: usize,
+        num_cols: usize,
+    ) -> Self {
+        Self::with_overheads(band, stride, col_start, num_cols, 0, &[])
+    }
+
+    /// Adds the chiplets-trace overheads: per-row ONEs at `prefix_one_cols` and `chip_clk` at
+    /// column `stride - 1` (when there's room), using `row_offset` as `band[0]`'s global row.
+    pub fn with_overheads(
+        band: &'a mut [Felt],
+        stride: usize,
+        col_start: usize,
+        num_cols: usize,
+        row_offset: usize,
+        prefix_one_cols: &'static [usize],
+    ) -> Self {
+        debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
+        debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
+        debug_assert!(
+            prefix_one_cols.iter().all(|&c| c < col_start),
+            "prefix_one_cols must lie before col_start",
+        );
+        let num_rows = band.len() / stride;
+        Self {
+            band,
+            stride,
+            col_start,
             num_rows,
+            num_cols,
+            row_offset,
+            prefix_one_cols,
         }
     }
 
@@ -58,7 +112,7 @@ impl<'a> TraceFragment<'a> {
 
     /// Returns the number of columns in this execution trace fragment.
     pub fn width(&self) -> usize {
-        self.data.len()
+        self.num_cols
     }
 
     /// Returns the number of rows in this execution trace fragment.
@@ -66,43 +120,47 @@ impl<'a> TraceFragment<'a> {
         self.num_rows
     }
 
+    /// Mutable access to columns `[0..col_start)` of `row`, for chiplets whose prefix
+    /// selectors vary per row (e.g. the hasher's `s_ctrl`).
+    pub fn prefix_mut(&mut self, row: usize) -> &mut [Felt] {
+        let row_start = row * self.stride;
+        &mut self.band[row_start..row_start + self.col_start]
+    }
+
     // DATA MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Updates a single cell in this fragment with provided value.
-    #[inline(always)]
-    pub fn set(&mut self, row_idx: RowIndex, col_idx: usize, value: Felt) {
-        self.data[col_idx][row_idx] = value;
+    /// Copies a chiplet's row-major buffer (`num_cols` cells per row) into this fragment's
+    /// band, fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
+    pub fn copy_rows_from(&mut self, src: &[Felt]) {
+        debug_assert_eq!(src.len(), self.num_rows * self.num_cols, "source buffer size mismatch");
+        self.copy_rows_into(0, src);
     }
 
-    /// Returns a mutable iterator to the columns of this fragment.
-    pub fn columns(&mut self) -> slice::IterMut<'_, &'a mut [Felt]> {
-        self.data.iter_mut()
-    }
-
-    /// Adds a new column to this fragment by pushing a mutable slice with the first `self.len()`
-    /// elements of the provided column.
-    ///
-    /// Returns the rest of the provided column as a separate mutable slice.
-    pub fn push_column_slice(&mut self, column: &'a mut [Felt]) -> &'a mut [Felt] {
-        let (column_fragment, rest) = column.split_at_mut(self.num_rows);
-        self.data.push(column_fragment);
-        rest
-    }
-
-    // TEST METHODS
-    // --------------------------------------------------------------------------------------------
-
-    #[cfg(test)]
-    pub fn trace_to_fragment(trace: &'a mut [Vec<Felt>]) -> Self {
-        assert!(!trace.is_empty(), "expected trace to have at least one column");
-        let mut data = Vec::new();
-        for column in trace.iter_mut() {
-            data.push(column.as_mut_slice());
+    /// Copies `src.len() / num_cols` rows starting at `row_offset` into this fragment's band,
+    /// fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
+    pub fn copy_rows_into(&mut self, row_offset: usize, src: &[Felt]) {
+        debug_assert_eq!(src.len() % self.num_cols, 0, "source buffer size not row-aligned");
+        let chunk_rows = src.len() / self.num_cols;
+        debug_assert!(
+            row_offset + chunk_rows <= self.num_rows,
+            "chunk overruns fragment row range",
+        );
+        let write_chip_clk = self.stride > self.col_start + self.num_cols;
+        let clk_col = self.stride - 1;
+        for r in 0..chunk_rows {
+            let dst_row = row_offset + r;
+            let row_start = dst_row * self.stride;
+            let row = &mut self.band[row_start..row_start + self.stride];
+            for &col in self.prefix_one_cols {
+                row[col] = ONE;
+            }
+            row[self.col_start..self.col_start + self.num_cols]
+                .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
+            if write_chip_clk {
+                row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
+            }
         }
-
-        let num_rows = data[0].len();
-        Self { data, num_rows }
     }
 }
 
@@ -111,13 +169,13 @@ impl<'a> TraceFragment<'a> {
 
 /// Contains the data about lengths of the trace parts.
 ///
-/// - `main_trace_len` contains the length of the main trace.
+/// - `core_trace_len` contains the length of the core trace (system + decoder + stack).
 /// - `range_trace_len` contains the length of the range checker trace.
 /// - `chiplets_trace_len` contains the trace lengths of the all chiplets (hash, bitwise, memory,
 ///   kernel ROM)
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
-    main_trace_len: usize,
+    core_trace_len: usize,
     range_trace_len: usize,
     chiplets_trace_len: ChipletsLengths,
     /// Set by the trace builder when known. `None` falls back to deriving from the
@@ -127,12 +185,12 @@ pub struct TraceLenSummary {
 
 impl TraceLenSummary {
     pub fn new(
-        main_trace_len: usize,
+        core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
     ) -> Self {
         TraceLenSummary {
-            main_trace_len,
+            core_trace_len,
             range_trace_len,
             chiplets_trace_len,
             padded_trace_len: None,
@@ -143,22 +201,22 @@ impl TraceLenSummary {
     /// (under per-AIR heights this is `max(core_height, chiplets_height)`, not a
     /// single `next_power_of_two(max(...))`).
     pub fn new_with_padded(
-        main_trace_len: usize,
+        core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
         padded_trace_len: usize,
     ) -> Self {
         TraceLenSummary {
-            main_trace_len,
+            core_trace_len,
             range_trace_len,
             chiplets_trace_len,
             padded_trace_len: Some(padded_trace_len),
         }
     }
 
-    /// Returns length of the main trace.
-    pub fn main_trace_len(&self) -> usize {
-        self.main_trace_len
+    /// Returns length of the core trace (system + decoder + stack).
+    pub fn core_trace_len(&self) -> usize {
+        self.core_trace_len
     }
 
     /// Returns length of the range checker trace.
@@ -174,7 +232,7 @@ impl TraceLenSummary {
     /// Returns the maximum of all component lengths.
     pub fn trace_len(&self) -> usize {
         self.range_trace_len
-            .max(self.main_trace_len)
+            .max(self.core_trace_len)
             .max(self.chiplets_trace_len.trace_len())
     }
 
