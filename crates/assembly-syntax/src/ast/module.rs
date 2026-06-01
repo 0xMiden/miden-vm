@@ -267,19 +267,13 @@ impl Module {
     /// * The concrete type of the enumeration is not an integral type
     pub fn define_enum(&mut self, ty: EnumType) -> Result<(), SemanticAnalysisError> {
         let repr = ty.ty().clone();
+        let is_c_like = ty.is_c_like();
 
         if !repr.is_integer() {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 
-        // We only define constants for C-like enums
-        if !ty.is_c_like() {
-            self.items.push(Export::Type(ty.into()));
-            return Ok(());
-        }
-
         let export = ty.clone();
-
         let (alias, variants) = ty.into_parts();
 
         if let Some(prev) = self.items.iter().find(|t| t.name() == &alias.name) {
@@ -287,6 +281,12 @@ impl Module {
                 span: alias.span(),
                 prev_span: prev.span(),
             });
+        }
+
+        // We only define constants for C-like enums
+        if !is_c_like {
+            self.push_export(Export::Type(export.into()))?;
+            return Ok(());
         }
 
         let mut values = SmallVec::<[Span<u64>; 8]>::new_const();
