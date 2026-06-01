@@ -56,7 +56,7 @@ jobs:
         run: cargo workspace-inheritance-check --promotion-threshold 2 --promotion-failure
 
   clippy:
-    name: clippy nightly on ubuntu-latest
+    name: clippy stable on ubuntu-latest
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: -D warnings
@@ -68,8 +68,8 @@ jobs:
         uses: ./.github/actions/cleanup-runner
       - name: Clippy
         run: |
-          rustup update --no-self-update nightly
-          rustup +nightly component add clippy
+          rustup update --no-self-update stable
+          rustup +stable component add clippy
           make clippy
 
   rustfmt:
