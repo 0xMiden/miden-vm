@@ -178,7 +178,7 @@ fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
 }
 
 #[test]
-fn new_requires_coordinate_expression_commitments_not_eval_memo_only() {
+fn new_requires_coordinate_expression_commitments_to_be_registered() {
     let (registry, mut state) = fresh();
 
     let h_3 = state.register(&registry, leaf(3)).unwrap();
@@ -188,17 +188,13 @@ fn new_requires_coordinate_expression_commitments_not_eval_memo_only() {
     let x_expr = Node::join(Uint::add_tag(), h_3, h_4);
     let h_x_expr = x_expr.digest();
 
-    // Evaluate directly, but do not register the expression node.
-    let x_canonical = state.evaluate_node(&registry, x_expr).unwrap();
-    assert_eq!(x_canonical, leaf(7));
-    assert!(
-        !state.contains(&h_x_expr),
-        "direct evaluate should not register the input expression"
-    );
-
-    let err = state.evaluate_node(&registry, Group::new_node(h_x_expr, h_y)).unwrap_err();
-
+    let err = state.register(&registry, Group::new_node(h_x_expr, h_y)).unwrap_err();
     assert!(matches!(err.root(), PrecompileError::MissingNode));
+
+    state.register(&registry, x_expr).unwrap();
+    let h_group = state.register(&registry, Group::new_node(h_x_expr, h_y)).unwrap();
+    let canonical = state.evaluate_digest(&registry, h_group).unwrap();
+    assert_eq!(canonical, Group::new_node(h_x_expr, h_y));
 }
 
 #[test]
@@ -212,12 +208,12 @@ fn eq_predicate_commutes_over_minted_children() {
     let h_g1 = register_group(&registry, &mut state, 3, 4);
     let h_g2 = register_group(&registry, &mut state, 10, 20);
     let h_g_add = state.register(&registry, Group::add_node(h_g1, h_g2)).unwrap();
-    let h_val = state
-        .register(&registry, Group::new_node(leaf(13).digest(), leaf(24).digest()))
-        .unwrap();
 
     // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
     state.evaluate_digest(&registry, h_g_add).unwrap();
+    let h_val = state
+        .register(&registry, Group::new_node(leaf(13).digest(), leaf(24).digest()))
+        .unwrap();
     assert!(state.contains(&leaf(13).digest()), "x3 minted into nodes");
     assert!(state.contains(&leaf(24).digest()), "y3 minted into nodes");
 

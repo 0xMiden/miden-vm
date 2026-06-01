@@ -19,13 +19,9 @@ pub fn leaf(low: u64) -> Node {
 
 /// Registers, verifies, logs, and round-trips a predicate expected to reduce to TRUE.
 pub fn log_and_verify(registry: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
-    let stmt_digest = state.register(registry, predicate.clone()).unwrap();
-    assert!(
-        state.evaluate_node(registry, predicate).unwrap().is_true_node(),
-        "log_and_verify expects a predicate that reduces to the TRUE node",
-    );
-    let new_root = Node::and(state.root(), stmt_digest).digest();
-    state.log(stmt_digest, new_root).unwrap();
+    let stmt_digest = state.register(registry, predicate).unwrap();
+    let root = state.append_statement(registry, stmt_digest).unwrap();
+    assert_ne!(root, miden_core::deferred::TRUE_DIGEST);
     assert_round_trips(state, registry);
 }
 

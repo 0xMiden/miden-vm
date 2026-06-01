@@ -59,7 +59,9 @@ content yields an identical digest, so equal subterms are shared automatically (
   the owning precompile; the three immediate felts (`args`) are entirely the precompile's to
   interpret (a discriminant, a chunk length, a small constant, …). The framework reserves ids `0`
   and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
-  `Tag::AND = [1, 0, 0, 0]` tags transcript/conjunction nodes. No precompile may claim either id.
+  `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes. No precompile may claim either id.
+  The transcript is a restricted right-spined use of the same semantic `AND` constructor, not a
+  separate tag family.
 - A **payload** is the node's body, in one of two shapes:
   - an **expression** — exactly 8 felts (one Poseidon2 rate block): raw value data for a leaf, or
     two packed child digests (`lhs || rhs`) for anything referential (an operation, a predicate,
@@ -100,9 +102,14 @@ duplicate ids at construction. The default registry is empty and rejects every t
 precompiles directly or by loading `HostLibrary` values that export a registry.
 
 During reduction the framework hands the precompile a `WitnessBuilder`, through which it can
-`resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. The
-precompile never touches the data model or the commitment directly — it supplies only per-node
-meaning, and the framework drives the depth-first recursion.
+`resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. Interned
+helper nodes are validated under the same registry and must satisfy the ordinary child-closure
+rules. The precompile never touches the data model or the commitment directly — it supplies only
+per-node meaning, and the framework drives the depth-first recursion.
+
+The in-memory `DeferredState` keeps an evaluation cache (`evals`) alongside materialized DAG nodes.
+Those cache entries are valid only under the same `PrecompileRegistry` semantics that populated
+them, and they are not serialized as trusted state.
 
 ## Building the DAG from a program
 
@@ -112,12 +119,12 @@ advice. The `sys` core-library module wraps the two register events in a thin he
 
 | Event (`adv.*`)            | `sys` helper     | Operand stack in                 | Effect |
 | -------------------------- | ---------------- | -------------------------------- | ------ |
-| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and interns the expression node. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, and interns the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
+| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and materializes the expression node. Join-shaped nodes may reference only already-materialized children, except for the implicit `TRUE_DIGEST`. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and materializes the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
 | `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, interns the canonical, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
-`register_*` validate the tag's shape and intern the node, but do not reduce it — they are pure
-host hints that populate the DAG.
+`register_*` validate the tag's shape and, for join-shaped nodes, child closure; they do not
+reduce the node. They are pure host hints that populate the DAG.
 
 ### Why the digest is computed in-circuit
 
@@ -154,9 +161,12 @@ error before any felts are pushed.
 
 The commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word (`TRUE_DIGEST`),
 which is also the digest of the always-present canonical `Node::TRUE`. To fold a verified
-**statement** — a predicate node that reduces to `TRUE` — the framework interns an AND node
+**statement** — any materialized digest that reduces to `TRUE`, not necessarily a primitive
+predicate node — the framework interns an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
-The digest is structural: even `AND(TRUE, TRUE)` hashes under the distinct capacity
+The checked append path first evaluates the statement under the installed registry and rejects
+missing or non-`TRUE` statements; an explicit unchecked append remains for replay / in-circuit-root
+mirroring. The digest is structural: even `AND(TRUE, TRUE)` hashes under the distinct capacity
 `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates semantically to `TRUE`.
 
 > **The fold reuses the existing `log_precompile` opcode.** Folding a statement is one framework
@@ -170,26 +180,30 @@ logged statement holds.** There is no separate finalization step.
 ## Wire format and verification
 
 The intended proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`.
-`to_wire` lowers state to a passive, topologically ordered list of entries in which referential
-nodes encode their children by **index** into earlier entries rather than by two full child digests.
-The walk is a DFS post-order from the root that emits exactly the root's reachable closure, so
-unreferenced orphans are dropped and the commitment is recoverable as the digest of the last entry.
+`to_wire` lowers state to a passive, topologically ordered entry stream. Wire index `0` is the
+implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by index
+and may reference only `0` or earlier entries. Empty `entries` means the root is `TRUE_DIGEST`; a
+non-empty wire's root is the digest of the last entry. `to_wire` emits a deterministic child-first
+DFS of the root-reachable closure, so unreferenced orphans are dropped, but accepted wire is not
+required to be byte-for-byte identical to that deterministic output.
 
 `rehydrate` is the only trusted path from wire bytes back to a validated state. It runs as a
 structural decode, a reachability gate, and a semantic replay:
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each materialized
-   node (translating child indices back to digests), decode its tag, check that the payload shape
-   matches the declared `NodeType`, reject attempts to materialize another `TRUE_DIGEST`, and intern
-   the remaining entries;
-2. **reachability** — reject any entry outside the root's structural closure, so an adversarial wire
-   cannot smuggle in hidden or bloat nodes;
-3. **semantic** — walk the AND-chain from the root down to the terminal, asserting each step is a
-   well-formed AND node and **re-evaluating each statement to the `TRUE` node** under the installed
-   precompiles.
+   entry (translating child indices back to digests), decode its tag, check that the entry variant
+   and payload shape match the declared `NodeType`, reject materialized `TRUE`, reject duplicate
+   digests, and require join children to reference only earlier entries;
+2. **reachability** — require the root to be `TRUE_DIGEST` or a framework `Tag::AND` node, walk the
+   right-spined AND transcript, mark every logged statement's structural closure, and reject any
+   dangling entry outside that closure;
+3. **semantic** — register reachable entries in topological order, then replay the transcript by
+   **re-evaluating each statement to the `TRUE` node** under the installed precompiles and appending
+   the corresponding AND step.
 
 A wire that yields any integrity error is rejected; a faithful one reconstructs a state equivalent
-to the prover's.
+to the prover's. Equivalent-but-reordered topological wire may be accepted even though `to_wire`
+would serialize it differently.
 
 ## Status and scope
 

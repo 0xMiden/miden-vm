@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireNode},
+    deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
     events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
@@ -280,22 +280,23 @@ fn generate_fuzz_seeds() {
             Felt::new_unchecked(3),
         ]);
         let wire = DeferredStateWire {
-            leaf_tags: vec![tag],
-            chunk_tags: vec![tag],
-            blocks: vec![[Felt::new_unchecked(1); 8], [Felt::new_unchecked(2); 8]],
-            nodes: vec![WireNode { tag, lhs: TRUE_INDEX, rhs: 1 }],
+            entries: vec![
+                WireEntry::Value { tag, block: [Felt::new_unchecked(1); 8] },
+                WireEntry::Chunks {
+                    tag,
+                    blocks: vec![[Felt::new_unchecked(2); 8]],
+                },
+                WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
+            ],
         };
-        write_seed("deferred_state_wire_deserialize", "all_sections_wire.bin", &wire.to_bytes());
+        write_seed("deferred_state_wire_deserialize", "all_entries_wire.bin", &wire.to_bytes());
 
-        let mut oversized_leaf_count = Vec::new();
-        oversized_leaf_count.write_usize(usize::MAX);
-        oversized_leaf_count.write_usize(0);
-        oversized_leaf_count.write_usize(0);
-        oversized_leaf_count.write_usize(0);
+        let mut oversized_entry_count = Vec::new();
+        oversized_entry_count.write_usize(usize::MAX);
         write_seed(
             "deferred_state_wire_deserialize",
-            "oversized_leaf_count.bin",
-            &oversized_leaf_count,
+            "oversized_entry_count.bin",
+            &oversized_entry_count,
         );
 
         #[cfg(feature = "serde")]
@@ -306,7 +307,7 @@ fn generate_fuzz_seeds() {
             let wire_json = serde_json::to_vec(&wire).expect("failed to serialize wire seed");
             write_seed(
                 "deferred_state_wire_serde_deserialize",
-                "all_sections_wire.json",
+                "all_entries_wire.json",
                 &wire_json,
             );
         }

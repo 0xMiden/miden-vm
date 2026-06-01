@@ -22,7 +22,7 @@ pub use precompile_registry::PrecompileRegistry;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use state::{DeferredState, WitnessBuilder};
-pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireNode};
+pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
 
 use crate::{
     Felt, Word,
@@ -34,7 +34,7 @@ pub type Digest = Word;
 
 /// Identifies the precompile that owns a node and carries its local immediates.
 ///
-/// Framework ids are reserved for built-in nodes: `0` is TRUE and `1` is transcript AND. The
+/// Framework ids are reserved for built-in nodes: `0` is TRUE and `1` is semantic AND. The
 /// remaining three felts are opaque to the framework and are decoded only by the owning
 /// [`Precompile`]. The canonical layout is `[id, arg0, arg1, arg2]` for hashing and wire encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,7 +48,7 @@ impl Tag {
     /// Framework-owned tag for the canonical TRUE node.
     pub const TRUE: Tag = Tag { id: ZERO, args: [ZERO; 3] };
 
-    /// Framework-owned tag for structural transcript/conjunction nodes.
+    /// Framework-owned tag for semantic conjunction nodes.
     pub const AND: Tag = Tag { id: ONE, args: [ZERO; 3] };
 
     /// Returns whether an id is reserved by the deferred framework.
