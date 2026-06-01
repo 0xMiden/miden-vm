@@ -6,8 +6,7 @@ use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
     deferred::{
-        DeferredError, DeferredState, Digest, IntegrityError, Node, NodeType, PrecompileError, Tag,
-        WitnessBuilder,
+        DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag, WitnessBuilder,
     },
 };
 
@@ -108,7 +107,7 @@ impl PrecompileRegistry {
     }
 
     /// Decodes either a framework-owned tag or a precompile-owned tag.
-    pub(crate) fn decode_node_type(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
+    fn decode_node_type(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         if tag == Tag::TRUE {
             Ok(NodeType::Value)
         } else if tag == Tag::AND {
@@ -126,20 +125,6 @@ impl PrecompileRegistry {
         }
         if !node_type.matches_payload(&node.payload) {
             return Err(PrecompileError::InvalidNode);
-        }
-        Ok(node_type)
-    }
-
-    /// Decodes a tag while preserving wire-level integrity errors.
-    pub(crate) fn decode_wire_tag_type(&self, tag: Tag) -> Result<NodeType, IntegrityError> {
-        self.decode_node_type(tag).map_err(|_| IntegrityError::UnknownTag)
-    }
-
-    /// Decodes the type of a materialized wire node while rejecting malformed TRUE payloads.
-    pub(crate) fn decode_wire_node_type(&self, node: &Node) -> Result<NodeType, IntegrityError> {
-        let node_type = self.decode_wire_tag_type(node.tag)?;
-        if node.tag == Tag::TRUE && !node.is_true_node() {
-            return Err(IntegrityError::ShapeMismatch);
         }
         Ok(node_type)
     }
