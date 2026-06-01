@@ -455,6 +455,105 @@ impl PackageDebugInfo {
     }
 }
 
+// DEBUG SOURCE CURSOR
+// ================================================================================================
+
+/// A cursor into package-owned source/debug MAST occurrence metadata.
+///
+/// Execution still runs by [`MastNodeId`], but source-aware diagnostics and debuggers need a stable
+/// source occurrence beside the reduced execution node. This cursor captures that active
+/// [`DebugSourceMastNodeId`] and exposes graph navigation with explicit ambiguity errors.
+#[derive(Clone, Copy, Debug)]
+pub struct DebugSourceCursor<'a> {
+    debug_info: &'a PackageDebugInfo,
+    source_node: DebugSourceMastNodeId,
+}
+
+impl<'a> DebugSourceCursor<'a> {
+    /// Creates a cursor for `source_node`, validating that the package source graph contains it.
+    pub fn new(
+        debug_info: &'a PackageDebugInfo,
+        source_node: DebugSourceMastNodeId,
+    ) -> Result<Self, DebugSourceGraphLookupError> {
+        debug_info
+            .source_node(source_node)
+            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node })?;
+        Ok(Self { debug_info, source_node })
+    }
+
+    /// Creates a cursor for the unique source/debug root that points at `exec_node`.
+    ///
+    /// Returns `Ok(None)` if the package has no source graph, or if no source root points at
+    /// `exec_node`.
+    pub fn from_unique_root_for_exec_node(
+        debug_info: &'a PackageDebugInfo,
+        exec_node: MastNodeId,
+    ) -> Result<Option<Self>, DebugSourceGraphLookupError> {
+        debug_info
+            .unique_source_root_for_exec_node(exec_node)?
+            .map(|source_node| Self::new(debug_info, source_node))
+            .transpose()
+    }
+
+    /// Returns the active source/debug occurrence ID.
+    pub fn source_node(&self) -> DebugSourceMastNodeId {
+        self.source_node
+    }
+
+    /// Returns the active source/debug occurrence record.
+    pub fn source_record(&self) -> &'a DebugSourceMastNode {
+        self.debug_info
+            .source_node(self.source_node)
+            .expect("DebugSourceCursor validates source node on construction")
+    }
+
+    /// Returns a cursor for the active occurrence's child at `child_index`.
+    ///
+    /// This is the preferred navigation for static control-flow children because source children
+    /// may share the same executable node.
+    pub fn child_by_index(
+        &self,
+        child_index: usize,
+    ) -> Result<Option<Self>, DebugSourceGraphLookupError> {
+        self.debug_info
+            .child_source_node(self.source_node, child_index)?
+            .map(|(source_node, _)| Self::new(self.debug_info, source_node))
+            .transpose()
+    }
+
+    /// Returns a cursor for the unique active occurrence child that points at `exec_node`.
+    ///
+    /// This is useful only when child position is unavailable. If several source children collapse
+    /// to the same execution node, this reports ambiguity instead of silently choosing one.
+    pub fn unique_child_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> Result<Option<Self>, DebugSourceGraphLookupError> {
+        self.debug_info
+            .unique_child_source_node_for_exec_node(self.source_node, exec_node)?
+            .map(|source_node| Self::new(self.debug_info, source_node))
+            .transpose()
+    }
+
+    /// Returns source-keyed assembly operation metadata for `op_idx`.
+    pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&'a DebugSourceAsmOp> {
+        self.debug_info.asm_op_for_operation(self.source_node, op_idx)
+    }
+
+    /// Returns the first assembly operation row for the active source occurrence.
+    pub fn first_asm_op(&self) -> Option<&'a DebugSourceAsmOp> {
+        self.debug_info.first_asm_op_for_source_node(self.source_node)
+    }
+
+    /// Returns source-keyed debug variable rows for `op_idx`.
+    pub fn debug_vars_for_operation(
+        &self,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &'a DebugSourceVar> {
+        self.debug_info.debug_vars_for_operation(self.source_node, op_idx)
+    }
+}
+
 // DEBUG SOURCE GRAPH SECTION
 // ================================================================================================
 
@@ -1343,6 +1442,80 @@ mod tests {
             Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
         );
         assert_eq!(package_debug.child_source_node(root, 1).unwrap().unwrap().0, child_b);
+    }
+
+    #[test]
+    fn test_source_cursor_navigates_static_children_and_reports_ambiguity() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let root_exec = MastNodeId::new_unchecked(7);
+        let child_exec = MastNodeId::new_unchecked(8);
+        let root = DebugSourceMastNodeId::from(0);
+        let child_a = DebugSourceMastNodeId::from(1);
+        let child_b = DebugSourceMastNodeId::from(2);
+        let debug_info = PackageDebugInfo {
+            source_graph: Some(DebugSourceGraphSection {
+                version: DEBUG_SOURCE_GRAPH_VERSION,
+                nodes: alloc::vec![
+                    DebugSourceMastNode::new(root_exec, alloc::vec![child_a, child_b], 0, 1),
+                    DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
+                    DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
+                ],
+                roots: alloc::vec![root],
+            }),
+            source_map: Some(DebugSourceMapSection {
+                version: DEBUG_SOURCE_MAP_VERSION,
+                asm_ops: alloc::vec![
+                    DebugSourceAsmOp::new(child_a, 0, None, "child_a".into(), "add".into(), 1),
+                    DebugSourceAsmOp::new(child_b, 0, None, "child_b".into(), "add".into(), 1),
+                ],
+                debug_vars: alloc::vec![
+                    DebugSourceVar::new(
+                        child_a,
+                        0,
+                        DebugVarInfo::new("a", DebugVarLocation::Stack(0)),
+                    ),
+                    DebugSourceVar::new(
+                        child_b,
+                        0,
+                        DebugVarInfo::new("b", DebugVarLocation::Stack(1)),
+                    ),
+                ],
+            }),
+            ..PackageDebugInfo::default()
+        };
+
+        let root_cursor = DebugSourceCursor::from_unique_root_for_exec_node(&debug_info, root_exec)
+            .unwrap()
+            .unwrap();
+        let child_a_cursor = root_cursor.child_by_index(0).unwrap().unwrap();
+        let child_b_cursor = root_cursor.child_by_index(1).unwrap().unwrap();
+
+        assert_eq!(child_a_cursor.source_node(), child_a);
+        assert_eq!(child_b_cursor.source_node(), child_b);
+        assert_eq!(child_a_cursor.asm_op_for_operation(0).unwrap().context_name, "child_a");
+        assert_eq!(child_b_cursor.asm_op_for_operation(0).unwrap().context_name, "child_b");
+        assert_eq!(
+            child_a_cursor
+                .debug_vars_for_operation(0)
+                .map(|row| row.var.name())
+                .collect::<Vec<_>>(),
+            alloc::vec!["a"],
+        );
+        assert_eq!(
+            child_b_cursor
+                .debug_vars_for_operation(0)
+                .map(|row| row.var.name())
+                .collect::<Vec<_>>(),
+            alloc::vec!["b"],
+        );
+        assert!(matches!(
+            root_cursor.unique_child_for_exec_node(child_exec),
+            Err(DebugSourceGraphLookupError::AmbiguousChild {
+                parent,
+                exec_node
+            }) if parent == root && exec_node == child_exec
+        ),);
     }
 
     #[test]
