@@ -13,8 +13,8 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_core::{
-    deferred::PrecompileRegistry, events::EventName, mast::MastForest,
-    precompile::PrecompileVerifierRegistry, serde::Deserializable,
+    events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry,
+    serde::Deserializable,
 };
 use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
@@ -112,7 +112,6 @@ impl From<&CoreLibrary> for HostLibrary {
         Self {
             mast_forest: core_lib.mast_forest().clone(),
             handlers: core_lib.handlers(),
-            precompiles: core_lib.precompiles(),
         }
     }
 }
@@ -157,13 +156,6 @@ impl CoreLibrary {
         ];
         handlers.extend(default_debug_handlers());
         handlers
-    }
-
-    /// Returns the deferred precompile registry exported by this library.
-    ///
-    /// The framework branch has not migrated the core precompiles yet, so this is currently empty.
-    pub fn precompiles(&self) -> PrecompileRegistry {
-        PrecompileRegistry::default()
     }
 
     /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate

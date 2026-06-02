@@ -2,6 +2,8 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use common::register_and_evaluate;
 use miden_core::{
     Felt, ZERO,
@@ -15,29 +17,28 @@ fn chunks(n: u32) -> Vec<[Felt; 8]> {
         .collect()
 }
 
-fn fresh() -> (PrecompileRegistry, DeferredState) {
-    (
-        PrecompileRegistry::default().with_precompile(Hash),
-        DeferredState::new(usize::MAX),
-    )
+fn fresh() -> (Arc<PrecompileRegistry>, DeferredState) {
+    let registry = Arc::new(PrecompileRegistry::default().with_precompile(Hash));
+    let state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
+    (registry, state)
 }
 
 #[test]
 fn preimage_evaluates_to_known_digest_and_eq_predicate_passes() {
-    let registry = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash);
-    let mut state = DeferredState::new(usize::MAX);
-    registry.init(&mut state).unwrap();
+    let registry =
+        Arc::new(PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash));
+    let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
 
     // Build a 64-byte preimage (two 32-byte chunks) and the digest the mock hash should yield.
     let preimage_chunks = chunks(2);
     let expected_digest_felts = Hash::hash(&preimage_chunks);
     let expected_digest = Hash::digest_node(expected_digest_felts);
 
-    let h_expected = state.register(&registry, expected_digest.clone()).unwrap();
-    let h_preimage = state.register(&registry, Hash::preimage_node(64, preimage_chunks)).unwrap();
+    let h_expected = state.register(expected_digest.clone()).unwrap();
+    let h_preimage = state.register(Hash::preimage_node(64, preimage_chunks)).unwrap();
 
     // Evaluating the preimage produces the digest leaf.
-    let canonical = state.evaluate(&registry, h_preimage).unwrap();
+    let canonical = state.evaluate(h_preimage).unwrap();
     assert_eq!(canonical, expected_digest);
 
     // eq predicate ties the preimage's hash to the pre-registered expected digest.
@@ -95,12 +96,12 @@ fn decode_classifies_each_discriminant() {
 
 #[test]
 fn eq_predicate_errors_on_mismatch() {
-    let (registry, mut state) = fresh();
+    let (_registry, mut state) = fresh();
     let data = chunks(1);
     let wrong = Hash::digest_node([Felt::from_u32(0xdead); 8]);
-    let h_wrong = state.register(&registry, wrong).unwrap();
-    let h_preimage = state.register(&registry, Hash::preimage_node(32, data)).unwrap();
-    let eq_digest = state.register(&registry, Hash::eq_node(h_preimage, h_wrong)).unwrap();
-    let err = state.evaluate(&registry, eq_digest);
+    let h_wrong = state.register(wrong).unwrap();
+    let h_preimage = state.register(Hash::preimage_node(32, data)).unwrap();
+    let eq_digest = state.register(Hash::eq_node(h_preimage, h_wrong)).unwrap();
+    let err = state.evaluate(eq_digest);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }

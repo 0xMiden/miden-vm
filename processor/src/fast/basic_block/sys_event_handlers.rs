@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredError, PrecompileError, PrecompileRegistry},
+    deferred::{DeferredError, PrecompileError},
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -59,7 +59,6 @@ impl From<PrecompileError> for SystemEventError {
 pub fn handle_system_event(
     processor: &mut FastProcessor,
     system_event: SystemEvent,
-    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     match system_event {
         SystemEvent::MerkleNodeMerge => merge_merkle_nodes(processor),
@@ -84,11 +83,9 @@ pub fn handle_system_event(
         },
         SystemEvent::HqwordToMap => insert_hqword_into_adv_map(processor),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(processor),
-        SystemEvent::DeferredRegister => handle_deferred_register(processor, precompiles),
-        SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor, precompiles),
-        SystemEvent::DeferredRegisterChunk => {
-            handle_deferred_register_chunk(processor, precompiles)
-        },
+        SystemEvent::DeferredRegister => handle_deferred_register(processor),
+        SystemEvent::DeferredEvaluate => handle_deferred_evaluate(processor),
+        SystemEvent::DeferredRegisterChunk => handle_deferred_register_chunk(processor),
     }
 }
 

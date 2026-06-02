@@ -3,7 +3,7 @@
 //! The tests prove that registration, evaluation, in-circuit digest binding, and chunk
 //! registration work without bypassing deferred-state verification.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_assembly::Assembler;
 use miden_core::{
@@ -21,7 +21,7 @@ extern crate alloc;
 // PROCESSOR FACTORY
 // ================================================================================================
 
-/// Builds a processor with the uint precompile installed for deferred tests.
+/// Builds a processor with an empty deferred precompile registry.
 fn build_processor() -> FastProcessor {
     build_processor_with_options(ExecutionOptions::default())
 }
@@ -31,9 +31,18 @@ fn build_processor_with_options(options: ExecutionOptions) -> FastProcessor {
         .expect("processor construction")
 }
 
-fn uint_host() -> DefaultHost {
-    DefaultHost::default()
-        .with_precompiles(Arc::new(PrecompileRegistry::default().with_precompile(Uint)))
+fn uint_precompiles() -> PrecompileRegistry {
+    PrecompileRegistry::default().with_precompile(Uint)
+}
+
+fn build_uint_processor() -> FastProcessor {
+    build_uint_processor_with_options(ExecutionOptions::default())
+}
+
+fn build_uint_processor_with_options(options: ExecutionOptions) -> FastProcessor {
+    build_processor_with_options(options)
+        .with_deferred_precompiles(uint_precompiles())
+        .expect("uint precompile registration")
 }
 
 fn assemble_test_program(src: &str) -> Program {
@@ -102,6 +111,25 @@ fn arith_leaf(low: u64) -> Node {
     Uint::leaf_node(limbs)
 }
 
+#[test]
+fn empty_processor_rejects_uint_deferred_tag() {
+    let leaf = arith_leaf(42);
+
+    let mut src = String::from("begin\n");
+    emit_register(&mut src, leaf);
+    src.push_str("end\n");
+
+    let program = assemble_test_program(&src);
+    let mut host = DefaultHost::default();
+    match build_processor().execute_sync(&program, &mut host) {
+        Err(ExecutionError::DeferredError { err, .. }) => {
+            assert!(matches!(err.root(), PrecompileError::InvalidNode));
+        },
+        Err(err) => panic!("expected invalid deferred node, got {err:?}"),
+        Ok(_) => panic!("empty processor should reject Uint deferred nodes"),
+    }
+}
+
 // E2E: adv.evaluate_deferred returns the canonical (tag || payload) on the advice stack.
 // ================================================================================================
 
@@ -140,8 +168,8 @@ fn deferred_evaluate_returns_canonical_value_on_advice() {
 
     let program = assemble_test_program(&src);
 
-    let mut host = uint_host();
-    let output = build_processor()
+    let mut host = DefaultHost::default();
+    let output = build_uint_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
@@ -177,8 +205,8 @@ fn deferred_evaluate_returns_true_node_for_predicate() {
 
     let program = assemble_test_program(&src);
 
-    let mut host = uint_host();
-    let output = build_processor()
+    let mut host = DefaultHost::default();
+    let output = build_uint_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
@@ -198,17 +226,18 @@ fn deferred_evaluate_returns_true_node_for_predicate() {
 
 #[test]
 fn deferred_register_over_deferred_budget_is_rejected() {
-    let leaf = arith_leaf(42);
+    let leaf = Hash::digest_node([Felt::from_u32(42); 8]);
 
     let mut src = String::from("begin\n");
     emit_register(&mut src, leaf);
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = uint_host();
-    let result =
-        build_processor_with_options(ExecutionOptions::default().with_max_deferred_elements(11))
-            .execute_sync(&program, &mut host);
+    let mut host = DefaultHost::default();
+    let result = build_hash_processor_with_options(
+        ExecutionOptions::default().with_max_deferred_elements(11),
+    )
+    .execute_sync(&program, &mut host);
 
     match result {
         Err(ExecutionError::DeferredStateTooLarge { num_elements, max, .. }) => {
@@ -233,12 +262,11 @@ fn deferred_register_predicate_does_not_verify() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = uint_host();
-    let mut output = build_processor()
+    let mut host = DefaultHost::default();
+    let mut output = build_uint_processor()
         .execute_sync(&program, &mut host)
         .expect("register-only execution must succeed even with a bad predicate");
-    let registry = PrecompileRegistry::default().with_precompile(Uint);
-    let err = output.deferred_state.evaluate(&registry, mismatch.digest()).unwrap_err();
+    let err = output.deferred_state.evaluate(mismatch.digest()).unwrap_err();
     assert!(matches!(err.root(), PrecompileError::AssertionFailed));
 }
 
@@ -257,8 +285,8 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
 
     let program = assemble_test_program(&src);
 
-    let mut host = uint_host();
-    let result = build_processor().execute_sync(&program, &mut host);
+    let mut host = DefaultHost::default();
+    let result = build_uint_processor().execute_sync(&program, &mut host);
     assert!(result.is_err(), "evaluating a mismatched predicate must fail execution");
 }
 
@@ -286,8 +314,8 @@ fn deferred_register_expr_digest_matches_node_digest() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = uint_host();
-    let output = build_processor()
+    let mut host = DefaultHost::default();
+    let output = build_uint_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
@@ -323,8 +351,8 @@ fn deferred_evaluate_value_rehashes_to_canonical_digest() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = uint_host();
-    let output = build_processor()
+    let mut host = DefaultHost::default();
+    let output = build_uint_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
@@ -373,8 +401,8 @@ fn deferred_register_chunk_digest_matches_node_digest() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = hash_host();
-    let output = build_chunk_processor()
+    let mut host = DefaultHost::default();
+    let output = build_hash_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
@@ -402,18 +430,18 @@ fn preimage_tag(n: u32) -> Tag {
     Hash::preimage_tag(n * Hash::BYTES_PER_CHUNK)
 }
 
-fn build_chunk_processor() -> FastProcessor {
-    build_chunk_processor_with_options(ExecutionOptions::default())
+fn hash_precompiles() -> PrecompileRegistry {
+    PrecompileRegistry::default().with_precompile(Hash)
 }
 
-fn build_chunk_processor_with_options(options: ExecutionOptions) -> FastProcessor {
-    FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
-        .expect("processor construction")
+fn build_hash_processor() -> FastProcessor {
+    build_hash_processor_with_options(ExecutionOptions::default())
 }
 
-fn hash_host() -> DefaultHost {
-    DefaultHost::default()
-        .with_precompiles(Arc::new(PrecompileRegistry::default().with_precompile(Hash)))
+fn build_hash_processor_with_options(options: ExecutionOptions) -> FastProcessor {
+    build_processor_with_options(options)
+        .with_deferred_precompiles(hash_precompiles())
+        .expect("hash precompile registration")
 }
 
 /// Emits MASM that registers a chunk node from memory.
@@ -436,8 +464,8 @@ fn chunk_register_over_deferred_budget_is_rejected() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = hash_host();
-    let result = build_chunk_processor_with_options(
+    let mut host = DefaultHost::default();
+    let result = build_hash_processor_with_options(
         ExecutionOptions::default().with_max_deferred_elements(16),
     )
     .execute_sync(&program, &mut host);
@@ -482,13 +510,12 @@ fn chunk_register_reads_bulk_data_from_memory_and_materializes_node() {
 
     let program = assemble_test_program(&src);
 
-    let registry = PrecompileRegistry::default().with_precompile(Hash);
-    let mut host = DefaultHost::default().with_precompiles(Arc::new(registry.clone()));
-    let mut output = build_chunk_processor()
+    let mut host = DefaultHost::default();
+    let mut output = build_hash_processor()
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    let canonical = output.deferred_state.evaluate(&registry, chunk_digest).unwrap();
+    let canonical = output.deferred_state.evaluate(chunk_digest).unwrap();
     assert_eq!(
         canonical, expected_canonical,
         "chunk node must be stored with the bulk data read from memory",
@@ -505,7 +532,7 @@ fn chunk_register_rejects_unaligned_pointer() {
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-    let mut host = hash_host();
-    let result = build_chunk_processor().execute_sync(&program, &mut host);
+    let mut host = DefaultHost::default();
+    let result = build_hash_processor().execute_sync(&program, &mut host);
     assert!(result.is_err(), "unaligned ptr must surface as an execution error");
 }

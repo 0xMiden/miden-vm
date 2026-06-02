@@ -32,7 +32,7 @@ impl FastProcessor {
     where
         F: ExecutableMastForest,
     {
-        match handle_system_event(self, system_event, host.precompiles()).map_exec_err_with_op_idx(
+        match handle_system_event(self, system_event).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,

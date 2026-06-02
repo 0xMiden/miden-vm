@@ -2,6 +2,8 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use common::register_and_evaluate;
 use miden_core::{
     Felt, ZERO,
@@ -17,12 +19,13 @@ fn three_chunks(first_first_felt: Felt) -> Vec<[Felt; 8]> {
 
 #[test]
 fn verify_passes_in_multi_precompile_registry() {
-    let registry = PrecompileRegistry::default()
-        .with_precompile(Uint)
-        .with_precompile(Hash)
-        .with_precompile(Sig);
-    let mut state = DeferredState::new(usize::MAX);
-    registry.init(&mut state).unwrap();
+    let registry = Arc::new(
+        PrecompileRegistry::default()
+            .with_precompile(Uint)
+            .with_precompile(Hash)
+            .with_precompile(Sig),
+    );
+    let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
 
     let node = Sig::verify_node(three_chunks(Felt::from_u32(7)));
     let result = register_and_evaluate(&registry, &mut state, node);
@@ -38,11 +41,11 @@ fn verify_passes_in_multi_precompile_registry() {
 
 #[test]
 fn verify_fails_for_zeroed_placeholder_sig() {
-    let registry = PrecompileRegistry::default().with_precompile(Sig);
-    let mut state = DeferredState::new(usize::MAX);
+    let registry = Arc::new(PrecompileRegistry::default().with_precompile(Sig));
+    let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
     let node = Sig::verify_node(three_chunks(ZERO));
-    let digest = state.register(&registry, node).unwrap();
-    let err = state.evaluate(&registry, digest);
+    let digest = state.register(node).unwrap();
+    let err = state.evaluate(digest);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -55,8 +58,8 @@ fn decode_classifies_verify_tag_only() {
 
 #[test]
 fn verify_rejects_wrong_chunk_count() {
-    let registry = PrecompileRegistry::default().with_precompile(Sig);
-    let mut state = DeferredState::new(usize::MAX);
+    let registry = Arc::new(PrecompileRegistry::default().with_precompile(Sig));
+    let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
     let node = Node::chunk(Sig::verify_tag(), vec![[Felt::from_u32(1); 8]; 2]);
-    assert!(matches!(state.register(&registry, node), Err(PrecompileError::InvalidNode)));
+    assert!(matches!(state.register(node), Err(PrecompileError::InvalidNode)));
 }

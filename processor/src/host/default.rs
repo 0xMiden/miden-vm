@@ -2,7 +2,6 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
-    deferred::PrecompileRegistry,
     events::{EventId, EventName},
     mast::MastForest,
 };
@@ -23,7 +22,6 @@ pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
     source_manager: Arc<S>,
-    precompiles: Arc<PrecompileRegistry>,
 }
 
 impl Default for DefaultHost {
@@ -32,7 +30,6 @@ impl Default for DefaultHost {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
-            precompiles: Arc::new(PrecompileRegistry::default()),
         }
     }
 }
@@ -51,21 +48,16 @@ where
             store: self.store,
             event_handlers: self.event_handlers,
             source_manager,
-            precompiles: self.precompiles,
         }
     }
 
-    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its event handlers and deferred
-    /// precompiles.
+    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its event handlers.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
-        let HostLibrary { mast_forest, handlers, precompiles } = library.into();
+        let HostLibrary { mast_forest, handlers } = library.into();
         self.store.insert(mast_forest);
 
         for (event, handler) in handlers {
             self.event_handlers.register(event, handler)?;
-        }
-        if !precompiles.is_empty() {
-            Arc::make_mut(&mut self.precompiles).merge(precompiles);
         }
         Ok(())
     }
@@ -75,12 +67,6 @@ where
     pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, ExecutionError> {
         self.load_library(library)?;
         Ok(self)
-    }
-
-    /// Installs the deferred precompile registry used by system-event handlers.
-    pub fn with_precompiles(mut self, precompiles: Arc<PrecompileRegistry>) -> Self {
-        self.precompiles = precompiles;
-        self
     }
 
     /// Registers a single [`EventHandler`] into this host.
@@ -126,10 +112,6 @@ where
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         self.event_handlers.resolve_event(event_id)
-    }
-
-    fn precompiles(&self) -> &PrecompileRegistry {
-        &self.precompiles
     }
 }
 
@@ -202,8 +184,6 @@ pub struct HostLibrary {
     pub mast_forest: Arc<MastForest>,
     /// List of handlers along with their event names to call them with `emit`.
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
-    /// Deferred precompiles exported by this library.
-    pub precompiles: PrecompileRegistry,
 }
 
 impl From<Arc<miden_mast_package::Package>> for HostLibrary {
@@ -211,18 +191,13 @@ impl From<Arc<miden_mast_package::Package>> for HostLibrary {
         Self {
             mast_forest: package.mast_forest().clone(),
             handlers: vec![],
-            precompiles: PrecompileRegistry::default(),
         }
     }
 }
 
 impl From<Arc<MastForest>> for HostLibrary {
     fn from(mast_forest: Arc<MastForest>) -> Self {
-        Self {
-            mast_forest,
-            handlers: vec![],
-            precompiles: PrecompileRegistry::default(),
-        }
+        Self { mast_forest, handlers: vec![] }
     }
 }
 
@@ -231,41 +206,6 @@ impl From<&Arc<MastForest>> for HostLibrary {
         Self {
             mast_forest: mast_forest.clone(),
             handlers: vec![],
-            precompiles: PrecompileRegistry::default(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use miden_core::{
-        ZERO,
-        deferred::{DeferredState, PrecompileError},
-        testing::precompile::{Hash, Uint},
-    };
-
-    use super::*;
-
-    #[test]
-    fn load_library_extends_existing_precompiles() {
-        let original = Arc::new(PrecompileRegistry::default().with_precompile(Uint));
-        let mut host = DefaultHost::default().with_precompiles(original.clone());
-        let library = HostLibrary {
-            mast_forest: Arc::new(MastForest::new()),
-            handlers: Vec::new(),
-            precompiles: PrecompileRegistry::default().with_precompile(Hash),
-        };
-
-        host.load_library(library).unwrap();
-
-        let mut merged_state = DeferredState::new(usize::MAX);
-        assert!(merged_state.register(host.precompiles(), Uint::leaf_node([0; 8])).is_ok());
-        assert!(merged_state.register(host.precompiles(), Hash::digest_node([ZERO; 8])).is_ok());
-
-        let mut original_state = DeferredState::new(usize::MAX);
-        assert!(matches!(
-            original_state.register(&original, Hash::digest_node([ZERO; 8])),
-            Err(PrecompileError::InvalidNode)
-        ));
     }
 }

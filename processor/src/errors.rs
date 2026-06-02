@@ -140,6 +140,15 @@ impl ExecutionError {
             err,
         }
     }
+
+    /// Wraps a deferred error without source-location context.
+    pub fn deferred_error_no_context(err: PrecompileError) -> Self {
+        Self::DeferredError {
+            label: SourceSpan::UNKNOWN,
+            source_file: None,
+            err,
+        }
+    }
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
