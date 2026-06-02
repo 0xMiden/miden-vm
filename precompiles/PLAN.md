@@ -48,9 +48,17 @@ semantics.
 - It is acceptable on this tracking branch to duplicate the generic deferred MASM helpers under
   `miden::precompiles::sys` instead of introducing a MASM package dependency on
   `miden::core::sys` or moving helpers immediately.
-- Keccak is the first concrete vertical slice. It exercises chunks, deferred evaluation/logging,
-  registry installation, and MASM package loading without the extra complexity of signature
-  precompile layouts.
+- The keccak256 + sha512 hash family is the first concrete vertical slice, landing together so the
+  shared base has two real consumers. It exercises chunks, deferred evaluation/logging, registry
+  installation, and MASM package loading without the extra complexity of signature precompile
+  layouts.
+- The hash precompiles share a generic base (a `HashFunction` trait + `HashPrecompile<H>`); each
+  hash is a thin spec (name, digest width, byte-level hash) plus a MASM wrapper.
+- The canonical digest node uses a uniform `ceil(DIGEST_FELTS / 8)`-chunk encoding for every width
+  (256-bit → one chunk, 512-bit → two), so there is no `Value`-vs-`Chunks` special case.
+- MASM hash wrappers write the digest to a caller-provided memory pointer
+  (`[out_ptr, ...] -> [...]`), keeping the operand stack net-neutral, and share a `register_preimage`
+  helper under `miden::precompiles::crypto::hashes`.
 - Processor/prover/verifier proof-wire support comes after the first concrete precompile package
   slice. That gives the proof plumbing a small real vertical test instead of abstract-only
   coverage.
@@ -94,11 +102,10 @@ Explicitly not done here:
 ```text
 #3170 (`adr1anh/deferred/framework`)
 └── precompiles/crate
-    └── precompiles/keccak
+    └── precompiles/hash
         └── precompiles/proof-wire
-            └── precompiles/sha512
-                └── precompiles/signatures
-                    └── precompiles/remove-legacy
+            └── precompiles/signatures
+                └── precompiles/remove-legacy
 ```
 
 This stack can be adjusted as the work unfolds, but each branch should remain a coherent review
@@ -106,23 +113,24 @@ unit.
 
 ## Branch Scopes
 
-### `precompiles/keccak`
+### `precompiles/hash`
 
-Port only the Keccak deferred precompile vertical slice from #3172
-(`adr1anh/deferred/migrate`) into `miden-precompiles`.
+Port the Keccak-256 and SHA-512 deferred precompiles from #3172
+(`adr1anh/deferred/migrate`) into `miden-precompiles`, on a shared hash-precompile base.
 
 In scope:
 
-- Shared byte/chunk codec needed by Keccak.
-- `Keccak256Precompile`.
-- `registry()` installs only Keccak.
-- MASM wrapper under `::miden::precompiles::crypto::hashes::keccak256`.
+- Shared byte/chunk codec and a generic hash-precompile base (a `HashFunction` trait +
+  `HashPrecompile<H>`); each hash is a thin spec.
+- `Keccak256Precompile` and `Sha512Precompile`; `registry()` installs both.
+- MASM wrappers under `::miden::precompiles::crypto::hashes::{keccak256,sha512}`, sharing a
+  `register_preimage` helper and writing the digest to a caller-provided memory pointer.
+- Uniform `ceil(DIGEST_FELTS / 8)`-chunk digest encoding.
 - Focused tests for Rust semantics, registry installation, package exports, dynamic linking, and
-  execution/deferred-state behavior where feasible.
+  execution/deferred-state behavior.
 
 Out of scope:
 
-- SHA-512.
 - ECDSA or EdDSA.
 - Proof-wire support.
 - Legacy request-list deletion.
@@ -130,7 +138,7 @@ Out of scope:
 
 ### `precompiles/proof-wire`
 
-Add the generic proof-model cutover using the Keccak package slice as the real vertical test.
+Add the generic proof-model cutover using the hash package slice as the real vertical test.
 
 In scope:
 
@@ -138,28 +146,13 @@ In scope:
 - Trace/prover serializes final deferred state under the registry used during execution.
 - Verifier rehydrates the wire under a supplied `PrecompileRegistry`.
 - `miden-vm` API/CLI support for loading `PrecompilesLibrary` where needed.
-- End-to-end prove/verify coverage for a program using the Keccak precompile package.
+- End-to-end prove/verify coverage for a program using a hash precompile (keccak256 or sha512).
 
 Out of scope:
 
-- Adding new concrete precompiles beyond Keccak.
+- Adding concrete precompiles beyond the hash family.
 - #3176 (`al/ecdsa-k256-on-vm`) material.
 - PVM proof import.
-
-### `precompiles/sha512`
-
-Port SHA-512 from #3172 (`adr1anh/deferred/migrate`) into `miden-precompiles`.
-
-In scope:
-
-- SHA-512 Rust deferred semantics.
-- SHA-512 MASM wrapper under `::miden::precompiles`.
-- Registry update and focused tests.
-
-Out of scope:
-
-- Signature precompiles.
-- Legacy request-list deletion unless all replacements are ready.
 
 ### `precompiles/signatures`
 

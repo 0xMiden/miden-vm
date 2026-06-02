@@ -217,7 +217,7 @@ pub(crate) fn masm_const(source: &str, name: &str) -> u64 {
 /// integration tests.
 #[cfg(test)]
 pub(crate) fn assert_hash_precompile<H: HashFunction>() {
-    use alloc::{vec, vec::Vec};
+    use alloc::{sync::Arc, vec, vec::Vec};
 
     use miden_core::deferred::{DeferredState, PrecompileRegistry};
 
@@ -229,17 +229,15 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     }
 
     let fresh = || {
-        (
-            PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default()),
-            DeferredState::new(usize::MAX),
+        DeferredState::new(
+            Arc::new(PrecompileRegistry::new().with_precompile(HashPrecompile::<H>::default())),
+            usize::MAX,
         )
+        .expect("hash precompile initialization should fit the test budget")
     };
-    let evaluate = |state: &mut DeferredState,
-                    reg: &PrecompileRegistry,
-                    node: Node|
-     -> Result<Node, PrecompileError> {
-        let digest = state.register(reg, node)?;
-        state.evaluate(reg, digest)
+    let evaluate = |state: &mut DeferredState, node: Node| -> Result<Node, PrecompileError> {
+        let digest = state.register(node)?;
+        state.evaluate(digest)
     };
 
     // -- decode routes each tag to its node shape and rejects malformed tags --
@@ -271,10 +269,10 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
 
     // -- preimage evaluates to the digest of the hashed bytes, across chunk boundaries --
     for &n in &[0usize, 11, 70] {
-        let (reg, mut state) = fresh();
+        let mut state = fresh();
         let input: Vec<u8> = (0..n).map(|i| i as u8).collect();
         let node = HashPrecompile::<H>::preimage_node(n as u32, pack_chunks(&input));
-        let got = evaluate(&mut state, &reg, node).unwrap();
+        let got = evaluate(&mut state, node).unwrap();
         let want =
             HashPrecompile::<H>::digest_node(&bytes_to_packed_u32_elements(&H::hash(&input)));
         assert_eq!(got, want, "preimage of {n} bytes");
@@ -282,52 +280,48 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
 
     // -- eq accepts a matching (preimage, digest) and rejects a forged digest --
     {
-        let (reg, mut state) = fresh();
+        let mut state = fresh();
         let input = b"hash precompile eq";
         let preimage = state
-            .register(
-                &reg,
-                HashPrecompile::<H>::preimage_node(input.len() as u32, pack_chunks(input)),
-            )
+            .register(HashPrecompile::<H>::preimage_node(input.len() as u32, pack_chunks(input)))
             .unwrap();
         let leaf = state
-            .register(
-                &reg,
-                HashPrecompile::<H>::digest_node(&bytes_to_packed_u32_elements(&H::hash(input))),
-            )
+            .register(HashPrecompile::<H>::digest_node(&bytes_to_packed_u32_elements(&H::hash(
+                input,
+            ))))
             .unwrap();
         assert!(
-            evaluate(&mut state, &reg, HashPrecompile::<H>::eq_node(preimage, leaf))
+            evaluate(&mut state, HashPrecompile::<H>::eq_node(preimage, leaf))
                 .unwrap()
                 .is_true_node()
         );
 
         let forged = state
-            .register(
-                &reg,
-                HashPrecompile::<H>::digest_node(&vec![Felt::from_u32(0xdead); H::DIGEST_FELTS]),
-            )
+            .register(HashPrecompile::<H>::digest_node(&vec![
+                Felt::from_u32(0xdead);
+                H::DIGEST_FELTS
+            ]))
             .unwrap();
-        let err = evaluate(&mut state, &reg, HashPrecompile::<H>::eq_node(preimage, forged));
+        let err = evaluate(&mut state, HashPrecompile::<H>::eq_node(preimage, forged));
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
     }
 
     // -- preimage rejects an oversized n_bytes for the chunk count, and nonzero trailing pad --
     {
-        let (reg, mut state) = fresh();
+        let mut state = fresh();
         let node = HashPrecompile::<H>::preimage_node(100, vec![[ZERO; 8]]);
         assert!(matches!(
-            evaluate(&mut state, &reg, node).unwrap_err().root(),
+            evaluate(&mut state, node).unwrap_err().root(),
             PrecompileError::InvalidNode
         ));
     }
     {
-        let (reg, mut state) = fresh();
+        let mut state = fresh();
         let mut chunks = pack_chunks(&[1, 2, 3]);
         chunks[0][0] = Felt::from_u32(u32::from_le_bytes([1, 2, 3, 0xaa]));
         let node = HashPrecompile::<H>::preimage_node(3, chunks);
         assert!(matches!(
-            evaluate(&mut state, &reg, node).unwrap_err().root(),
+            evaluate(&mut state, node).unwrap_err().root(),
             PrecompileError::InvalidNode
         ));
     }
