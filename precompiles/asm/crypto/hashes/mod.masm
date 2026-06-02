@@ -1,0 +1,43 @@
+use miden::precompiles::sys
+
+# Shared helpers for the deferred hash precompiles (keccak256, sha512, ...).
+# ================================================================================================
+# The per-hash wrappers differ only in their digest width; the preimage-registration step is
+# identical, so it lives here and is parameterized by the caller's PRECOMPILE_ID.
+
+# `preimage` tag discriminant, shared by every hash precompile (pinned to the Rust-side
+# `HashPrecompile::PREIMAGE_TAG_ID`).
+const PREIMAGE_TAG_ID = 0
+
+#! Registers the `preimage` chunk node for a hash precompile and returns its content-addressed
+#! digest.
+#!
+#! Input:  [PRECOMPILE_ID, ptr, len_bytes, ...]
+#! Output: [PREIMAGE_DIGEST, ...]
+#!
+#! Stages the preimage tag `[PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0]` over the
+#! `n_chunks = max(1, ceil(len_bytes/32))` rate-sized blocks at `ptr` and calls
+#! `sys::register_chunk`, which derives the digest in-circuit (a linear hash over the `8*n_chunks`
+#! felts), binding it to the caller's memory. Empty input is one zero chunk (empty chunk bodies are
+#! banned).
+pub proc register_preimage
+    # => [PRECOMPILE_ID, ptr, len_bytes, ...]
+    movdn.2
+    # => [ptr, len_bytes, PRECOMPILE_ID, ...]
+    dup.1
+    # => [len_bytes, ptr, len_bytes, PRECOMPILE_ID, ...]
+    add.31 u32div.32
+    # => [ceil(len_bytes/32), ptr, len_bytes, PRECOMPILE_ID, ...]
+    dup eq.0 add
+    # => [n_chunks, ptr, len_bytes, PRECOMPILE_ID, ...]  (clamp to >= 1)
+    movdn.2
+    # => [ptr, len_bytes, n_chunks, PRECOMPILE_ID, ...]
+    swap push.0 swap
+    # => [len_bytes, 0, ptr, n_chunks, PRECOMPILE_ID, ...]
+    push.PREIMAGE_TAG_ID
+    # => [PREIMAGE_TAG_ID, len_bytes, 0, ptr, n_chunks, PRECOMPILE_ID, ...]
+    movup.5
+    # => [PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, n_chunks, ...]
+    exec.sys::register_chunk
+    # => [PREIMAGE_DIGEST, ...]
+end

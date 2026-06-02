@@ -12,19 +12,24 @@ use miden_mast_package::Package;
 use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
+mod codec;
+mod hash;
+
+pub use hash::{
+    HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
+};
+
 // PRECOMPILES LIBRARY
 // ================================================================================================
 
 /// The Miden precompiles library, wrapping the compiled `miden-precompiles` [`Package`].
 ///
-/// The package bundles the MASM procedures exported under the `miden::precompiles` namespace.
-/// During scaffolding this is the deferred-DAG helper procedures under `miden::precompiles::sys`
-/// plus a smoke procedure; concrete precompiles are added as they are migrated onto the deferred
-/// framework. When the package is dynamically linked during assembly, these procedures can be
-/// called from any Miden program and are serialized as 32 bytes.
+/// The package bundles the MASM procedures exported under the `miden::precompiles` namespace: the
+/// `keccak256` wrappers under `miden::precompiles::crypto::hashes::keccak256` and the deferred-DAG
+/// helper procedures under `miden::precompiles::sys`. When the package is dynamically linked during
+/// assembly, these procedures can be called from any Miden program and are serialized as 32 bytes.
 ///
-/// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`]; it is
-/// currently empty and grows alongside the concrete precompiles.
+/// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`].
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
@@ -78,4 +83,6 @@ impl Default for PrecompilesLibrary {
 /// Returns a [`PrecompileRegistry`] containing the deferred precompiles provided by this crate.
 pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
+        .with_precompile(Keccak256Precompile::default())
+        .with_precompile(Sha512Precompile::default())
 }
