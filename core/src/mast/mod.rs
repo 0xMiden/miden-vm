@@ -994,7 +994,7 @@ impl Iterator for SubtreeIterator<'_> {
 // ASM OP ID
 // ================================================================================================
 
-/// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
+/// Unique identifier for assembly operation metadata within a [`MastForest`].
 ///
 /// AssemblyOps are metadata used only for error context and debugging tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
