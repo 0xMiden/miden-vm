@@ -137,6 +137,19 @@ impl SourceDebugGraph {
             })
     }
 
+    pub(crate) fn unique_root_for_exec_node(
+        &self,
+        exec_node: MastNodeId,
+    ) -> Option<SourceMastNodeId> {
+        let mut roots = self
+            .roots
+            .iter()
+            .copied()
+            .filter(|root| self.nodes[*root].exec_node() == exec_node);
+        let root = roots.next()?;
+        roots.next().is_none().then_some(root)
+    }
+
     pub(crate) fn with_rewritten_source_locations(
         mut self,
         mut rewrite_location: impl FnMut(Location) -> Location,

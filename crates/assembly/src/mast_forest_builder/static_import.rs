@@ -8,7 +8,8 @@ use miden_core::{
 use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 use super::{
-    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, truncate_index_vec,
+    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceMastNodeRef,
+    truncate_index_vec,
 };
 use crate::diagnostics::Report;
 
@@ -26,8 +27,16 @@ struct StaticLinkedRoot {
 
 #[derive(Default)]
 pub(super) struct StaticSourceMetadata {
+    op_range: Option<(usize, usize)>,
     asm_ops: Vec<(usize, AssemblyOp)>,
     debug_vars: Vec<(usize, DebugVarInfo)>,
+}
+
+struct StaticPendingDraft {
+    draft: PendingMastNodeDraft,
+    source_op_range: Option<(usize, usize)>,
+    asm_op_checkpoint: usize,
+    debug_var_checkpoint: usize,
 }
 
 /// Result of resolving an exact static-library root provenance hint.
@@ -51,11 +60,11 @@ impl MastForestBuilder {
         source_node: MastNode,
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
-    ) -> Result<(PendingMastNodeDraft, usize, usize), Report> {
+    ) -> Result<StaticPendingDraft, Report> {
         let digest = source_node.digest();
         let kind = PendingMastNodeKind::from_node(source_node);
-        let (asm_ops, debug_vars) = source_metadata
-            .map(|metadata| (metadata.asm_ops, metadata.debug_vars))
+        let (asm_ops, debug_vars, op_range) = source_metadata
+            .map(|metadata| (metadata.asm_ops, metadata.debug_vars, metadata.op_range))
             .unwrap_or_else(|| {
                 (
                     self.pending_asm_ops_for_statically_linked_source(
@@ -66,6 +75,7 @@ impl MastForestBuilder {
                         source_forest,
                         source_node_id,
                     ),
+                    None,
                 )
             });
 
@@ -81,17 +91,18 @@ impl MastForestBuilder {
             },
         };
 
-        Ok((
-            PendingMastNodeDraft {
+        Ok(StaticPendingDraft {
+            draft: PendingMastNodeDraft {
                 digest,
                 kind,
                 child_refs,
                 asm_ops: indexed_asm_ops,
                 debug_vars: indexed_debug_vars,
             },
+            source_op_range: op_range,
             asm_op_checkpoint,
             debug_var_checkpoint,
-        ))
+        })
     }
 
     /// Copies a statically linked node into this builder while keeping source metadata in the
@@ -104,18 +115,27 @@ impl MastForestBuilder {
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
     ) -> Result<MastNodeRef, Report> {
-        let (draft, asm_op_checkpoint, debug_var_checkpoint) = self
-            .pending_draft_for_statically_linked_source(
-                source_forest,
-                source_node_id,
-                source_node,
-                child_refs,
-                source_metadata,
-            )?;
+        let StaticPendingDraft {
+            draft,
+            source_op_range,
+            asm_op_checkpoint,
+            debug_var_checkpoint,
+        } = self.pending_draft_for_statically_linked_source(
+            source_forest,
+            source_node_id,
+            source_node,
+            child_refs,
+            source_metadata,
+        )?;
         let dedup_key = self.dedup_key_for_pending_data(&draft);
         let source_child_refs = self.source_child_refs_for_node_refs(&draft.child_refs);
         if let Some(node_ref) = self.find_reusable_node_ref_by_key(&dedup_key, &draft) {
-            self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+            self.record_static_source_occurrence(
+                node_ref,
+                source_child_refs,
+                &draft,
+                source_op_range,
+            )?;
             return Ok(node_ref);
         }
 
@@ -125,8 +145,28 @@ impl MastForestBuilder {
             asm_op_checkpoint,
             debug_var_checkpoint,
         )?;
-        self.record_source_occurrence(node_ref, source_child_refs, &draft)?;
+        self.record_static_source_occurrence(node_ref, source_child_refs, &draft, source_op_range)?;
         Ok(node_ref)
+    }
+
+    fn record_static_source_occurrence(
+        &mut self,
+        exec_ref: MastNodeRef,
+        child_refs: Vec<SourceMastNodeRef>,
+        draft: &PendingMastNodeDraft,
+        source_op_range: Option<(usize, usize)>,
+    ) -> Result<SourceMastNodeRef, Report> {
+        let (op_start, op_end) =
+            source_op_range.unwrap_or_else(|| self.source_op_range_for_draft(draft));
+        self.push_source_occurrence(
+            exec_ref,
+            child_refs,
+            op_start,
+            op_end,
+            draft.asm_ops.clone(),
+            draft.debug_vars.clone(),
+            true,
+        )
     }
 
     fn pending_asm_ops_for_statically_linked_source(
@@ -442,8 +482,17 @@ impl MastForestBuilder {
             .debug_vars_for_source_node(source_node_id)
             .map(|row| (row.op_idx as usize, row.var.clone()))
             .collect();
+        let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
+            self.unadjust_source_block_range(
+                source_forest,
+                source_exec_node_id,
+                source_node.op_start as usize,
+                source_node.op_end as usize,
+            )
+        });
 
         StaticSourceMetadata {
+            op_range,
             asm_ops: self.unadjust_source_block_indices(
                 source_forest,
                 source_exec_node_id,
@@ -454,6 +503,28 @@ impl MastForestBuilder {
                 source_exec_node_id,
                 debug_vars,
             ),
+        }
+    }
+
+    fn unadjust_source_block_range(
+        &self,
+        source_forest: &MastForest,
+        source_node_id: MastNodeId,
+        op_start: usize,
+        op_end: usize,
+    ) -> (usize, usize) {
+        if op_start == op_end {
+            return (op_start, op_end);
+        }
+
+        if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_node_id) {
+            let unadjusted_indices = BasicBlockNode::unadjust_asm_op_indices(
+                vec![(op_start, ()), (op_end - 1, ())],
+                block.op_batches(),
+            );
+            (unadjusted_indices[0].0, unadjusted_indices[1].0 + 1)
+        } else {
+            (op_start, op_end)
         }
     }
 }
