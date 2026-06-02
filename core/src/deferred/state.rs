@@ -7,8 +7,8 @@ use super::{
 
 /// In-memory witness for deferred-DAG verification.
 ///
-/// The state keeps committed nodes, host-side reduction memos, and the current transcript root.
-/// Reduction memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
+/// The state keeps registered nodes, host-side evaluation memos, and the current transcript root.
+/// Evaluation memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
 /// them. The state is intentionally not serialized directly: proofs carry [`DeferredStateWire`],
 /// and [`Self::from_wire`] rebuilds this state only after registry checks, canonical wire checks,
 /// expected-root matching, and root evaluation.
@@ -65,7 +65,8 @@ impl DeferredState {
         }
     }
 
-    /// Caches a reduction result and materializes its canonical node for downstream references.
+    /// Records an evaluation memo and stores its canonical node in `nodes` for downstream
+    /// references.
     fn record_eval(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -92,11 +93,11 @@ impl DeferredState {
         self.root
     }
 
-    /// Appends a statement commitment to the transcript after proving it reduces to TRUE.
+    /// Appends a statement commitment to the transcript after proving it evaluates to TRUE.
     ///
-    /// The statement digest must already be materialized in `nodes`, unless it is the implicit
-    /// [`TRUE_DIGEST`]. Evaluation may populate the registry-bound eval cache and materialize
-    /// canonical helper nodes.
+    /// The statement digest must already be registered (present in `nodes`), unless it is the
+    /// implicit [`TRUE_DIGEST`]. Evaluation may populate the registry-bound eval cache and store
+    /// canonical/helper nodes in `nodes`.
     pub fn append_statement(
         &mut self,
         precompiles: &PrecompileRegistry,
@@ -114,7 +115,7 @@ impl DeferredState {
         Ok(new_root)
     }
 
-    /// Commits a `PrecompileRegistry`-valid node to the DAG without reducing it.
+    /// Registers a `PrecompileRegistry`-valid node in the DAG without evaluating it.
     ///
     /// Registration lets later nodes reference this digest and lets predicates be logged, but it
     /// does not prove predicate truth. Verification happens only through evaluation or through
@@ -144,7 +145,7 @@ impl DeferredState {
         Ok(node_type)
     }
 
-    /// Reduces a committed node addressed by digest.
+    /// Evaluates a registered node addressed by digest.
     ///
     /// The memo is used only after the digest is proven present in `nodes`; memo entries alone do
     /// not create durable DAG membership. Predicate success returns [`Node::TRUE`]; mismatch
@@ -171,8 +172,8 @@ impl DeferredState {
             }
             Node::TRUE
         } else {
-            let mut witness = WitnessBuilder::new(self, precompiles);
-            precompiles.reduce(&node, &mut witness)?
+            let mut context = DeferredContext::new(self, precompiles);
+            precompiles.evaluate(&node, &mut context)?
         };
 
         self.record_eval(precompiles, digest, canonical.clone())?;
@@ -238,38 +239,39 @@ impl DeferredState {
     }
 }
 
-// WITNESS BUILDER
+// DEFERRED CONTEXT
 // ================================================================================================
 
-/// Capability object passed to precompiles during recursive reduction.
+/// Capability object passed to precompiles during recursive evaluation.
 ///
-/// Precompiles do not own the DAG; they receive this handle to resolve committed children and to
-/// intern helper nodes referenced by compound canonicals. The verifier reuses the same path during
-/// [`DeferredState::from_wire`], so prover and verifier agree on how witnesses are reconstructed.
-pub struct WitnessBuilder<'a> {
+/// Precompiles do not own the DAG; they receive this handle to resolve registered children and to
+/// register helper nodes referenced by compound canonicals. The verifier reuses the same path
+/// during [`DeferredState::from_wire`], so prover and verifier agree on how witnesses are
+/// reconstructed.
+pub struct DeferredContext<'a> {
     state: &'a mut DeferredState,
     precompiles: &'a PrecompileRegistry,
 }
 
-impl<'a> WitnessBuilder<'a> {
-    /// Binds state and registry for one framework-driven reduction.
+impl<'a> DeferredContext<'a> {
+    /// Binds state and registry for one framework-driven evaluation.
     pub(crate) fn new(state: &'a mut DeferredState, precompiles: &'a PrecompileRegistry) -> Self {
         Self { state, precompiles }
     }
 
-    /// Resolves a committed child digest to its canonical form.
+    /// Resolves a registered child digest by evaluating it to its canonical node.
     ///
-    /// The committed-node check keeps local evaluation reproducible by `to_wire` and rehydration;
-    /// memo hits are used only after that membership is established.
+    /// The `nodes` membership check keeps local evaluation reproducible by `to_wire` and
+    /// rehydration; memo hits are used only after that membership is established.
     pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
         self.state.evaluate(self.precompiles, digest)
     }
 
-    /// Commits a freshly minted helper node and returns its digest.
+    /// Registers a freshly minted helper node and returns its digest.
     ///
     /// Use this when a compound canonical needs stable child commitments that were created during
-    /// reduction.
-    pub fn intern(&mut self, node: Node) -> Result<Digest, PrecompileError> {
+    /// evaluation.
+    pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         self.state.register(self.precompiles, node)
     }
 }
@@ -477,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn register_join_requires_materialized_children() {
+    fn register_join_requires_children_present_in_nodes() {
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
         let a = state.register(&registry, test_leaf(3)).unwrap();
@@ -489,9 +491,9 @@ mod tests {
 
     #[test]
     fn register_predicate_does_not_verify_eagerly() {
-        // `register` is a pure host hint — it interns the predicate node without driving reduce.
-        // Programs that want host-side verification call `evaluate`; programs that want
-        // constrained verification call checked append.
+        // `register` is a pure host hint — it stores the predicate node in `nodes` without
+        // evaluating. Programs that want host-side verification call `evaluate`; programs
+        // that want constrained verification call checked append.
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
         let a = state.register(&registry, test_leaf(3)).unwrap();
@@ -501,7 +503,7 @@ mod tests {
         let bad_digest = state.register(&registry, bad).unwrap();
         assert!(
             state.nodes.contains_key(&bad_digest),
-            "predicate interned even when it doesn't hold"
+            "predicate is present in nodes even when it doesn't hold"
         );
         // Verification surfaces the mismatch only when explicitly invoked.
         let err = state.evaluate(&registry, bad_digest);
@@ -529,9 +531,9 @@ mod tests {
     }
 
     #[test]
-    fn register_then_evaluate_interns_canonical() {
+    fn register_then_evaluate_stores_canonical_in_nodes() {
         // Build (a+b)*c, pre-register only the leaves and `add`. The outer `mul` is explicitly
-        // registered before digest-addressed evaluation, and its canonical is interned.
+        // registered before digest-addressed evaluation, and its canonical is stored in `nodes`.
         let mut state = DeferredState::new(usize::MAX);
         let registry = precompiles();
         let a = state.register(&registry, test_leaf(3)).unwrap();
@@ -550,7 +552,7 @@ mod tests {
         );
         assert!(
             state.nodes.contains_key(&test_leaf(35).digest()),
-            "computed canonical is interned"
+            "computed canonical is present in nodes"
         );
         assert_eq!(state.evaluate(&registry, mul_digest).unwrap(), test_leaf(35));
     }
@@ -646,12 +648,12 @@ mod tests {
 
         let cases = [
             (
-                "materialized TRUE value",
+                "explicit TRUE value",
                 wire(alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }]),
                 registry.clone(),
             ),
             (
-                "materialized TRUE join",
+                "explicit TRUE join",
                 wire(alloc::vec![WireEntry::Join {
                     tag: Tag::TRUE,
                     lhs: crate::deferred::TRUE_INDEX,
@@ -759,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn rehydrate_rejects_root_that_reduces_non_true() {
+    fn rehydrate_rejects_root_that_evaluates_non_true() {
         let wire = wire(alloc::vec![value_entry(&test_leaf(7))]);
         assert_rehydrate_err!(wire, &precompiles(), IntegrityError::RootNotTrue);
     }

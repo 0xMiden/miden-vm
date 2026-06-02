@@ -2,7 +2,7 @@
 //!
 //! Deferred events let programs commit opaque statements during execution and leave their
 //! semantic checks to installed [`Precompile`]s. The framework stores those commitments as a DAG
-//! of [`Node`]s and a transcript root that verifies by reducing every logged statement to TRUE.
+//! of [`Node`]s and a transcript root that verifies by evaluating every logged statement to TRUE.
 //!
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
 //! provides system-event plumbing. Reference precompiles live in `crate::testing::precompile`.
@@ -21,7 +21,7 @@ pub use precompile::{Precompile, precompile_id};
 pub use precompile_registry::PrecompileRegistry;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-pub use state::{DeferredState, WitnessBuilder};
+pub use state::{DeferredContext, DeferredState};
 pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
 
 use crate::{
@@ -137,7 +137,7 @@ impl Payload {
         Self::Expression(felts)
     }
 
-    /// Creates a chunk payload for bulk data committed by a tag-declared non-zero length.
+    /// Creates a chunk payload for bulk data bound by a tag-declared non-zero length.
     ///
     /// # Panics
     /// In debug builds, if `chunks` is empty. Untrusted wire input is rejected before reaching
@@ -179,7 +179,7 @@ impl Payload {
 /// A deferred DAG entry whose meaning is supplied by its tag's precompile.
 ///
 /// The framework validates only the declared [`NodeType`]. Value semantics, producing ops, and
-/// predicates all live in the owning [`Precompile`]. A predicate succeeds by reducing to
+/// predicates all live in the owning [`Precompile`]. A predicate succeeds by evaluating to
 /// [`Node::TRUE`], so callers can handle every canonical result as an ordinary node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {

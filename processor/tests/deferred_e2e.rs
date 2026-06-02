@@ -273,7 +273,7 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
 
 #[test]
 fn deferred_register_expr_digest_matches_node_digest() {
-    // `sys::register_expr` body: intern, then `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]` and
+    // `sys::register_expr` body: register, then `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]` and
     // squeeze rate0. Assert the operand-stack result equals `Node::digest`.
     let leaf = arith_leaf(42);
     let expected = leaf.digest();
@@ -338,7 +338,7 @@ fn deferred_evaluate_value_rehashes_to_canonical_digest() {
 #[test]
 fn deferred_register_chunk_digest_matches_node_digest() {
     use core::fmt::Write;
-    // `sys::register_chunk` body over two 8-felt chunks in memory at 0..16: intern, derive
+    // `sys::register_chunk` body over two 8-felt chunks in memory at 0..16: register, derive
     // end_addr = ptr + 8*n_chunks, then `mem_stream`/`hperm` once per block. Assert the result
     // equals the chunk node's `Node::digest`.
     let chunks: Vec<[Felt; 8]> = (0..2u32)
@@ -452,7 +452,7 @@ fn chunk_register_over_deferred_budget_is_rejected() {
 }
 
 #[test]
-fn chunk_register_reads_bulk_data_from_memory_and_interns_node() {
+fn chunk_register_reads_bulk_data_from_memory_and_materializes_node() {
     use core::fmt::Write;
 
     // Lay out two 8-felt chunks in MASM memory starting at address 0:

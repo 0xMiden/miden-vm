@@ -1,14 +1,14 @@
 //! Mock group precompile for exercising compound canonical nodes.
 //!
 //! Group elements preserve committed coordinate expressions, while `add` and `sub` mint new
-//! `Uint` leaves during reduction. This stresses the witness path where a canonical result
+//! `Uint` leaves during evaluation. This stresses the context path where a canonical result
 //! references helper nodes created by the precompile itself.
 
 use super::uint::Uint;
 use crate::{
     Felt, ZERO,
     deferred::{
-        Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder,
+        DeferredContext, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
         precompile_id,
     },
 };
@@ -94,11 +94,11 @@ impl Precompile for Group {
         Some(NodeType::Join)
     }
 
-    fn reduce(
+    fn evaluate(
         &self,
         args: [Felt; 3],
         payload: &Payload,
-        witness: &mut WitnessBuilder<'_>,
+        context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
         let (h_lhs, h_rhs) = payload.join_children()?;
@@ -107,8 +107,8 @@ impl Precompile for Group {
             Discriminant::New => {
                 // Validate that both committed coordinate expressions resolve to field leaves,
                 // but preserve their original commitments in the canonical group element.
-                let x_leaf = witness.resolve(h_lhs)?;
-                let y_leaf = witness.resolve(h_rhs)?;
+                let x_leaf = context.resolve(h_lhs)?;
+                let y_leaf = context.resolve(h_rhs)?;
                 Uint::limbs_of(&x_leaf).map_err(PrecompileError::from)?;
                 Uint::limbs_of(&y_leaf).map_err(PrecompileError::from)?;
                 Ok(Self::new_node(h_lhs, h_rhs))
@@ -119,31 +119,31 @@ impl Precompile for Group {
                     Discriminant::Sub => BinaryOp::Sub,
                     _ => unreachable!(),
                 };
-                let g1 = witness.resolve(h_lhs)?;
-                let g2 = witness.resolve(h_rhs)?;
+                let g1 = context.resolve(h_lhs)?;
+                let g2 = context.resolve(h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
-                let x1 = Uint::limbs_of(&witness.resolve(h_x1)?).map_err(PrecompileError::from)?;
-                let y1 = Uint::limbs_of(&witness.resolve(h_y1)?).map_err(PrecompileError::from)?;
-                let x2 = Uint::limbs_of(&witness.resolve(h_x2)?).map_err(PrecompileError::from)?;
-                let y2 = Uint::limbs_of(&witness.resolve(h_y2)?).map_err(PrecompileError::from)?;
+                let x1 = Uint::limbs_of(&context.resolve(h_x1)?).map_err(PrecompileError::from)?;
+                let y1 = Uint::limbs_of(&context.resolve(h_y1)?).map_err(PrecompileError::from)?;
+                let x2 = Uint::limbs_of(&context.resolve(h_x2)?).map_err(PrecompileError::from)?;
+                let y2 = Uint::limbs_of(&context.resolve(h_y2)?).map_err(PrecompileError::from)?;
                 let (x3, y3) = match op {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
                 // Mint new field leaves for the result coordinates.
-                let h_x3 = witness.intern(Uint::leaf_node(x3))?;
-                let h_y3 = witness.intern(Uint::leaf_node(y3))?;
+                let h_x3 = context.register(Uint::leaf_node(x3))?;
+                let h_y3 = context.register(Uint::leaf_node(y3))?;
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
-                let g1 = witness.resolve(h_lhs)?;
-                let g2 = witness.resolve(h_rhs)?;
+                let g1 = context.resolve(h_lhs)?;
+                let g2 = context.resolve(h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
 
-                if witness.resolve(h_x1)? != witness.resolve(h_x2)?
-                    || witness.resolve(h_y1)? != witness.resolve(h_y2)?
+                if context.resolve(h_x1)? != context.resolve(h_x2)?
+                    || context.resolve(h_y1)? != context.resolve(h_y2)?
                 {
                     return Err(PrecompileError::AssertionFailed);
                 }

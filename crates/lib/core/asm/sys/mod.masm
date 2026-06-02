@@ -69,7 +69,7 @@ end
 #! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and
 #! returns its content-addressed digest on top of the operand stack.
 #!
-#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
+#! `adv.register_deferred` registers the node host-side (no stack or advice output); the digest is
 #! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
 #! by advice. The input is already in Poseidon2 sponge layout — `[R0=PAYLOAD_LO, R1=PAYLOAD_HI,
 #! C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0 word
@@ -89,7 +89,7 @@ end
 #! Registers a chunk-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
 #! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
-#! `adv.register_deferred_chunk` interns the node host-side (reading `8n` felts from memory at
+#! `adv.register_deferred_chunk` registers the node host-side (reading `8n` felts from memory at
 #! `ptr`; `n` derived from the tag); it produces no stack or advice output. The digest is then
 #! derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity = `TAG`,
 #! one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather than
@@ -127,7 +127,7 @@ pub proc register_chunk
 end
 
 #! Folds a deferred node digest into the rolling deferred commitment using the existing
-#! `log_precompile` commitment state. The digest must reference a node that will reduce to TRUE
+#! `log_precompile` commitment state. The digest must reference a node that will evaluate to TRUE
 #! under the installed precompiles.
 #!
 #! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees

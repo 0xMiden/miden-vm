@@ -55,7 +55,7 @@ fn add_produces_minted_new_and_passes_eq_against_expected() {
     assert!(eq_result.is_true_node());
 
     // Defense-in-depth: log the proven equality and round-trip the transcript — this re-runs
-    // the Group reduce (including its mid-`reduce` minting) through rehydrate.
+    // the Group evaluation (including its mid-evaluation minting) through rehydrate.
     common::log_and_verify(&registry, &mut state, Group::eq_node(h_add, h_expected));
 }
 
@@ -99,7 +99,7 @@ fn new_preserves_field_expression_commitments() {
     assert_ne!(
         canonical,
         Group::new_node(leaf(7).digest(), leaf(11).digest()),
-        "new must not reduce coordinates to value leaves in its canonical payload"
+        "new must not evaluate coordinates to value leaves in its canonical payload"
     );
 
     let (h_x, h_y) = canonical.payload.join_children().unwrap();
@@ -198,11 +198,11 @@ fn new_requires_coordinate_expression_commitments_to_be_registered() {
 
 #[test]
 fn eq_predicate_commutes_over_minted_children() {
-    // Locks in that `witness.intern` writes minted children to `state.nodes`. After `Group::Add`
-    // evaluates and mints x3=13 / y3=24, a separately-registered
+    // Locks in that `DeferredContext::register` writes minted children to `state.nodes`. After
+    // `Group::Add` evaluates and mints x3=13 / y3=24, a separately-registered
     // `val = Group::new(leaf(13).digest(), leaf(24).digest())` references those digests directly
     // without the leaves being explicitly registered. The eq predicate must succeed regardless
-    // of operand order — i.e. resolution must not depend on which side reduces first.
+    // of operand order — i.e. resolution must not depend on which side evaluates first.
     let (registry, mut state) = fresh();
     let h_g1 = register_group(&registry, &mut state, 3, 4);
     let h_g2 = register_group(&registry, &mut state, 10, 20);
@@ -228,7 +228,7 @@ fn eq_predicate_commutes_over_minted_children() {
 }
 
 #[test]
-fn reduce_rejects_new_with_non_field_leaf_children() {
+fn evaluate_rejects_new_with_non_field_leaf_children() {
     // Children resolve to canonical leaves but their tag is *not* the field leaf tag —
     // new must reject.
     let (registry, mut state) = fresh();

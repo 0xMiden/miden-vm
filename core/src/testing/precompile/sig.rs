@@ -9,7 +9,7 @@ use core::num::NonZeroU32;
 use crate::{
     Felt, ZERO,
     deferred::{
-        Node, NodeType, Payload, Precompile, PrecompileError, Tag, WitnessBuilder, precompile_id,
+        DeferredContext, Node, NodeType, Payload, Precompile, PrecompileError, Tag, precompile_id,
     },
 };
 
@@ -62,11 +62,11 @@ impl Precompile for Sig {
         }
     }
 
-    fn reduce(
+    fn evaluate(
         &self,
         args: [Felt; 3],
         payload: &Payload,
-        _witness: &mut WitnessBuilder<'_>,
+        _context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         // `decode` already gated this; `Verify` is the only discriminant.
         Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;

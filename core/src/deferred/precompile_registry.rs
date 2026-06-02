@@ -6,11 +6,11 @@ use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
     deferred::{
-        DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag, WitnessBuilder,
+        DeferredContext, DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag,
     },
 };
 
-/// Installed set of precompiles for deferred-node validation and reduction.
+/// Installed set of precompiles for deferred-node validation and evaluation.
 ///
 /// Routing is entirely id-based. The empty registry is valid but rejects every precompile-owned
 /// tag, which is useful for programs that do not use deferred precompiles.
@@ -87,7 +87,7 @@ impl PrecompileRegistry {
         for p in self.precompiles.values() {
             let nodes = p.init();
             // Cross-precompile collision: a digest already contributed by a *prior*
-            // precompile. Idempotent re-interns within one precompile are harmless.
+            // precompile. Idempotent re-registrations within one precompile are harmless.
             let local: Vec<Digest> = nodes.iter().map(Node::digest).collect();
             if local.iter().any(|d| seen.contains(d)) {
                 return Err(DeferredError::ConflictingNode.into());
@@ -139,20 +139,20 @@ impl PrecompileRegistry {
         Ok(node_type)
     }
 
-    /// Reduces a node through the precompile selected by its tag id.
+    /// Evaluates a node through the precompile selected by its tag id.
     ///
     /// Failures are wrapped with the owning precompile's name so callers can distinguish routing
     /// from precompile-local validation.
-    pub(crate) fn reduce(
+    pub(crate) fn evaluate(
         &self,
         node: &Node,
-        witness: &mut WitnessBuilder<'_>,
+        context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         if node.tag.is_framework_reserved() {
             return Err(PrecompileError::InvalidNode);
         }
         let p = self.precompiles.get(&node.tag.id).ok_or(PrecompileError::InvalidNode)?;
-        p.reduce(node.tag.args, &node.payload, witness).map_err(|source| {
+        p.evaluate(node.tag.args, &node.payload, context).map_err(|source| {
             PrecompileError::Precompile { name: p.name(), source: Box::new(source) }
         })
     }
@@ -205,11 +205,11 @@ mod tests {
             }
             Some(NodeType::Value)
         }
-        fn reduce(
+        fn evaluate(
             &self,
             args: [Felt; 3],
             payload: &Payload,
-            _witness: &mut WitnessBuilder<'_>,
+            _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
             let felts = payload.as_felts()?;
             Ok(Node::leaf(Tag::new(self.id(), args), *felts))
@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn reduce_dispatches_to_owning_precompile() {
+    fn evaluate_dispatches_to_owning_precompile() {
         let f = Fixture::new("r");
         let tag = f.tag();
         let registry = PrecompileRegistry::default().with_precompile(f);

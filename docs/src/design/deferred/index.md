@@ -12,7 +12,7 @@ DAG of nodes, committed by a single rolling digest (`DeferredState.root`, the **
 commitment**). The DAG is verified **externally**: either alongside the Miden VM's STARK proof, or
 by a dedicated *Precompile VM* whose proof attests that every committed node evaluates correctly.
 
-The DAG can be read as a small **program**: each node is a term, and reducing the commitment to
+The DAG can be read as a small **program**: each node is a term, and evaluating the commitment to
 `TRUE` proves every claim it transitively references. The framework (`miden_core::deferred`) owns
 the data model, the commitment, and the wire format; individual *precompiles* plug in the meaning
 of the nodes.
@@ -89,9 +89,9 @@ A precompile supplies three things:
   structural shape does it carry (`Value`, `Join`, or `Chunks(n)`)? Tag inspection only. For
   chunk-bodied tags, this is also the precompile-owned size gate: returning `Chunks(n)` authorizes
   the host to read exactly `n` chunks, so oversized chunk tags should be rejected here.
-- `reduce(args, payload, …) -> Result<Node>` — *normalizes* a node to its **canonical form**. The
-  common roles are: validate a value leaf (its canonical is itself), evaluate an operation (resolve
-  the child canonicals, then combine), or check a predicate (resolve operands, return the `TRUE`
+- `evaluate(args, payload, …) -> Result<Node>` — computes a node's **canonical form**. The
+  common roles are: validate a value leaf (its canonical is itself), evaluate an operation (evaluate
+  the child canonicals, then combine), or check a predicate (evaluate operands, return the `TRUE`
   node on success or fail otherwise). These roles are conventions, not a fixed taxonomy — a
   precompile is free to define unary operations, multi-ary constructors, and so on over the three
   structural shapes.
@@ -106,13 +106,14 @@ event of the same name get different ids by construction. The registry rejects m
 duplicate ids at construction. The default registry is empty and rejects every tag. Hosts install
 precompiles directly or by loading `HostLibrary` values that export a registry.
 
-During reduction the framework hands the precompile a `WitnessBuilder`, through which it can
-`resolve` a child digest to its canonical or `intern` a freshly-minted child into the DAG. Interned
-helper nodes are validated under the same registry and must satisfy the ordinary child-closure
-rules. The precompile never touches the data model or the commitment directly — it supplies only
-per-node meaning, and the framework drives the depth-first recursion.
+During evaluation the framework hands the precompile a `DeferredContext`, through which it can
+`resolve` a child digest by evaluating it to its canonical node or `register` a freshly-minted
+helper node into the DAG. Registered helper nodes are validated under the same registry and must
+satisfy the ordinary child-closure rules. The precompile never touches the data model or the
+commitment directly — it supplies only per-node meaning, and the framework drives the depth-first
+recursion.
 
-The in-memory `DeferredState` keeps an evaluation cache (`evals`) alongside materialized DAG nodes.
+The in-memory `DeferredState` keeps an evaluation cache (`evals`) alongside registered DAG nodes.
 Those cache entries are valid only under the same `PrecompileRegistry` semantics that populated
 them, and they are not serialized as trusted state.
 
@@ -124,12 +125,12 @@ advice. The `sys` core-library module wraps the two register events in a thin he
 
 | Event (`adv.*`)            | `sys` helper     | Operand stack in                 | Effect |
 | -------------------------- | ---------------- | -------------------------------- | ------ |
-| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and materializes the expression node. Join-shaped nodes may reference only already-materialized children, except for the implicit `TRUE_DIGEST`. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and materializes the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
-| `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, reduces it, interns the canonical, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
+| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and registers the expression node. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and registers the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
+| `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it, stores the canonical node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure; they do not
-reduce the node. They are pure host hints that populate the DAG.
+evaluate the node. They are pure host hints that populate the DAG.
 
 ### Why the digest is computed in-circuit
 
@@ -142,15 +143,15 @@ composes with the verifier:
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
 - once the deferred root is threaded into proof public inputs, the **deferred-commitment root
   match** will bind that digest to the wire the verifier rehydrates;
-- `DeferredState::from_wire` then rehydrates the canonical wire opening and reduces the expected
+- `DeferredState::from_wire` then rehydrates the canonical wire opening and evaluates the expected
   root from wire data.
 
-Once the root is public, these pieces bind the wire — and therefore every reduction the verifier
+Once the root is public, these pieces bind the wire — and therefore every evaluation the verifier
 re-checks — to the data the circuit actually committed to.
 
 ### Why `evaluate_deferred` is a bare event
 
-`evaluate_deferred`'s output is a *deferred reduction* the circuit cannot perform, so it must come
+`evaluate_deferred`'s output is a *deferred evaluation* the circuit cannot perform, so it must come
 through advice — but that makes it an **unbound host hint**. Using it soundly requires re-hashing
 the returned `tag || payload` in-circuit and logging a predicate that `from_wire` re-checks; an
 in-circuit `eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
@@ -167,12 +168,12 @@ error before any felts are pushed.
 
 The commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word (`TRUE_DIGEST`),
 which is also the digest of the always-present canonical `Node::TRUE`. To fold a verified
-**statement** — any materialized digest that reduces to `TRUE`, not necessarily a primitive
-predicate node — the framework interns an AND node
+**statement** — any registered digest that evaluates to `TRUE`, not necessarily a primitive
+predicate node — the framework registers an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
 The append path first evaluates the statement under the installed registry and rejects missing or
 non-`TRUE` statements. Wire verification does not replay append history; it opens the wire's
-implicit root and reduces that root directly. The digest is structural: even `AND(TRUE, TRUE)` hashes
+implicit root and evaluates that root directly. The digest is structural: even `AND(TRUE, TRUE)` hashes
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
@@ -180,8 +181,8 @@ semantically to `TRUE`.
 > deferred DAG state is accumulated host-side and verified through `DeferredStateWire`; the legacy
 > precompile transcript path remains documented separately.
 
-The verifier's obligation collapses to a single fixed point: **reduce the root to `TRUE`, and every
-logged statement holds.** There is no separate finalization step.
+The verifier's obligation collapses to a single fixed point: **evaluate the root to `TRUE`, and
+every logged statement holds.** There is no separate finalization step.
 
 ## Wire format and verification
 
@@ -197,15 +198,15 @@ back to a validated state. It runs as a structural decode, a canonicality check,
 evaluation. This validates the wire's own implicit root; proof plumbing must separately compare the
 returned `state.root()` against the externally committed root.
 
-1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each materialized
+1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
    entry (translating child indices back to digests), decode its tag, check that the entry variant
-   and payload shape match the declared `NodeType`, reject materialized `TRUE`, reject duplicate
+   and payload shape match the declared `NodeType`, reject explicit `TRUE`, reject duplicate
    digests, and require join children to reference only earlier entries;
 2. **canonicality** — register decoded entries into a fresh state, set the implicit wire root as
    `state.root`, and require `state.to_wire(registry) == wire`; this rejects dangling nodes,
    non-root-last encodings, and equivalent-but-reordered topological wire;
 3. **semantic** — evaluate the implicit wire root under the installed precompiles and require it to
-   reduce to the canonical `TRUE` node. Evaluation repopulates `evals` and may materialize
+   equal the canonical `TRUE` node. Evaluation repopulates `evals` and may insert
    canonical/helper nodes in addition to the wire nodes.
 
 A wire that yields any integrity error is rejected; a faithful one reconstructs a state whose root is

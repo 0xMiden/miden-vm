@@ -26,13 +26,13 @@ fn end_to_end_register_evaluate_assert_extract() {
     let canonical = state.evaluate(&registry, mul).unwrap();
     assert_eq!(canonical, leaf(35));
 
-    // Predicate verification: register interns the eq node; evaluate returns Node::TRUE.
+    // Predicate verification: register materializes the eq node; evaluate returns Node::TRUE.
     let assertion = Node::join(Uint::eq_tag(), mul, expected);
     let assertion_digest = state.register(&registry, assertion).unwrap();
     let result = state.evaluate(&registry, assertion_digest).unwrap();
     assert!(result.is_true_node());
 
-    // Evaluating the tree interns canonical(add)=leaf(7) into the durable node store.
+    // Evaluating the tree materializes canonical(add)=leaf(7) into the durable node store.
     assert_eq!(state.evaluate(&registry, leaf(7).digest()).unwrap(), leaf(7));
 
     // Log the proven equality and round-trip the whole transcript.

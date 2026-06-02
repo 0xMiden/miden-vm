@@ -21,19 +21,30 @@ pub struct DeferredState {
 }
 ```
 
-## Durable nodes
+## Vocabulary
+
+- **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
+  through `DeferredState::register`, evaluation storing canonical/helper nodes, `append_statement`
+  storing framework `AND` nodes, or wire rehydration rebuilding entries.
+- **Evaluated** means a registered input digest has an evaluation memo:
+  `evals[input_digest] = canonical_digest`. The canonical node is stored in `nodes`.
+- **Logged** or **root-reachable** means a registered digest contributes to `DeferredState.root`.
+  Only the root-reachable closure is serialized by `to_wire`; registered/evaluated orphans are
+  dropped.
+
+## Registered nodes
 
 `nodes` is the only durable node store.
 
 - `TRUE_DIGEST` is always present and maps to `Node::TRUE`.
 - `Node::TRUE` costs no budget.
 - Every non-TRUE node is keyed by `node.digest()`.
-- Join-shaped nodes may reference only already-materialized children, except for the implicit
+- Join-shaped nodes may reference only children already present in `nodes`, except for the implicit
   `TRUE_DIGEST`.
 - Re-registering identical content is idempotent and free.
 - Reusing an existing digest for different content is rejected as a conflicting node.
 
-Registration materializes and shape-checks a node. It does not reduce operations or prove
+Registration stores and shape-checks a node in `nodes`. It does not evaluate operations or prove
 predicates; false predicates fail only when evaluated or logged as statements.
 
 ## One remaining budget
@@ -50,7 +61,7 @@ registry's `init()` constants, charging them against that same budget.
 Every new unique durable node inserted into `nodes` decrements `remaining_elements` by the node's
 field-element footprint using checked subtraction. Duplicate insertion is free, so registering the
 same chunk node at the exact budget limit succeeds. Evaluation memos do not have a separate budget
-and do not double-count canonical payloads; only canonical/helper nodes newly materialized in
+and do not double-count canonical payloads; only canonical/helper nodes newly inserted into
 `nodes` are charged.
 
 For chunk-bodied nodes, the precompile's `decode` result is also the size gate: returning
@@ -74,10 +85,10 @@ Canonical node contents live only in `nodes`.
 
 Evaluation first requires the input digest to be present in `nodes`; a memo entry alone never
 creates membership. On a memo hit, the canonical digest is looked up in `nodes` and the canonical
-node is returned. On a miss, the framework reduces the node, inserts/materializes the canonical node
+node is returned. On a miss, the framework evaluates the node, stores the canonical node in `nodes`
 through the same insertion helper used by registration, then records the memo.
 
-Framework nodes reduce as follows:
+Framework nodes evaluate as follows:
 
 ```text
 Node::TRUE => Node::TRUE
@@ -87,13 +98,13 @@ Node::AND(lhs, rhs) =>
   Node::TRUE
 ```
 
-Precompile-owned nodes are reduced by `PrecompileRegistry::reduce`, which dispatches to the owning
-`Precompile` with a `WitnessBuilder` for resolving children and interning helper nodes.
+Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which dispatches to the
+owning `Precompile` with a `DeferredContext` for resolving children and registering helper nodes.
 
 ## Transcript and wire
 
 `root` starts at `TRUE_DIGEST`. `append_statement(registry, stmt_digest)` evaluates the statement
-and requires it to reduce to `Node::TRUE`, then appends one framework `AND` node:
+and requires it to evaluate to `Node::TRUE`, then appends one framework `AND` node:
 
 ```text
 next_root = digest(Node::and(previous_root, stmt_digest))
@@ -103,8 +114,8 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the final entry.
 `from_wire(wire, registry, max_elements)` decodes untrusted wire, rejects non-canonical or dangling
 wire by requiring `state.to_wire(registry) == wire`, then evaluates the implicit wire root to
-`Node::TRUE`. Evaluation repopulates `evals` and may materialize canonical/helper nodes in addition
-to the wire nodes. Proof plumbing should compare the returned `state.root()` to the externally
+`Node::TRUE`. Evaluation repopulates `evals` and may insert canonical/helper nodes in addition to
+the wire nodes. Proof plumbing should compare the returned `state.root()` to the externally
 committed root.
 
 ## Public API
