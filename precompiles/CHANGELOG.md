@@ -10,3 +10,7 @@
 - Added the `miden-precompiles` MASM package (namespace `miden::precompiles`) and the
   `PrecompilesLibrary` wrapper that embeds and loads it, with a duplicated copy of the deferred-DAG
   helpers under `miden::precompiles::sys`.
+- Added a reusable hash-precompile base (the `HashFunction` trait + `HashPrecompile<H>`) and the
+  `keccak256` and `sha512` deferred precompiles built on it, with MASM wrappers under
+  `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`) sharing a
+  `register_preimage` helper; `registry()` installs both.

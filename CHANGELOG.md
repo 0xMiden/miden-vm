@@ -18,6 +18,7 @@
 - Removed the legacy LALRPOP parser backend
 - Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with a structured `Tag { id, args }`, wire format, the `Precompile` trait + `PrecompileRegistry`, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
 - Added the `miden-precompiles` crate as the home for concrete deferred precompile implementations, built on top of the deferred framework in `miden_core::deferred`.
+- Added the `keccak256` and `sha512` deferred precompiles to `miden-precompiles`, built on a shared `HashPrecompile<H>` base, with MASM wrappers under `miden::precompiles::crypto::hashes`.
 
 #### Fixes
 
