@@ -1,6 +1,5 @@
-## 0.26.0 (TBD)
+## 0.26.0 (06-02-2026)
 
-- [BREAKING] Added reusable preprocessed trace setup artifacts for Lifted STARKs: AIRs can declare fixed preprocessed columns, provers build and reuse a `Preprocessed` commitment bundle, and verifier instances receive the trusted preprocessed commitment ([#1021](https://github.com/0xMiden/crypto/pull/1021)).
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
 - Optimized prover quotient evaluation by evaluating each AIR's quotient on its native coset (size `n_j · D_j`) and lifting per-AIR, instead of always on the global maximum coset; constraint division is fused into the constraint evaluation loop ([#991](https://github.com/0xMiden/crypto/pull/991)).
 - [BREAKING] Replaced the per-AIR witness/aux-builder proving model (`AirInstance`, `AirWitness`, `AuxBuilder`, `prove_multi` / `verify_multi`) with a `MultiAir` trait that owns its AIRs (each builds its own aux trace via `LiftedAir::build_aux_trace`), plus validated `Statement` / `ProverStatement` structs carried by `ProverInstance` / `VerifierInstance`. `LiftedAir::reduced_aux_values` and `num_var_len_public_inputs` are replaced by `MultiAir::eval_external`, which returns the cross-AIR external assertions as a flat list of extension-field values that must equal zero, fed by an `aux_inputs` slice whose schema each `MultiAir` owns and validates ([#992](https://github.com/0xMiden/crypto/pull/992)).
@@ -11,9 +10,10 @@
 - [BREAKING] Reduced `LargeSmt<S>` cache depth from 24 to 16 levels ([#1011](https://github.com/0xMiden/crypto/pull/1011)).
 - [BREAKING] Implemented two-phase commit_mutations() / apply_mutations()-style API for `LargeSmtForest` ([#1018](https://github.com/0xMiden/crypto/pull/1018)).
 - [BREAKING] Tightened the `miden-lifted-stark` public API surface: dropped the wide crate-root re-export list (callers now import from `miden_lifted_stark::air` and `miden_lifted_stark::{lmcs, pcs, proof, prover, verifier}` directly), demoted internal submodules to `pub(crate)`/`pub(super)`, and folded the `transcript` module into `proof` (`TranscriptChallenger` / `TranscriptData` / `TranscriptError` are re-exported there). Renamed the proof artifact types — `StarkProof` → `StarkProofData` (wire artifact) and `StarkTranscript` → `StarkProof` (parsed view, built via `StarkProof::from_data`) — and `*::from_verifier_channel` → `*::read_from_channel` on the PCS sub-proofs. Dropped the panicking domain constructors (`TwoAdicCoset::unshifted`, `LiftedDomain::{canonical, sub_domain}`) in favour of the fallible `try_*` variants ([#1020](https://github.com/0xMiden/crypto/pull/1020)).
+- [BREAKING] Added reusable preprocessed trace setup artifacts for Lifted STARKs: AIRs can declare fixed preprocessed columns, provers build and reuse a `Preprocessed` commitment bundle, and verifier instances receive the trusted preprocessed commitment ([#1021](https://github.com/0xMiden/crypto/pull/1021)).
 - [BREAKING] Fixed RocksDB CLI safety, non-canonical serde input handling, and qualified `WordWrapper` derive paths ([#1022](https://github.com/0xMiden/crypto/pull/1022)).
 - [BREAKING] Simplify `LargeSmtForest` backend API ([#1030](https://github.com/0xMiden/crypto/pull/1030)).
-- [BREAKING] Made `LargeSmt` leaf/entry/inner node iterators fallible.
+- [BREAKING] Made `LargeSmt` leaf/entry/inner node iterators fallible ([#1032](https://github.com/0xMiden/crypto/pull/1032)).
 
 ## 0.25.1 (2026-05-21)
 
