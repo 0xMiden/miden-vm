@@ -581,7 +581,7 @@ impl PackageDebugInfo {
         self.source_map.as_ref()?.first_asm_op_for_source_node(source_node)
     }
 
-    /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
+    /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(
         &self,
         source_node: DebugSourceMastNodeId,
@@ -1010,13 +1010,15 @@ impl DebugSourceMapSection {
         self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
     }
 
-    /// Returns the assembly operation row for `source_node` at `op_idx`, if present.
+    /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(
         &self,
         source_node: DebugSourceMastNodeId,
         op_idx: u32,
     ) -> Option<&DebugSourceAsmOp> {
-        self.asm_ops_for_source_node(source_node).find(|row| row.op_idx == op_idx)
+        self.asm_ops_for_source_node(source_node)
+            .filter(|row| row.op_idx <= op_idx)
+            .max_by_key(|row| row.op_idx)
     }
 
     /// Returns debug variable rows for a source/debug occurrence.
@@ -1797,6 +1799,7 @@ mod tests {
         assert_eq!(child_a_cursor.source_node(), child_a);
         assert_eq!(child_b_cursor.source_node(), child_b);
         assert_eq!(child_a_cursor.asm_op_for_operation(0).unwrap().context_name, "child_a");
+        assert_eq!(child_a_cursor.asm_op_for_operation(1).unwrap().context_name, "child_a");
         assert_eq!(child_b_cursor.asm_op_for_operation(0).unwrap().context_name, "child_b");
         assert_eq!(
             child_a_cursor

@@ -47,17 +47,28 @@ where
     }
 
     // execute the appropriate branch
-    state
-        .continuation_stack
-        .push_finish_split_with_source(node_id, state.current_source_node());
     if condition == ONE {
+        let source_node = match state.child_source_node(0) {
+            Ok(source_node) => source_node,
+            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        };
         state
             .continuation_stack
-            .push_start_node_with_source(split_node.on_true(), state.child_source_node(0));
+            .push_finish_split_with_source(node_id, state.current_source_node());
+        state
+            .continuation_stack
+            .push_start_node_with_source(split_node.on_true(), source_node);
     } else if condition == ZERO {
+        let source_node = match state.child_source_node(1) {
+            Ok(source_node) => source_node,
+            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        };
         state
             .continuation_stack
-            .push_start_node_with_source(split_node.on_false(), state.child_source_node(1));
+            .push_finish_split_with_source(node_id, state.current_source_node());
+        state
+            .continuation_stack
+            .push_start_node_with_source(split_node.on_false(), source_node);
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
         return ControlFlow::Break(BreakReason::Err(err.with_context(

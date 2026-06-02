@@ -88,12 +88,16 @@ where
 
     // Update the continuation stack: first push the finish call continuation, then the callee node
     // (to be executed next).
+    let callee_source_node = match state.child_source_node(0) {
+        Ok(source_node) => source_node,
+        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+    };
     state
         .continuation_stack
         .push_finish_call_with_source(current_node_id, state.current_source_node());
     state
         .continuation_stack
-        .push_start_node_with_source(call_node.callee(), state.child_source_node(0));
+        .push_start_node_with_source(call_node.callee(), callee_source_node);
 
     // Finalize the clock cycle corresponding to the CALL or SYSCALL operation.
     finalize_clock_cycle(

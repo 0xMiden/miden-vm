@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
+    BaseHost, BreakReason, ContextId, ExecutionError, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     errors::PackageSourceDebugContext,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
@@ -53,15 +53,25 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
         self.current_source_node
     }
 
-    pub fn child_source_node(&self, child_index: usize) -> Option<DebugSourceMastNodeId> {
-        let source_debug_info = self.source_debug_info?;
-        let current_source_node = self.current_source_node?;
+    pub fn child_source_node(
+        &self,
+        child_index: usize,
+    ) -> Result<Option<DebugSourceMastNodeId>, ExecutionError> {
+        let Some(source_debug_info) = self.source_debug_info else {
+            return Ok(None);
+        };
+        let Some(current_source_node) = self.current_source_node else {
+            return Ok(None);
+        };
 
-        source_debug_info
+        Ok(source_debug_info
             .child_source_node(current_source_node, child_index)
-            .ok()
-            .flatten()
-            .map(|(source_node, _)| source_node)
+            .map_err(|_| {
+                ExecutionError::Internal(
+                    "package debug source graph has malformed child references",
+                )
+            })?
+            .map(|(source_node, _)| source_node))
     }
 
     pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'a>> {
@@ -128,7 +138,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
+///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation, source_node } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -334,10 +344,12 @@ pub enum InternalBreakReason<F> {
         basic_block_node_id: MastNodeId,
         op_idx: usize,
         continuation: Continuation<F>,
+        source_node: Option<DebugSourceMastNodeId>,
     },
     LoadMastForestFromDyn {
         dyn_node_id: MastNodeId,
         callee_hash: Word,
+        source_node: Option<DebugSourceMastNodeId>,
     },
     LoadMastForestFromExternal {
         external_node_id: MastNodeId,

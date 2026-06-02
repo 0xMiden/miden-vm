@@ -258,7 +258,7 @@ impl Deserializable for Package {
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast, true)
+        Self::read_from_with_header_and_mast(source, header, mast, false)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -656,8 +656,8 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
-        TargetType,
+        Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
+        ProcedureExport, SectionId, TargetType,
         debug_info::{
             DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
             DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
@@ -803,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn package_checked_deserialization_strips_forest_debug_but_preserves_package_debug() {
+    fn package_checked_deserialization_preserves_untrusted_debug_sections() {
         let package = build_package_with_debug_info();
         let bytes = package.to_bytes();
 
@@ -815,7 +815,10 @@ mod tests {
                 .iter()
                 .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
         );
-        assert!(deserialized.debug_info().unwrap().is_some());
+        assert!(matches!(
+            deserialized.debug_info(),
+            Err(PackageDebugInfoError::UntrustedSections)
+        ));
     }
 
     #[test]

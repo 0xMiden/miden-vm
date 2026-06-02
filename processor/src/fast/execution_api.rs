@@ -6,7 +6,7 @@ use miden_core::{
     mast::{MastForest, MastNodeId},
     program::{Kernel, MIN_STACK_DEPTH, Program, StackOutputs},
 };
-use miden_mast_package::debug_info::{DebugSourceCursor, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceCursor, DebugSourceMastNodeId, PackageDebugInfo};
 use tracing::instrument;
 
 use super::{
@@ -17,7 +17,7 @@ use super::{
 use crate::{
     ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceBuildInputs,
     continuation_stack::ContinuationStack,
-    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
+    errors::{MapExecErr, MapExecErrNoCtx, OperationError, PackageSourceDebugContext},
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
@@ -521,11 +521,13 @@ impl FastProcessor {
                     basic_block_node_id,
                     op_idx,
                     continuation,
+                    source_node,
                 } => {
                     self.op_emit_sync(host, current_forest, basic_block_node_id, op_idx)?;
 
                     finish_emit_op_execution(
                         continuation,
+                        source_node,
                         self,
                         continuation_stack,
                         current_forest,
@@ -533,12 +535,18 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+                InternalBreakReason::LoadMastForestFromDyn {
+                    dyn_node_id,
+                    callee_hash,
+                    source_node,
+                } => {
                     let (root_id, new_forest) = match self.load_mast_forest_sync(
                         callee_hash,
                         host,
                         current_forest,
                         dyn_node_id,
+                        package_debug_info,
+                        source_node,
                     ) {
                         Ok(result) => result,
                         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
@@ -563,6 +571,8 @@ impl FastProcessor {
                         host,
                         current_forest,
                         external_node_id,
+                        None,
+                        None,
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -635,11 +645,13 @@ impl FastProcessor {
                     basic_block_node_id,
                     op_idx,
                     continuation,
+                    source_node,
                 } => {
                     self.op_emit(host, current_forest, basic_block_node_id, op_idx).await?;
 
                     finish_emit_op_execution(
                         continuation,
+                        source_node,
                         self,
                         continuation_stack,
                         current_forest,
@@ -647,9 +659,20 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+                InternalBreakReason::LoadMastForestFromDyn {
+                    dyn_node_id,
+                    callee_hash,
+                    source_node,
+                } => {
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(callee_hash, host, current_forest, dyn_node_id)
+                        .load_mast_forest(
+                            callee_hash,
+                            host,
+                            current_forest,
+                            dyn_node_id,
+                            package_debug_info,
+                            source_node,
+                        )
                         .await
                     {
                         Ok(result) => result,
@@ -671,7 +694,14 @@ impl FastProcessor {
                     procedure_hash,
                 } => {
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(procedure_hash, host, current_forest, external_node_id)
+                        .load_mast_forest(
+                            procedure_hash,
+                            host,
+                            current_forest,
+                            external_node_id,
+                            None,
+                            None,
+                        )
                         .await
                     {
                         Ok(result) => result,
@@ -724,14 +754,25 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         current_forest: &MastForest,
         node_id: MastNodeId,
+        package_debug_info: Option<&PackageDebugInfo>,
+        source_node: Option<DebugSourceMastNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            crate::errors::procedure_not_found_with_context(
-                node_digest,
-                current_forest,
-                node_id,
-                host,
-            )
+            match (package_debug_info, source_node) {
+                (Some(debug_info), Some(source_node)) => {
+                    crate::errors::procedure_not_found_with_package_source_context(
+                        node_digest,
+                        PackageSourceDebugContext::new(debug_info, source_node),
+                        host,
+                    )
+                },
+                _ => crate::errors::procedure_not_found_with_context(
+                    node_digest,
+                    current_forest,
+                    node_id,
+                    host,
+                ),
+            }
         })?;
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
@@ -755,16 +796,27 @@ impl FastProcessor {
         host: &mut impl Host,
         current_forest: &MastForest,
         node_id: MastNodeId,
+        package_debug_info: Option<&PackageDebugInfo>,
+        source_node: Option<DebugSourceMastNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
             mast_forest
         } else {
-            return Err(crate::errors::procedure_not_found_with_context(
-                node_digest,
-                current_forest,
-                node_id,
-                host,
-            ));
+            return Err(match (package_debug_info, source_node) {
+                (Some(debug_info), Some(source_node)) => {
+                    crate::errors::procedure_not_found_with_package_source_context(
+                        node_digest,
+                        PackageSourceDebugContext::new(debug_info, source_node),
+                        host,
+                    )
+                },
+                _ => crate::errors::procedure_not_found_with_context(
+                    node_digest,
+                    current_forest,
+                    node_id,
+                    host,
+                ),
+            });
         };
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
