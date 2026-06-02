@@ -1,15 +1,18 @@
-use std::{path::Path, process::Command, string::String};
+use std::{path::Path, process::Command, string::String, sync::Arc};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
+    operations::{DebugVarInfo, DebugVarLocation, Operation},
     serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,
 };
 use miden_mast_package::{
-    Section, SectionId,
+    PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
-        DebugFunctionsSection, DebugSourceGraphSection, DebugSourceMapSection,
-        DebugSourceMastNodeId, DebugSourcesSection, DebugTypesSection,
+        DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection,
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+        DebugSourceMastNodeId, DebugSourceVar, DebugSourcesSection, DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -376,6 +379,214 @@ end
     assert!(
         source_nodes_by_exec.values().any(|source_nodes| source_nodes.len() >= 2),
         "source-keyed asm-op rows should preserve multiple metadata occurrences for one execution node",
+    );
+}
+
+fn debug_bearing_static_package(
+    name: &str,
+    export: &str,
+    context: &str,
+    var_name: &str,
+    marker_export: Option<(&str, Operation)>,
+) -> MastPackage {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .expect("test package block should build");
+    forest.make_root(root);
+    let digest = forest[root].digest();
+
+    let mut exports = Vec::new();
+    let export_path =
+        miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
+    let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
+    let export_path = Arc::from(export_path.into_boxed_path());
+    let source_root = DebugSourceMastNodeId::from(0);
+    let export = ProcedureExport::new(export_path, Some(root), digest, None)
+        .with_source_node(Some(source_root));
+    exports.push(PackageExport::Procedure(export));
+
+    if let Some((marker_export, marker_op)) = marker_export {
+        let marker_root = BasicBlockNodeBuilder::new(vec![marker_op])
+            .add_to_forest(&mut forest)
+            .expect("test package marker block should build");
+        forest.make_root(marker_root);
+        let marker_digest = forest[marker_root].digest();
+        let marker_path = miden_assembly_syntax::ast::PathBuf::new(marker_export)
+            .expect("test marker export path should parse");
+        let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
+        let marker_path = Arc::from(marker_path.into_boxed_path());
+        exports.push(PackageExport::Procedure(ProcedureExport::new(
+            marker_path,
+            Some(marker_root),
+            marker_digest,
+            None,
+        )));
+    }
+
+    let source_graph = DebugSourceGraphSection {
+        version: DEBUG_SOURCE_GRAPH_VERSION,
+        nodes: vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+        roots: vec![source_root],
+    };
+    let source_map = DebugSourceMapSection {
+        version: DEBUG_SOURCE_MAP_VERSION,
+        asm_ops: vec![DebugSourceAsmOp::new(
+            source_root,
+            0,
+            None,
+            context.to_string(),
+            "add".to_string(),
+            1,
+        )],
+        debug_vars: vec![DebugSourceVar::new(
+            source_root,
+            0,
+            DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
+        )],
+    };
+
+    let mut package = MastPackage::create(
+        PackageId::from(name),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        Arc::new(forest),
+        exports,
+        [],
+    )
+    .expect("test package should be valid");
+    package.sections = vec![
+        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+    ];
+    package
+}
+
+#[test]
+fn static_linking_preserves_debug_rows_for_deduped_execution_nodes() {
+    let tempdir = TempDir::new().unwrap();
+
+    let depa = debug_bearing_static_package(
+        "depa",
+        "deps::depa::leaf",
+        "depa_ctx",
+        "depa_var",
+        Some(("deps::depa::marker", Operation::Mul)),
+    );
+    let depa_path = tempdir.path().join("depa.masp");
+    depa.write_to_file(&depa_path).unwrap();
+
+    let depb = debug_bearing_static_package(
+        "depb",
+        "deps::depb::leaf",
+        "depb_ctx",
+        "depb_var",
+        Some(("deps::depb::marker", Operation::Incr)),
+    );
+    let depb_path = tempdir.path().join("depb.masp");
+    depb.write_to_file(&depb_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+depa = { path = "../depa.masp", linkage = "static" }
+depb = { path = "../depb.masp", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::deps::depa::leaf
+    exec.::deps::depb::leaf
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&root_manifest, Some("dev"))
+        .expect("root package with static debug deps should build");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug sections should decode")
+        .expect("root package should contain debug info");
+    let source_graph = debug_info
+        .source_graph
+        .as_ref()
+        .expect("root package should contain source graph");
+
+    let source_for_context = |context_name: &str| {
+        debug_info
+            .source_map
+            .as_ref()
+            .expect("root package should contain source map")
+            .asm_ops
+            .iter()
+            .find(|row| row.context_name == context_name)
+            .map(|row| row.source_node)
+            .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
+    };
+    let depa_source = source_for_context("depa_ctx");
+    let depb_source = source_for_context("depb_ctx");
+    assert_ne!(depa_source, depb_source, "static package source occurrences must stay distinct",);
+
+    let depa_exec = source_graph.source_node(depa_source).unwrap().exec_node;
+    let depb_exec = source_graph.source_node(depb_source).unwrap().exec_node;
+    assert_eq!(
+        depa_exec, depb_exec,
+        "identical static dependency bodies should dedup to one execution node",
+    );
+
+    let contexts_for_deduped_exec = debug_info
+        .source_nodes_for_exec_node(depa_exec)
+        .filter_map(|(source_node, _)| {
+            debug_info
+                .first_asm_op_for_source_node(source_node)
+                .map(|row| row.context_name.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
+    assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
+
+    let depa_vars = debug_info
+        .debug_vars_for_operation(depa_source, 0)
+        .map(|row| row.var.name())
+        .collect::<Vec<_>>();
+    let depb_vars = debug_info
+        .debug_vars_for_operation(depb_source, 0)
+        .map(|row| row.var.name())
+        .collect::<Vec<_>>();
+    assert_eq!(depa_vars, vec!["depa_var"]);
+    assert_eq!(depb_vars, vec!["depb_var"]);
+
+    let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
+        .expect("root package should deserialize as trusted");
+    let round_tripped_debug_info = round_tripped
+        .debug_info()
+        .expect("round-tripped debug sections should decode")
+        .expect("round-tripped package should contain debug info");
+    assert_eq!(
+        round_tripped_debug_info
+            .first_asm_op_for_source_node(depa_source)
+            .unwrap()
+            .context_name,
+        "depa_ctx",
+    );
+    assert_eq!(
+        round_tripped_debug_info
+            .debug_vars_for_operation(depb_source, 0)
+            .map(|row| row.var.name())
+            .collect::<Vec<_>>(),
+        vec!["depb_var"],
     );
 }
 
