@@ -136,5 +136,6 @@ concrete node should explicitly `register` it and then `evaluate` the returned d
 
 ## Scope note
 
-This pass simplifies deferred state and budgeting only. It does not change `log_precompile`
-behavior or the legacy precompile transcript path.
+This pass simplifies deferred state and budgeting while the legacy request-list precompile path
+remains in place. `log_precompile` folds statement words in the framework `AND` domain
+(`Tag::AND`, capacity `[1, 0, 0, 0]`).
