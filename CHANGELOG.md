@@ -1,3 +1,5 @@
+## 0.27.0 (TBD)
+
 ## 0.26.0 (06-02-2026)
 
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).
