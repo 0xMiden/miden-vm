@@ -1,10 +1,13 @@
 use alloc::{boxed::Box, vec::Vec};
 
-use super::{IN_MEMORY_DEPTH, LargeSmt, SmtStorageReader, is_empty_parent};
+use super::{IN_MEMORY_DEPTH, LargeSmtResult, StorageResult, is_empty_parent};
 use crate::{
     Word,
     hash::poseidon2::Poseidon2,
-    merkle::{InnerNodeInfo, smt::large::subtree::Subtree},
+    merkle::{
+        InnerNodeInfo,
+        smt::{LargeSmt, SmtStorageReader, large::subtree::Subtree},
+    },
 };
 
 // ITERATORS
@@ -16,7 +19,7 @@ enum InnerNodeIteratorState<'a> {
         large_smt_in_memory_nodes: &'a [Word],
     },
     Subtree {
-        subtree_iter: Box<dyn Iterator<Item = Subtree> + 'a>,
+        subtree_iter: Box<dyn Iterator<Item = StorageResult<Subtree>> + 'a>,
         current_subtree_node_iter: Option<Box<dyn Iterator<Item = InnerNodeInfo> + 'a>>,
     },
     Done,
@@ -41,7 +44,7 @@ impl<'a, S: SmtStorageReader> LargeSmtInnerNodeIterator<'a, S> {
 }
 
 impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
-    type Item = InnerNodeInfo;
+    type Item = LargeSmtResult<InnerNodeInfo>;
 
     /// Returns the next inner node info in the tree.
     ///
@@ -75,11 +78,11 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                         let child_depth = depth + 1;
 
                         if !is_empty_parent(left, right, child_depth) {
-                            return Some(InnerNodeInfo {
+                            return Some(Ok(InnerNodeInfo {
                                 value: Poseidon2::merge(&[left, right]),
                                 left,
                                 right,
-                            });
+                            }));
                         }
                     }
 
@@ -92,11 +95,11 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                             };
                             continue; // Start processing subtrees immediately
                         },
-                        Err(_e) => {
-                            // Storage error occurred - we should propagate this properly
-                            // For now, transition to Done state to avoid infinite loops
+                        Err(e) => {
+                            // Storage error occurred - we should propagate this error.
+                            // We also transition to Done state to avoid infinite loops.
                             self.state = InnerNodeIteratorState::Done;
-                            return None;
+                            return Some(LargeSmtResult::Err(e.into()));
                         },
                     }
                 },
@@ -107,12 +110,12 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                         if let Some(node_iter) = current_subtree_node_iter
                             && let Some(info) = node_iter.as_mut().next()
                         {
-                            return Some(info);
+                            return Some(Ok(info));
                         }
 
                         // Current subtree exhausted, move to next subtree
                         match subtree_iter.next() {
-                            Some(next_subtree) => {
+                            Some(Ok(next_subtree)) => {
                                 // Collect is necessary here because iter_inner_node_info returns
                                 // an iterator borrowing from next_subtree, which would outlive
                                 // the subtree itself. We need to eagerly evaluate to owned data.
@@ -121,6 +124,7 @@ impl<S: SmtStorageReader> Iterator for LargeSmtInnerNodeIterator<'_, S> {
                                     next_subtree.iter_inner_node_info().collect();
                                 *current_subtree_node_iter = Some(Box::new(infos.into_iter()));
                             },
+                            Some(Err(err)) => return Some(Err(err.into())),
                             None => {
                                 self.state = InnerNodeIteratorState::Done;
                                 return None; // All subtrees processed

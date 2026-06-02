@@ -249,7 +249,7 @@ use crate::{
 };
 
 mod error;
-pub use error::LargeSmtError;
+pub use error::{LargeSmtError, LargeSmtResult};
 
 #[cfg(test)]
 mod property_tests;
@@ -262,7 +262,7 @@ pub use subtree::{Subtree, SubtreeError};
 mod storage;
 pub use storage::{
     MemoryStorage, MemoryStorageSnapshot, SmtStorage, SmtStorageReader, StorageError,
-    StorageUpdateParts, StorageUpdates, SubtreeUpdate,
+    StorageResult, StorageUpdateParts, StorageUpdates, SubtreeUpdate,
 };
 #[cfg(feature = "rocksdb")]
 pub use storage::{RocksDbConfig, RocksDbSnapshotStorage, RocksDbStorage};
@@ -419,40 +419,61 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     // --------------------------------------------------------------------------------------------
 
     /// Returns an iterator over the leaves of this [`LargeSmt`].
-    /// Note: This iterator returns owned SmtLeaf values.
+    ///
+    /// The returned iterator is fallible: each item is a [`LargeSmtResult`] so storage errors
+    /// encountered while advancing the iterator are surfaced instead of being skipped.
+    ///
+    /// Note: This iterator returns owned [`SmtLeaf`] values.
     ///
     /// # Errors
     /// Returns an error if the storage backend fails to create the iterator.
     pub fn leaves(
         &self,
-    ) -> Result<impl Iterator<Item = (LeafIndex<SMT_DEPTH>, SmtLeaf)>, LargeSmtError> {
+    ) -> LargeSmtResult<impl Iterator<Item = LargeSmtResult<(LeafIndex<SMT_DEPTH>, SmtLeaf)>> + '_>
+    {
         let iter = self.storage.iter_leaves()?;
-        Ok(iter.map(|(idx, leaf)| (LeafIndex::new_max_depth(idx), leaf)))
+        Ok(iter.map(|result| {
+            result
+                .map(|(idx, leaf)| (LeafIndex::new_max_depth(idx), leaf))
+                .map_err(Into::into)
+        }))
     }
 
     /// Returns an iterator over the key-value pairs of this [`LargeSmt`].
-    /// Note: This iterator returns owned (Word, Word) tuples.
+    ///
+    /// The returned iterator is fallible: each item is a [`LargeSmtResult`] so storage errors
+    /// from the underlying leaf iterator are propagated while flattening leaf entries.
+    ///
+    /// Note: This iterator returns owned `(Word, Word)` tuples.
     ///
     /// # Errors
     /// Returns an error if the storage backend fails to create the iterator.
-    pub fn entries(&self) -> Result<impl Iterator<Item = (Word, Word)>, LargeSmtError> {
+    pub fn entries(
+        &self,
+    ) -> LargeSmtResult<impl Iterator<Item = LargeSmtResult<(Word, Word)>> + '_> {
         let leaves_iter = self.leaves()?;
-        Ok(leaves_iter.flat_map(|(_, leaf)| {
-            // Collect the (Word, Word) tuples into an owned Vec
-            // This ensures they outlive the 'leaf' from which they are derived.
-            let owned_entries: Vec<(Word, Word)> = leaf.entries().to_vec();
-            // Return an iterator over this owned Vec
+        Ok(leaves_iter.flat_map(|result| {
+            let mut owned_entries = Vec::new();
+            match result {
+                Ok((_, leaf)) => {
+                    owned_entries.extend(leaf.entries().iter().copied().map(Ok));
+                },
+                Err(err) => owned_entries.push(Err(err)),
+            }
             owned_entries.into_iter()
         }))
     }
 
     /// Returns an iterator over the inner nodes of this [`LargeSmt`].
     ///
+    /// The returned iterator is fallible: each item is a [`LargeSmtResult`] so storage errors
+    /// from the underlying inner node iterator are propagated while flattening leaf entries.
+    ///
     /// # Errors
     /// Returns an error if the storage backend fails during iteration setup.
-    pub fn inner_nodes(&self) -> Result<impl Iterator<Item = InnerNodeInfo> + '_, LargeSmtError> {
-        // Pre-validate that storage is accessible
-        let _ = self.storage.iter_subtrees()?;
+    pub fn inner_nodes(
+        &self,
+    ) -> LargeSmtResult<impl Iterator<Item = LargeSmtResult<InnerNodeInfo>> + '_> {
         Ok(LargeSmtInnerNodeIterator::new(self))
     }
 
@@ -508,7 +529,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// The new tree shares the same root, leaf count, and entry count as `self`, and its storage
     /// is a point-in-time snapshot produced by [`SmtStorage::reader`]. The returned tree's storage
     /// type is `S::Reader: SmtStorageReader`, so it cannot be used for mutations.
-    pub fn reader(&self) -> Result<LargeSmt<S::Reader>, LargeSmtError> {
+    pub fn reader(&self) -> LargeSmtResult<LargeSmt<S::Reader>> {
         Ok(LargeSmt {
             storage: self.storage.reader()?,
             in_memory_nodes: self.in_memory_nodes.clone(),

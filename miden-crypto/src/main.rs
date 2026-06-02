@@ -269,8 +269,8 @@ pub fn proof_generation(tree: &mut LargeSmt<Storage>) -> Result<(), LargeSmtErro
     let keys = tree
         .leaves()?
         .take(NUM_PROOFS)
-        .map(|(_, leaf)| leaf.entries()[0].0)
-        .collect::<Vec<_>>();
+        .map(|result| result.map(|(_, leaf)| leaf.entries()[0].0))
+        .collect::<Result<Vec<_>, _>>()?;
 
     for key in keys {
         let now = Instant::now();

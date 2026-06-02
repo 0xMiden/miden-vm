@@ -5,8 +5,8 @@ use num::Integer;
 use p3_maybe_rayon::prelude::*;
 
 use super::{
-    IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LoadedLeaves, MutatedLeaves, ROOT_MEMORY_INDEX,
-    SMT_DEPTH, SmtStorage, StorageUpdates, Subtree, SubtreeUpdate,
+    IN_MEMORY_DEPTH, LargeSmt, LargeSmtError, LargeSmtResult, LoadedLeaves, MutatedLeaves,
+    ROOT_MEMORY_INDEX, SMT_DEPTH, SmtStorage, StorageUpdates, Subtree, SubtreeUpdate,
 };
 use crate::{
     Word,
@@ -103,7 +103,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     fn load_leaves_for_pairs(
         &self,
         sorted_kv_pairs: &[(Word, Word)],
-    ) -> Result<LoadedLeaves, LargeSmtError> {
+    ) -> LargeSmtResult<LoadedLeaves> {
         // Collect the unique leaf indices. If the input is truly sorted, then we can dedup
         // directly.
         let mut leaf_indices: Vec<u64> = sorted_kv_pairs
@@ -359,7 +359,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn insert_batch(
         &mut self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<Word, LargeSmtError>
+    ) -> LargeSmtResult<Word>
     where
         Self: Sized + Sync,
     {
@@ -483,7 +483,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     fn prepare_mutations(
         &self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
-    ) -> Result<PreparedMutations, LargeSmtError> {
+    ) -> LargeSmtResult<PreparedMutations> {
         let MutationSet {
             old_root,
             node_mutations,
@@ -562,10 +562,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     ///
     /// Note: This and [`insert_batch()`](Self::insert_batch) are the only two methods that
     /// persist changes to storage.
-    fn apply_prepared_mutations(
-        &mut self,
-        prepared: PreparedMutations,
-    ) -> Result<(), LargeSmtError> {
+    fn apply_prepared_mutations(&mut self, prepared: PreparedMutations) -> LargeSmtResult<()> {
         use NodeMutation::*;
 
         let PreparedMutations {
@@ -719,7 +716,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn compute_mutations(
         &self,
         kv_pairs: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, LargeSmtError>
+    ) -> LargeSmtResult<MutationSet<SMT_DEPTH, Word, Word>>
     where
         Self: Sized + Sync,
     {
@@ -818,7 +815,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn apply_mutations(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
-    ) -> Result<(), LargeSmtError> {
+    ) -> LargeSmtResult<()> {
         let prepared = self.prepare_mutations(mutations)?;
         self.apply_prepared_mutations(prepared)?;
         Ok(())
@@ -837,7 +834,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn apply_mutations_with_reversion(
         &mut self,
         mutations: MutationSet<SMT_DEPTH, Word, Word>,
-    ) -> Result<MutationSet<SMT_DEPTH, Word, Word>, LargeSmtError>
+    ) -> LargeSmtResult<MutationSet<SMT_DEPTH, Word, Word>>
     where
         Self: Sized,
     {

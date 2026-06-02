@@ -55,13 +55,18 @@ impl<T: SmtStorageReader> SmtStorageReader for BoxedStorage<T> {
     ) -> Result<Option<InnerNode>, StorageError> {
         self.0.get_inner_node(index)
     }
-    fn iter_leaves(&self) -> Result<Box<dyn Iterator<Item = (u64, SmtLeaf)> + '_>, StorageError> {
+    fn iter_leaves(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Result<(u64, SmtLeaf), StorageError>> + '_>, StorageError>
+    {
         self.0.iter_leaves()
     }
     fn iter_subtrees(
         &self,
-    ) -> Result<Box<dyn Iterator<Item = miden_crypto::merkle::smt::Subtree> + '_>, StorageError>
-    {
+    ) -> Result<
+        Box<dyn Iterator<Item = Result<miden_crypto::merkle::smt::Subtree, StorageError>> + '_>,
+        StorageError,
+    > {
         self.0.iter_subtrees()
     }
     fn get_top_subtree_roots(&self) -> Result<Vec<(u64, Word)>, StorageError> {

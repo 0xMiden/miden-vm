@@ -34,6 +34,9 @@ pub enum LargeSmtError {
     StorageNotEmpty,
 }
 
+/// The result type for use within the large SMT portion of the library.
+pub type LargeSmtResult<T> = Result<T, LargeSmtError>;
+
 #[cfg(test)]
 // Compile-time assertion that LargeSmtError implements the required traits
 const _: fn() = || {

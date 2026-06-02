@@ -16,7 +16,7 @@ use crate::{
         full::concurrent::{
             PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
         },
-        large::to_memory_index,
+        large::{LargeSmtResult, to_memory_index},
     },
 };
 
@@ -40,7 +40,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// let storage = MemoryStorage::new();
     /// let smt = LargeSmt::new(storage).expect("Failed to create SMT");
     /// ```
-    pub fn new(storage: S) -> Result<Self, LargeSmtError> {
+    pub fn new(storage: S) -> LargeSmtResult<Self> {
         if storage.has_leaves()? {
             return Err(LargeSmtError::StorageNotEmpty);
         }
@@ -69,7 +69,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// let smt = LargeSmt::load(storage).expect("Failed to load SMT");
     /// # }
     /// ```
-    pub fn load(storage: S) -> Result<Self, LargeSmtError> {
+    pub fn load(storage: S) -> LargeSmtResult<Self> {
         Self::initialize_from_storage(storage)
     }
 
@@ -100,7 +100,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     ///     .expect("Failed to load SMT with expected root");
     /// # }
     /// ```
-    pub fn load_with_root(storage: S, expected_root: Word) -> Result<Self, LargeSmtError> {
+    pub fn load_with_root(storage: S, expected_root: Word) -> LargeSmtResult<Self> {
         let smt = Self::load(storage)?;
 
         let actual_root = smt.root();
@@ -118,7 +118,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     ///
     /// For empty storage, returns an empty tree. For non-empty storage,
     /// rebuilds the in-memory top from cached in-memory-depth hashes.
-    fn initialize_from_storage(storage: S) -> Result<Self, LargeSmtError> {
+    fn initialize_from_storage(storage: S) -> LargeSmtResult<Self> {
         // Initialize in-memory nodes
         let mut in_memory_nodes: Vec<Word> = vec![EMPTY_WORD; NUM_IN_MEMORY_NODES];
 
@@ -212,7 +212,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn with_entries(
         storage: S,
         entries: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<Self, LargeSmtError> {
+    ) -> LargeSmtResult<Self> {
         let entries: Vec<(Word, Word)> = entries.into_iter().collect();
 
         if storage.has_leaves()? {
