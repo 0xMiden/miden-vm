@@ -280,7 +280,7 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 }
 
 #[test]
-fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
+fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
@@ -335,8 +335,11 @@ fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
 
     assert_matches!(
         err,
-        ExecutionError::Internal(message)
-            if message.contains("ambiguous or malformed dynamic callee roots")
+        ExecutionError::OperationError {
+            label,
+            source_file: None,
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::UNKNOWN && err_code == Felt::ZERO
     );
 }
 

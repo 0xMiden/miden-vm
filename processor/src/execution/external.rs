@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 use miden_mast_package::debug_info::PackageDebugInfo;
 
 use crate::{
-    BaseHost, BreakReason, ExecutionError,
+    BaseHost, BreakReason,
     continuation_stack::ContinuationStack,
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
@@ -87,25 +87,18 @@ where
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
-    let source_node = match (
-        source_debug_info,
-        old_forest.get_node_by_id(resolved_node_id_new_forest),
-    ) {
-        (Some(source_debug_info), Some(resolved_node_old_forest))
-            if !resolved_node_old_forest.is_external()
-                && resolved_node_old_forest.digest() == external_node_old_forest.digest() =>
-        {
-            match source_debug_info.unique_source_root_for_exec_node(resolved_node_id_new_forest) {
-                Ok(source_node) => source_node,
-                Err(_) => {
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
-                        "package debug source graph has ambiguous or malformed external target roots",
-                    )));
-                },
-            }
-        },
-        _ => None,
-    };
+    let source_node =
+        match (source_debug_info, old_forest.get_node_by_id(resolved_node_id_new_forest)) {
+            (Some(source_debug_info), Some(resolved_node_old_forest))
+                if !resolved_node_old_forest.is_external()
+                    && resolved_node_old_forest.digest() == external_node_old_forest.digest() =>
+            {
+                source_debug_info
+                    .unique_source_root_for_exec_node(resolved_node_id_new_forest)
+                    .unwrap_or(None)
+            },
+            _ => None,
+        };
 
     // Push current forest to the continuation stack so that we can return to it
     continuation_stack.push_enter_forest(old_forest.clone());
@@ -139,10 +132,10 @@ mod tests {
     };
 
     use super::*;
-    use crate::{DefaultHost, ExecutionError, fast::NoopTracer};
+    use crate::{Continuation, DefaultHost, fast::NoopTracer};
 
     #[test]
-    fn current_package_external_resolution_rejects_ambiguous_source_root() {
+    fn current_package_external_resolution_ignores_ambiguous_source_root() {
         let mut forest = MastForest::new();
         let target_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(7))])
             .add_to_forest(&mut forest)
@@ -184,10 +177,10 @@ mod tests {
             &mut tracer,
         );
 
+        assert_matches!(result, ControlFlow::Continue(()));
         assert_matches!(
-            result,
-            ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(message)))
-                if message.contains("ambiguous or malformed external target roots")
+            continuation_stack.pop_continuation_with_source(),
+            Some((Continuation::StartNode(node_id), None)) if node_id == target_id
         );
     }
 }

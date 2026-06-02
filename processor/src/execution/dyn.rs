@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, MapExecErr, Stopper,
+    BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
@@ -114,17 +114,7 @@ where
         Some(callee_id) => {
             let source_node = match state.source_debug_info {
                 Some(source_debug_info) => {
-                    match source_debug_info.unique_source_root_for_exec_node(callee_id) {
-                        Ok(source_node) => source_node,
-                        Err(_) => {
-                            return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::Internal(
-                                "package debug source graph has ambiguous or malformed dynamic callee roots",
-                            ),
-                        )
-                        .into());
-                        },
-                    }
+                    source_debug_info.unique_source_root_for_exec_node(callee_id).unwrap_or(None)
                 },
                 None => None,
             };

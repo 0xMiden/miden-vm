@@ -9,7 +9,6 @@ use miden_assembly_syntax::{
     ast::{ModuleKind, Path as MasmPath},
     diagnostics::Report,
 };
-use miden_core::serde::Deserializable;
 use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
@@ -797,7 +796,7 @@ fn load_selected_preassembled_package(
 fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
     let bytes = fs::read(path)
         .map_err(|error| Report::msg(format!("failed to read '{}': {error}", path.display())))?;
-    let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+    let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))

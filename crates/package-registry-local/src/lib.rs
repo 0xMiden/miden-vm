@@ -7,10 +7,7 @@ use std::{
 };
 
 use miden_assembly_syntax::Report;
-use miden_core::{
-    serde::{Deserializable, Serializable},
-    utils::DisplayHex,
-};
+use miden_core::{serde::Serializable, utils::DisplayHex};
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
     InMemoryPackageRegistry, PackageCache, PackageId, PackageIndex, PackageProvider, PackageRecord,
@@ -224,7 +221,7 @@ impl LocalPackageRegistry {
     ) -> Result<PublishedPackage, LocalRegistryError> {
         let package_path = package_path.as_ref();
         let bytes = fs::read(package_path).map_err(LocalRegistryError::IndexRead)?;
-        let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: package_path.to_path_buf(),
                 error: error.to_string(),
@@ -293,7 +290,7 @@ impl LocalPackageRegistry {
         let Ok(bytes) = fs::read(path) else {
             return false;
         };
-        let Ok(loaded) = MastPackage::read_from_bytes(&bytes) else {
+        let Ok(loaded) = MastPackage::read_from_bytes_trusted(&bytes) else {
             return false;
         };
         let actual_version = Version::new(loaded.version.clone(), loaded.digest());
@@ -336,7 +333,7 @@ impl LocalPackageRegistry {
         };
 
         let bytes = fs::read(&path).map_err(LocalRegistryError::IndexRead)?;
-        let loaded = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        let loaded = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
             LocalRegistryError::PackageDecode {
                 path: path.clone(),
                 error: error.to_string(),
@@ -437,7 +434,7 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(legacy_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
                 Ok(existing_package) => {
                     let existing_version =
                         Version::new(existing_package.version.clone(), existing_package.digest());
@@ -469,7 +466,7 @@ impl LocalPackageRegistry {
         bytes: &[u8],
     ) -> Result<(), LocalRegistryError> {
         match fs::read(artifact_path) {
-            Ok(existing_bytes) => match MastPackage::read_from_bytes(&existing_bytes) {
+            Ok(existing_bytes) => match MastPackage::read_from_bytes_trusted(&existing_bytes) {
                 Ok(existing_package) if &existing_package == package => Ok(()),
                 Ok(_) => Err(LocalRegistryError::DuplicateSemanticVersion {
                     package: package.name.clone(),
