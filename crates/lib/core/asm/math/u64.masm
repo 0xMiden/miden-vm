@@ -14,6 +14,16 @@ end
 
 # ===== ADDITION ==================================================================================
 
+#! Performs addition of two unsigned 64 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a + b) % 2^64
+#! This takes 6 cycles.
+pub proc wrapping_add(b: u64, a: u64) -> u64
+    exec.overflowing_add
+    drop
+end
+
 #! Performs addition of two unsigned 64 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
@@ -35,16 +45,6 @@ end
 pub proc widening_add(b: u64, a: u64) -> (u64, i1)
     exec.overflowing_add
     movdn.2
-end
-
-#! Performs addition of two unsigned 64 bit integers discarding the overflow.
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition looks as follows:
-#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a + b) % 2^64
-#! This takes 6 cycles.
-pub proc wrapping_add(b: u64, a: u64) -> u64
-    exec.overflowing_add
-    drop
 end
 
 # ===== SUBTRACTION ===============================================================================
@@ -112,6 +112,19 @@ pub proc wrapping_mul(b: u64, a: u64) -> u64
     swap                # => [t2_hi, t2_lo, p0_lo]
     drop                # => [t2_lo, p0_lo]
     swap                # => [p0_lo, t2_lo] = [c_lo, c_hi]
+end
+
+#! Performs multiplication of two unsigned 64 bit integers preserving the overflow flag.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [overflow, c_lo, c_hi, ...], where c = (a * b) % 2^64
+#! and overflow = 1 iff a * b >= 2^64.
+#! This takes 38 cycles.
+pub proc overflowing_mul(b: u64, a: u64) -> (i1, u64)
+    exec.widening_mul       # [c_lo, c_mid_lo, c_mid_hi, c_hi, ...]
+    movup.3 movup.3         # [c_mid_hi, c_hi, c_lo, c_mid_lo, ...]
+    u32or                   # [c_mid_hi | c_hi, c_lo, c_mid_lo, ...]
+    neq.0                   # [overflow, c_lo, c_mid_lo, ...]
 end
 
 #! Performs multiplication of two unsigned 64 bit integers preserving the overflow.
@@ -544,6 +557,18 @@ pub proc xor(b: u64, a: u64) -> u64
     swap.2      # => [a_hi, b_hi, c_lo]
     u32xor      # => [c_hi, c_lo]
     swap        # => [c_lo, c_hi]
+end
+
+#! Performs bitwise NOT of one unsigned 64 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = !a (i.e., 2^64 - 1 - a).
+#! This takes 4 cycles.
+pub proc not(a: u64) -> u64
+    u32not          # [!a_lo, a_hi, ...]
+    swap            # [a_hi, !a_lo, ...]
+    u32not          # [!a_hi, !a_lo, ...]
+    swap            # [!a_lo, !a_hi, ...]
 end
 
 #! Performs left shift of one unsigned 64-bit integer.

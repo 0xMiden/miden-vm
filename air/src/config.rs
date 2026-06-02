@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2564365500194292689),
-    Felt::new_unchecked(7963649451118915546),
-    Felt::new_unchecked(13003513905888733288),
-    Felt::new_unchecked(3704785727996306162),
+    Felt::new_unchecked(18363916774600657317),
+    Felt::new_unchecked(13829962896193052251),
+    Felt::new_unchecked(11712920789916264607),
+    Felt::new_unchecked(2316307575747477038),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -107,6 +107,17 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
     challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
     challenger.observe(Felt::ZERO);
+}
+
+/// Absorbs the multi-AIR `air_order` permutation into the challenger.
+pub fn observe_air_order<C: CanObserve<Felt>>(challenger: &mut C, air_order: &[u32]) {
+    let padded_len = air_order.len().next_multiple_of(SPONGE_RATE);
+    for &caller_idx in air_order.iter() {
+        challenger.observe(Felt::new_unchecked(caller_idx as u64));
+    }
+    for _ in air_order.len()..padded_len {
+        challenger.observe(Felt::ZERO);
+    }
 }
 
 /// Absorbs variable-length public inputs into the challenger.
@@ -296,7 +307,7 @@ mod tests {
     use miden_ace_codegen::{AceConfig, LayoutKind};
     use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
-    use crate::{ProcessorAir, ace};
+    use crate::ace;
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
@@ -312,11 +323,9 @@ mod tests {
             num_quotient_chunks: 8,
             num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
+            is_multi_air: true,
         };
-        let air = ProcessorAir;
-        let boundary_config = ace::logup_boundary_config();
-        let circuit =
-            ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &boundary_config).unwrap();
+        let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
         let encoded = circuit.to_ace().unwrap();
         let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
 

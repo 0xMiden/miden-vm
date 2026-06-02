@@ -57,7 +57,6 @@ serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
-    "miden-debug-types/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -72,7 +71,6 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
-miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
@@ -93,7 +91,6 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
-miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-lifted-stark.workspace = true
 miden-test-serde-macros.workspace = true

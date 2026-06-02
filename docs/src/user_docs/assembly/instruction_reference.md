@@ -321,32 +321,29 @@ High-level constructs for controlling the execution flow.
 
 ## Events
 
-Instructions for communicating with the host through events and tracing.
+Instructions for communicating with the host through events.
 
 | Instruction        | Stack Input       | Stack Output      | Cycles | Notes                                                                                                                                                                                                                                                                                                                                                                                                                           |
--|--------------------|-------------------|-------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-+| ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
- | `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
+| ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Note that event IDs in the range `0..256` are reserved for system events.     |
-| `trace.<trace_id>` | `[...]`           | `[...]`           | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1`                                                   |
-| `log_precompile`   | `[COMM, TAG, PAD, ...]` | `[R0, R1, CAP_NEXT, ...]` | 1      | Absorbs a precompile commitment into the transcript used for deferred verification. Takes a precompile commitment (`TAG` and `COMM`) from the stack and performs an Poseidon2 permutation to update the transcript capacity (sponge capacity). Outputs `[R0, R1, CAP_NEXT]`; callers normally drop all three words immediately. See “Precompile flow” for initialization details. |
+| `log_precompile`   | `[_, STMNT, _, ...]` | `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds a precomputed precompile statement into the rolling transcript. Reads the per-call statement word `STMNT` from `stack[4..8]` (the HPERM rate1 slots), applies the Poseidon2 permutation `Permute(STATE_PREV, STMNT, ZERO)` (with `STATE_PREV` supplied non-deterministically via helper registers), and writes the permutation output back via the identity lane→slot mapping (matching HPERM): `STATE_NEW` (= output `rate0`) at `stack[0..4]`, then `rate1` and `capacity` halves at `stack[4..8]` and `stack[8..12]`. Callers normally drop all three words immediately. See "Precompile flow" for initialization details. |
 
 ## Debugging Operations
 
-Instructions for inspecting VM state during execution. These do not affect VM state or program hash and are only active when the assembler is in debug mode.
+Procedures for inspecting VM state during execution. These are ordinary `core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs. Remove these calls from production programs.
 
-### `debug`
+### `core::debug`
 
-- **Syntax & Parameters:**
-  - `debug.stack`: Prints entire stack.
-  - `debug.stack.N`: Prints top `N` stack items (`0 < N < 256`).
-  - `debug.mem`: Prints entire RAM.
-  - `debug.mem.A`: Prints memory at address `A`.
-  - `debug.mem.A.M`: Prints memory from address `A` to `M` (inclusive, `M >= A`).
-  - `debug.local`: Prints entire local memory of the current procedure.
-  - `debug.local.I`: Prints local memory at index `I` (`0 <= I < 65536`).
-  - `debug.local.I.M`: Prints local memory from index `I` to `M` (inclusive, `M >= I`, `0 <= I, M < 65536`).
-- **Cycles:** 0 (does not consume VM cycles).
+- **Procedures:**
+  - `print_stack`: Prints the entire operand stack. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_mem`: Prints memory in the range `[start, end)` of the current context. Inputs: `[start, end, ...]`. Outputs: `[...]`. Cycles: 5.
+  - `print_mem_all`: Prints the full memory of the current context. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_adv_stack`: Prints the advice stack in the range `[start, end)`. Inputs: `[start, end, ...]`. Outputs: `[...]`. Cycles: 5.
+  - `print_adv_stack_all`: Prints the full advice stack. Inputs: `[...]`. Outputs: `[...]`. Cycles: 7.
+  - `print_adv_map_all`: Prints the full advice map. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_adv_map_item`: Looks up a WORD key in the advice map and prints the associated list of field elements. Inputs: `[KEY, ...]`. Outputs: `[...]`. Cycles: 7.
 - **Notes:**
-  - Prints the specified part of the VM state.
-  - Ignored if assembler is not in debug mode.
+  - Range-based procedures consume `start` and `end`.
+  - Advice-map item procedures consume the WORD key.
+  - Always active regardless of debug mode.

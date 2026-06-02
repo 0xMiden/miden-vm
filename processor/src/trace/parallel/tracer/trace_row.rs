@@ -1,30 +1,28 @@
 //! Module which concerns itself with all the trace row building logic.
 
-use miden_air::trace::{
-    CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
-    STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-    chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-    decoder::{
-        ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
-        NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS, OP_BATCH_FLAGS_OFFSET,
-        OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
+use alloc::sync::Arc;
+
+use miden_air::{
+    CoreCols, DecoderCols, StackCols, SystemCols,
+    trace::{
+        chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
+        decoder::{NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
-    stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET, STACK_TOP_RANGE},
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
     mast::{
-        BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, JoinNode, LoopNode, MastNodeExt, OpBatch, SparseMastForest,
+        SplitNode,
     },
     operations::{Operation, opcodes},
+    program::MIN_STACK_DEPTH,
 };
 
-use super::{ExecutionContextInfo, StackState, SystemState, get_node_in_forest};
+use super::{ExecutionContextInfo, StackState, SystemState, get_digest_in_forest};
 use crate::{
     ExecutionError,
-    trace::parallel::{
-        CORE_TRACE_WIDTH, core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer,
-    },
+    trace::parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
 };
 
 // DECODER ROW
@@ -270,12 +268,12 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         call_node: &CallNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
         // child)
-        let callee_hash: Word = get_node_in_forest(current_forest, call_node.callee())?.digest();
+        let callee_hash: Word = get_digest_in_forest(current_forest, call_node.callee())?;
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -349,11 +347,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         join_node: &JoinNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let child1_hash: Word = get_node_in_forest(current_forest, join_node.first())?.digest();
-        let child2_hash: Word = get_node_in_forest(current_forest, join_node.second())?.digest();
+        let child1_hash: Word = get_digest_in_forest(current_forest, join_node.first())?;
+        let child2_hash: Word = get_digest_in_forest(current_forest, join_node.second())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::JOIN,
@@ -374,11 +372,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         loop_node: &LoopNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
-        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
+        let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -397,12 +395,12 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         loop_node: &LoopNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
         current_addr: Felt,
     ) -> Result<(), ExecutionError> {
         // For REPEAT operations, the hasher state in start operations contains the loop body hash
         // in the first half.
-        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
+        let body_hash: Word = get_digest_in_forest(current_forest, loop_node.body())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::REPEAT,
@@ -424,12 +422,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         split_node: &SplitNode,
-        current_forest: &MastForest,
+        current_forest: &Arc<SparseMastForest>,
     ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let on_true_hash: Word = get_node_in_forest(current_forest, split_node.on_true())?.digest();
-        let on_false_hash: Word =
-            get_node_in_forest(current_forest, split_node.on_false())?.digest();
+        let on_true_hash: Word = get_digest_in_forest(current_forest, split_node.on_true())?;
+        let on_false_hash: Word = get_digest_in_forest(current_forest, split_node.on_false())?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::SPLIT,
@@ -481,96 +478,85 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         decoder_row: DecoderRow,
     ) {
-        let mut row = [ZERO; CORE_TRACE_WIDTH];
-
-        // System trace columns (identical for all control flow operations)
-        if let Some(ref system_cols) = self.system_cols {
-            row[..SYS_TRACE_WIDTH].copy_from_slice(system_cols);
+        let mut row = CoreCols::<Felt>::default();
+        if let Some(system) = &self.system_cols {
+            row.system = system.clone();
         }
-
-        // Decoder trace columns
-        Self::write_decoder_to_row(&mut row, &decoder_row);
-
-        // Stack trace columns (identical for all control flow operations)
-        if let Some(ref stack_cols) = self.stack_cols {
-            row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
-                .copy_from_slice(stack_cols);
+        if let Some(stack) = &self.stack_cols {
+            row.stack = stack.clone();
         }
+        Self::write_decoder(&mut row.decoder, &decoder_row);
 
-        self.writer.write_row(self.row_write_index, &row);
+        self.writer.write_row(self.row_write_index, row.as_slice());
 
         // Store the buffer for the next call
-        self.system_cols = Some(Self::build_system_buffer(system));
-        self.stack_cols = Some(Self::build_stack_buffer(stack));
+        self.system_cols = Some(Self::build_system_cols(system));
+        self.stack_cols = Some(Self::build_stack_cols(stack));
 
         // Increment the row write index
         self.row_write_index += 1;
     }
 
-    fn write_decoder_to_row(row: &mut [Felt; CORE_TRACE_WIDTH], decoder_row: &DecoderRow) {
+    fn write_decoder(decoder: &mut DecoderCols<Felt>, decoder_row: &DecoderRow) {
         // Block address
-        row[DECODER_TRACE_OFFSET + ADDR_COL_IDX] = decoder_row.addr;
+        decoder.addr = decoder_row.addr;
 
         // Decompose operation into bits
         let opcode = decoder_row.opcode;
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from_u8((opcode >> i) & 1);
-            row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit;
+            decoder.op_bits[i] = Felt::from_u8((opcode >> i) & 1);
         }
 
         // Hasher state
         let (first_hash, second_hash) = decoder_row.hasher_state;
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET] = first_hash[0];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1] = first_hash[1];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2] = first_hash[2];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3] = first_hash[3];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4] = second_hash[0];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5] = second_hash[1];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6] = second_hash[2];
-        row[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7] = second_hash[3];
+        decoder.hasher_state[0] = first_hash[0];
+        decoder.hasher_state[1] = first_hash[1];
+        decoder.hasher_state[2] = first_hash[2];
+        decoder.hasher_state[3] = first_hash[3];
+        decoder.hasher_state[4] = second_hash[0];
+        decoder.hasher_state[5] = second_hash[1];
+        decoder.hasher_state[6] = second_hash[2];
+        decoder.hasher_state[7] = second_hash[3];
 
         // Remaining decoder trace columns (identical for all control flow operations)
-        row[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX] = decoder_row.op_index;
-        row[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX] = decoder_row.group_count;
-        row[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX] =
-            if decoder_row.in_basic_block { ONE } else { ZERO };
+        decoder.op_index = decoder_row.op_index;
+        decoder.group_count = decoder_row.group_count;
+        decoder.in_span = if decoder_row.in_basic_block { ONE } else { ZERO };
 
         // Batch flag columns - all 0 for control flow operations
         for i in 0..NUM_OP_BATCH_FLAGS {
-            row[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i] = decoder_row.op_batch_flags[i];
+            decoder.batch_flags[i] = decoder_row.op_batch_flags[i];
         }
 
         // Extra bit columns
         let bit6 = Felt::from_u8((opcode >> 6) & 1);
         let bit5 = Felt::from_u8((opcode >> 5) & 1);
         let bit4 = Felt::from_u8((opcode >> 4) & 1);
-        row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET] = bit6 * (ONE - bit5) * bit4;
-        row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = bit6 * bit5;
+        decoder.extra[0] = bit6 * (ONE - bit5) * bit4;
+        decoder.extra[1] = bit6 * bit5;
     }
 
-    fn build_system_buffer(system: &SystemState) -> [Felt; SYS_TRACE_WIDTH] {
-        let mut buf = [ZERO; SYS_TRACE_WIDTH];
-        buf[CLK_COL_IDX] = (system.clk + 1).into();
-        buf[CTX_COL_IDX] = system.ctx.into();
-        buf[FN_HASH_OFFSET] = system.fn_hash[0];
-        buf[FN_HASH_OFFSET + 1] = system.fn_hash[1];
-        buf[FN_HASH_OFFSET + 2] = system.fn_hash[2];
-        buf[FN_HASH_OFFSET + 3] = system.fn_hash[3];
-        buf
+    fn build_system_cols(system: &SystemState) -> SystemCols<Felt> {
+        SystemCols {
+            clk: (system.clk + 1).into(),
+            ctx: system.ctx.into(),
+            fn_hash: *system.fn_hash,
+        }
     }
 
-    fn build_stack_buffer(stack: &StackState) -> [Felt; STACK_TRACE_WIDTH] {
-        let mut buf = [ZERO; STACK_TRACE_WIDTH];
-        for i in STACK_TOP_RANGE {
-            buf[STACK_TOP_OFFSET + i] = stack.get(i);
+    fn build_stack_cols(stack: &StackState) -> StackCols<Felt> {
+        let mut top = [ZERO; MIN_STACK_DEPTH];
+        for (i, slot) in top.iter_mut().enumerate() {
+            *slot = stack.get(i);
         }
 
-        // Stack helpers (b0, b1, h0)
-        // Note: H0 will be inverted using batch inversion later
-        buf[B0_COL_IDX] = Felt::new_unchecked(stack.stack_depth() as u64);
-        buf[B1_COL_IDX] = stack.overflow_addr();
-        buf[H0_COL_IDX] = stack.overflow_helper();
-        buf
+        // H0 will be inverted using batch inversion later.
+        StackCols {
+            top,
+            b0: Felt::new_unchecked(stack.stack_depth() as u64),
+            b1: stack.overflow_addr(),
+            h0: stack.overflow_helper(),
+        }
     }
 }
 

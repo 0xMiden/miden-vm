@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
-use super::{Felt, KERNEL_ROM_TRACE_WIDTH, Kernel, KernelRom, TraceFragment};
+use super::{ChipletTraceFragment, Felt, KERNEL_ROM_TRACE_WIDTH, Kernel, KernelRom};
 use crate::{ONE, ZERO};
 
 // CONSTANTS
@@ -92,11 +92,18 @@ fn build_kernel() -> Kernel {
 /// Builds a trace of the specified length and fills it with data from the provided KernelRom
 /// instance.
 fn build_trace(kernel_rom: KernelRom, num_rows: usize) -> Vec<Vec<Felt>> {
-    let mut trace = (0..KERNEL_ROM_TRACE_WIDTH).map(|_| vec![ZERO; num_rows]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(KERNEL_ROM_TRACE_WIDTH * num_rows);
+    let mut fragment = ChipletTraceFragment::row_major(
+        &mut band,
+        KERNEL_ROM_TRACE_WIDTH,
+        0,
+        KERNEL_ROM_TRACE_WIDTH,
+    );
     kernel_rom.fill_trace(&mut fragment);
 
-    trace
+    (0..KERNEL_ROM_TRACE_WIDTH)
+        .map(|c| (0..num_rows).map(|r| band[r * KERNEL_ROM_TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 /// Asserts that row `row` carries the given multiplicity and procedure digest.

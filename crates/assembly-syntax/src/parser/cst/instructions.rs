@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{
     Felt, Word,
-    ast::{self, DebugOptions, Immediate, Instruction, SystemEventNode},
+    ast::{self, Immediate, Instruction, SystemEventNode},
     parser::{LiteralErrorKind, ParsingError, PushValue},
 };
 
@@ -43,10 +43,6 @@ pub(super) fn try_lower_instruction(
 
         if let Some(ops) = lower_immediate_instruction(context, span, &compact)? {
             return Ok(Some(ops));
-        }
-
-        if let Some(error) = unexpected_primitive_suffix_error(context, instruction, &compact) {
-            return Err(error);
         }
     }
 
@@ -126,11 +122,6 @@ impl CompactInstruction {
     fn first_segment_text(&self) -> Option<&str> {
         self.segment_text(0)
     }
-
-    /// Returns the first segment when the compact spelling has exactly one suffix.
-    fn single_suffix_base(&self) -> Option<&str> {
-        (self.segment_count() == 2).then(|| self.segment_text(0)).flatten()
-    }
 }
 
 /// Lowers compact spellings that carry exactly one immediate-like segment.
@@ -145,47 +136,6 @@ fn lower_immediate_instruction(
         }
     }
     Ok(None)
-}
-
-/// Restores the legacy “unexpected `.`” diagnostic for primitive opcodes that do not accept
-/// suffixes, e.g. `neg.1` or `inv.1`.
-fn unexpected_primitive_suffix_error(
-    context: &LoweringContext<'_>,
-    instruction: &CstInstruction,
-    compact: &CompactInstruction,
-) -> Option<ParsingError> {
-    let name = compact.single_suffix_base()?;
-    if lower_primitive_instruction(name).is_none() || accepts_single_suffix(name) {
-        return None;
-    }
-
-    let dot = instruction
-        .syntax()
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-        .find(|token| token.kind() == SyntaxKind::Dot)?;
-    Some(ParsingError::UnrecognizedToken {
-        span: context.parse().span_for_token(&dot),
-        token: dot.text().to_string(),
-        expected: expected_block_operation_tokens(),
-    })
-}
-
-/// Returns true when `name.<suffix>` may be a valid spelling handled by direct lowering.
-fn accepts_single_suffix(name: &str) -> bool {
-    COMPACT_SUFFIX_SPECS
-        .iter()
-        .any(|spec| spec.prefix.len() == 1 && spec.prefix[0] == name)
-        || matches!(name, "debug" | "emit" | "trace")
-}
-
-/// Returns the compact legacy expected-token set for block-local syntax errors.
-fn expected_block_operation_tokens() -> Vec<String> {
-    vec![
-        r#"primitive opcode (e.g. "add")"#.to_string(),
-        r#""end""#.to_string(),
-        r#"control flow opcode (e.g. "if.true")"#.to_string(),
-    ]
 }
 
 /// Returns the fixed primitive instruction for suffix-free spellings.
@@ -242,22 +192,6 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         spelling: "adv.push_mtnode",
         build: || Instruction::SysEvent(SystemEventNode::PushMtNode),
-    },
-    PrimitiveSpec {
-        spelling: "debug.adv_stack",
-        build: || Instruction::Debug(DebugOptions::AdvStackTop(0u16.into())),
-    },
-    PrimitiveSpec {
-        spelling: "debug.local",
-        build: || Instruction::Debug(DebugOptions::LocalAll),
-    },
-    PrimitiveSpec {
-        spelling: "debug.mem",
-        build: || Instruction::Debug(DebugOptions::MemAll),
-    },
-    PrimitiveSpec {
-        spelling: "debug.stack",
-        build: || Instruction::Debug(DebugOptions::StackAll),
     },
     PrimitiveSpec {
         spelling: "add",
@@ -747,12 +681,12 @@ struct CompactSuffixSpec {
 enum CompactSuffixKind {
     /// A comparison instruction with felt immediate, e.g. `eq.1` or `lt.42`
     Comparison(fn(ast::ImmFelt) -> Instruction),
-    /// A possibly-foldable felt arithmetic instruction with felt immediate
-    Felt(fn(ast::ImmFelt, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>),
+    /// An instruction with felt immediate
+    Felt(fn(ast::ImmFelt) -> Instruction),
     /// An instruction with u32 immediate
     U32(fn(ast::ImmU32) -> Instruction),
-    /// A instruction with u32 immediate with parse-time folder
-    U32WithFolder(fn(ast::ImmU32, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>),
+    /// A u32 instruction family represented by pushing the immediate, then applying the opcode
+    U32Expanded(fn() -> Instruction),
     U16(fn(ast::ImmU16) -> Instruction),
     Stack(&'static StackIndexSpec),
     ShiftU32(fn(ast::ImmU8) -> Instruction),
@@ -787,19 +721,19 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["add"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_add),
+        kind: CompactSuffixKind::Felt(Instruction::AddImm),
     },
     CompactSuffixSpec {
         prefix: &["sub"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_sub),
+        kind: CompactSuffixKind::Felt(Instruction::SubImm),
     },
     CompactSuffixSpec {
         prefix: &["mul"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_mul),
+        kind: CompactSuffixKind::Felt(Instruction::MulImm),
     },
     CompactSuffixSpec {
         prefix: &["div"],
-        kind: CompactSuffixKind::Felt(super::folders::fold_div),
+        kind: CompactSuffixKind::Felt(Instruction::DivImm),
     },
     CompactSuffixSpec {
         prefix: &["exp"],
@@ -891,43 +825,43 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["u32div"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32div),
+        kind: CompactSuffixKind::U32(Instruction::U32DivImm),
     },
     CompactSuffixSpec {
         prefix: &["u32divmod"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32divmod),
+        kind: CompactSuffixKind::U32(Instruction::U32DivModImm),
     },
     CompactSuffixSpec {
         prefix: &["u32mod"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32mod),
+        kind: CompactSuffixKind::U32(Instruction::U32ModImm),
     },
     CompactSuffixSpec {
         prefix: &["u32and"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32and),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32And),
     },
     CompactSuffixSpec {
         prefix: &["u32or"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32or),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Or),
     },
     CompactSuffixSpec {
         prefix: &["u32xor"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32xor),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Xor),
     },
     CompactSuffixSpec {
         prefix: &["u32not"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32not),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Not),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_add"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_add),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingAddImm),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_sub"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_sub),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingSubImm),
     },
     CompactSuffixSpec {
         prefix: &["u32wrapping_mul"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32wrapping_mul),
+        kind: CompactSuffixKind::U32(Instruction::U32WrappingMulImm),
     },
     CompactSuffixSpec {
         prefix: &["u32overflowing_add"],
@@ -947,27 +881,27 @@ static COMPACT_SUFFIX_SPECS: &[CompactSuffixSpec] = &[
     },
     CompactSuffixSpec {
         prefix: &["u32lt"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32lt),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Lt),
     },
     CompactSuffixSpec {
         prefix: &["u32lte"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32lte),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Lte),
     },
     CompactSuffixSpec {
         prefix: &["u32gt"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32gt),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Gt),
     },
     CompactSuffixSpec {
         prefix: &["u32gte"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32gte),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Gte),
     },
     CompactSuffixSpec {
         prefix: &["u32min"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32min),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Min),
     },
     CompactSuffixSpec {
         prefix: &["u32max"],
-        kind: CompactSuffixKind::U32WithFolder(super::folders::fold_u32max),
+        kind: CompactSuffixKind::U32Expanded(|| Instruction::U32Max),
     },
     CompactSuffixSpec {
         prefix: &["u32shl"],
@@ -1179,10 +1113,10 @@ fn lower_compact_suffix_instruction(
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     match kind {
         CompactSuffixKind::Comparison(build) => lower_felt_comparison(context, span, token, build),
-        CompactSuffixKind::Felt(folder) => lower_felt_instruction(context, span, token, folder),
+        CompactSuffixKind::Felt(build) => lower_felt_instruction(context, span, token, build),
         CompactSuffixKind::U32(build) => lower_u32_instruction(context, span, token, build),
-        CompactSuffixKind::U32WithFolder(folder) => {
-            lower_foldable_u32_instruction(context, span, token, folder)
+        CompactSuffixKind::U32Expanded(build) => {
+            lower_expanded_u32_instruction(context, span, token, build)
         },
         CompactSuffixKind::U16(build) => lower_u16_instruction(context, span, token, build),
         CompactSuffixKind::Stack(spec) => lower_stack_index_instruction(context, span, token, spec),
@@ -1199,7 +1133,7 @@ fn lower_stack_index_instruction(
     spec: &StackIndexSpec,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let immediate_span = context.parse().span_for_token(token);
-    let Some(index) = lower_decimal_u8_literal(token)? else {
+    let Some(index) = lower_decimal_u8_literal(token) else {
         return Ok(None);
     };
     let Some(instruction) = spec.instruction(index) else {
@@ -1252,9 +1186,8 @@ fn lower_extended_instruction(
         ExtendedInstructionKind::Invocation(build) => {
             lower_invocation_instruction(context, span, &tokens, build)
         },
-        ExtendedInstructionKind::Debug => lower_debug_instruction(context, span, &tokens),
+
         ExtendedInstructionKind::Emit => lower_emit_instruction(context, span, &tokens),
-        ExtendedInstructionKind::Trace => lower_trace_instruction(context, span, &tokens),
         ExtendedInstructionKind::ErrorCode(build) => {
             lower_error_code_instruction(context, span, &tokens, spec.keyword, build)
         },
@@ -1270,9 +1203,7 @@ struct ExtendedInstructionSpec {
 enum ExtendedInstructionKind {
     Push,
     Invocation(fn(ast::InvocationTarget) -> Instruction),
-    Debug,
     Emit,
-    Trace,
     ErrorCode(fn(ast::ErrorMsg) -> Instruction),
 }
 
@@ -1298,16 +1229,8 @@ static EXTENDED_INSTRUCTION_SPECS: &[ExtendedInstructionSpec] = &[
         kind: ExtendedInstructionKind::Invocation(Instruction::ProcRef),
     },
     ExtendedInstructionSpec {
-        keyword: "debug",
-        kind: ExtendedInstructionKind::Debug,
-    },
-    ExtendedInstructionSpec {
         keyword: "emit",
         kind: ExtendedInstructionKind::Emit,
-    },
-    ExtendedInstructionSpec {
-        keyword: "trace",
-        kind: ExtendedInstructionKind::Trace,
     },
     ExtendedInstructionSpec {
         keyword: "assert",
@@ -1400,114 +1323,6 @@ fn lower_invocation_instruction(
     Ok(Some(vec![inst_op(instruction_span, build(target))]))
 }
 
-/// Lowers all `debug.*` forms, including interval/range variants.
-fn lower_debug_instruction(
-    context: &mut LoweringContext<'_>,
-    instruction_span: SourceSpan,
-    tokens: &[SyntaxToken],
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    if tokens.len() < 3
-        || tokens[0].kind() != SyntaxKind::Ident
-        || tokens[0].text() != "debug"
-        || tokens[1].kind() != SyntaxKind::Dot
-        || tokens[2].kind() != SyntaxKind::Ident
-    {
-        return Ok(None);
-    }
-
-    let option = match tokens[2].text() {
-        "stack" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u8_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u8 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::StackTop(imm)
-            },
-            _ => return Ok(None),
-        },
-        "mem" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u32_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::MemInterval(imm.clone(), imm)
-            },
-            [dot1, first, dot2, second]
-                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
-            {
-                let first = lower_u32_immediate(context, first)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(first),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                let second = lower_u32_immediate(context, second)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(second),
-                        message: "expected a u32 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::MemInterval(first, second)
-            },
-            _ => return Ok(None),
-        },
-        "local" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::LocalRangeFrom(imm)
-            },
-            [dot1, first, dot2, second]
-                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
-            {
-                let first = lower_u16_immediate(context, first)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(first),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                let second = lower_u16_immediate(context, second)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(second),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::LocalInterval(first, second)
-            },
-            _ => return Ok(None),
-        },
-        "adv_stack" => match &tokens[3..] {
-            [] => return Ok(None),
-            [dot, value] if dot.kind() == SyntaxKind::Dot => {
-                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
-                    ParsingError::InvalidSyntax {
-                        span: context.parse().span_for_token(value),
-                        message: "expected a u16 literal or constant reference".to_string(),
-                    }
-                })?;
-                DebugOptions::AdvStackTop(imm)
-            },
-            _ => return Ok(None),
-        },
-        _ => return Ok(None),
-    };
-
-    Ok(Some(vec![inst_op(instruction_span, Instruction::Debug(option))]))
-}
-
 /// Lowers `emit.<const>` and `emit.event("name")`.
 fn lower_emit_instruction(
     context: &mut LoweringContext<'_>,
@@ -1546,27 +1361,6 @@ fn lower_emit_instruction(
         },
         _ => Ok(None),
     }
-}
-
-/// Lowers `trace.<u32>` immediates.
-fn lower_trace_instruction(
-    context: &mut LoweringContext<'_>,
-    instruction_span: SourceSpan,
-    tokens: &[SyntaxToken],
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    if !matches!(tokens, [trace, dot, _value] if trace.kind() == SyntaxKind::Ident
-        && trace.text() == "trace"
-        && dot.kind() == SyntaxKind::Dot)
-    {
-        return Ok(None);
-    }
-
-    let value =
-        lower_u32_immediate(context, &tokens[2])?.ok_or_else(|| ParsingError::InvalidSyntax {
-            span: context.parse().span_for_token(&tokens[2]),
-            message: "expected a u32 literal or constant reference".to_string(),
-        })?;
-    Ok(Some(vec![inst_op(instruction_span, Instruction::Trace(value))]))
 }
 
 /// Lowers `.err=` forms for assertion-like instructions.
@@ -1643,8 +1437,7 @@ fn lower_invocation_target(
 
 /// Lowers a `push` list of integer immediates and/or constant references.
 ///
-/// Each pushed element becomes a separate AST op so the rest of the pipeline sees the same shape
-/// produced by the legacy parser.
+/// Each pushed element becomes a separate AST op so the rest of the pipeline sees scalar pushes.
 fn lower_push_list(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -1828,27 +1621,9 @@ fn expected_integer_literal_error(
     context: &LoweringContext<'_>,
     token: &SyntaxToken,
 ) -> ParsingError {
-    ParsingError::UnrecognizedToken {
+    ParsingError::InvalidSyntax {
         span: context.parse().span_for_token(token),
-        token: legacy_token_name(token),
-        expected: vec!["integer literal".to_string()],
-    }
-}
-
-fn legacy_token_name(token: &SyntaxToken) -> String {
-    match token.kind() {
-        SyntaxKind::Number if token.text().starts_with("0x") || token.text().starts_with("0X") => {
-            "hex-encoded value".to_string()
-        },
-        SyntaxKind::Number if token.text().starts_with("0b") || token.text().starts_with("0B") => {
-            "bin-encoded value".to_string()
-        },
-        SyntaxKind::Number => "integer".to_string(),
-        SyntaxKind::Ident if token.text().chars().next().is_some_and(char::is_uppercase) => {
-            "constant identifier".to_string()
-        },
-        SyntaxKind::Ident => "identifier".to_string(),
-        _ => token.text().to_string(),
+        message: "expected integer literal".to_string(),
     }
 }
 
@@ -1874,30 +1649,6 @@ fn lower_error_msg(
             span,
             message: "expected a quoted string or constant reference".to_string(),
         }),
-    }
-}
-
-/// Lowers a token that must represent a `u8` immediate or constant reference.
-fn lower_u8_immediate(
-    context: &mut LoweringContext<'_>,
-    token: &SyntaxToken,
-) -> Result<Option<ast::ImmU8>, ParsingError> {
-    let span = context.parse().span_for_token(token);
-    match token.kind() {
-        SyntaxKind::Ident => {
-            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
-        },
-        SyntaxKind::Number => {
-            let Some(value) = parse_decimal_u64(token.text()) else {
-                return Ok(None);
-            };
-            let value = u8::try_from(value).map_err(|_| ParsingError::ImmediateOutOfRange {
-                span,
-                range: 0..(u8::MAX as usize + 1),
-            })?;
-            Ok(Some(Immediate::Value(Span::new(span, value))))
-        },
-        _ => Ok(None),
     }
 }
 
@@ -1938,22 +1689,17 @@ fn lower_felt_comparison(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
-/// Lowers foldable felt-immediate arithmetic and applies the same peephole folds as the legacy
-/// parser.
-///
-/// TODO(pauls): Remove folding after legacy parser removal, as this sort of optimization should not
-/// be performed during parsing.
 fn lower_felt_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
     token: &SyntaxToken,
-    folder: fn(ast::ImmFelt, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>,
+    build: fn(ast::ImmFelt) -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(imm) = lower_felt_immediate(context, token)? else {
         return Ok(None);
     };
 
-    folder(imm, span).map(Some)
+    Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
 /// Lowers the two `exp` families: `exp.<felt>` and `exp.u<bits>`.
@@ -1997,18 +1743,19 @@ fn lower_u32_instruction(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
-/// Lowers foldable `u32` immediate instruction families and preserves the legacy peephole folds.
-fn lower_foldable_u32_instruction(
+/// Lowers `u32.<imm>` spellings for instruction families without a dedicated immediate AST
+/// variant.
+fn lower_expanded_u32_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
     token: &SyntaxToken,
-    folder: fn(ast::ImmU32, SourceSpan) -> Result<Vec<ast::Op>, ParsingError>,
+    build: fn() -> Instruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(imm) = lower_u32_immediate(context, token)? else {
         return Ok(None);
     };
 
-    folder(imm, span).map(Some)
+    Ok(Some(vec![push_u32_op(span, imm), inst_op(span, build())]))
 }
 
 /// Lowers `u16` immediates for local-memory operations.
@@ -2043,7 +1790,7 @@ fn lower_push_mapvaln(
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let immediate_span = context.parse().span_for_token(token);
-    let Some(padding) = lower_decimal_u8_literal(token)? else {
+    let Some(padding) = lower_decimal_u8_literal(token) else {
         return Ok(None);
     };
     let event = match padding {
@@ -2109,7 +1856,7 @@ fn lower_u16_immediate(
             Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
-            let Some(value) = lower_decimal_u64_literal(token)? else {
+            let Some(value) = lower_decimal_u64_literal(token) else {
                 return Ok(None);
             };
             let Ok(value) = u16::try_from(value) else {
@@ -2134,7 +1881,7 @@ fn lower_shift32_immediate(
             Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
         },
         SyntaxKind::Number => {
-            let Some(value) = lower_decimal_u64_literal(token)? else {
+            let Some(value) = lower_decimal_u64_literal(token) else {
                 return Ok(None);
             };
             let Ok(value) = u8::try_from(value) else {
@@ -2150,11 +1897,9 @@ fn lower_shift32_immediate(
 }
 
 /// Parses a decimal `u8` literal token without accepting non-decimal spellings.
-fn lower_decimal_u8_literal(token: &SyntaxToken) -> Result<Option<u8>, ParsingError> {
-    let Some(value) = lower_decimal_u64_literal(token)? else {
-        return Ok(None);
-    };
-    Ok(u8::try_from(value).ok())
+fn lower_decimal_u8_literal(token: &SyntaxToken) -> Option<u8> {
+    let value = lower_decimal_u64_literal(token)?;
+    u8::try_from(value).ok()
 }
 
 /// Returns the suffix subspan of a token span, used for diagnostics like `exp.u65 -> 65`.
@@ -2163,11 +1908,11 @@ fn token_suffix_span(span: SourceSpan, prefix_len: u32) -> SourceSpan {
 }
 
 /// Parses a decimal `u64` from a number token if the token is decimal-shaped.
-fn lower_decimal_u64_literal(token: &SyntaxToken) -> Result<Option<u64>, ParsingError> {
+fn lower_decimal_u64_literal(token: &SyntaxToken) -> Option<u64> {
     if token.kind() != SyntaxKind::Number {
-        return Ok(None);
+        return None;
     }
-    Ok(parse_decimal_u64(token.text()))
+    parse_decimal_u64(token.text())
 }
 
 /// Wraps an instruction in an AST op at `span`.
@@ -2182,9 +1927,4 @@ pub(super) fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
         Immediate::Value(value) => Immediate::Value(value.map(PushValue::from)),
     };
     inst_op(span, Instruction::Push(push))
-}
-
-/// Builds a `push.0` op at `span`.
-pub(super) fn push_zero_op(span: SourceSpan) -> ast::Op {
-    inst_op(span, Instruction::Push(Immediate::Value(Span::new(span, PushValue::from(0u8)))))
 }

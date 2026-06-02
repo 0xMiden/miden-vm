@@ -11,7 +11,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    CoreCols, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags},
 };
 
@@ -21,8 +21,8 @@ use crate::{
 /// Enforces stack arith/u32 constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

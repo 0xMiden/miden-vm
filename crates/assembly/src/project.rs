@@ -9,15 +9,15 @@ use miden_assembly_syntax::{
     ast::{ModuleKind, Path as MasmPath},
     diagnostics::Report,
 };
-use miden_core::serde::{Deserializable, Serializable};
-use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
+use miden_core::serde::Deserializable;
+use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
     ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
+use crate::{Assembler, ast::Module};
 
 mod build_provenance;
 mod dependency_graph;
@@ -189,9 +189,15 @@ where
             .with_emit_debug_info(profile.should_emit_debug_info())
             .with_trim_paths(profile.should_trim_paths());
         let mut runtime_dependencies = RuntimeDependencies::default();
+        debug_assert!(
+            required_lib.is_none() || target.ty.is_executable(),
+            "expected required_lib only for executable targets"
+        );
         match required_lib {
             Some(required_lib) if required_lib.package.is_kernel() => {
-                assembler.link_package(required_lib.package.clone(), Linkage::Dynamic)?;
+                // We do not link the package here, as by definition a required library is only
+                // present for executable targets, and we always unconditionally link kernel
+                // dependencies just prior to assembling the package
                 runtime_dependencies.record_linked_kernel_dependency(required_lib.package)?;
             },
             Some(required_lib) => {
@@ -215,7 +221,9 @@ where
                 )));
             }
 
-            assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            if !dependency_package.package.is_kernel() {
+                assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            }
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
@@ -225,29 +233,37 @@ where
             None => self.load_target_sources(project.as_ref(), target)?,
         };
 
-        let product = match target.ty {
-            TargetType::Executable => assembler.assemble_executable_modules(root, support)?,
+        if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
+            if matches!(target.ty, TargetType::Kernel) {
+                return Err(Report::msg(format!(
+                    "kernel targets cannot depend on a kernel, dependency '{}' is a kernel",
+                    kernel_package.name
+                )));
+            }
+            assembler.link_package(kernel_package, Linkage::Dynamic)?;
+        }
+        let mut product = match target.ty {
+            TargetType::Executable => {
+                assembler.assemble_executable_modules(package_id.clone(), root, support)?
+            },
             TargetType::Kernel => {
                 if !support.is_empty() {
                     assembler.compile_and_statically_link_all(support)?;
                 }
-                assembler.assemble_kernel_module(root)?
+                assembler.assemble_kernel_module(package_id.clone(), root)?
             },
             _ if target.ty.is_library() => {
                 let mut modules = Vec::with_capacity(support.len() + 1);
                 modules.push(root);
                 modules.extend(support);
-                assembler.assemble_library_modules(modules, target.ty)?
+                assembler.assemble_library_modules(package_id.clone(), modules, target.ty)?
             },
             _ => unreachable!("non-exhaustive target type"),
         };
 
-        let manifest = product
-            .manifest()
-            .clone()
-            .with_dependencies(runtime_dependencies.deps.into_values())
+        product
+            .extend_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
-        let debug_info = product.debug_info().cloned();
 
         // Emit custom sections
         let mut sections = Vec::new();
@@ -263,38 +279,15 @@ where
             sections.push(provenance.to_section());
         }
 
-        // Section: embedded kernel package
-        if target.ty.is_executable()
-            && let Some(kernel_package) = runtime_dependencies.kernel.clone()
-        {
-            sections.push(linked_kernel_package_section(kernel_package.as_ref()));
-        }
-
-        // Section: debug info
-        if let Some(DebugInfoSections {
-            debug_sources_section,
-            debug_functions_section,
-            debug_types_section,
-        }) = debug_info.as_ref()
-        {
-            sections.push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
-            sections
-                .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));
-            sections.push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
-        }
-
-        let package = Arc::new(MastPackage {
-            name: project.target_package_name(target),
-            version: project.version().into_inner().clone(),
-            description: project.description().map(|description| description.to_string()),
-            kind: product.kind(),
-            mast: product.into_artifact(),
-            manifest,
-            sections,
-        });
+        let mut package = product.into_artifact()?;
+        package.name = project.target_package_name(target);
+        package.version = project.version().into_inner().clone();
+        package.description = project.description().map(|description| description.to_string());
+        package.sections.extend(sections);
+        let package = Arc::from(package);
 
         let resolved = ResolvedPackage {
-            package: Arc::clone(&package),
+            package,
             linked_kernel_package: runtime_dependencies.kernel,
         };
         if !has_provided_sources {
@@ -480,7 +473,7 @@ where
                 Err(load_error) => {
                     if let Some(kernel_package) = package
                         .try_embedded_kernel_package()
-                        .map(|kernel_package| kernel_package.map(Arc::new))?
+                        .map(|kernel_package| kernel_package.map(Arc::from))?
                     {
                         return Ok(Some(kernel_package));
                     }
@@ -491,7 +484,7 @@ where
 
         package
             .try_embedded_kernel_package()
-            .map(|kernel_package| kernel_package.map(Arc::new))
+            .map(|kernel_package| kernel_package.map(Arc::from))
     }
 
     fn load_canonical_package(
@@ -565,10 +558,7 @@ where
             return false;
         }
 
-        match self.store.load_package(package_id, selected) {
-            Ok(_) => false,
-            Err(_) => true,
-        }
+        self.store.load_package(package_id, selected).is_err()
     }
 
     fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
@@ -590,10 +580,7 @@ where
             return false;
         }
 
-        match self.store.load_package(&package.name, &version) {
-            Ok(_) => false,
-            Err(_) => true,
-        }
+        self.store.load_package(&package.name, &version).is_err()
     }
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
@@ -724,10 +711,6 @@ fn target_root_module_kind(ty: TargetType) -> ModuleKind {
         TargetType::Kernel => ModuleKind::Kernel,
         _ => ModuleKind::Library,
     }
-}
-
-fn linked_kernel_package_section(package: &MastPackage) -> Section {
-    Section::new(SectionId::KERNEL, package.to_bytes())
 }
 
 fn module_path_from_relative(

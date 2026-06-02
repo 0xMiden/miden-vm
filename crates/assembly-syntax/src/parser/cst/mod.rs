@@ -1,13 +1,12 @@
 mod blocks;
 mod context;
-mod folders;
 mod forms;
 mod fragments;
 mod instructions;
 
 use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::SourceFile;
+use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::LabeledSpan;
 
 use self::{context::LoweringContext, forms::lower_source_file};
@@ -58,7 +57,7 @@ pub enum SyntaxError {
     },
 }
 
-/// Parses zero or more legacy AST forms from `source` using the CST-backed frontend.
+/// Parses zero or more AST forms from `source` using the CST-backed frontend.
 ///
 /// This function is the public entry point for the CST backend. It first runs the lossless CST
 /// parser, converts any CST diagnostics into the existing parser-facing report surface, and only
@@ -77,22 +76,38 @@ pub fn parse_forms(
     }
 }
 
-/// Collapses a recovered CST diagnostic list into the user-facing syntax error surface.
+/// This is like `parse_forms`, but for parsing the content of inline MASM blocks in languages like
+/// Rust.
 ///
-/// When recovery produced multiple diagnostics, we prefer the first real error to avoid surfacing
-/// noisy follow-on messages that the legacy parser would never have reported.
+/// Inline MASM is parsed as an [ast::Block], as if it was the body of a procedure definition. This
+/// means that top-level items such as imports and constant declarations are not allowed.
+///
+/// An optional span can be provided, in which case only the contents of the span are parsed as the
+/// inline MASM.
+pub fn parse_inline_masm(
+    source: Arc<SourceFile>,
+    bounds: Option<SourceSpan>,
+    interned: &mut BTreeSet<Arc<str>>,
+) -> Result<ast::Block, Report> {
+    use miden_assembly_syntax_cst::ast::AstNode;
+    let mut parse = miden_assembly_syntax_cst::parse_inline_masm(source.clone(), bounds);
+    let diagnostics = parse.take_diagnostics();
+    if diagnostics.is_empty() {
+        let mut context = LoweringContext::new(parse, interned);
+        let cst_block = miden_assembly_syntax_cst::ast::Block::cast(context.parse().syntax())
+            .expect("inline masm root kind should always be Block");
+        blocks::lower_block(&mut context, &cst_block)
+            .map_err(move |err| Report::from(err).with_source_code(source))
+    } else {
+        Err(Report::from(SyntaxError::from(diagnostics)).with_source_code(source))
+    }
+}
+
+/// Converts recovered CST diagnostics into the user-facing syntax error surface.
 impl From<Vec<MietteDiagnostic>> for SyntaxError {
     fn from(mut diagnostics: Vec<MietteDiagnostic>) -> Self {
         if diagnostics.len() == 1 {
-            // If we have only a single diagnostic, flatten them for cleaner output
             Self::from(diagnostics.pop().unwrap())
-        } else if let Some(first_error) = diagnostics.iter().position(|diagnostic| {
-            diagnostic.severity.is_none_or(|severity| matches!(severity, Severity::Error))
-        }) {
-            // The legacy parser surfaced the primary syntax error and stopped. The CST parser
-            // can recover and accumulate follow-on syntax diagnostics, but the user-facing
-            // parser surface should still prefer the first real error to avoid noisy cascades.
-            Self::from(diagnostics.remove(first_error))
         } else {
             Self::Multiple {
                 diagnostics: diagnostics.into_iter().map(Self::from).collect(),

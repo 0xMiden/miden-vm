@@ -6,7 +6,6 @@ use alloc::{
 use std::{fs, io, println};
 
 use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
-use miden_air::ProcessorAir;
 use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +18,7 @@ const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
     num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
+    is_multi_air: true,
 };
 pub const RELATION_DIGEST_PATHS: (&str, &str) =
     ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");
@@ -29,10 +29,16 @@ const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = RELATION_DIGEST_PATHS.0;
 
 /// Builds the batched ACE circuit used by the Miden VM recursive verifier.
+///
+/// The production circuit is the combined CoreAir + ChipletsAir circuit produced by
+/// [`build_multi_air_ace_circuit`](miden_air::ace::build_multi_air_ace_circuit).
+/// The `config.is_multi_air` flag must be `true`.
 pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
-    let air = ProcessorAir;
-    let batch_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
+    assert!(
+        config.is_multi_air,
+        "production circuit is multi-AIR; pass AceConfig with is_multi_air = true"
+    );
+    miden_air::ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap()
 }
 
 /// Computes the relation digest used by recursive verification.

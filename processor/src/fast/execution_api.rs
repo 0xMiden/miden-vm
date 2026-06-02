@@ -56,7 +56,10 @@ impl FastProcessor {
     /// use miden_assembly::Assembler;
     /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
     ///
-    /// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+    /// let program = Assembler::default()
+    ///     .assemble_program("prg", "begin push.1 drop end")
+    ///     .unwrap()
+    ///     .unwrap_program();
     /// let mut host = DefaultHost::default();
     ///
     /// let trace_inputs = FastProcessor::new(StackInputs::default())
@@ -104,10 +107,9 @@ impl FastProcessor {
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack =
-            ContinuationStack::new(program, self.options.max_num_continuations());
+        let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -132,10 +134,9 @@ impl FastProcessor {
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack =
-            ContinuationStack::new(program, self.options.max_num_continuations());
+        let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -170,7 +171,13 @@ impl FastProcessor {
             &mut NoopTracer,
             &StepStopper,
         );
-        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(
+            flow,
+            continuation_stack,
+            current_forest,
+            kernel,
+            self.options.max_num_continuations(),
+        )
     }
 
     /// Async variant of [`Self::step_sync`].
@@ -196,7 +203,13 @@ impl FastProcessor {
                 &StepStopper,
             )
             .await;
-        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(
+            flow,
+            continuation_stack,
+            current_forest,
+            kernel,
+            self.options.max_num_continuations(),
+        )
     }
 
     /// Pairs execution output with the trace inputs captured by the tracer.
@@ -216,10 +229,11 @@ impl FastProcessor {
     /// Converts a step-wise execution result into the next resume context, if execution stopped.
     #[inline(always)]
     fn resume_context_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
-        mut continuation_stack: ContinuationStack,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
+        mut continuation_stack: ContinuationStack<Arc<MastForest>>,
         current_forest: Arc<MastForest>,
         kernel: Kernel,
+        max_num_continuations: usize,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         match flow {
             ControlFlow::Continue(_) => Ok(None),
@@ -229,7 +243,11 @@ impl FastProcessor {
                     if let Some(continuation) = maybe_continuation {
                         continuation_stack.push_continuation(continuation);
                     }
-                    continuation_stack.check_size()?;
+                    if continuation_stack.len() > max_num_continuations {
+                        return Err(ExecutionError::Internal(
+                            "continuation stack size exceeded the allowed maximum",
+                        ));
+                    }
 
                     Ok(Some(ResumeContext {
                         current_forest,
@@ -261,16 +279,16 @@ impl FastProcessor {
     /// processor for a second program is incorrect. This is mainly meant to be used in tests.
     fn execute_impl<S, T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl SyncHost,
         tracer: &mut T,
         stopper: &S,
-    ) -> ControlFlow<BreakReason, StackOutputs>
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
-        S: Stopper<Processor = Self>,
-        T: Tracer<Processor = Self>,
+        S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         while let ControlFlow::Break(internal_break_reason) =
             execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
@@ -366,16 +384,16 @@ impl FastProcessor {
 
     async fn execute_impl_async<S, T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &mut ContinuationStack<Arc<MastForest>>,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl Host,
         tracer: &mut T,
         stopper: &S,
-    ) -> ControlFlow<BreakReason, StackOutputs>
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>
     where
-        S: Stopper<Processor = Self>,
-        T: Tracer<Processor = Self>,
+        S: Stopper<Processor = Self, Forest = Arc<MastForest>>,
+        T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
         while let ControlFlow::Break(internal_break_reason) =
             execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
@@ -579,8 +597,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack =
-            ContinuationStack::new(program, self.options.max_num_continuations());
+        let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -604,8 +621,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack =
-            ContinuationStack::new(program, self.options.max_num_continuations());
+        let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;

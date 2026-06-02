@@ -32,7 +32,7 @@ fn truncate_stack() {
 #[test]
 fn reduce_kernel_digests_upper_bound() {
     // init_seed contract:
-    //   Stack: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+    //   Stack: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
     //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
     //
     // process_public_inputs advice stack (consumed in order):
@@ -51,7 +51,7 @@ fn reduce_kernel_digests_upper_bound() {
             push.0  exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10
+            push.0.0.0.0 push.10 push.10
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end
@@ -153,10 +153,11 @@ fn log_precompile_request_procedure() {
 
     // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
     let program: Program = Assembler::default()
-        .with_dynamic_library(CoreLibrary::default())
+        .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
         .expect("failed to load core library")
-        .assemble_program(source)
-        .expect("failed to assemble log_precompile fixture");
+        .assemble_program("program", source)
+        .expect("failed to assemble log_precompile fixture")
+        .unwrap_program();
 
     let stack_inputs = StackInputs::default();
     let advice_inputs = AdviceInputs::default();
@@ -186,21 +187,21 @@ fn log_precompile_request_procedure() {
         .requests_transcript(proof.precompile_requests())
         .expect("failed to recompute deferred commitment (proof)");
     assert_eq!(
-        verifier_transcript.finalize(),
-        transcript.finalize(),
+        verifier_transcript.state(),
+        transcript.state(),
         "deferred commitment mismatch in proof"
     );
 
     let mut expected_proof_transcript = PrecompileTranscript::new();
     expected_proof_transcript.record(commitment);
     assert_eq!(
-        expected_proof_transcript.finalize(),
-        transcript.finalize(),
+        expected_proof_transcript.state(),
+        transcript.state(),
         "deferred commitment mismatch in proof"
     );
 
     let program_info = ProgramInfo::from(program);
-    let (_, pc_transcript_digest) = miden_verifier::verify_with_precompiles(
+    let (_, pc_transcript_state) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -208,7 +209,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript.finalize(), pc_transcript_digest);
+    assert_eq!(transcript.state(), pc_transcript_state);
 }
 
 #[derive(Clone)]

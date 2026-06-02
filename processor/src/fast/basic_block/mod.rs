@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 
 use miden_core::{
     events::{EventId, SystemEvent},
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
 };
 
 use crate::{
@@ -20,14 +20,17 @@ use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
     #[inline(always)]
-    fn handle_system_event(
+    fn handle_system_event<F>(
         &mut self,
         system_event: SystemEvent,
-        current_forest: &MastForest,
+        current_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         match handle_system_event(self, system_event).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -40,15 +43,18 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    fn apply_host_event_mutations(
+    fn apply_host_event_mutations<F>(
         &mut self,
-        current_forest: &MastForest,
+        current_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
         event_id: EventId,
         mutations: Result<Vec<AdviceMutation>, EventError>,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         let mutations = match mutations {
             Ok(mutations) => mutations,
             Err(err) => {
@@ -78,13 +84,16 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) fn op_emit_sync(
+    pub(super) fn op_emit_sync<F>(
         &mut self,
         host: &mut impl SyncHost,
-        current_forest: &MastForest,
+        current_forest: &F,
         node_id: MastNodeId,
         op_idx: usize,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         let event_id = EventId::from_felt(self.stack_get(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
@@ -98,13 +107,16 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) async fn op_emit(
+    pub(super) async fn op_emit<F>(
         &mut self,
         host: &mut impl Host,
-        current_forest: &MastForest,
+        current_forest: &F,
         node_id: MastNodeId,
         op_idx: usize,
-    ) -> ControlFlow<BreakReason> {
+    ) -> ControlFlow<BreakReason<F>>
+    where
+        F: ExecutableMastForest,
+    {
         let event_id = EventId::from_felt(self.stack_get(0));
 
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {

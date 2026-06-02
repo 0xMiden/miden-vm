@@ -6,7 +6,7 @@ use std::{
 };
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Library, Path as LibraryPath, SourceManager,
+    Assembler, DefaultSourceManager, Path as LibraryPath, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
@@ -14,6 +14,7 @@ use miden_assembly::{
 };
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
+use miden_mast_package::Package;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -143,23 +144,26 @@ where
 
     /// Compiles this program file into a [Program].
     #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<'a, I>(&self, libraries: I) -> Result<Program, Report>
+    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
     where
-        I: IntoIterator<Item = &'a Library>,
+        I: IntoIterator<Item = Arc<Package>>,
     {
         // compile program
         let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
-            .link_dynamic_library(CoreLibrary::default())
+            .link_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .wrap_err("Failed to load core library")?;
 
         for library in libraries {
-            assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
+            assembler
+                .link_package(library, miden_assembly::Linkage::Dynamic)
+                .wrap_err("Failed to load libraries")?;
         }
 
         let program: Program = assembler
-            .assemble_program(self.ast.as_ref())
-            .wrap_err("Failed to compile program")?;
+            .assemble_program("program", self.ast.as_ref())
+            .wrap_err("Failed to compile program")?
+            .unwrap_program();
 
         Ok(program)
     }
@@ -263,7 +267,7 @@ impl ProgramHash {
 // LIBRARY FILE
 // ================================================================================================
 pub struct Libraries {
-    pub libraries: Vec<Library>,
+    pub libraries: Vec<Arc<Package>>,
 }
 
 impl Libraries {
@@ -279,8 +283,8 @@ impl Libraries {
         for path in paths {
             let path_str = path.as_ref().to_string_lossy().into_owned();
 
-            let library = Library::deserialize_from_file(path).map_err(|err| {
-                report!("Failed to read library from file `{}`: {}", path_str, err)
+            let library = Package::deserialize_from_file(path).map(Arc::new).map_err(|err| {
+                report!("Failed to read package from file `{}`: {}", path_str, err)
             })?;
 
             libraries.push(library);

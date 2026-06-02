@@ -4,17 +4,13 @@ use miden_core::{
     Word,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
-use super::{
-    debug::DefaultDebugHandler,
-    handlers::{EventError, EventHandler, EventHandlerRegistry},
-};
+use super::handlers::{EventError, EventHandler, EventHandlerRegistry};
 use crate::{
-    BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
-    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
+    BaseHost, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
+    advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -22,13 +18,9 @@ use crate::{
 
 /// A default SyncHost implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
-pub struct DefaultHost<
-    D: DebugHandler = DefaultDebugHandler,
-    S: SourceManager = DefaultSourceManager,
-> {
+pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
-    debug_handler: D,
     source_manager: Arc<S>,
 }
 
@@ -37,27 +29,24 @@ impl Default for DefaultHost {
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
-            debug_handler: DefaultDebugHandler::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 }
 
-impl<D, S> DefaultHost<D, S>
+impl<S> DefaultHost<S>
 where
-    D: DebugHandler,
     S: SourceManager,
 {
     /// Use the given source manager implementation instead of the default one
     /// [`DefaultSourceManager`].
-    pub fn with_source_manager<O>(self, source_manager: Arc<O>) -> DefaultHost<D, O>
+    pub fn with_source_manager<O>(self, source_manager: Arc<O>) -> DefaultHost<O>
     where
         O: SourceManager,
     {
-        DefaultHost::<D, O> {
+        DefaultHost::<O> {
             store: self.store,
             event_handlers: self.event_handlers,
-            debug_handler: self.debug_handler,
             source_manager,
         }
     }
@@ -106,27 +95,10 @@ where
         self.register_handler(event, handler).unwrap();
         existed
     }
-
-    /// Replace the current [`DebugHandler`] with a custom one.
-    pub fn with_debug_handler<H: DebugHandler>(self, handler: H) -> DefaultHost<H, S> {
-        DefaultHost::<H, S> {
-            store: self.store,
-            event_handlers: self.event_handlers,
-            debug_handler: handler,
-            source_manager: self.source_manager,
-        }
-    }
-
-    /// Returns a reference to the [`DebugHandler`], useful for recovering debug information
-    /// emitted during a program execution.
-    pub fn debug_handler(&self) -> &D {
-        &self.debug_handler
-    }
 }
 
-impl<D, S> BaseHost for DefaultHost<D, S>
+impl<S> BaseHost for DefaultHost<S>
 where
-    D: DebugHandler,
     S: SourceManager,
 {
     fn get_label_and_source_file(
@@ -138,26 +110,13 @@ where
         (span, maybe_file)
     }
 
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.on_debug(process, options)
-    }
-
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        self.debug_handler.on_trace(process, trace_id)
-    }
-
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         self.event_handlers.resolve_event(event_id)
     }
 }
 
-impl<D, S> SyncHost for DefaultHost<D, S>
+impl<S> SyncHost for DefaultHost<S>
 where
-    D: DebugHandler,
     S: SourceManager,
 {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
@@ -225,6 +184,15 @@ pub struct HostLibrary {
     pub mast_forest: Arc<MastForest>,
     /// List of handlers along with their event names to call them with `emit`.
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+}
+
+impl From<Arc<miden_mast_package::Package>> for HostLibrary {
+    fn from(package: Arc<miden_mast_package::Package>) -> Self {
+        Self {
+            mast_forest: package.mast_forest().clone(),
+            handlers: vec![],
+        }
+    }
 }
 
 impl From<Arc<MastForest>> for HostLibrary {

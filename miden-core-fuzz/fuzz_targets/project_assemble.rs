@@ -277,7 +277,6 @@ fn validate_package(package: &MastPackage) {
             let _ = package.try_embedded_kernel_package();
         },
         TargetType::Kernel => {
-            let _ = package.try_into_kernel_library();
             let _ = package.to_kernel();
             let _ = package.kernel_module_info();
         },

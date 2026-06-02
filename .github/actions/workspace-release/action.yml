@@ -55,6 +55,14 @@ runs:
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
 
+    - name: Check MASM procedure root stability
+      if: ${{ inputs.mode == 'dry-run' && github.ref == 'refs/heads/main' }}
+      shell: bash
+      run: |
+        rustup toolchain install nightly --profile minimal --no-self-update
+        chmod +x scripts/check-masm-root-stability.sh
+        ./scripts/check-masm-root-stability.sh
+
     # Clean packaging directory to avoid stale/corrupted tmp-registry state
     - name: Clean packaging directory
       shell: bash

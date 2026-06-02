@@ -18,13 +18,13 @@ use crate::{
 #[derive(Debug)]
 pub struct ResumeContext {
     pub(crate) current_forest: Arc<MastForest>,
-    pub(crate) continuation_stack: ContinuationStack,
+    pub(crate) continuation_stack: ContinuationStack<Arc<MastForest>>,
     pub(crate) kernel: Kernel,
 }
 
 impl ResumeContext {
     /// Returns a reference to the continuation stack.
-    pub fn continuation_stack(&self) -> &ContinuationStack {
+    pub fn continuation_stack(&self) -> &ContinuationStack<Arc<MastForest>> {
         &self.continuation_stack
     }
 
@@ -48,14 +48,15 @@ pub struct NeverStopper;
 
 impl Stopper for NeverStopper {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     #[inline(always)]
     fn should_stop(
         &self,
         processor: &FastProcessor,
-        _continuation_stack: &ContinuationStack,
-        _continuation_after_stop: impl FnOnce() -> Option<Continuation>,
-    ) -> ControlFlow<BreakReason> {
+        _continuation_stack: &ContinuationStack<Arc<MastForest>>,
+        _continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)
     }
 }
@@ -66,14 +67,15 @@ pub struct StepStopper;
 
 impl Stopper for StepStopper {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     #[inline(always)]
     fn should_stop(
         &self,
         processor: &FastProcessor,
-        _continuation_stack: &ContinuationStack,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
-    ) -> ControlFlow<BreakReason> {
+        _continuation_stack: &ContinuationStack<Arc<MastForest>>,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+    ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
 
         ControlFlow::Break(BreakReason::Stopped(continuation_after_stop()))
@@ -82,7 +84,7 @@ impl Stopper for StepStopper {
 
 /// Checks if the maximum cycle count has been exceeded, returning a `BreakReason::Err` if so.
 #[inline(always)]
-fn check_if_max_cycles_exceeded(processor: &FastProcessor) -> ControlFlow<BreakReason> {
+fn check_if_max_cycles_exceeded<F>(processor: &FastProcessor) -> ControlFlow<BreakReason<F>> {
     if processor.clk > processor.options.max_cycles() as usize {
         ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
             processor.options.max_cycles(),
@@ -97,7 +99,7 @@ fn check_if_max_cycles_exceeded(processor: &FastProcessor) -> ControlFlow<BreakR
 
 /// The reason why execution was interrupted.
 #[derive(Debug)]
-pub enum BreakReason {
+pub enum BreakReason<F> {
     /// An execution error occurred
     Err(ExecutionError),
     /// Execution was stopped by a [`Stopper`]. Provides the continuation to add to the continuation
@@ -109,5 +111,5 @@ pub enum BreakReason {
     ///
     /// If yes, then `None` should be returned. If not, then the continuation that runs the next
     /// step in `FastProcessor::execute_impl()` should be returned.
-    Stopped(Option<Continuation>),
+    Stopped(Option<Continuation<F>>),
 }

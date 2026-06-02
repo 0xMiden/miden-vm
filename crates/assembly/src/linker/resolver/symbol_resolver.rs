@@ -452,7 +452,11 @@ impl<'a> SymbolResolver<'a> {
                 let (imported_symbol, subpath) = path.split_first().expect("multi-component path");
                 if ignored_imports.contains(imported_symbol) {
                     log::trace!(target: "name-resolver::expand", "skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead");
-                    let path = path.to_absolute();
+                    let path = path.to_absolute().map_err(|_| {
+                        LinkerError::SymbolResolution(Box::new(
+                            SymbolResolutionError::UndefinedSymbol { span, source_file: None },
+                        ))
+                    })?;
                     break self.expand_path_from(
                         origin_module,
                         &context,
@@ -531,7 +535,11 @@ impl<'a> SymbolResolver<'a> {
                         ) =>
                     {
                         // Try to expand the path by treating it as an absolute path
-                        let absolute = path.to_absolute();
+                        let absolute = path.to_absolute().map_err(|_| {
+                            LinkerError::SymbolResolution(Box::new(
+                                SymbolResolutionError::UndefinedSymbol { span, source_file: None },
+                            ))
+                        })?;
                         log::trace!(target: "name-resolver::expand", "no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead");
                         break self.expand_path_from(
                             origin_module,

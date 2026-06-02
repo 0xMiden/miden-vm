@@ -71,7 +71,7 @@ pub mod columns;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    Felt, MainCols, MidenAirBuilder,
+    CoreCols, Felt, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128},
         decoder::columns::DecoderCols,
@@ -87,8 +87,8 @@ use crate::{
 /// Enforces decoder main-trace constraints (entry point).
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -223,7 +223,6 @@ pub fn enforce_main<AB>(
     // Operation | Constraint                          | Why
     // ----------+-------------------------------------+------------------------------------
     // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
-    // LOOP      | s0 in {0, 1}                        | s0 determines enter (1) / skip (0)
     // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
     // REPEAT    | s0 = 1                              | loop condition must be true
     // REPEAT    | is_loop_body (h4) = 1               | must be inside an active loop body
@@ -231,11 +230,9 @@ pub fn enforce_main<AB>(
     // END+REP'  | h0'..h4' = h0..h4                   | carry block hash + loop flag for re-entry
     // HALT      | f_halt => f_halt'                   | absorbing / terminal state
 
-    // SPLIT/LOOP: branch selector must be binary.
+    // SPLIT: branch selector must be binary.
     let branch_condition = local.stack.get(0);
-    builder
-        .when(op_flags.split() + op_flags.loop_op())
-        .assert_bool(branch_condition);
+    builder.when(op_flags.split()).assert_bool(branch_condition);
 
     // DYN: the upper hasher lanes must be zero so the callee digest in h0..h3 is the
     // only input to the hash chiplet.

@@ -174,8 +174,8 @@ fn lower_doc_group(
 
 /// Extracts the normalized text payload for a single doc-comment item.
 ///
-/// The returned string is trimmed the same way as the legacy parser and always includes a trailing
-/// newline so grouped docs concatenate without additional bookkeeping.
+/// The returned string is normalized and always includes a trailing newline so grouped docs
+/// concatenate without additional bookkeeping.
 fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     let span = item_span(context, item);
     let raw = context.source_text(span);
@@ -190,7 +190,7 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
 /// Lowers a `use` form into the alias representation.
 ///
 /// Unnamed path imports derive their alias name from the final path segment, while digest imports
-/// are required to provide an explicit alias to match the legacy parser contract.
+/// are required to provide an explicit alias.
 fn lower_import(
     context: &mut LoweringContext<'_>,
     import: &CstImport,

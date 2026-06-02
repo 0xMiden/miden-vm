@@ -23,8 +23,9 @@ pub const CALIBRATION_ITERS: u64 = 1000;
 /// assembler + fast processor + trace builder.
 pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let program = Assembler::default()
-        .assemble_program(source)
-        .map_err(|e| MeasurementError::Assembly(format!("{e}")))?;
+        .assemble_program("program", source)
+        .map_err(|e| MeasurementError::Assembly(format!("{e}")))?
+        .unwrap_program();
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default());
@@ -44,7 +45,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         ace_rows: chiplets.ace_chiplet_len() as u64,
     };
     let totals = TraceTotals {
-        core_rows: summary.main_trace_len() as u64,
+        core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };

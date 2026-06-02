@@ -1,0 +1,27 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(ControllerCols)
+---
+ControllerCols {
+    s0: 0,
+    s1: 1,
+    s2: 2,
+    state: [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+    ],
+    node_index: 15,
+    mrupdate_id: 16,
+    is_boundary: 17,
+    direction_bit: 18,
+}

@@ -42,7 +42,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    ChipletCols, MidenAirBuilder,
     constraints::{
         chiplets::{columns::ControllerCols, selectors::ChipletFlags},
         utils::BoolNot,
@@ -58,8 +58,8 @@ use crate::{
 /// column (`chiplets[0]`) is never referenced directly by constraint code.
 pub fn enforce_controller_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     chiplet: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

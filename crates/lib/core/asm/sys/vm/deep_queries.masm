@@ -125,7 +125,9 @@ proc process_main_segment_execution_trace
     # compute their hash and the value of their random linear combination using powers of a
     # single random value alpha.
 
-    # Load the 80 columns in 10 batches of 8 base field elements
+    # Load the multi-AIR aligned main columns. Per-leaf width is the LMCS-aligned
+    # sum of per-AIR main widths: ceil(51/8)·8 + ceil(22/8)·8 = 56 + 24 = 80 base
+    # felts, loaded in 10 batches of 8.
     padw swapw padw
     #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
 
@@ -142,10 +144,8 @@ end
 #!
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
-#!
-#! Cycles: 27
 proc load_main_segment_execution_trace
-    repeat.9
+    repeat.10
         adv_pipe
         horner_eval_base
         exec.poseidon2::permute

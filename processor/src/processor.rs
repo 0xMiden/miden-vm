@@ -1,14 +1,8 @@
-use core::ops::ControlFlow;
-
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, Felt, MemoryError, Word,
-    advice::AdviceError,
-    crypto::merkle::MerklePath,
-    errors::OperationError,
-    mast::{MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
+    ContextId, ExecutionError, Felt, MemoryError, Word, advice::AdviceError,
+    crypto::merkle::MerklePath, errors::OperationError, precompile::PrecompileTranscriptState,
 };
 
 // PROCESSOR
@@ -47,6 +41,9 @@ pub(crate) trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
+    /// Returns the maximum number of continuations allowed on the continuation stack.
+    fn max_num_continuations(&self) -> usize;
+
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
     fn save_context_and_truncate_stack(&mut self);
@@ -55,41 +52,16 @@ pub(crate) trait Processor: Sized {
     /// `dyncall. This includes restoring the overflow stack and the system parameters.
     fn restore_context(&mut self) -> Result<(), OperationError>;
 
-    /// Returns the current precompile transcript state (sponge capacity).
+    /// Returns the current precompile-transcript state (the rolling digest of all recorded
+    /// commitments).
     ///
     /// Used by `log_precompile` to thread the transcript across invocations.
     fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
 
-    /// Sets the precompile transcript state (sponge capacity) to a new value.
+    /// Sets the precompile-transcript state to a new value.
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason>;
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason>;
-
-    /// Executes any decorator in a basic block that is to be executed before the operation at the
-    /// given index in the block.
-    fn execute_decorators_for_op(
-        &self,
-        node_id: MastNodeId,
-        op_idx_in_block: usize,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason>;
 }
 
 // SYSTEM INTERFACE

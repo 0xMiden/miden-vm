@@ -125,32 +125,14 @@ cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuz
 cargo +nightly fuzz run precompile_request_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-### Assembly/Package Deserialization Targets
+### Package Deserialization Targets
 
-These targets exercise library and package deserializers used by `.masl` and `.masp`.
-
-**`library_deserialize`** — Tests `Library::read_from_bytes`.
-
-```bash
-cargo +nightly fuzz run library_deserialize --fuzz-dir miden-core-fuzz
-```
-
-**`library_serde_deserialize`** — Tests `Library` JSON deserialization via `serde_json`.
-
-```bash
-cargo +nightly fuzz run library_serde_deserialize --fuzz-dir miden-core-fuzz
-```
+These targets exercise package deserializers used by `.masp`.
 
 **`package_deserialize`** — Tests `Package::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run package_deserialize --fuzz-dir miden-core-fuzz
-```
-
-**`package_serde_deserialize`** — Tests `Package` JSON deserialization via `serde_json`.
-
-```bash
-cargo +nightly fuzz run package_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 ### Component Targets
@@ -163,7 +145,7 @@ These fuzz internal structures through the MastForest deserialization path:
 cargo +nightly fuzz run basic_block_data --fuzz-dir miden-core-fuzz
 ```
 
-**`debug_info`** — Decorators, string table, CSR structures, error codes.
+**`debug_info`** — Debug info string tables, CSR structures, and error codes.
 
 ```bash
 cargo +nightly fuzz run debug_info --fuzz-dir miden-core-fuzz

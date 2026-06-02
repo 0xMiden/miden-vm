@@ -50,7 +50,7 @@ fn stack_overflow_bus_emits_per_interaction_row() {
     let main = trace.main_trace();
 
     let mut exp = Expectations::new(&log);
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let next = RowIndex::from(row + 1);
         let op = main.get_op_code(idx);

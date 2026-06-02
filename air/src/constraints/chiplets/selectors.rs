@@ -59,7 +59,7 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainCols, MidenAirBuilder, constraints::utils::BoolNot};
+use crate::{ChipletCols, MidenAirBuilder, constraints::utils::BoolNot};
 
 // CHIPLET FLAGS
 // ================================================================================================
@@ -102,8 +102,8 @@ pub struct ChipletSelectors<E> {
 /// Returns [`ChipletSelectors`] with precomputed flags for gating chiplet constraints.
 pub fn build_chiplet_selectors<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
 ) -> ChipletSelectors<AB::Expr>
 where
     AB: MidenAirBuilder,

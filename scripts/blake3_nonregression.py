@@ -17,7 +17,6 @@ BENCHMARK_COMMAND = [
     "./target/optimized/miden-vm",
     "prove",
     BENCHMARK_PATH,
-    "--release",
 ]
 
 ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
