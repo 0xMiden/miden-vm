@@ -4,7 +4,7 @@ use miden_assembly::{Assembler, Linkage};
 use miden_core::{Felt, serde::Deserializable, utils::bytes_to_packed_u32_elements};
 use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
 use miden_mast_package::Package;
-use miden_precompiles::PrecompilesLibrary;
+use miden_precompiles::{PrecompilesLibrary, registry};
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
@@ -90,7 +90,7 @@ fn host_loads_library() {
 }
 
 /// End-to-end: a program calling `keccak256::hash` runs on a real processor with the precompile
-/// registry installed (via `with_library`) and returns the expected digest.
+/// registry installed on the processor and returns the expected digest.
 #[test]
 fn keccak_hash_executes_end_to_end() {
     let library = PrecompilesLibrary::default();
@@ -119,6 +119,8 @@ fn keccak_hash_executes_end_to_end() {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
     .execute_sync(&program, &mut host)
     .expect("keccak execution must succeed");
 
@@ -170,6 +172,8 @@ fn sha512_hash_executes_end_to_end() {
         ExecutionOptions::default(),
     )
     .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
     .execute_sync(&program, &mut host)
     .expect("sha512 execution must succeed");
 
