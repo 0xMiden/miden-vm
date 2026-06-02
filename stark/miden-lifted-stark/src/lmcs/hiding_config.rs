@@ -13,9 +13,12 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 
-use crate::lmcs::{
-    Lmcs, LmcsError, OpenedRows, bitrev::BitReversibleMatrix, config::LmcsConfig,
-    lifted_tree::LiftedMerkleTree, proof::BatchProof, tree_indices::TreeIndices,
+use crate::{
+    lmcs::{
+        Lmcs, LmcsError, OpenedRows, config::LmcsConfig, lifted_tree::LiftedMerkleTree,
+        proof::BatchProof, tree_indices::TreeIndices,
+    },
+    util::bitrev::BitReversibleMatrix,
 };
 
 /// Configuration for hiding LMCS with random salt.

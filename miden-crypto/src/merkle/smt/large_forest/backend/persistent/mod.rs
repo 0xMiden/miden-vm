@@ -32,28 +32,31 @@ mod internal;
 mod iterator;
 mod keys;
 mod property_tests;
+mod snapshot;
 mod tests;
 mod tree_metadata;
 
 use alloc::{string::ToString, sync::Arc, vec::Vec};
 use core::ffi::c_int;
-use std::{collections::HashMap, iter::once, mem};
+use std::{collections::HashMap, mem};
 
 use miden_serde_utils::{Deserializable, DeserializationError, Serializable};
 use num::Integer;
 use rayon::prelude::*;
 use rocksdb as db;
+pub use snapshot::PersistentBackendReader;
 
 use super::{BackendError, Result};
+#[cfg(test)]
+use crate::merkle::smt::SmtUpdateBatch;
 use crate::{
     EMPTY_WORD, Map, Word,
     merkle::{
-        EmptySubtreeRoots, MerkleError, NodeIndex, SparseMerklePath,
+        EmptySubtreeRoots, MerkleError, NodeIndex,
         smt::{
-            Backend, InnerNode, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
-            SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, SmtUpdateBatch,
-            StorageUpdateParts, StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot,
-            VersionId,
+            Backend, BackendReader, LeafIndex, LineageId, NodeMutation, NodeMutations, SMT_DEPTH,
+            SmtForestUpdateBatch, SmtLeaf, SmtLeafError, SmtProof, StorageUpdateParts,
+            StorageUpdates, Subtree, SubtreeError, TreeEntry, TreeWithRoot, VersionId,
             full::concurrent::{
                 MutatedSubtreeLeaves, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter,
                 fetch_sibling_pair, process_sorted_pairs_to_leaves,
@@ -67,7 +70,9 @@ use crate::{
                     keys::{LeafKey, SubtreeKey},
                     tree_metadata::TreeMetadata,
                 },
-                utils::MutationSet,
+                utils::{
+                    AppliedLineageMutation, LineageMutation, LineageMutationKind, MutationSet,
+                },
             },
         },
     },
@@ -81,6 +86,34 @@ type DB = db::DB;
 
 /// The type of a write batch in the database associated with a transaction.
 type WriteBatch = db::WriteBatch;
+
+/// Prepared mutations for [`PersistentBackend`].
+///
+/// This is the persistent backend's concrete [`Backend::PreparedMutations`] type. It stores
+/// storage-level updates and the resulting metadata computed during the first phase of a forest
+/// update. Applying it builds and commits a RocksDB [`WriteBatch`] without recomputing the Merkle
+/// update batches.
+///
+/// The fields are private because callers should treat prepared mutation data as opaque and pass it
+/// back through
+/// [`LargeSmtForest::apply_mutations`](crate::merkle::smt::LargeSmtForest::apply_mutations).
+#[derive(Debug)]
+pub struct PersistentPreparedMutations {
+    entries: Vec<PersistentPreparedLineageMutation>,
+}
+
+#[derive(Debug)]
+struct PersistentPreparedLineageMutation {
+    lineage: LineageId,
+    old_version: Option<VersionId>,
+    new_version: VersionId,
+    old_root: Word,
+    old_entry_count: usize,
+    reverse: MutationSet,
+    metadata: TreeMetadata,
+    storage_updates: StorageUpdates,
+    kind: LineageMutationKind,
+}
 
 // CONSTANTS / COLUMN FAMILY NAMES
 // ================================================================================================
@@ -145,69 +178,10 @@ const MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE: usize = 5;
 /// The minimum number of items per rayon chunk when parallelizing deserialization and extraction.
 const CHUNKING_UNIT: usize = 100;
 
-// PERSISTENT BACKEND
+// BACKEND READER TRAIT
 // ================================================================================================
 
-/// The persistent backend for the SMT forest, providing durable storage for the latest tree in each
-/// lineage in the forest.
-#[derive(Debug)]
-pub struct PersistentBackend {
-    /// The underlying database.
-    ///
-    /// # Layout
-    ///
-    /// The data on each tree is stored across a series of RocksDB column families, along with
-    /// additional metadata. The layout is fixed (for the moment), and has the following column
-    /// families.
-    ///
-    /// - [`LEAVES_CF`]: Stores the [`SmtLeaf`] data, keyed by a [`LeafKey`] instance.
-    /// - [`METADATA_CF`]: Stores a [`TreeMetadata`] instance for each tree, keyed by
-    ///   [`LineageId`]. This acts like a mirror of the in-memory `lineages` data, which exists to
-    ///   speed up common queries.
-    /// - `SUBTREE_XX_CF`: Stores the [`Subtree`]s with their root at level `XX` in the backend,
-    ///   keyed on the [`SubtreeKey`].
-    db: Arc<DB>,
-
-    /// An in-memory cache of the tree metadata enabling the more rapid servicing of certain kinds
-    /// of queries.
-    ///
-    /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
-    /// [`METADATA_CF`] column.
-    lineages: HashMap<LineageId, TreeMetadata>,
-
-    /// Whether writes should be synchronously flushed to disk.
-    ///
-    /// Setting this to true will result in reduced throughput but may result in higher durability
-    /// in the presence of crashes.
-    sync_writes: bool,
-}
-
-// CONSTRUCTION
-// ================================================================================================
-
-/// This block contains functions for the construction of the persistent backend.
-impl PersistentBackend {
-    /// Constructs an instance of the persistent backend, either opening or creating the data store
-    /// at the location specified in the `config`.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
-    ///   from disk.
-    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
-    pub fn load(config: Config) -> Result<Self> {
-        let db = Arc::new(Self::build_db_with_options(&config)?);
-        let lineages = Self::read_all_metadata(db.clone())?;
-        let sync_writes = config.sync_writes;
-
-        Ok(Self { db, lineages, sync_writes })
-    }
-}
-
-// BACKEND TRAIT
-// ================================================================================================
-
-impl Backend for PersistentBackend {
+impl BackendReader for PersistentBackend {
     /// Returns an opening for the specified `key` in the SMT with the specified `lineage`.
     ///
     /// # Errors
@@ -215,44 +189,13 @@ impl Backend for PersistentBackend {
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by the backend.
     /// - [`BackendError::Internal`] if the backing database cannot be accessed for some reason.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
-        // We fail early if we don't know about the lineage in question, as querying further could
-        // cause very strange behavior.
-        if !self.lineages.contains_key(&lineage) {
-            return Err(BackendError::UnknownLineage(lineage));
-        }
-
-        // We get our leaf first.
-        let leaf = self
-            .load_leaf_for(lineage, key)?
-            .unwrap_or_else(|| SmtLeaf::new_empty(LeafIndex::from(key)));
-
-        // We then have to load both the corresponding leaf, and the siblings for its path out of
-        // storage.
-        let leaf_index: NodeIndex = LeafIndex::from(key).into();
-
-        // We calculate the roots of the subtrees in order to know their keys for loading. As an
-        // opening only ever needs to retrieve 8 subtrees we just do this sequentially.
-        let subtree_roots = (0..SMT_DEPTH / SUBTREE_DEPTH)
-            .scan(leaf_index.parent(), |cursor, _| {
-                let subtree_root = Subtree::find_subtree_root(*cursor);
-                *cursor = subtree_root.parent();
-                Some(subtree_root)
-            })
-            .collect::<Vec<_>>();
-
-        // Doing this as a separate step exhibits better performance than loading these subtrees
-        // inline in the path creation. This appears to be due to better pipelining and
-        // branch-predictor behavior.
-        let mut subtree_cache = HashMap::<NodeIndex, Subtree>::new();
-        for root in subtree_roots {
-            let maybe_tree = self.load_subtree(SubtreeKey { lineage, index: root })?;
-            subtree_cache.insert(root, maybe_tree.unwrap_or_else(|| Subtree::new(root)));
-        }
-
-        let merkle_path = self.compute_path(leaf_index, &subtree_cache);
-
-        // This is safe to do unchecked as we ensure that the path is valid by construction.
-        Ok(SmtProof::new_unchecked(merkle_path, leaf))
+        snapshot::open_proof(
+            &self.lineages,
+            lineage,
+            key,
+            |l, k| self.load_leaf_for(l, k),
+            |k| self.load_subtree(k),
+        )
     }
 
     /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
@@ -367,7 +310,188 @@ impl Backend for PersistentBackend {
         // its type, so we delegate to our custom entries iterator impl.
         Ok(PersistentBackendEntriesIterator::new(lineage, pfx_iterator))
     }
+}
 
+// BACKEND TRAIT
+// ================================================================================================
+
+impl Backend for PersistentBackend {
+    type Reader = PersistentBackendReader;
+    type PreparedMutations = PersistentPreparedMutations;
+
+    fn reader(&self) -> Result<Self::Reader> {
+        let snapshot = self.db.snapshot();
+        // SAFETY: `SnapshotInner` holds both the snapshot and `Arc<DB>`, and its `Drop` impl
+        // drops the snapshot before decrementing the Arc. This guarantees the DB outlives the
+        // snapshot, making the 'static transmute sound.
+        let snapshot: db::Snapshot<'static> = unsafe { mem::transmute(snapshot) };
+        Ok(PersistentBackendReader::new(
+            Arc::clone(&self.db),
+            snapshot,
+            Arc::clone(&self.lineages),
+        ))
+    }
+
+    /// Computes the mutations required to apply the provided `updates` on the forest.
+    ///
+    /// The order of application of these mutations is unspecified, but is guaranteed to produce no
+    /// more than one new root for each operated-upon lineage. All operations are performed as part
+    /// of one atomic update, leaving the data on disk in a consistent state even if failures occur.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
+    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
+    fn compute_mutations(
+        &self,
+        new_version: VersionId,
+        updates: SmtForestUpdateBatch,
+    ) -> Result<(Vec<LineageMutation>, Self::PreparedMutations)> {
+        let updates = updates
+            .into_iter()
+            .map(|(lineage, ops)| {
+                let (metadata, kind) = if let Some(metadata) = self.lineages.get(&lineage) {
+                    (metadata.clone(), LineageMutationKind::UpdateTree)
+                } else {
+                    (
+                        TreeMetadata {
+                            version: new_version,
+                            root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
+                            entry_count: 0,
+                        },
+                        LineageMutationKind::AddLineage,
+                    )
+                };
+                Ok((lineage, ops, metadata, kind))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Now we can simply issue the work in parallel.
+        let lineage_data = updates
+            .into_par_iter()
+            .map(|(lineage, ops, metadata, kind)| {
+                self.prepare_tree_update(
+                    lineage,
+                    metadata,
+                    new_version,
+                    ops.into_iter().map(Into::into).collect(),
+                    kind,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let (mutations, prepared): (Vec<_>, Vec<_>) = lineage_data.into_iter().unzip();
+
+        Ok((mutations, PersistentPreparedMutations { entries: prepared }))
+    }
+
+    /// Apply a mutation set to the entire forest, returning the mutation sets that would reverse
+    /// the changes to each lineage in the forest.
+    ///
+    /// All operations are performed as part of one atomic update, leaving the data on disk in a
+    /// consistent state even if failures occur.
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
+    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
+    fn apply_mutations(
+        &mut self,
+        mutations: Self::PreparedMutations,
+    ) -> Result<Vec<AppliedLineageMutation>> {
+        // We first have to check our precondition that all lineages are valid.
+        for entry in &mutations.entries {
+            match entry.kind {
+                LineageMutationKind::AddLineage => {
+                    if self.lineages.contains_key(&entry.lineage) {
+                        return Err(BackendError::DuplicateLineage(entry.lineage));
+                    }
+                },
+                LineageMutationKind::UpdateTree => {
+                    let metadata = self
+                        .lineages
+                        .get(&entry.lineage)
+                        .ok_or(BackendError::UnknownLineage(entry.lineage))?;
+
+                    if Some(metadata.version) != entry.old_version {
+                        return Err(BackendError::BadVersion {
+                            provided: entry.old_version.unwrap_or_default(),
+                            latest: metadata.version,
+                        });
+                    }
+
+                    if metadata.root_value != entry.old_root {
+                        return Err(MerkleError::ConflictingRoots {
+                            expected_root: entry.old_root,
+                            actual_root: metadata.root_value,
+                        }
+                        .into());
+                    }
+                },
+            }
+        }
+
+        let lineage_count = mutations.entries.len();
+
+        // We want to update all trees as part of an atomic update to the backing database, but we
+        // also want to do this in parallel. As we cannot share a transaction directly, we instead
+        // share a write-batch per tree.
+        let mutations_with_batch = mutations
+            .entries
+            .into_iter()
+            .map(|mutation| {
+                let batch = WriteBatch::default();
+                (mutation, batch)
+            })
+            .collect::<Vec<_>>();
+
+        let lineage_data = mutations_with_batch
+            .into_par_iter()
+            .map(|(entry, batch)| {
+                let applied_entry = AppliedLineageMutation::new(
+                    entry.lineage,
+                    entry.old_version,
+                    entry.new_version,
+                    entry.old_root,
+                    entry.metadata.root_value,
+                    entry.old_entry_count,
+                    entry.reverse,
+                    entry.kind,
+                );
+                let batch =
+                    self.apply_updates_to_lineage(batch, entry.lineage, entry.storage_updates)?;
+                let batch = self.write_metadata(batch, entry.lineage, &entry.metadata)?;
+
+                Ok((batch, (applied_entry, (entry.lineage, entry.metadata))))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (batches, (applied_entries, metadata_updates)): (Vec<_>, (Vec<_>, Vec<_>)) =
+            lineage_data.into_iter().unzip();
+
+        // We construct our final WriteBatch in parallel if we have enough of them, otherwise we
+        // just do it in serial.
+        let final_batch = if lineage_count > MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE {
+            batches
+                .into_par_iter()
+                .fold(WriteBatch::new, |l, r| merge_batches(l, &r))
+                .reduce(WriteBatch::new, |l, r| merge_batches(l, &r))
+        } else {
+            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(l, &r))
+        };
+
+        // We first write the full atomic update to disk. If it errors, we bail.
+        self.write(final_batch)?;
+
+        // If it hasn't errored, we can now safely update the in-memory metadata cache.
+        self.lineages_mut().extend(metadata_updates);
+
+        Ok(applied_entries)
+    }
+}
+
+// These are the implementations of helper methods used by the backend tests.
+#[cfg(test)]
+impl PersistentBackend {
     /// Adds the provided `lineage` to the forest with the provided `version` and sets the
     /// associated tree to have the value created by applying `updates` to the empty tree, returning
     /// the root of this new tree.
@@ -378,51 +502,27 @@ impl Backend for PersistentBackend {
     ///   backend.
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
-    fn add_lineage(
+    pub(crate) fn add_lineage(
         &mut self,
         lineage: LineageId,
         version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<TreeWithRoot> {
-        // We start by checking if the lineage already exists, as we are expected by contract to
-        // error if it is a duplicate.
         if self.lineages.contains_key(&lineage) {
             return Err(BackendError::DuplicateLineage(lineage));
         }
 
-        // We now build our new tree metadata, which begins as a fully-empty tree with the default
-        // root, no leaves, and no entries.
-        let new_lineage_meta = TreeMetadata {
-            version,
-            root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
-            entry_count: 0,
-        };
+        let mut batch = SmtForestUpdateBatch::empty();
+        batch.operations(lineage).add_operations(updates.into_iter());
+        let (_mutations, persistent_mutations) = self.compute_mutations(version, batch)?;
 
-        // We add and update the tree all in one go in the backend, using a single batch to ensure
-        // internal consistency.
-        let batch = WriteBatch::default();
-
-        // We perform the update. If this fails due to an error, the batch will get dropped at the
-        // end of the scope, and any staged mutations will be forgotten without being applied.
-        let (batch, reversion_set, tree_metadata) = self.update_tree_in_write_batch(
-            batch,
-            lineage,
-            new_lineage_meta,
-            version,
-            updates.into(),
-        )?;
-
-        // Upon returning successfully, we need to update the metadata on disk as part of this
-        // operation.
-        let batch = self.write_metadata(batch, lineage, &tree_metadata)?;
-
-        // Only when the batch has been successfully written to disk do we write to the in-memory
-        // metadata, ensuring that the state remains consistent.
-        let new_root = tree_metadata.root_value;
-        self.finalize_update(batch, once((lineage, tree_metadata, reversion_set)))?;
+        let mut applied_mutations = self.apply_mutations(persistent_mutations)?;
+        let applied_mutation = applied_mutations
+            .pop()
+            .expect("should have applied exactly one lineage mutation");
 
         // Finally we just return the necessary metadata.
-        Ok(TreeWithRoot::new(lineage, version, new_root))
+        Ok(TreeWithRoot::new(lineage, version, applied_mutation.new_root()))
     }
 
     /// Performs the provided `updates` on the tree with the specified `lineage`, returning the
@@ -435,47 +535,27 @@ impl Backend for PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    fn update_tree(
+    pub(crate) fn update_tree(
         &mut self,
         lineage: LineageId,
         new_version: VersionId,
         updates: SmtUpdateBatch,
     ) -> Result<MutationSet> {
-        // We check our lineage existence at the start just as a sanity check.
-        let tree_metadata = self
-            .lineages
-            .get(&lineage)
-            .ok_or(BackendError::UnknownLineage(lineage))?
-            .clone();
+        if !self.lineages.contains_key(&lineage) {
+            return Err(BackendError::UnknownLineage(lineage));
+        }
 
-        // All the work needs to happen atomically, so we construct a new write batch in which we
-        // stage our operations.
-        let batch = WriteBatch::default();
+        let mut batch = SmtForestUpdateBatch::empty();
+        batch.operations(lineage).add_operations(updates.into_iter());
+        let (_mutations, persistent_mutations) = self.compute_mutations(new_version, batch)?;
 
-        // We perform the update. If this fails with an error, the write batch will be dropped
-        // during error unwind, and any staged mutations will be forgotten about without being
-        // applied.
-        let (batch, reversion_set, tree_metadata) = self.update_tree_in_write_batch(
-            batch,
-            lineage,
-            tree_metadata,
-            new_version,
-            updates.into(),
-        )?;
-
-        // At this point the batch contains the updates to the tree, but we still need to handle
-        // updating the metadata.
-        let batch = self.write_metadata(batch, lineage, &tree_metadata)?;
-
-        // Writing the batch may fail, so we only write to the in-memory metadata once it is
-        // successful to ensure the in-memory state cache remains consistent with the database.
-        let mut res = self.finalize_update(batch, once((lineage, tree_metadata, reversion_set)))?;
-        let Some((_, reversion_set)) = res.pop() else {
-            unreachable!("finalize_update did not return the same number of output elements")
-        };
+        let mut applied_mutations = self.apply_mutations(persistent_mutations)?;
+        let applied_mutation = applied_mutations
+            .pop()
+            .expect("should have applied exactly one lineage mutation");
 
         // We then just return the reversion set for the operations in question.
-        Ok(reversion_set)
+        Ok(applied_mutation.into_reverse())
     }
 
     /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
@@ -490,88 +570,25 @@ impl Backend for PersistentBackend {
     ///   backend.
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
-    fn add_lineages(
+    pub(crate) fn add_lineages(
         &mut self,
         version: VersionId,
         lineages: SmtForestUpdateBatch,
     ) -> Result<Vec<(LineageId, TreeWithRoot)>> {
-        // We start by checking that none of the lineages already exist, as we are expected by
-        // contract to error if any is a duplicate.
-        let updates = lineages
-            .into_iter()
-            .map(|(lineage, ops)| {
-                if self.lineages.contains_key(&lineage) {
-                    return Err(BackendError::DuplicateLineage(lineage));
-                }
-                Ok((lineage, ops))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let lineage_count = updates.len();
-
-        // If we have no lineages, then we can exit early.
-        if updates.is_empty() {
-            return Ok(Vec::new());
+        for lineage in lineages.lineages() {
+            if self.lineages.contains_key(lineage) {
+                return Err(BackendError::DuplicateLineage(*lineage));
+            }
         }
 
-        // Build the initial metadata and set up empty write batches for each new lineage
-        let updates_with_batch = updates
+        let (_mutations, persistent_mutations) = self.compute_mutations(version, lineages)?;
+
+        let applied_mutations = self.apply_mutations(persistent_mutations)?;
+
+        // Build the return value from the applied mutations.
+        let results = applied_mutations
             .into_iter()
-            .map(|(lineage, ops)| {
-                let new_meta = TreeMetadata {
-                    version,
-                    root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
-                    entry_count: 0,
-                };
-                let batch = WriteBatch::default();
-                (lineage, ops, new_meta, batch)
-            })
-            .collect::<Vec<_>>();
-
-        // Process lineages in parallel, updating each tree in its own write batch
-        let lineage_data = updates_with_batch
-            .into_par_iter()
-            .map(|(lineage, ops, new_meta, batch)| {
-                let ops = ops.into_iter().map(Into::into).collect();
-                let (batch, reversion, tree_data) =
-                    self.update_tree_in_write_batch(batch, lineage, new_meta, version, ops)?;
-                let batch = self.write_metadata(batch, lineage, &tree_data)?;
-                let root = tree_data.root_value;
-
-                Ok((batch, (lineage, tree_data, reversion), (lineage, root)))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let (batches, mutation_sets, roots): (Vec<_>, Vec<_>, Vec<_>) =
-            lineage_data.into_iter().fold(
-                (
-                    Vec::with_capacity(lineage_count),
-                    Vec::with_capacity(lineage_count),
-                    Vec::with_capacity(lineage_count),
-                ),
-                |(mut bs, mut ms, mut rs), (b, m, r)| {
-                    bs.push(b);
-                    ms.push(m);
-                    rs.push(r);
-                    (bs, ms, rs)
-                },
-            );
-
-        // Merge all the write batches into one atomic batch
-        let final_batch = if lineage_count > MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE {
-            batches
-                .into_par_iter()
-                .fold(WriteBatch::new, |l, r| merge_batches(l, &r))
-                .reduce(WriteBatch::new, |l, r| merge_batches(l, &r))
-        } else {
-            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(l, &r))
-        };
-
-        // Atomically write to disk and update in-memory cache.
-        self.finalize_update(final_batch, mutation_sets.into_iter())?;
-
-        // Build the return value from the captured roots.
-        let results = roots
-            .into_iter()
-            .map(|(lineage, root)| (lineage, TreeWithRoot::new(lineage, version, root)))
+            .map(|applied_mutation| (applied_mutation.lineage(), applied_mutation.result()))
             .collect();
 
         Ok(results)
@@ -589,120 +606,114 @@ impl Backend for PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by this backend.
-    fn update_forest(
+    pub(crate) fn update_forest(
         &mut self,
         new_version: VersionId,
         updates: SmtForestUpdateBatch,
     ) -> Result<Vec<(LineageId, MutationSet)>> {
-        // We first have to check our precondition that all lineages are valid, returning an error
-        // as required by our contract if any lineage is unknown to the backend.
-        let updates: Vec<_> = updates
+        for lineage in updates.lineages() {
+            if !self.lineages.contains_key(lineage) {
+                return Err(BackendError::UnknownLineage(*lineage));
+            }
+        }
+
+        let (_mutations, persistent_mutations) = self.compute_mutations(new_version, updates)?;
+
+        let applied_mutations = self.apply_mutations(persistent_mutations)?;
+
+        // Build the return value from the applied mutations.
+        let reversion_sets = applied_mutations
             .into_iter()
-            .map(|(lineage, ops)| {
-                if !self.lineages.contains_key(&lineage) {
-                    return Err(BackendError::UnknownLineage(lineage));
-                }
-                let tree_data = self.lineages.get(&lineage).expect("Known to exist").clone();
-                Ok((lineage, ops, tree_data))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let lineage_count = updates.len();
+            .map(|applied_mutation| (applied_mutation.lineage(), applied_mutation.into_reverse()))
+            .collect();
 
-        // We want to update all trees as part of an atomic update to the backing database, but we
-        // also want to do this in parallel. As we cannot share a transaction directly, we instead
-        // share a write-batch per tree.
-        let updates_with_batch = updates
-            .into_iter()
-            .map(|(lineage, ops, tree_data)| {
-                let batch = WriteBatch::default();
-                (lineage, ops, tree_data, batch)
-            })
-            .collect::<Vec<_>>();
-
-        // Now we can simply issue the work in parallel.
-        let lineage_data = updates_with_batch
-            .into_par_iter()
-            .map(|(lineage, ops, tree_data, batch)| {
-                let ops = ops.into_iter().map(Into::into).collect();
-                let (batch, reversion, tree_data) =
-                    self.update_tree_in_write_batch(batch, lineage, tree_data, new_version, ops)?;
-                let batch = self.write_metadata(batch, lineage, &tree_data)?;
-
-                Ok((batch, (lineage, tree_data, reversion)))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let (batches, mutation_sets): (Vec<_>, Vec<_>) = lineage_data.into_iter().unzip();
-
-        // We construct our final WriteBatch in parallel if we have enough of them, otherwise we
-        // just do it in serial.
-        let final_batch = if lineage_count > MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE {
-            batches
-                .into_par_iter()
-                .fold(WriteBatch::new, |l, r| merge_batches(l, &r))
-                .reduce(WriteBatch::new, |l, r| merge_batches(l, &r))
-        } else {
-            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(l, &r))
-        };
-
-        // Only at this point do we write to the in-memory metadata, ensuring that the state remains
-        // consistent.
-        let result = self.finalize_update(final_batch, mutation_sets.into_iter())?;
-
-        Ok(result)
+        Ok(reversion_sets)
     }
 }
 
-// INTERNAL / UTILITY
+// PERSISTENT BACKEND
 // ================================================================================================
 
-/// This block contains methods for internal use only that provide useful functionality for the
-/// implementation of the backend.
+/// The persistent backend for the SMT forest, providing durable storage for the latest tree in each
+/// lineage in the forest.
+#[derive(Debug)]
+pub struct PersistentBackend {
+    /// The underlying database.
+    ///
+    /// # Layout
+    ///
+    /// The data on each tree is stored across a series of RocksDB column families, along with
+    /// additional metadata. The layout is fixed (for the moment), and has the following column
+    /// families.
+    ///
+    /// - [`LEAVES_CF`]: Stores the [`SmtLeaf`] data, keyed by a [`LeafKey`] instance.
+    /// - [`METADATA_CF`]: Stores a [`TreeMetadata`] instance for each tree, keyed by
+    ///   [`LineageId`]. This acts like a mirror of the in-memory `lineages` data, which exists to
+    ///   speed up common queries.
+    /// - `SUBTREE_XX_CF`: Stores the [`Subtree`]s with their root at level `XX` in the backend,
+    ///   keyed on the [`SubtreeKey`].
+    db: Arc<DB>,
+
+    /// An in-memory cache of the tree metadata enabling the more rapid servicing of certain kinds
+    /// of queries.
+    ///
+    /// Wrapped in an `Arc` for copy-on-write sharing with reader snapshots. Readers clone the
+    /// `Arc` cheaply; mutations use `Arc::make_mut` to fork a private copy only when needed.
+    ///
+    /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
+    /// [`METADATA_CF`] column.
+    lineages: Arc<HashMap<LineageId, TreeMetadata>>,
+
+    /// Whether writes should be synchronously flushed to disk.
+    ///
+    /// Setting this to true will result in reduced throughput but may result in higher durability
+    /// in the presence of crashes.
+    sync_writes: bool,
+}
+
 impl PersistentBackend {
-    /// Computes the merkle path for the provided `lineage` beginning at the provided `leaf_index`
-    /// using the pre-loaded `subtrees`.
-    fn compute_path(
-        &self,
-        mut leaf_index: NodeIndex,
-        subtrees: &HashMap<NodeIndex, Subtree>,
-    ) -> SparseMerklePath {
-        let mut path = Vec::with_capacity(SMT_DEPTH as usize);
+    /// Constructs an instance of the persistent backend, either opening or creating the data store
+    /// at the location specified in the `config`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::CorruptedData`] if data corruption is encountered when loading the forest
+    ///   from disk.
+    /// - [`BackendError::Internal`] if the backend cannot be started up properly.
+    pub fn load(config: Config) -> Result<Self> {
+        let db = Arc::new(Self::build_db_with_options(&config)?);
+        let lineages = Arc::new(Self::read_all_metadata(db.clone())?);
+        let sync_writes = config.sync_writes;
 
-        while leaf_index.depth() > 0 {
-            let is_right = leaf_index.is_position_odd();
-            leaf_index = leaf_index.parent();
-
-            let root = Subtree::find_subtree_root(leaf_index);
-            let subtree = &subtrees[&root]; // Known to exist by construction.
-            let InnerNode { left, right } =
-                subtree.get_inner_node(leaf_index).unwrap_or_else(|| {
-                    EmptySubtreeRoots::get_inner_node(SMT_DEPTH, leaf_index.depth())
-                });
-
-            path.push(if is_right { left } else { right });
-        }
-
-        SparseMerklePath::from_sized_iter(path).expect("Always succeeds by construction")
+        Ok(Self { db, lineages, sync_writes })
     }
 
-    /// Performs `updates` on the tree in the specified lineage, assigning the new tree the
-    /// provided `new_version`.
+    // Triggers copy-on-write: clones the shared lineages map only if other references exist.
+    pub(crate) fn lineages_mut(&mut self) -> &mut HashMap<LineageId, TreeMetadata> {
+        Arc::make_mut(&mut self.lineages)
+    }
+
+    // INTERNAL / UTILITY
+    // --------------------------------------------------------------------------------------------
+
+    /// Computes the mutation set for `updates` on the tree in the specified lineage, assigning the
+    /// new tree the provided `new_version`.
     ///
-    /// All operations in this method take place within the context of the provided `batch`. This
-    /// method will only stage operations using the transaction associated with that batch, and is
-    /// guaranteed to not commit those changes.
+    /// This method will only compute the mutation set required to do the updates but does not
+    /// update the tree.
     ///
     /// # Errors
     ///
     /// - [`BackendError::Internal`] if the backend fails to read to or write from storage.
     /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics in the backend.
-    fn update_tree_in_write_batch(
+    fn prepare_tree_update(
         &self,
-        batch: WriteBatch,
         lineage: LineageId,
         mut tree_metadata: TreeMetadata,
         new_version: VersionId,
         mut updates: Vec<(Word, Word)>,
-    ) -> Result<(WriteBatch, MutationSet, TreeMetadata)> {
+        kind: LineageMutationKind,
+    ) -> Result<(LineageMutation, PersistentPreparedLineageMutation)> {
         // We start by ensuring that our updates are sorted, as this is necessary for the efficiency
         // of various other operations.
         updates.sort_by_key(|(k, _)| LeafIndex::from(*k).position());
@@ -727,20 +738,42 @@ impl PersistentBackend {
             reversion_pairs,
         } = self.sorted_pairs_to_mutated_leaves(updates, &leaf_map)?;
 
+        let old_version = tree_metadata.version;
+        let old_root = tree_metadata.root_value;
+        let old_entry_count = tree_metadata
+            .entry_count
+            .try_into()
+            .expect("Count of entries should fit into usize");
+
         // If we have no mutations to perform, we return early for performance and to satisfy the
         // contract required of `add_lineage`.
         if leaves.is_empty() {
-            // As a result, our mutation set is empty.
-            return Ok((
-                batch,
-                MutationSet {
-                    old_root: tree_metadata.root_value,
-                    node_mutations: NodeMutations::default(),
-                    new_pairs: Map::default(),
-                    new_root: tree_metadata.root_value,
-                },
-                tree_metadata,
-            ));
+            let empty = MutationSet {
+                old_root,
+                node_mutations: NodeMutations::default(),
+                new_pairs: Map::default(),
+                new_root: old_root,
+            };
+            let mutation = LineageMutation::new(
+                lineage,
+                (kind == LineageMutationKind::UpdateTree).then_some(old_version),
+                new_version,
+                old_root,
+                old_root,
+                kind,
+            );
+            let prepared = PersistentPreparedLineageMutation {
+                lineage,
+                old_version: (kind == LineageMutationKind::UpdateTree).then_some(old_version),
+                new_version,
+                old_root,
+                old_entry_count,
+                reverse: empty,
+                metadata: tree_metadata,
+                storage_updates: StorageUpdates::default(),
+                kind,
+            };
+            return Ok((mutation, prepared));
         }
 
         // We can then preallocate capacity for the subtree updates.
@@ -768,14 +801,14 @@ impl PersistentBackend {
                         ))
                     },
                     |result, processed_tree| match (result, processed_tree) {
-                        (Ok((mut roots, mut subtrees, mut node_reversions)), Ok(tree)) => {
+                        (Ok((mut roots, mut subtrees, mut reversions)), Ok(tree)) => {
                             roots.push(tree.subtree_root);
-                            node_reversions.extend(tree.reversion_nodes);
+                            reversions.extend(tree.reversion_nodes);
                             if let Some(action) = tree.storage_action {
                                 subtrees.push(action);
                             }
 
-                            Ok((roots, subtrees, node_reversions))
+                            Ok((roots, subtrees, reversions))
                         },
                         (Err(e), _) | (_, Err(e)) => Err(e),
                     },
@@ -808,41 +841,62 @@ impl PersistentBackend {
 
         for (idx, mutated_leaf) in leaf_updates {
             let leaf_opt = match mutated_leaf {
-                SmtLeaf::Empty(_) => None, // Delete from storage
+                SmtLeaf::Empty(_) => None,
                 _ => Some(mutated_leaf),
             };
             leaf_update_map.insert(idx, leaf_opt);
         }
 
-        let updates = StorageUpdates::from_parts(
+        let storage_updates = StorageUpdates::from_parts(
             leaf_update_map,
             subtree_updates,
             leaf_count_delta,
             entry_count_delta,
         );
 
-        // And we apply the updates to the lineage in the storage under the current transaction.
-        let batch = self.apply_updates_to_lineage(batch, lineage, updates)?;
-
         // And then compute the new root.
-        let root_after_modification = leaves[0][0].hash;
+        let new_root = leaves[0][0].hash;
 
         // We then write the node metadata into a copy
-        let root_before_modification = tree_metadata.root_value;
         tree_metadata.entry_count = tree_metadata.entry_count.saturating_add_signed(
             entry_count_delta.try_into().expect("Delta should always fit into i64"),
         );
-        tree_metadata.root_value = root_after_modification;
+        tree_metadata.root_value = new_root;
         tree_metadata.version = new_version;
 
-        let mutation_set = MutationSet {
-            old_root: root_after_modification,
+        // Construct the reverse mutation set.
+        let reverse = MutationSet {
+            old_root: new_root,
             node_mutations: global_node_reversions,
             new_pairs: reversion_pairs.into_iter().collect(),
-            new_root: root_before_modification,
+            new_root: old_root,
         };
 
-        Ok((batch, mutation_set, tree_metadata))
+        // The forward mutation set.
+        let mutation = LineageMutation::new(
+            lineage,
+            (kind == LineageMutationKind::UpdateTree).then_some(old_version),
+            new_version,
+            old_root,
+            new_root,
+            kind,
+        );
+
+        // And the prepared mutation set that contains _all_ information that is required
+        // to _apply_ these changes in [`apply_mutations`].
+        let prepared = PersistentPreparedLineageMutation {
+            lineage,
+            old_version: (kind == LineageMutationKind::UpdateTree).then_some(old_version),
+            new_version,
+            old_root,
+            old_entry_count,
+            reverse,
+            metadata: tree_metadata,
+            storage_updates,
+            kind,
+        };
+
+        Ok((mutation, prepared))
     }
 
     /// Applies the `updates` to the specified `lineage` in the context of the provided `batch`.
@@ -1363,14 +1417,10 @@ impl PersistentBackend {
 
         Ok(())
     }
-}
 
-// INTERNAL / STARTUP
-// ================================================================================================
+    // INTERNAL / STARTUP
+    // --------------------------------------------------------------------------------------------
 
-/// This impl block contains internal functionality to do with starting up the backend and
-/// performing its initialization work.
-impl PersistentBackend {
     /// Sets up the basic configuration for the underlying RocksDB database.
     fn build_db_with_options(config: &Config) -> Result<DB> {
         let mut db_opts = db::Options::default();
@@ -1476,29 +1526,6 @@ impl PersistentBackend {
         let metadata_value = tree_metadata.to_bytes();
         batch.put_cf(metadata, &metadata_key, &metadata_value);
         Ok(batch)
-    }
-
-    /// Finalizes the update by committing the provided `batch` to disk and updating the in-memory
-    /// cache with the provided `metadata`.
-    ///
-    /// # Errors
-    ///
-    /// - [`BackendError::Internal`] if the underlying database cannot be written to.
-    fn finalize_update(
-        &mut self,
-        batch: WriteBatch,
-        metadata: impl Iterator<Item = (LineageId, TreeMetadata, MutationSet)>,
-    ) -> Result<Vec<(LineageId, MutationSet)>> {
-        // We first write the full atomic update to disk. If it errors, we bail.
-        self.write(batch)?;
-
-        // If it hasn't errored, we can now safely update the in-memory metadata cache.
-        Ok(metadata
-            .map(|(l, d, r)| {
-                self.lineages.insert(l, d);
-                (l, r)
-            })
-            .collect())
     }
 
     /// Reads all the lineages and their corresponding metadata out of the on-disk storage as part

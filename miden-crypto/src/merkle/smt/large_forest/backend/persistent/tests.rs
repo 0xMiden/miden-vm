@@ -15,8 +15,9 @@ use super::{PersistentBackend, Result};
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        Backend, BackendError, LineageId, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeEntry,
-        TreeWithRoot, VersionId, large_forest::backend::persistent::config::Config,
+        Backend, BackendError, BackendReader, LargeSmtForest, LineageId, Smt, SmtForestUpdateBatch,
+        SmtUpdateBatch, TreeEntry, TreeWithRoot, VersionId,
+        large_forest::backend::persistent::config::Config,
     },
     rand::test_utils::ContinuousRng,
 };
@@ -819,6 +820,145 @@ fn update_forest() -> Result<()> {
     assert_eq!(backend.trees()?.count(), 2);
     assert!(backend.trees()?.any(|e| e.root() == tree_1.root()));
     assert!(backend.trees()?.any(|e| e.root() == tree_2.root()));
+
+    Ok(())
+}
+
+#[test]
+fn forest_apply_noop_update_tree_does_not_panic() {
+    let (_dir, backend) = default_backend().unwrap();
+    let mut forest = LargeSmtForest::new(backend).unwrap();
+    let mut rng = ContinuousRng::new([0x99; 32]);
+
+    let lineage: LineageId = rng.value();
+    let key: Word = rng.value();
+    let value: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key, value);
+    forest.add_lineage(lineage, 1, initial).unwrap();
+
+    let mut noop = SmtUpdateBatch::default();
+    noop.add_insert(key, value);
+    let mutations = forest.compute_update_tree_mutations(lineage, 2, noop).unwrap();
+    let roots = forest.apply_mutations(mutations).unwrap();
+
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].version(), 1);
+}
+
+#[test]
+fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
+    let (_dir, mut backend) = default_backend()?;
+    let mut rng = ContinuousRng::new([0xa5; 32]);
+
+    let lineage: LineageId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key_1, value_1);
+    backend.add_lineage(lineage, 1, initial)?;
+
+    let mut stale_updates = SmtUpdateBatch::default();
+    stale_updates.add_insert(key_2, value_2);
+    let mut stale_batch = SmtForestUpdateBatch::empty();
+    stale_batch.operations(lineage).add_operations(stale_updates.into_iter());
+    let (_visible, stale_prepared) = backend.compute_mutations(2, stale_batch)?;
+
+    let mut intervening_updates = SmtUpdateBatch::default();
+    intervening_updates.add_insert(key_3, value_3);
+    backend.update_tree(lineage, 2, intervening_updates)?;
+
+    assert!(
+        backend.apply_mutations(stale_prepared).is_err(),
+        "stale prepared mutations must not apply after the lineage root changes"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn reader_snapshot_isolation() -> Result<()> {
+    // Writes committed to the backend after the reader is created must be invisible to the reader.
+    let (_dir, mut backend) = default_backend()?;
+    let mut rng = ContinuousRng::new([0xc7; 32]);
+    let version: VersionId = rng.value();
+
+    // Add lineage_1 and create the reader while lineage_2 does not yet exist.
+    let lineage_1: LineageId = rng.value();
+    let k1: Word = rng.value();
+    let v1: Word = rng.value();
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(k1, v1);
+    backend.add_lineage(lineage_1, version, ops)?;
+
+    let reader = backend.reader()?;
+
+    // Now add lineage_2 after the reader was created.
+    let lineage_2: LineageId = rng.value();
+    let k2: Word = rng.value();
+    let v2: Word = rng.value();
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(k2, v2);
+    backend.add_lineage(lineage_2, version, ops)?;
+
+    // Also mutate lineage_1 after the snapshot.
+    let k3: Word = rng.value();
+    let v3: Word = rng.value();
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(k3, v3);
+    backend.update_tree(lineage_1, version + 1, ops)?;
+
+    // The reader must not see lineage_2 at all.
+    assert_eq!(reader.lineages()?.count(), 1);
+    assert!(!reader.lineages()?.any(|l| l == lineage_2));
+    assert_matches!(reader.open(lineage_2, k2).unwrap_err(), BackendError::UnknownLineage(l) if l == lineage_2);
+    assert_matches!(reader.get(lineage_2, k2).unwrap_err(), BackendError::UnknownLineage(l) if l == lineage_2);
+
+    // The reader must see lineage_1 at the pre-snapshot state (k3 absent, version unchanged).
+    assert_eq!(reader.version(lineage_1)?, version);
+    assert_eq!(reader.entry_count(lineage_1)?, 1);
+    assert!(reader.get(lineage_1, k3)?.is_none());
+    assert_eq!(reader.get(lineage_1, k1)?, Some(v1));
+
+    Ok(())
+}
+
+#[test]
+fn reader_clone() -> Result<()> {
+    // Cloning a reader must produce an independent handle to the same snapshot.
+    let (_dir, mut backend) = default_backend()?;
+    let mut rng = ContinuousRng::new([0xc8; 32]);
+    let version: VersionId = rng.value();
+
+    let lineage_1: LineageId = rng.value();
+    let k1: Word = rng.value();
+    let v1: Word = rng.value();
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(k1, v1);
+    backend.add_lineage(lineage_1, version, ops)?;
+
+    let reader = backend.reader()?;
+    let reader_clone = reader.clone();
+
+    // Write to the backend after cloning — neither handle should see it.
+    let lineage_2: LineageId = rng.value();
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(rng.value(), rng.value());
+    backend.add_lineage(lineage_2, version, ops)?;
+
+    // Both handles see exactly lineage_1 and agree on its data.
+    for r in [&reader, &reader_clone] {
+        assert_eq!(r.lineages()?.count(), 1);
+        assert!(r.lineages()?.any(|l| l == lineage_1));
+        assert_eq!(r.get(lineage_1, k1)?, Some(v1));
+        assert_matches!(r.get(lineage_2, k1).unwrap_err(), BackendError::UnknownLineage(l) if l == lineage_2);
+    }
 
     Ok(())
 }

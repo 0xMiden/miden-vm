@@ -7,11 +7,11 @@
 //!
 //! This module provides:
 //!
-//! - **[`deep`]**: DEEP (Domain Extension for Eliminating Pretenders) quotient construction for
-//!   batching polynomial evaluation claims into a single low-degree polynomial.
+//! - **`deep`** (internal): DEEP (Domain Extension for Eliminating Pretenders) quotient
+//!   construction for batching polynomial evaluation claims into a single low-degree polynomial.
 //!
-//! - **[`fri`]**: FRI (Fast Reed-Solomon IOP) protocol for low-degree testing, with configurable
-//!   folding arities and final polynomial degree.
+//! - **`fri`** (internal): FRI (Fast Reed-Solomon IOP) protocol for low-degree testing, with
+//!   configurable folding arities and final polynomial degree.
 //!
 //! - **PCS API (module root)**: complete PCS implementation combining DEEP quotient and FRI via
 //!   `prover::open_with_channel` and `verifier::verify`, plus `PcsParams`.
@@ -25,18 +25,25 @@
 //! caller's (or AIR's) responsibility. (FRI openings still ignore the padded tail because
 //! FRI expects a fixed single-column width.)
 
-/// DEEP quotient construction for batched polynomial evaluation.
-pub mod deep;
-
-/// FRI protocol for low-degree testing.
-pub mod fri;
-
-pub mod params;
-pub mod proof;
-pub mod prover;
-pub mod verifier;
-
-pub mod utils;
+pub(crate) mod deep;
+pub(crate) mod fri;
+pub(crate) mod params;
+pub(crate) mod proof;
+pub(crate) mod prover;
+pub(crate) mod verifier;
 
 #[cfg(test)]
 mod tests;
+
+// Structured proof types and errors needed for inspection / error pattern matching.
+pub use deep::{
+    proof::{DeepProof, OpenedValues},
+    verifier::DeepError,
+};
+pub use fri::{
+    proof::{FriProof, FriRoundProof},
+    verifier::FriError,
+};
+pub use params::{PcsParams, PcsParamsError};
+pub use proof::PcsProof;
+pub use verifier::PcsError;

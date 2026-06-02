@@ -16,14 +16,15 @@ use alloc::{string::ToString, vec::Vec};
 
 use hkdf::{Hkdf, hmac::SimpleHmac};
 use k256::{AffinePoint, elliptic_curve::sec1::ToEncodedPoint, sha2::Sha256};
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 
 use crate::{
     dsa::ecdsa_k256_keccak::{KeyExchangeKey, PUBLIC_KEY_BYTES, PublicKey},
     ecdh::KeyAgreementScheme,
+    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
+        zeroize::{Zeroize, ZeroizeOnDrop},
     },
 };
 // SHARED SECRET
@@ -109,17 +110,9 @@ impl EphemeralSecretKey {
     }
 
     /// Generates a new ephemeral secret key using the provided random number generator.
-    pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
-        // we use a seedable CSPRNG and seed it with `rng`
-        // this is a work around the fact that the version of the `rand` dependency in our crate
-        // is different than the one used in the `k256` one. This solution will no longer be needed
-        // once `k256` gets a new release with a version of the `rand` dependency matching ours
-        use k256::elliptic_curve::rand_core::SeedableRng;
-        let mut seed = Zeroizing::new([0_u8; 32]);
-        RngCore::fill_bytes(rng, &mut *seed);
-        let mut rng = rand_hc::Hc128Rng::from_seed(*seed);
-
-        let sk_e = k256::ecdh::EphemeralSecret::random(&mut rng);
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
+        let mut compat_rng = RandCore06::new(rng);
+        let sk_e = k256::ecdh::EphemeralSecret::random(&mut compat_rng);
         Self { inner: sk_e }
     }
 
@@ -191,7 +184,7 @@ impl KeyAgreementScheme for K256 {
 
     type SharedSecret = SharedSecret;
 
-    fn generate_ephemeral_keypair<R: CryptoRng + RngCore>(
+    fn generate_ephemeral_keypair<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::EphemeralSecretKey, Self::EphemeralPublicKey) {
         let sk = EphemeralSecretKey::with_rng(rng);

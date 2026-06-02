@@ -2,7 +2,7 @@
 
 End-to-end proving for the lifted STARK protocol using LMCS commitments
 and the lifted FRI PCS. Supports multiple traces of different power-of-two
-heights via virtual lifting.
+heights of at least 2 rows via virtual lifting.
 
 Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
@@ -10,38 +10,55 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
 | Item | Purpose |
 |------|---------|
-| `prove_single` | Prove a single-AIR STARK |
-| `prove_multi` | Prove a multi-trace STARK |
-| `AirWitness` | Bundle a trace with its public values |
+| `prove` | Prove one or more AIR instances |
+| `ProverStatement` | Validated proving input: a `Statement` plus per-AIR main witness traces in instance order |
+| `Statement` | A `MultiAir` plus the per-proof inputs (`air_inputs`, optional `aux_inputs`) |
+| `MultiAir` | Trusted statement definition: AIR instances, cross-AIR assertions, and a Fiat-Shamir `observe` hook |
 
 ```text
-prove_single(config, air, trace, public_values, var_len_public_inputs, aux_builder, challenger)
-prove_multi(config, &[(air, witness, aux_builder), ...], challenger)
+prove(config, &prover_statement, challenger)
 ```
+
+A `MultiAir` impl exposes its AIRs via `type Air` + `fn airs() -> &[Self::Air]`
+and optionally overrides `max_aux_inputs()`, `eval_external(...)`, and
+`observe(challenger, ...)` (defaults: zero `aux_inputs` budget, no cross-AIR assertions,
+and framed observation of `air_inputs.len()`, `air_inputs`, `max_aux_inputs()`,
+`aux_inputs.len()`, then `aux_inputs`; the protocol observes instance count and
+`log_heights` after that hook). Each AIR builds its
+own auxiliary trace via `LiftedAir::build_aux_trace(main, air_inputs, aux_inputs,
+challenges)`. A `Statement` wraps a `MultiAir` with the
+`air_inputs` shared by every AIR and the optional `aux_inputs`; `Statement::new`
+validates the inputs against the AIRs. A `ProverStatement` wraps a `Statement`
+with `traces()` (per-AIR main witness traces in instance order); `ProverStatement::new`
+validates the trace shape. The same `MultiAir` drives both proving and
+verification — the verifier takes the `Statement`, the prover the `ProverStatement`.
 
 The proof is written into the provided transcript channel. This crate does not
 prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / transcript binding
 
-The caller must bind protocol parameters, public values, variable-length
-public inputs, AIR configurations, and `air_order` into the challenger
-before calling `prove_multi`. See the Rust module-level docs for the full contract
-and code examples.
+The caller must bind protocol parameters and AIR configurations into the
+challenger before calling `prove`. The wire-format AIR ordering is derived
+deterministically from the trace heights (no explicit `air_order` to bind).
+The statement's `air_inputs` and `aux_inputs` are absorbed by
+`Statement::observe` using the `MultiAir::observe` framing; the protocol then
+observes the instance count and log trace heights in instance order. See the
+Rust module-level docs for the full contract and code examples.
 
 ## Protocol flow
 
+0. Absorb caller-supplied inputs via `Statement::observe`, then absorb the instance count and per-instance log trace heights into the challenger.
 1. Validate trace dimensions against AIR definition.
 2. Commit main trace LDE on nested coset (bit-reversed), observe commitment.
 3. Sample aux randomness, build aux trace, commit aux LDE.
 4. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
 5. Build periodic LDEs for periodic columns.
-6. Compute folded constraint numerators on each trace's quotient domain `gJ`.
-7. Lift and beta-accumulate numerators onto the max quotient domain.
-8. Divide by the max vanishing polynomial to obtain Q(gJ).
-9. Commit quotient chunks via fused iDFT + scaling + DFT pipeline.
-10. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
-11. Open via PCS at `[z, z_next]` for main, aux, and quotient trees.
+6. Compute each AIR's quotient on its native quotient coset.
+7. Lift and accumulate per-AIR quotients onto the max quotient domain.
+8. Commit quotient chunks via fused iDFT + scaling + DFT pipeline.
+9. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
+10. Open via PCS at `[z, z_next]` for main, aux, and quotient trees.
 
 ## Mathematical background
 
@@ -53,9 +70,13 @@ changes with **lifting** — how the prover avoids work on the largest
 
 Let:
 
-- $N = 2^n$ be the **maximum** trace height across all traces in the proof.
-- $D = 2^d$ be the **constraint degree** (quotient-domain blowup).
-- $B = 2^b$ be the **PCS/FRI blowup** (commitment-domain blowup), with $D \le B$.
+- $N$ be the **maximum** trace height across all AIRs in the proof; $n_j$ is AIR
+  $j$'s trace height and $r_j = N / n_j$.
+- $D_j$ be AIR $j$'s **quotient degree factor**, derived from its
+  constraint-degree bound; its native quotient evaluation domain has size
+  $n_j D_j$. Let $D_{\max} = \max_j D_j$.
+- $B$ be the **PCS/FRI blowup** used for commitment domains, with
+  $D_{\max} \le B$.
 - $g$ be the fixed multiplicative shift (`F::GENERATOR`).
 
 Define two-adic subgroups:
@@ -63,7 +84,7 @@ Define two-adic subgroups:
 $$
 H = \langle \omega_H \rangle,\ |H| = N
 \qquad
-J = \langle \omega_J \rangle,\ |J| = N\,D
+J = \langle \omega_J \rangle,\ |J| = N\,D_{\max}
 \qquad
 K = \langle \omega_K \rangle,\ |K| = N\,B
 $$
@@ -71,23 +92,19 @@ $$
 with the usual relationships:
 
 $$
-\omega_H = \omega_J^D = \omega_K^B
+\omega_H = \omega_J^{D_{\max}} = \omega_K^B
 \qquad
-H = J^D = K^B
+H = J^{D_{\max}} = K^B
 \qquad
-J = K^{B/D}\ \text{(when } D \le B\text{)}
+J = K^{B/D_{\max}}.
 $$
 
-We work over shifted cosets $gH, gJ, gK$.
+We work over shifted cosets $gH, gJ, gK$. The **global quotient coset** is
+$gJ$ of size $N D_{\max}$.
 
 ### Mixed heights via lifting
 
-Suppose trace $T_j$ has height
-
-$$
-n_j = N / r_j
-\qquad\text{where } r_j = 2^{\ell_j} \text{ is a power of two.}
-$$
+Trace $T_j$ has height $n_j = N / r_j$ with $r_j$ a power of two.
 
 Intuitively, **lifting** makes $T_j$ look like a height-$N$ trace by stacking $r_j$
 copies of it. Algebraically, if $t_j(X)$ is the degree-$<n_j$ interpolant over $H^{r_j}$,
@@ -131,76 +148,109 @@ computing an LDE for a short trace stays $\Theta(n_j B)$, not $\Theta(N B)$.
 As in a classic STARK, constraints produce a numerator polynomial divisible by the
 trace vanishing polynomial. The twist is **where** we evaluate it.
 
-Let $Q(X)$ be the quotient we will ultimately commit. Its degree bound is controlled
-by the AIR's constraint degree $D$, so it suffices to evaluate the constraint numerator
-on the **quotient coset** $gJ$ (size $N D$) rather than on the full LDE coset $gK$
-(size $N B$).
+For a single AIR with quotient degree factor $D_j$, the quotient $Q_j$ has
+degree bound $n_j D_j$, so it suffices to evaluate it on a coset of
+size $n_j D_j$ rather than on the full commitment coset of size $n_j B$.
 
 Implementation-wise:
 
-- The committed trace LDEs are stored on $gK$ in **bit-reversed** row order.
-- The quotient domain $gJ$ is the first $N D$ points of $gK$ under this ordering.
-- Therefore we obtain a zero-copy natural-order view of trace values on $gJ$ by
-  truncating to $N D$ rows and bit-reversing. This is what
+- The committed trace LDEs are stored on $gK$ (or its nested coset for short
+  traces) in **bit-reversed** row order.
+- The native quotient coset of size $n_j D_j$ is the first $n_j D_j$ points of
+  the per-trace LDE coset under this ordering.
+- We obtain a zero-copy natural-order view of trace values on that coset by
+  truncating and bit-reversing. This is what
   `Committed::evals_on_quotient_domain` encodes.
 
-### Lifting numerators instead of re-evaluating constraints
+### Folding per-AIR quotients
 
-The expensive part of proving is evaluating constraints across a domain.
-For a short trace $T_j$ we do **not** evaluate constraints over the max domain.
+For AIR $j$, let $D_j$ be the quotient degree factor required by its
+constraints. The expensive part of proving is evaluating constraints across a
+domain. We avoid the global $gJ$ entirely: each AIR is divided locally on its
+native coset, and the per-AIR quotient evaluations are then folded together via
+cyclic lifting.
 
-Instead:
-
-1. Evaluate the folded constraint numerator $N_j$ on the *small* quotient coset
-   $(gJ)^{r_j}$ of size $n_j D$.
-
-2. **Lift** $N_j$ onto the max quotient coset $gJ$ by cyclic extension:
-
-$$
-\big(\mathrm{lift}_{r}(v)\big)\lbrack i\rbrack = v\lbrack i \bmod |v|\rbrack,\quad i \in \lbrack 0, r\,|v|).
-$$
-
-This matches $X \mapsto X^{r}$ on two-adic cosets: iterating the $gJ$ points
-in natural order, raising them to the $r$-th power cycles through $(gJ)^r$ with period
-$| (gJ)^r |$.
-
-3. Combine lifted numerators across traces using challenge $\beta$ (Horner):
+This is the implementation form of the older "lift numerators, divide once on
+$gJ$" identity. The two views agree because, with $Y = X^{r_j}$,
 
 $$
-N_{\mathrm{acc}} \leftarrow \mathrm{lift}_{r}(N_{\mathrm{acc}}) \cdot \beta + N_j.
+Z_{H^{r_j}}(X^{r_j}) = X^N - 1 = Z_H(X),
 $$
 
-Because $Z_{H^{r_j}}(X^{r_j}) = Z_H(X)$, lifting turns "divisible by $Z_{H^{r_j}}$" into
-"divisible by $Z_H$". After combining, the result is still divisible by $Z_H$,
-so we divide **once** on the max domain.
+so if a numerator factors as $N_j(Y) = Z_{H^{r_j}}(Y)\,Q_j(Y)$ on the small
+domain, then on the global domain
+
+$$
+\frac{N_j(X^{r_j})}{Z_H(X)} = Q_j(X^{r_j}).
+$$
+
+Lifting the small quotient $Q_j$ by $X \mapsto X^{r_j}$ produces exactly what
+the lifted numerator would have produced after a global division by $Z_H$. So
+we may divide AIR-by-AIR on the small domain and fold afterwards.
+
+Write $gJ_j$ for AIR $j$'s native quotient coset of size $n_j D_j$. After
+degree extension it is evaluated on the corresponding size-$n_j D_{\max}$
+target coset used for cyclic lifting into $gJ$. The procedure for each AIR is:
+
+1. Evaluate the $\alpha$-folded constraint numerator on $gJ_j$.
+
+2. Divide by $Z_{H^{r_j}}(X) = X^{n_j} - 1$ on $gJ_j$ to obtain $Q_j$ on $gJ_j$.
+
+3. If AIR $j$ requires a smaller quotient degree factor than the batch maximum
+   ($D_j < D_{\max}$), low-degree extend $Q_j$ from $gJ_j$ (size $n_j D_j$) to
+   the size-$n_j D_{\max}$ target coset — same polynomial, denser sampling on
+   the coset chosen so that the next step's cyclic extension lands on $gJ$.
+
+4. Lift the running accumulator from its current size $L$ onto $n_j D_{\max}$
+   by cyclic extension:
+
+$$
+\mathrm{lift}_{r}(v)\lbrack i\rbrack = v\lbrack i \bmod L\rbrack,\quad i \in \lbrack 0, r L),
+\qquad r = n_j D_{\max} / L,
+$$
+
+   and Horner-fold $Q_j$ in:
+
+$$
+\mathrm{acc} \leftarrow \mathrm{lift}_{r}(\mathrm{acc}) \cdot \beta + Q_j.
+$$
+
+Cyclic extension matches $X \mapsto X^{r}$ on two-adic cosets: iterating a
+size-$rL$ coset in natural order and raising each point to the $r$-th power
+cycles through its size-$L$ image coset, repeating each value $r$ times. So
+copying entries by $i \bmod L$ on the target buffer evaluates the lifted
+polynomial in the right places. After all AIRs are folded in, the accumulator
+holds the combined quotient $Q$ on the global $gJ$ of size $N D_{\max}$.
 
 ### Vanishing division (periodicity trick)
 
-On $gJ$, the vanishing polynomial
+On $gJ_j$ (size $n_j D_j$), the AIR's local vanishing polynomial
 
 $$
-Z_H(X) = X^N - 1
+Z_{H^{r_j}}(X) = X^{n_j} - 1
 $$
 
-takes only $D$ distinct values, since for $x = g\,\omega_J^i$:
+takes only $D_j$ distinct values, since for $x = g^{r_j}\,\omega^i$ with $\omega$
+of order $n_j D_j$:
 
 $$
-x^N = g^N\,(\omega_J^N)^i = g^N\,\omega_S^i
-\qquad\text{where } \omega_S := \omega_J^N \text{ has order } D.
+x^{n_j} = g^{n_j r_j}\,\omega_S^i
+\qquad\text{where } \omega_S := \omega^{n_j} \text{ has order } D_j.
 $$
 
-Division by $Z_H$ batch-inverts those $D$ values once and indexes by
-$i \bmod D$ (a bitmask in code).
+So division by $Z_{H^{r_j}}$ on $gJ_j$ batch-inverts those $D_j$ values once and
+indexes them by $i \bmod D_j$ — only $D_j$ inversions, not $n_j D_j$.
 
 ### Quotient commitment (fused scaling)
 
-After division we have $Q$ evaluated on $gJ$ in natural order. We commit to
-LDE evaluations of the $D$ degree-$<N$ chunks $q_0,\dots,q_{D-1}$ on $gK$.
+After all AIRs are folded in we have $Q$ evaluated on $gJ$ in natural order.
+We commit to LDE evaluations of the $D_{\max}$ degree-$<N$ chunks
+$q_0,\dots,q_{D_{\max}-1}$ on $gK$.
 
-The decomposition: $gJ$ splits into $D$ disjoint $H$-cosets,
+The decomposition: $gJ$ splits into $D_{\max}$ disjoint $H$-cosets,
 
 $$
-gJ = \bigsqcup_{t=0}^{D-1} g\,\omega_J^t\,H,
+gJ = \bigsqcup_{t=0}^{D_{\max}-1} g\,\omega_J^t\,H,
 $$
 
 and $q_t$ is the unique degree-$<N$ polynomial agreeing with $Q$ on
@@ -208,7 +258,7 @@ $g\,\omega_J^t\,H$.
 
 The `commit_quotient` pipeline computes LDE commitments via fused scaling:
 
-1. Reshape $Q(gJ)$ into an $N \times D$ matrix; column $t$ is $Q$ on
+1. Reshape $Q(gJ)$ into an $N \times D_{\max}$ matrix; column $t$ is $Q$ on
    $g\,\omega_J^t\,H$.
 2. Batched iDFT over $H$ (treating each column as if on $H$), yielding
    coefficients with an extra $(g\,\omega_J^t)^k$ factor.
@@ -217,5 +267,5 @@ The `commit_quotient` pipeline computes LDE commitments via fused scaling:
 4. Zero-pad from $N$ to $N B$ and run a plain (non-coset) DFT. The $g^k$
    factor baked into coefficients produces evaluations on $gK$.
 
-This avoids $D$ separate coset DFTs and aligns with how the verifier
+This avoids $D_{\max}$ separate coset DFTs and aligns with how the verifier
 reconstructs $Q(z)$ from the opened chunk values.

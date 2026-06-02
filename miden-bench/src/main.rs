@@ -36,7 +36,8 @@ use std::{fmt, time::Instant};
 
 use clap::Parser;
 use miden_lifted_stark::{
-    GenericStarkConfig, PcsParams,
+    GenericStarkConfig,
+    pcs::PcsParams,
     testing::{
         airs::{
             blake3::generate_blake3_trace,
@@ -253,7 +254,7 @@ fn main() {
                     Dft::default(),
                     gl::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, &traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
             },
             HashFn::Keccak => {
                 let config = GenericStarkConfig::new(
@@ -262,7 +263,7 @@ fn main() {
                     Dft::default(),
                     keccak::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, &traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
             },
             HashFn::Blake3 => {
                 let config = GenericStarkConfig::new(
@@ -271,7 +272,7 @@ fn main() {
                     Dft::default(),
                     blake3::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, &traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
             },
             HashFn::Blake3_192 => {
                 let config = GenericStarkConfig::new(
@@ -280,7 +281,7 @@ fn main() {
                     Dft::default(),
                     blake3_192::test_challenger(),
                 );
-                lifted::run_lifted(&config, &specs, &traces, &poseidon2_constants, &cli)
+                lifted::run_lifted(&config, &specs, traces, &poseidon2_constants, &cli)
             },
         },
         Mode::Batch => match cli.hash {

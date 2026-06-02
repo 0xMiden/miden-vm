@@ -6,8 +6,8 @@
 use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{
-    AirBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, PeriodicAirBuilder,
-    PermutationAirBuilder,
+    AirBuilder, ExtensionBuilder, LiftedAir, PeriodicAirBuilder, PermutationAirBuilder,
+    WindowAccess,
     symbolic::{AirLayout, ConstraintLayout},
 };
 use p3_field::{ExtensionField, Field};
@@ -24,14 +24,15 @@ use tracing::instrument;
 /// for all variables. This discovers which constraints are base-field vs extension-field
 /// without building symbolic expression trees — only the emission order matters.
 #[instrument(name = "compute constraint layout", skip_all, level = "debug")]
-pub fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
+pub(crate) fn get_constraint_layout<F, EF, A>(air: &A) -> ConstraintLayout
 where
     F: Field,
     EF: ExtensionField<F>,
     A: LiftedAir<F, EF>,
 {
     let mut builder = ConstraintLayoutBuilder::<F>::new(air.air_layout());
-    debug_assert!(air.is_valid_builder(&builder).is_ok());
+    #[cfg(debug_assertions)]
+    miden_lifted_air::debug::check_builder_shape(air, &builder);
     air.eval(&mut builder);
     builder.into_layout()
 }
@@ -42,11 +43,33 @@ where
 /// tracking, no `Arc` allocations. Builds a [`ConstraintLayout`] directly by recording
 /// which `assert_*` method is called for each constraint.
 ///
-/// Uses `RowMajorMatrix<F>` as `MainWindow` because the builder owns its trace data.
-/// `RowWindow` cannot be used here — it borrows, but the associated type can't
-/// capture the `&self` lifetime from `main()`.
+/// Uses owned windows because the builder owns its trace data. `RowWindow` cannot be used here —
+/// it borrows, but the associated type can't capture the `&self` lifetime from `main()`.
+#[derive(Clone)]
+struct OwnedRowWindow<F> {
+    values: Vec<F>,
+    width: usize,
+}
+
+impl<F: Field> OwnedRowWindow<F> {
+    fn zeros(width: usize) -> Self {
+        Self { values: vec![F::ZERO; 2 * width], width }
+    }
+}
+
+impl<F> WindowAccess<F> for OwnedRowWindow<F> {
+    fn current_slice(&self) -> &[F] {
+        &self.values[..self.width]
+    }
+
+    fn next_slice(&self) -> &[F] {
+        &self.values[self.width..]
+    }
+}
+
 struct ConstraintLayoutBuilder<F: Field> {
     main: RowMajorMatrix<F>,
+    preprocessed: OwnedRowWindow<F>,
     public_values: Vec<F>,
     periodic_values: Vec<F>,
     permutation: RowMajorMatrix<F>,
@@ -59,16 +82,17 @@ struct ConstraintLayoutBuilder<F: Field> {
 impl<F: Field> ConstraintLayoutBuilder<F> {
     fn new(layout: AirLayout) -> Self {
         let AirLayout {
+            preprocessed_width,
             main_width,
             num_public_values,
             permutation_width,
             num_permutation_challenges,
             num_permutation_values,
             num_periodic_columns,
-            ..
         } = layout;
         Self {
             main: RowMajorMatrix::new(vec![F::ZERO; 2 * main_width], main_width),
+            preprocessed: OwnedRowWindow::zeros(preprocessed_width),
             public_values: vec![F::ZERO; num_public_values],
             periodic_values: vec![F::ZERO; num_periodic_columns],
             permutation: RowMajorMatrix::new(
@@ -91,7 +115,7 @@ impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
     type F = F;
     type Expr = F;
     type Var = F;
-    type PreprocessedWindow = EmptyWindow<F>;
+    type PreprocessedWindow = OwnedRowWindow<F>;
     type MainWindow = RowMajorMatrix<F>;
     type PublicVar = F;
 
@@ -100,7 +124,7 @@ impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        EmptyWindow::empty_ref()
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {

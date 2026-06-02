@@ -97,5 +97,10 @@ harness           = false
 name              = "plonky3"
 required-features = ["testing"]
 
+[[bench]]
+harness           = false
+name              = "per_air_degree_opt"
+required-features = ["testing"]
+
 [lints]
 workspace = true

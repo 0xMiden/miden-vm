@@ -16,13 +16,14 @@ use chacha20poly1305::{
     XChaCha20Poly1305,
     aead::{Aead, AeadCore, KeyInit},
 };
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 #[cfg(any(test, feature = "testing"))]
 use subtle::ConstantTimeEq;
 
 use crate::{
     Felt,
     aead::{AeadScheme, DataType, EncryptionError},
+    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_elements_exact, elements_to_bytes,
@@ -65,19 +66,10 @@ pub struct Nonce {
 
 impl Nonce {
     /// Creates a new random nonce using the provided random number generator
-    pub fn with_rng<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        // we use a seedable CSPRNG and seed it with `rng`
-        // this is a work around the fact that the version of the `rand` dependency in our crate
-        // is different than the one used in the `chacha20poly1305`. This solution will
-        // no longer be needed once `chacha20poly1305` gets a new release with a version of
-        // the `rand` dependency matching ours
-        use chacha20poly1305::aead::rand_core::SeedableRng;
-        let mut seed = [0_u8; 32];
-        RngCore::fill_bytes(rng, &mut seed);
-        let rng = rand_hc::Hc128Rng::from_seed(seed);
-
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
+        let mut compat_rng = RandCore06::new(rng);
         Nonce {
-            inner: XChaCha20Poly1305::generate_nonce(rng),
+            inner: XChaCha20Poly1305::generate_nonce(&mut compat_rng),
         }
     }
 
@@ -115,18 +107,9 @@ impl SecretKey {
     }
 
     /// Creates a new random secret key using the provided random number generator
-    pub fn with_rng<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        // we use a seedable CSPRNG and seed it with `rng`
-        // this is a work around the fact that the version of the `rand` dependency in our crate
-        // is different than the one used in the `chacha20poly1305`. This solution will
-        // no longer be needed once `chacha20poly1305` gets a new release with a version of
-        // the `rand` dependency matching ours
-        use chacha20poly1305::aead::rand_core::SeedableRng;
-        let mut seed = [0_u8; 32];
-        RngCore::fill_bytes(rng, &mut seed);
-        let rng = rand_hc::Hc128Rng::from_seed(seed);
-
-        let key = XChaCha20Poly1305::generate_key(rng);
+    pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
+        let mut compat_rng = RandCore06::new(rng);
+        let key = XChaCha20Poly1305::generate_key(&mut compat_rng);
         Self(key.into())
     }
 
@@ -348,7 +331,7 @@ impl AeadScheme for XChaCha {
             .map_err(|_| EncryptionError::FailedOperation)
     }
 
-    fn encrypt_bytes<R: CryptoRng + RngCore>(
+    fn encrypt_bytes<R: CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[u8],

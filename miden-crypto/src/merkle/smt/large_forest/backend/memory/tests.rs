@@ -13,7 +13,7 @@ use itertools::Itertools;
 use crate::{
     EMPTY_WORD, Word,
     merkle::smt::{
-        Backend, BackendError, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
+        Backend, BackendError, BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, VersionId,
         large_forest::{
             InMemoryBackend,
             backend::Result,
@@ -618,6 +618,85 @@ fn update_tree() -> Result<()> {
     assert_eq!(backend.trees()?.count(), 1);
     assert!(backend.trees()?.any(|e| e.root() == tree_1.root()));
     assert_eq!(backend_revs_2, tree_revs_2);
+
+    Ok(())
+}
+
+#[test]
+fn apply_mutations_returns_reversion_data() -> Result<()> {
+    let mut backend = InMemoryBackend::new();
+    let mut rng = ContinuousRng::new([0x77; 32]);
+
+    let lineage: LineageId = rng.value();
+    let version_1: VersionId = rng.value();
+    let version_2: VersionId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key_1, value_1);
+    initial.add_insert(key_2, value_2);
+    backend.add_lineage(lineage, version_1, initial)?;
+
+    let mut reference = Smt::new();
+    reference.insert(key_1, value_1)?;
+    reference.insert(key_2, value_2)?;
+    let old_entry_count = reference.num_entries();
+
+    let mut updates = SmtUpdateBatch::default();
+    updates.add_insert(key_2, value_3);
+    let expected_forward = reference.compute_mutations([(key_2, value_3)])?;
+    let expected_reverse = reference.apply_mutations_with_reversion(expected_forward)?;
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage).add_operations(updates.into_iter());
+    let (_, prepared) = backend.compute_mutations(version_2, batch)?;
+    let applied = backend.apply_mutations(prepared)?;
+
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].lineage(), lineage);
+    assert_eq!(applied[0].old_entry_count(), old_entry_count);
+    assert_eq!(applied[0].reverse(), &expected_reverse);
+    assert_eq!(backend.version(lineage)?, version_2);
+    assert!(backend.trees()?.any(|tree| tree.root() == reference.root()));
+
+    Ok(())
+}
+
+#[test]
+fn apply_mutations_rejects_stale_prepared_update() -> Result<()> {
+    let mut backend = InMemoryBackend::new();
+    let mut rng = ContinuousRng::new([0xa5; 32]);
+
+    let lineage: LineageId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    let mut initial = SmtUpdateBatch::default();
+    initial.add_insert(key_1, value_1);
+    backend.add_lineage(lineage, 1, initial)?;
+
+    let mut stale_updates = SmtUpdateBatch::default();
+    stale_updates.add_insert(key_2, value_2);
+    let mut stale_batch = SmtForestUpdateBatch::empty();
+    stale_batch.operations(lineage).add_operations(stale_updates.into_iter());
+    let (_visible, stale_prepared) = backend.compute_mutations(2, stale_batch)?;
+
+    let mut intervening_updates = SmtUpdateBatch::default();
+    intervening_updates.add_insert(key_3, value_3);
+    backend.update_tree(lineage, 2, intervening_updates)?;
+
+    assert!(
+        backend.apply_mutations(stale_prepared).is_err(),
+        "stale prepared mutations must not apply after the lineage root changes"
+    );
 
     Ok(())
 }

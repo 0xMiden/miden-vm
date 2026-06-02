@@ -1,11 +1,12 @@
 //! Pseudo-random element generation.
 
-use rand::RngCore;
+use rand::Rng;
 
 use crate::{Felt, Word};
 
 mod coin;
 pub use coin::RandomCoin;
+pub(crate) mod compat;
 
 // Test utilities for generating random data (used in tests and benchmarks)
 #[cfg(any(test, feature = "std"))]
@@ -127,7 +128,7 @@ impl<const N: usize> Randomizable for [u8; N] {
 /// Pseudo-random element generator.
 ///
 /// An instance can be used to draw, uniformly at random, base field elements as well as [Word]s.
-pub trait FeltRng: RngCore {
+pub trait FeltRng: Rng {
     /// Draw, uniformly at random, a base field element.
     fn draw_element(&mut self) -> Felt;
 
@@ -143,7 +144,7 @@ pub trait FeltRng: RngCore {
 /// This function is only available with the `std` feature.
 #[cfg(feature = "std")]
 pub fn random_felt() -> Felt {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     // We use the `Felt::new` constructor to do rejection sampling here. It should effectively
     // never repeat, but nevertheless gives us the correct distribution.

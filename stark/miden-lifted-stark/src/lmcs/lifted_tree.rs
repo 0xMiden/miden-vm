@@ -10,9 +10,9 @@ use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::lmcs::{
-    LmcsTree, bitrev::BitReversibleMatrix, proof::LeafOpening, row_list::RowList,
-    tree_indices::TreeIndices,
+use crate::{
+    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
+    util::bitrev::BitReversibleMatrix,
 };
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
@@ -61,14 +61,17 @@ use crate::lmcs::{
 ///
 /// ## Transcript Hints
 ///
-/// `prove_batch` streams transcript hints in the format expected by
+/// `prove_batch` streams exact transcript hints in the format expected by
 /// [`Lmcs::open_batch`](crate::lmcs::Lmcs::open_batch):
-/// - For each unique query index **in sorted tree index order** (ascending, deduplicated): one row
-///   per matrix (in leaf order), then `SALT_ELEMS` field elements of salt.
+/// - For each unique tree index **in sorted tree index order** (ascending, deduplicated): one row
+///   per committed matrix (in committed matrix order), then `SALT_ELEMS` field elements of salt.
 /// - Each row is padded with explicit zeros to the LMCS alignment. This allows verifiers to absorb
 ///   fixed-size chunks without special-casing the final partial chunk; padding is not enforced to
 ///   be zero.
 /// - After all indices: missing sibling hashes, level-by-level, left-to-right, bottom-to-top.
+///
+/// Use [`LmcsTree::prove_lifted_batch`] to open query indices from a larger domain against a
+/// shorter committed tree.
 ///
 /// Hints are not observed into the Fiat-Shamir challenger.
 ///
@@ -76,7 +79,7 @@ use crate::lmcs::{
 /// see the MMCS wrapper types.
 #[derive(Debug)]
 pub struct LiftedMerkleTree<F, D, M, const DIGEST_ELEMS: usize, const SALT_ELEMS: usize = 0> {
-    /// All leaf matrices in insertion order.
+    /// All committed matrices in insertion order.
     ///
     /// Matrices must be sorted by height (shortest to tallest) and all heights must be
     /// powers of two. Each matrix's rows are absorbed into sponge states that are
@@ -145,17 +148,24 @@ where
         self.leaves.iter().map(Matrix::width).collect()
     }
 
-    /// Prove a batch opening and stream it into a transcript channel.
+    /// Prove an exact batch opening and stream it into a transcript channel.
     ///
-    /// Panics if any index is out of range. Rows are padded to `alignment` and those
-    /// padding values are not validated by verification; callers that require zero
-    /// padding must check the opened rows explicitly.
+    /// Panics if `indices.depth()` is not this tree's depth or any index is out of range. Rows are
+    /// padded to `alignment` and those padding values are not validated by verification; callers
+    /// that require zero padding must check the opened rows explicitly.
     ///
     /// Leaf openings are written in **sorted tree index order** (ascending, deduplicated).
     fn prove_batch<Ch>(&self, indices: &TreeIndices, channel: &mut Ch)
     where
         Ch: ProverChannel<F = F, Commitment = Hash<F, D, DIGEST_ELEMS>>,
     {
+        let tree_log_height = log2_strict_usize(self.height()) as u8;
+        assert_eq!(
+            indices.depth(),
+            tree_log_height,
+            "exact batch indices must be in the committed tree's index space",
+        );
+
         // Stream leaf openings in sorted tree index order.
         for &index in indices.iter() {
             let opening = LeafOpening {
@@ -536,10 +546,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        lmcs::{tests::build_leaves_single, utils::aligned_len},
+        lmcs::tests::build_leaves_single,
         testing::configs::goldilocks_poseidon2::{
             self as gl, DIGEST, Felt, PackedFelt, RATE, Sponge,
         },
+        util::align::aligned_len,
     };
 
     /// Common matrix group scenarios for testing lifting with varying heights.

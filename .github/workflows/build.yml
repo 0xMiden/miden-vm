@@ -56,3 +56,28 @@ jobs:
           rustup default ${{ matrix.toolchain }}
           rustup target add wasm32-wasip2
           make build-target-miden
+
+  fuzz-check:
+    name: Check fuzz crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup toolchain install --no-self-update nightly
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
+        with:
+          # Fuzz crates are separate workspaces, so cache them explicitly.
+          workspaces: |
+            .
+            miden-crypto-fuzz
+            miden-serde-utils/fuzz
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version 0.13.1
+      - name: Check fuzz crates
+        run: make check-fuzz

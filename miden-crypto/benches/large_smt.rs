@@ -165,6 +165,25 @@ benchmark_with_setup_data! {
 }
 
 benchmark_with_setup_data! {
+    large_smt_clone,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "rocksdb_smt_clone",
+    || {
+        let entries = generate_smt_entries_sequential(10_000);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let storage = RocksDbStorage::open(RocksDbConfig::new(temp_dir.path())).unwrap();
+        let smt = LargeSmt::with_entries(storage, entries).unwrap();
+        (smt, temp_dir)
+    },
+    |b: &mut criterion::Bencher, (smt, _temp_dir): &(LargeSmt<RocksDbStorage>, tempfile::TempDir)| {
+        // iter_batched drops the returned clone after the timed section, keeping the
+        // RocksDbStorage::drop flush out of the measurement.
+        b.iter_batched(|| (), |_| hint::black_box(smt.clone()), BatchSize::SmallInput)
+    },
+}
+
+benchmark_with_setup_data! {
     large_smt_compute_mutations,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
@@ -199,6 +218,7 @@ benchmark_batch! {
 
         b.iter_batched(
             || {
+                let _ = std::fs::remove_dir_all(&bench_dir);
                 std::fs::create_dir_all(&bench_dir).unwrap();
                 let storage = RocksDbStorage::open(RocksDbConfig::new(&bench_dir)).unwrap();
                 let smt = LargeSmt::with_entries(storage, base_entries.clone()).unwrap();
@@ -232,6 +252,7 @@ benchmark_batch! {
 
         b.iter_batched(
             || {
+                let _ = std::fs::remove_dir_all(&bench_dir);
                 std::fs::create_dir_all(&bench_dir).unwrap();
                 let storage = RocksDbStorage::open(RocksDbConfig::new(&bench_dir)).unwrap();
                 let smt = LargeSmt::with_entries(storage, base_entries.clone()).unwrap();
@@ -406,6 +427,7 @@ criterion_group!(
     large_smt_benchmark_group,
     large_smt_open,
     large_smt_open_in_large_tree,
+    large_smt_clone,
     large_smt_compute_mutations,
     large_smt_apply_mutations,
     large_smt_apply_mutations_with_reversion,

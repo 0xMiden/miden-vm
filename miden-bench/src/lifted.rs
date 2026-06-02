@@ -3,17 +3,15 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    AirInstance, AirWitness, StarkConfig,
-    air::{BaseAir, LiftedAir, LiftedAirBuilder},
-    prove_multi,
+    ProverInstance, StarkConfig, VerifierInstance,
+    air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
     testing::airs::{
-        ZeroAuxBuilder, blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
+        blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
         poseidon2::LiftedPoseidon2Air,
     },
-    verify_multi,
 };
 use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::info_span;
 
 use crate::{
@@ -65,8 +63,18 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
         }
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        _air_inputs: &[Felt],
+        _aux_inputs: &[Felt],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        // All-zero aux trace of the AIR's declared width.
+        let aux_width = LiftedAir::<Felt, EF>::aux_width(self);
+        let num_aux_values = LiftedAir::<Felt, EF>::num_aux_values(self);
+        let aux = RowMajorMatrix::new(EF::zero_vec(main.height() * aux_width), aux_width);
+        (aux, EF::zero_vec(num_aux_values))
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -80,19 +88,35 @@ impl<EF: Field> LiftedAir<Felt, EF> for LiftedBenchAir {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// MultiAir: empty public inputs; each AIR builds its own all-zero aux trace.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+struct BenchMultiAir {
+    airs: Vec<LiftedBenchAir>,
+}
+
+impl MultiAir<Felt, QuadFelt> for BenchMultiAir {
+    type Air = LiftedBenchAir;
+
+    fn airs(&self) -> &[Self::Air] {
+        &self.airs
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Runner
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub(crate) fn run_lifted<SC>(
     config: &SC,
     specs: &[TraceSpec],
-    traces: &[RowMajorMatrix<Felt>],
+    traces: Vec<RowMajorMatrix<Felt>>,
     constants: &Option<GlRoundConstants>,
     cli: &Cli,
 ) -> RunResult
 where
     SC: StarkConfig<Felt, QuadFelt>,
-    miden_lifted_stark::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
+    miden_lifted_stark::proof::StarkDigest<Felt, QuadFelt, SC>: PartialEq + fmt::Debug,
 {
     let airs: Vec<LiftedBenchAir> = specs
         .iter()
@@ -109,26 +133,14 @@ where
         })
         .collect();
 
-    let aux_builders: Vec<ZeroAuxBuilder> = specs
-        .iter()
-        .map(|spec| match spec.air_type {
-            AirType::Miden => ZeroAuxBuilder {
-                num_aux_cols: spec.num_aux_cols,
-                num_aux_values: spec.num_aux_cols,
-            },
-            _ => ZeroAuxBuilder::dummy(),
-        })
-        .collect();
-
-    let instances: Vec<_> = airs
-        .iter()
-        .zip(traces)
-        .zip(&aux_builders)
-        .map(|((air, trace), aux)| (air, AirWitness::new(trace, &[], &[]), aux))
-        .collect();
+    let statement =
+        Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
+    let prover_statement = ProverStatement::new(statement, traces).expect("prover statement");
+    let prover_instance =
+        ProverInstance::new(config, &prover_statement, None).expect("no preprocessed columns");
 
     let output = info_span!("prove")
-        .in_scope(|| prove_multi(config, &instances, config.challenger()).expect("proving failed"));
+        .in_scope(|| prover_instance.prove(config.challenger()).expect("proving failed"));
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
@@ -138,21 +150,10 @@ where
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
-            let verifier_instances: Vec<_> = airs
-                .iter()
-                .map(|air| {
-                    (
-                        air,
-                        AirInstance {
-                            public_values: &[],
-                            var_len_public_inputs: &[],
-                        },
-                    )
-                })
-                .collect();
-            let digest =
-                verify_multi(config, &verifier_instances, &output.proof, config.challenger())
-                    .expect("verification failed");
+            let digest = VerifierInstance::new(config, prover_statement.statement(), None)
+                .expect("no preprocessed columns")
+                .verify(&output.proof, config.challenger())
+                .expect("verification failed");
             assert_eq!(output.digest, digest);
         });
     }

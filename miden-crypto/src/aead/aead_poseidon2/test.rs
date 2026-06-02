@@ -2,7 +2,7 @@ use proptest::{
     prelude::{any, prop},
     prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
-use rand::{RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 use super::*;

@@ -16,7 +16,7 @@ use crate::{
         full::concurrent::{
             PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
         },
-        large::to_memory_index,
+        large::{LargeSmtResult, to_memory_index},
     },
 };
 
@@ -40,7 +40,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// let storage = MemoryStorage::new();
     /// let smt = LargeSmt::new(storage).expect("Failed to create SMT");
     /// ```
-    pub fn new(storage: S) -> Result<Self, LargeSmtError> {
+    pub fn new(storage: S) -> LargeSmtResult<Self> {
         if storage.has_leaves()? {
             return Err(LargeSmtError::StorageNotEmpty);
         }
@@ -50,7 +50,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// Loads an existing [LargeSmt] from storage without validating the root.
     ///
     /// If the storage is empty, the SMT is initialized with the root of an empty tree.
-    /// Otherwise, the in-memory top of the tree is reconstructed from the cached depth-24
+    /// Otherwise, the in-memory top of the tree is reconstructed from the cached in-memory-depth
     /// subtree hashes stored in the backend.
     ///
     /// **Note:** This method does not validate the reconstructed root. Use this only when
@@ -69,13 +69,13 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// let smt = LargeSmt::load(storage).expect("Failed to load SMT");
     /// # }
     /// ```
-    pub fn load(storage: S) -> Result<Self, LargeSmtError> {
+    pub fn load(storage: S) -> LargeSmtResult<Self> {
         Self::initialize_from_storage(storage)
     }
 
     /// Loads an existing [LargeSmt] from storage and validates it against the expected root.
     ///
-    /// This method reconstructs the in-memory top of the tree from the cached depth-24
+    /// This method reconstructs the in-memory top of the tree from the cached in-memory-depth
     /// subtree hashes, computes the root, and validates it against `expected_root`.
     ///
     /// Use this method when reloading a tree to ensure the storage contains the expected
@@ -100,7 +100,7 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     ///     .expect("Failed to load SMT with expected root");
     /// # }
     /// ```
-    pub fn load_with_root(storage: S, expected_root: Word) -> Result<Self, LargeSmtError> {
+    pub fn load_with_root(storage: S, expected_root: Word) -> LargeSmtResult<Self> {
         let smt = Self::load(storage)?;
 
         let actual_root = smt.root();
@@ -117,8 +117,8 @@ impl<S: SmtStorageReader> LargeSmt<S> {
     /// Internal method that initializes the in-memory tree from storage.
     ///
     /// For empty storage, returns an empty tree. For non-empty storage,
-    /// rebuilds the in-memory top from cached depth-24 hashes.
-    fn initialize_from_storage(storage: S) -> Result<Self, LargeSmtError> {
+    /// rebuilds the in-memory top from cached in-memory-depth hashes.
+    fn initialize_from_storage(storage: S) -> LargeSmtResult<Self> {
         // Initialize in-memory nodes
         let mut in_memory_nodes: Vec<Word> = vec![EMPTY_WORD; NUM_IN_MEMORY_NODES];
 
@@ -147,8 +147,8 @@ impl<S: SmtStorageReader> LargeSmt<S> {
         let leaf_count = storage.leaf_count()?;
         let entry_count = storage.entry_count()?;
 
-        // Get the in-memory top of tree leaves from storage
-        let in_memory_tree_leaves = storage.get_depth24()?;
+        // Get the tops of subtrees from storage; these become the leaves of the in-memory tree
+        let in_memory_tree_leaves = storage.get_top_subtree_roots()?;
 
         // Convert in-memory top of tree leaves to SubtreeLeaf
         let mut leaf_subtrees: Vec<SubtreeLeaf> = in_memory_tree_leaves
@@ -212,7 +212,7 @@ impl<S: SmtStorage> LargeSmt<S> {
     pub fn with_entries(
         storage: S,
         entries: impl IntoIterator<Item = (Word, Word)>,
-    ) -> Result<Self, LargeSmtError> {
+    ) -> LargeSmtResult<Self> {
         let entries: Vec<(Word, Word)> = entries.into_iter().collect();
 
         if storage.has_leaves()? {

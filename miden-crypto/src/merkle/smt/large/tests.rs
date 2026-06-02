@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeSet, vec::Vec};
 
-use rand::{Rng, prelude::IteratorRandom, rng};
+use rand::{RngExt, prelude::IteratorRandom, rng};
 
 use super::{IN_MEMORY_DEPTH, MemoryStorage, SmtStorage, SmtStorageReader};
 use crate::{
@@ -35,7 +35,7 @@ fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Wo
     );
     let mut sorted_entries: Vec<(Word, Word)> = entries
         .into_iter()
-        .choose_multiple(&mut rng, updates)
+        .sample(&mut rng, updates)
         .into_iter()
         .map(|(key, _)| {
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {
@@ -105,7 +105,8 @@ fn test_equivalent_entry_sets() {
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
     let mut entries_control_smt_owned: Vec<(Word, Word)> = control_smt.entries().copied().collect();
-    let mut entries_large_smt: Vec<(Word, Word)> = large_smt.entries().unwrap().collect();
+    let mut entries_large_smt: Vec<(Word, Word)> =
+        large_smt.entries().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
 
     entries_control_smt_owned.sort_by_key(|k| k.0);
     entries_large_smt.sort_by_key(|k| k.0);
@@ -124,7 +125,7 @@ fn test_equivalent_leaf_sets() {
     let mut leaves_control_smt: Vec<(LeafIndex<SMT_DEPTH>, SmtLeaf)> =
         control_smt.leaves().map(|(idx, leaf_ref)| (idx, leaf_ref.clone())).collect();
     let mut leaves_large_smt: Vec<(LeafIndex<SMT_DEPTH>, SmtLeaf)> =
-        large_smt.leaves().unwrap().collect();
+        large_smt.leaves().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
 
     leaves_control_smt.sort_by_key(|k| k.0);
     leaves_large_smt.sort_by_key(|k| k.0);
@@ -142,7 +143,8 @@ fn test_equivalent_inner_nodes() {
     let (control_smt, large_smt) = create_equivalent_smts_for_testing(storage, entries);
 
     let mut control_smt_inner_nodes: Vec<InnerNodeInfo> = control_smt.inner_nodes().collect();
-    let mut large_smt_inner_nodes: Vec<InnerNodeInfo> = large_smt.inner_nodes().unwrap().collect();
+    let mut large_smt_inner_nodes: Vec<InnerNodeInfo> =
+        large_smt.inner_nodes().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
 
     control_smt_inner_nodes.sort_by_key(|info| info.value);
     large_smt_inner_nodes.sort_by_key(|info| info.value);
@@ -185,10 +187,18 @@ fn test_empty_smt() {
         "get_value on empty SMT should return EMPTY_WORD"
     );
 
-    assert_eq!(large_smt.entries().unwrap().count(), 0, "Empty SMT should have no entries");
-    assert_eq!(large_smt.leaves().unwrap().count(), 0, "Empty SMT should have no leaves");
     assert_eq!(
-        large_smt.inner_nodes().unwrap().count(),
+        large_smt.entries().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len(),
+        0,
+        "Empty SMT should have no entries"
+    );
+    assert_eq!(
+        large_smt.leaves().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len(),
+        0,
+        "Empty SMT should have no leaves"
+    );
+    assert_eq!(
+        large_smt.inner_nodes().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len(),
         0,
         "Empty SMT should have no inner nodes"
     );
@@ -210,7 +220,7 @@ fn test_single_entry_smt() {
     let other_key = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
     assert_eq!(smt.get_value(&other_key), EMPTY_WORD, "get_value for non-existing key failed");
 
-    let entries: Vec<_> = smt.entries().unwrap().collect();
+    let entries: Vec<_> = smt.entries().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
     assert_eq!(entries.len(), 1, "Single entry SMT should have one entry");
     assert_eq!(entries[0], (key, value), "Single entry SMT entry mismatch");
 
@@ -241,7 +251,11 @@ fn test_single_entry_smt() {
     let empty_control_smt = Smt::new();
     assert_eq!(smt.root(), empty_control_smt.root(), "SMT root after deletion mismatch");
     assert_eq!(smt.get_value(&key), EMPTY_WORD, "get_value after deletion failed");
-    assert_eq!(smt.entries().unwrap().count(), 0, "SMT should have no entries after deletion");
+    assert_eq!(
+        smt.entries().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len(),
+        0,
+        "SMT should have no entries after deletion"
+    );
 }
 
 #[test]
@@ -337,7 +351,7 @@ fn test_delete_entry() {
         "get_value for deleted key should be EMPTY_WORD"
     );
 
-    let current_entries: Vec<_> = smt.entries().unwrap().collect();
+    let current_entries: Vec<_> = smt.entries().unwrap().collect::<Result<Vec<_>, _>>().unwrap();
     assert!(
         !current_entries.iter().any(|(k, _v)| k == &key2),
         "Deleted key should not be in entries"
@@ -731,11 +745,11 @@ fn test_flat_layout_children_relationship() {
     }
 }
 
-/// Verifies that a snapshot produced by `MemoryStorage::reader()` returns correct depth-24 roots
-/// from `get_depth24()`, and that loading a `LargeSmt` from that snapshot reconstructs the same
-/// root as the original tree.
+/// Verifies that a snapshot produced by `MemoryStorage::reader()` returns correct top subtree
+/// roots from `get_top_subtree_roots()`, and that loading a `LargeSmt` from that snapshot
+/// reconstructs the same root as the original tree.
 #[test]
-fn test_memory_storage_snapshot_depth24() {
+fn test_memory_storage_snapshot_in_mem_depth() {
     use crate::merkle::NodeIndex;
 
     let entries = generate_entries(50);
@@ -745,17 +759,20 @@ fn test_memory_storage_snapshot_depth24() {
 
     let snapshot = smt.storage.reader().unwrap();
 
-    // The depth-24 entries must be non-empty for a non-empty tree.
-    let depth24 = snapshot.get_depth24().unwrap();
-    assert!(!depth24.is_empty(), "snapshot must expose depth-24 roots for a non-empty tree");
+    // The in-memory-depth entries must be non-empty for a non-empty tree.
+    let in_mem_roots = snapshot.get_top_subtree_roots().unwrap();
+    assert!(
+        !in_mem_roots.is_empty(),
+        "snapshot must expose in-memory-depth roots for a non-empty tree"
+    );
 
     // Every returned entry must sit exactly at IN_MEMORY_DEPTH.
-    for (position, _hash) in &depth24 {
+    for (position, _hash) in &in_mem_roots {
         let index = NodeIndex::new(IN_MEMORY_DEPTH, *position).unwrap();
         assert_eq!(
             index.depth(),
             IN_MEMORY_DEPTH,
-            "depth-24 entry at position {position} has wrong depth"
+            "in-memory-depth entry at position {position} has wrong depth"
         );
     }
 

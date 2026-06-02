@@ -8,6 +8,8 @@ help:
 
 ALL_FEATURES_EXCEPT_ROCKSDB="concurrent executable internal serde std"
 MIDEN_STARK_TEST_PACKAGES=-p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
+MIDEN_CRYPTO_FUZZ_TARGETS=word merkle merkle_store smt_serde partial_smt mmr crypto aead signatures
+MIDEN_SERDE_UTILS_FUZZ_TARGETS=primitives collections string vint64 goldilocks budgeted
 WARNINGS=RUSTDOCFLAGS="-D warnings"
 
 # -- linting --------------------------------------------------------------------------------------
@@ -76,7 +78,7 @@ lint: clippy fix format toml typos-check shear cargo-deny ## Run all linting tas
 
 .PHONY: doc
 doc: ## Generate and check documentation for workspace crates only
-	rm -rf "${CARGO_TARGET_DIR:-target}/doc"
+	rm -rf "$${CARGO_TARGET_DIR:-target}/doc"
 	RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +nightly doc --all-features --keep-going --release --no-deps
 
 # --- testing -------------------------------------------------------------------------------------
@@ -103,7 +105,7 @@ test-p3-parallel: ## Run Miden STARK crate tests with the parallel feature enabl
 
 .PHONY: test-large-smt
 test-large-smt: ## Run large SMT unit tests and RocksDB integration tests
-	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features rocksdb
+	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features persistent-forest
 
 .PHONY: test
 test: test-default test-no-std test-docs test-large-smt ## Run all tests except concurrent SMT tests
@@ -119,8 +121,15 @@ check-features: ## Check curated feature combinations across the integrated work
 	./scripts/check-features.sh
 
 .PHONY: check-fuzz
-check-fuzz: ## Check miden-crypto-fuzz compilation
-	cd miden-crypto-fuzz && cargo check
+check-fuzz: ## Check and link fuzz targets
+	cd miden-crypto-fuzz && cargo check --locked
+	cd miden-serde-utils/fuzz && cargo check --locked
+	for target in $(MIDEN_CRYPTO_FUZZ_TARGETS); do \
+		cargo +nightly fuzz build --fuzz-dir miden-crypto-fuzz $$target; \
+	done
+	for target in $(MIDEN_SERDE_UTILS_FUZZ_TARGETS); do \
+		(cd miden-serde-utils && cargo +nightly fuzz build $$target); \
+	done
 
 # --- building ------------------------------------------------------------------------------------
 
@@ -218,10 +227,10 @@ fuzz-signatures: ## Run fuzzing for DSA signature deserialization
 check-tools: ## Checks if development tools are installed
 	@echo "Checking development tools..."
 	@command -v typos >/dev/null 2>&1 && echo "[OK] typos is installed" || echo "[MISSING] typos is not installed (run: make install-tools)"
-	@command -v cargo nextest >/dev/null 2>&1 && echo "[OK] nextest is installed" || echo "[MISSING] nextest is not installed (run: make install-tools)"
+	@command -v cargo-nextest >/dev/null 2>&1 && echo "[OK] nextest is installed" || echo "[MISSING] nextest is not installed (run: make install-tools)"
 	@command -v taplo >/dev/null 2>&1 && echo "[OK] taplo is installed" || echo "[MISSING] taplo is not installed (run: make install-tools)"
 	@command -v cargo-shear >/dev/null 2>&1 && echo "[OK] cargo-shear is installed" || echo "[MISSING] cargo-shear is not installed (run: make install-tools)"
-	@command -v cargo deny >/dev/null 2>&1 && echo "[OK] cargo-deny is installed" || echo "[MISSING] cargo-deny is not installed (run: make install-tools)"
+	@command -v cargo-deny >/dev/null 2>&1 && echo "[OK] cargo-deny is installed" || echo "[MISSING] cargo-deny is not installed (run: make install-tools)"
 
 .PHONY: install-tools
 install-tools: ## Installs development tools required by the Makefile (typos, nextest, taplo, cargo-shear, cargo-deny)

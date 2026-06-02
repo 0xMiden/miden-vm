@@ -1,103 +1,113 @@
-//! Quotient polynomial helpers: accumulation, vanishing division, decomposition.
+//! Quotient polynomial helpers used by the prover's per-AIR pipeline.
 //!
-//! The prover orchestrates the quotient pipeline (loop over instances, accumulate,
-//! divide, commit). This module provides the building blocks:
-//!
-//! - [`cyclic_extend_and_scale`]: Horner-style beta scaling + cyclic extension
-//! - [`divide_by_vanishing_in_place`]: Divide by Z_H on the quotient evaluation domain
-//! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK
+//! - [`upsample_evals`]: Low-degree extend coset evaluations onto a larger two-adic coset (the
+//!   constraint-degree axis: `D_j -> D_max`, same polynomial, denser evaluations).
+//! - [`cyclic_extend_and_accumulate`]: Lift the running accumulator along the trace-height axis
+//!   (`n_j -> N`) by cyclic repetition, and Horner-fold a new AIR's contribution in via beta.
+//! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK.
 
 use alloc::{format, vec, vec::Vec};
 
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{
-    BasedVectorSpace, ExtensionField, Field, TwoAdicField, batch_multiplicative_inverse,
+    BasedVectorSpace, ExtensionField, Field, TwoAdicField, par_add_scaled_slice_in_place,
+    par_scale_slice_in_place,
 };
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use p3_util::log2_strict_usize;
 use tracing::info_span;
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
-    lmcs::{Lmcs, bitrev::materialize_bitrev},
+    domain::{Coset, EvaluationDomain},
+    lmcs::Lmcs,
     prover::commit::Committed,
+    util::bitrev::materialize_bitrev,
 };
 
 // ============================================================================
-// Accumulation
+// Domain lifting and accumulation
 // ============================================================================
 
-/// Cyclically extend the accumulator to `target_len` and scale every element by `β`.
+/// Low-degree extend coset evaluations onto a larger two-adic coset.
 ///
-/// On the first call (empty accumulator) this simply zero-fills to `target_len`.
-/// On subsequent calls it scales the existing buffer by `β` (Horner folding)
-/// then doubles via `extend_from_within` until it reaches `target_len`.
+/// Treats `evals` as evaluations of a polynomial `p` on a coset `g*H` of size
+/// `evals.len()`, and returns evaluations of the same `p` on the coset `g*K`
+/// of size `evals.len() << added_bits` (same shift `g`, larger two-adic
+/// subgroup).
 ///
-/// Both `accumulator.len()` and `target_len` must be powers of two, and
-/// `target_len ≥ accumulator.len()`.
+/// # Precondition
 ///
-/// Cyclic extension is valid because H_small is a subgroup of H_big, so
-/// evaluations repeat cyclically. The β scaling implements Horner folding for
-/// multi-trace accumulation: `acc = acc·β + Nⱼ`.
-pub fn cyclic_extend_and_scale<EF: Field>(accumulator: &mut Vec<EF>, target_len: usize, beta: EF) {
-    if accumulator.is_empty() {
-        accumulator.resize(target_len, EF::ZERO);
-    } else {
-        // Horner: scale the smaller buffer by beta before upsampling
-        accumulator.par_iter_mut().for_each(|v| *v *= beta);
-        // Cyclic extension by repeated doubling (all sizes are powers of 2)
-        while accumulator.len() < target_len {
-            accumulator.extend_from_within(..);
-        }
-    }
-}
-
-// ============================================================================
-// Vanishing division
-// ============================================================================
-
-/// Divide quotient numerator by vanishing polynomial in-place (natural order).
-///
-/// Replaces each `numerator[i]` with `numerator[i] / Z_H(xᵢ)` where
-/// `Z_H(X) = Xᴺ − 1` and `N` is the trace height.
-///
-/// This uses a periodicity trick: on the quotient evaluation coset `gJ` of size `N·D`,
-/// the values `Z_H(x)` take only `D` distinct values, so we can batch-invert those `D`
-/// values once and reuse them by modular indexing.
-///
-/// Note that here `coset.log_blowup()` is `log2(D)` because `coset` is the *quotient*
-/// domain (blowup = constraint degree), not the PCS/FRI blowup `B`.
-pub fn divide_by_vanishing_in_place<F, EF>(numerator: &mut [EF], coset: &LiftedCoset)
+/// `deg(p) < evals.len()`. If the input evaluations are of a polynomial whose
+/// actual degree is `>= evals.len()`, this function silently returns evaluations
+/// of a different polynomial (the unique degree-`< evals.len()` interpolant of
+/// the input). The caller is responsible for ensuring the degree bound.
+pub(crate) fn upsample_evals<F, EF, DFT>(dft: &DFT, evals: Vec<EF>, added_bits: usize) -> Vec<EF>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
+    DFT: TwoAdicSubgroupDft<F>,
 {
-    // D = constraint degree. On the quotient coset, log_blowup() = log₂(D).
-    let log_blowup = coset.log_blowup();
-    let num_distinct = 1 << log_blowup;
+    if added_bits == 0 {
+        return evals;
+    }
 
-    // The D distinct values of Z_H on gJ:
-    // Z_H(g·ω_Jⁱ) = sᴺ·ω_Dⁱ − 1 where
-    // - s is the coset shift
-    // - ω_D is a D-th root of unity.
-    let shift: F = coset.lde_shift();
-    let s_pow_n = shift.exp_power_of_2(coset.log_trace_height as usize);
-    let z_h_evals: Vec<F> = F::two_adic_generator(log_blowup)
-        .powers()
-        .take(num_distinct)
-        .map(|x| s_pow_n * x - F::ONE)
-        .collect();
+    dft.lde_algebra_batch(RowMajorMatrix::new_col(evals), added_bits).values
+}
 
-    let inv_van = batch_multiplicative_inverse(&z_h_evals);
+/// Fold a new AIR's quotient contribution into the cross-AIR accumulator via one
+/// Horner step, after lifting the prior accumulator onto the larger coset:
+///
+/// ```text
+/// acc <- lift_r(acc) * beta + contribution,    r = contribution.len() / acc.len()
+/// ```
+///
+/// On return, `accumulator.len() == contribution.len()`. `contribution.len()` and
+/// (when non-empty) `accumulator.len()` must be powers of two, with
+/// `contribution.len() >= accumulator.len()`.
+///
+/// # Why
+///
+/// - **Scale before extend.** Horner-multiplying the smaller buffer is strictly less work than the
+///   lifted one, and the lifted values are determined entirely by the smaller buffer via cyclic
+///   repetition.
+/// - **Cyclic repetition = polynomial lift on two-adic cosets.** In natural-order coset
+///   evaluations, `extended[i] = original[i mod n_old]` realises the composition `P(X) -> P(X^r)`:
+///   iterating `gJ` in natural order and raising to the `r`-th power cycles through `(gJ)^r` with
+///   period `|(gJ)^r|`.
+pub(super) fn cyclic_extend_and_accumulate<EF: Field>(
+    accumulator: &mut Vec<EF>,
+    contribution: Vec<EF>,
+    beta: EF,
+) {
+    debug_assert!(contribution.len().is_power_of_two());
+    debug_assert!(accumulator.is_empty() || accumulator.len().is_power_of_two());
+    debug_assert!(contribution.len() >= accumulator.len());
 
-    // Parallel division using modular indexing for periodicity.
-    // Z_H has only num_distinct unique values on gJ; power-of-2 size
-    // lets us use bitmask: i & (num_distinct - 1) == i % num_distinct.
-    numerator.par_iter_mut().enumerate().for_each(|(i, n)| {
-        *n *= inv_van[i & (num_distinct - 1)];
-    });
+    if accumulator.is_empty() {
+        accumulator.extend(contribution);
+        return;
+    }
+
+    if accumulator.len() == contribution.len() {
+        // No lift needed; fuse the Horner mul and add into a single packed pass by
+        // computing `contribution + beta * accumulator` in place on the (owned)
+        // contribution buffer and swapping it in.
+        let mut contribution = contribution;
+        par_add_scaled_slice_in_place(&mut contribution, accumulator, beta);
+        *accumulator = contribution;
+        return;
+    }
+
+    par_scale_slice_in_place(accumulator, beta);
+    while accumulator.len() < contribution.len() {
+        accumulator.extend_from_within(..);
+    }
+    // TODO: use parallel packed addition
+    accumulator
+        .par_iter_mut()
+        .zip(contribution.into_par_iter())
+        .for_each(|(a, c)| *a += c);
 }
 
 // ============================================================================
@@ -133,21 +143,19 @@ where
 pub fn commit_quotient<F, EF, SC>(
     config: &SC,
     q_evals: Vec<EF>,
-    coset: &LiftedCoset,
+    domain: &EvaluationDomain<F>,
 ) -> Committed<F, RowMajorMatrix<F>, SC::Lmcs>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
-    let n = coset.trace_height();
-    let d = q_evals.len() / n;
-    let log_d = log2_strict_usize(d);
-    let log_blowup = config.pcs().log_blowup();
-    let b = 1usize << log_blowup;
+    let n = domain.trace_height();
+    let d = domain.quotient_degree();
+    let lde_height = domain.lifted().lde_height();
 
-    debug_assert_eq!(q_evals.len() % n, 0, "q_evals length must be divisible by N");
-    debug_assert!(b >= d, "blowup B must be >= constraint degree D");
+    debug_assert_eq!(q_evals.len(), n * d, "q_evals length must equal N · D");
+    // D ≤ B (i.e. lde_height ≥ N · D) is enforced by `EvaluationDomain::new`.
 
     // ═══════════════════════════════════════════════════════════════════════
     // Step 0: Reshape to N × D matrix
@@ -172,7 +180,7 @@ where
     // Multiply c_hat[t, k] by (ω_Jᵗ)⁻ᵏ → a[t, k]·gᵏ.
     // This removes the per-coset shift ω_Jᵗ while keeping gᵏ baked in.
     info_span!("quotient scaling", n).in_scope(|| {
-        let omega_j_inv = F::two_adic_generator(coset.log_trace_height as usize + log_d).inverse();
+        let omega_j_inv = domain.subgroup().generator_inverse();
 
         // Precompute ω_J⁻ᵏ for k = 0..N with sequential multiplications
         let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();
@@ -186,15 +194,15 @@ where
     });
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Step 3: Flatten EF → F, zero-pad to N·B rows
+    // Step 3: Flatten EF → F, zero-pad to LDE height (N·B rows)
     // ═══════════════════════════════════════════════════════════════════════
     // We flatten before the DFT (rather than using dft_algebra_batch) because
     // we need base field for commitment anyway — this skips the reconstitute.
     //
-    // Zero-padding from N to N·B rows is needed because `dft_batch` expects
-    // the full target-size buffer. The extra rows are zero because each qₜ has
-    // degree < N. We pad here (after iDFT + scaling) so those two steps work
-    // on the smaller N-row buffer.
+    // Zero-padding from N to lde_height rows is needed because `dft_batch`
+    // expects the full target-size buffer. The extra rows are zero because each
+    // qₜ has degree < N. We pad here (after iDFT + scaling) so those two steps
+    // work on the smaller N-row buffer.
     //
     // PERF: the full N·B-size DFT processes N·(B−1) zero rows through every
     // butterfly stage, costing O(N·B·log(N·B)) instead of O(N·B·log N). For
@@ -214,7 +222,7 @@ where
     // already does internally after the iDFT phase.
     let base_width = d * EF::DIMENSION;
     let mut base_coeffs = <EF as BasedVectorSpace<F>>::flatten_to_base(coeffs.values);
-    base_coeffs.resize(n * b * base_width, F::ZERO);
+    base_coeffs.resize(lde_height * base_width, F::ZERO);
     let coeffs_padded = RowMajorMatrix::new(base_coeffs, base_width);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -222,7 +230,7 @@ where
     // ═══════════════════════════════════════════════════════════════════════
     // Because gᵏ is baked into the coefficients, the plain DFT evaluates
     // on gK directly: entry (i, t) gives qₜ(g·ω_Kⁱ).
-    let quotient_matrix = info_span!("quotient DFT", dims = %format!("{}x{base_width}", n * b))
+    let quotient_matrix = info_span!("quotient DFT", dims = %format!("{lde_height}x{base_width}"))
         .in_scope(|| {
             let lde = config.dft().dft_batch(coeffs_padded);
 
@@ -234,5 +242,62 @@ where
 
     let tree = config.lmcs().build_aligned_tree(vec![quotient_matrix]);
 
-    Committed::new(tree, log_blowup)
+    // The quotient is committed on the same LDE coset as the trace commits.
+    Committed::new(tree)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
+    use p3_field::{Field, PrimeCharacteristicRing};
+    use p3_matrix::dense::RowMajorMatrix;
+
+    use super::upsample_evals;
+    use crate::testing::configs::goldilocks_poseidon2::{Felt, QuadFelt};
+
+    fn coeffs(height: usize) -> Vec<QuadFelt> {
+        (0..height).map(|i| QuadFelt::from_u64((i as u64) + 1)).collect()
+    }
+
+    /// Checks that `upsample_evals` on `dft` produces the same result as a direct
+    /// coset DFT of zero-padded coefficients.
+    fn assert_upsample_matches_direct<D: TwoAdicSubgroupDft<Felt>>(dft: &D, shift: Felt) {
+        let small_height = 8;
+        let added_bits = 2;
+        let large_height = small_height << added_bits;
+
+        let small_coeffs = RowMajorMatrix::new(coeffs(small_height), 1);
+        let small_evals = NaiveDft.coset_dft_algebra_batch(small_coeffs, shift).values;
+
+        let mut large_coeffs = coeffs(small_height);
+        large_coeffs.resize(large_height, QuadFelt::ZERO);
+        let direct_large = NaiveDft
+            .coset_dft_algebra_batch(RowMajorMatrix::new(large_coeffs, 1), shift)
+            .values;
+
+        let upsampled = upsample_evals::<Felt, QuadFelt, _>(dft, small_evals, added_bits);
+        assert_eq!(upsampled, direct_large);
+    }
+
+    #[test]
+    fn upsample_evals_matches_direct_coset_dft() {
+        assert_upsample_matches_direct(&NaiveDft, Felt::GENERATOR.exp_power_of_2(2));
+    }
+
+    /// Same check with the production DFT backend.
+    #[test]
+    fn upsample_evals_with_radix2_dit_parallel_matches_naive() {
+        use p3_dft::Radix2DitParallel;
+        let dft = Radix2DitParallel::<Felt>::default();
+        assert_upsample_matches_direct(&dft, Felt::GENERATOR.exp_power_of_2(2));
+    }
+
+    #[test]
+    fn upsample_evals_with_zero_added_bits_returns_input_unchanged() {
+        let evals = coeffs(8);
+        let out = upsample_evals::<Felt, QuadFelt, _>(&NaiveDft, evals.clone(), 0);
+        assert_eq!(out, evals);
+    }
 }

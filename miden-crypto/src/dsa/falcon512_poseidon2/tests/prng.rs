@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 
-use rand::{Rng, RngCore};
-use rand_core::impls;
+use rand::{
+    Rng,
+    rand_core::{Infallible, TryRng, utils},
+};
 use sha3::{
     Shake256, Shake256ReaderCore,
     digest::{ExtendableOutput, Update, XofReader, core_api::XofReaderCoreWrapper},
@@ -49,17 +51,20 @@ impl Shake256Testing {
     }
 }
 
-impl RngCore for Shake256Testing {
-    fn next_u32(&mut self) -> u32 {
-        impls::next_u32_via_fill(self)
+impl TryRng for Shake256Testing {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        utils::next_word_via_fill::<u32, _>(self)
     }
 
-    fn next_u64(&mut self) -> u64 {
-        impls::next_u64_via_u32(self)
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        utils::next_u64_via_u32(self)
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.fill_bytes(dest)
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+        Shake256Testing::fill_bytes(self, dest);
+        Ok(())
     }
 }
 
@@ -176,18 +181,21 @@ impl ChaCha {
     }
 }
 
-impl RngCore for ChaCha {
-    fn next_u32(&mut self) -> u32 {
-        impls::next_u32_via_fill(self)
+impl TryRng for ChaCha {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        utils::next_word_via_fill::<u32, _>(self)
     }
 
-    fn next_u64(&mut self) -> u64 {
-        impls::next_u64_via_u32(self)
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        utils::next_u64_via_u32(self)
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         let len = dest.len();
         let buffer = self.random_bytes(len);
-        dest.iter_mut().enumerate().for_each(|(i, d)| *d = buffer[i])
+        dest.iter_mut().enumerate().for_each(|(i, d)| *d = buffer[i]);
+        Ok(())
     }
 }

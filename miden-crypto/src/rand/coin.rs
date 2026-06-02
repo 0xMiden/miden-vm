@@ -1,8 +1,11 @@
 use alloc::string::ToString;
 
-use rand_core::impls;
+use rand::{
+    Rng,
+    rand_core::{Infallible, TryRng, utils},
+};
 
-use super::{Felt, FeltRng, RngCore};
+use super::{Felt, FeltRng};
 use crate::{
     Word, ZERO,
     field::ExtensionField,
@@ -68,7 +71,7 @@ impl RandomCoin {
 
     /// Fills `dest` with random data.
     pub fn fill_bytes(&mut self, dest: &mut [u8]) {
-        <Self as RngCore>::fill_bytes(self, dest)
+        <Self as Rng>::fill_bytes(self, dest)
     }
 
     /// Draws a random base field element from the random coin.
@@ -142,20 +145,22 @@ impl FeltRng for RandomCoin {
     }
 }
 
-// RNGCORE IMPLEMENTATION
+// RNG IMPLEMENTATION
 // ------------------------------------------------------------------------------------------------
 
-impl RngCore for RandomCoin {
-    fn next_u32(&mut self) -> u32 {
-        self.draw_basefield().as_canonical_u64() as u32
+impl TryRng for RandomCoin {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(self.draw_basefield().as_canonical_u64() as u32)
     }
 
-    fn next_u64(&mut self) -> u64 {
-        impls::next_u64_via_u32(self)
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        utils::next_u64_via_u32(self)
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        impls::fill_bytes_via_next(self, dest)
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+        utils::fill_bytes_via_next_word(dest, || self.try_next_u32())
     }
 }
 

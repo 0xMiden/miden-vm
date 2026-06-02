@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_lifted_air::{
-    AirBuilder, EmptyWindow, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
+    AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
 };
 use p3_field::{
     Algebra, BasedVectorSpace, ExtensionField, Field, PackedField, PrimeCharacteristicRing,
@@ -83,7 +83,7 @@ fn batched_base_linear_combination<P: PackedField>(coeffs: &[P::Scalar], values:
 /// - `EF`: Extension field scalar
 /// - `P`: Packed base field (with `P::Scalar = F`)
 /// - `PE`: Packed extension field (must implement appropriate algebra traits)
-pub struct ProverConstraintFolder<'a, F, EF, P, PE>
+pub(super) struct ProverConstraintFolder<'a, F, EF, P, PE>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -92,6 +92,9 @@ where
 {
     /// Main trace two-row window (packed base field)
     pub main: RowWindow<'a, P>,
+    /// Preprocessed trace two-row window (packed base field); empty when the
+    /// AIR declares no preprocessed columns.
+    pub preprocessed: RowWindow<'a, P>,
     /// Aux/permutation trace two-row window (packed extension field)
     pub aux: RowWindow<'a, PE>,
     /// Randomness for aux trace (packed extension field)
@@ -169,7 +172,7 @@ where
     type F = F;
     type Expr = P;
     type Var = P;
-    type PreprocessedWindow = EmptyWindow<P>;
+    type PreprocessedWindow = RowWindow<'a, P>;
     type MainWindow = RowWindow<'a, P>;
     type PublicVar = F;
 
@@ -178,8 +181,9 @@ where
         self.main
     }
 
+    #[inline]
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        EmptyWindow::empty_ref()
+        &self.preprocessed
     }
 
     #[inline]

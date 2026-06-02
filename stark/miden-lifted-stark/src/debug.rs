@@ -1,175 +1,145 @@
-//! Debug constraint checker for lifted AIRs.
+//! Debug helpers for lifted AIRs.
 //!
-//! Evaluates constraints row-by-row on concrete trace values and panics if any constraint
-//! is nonzero. This avoids the full STARK pipeline (DFT, commitment, FRI) and provides
-//! immediate feedback on constraint violations during development.
+//! Two flavours of helpers live here:
 //!
-//! # Usage
-//!
-//! ```ignore
-//! use miden_lifted_stark::AirWitness;
-//!
-//! // Single instance
-//! let witness = AirWitness::new(&trace, &public_values, &[]);
-//! check_constraints(&air, &witness, &aux_builder, &challenges);
-//!
-//! // Multiple instances
-//! check_constraints_multi(
-//!     &[(&air_a, witness_a, &builder_a), (&air_b, witness_b, &builder_b)],
-//!     &challenges,
-//! );
-//! ```
+//! - **Structural assertion** ([`assert_prover_setup`]) — a panic-based check over
+//!   [`miden_lifted_air::debug::assert_multi_air_valid`]. Call it from tests / setup; the prover
+//!   and verifier hot paths trust the AIR's structural contract.
+//! - **Constraint checker** ([`check_constraints`]) — evaluates AIR constraints row-by-row on
+//!   concrete trace values and panics on the first nonzero constraint. It derives deterministic
+//!   debug challenges; it does not replay the prover transcript.
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 
 use miden_lifted_air::{
-    AirBuilder, AuxBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, PeriodicAirBuilder,
-    PermutationAirBuilder, RowWindow,
+    AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PeriodicAirBuilder, PermutationAirBuilder,
+    ProverStatement, RowWindow, debug::assert_multi_air_valid,
 };
+use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
-use crate::instance::AirWitness;
+use crate::order::TraceOrder;
+
+// ============================================================================
+// Structural assertions (over miden_lifted_air::debug)
+// ============================================================================
+
+/// Assert the AIR's structural contract via [`assert_multi_air_valid`].
+///
+/// Only the *trusted* structural contract is asserted here. The AIR ↔ PCS
+/// compatibility bound (`log_quotient_degree <= log_blowup`) is a validated
+/// runtime input — prover and verifier surface it as
+/// [`DomainError::ConstraintDegreeTooHigh`](crate::DomainError) — so it is not
+/// re-checked here.
+///
+/// The preprocessed bundle's shape (tree presence, per-trace width, per-AIR
+/// height) is validated at [`ProverInstance::new`](crate::ProverInstance::new)
+/// construction time, so it is not re-checked here.
+pub fn assert_prover_setup<F, EF, MA>(prover_statement: &ProverStatement<F, EF, MA>)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+{
+    assert_multi_air_valid::<F, EF, MA>(prover_statement.statement().multi_air());
+}
 
 // ============================================================================
 // Public API
 // ============================================================================
 
-/// Evaluate every AIR constraint against a concrete trace and panic on failure.
+/// Evaluate AIR constraints against concrete trace values and panic on failure.
 ///
-/// Convenience wrapper around [`check_constraints_multi`] for a single instance.
+/// Constraints are checked row-by-row using the trace + aux trace built by
+/// [`ProverStatement`]. All AIRs see the same `air_inputs` from `statement`.
 ///
-/// # Panics
-///
-/// - If the AIR fails validation
-/// - If trace dimensions don't match the AIR
-/// - If challenges are insufficient
-/// - If any constraint evaluates to nonzero on any row
-pub fn check_constraints<F, EF, A, B>(
-    air: &A,
-    witness: AirWitness<'_, F>,
-    aux_builder: &B,
-    challenges: &[EF],
-) where
-    F: Field,
-    EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    B: AuxBuilder<F, EF>,
-{
-    check_constraints_multi(&[(air, witness, aux_builder)], challenges);
-}
-
-/// Evaluate constraints for multiple AIR instances and panic on failure.
-///
-/// Each instance is a tuple of `(air, witness, aux_builder)`.
-///
-/// Builds the auxiliary trace for each instance and checks constraints row by row.
-/// Uses shared challenges across all instances (caller samples from RNG in test code).
+/// Derives auxiliary-trace challenges from the supplied challenger using only
+/// statement-owned data plus the instance count and log trace heights. This is
+/// a local constraint debugger: it intentionally skips protocol commitments
+/// (including any preprocessed setup commitment), so sampled challenges need
+/// not match a full proof transcript produced by
+/// [`ProverInstance::prove`](crate::ProverInstance::prove).
 ///
 /// # Panics
 ///
-/// - If any AIR fails validation
 /// - If trace dimensions don't match their AIR
-/// - If challenges are insufficient
 /// - If any constraint evaluates to nonzero on any row
-pub fn check_constraints_multi<F, EF, A, B>(
-    instances: &[(&A, AirWitness<'_, F>, &B)],
-    challenges: &[EF],
+pub fn check_constraints<F, EF, MA, Ch>(
+    prover_statement: &ProverStatement<F, EF, MA>,
+    mut challenger: Ch,
 ) where
     F: Field,
     EF: ExtensionField<F>,
-    A: LiftedAir<F, EF>,
-    B: AuxBuilder<F, EF>,
+    MA: MultiAir<F, EF>,
+    Ch: CanObserve<F> + CanSample<F>,
 {
-    assert!(!instances.is_empty(), "no instances provided");
+    let statement = prover_statement.statement();
+    let airs = statement.airs();
+    let traces = prover_statement.traces();
+    let air_inputs = statement.air_inputs();
+    let aux_inputs = statement.aux_inputs();
+    assert!(!airs.is_empty(), "no instances provided");
+    assert_eq!(airs.len(), traces.len(), "airs and traces counts must match");
 
-    // Sort by (trace_height, caller_index) to match InstanceShapes::from_trace_heights.
-    let mut perm: Vec<usize> = (0..instances.len()).collect();
-    perm.sort_by_key(|&i| (instances[i].1.trace.height(), i));
+    // Seed deterministic debug challenges from statement/height observations only.
+    // Do not observe setup/trace commitments or replay the prover transcript here.
+    let trace_heights: Vec<usize> = traces.iter().map(Matrix::height).collect();
+    let trace_order = TraceOrder::from_trace_heights::<F, EF, _>(airs, &trace_heights)
+        .expect("ProverStatement::new should reject malformed heights");
+    statement.observe(&mut challenger, trace_order.log_heights());
+    trace_order.observe_shape::<F, _>(&mut challenger);
+    let max_num_randomness = airs.iter().map(LiftedAir::num_randomness).max().unwrap_or(0);
+    let challenges: Vec<EF> = (0..max_num_randomness)
+        .map(|_| EF::from_basis_coefficients_fn(|_| challenger.sample()))
+        .collect();
 
-    for (i, &orig_idx) in perm.iter().enumerate() {
-        let &(air, ref witness, aux_builder) = &instances[orig_idx];
-
-        air.validate()
-            .unwrap_or_else(|e| panic!("AIR validation failed for instance {i}: {e}"));
-
-        let main = witness.trace;
-        let height = main.height();
-
-        // Main trace dimensions.
-        assert!(
-            height.is_power_of_two(),
-            "instance {i}: trace height {height} is not a power of two"
-        );
-        assert_eq!(
-            main.width,
-            air.width(),
-            "instance {i}: main trace width mismatch: expected {}, got {}",
-            air.width(),
-            main.width
-        );
-        assert_eq!(
-            witness.public_values.len(),
-            air.num_public_values(),
-            "instance {i}: public values length mismatch: expected {}, got {}",
-            air.num_public_values(),
-            witness.public_values.len()
-        );
-        assert_eq!(
-            witness.var_len_public_inputs.len(),
-            air.num_var_len_public_inputs(),
-            "instance {i}: var-len public inputs count mismatch: expected {}, got {}",
-            air.num_var_len_public_inputs(),
-            witness.var_len_public_inputs.len()
-        );
-        assert!(
-            challenges.len() >= air.num_randomness(),
-            "instance {i}: not enough challenges: need {}, got {}",
-            air.num_randomness(),
-            challenges.len()
-        );
-
-        // Build auxiliary trace.
+    let mut aux_traces = Vec::with_capacity(airs.len());
+    let mut aux_values_per_air = Vec::with_capacity(airs.len());
+    for (air, main) in airs.iter().zip(traces.iter()) {
+        let num_randomness = air.num_randomness();
         let (aux_trace, aux_values) =
-            aux_builder.build_aux_trace(main, &challenges[..air.num_randomness()]);
+            air.build_aux_trace(main, air_inputs, aux_inputs, &challenges[..num_randomness]);
+        aux_traces.push(aux_trace);
+        aux_values_per_air.push(aux_values);
+    }
 
-        // Auxiliary trace dimensions.
+    // Mirror the verifier's external-assertion check: the cross-AIR
+    // interactions must hold for these aux values and public inputs. Each
+    // assertion is a concrete value, so a zero-check is exact.
+    let aux_views: Vec<&[EF]> = aux_values_per_air.iter().map(Vec::as_slice).collect();
+    let assertions = statement
+        .eval_external(&challenges, &aux_views, trace_order.log_heights())
+        .expect("eval_external failed during check_constraints");
+    for (k, assertion) in assertions.iter().enumerate() {
+        assert_eq!(*assertion, EF::ZERO, "external assertion {k} is non-zero");
+    }
+
+    for (i, ((air, main), (aux_trace, aux_values))) in airs
+        .iter()
+        .zip(traces.iter())
+        .zip(aux_traces.iter().zip(aux_values_per_air.iter()))
+        .enumerate()
+    {
+        // `check_builder_shape` validates row-window widths per row, but aux trace
+        // height is invisible to a single row window — check it here so a short aux
+        // trace fails cleanly rather than via an opaque row-slice panic.
         assert_eq!(
             aux_trace.height(),
-            height,
-            "instance {i}: aux trace height mismatch: expected {height}, got {}",
+            main.height(),
+            "instance {i}: aux trace height mismatch: expected {}, got {}",
+            main.height(),
             aux_trace.height()
         );
-        assert_eq!(
-            aux_trace.width,
-            air.aux_width(),
-            "instance {i}: aux trace width mismatch: expected {}, got {}",
-            air.aux_width(),
-            aux_trace.width
-        );
-        assert_eq!(
-            aux_values.len(),
-            air.num_aux_values(),
-            "instance {i}: aux values count mismatch: expected {}, got {}",
-            air.num_aux_values(),
-            aux_values.len()
-        );
 
-        check_single_trace(
-            air,
-            main,
-            &aux_trace,
-            &aux_values,
-            witness.public_values,
-            challenges,
-            i,
-        );
+        check_single_trace(air, main, aux_trace, aux_values, air_inputs, &challenges, i);
     }
 }
 
 /// Check constraints for one instance's traces row by row.
+#[allow(clippy::too_many_arguments)]
 fn check_single_trace<F, EF, A>(
     air: &A,
     main: &RowMajorMatrix<F>,
@@ -184,6 +154,20 @@ fn check_single_trace<F, EF, A>(
     A: LiftedAir<F, EF>,
 {
     let height = main.height();
+
+    // Preprocessed matrix comes straight off the AIR (debug-only; this
+    // re-materialises `BaseAir::preprocessed_trace`). Its height must match the main
+    // trace; width is checked per row by `check_builder_shape`.
+    let preprocessed = air.preprocessed_trace();
+    if let Some(preproc) = &preprocessed {
+        assert_eq!(
+            preproc.height(),
+            height,
+            "instance {instance_index}: preprocessed trace height mismatch: expected {height}, got {}",
+            preproc.height()
+        );
+    }
+
     let periodic_matrix = air.periodic_columns_matrix();
     for row in 0..height {
         let next_row = (row + 1) % height;
@@ -200,8 +184,16 @@ fn check_single_trace<F, EF, A>(
         let periodic_row = periodic_matrix.as_ref().map(|m| m.row_slice(row % m.height()).unwrap());
         let periodic_values: &[F] = periodic_row.as_deref().unwrap_or(&[]);
 
+        // Preprocessed rows (empty window when the AIR declares none).
+        let preprocessed_current = preprocessed.as_ref().map(|m| m.row_slice(row).unwrap());
+        let preprocessed_next = preprocessed.as_ref().map(|m| m.row_slice(next_row).unwrap());
+
         let mut builder = DebugConstraintBuilder {
             main: RowWindow::from_two_rows(&main_current, &main_next),
+            preprocessed: RowWindow::from_two_rows(
+                preprocessed_current.as_deref().unwrap_or(&[]),
+                preprocessed_next.as_deref().unwrap_or(&[]),
+            ),
             permutation: RowWindow::from_two_rows(&aux_current, &aux_next),
             randomness: &challenges[..air.num_randomness()],
             public_values,
@@ -214,7 +206,8 @@ fn check_single_trace<F, EF, A>(
             row_index: row,
         };
 
-        debug_assert!(air.is_valid_builder(&builder).is_ok());
+        #[cfg(debug_assertions)]
+        miden_lifted_air::debug::check_builder_shape(air, &builder);
 
         air.eval(&mut builder);
     }
@@ -231,6 +224,7 @@ fn check_single_trace<F, EF, A>(
 /// (permutation) trace, matching the actual field layout of lifted STARK traces.
 struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
     main: RowWindow<'a, F>,
+    preprocessed: RowWindow<'a, F>,
     permutation: RowWindow<'a, EF>,
     randomness: &'a [EF],
     public_values: &'a [F],
@@ -251,7 +245,7 @@ where
     type F = F;
     type Expr = F;
     type Var = F;
-    type PreprocessedWindow = EmptyWindow<F>;
+    type PreprocessedWindow = RowWindow<'a, F>;
     type MainWindow = RowWindow<'a, F>;
     type PublicVar = F;
 
@@ -260,7 +254,7 @@ where
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        EmptyWindow::empty_ref()
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {

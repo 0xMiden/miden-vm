@@ -2,25 +2,27 @@
 
 use alloc::{vec, vec::Vec};
 
+use miden_lifted_air::log2_strict_u8;
 use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
 use p3_challenger::CanObserve;
-use p3_field::Field;
 use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use params::PcsParams;
-use proof::PcsTranscript;
+use proof::PcsProof;
 use prover::open_with_channel;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
-use verifier::{PcsError, verify_aligned};
+use verifier::{CommitmentGroup, PcsError, verify_aligned};
 
 use super::*;
 use crate::{
-    lmcs::{
-        Lmcs, LmcsTree,
-        utils::{aligned_widths, log2_strict_u8},
+    domain::LiftedDomain,
+    lmcs::{Lmcs, LmcsTree},
+    testing::{
+        canonical_domain,
+        configs::goldilocks_poseidon2::{
+            self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
+        },
     },
-    testing::configs::goldilocks_poseidon2::{
-        self as gl, Felt, Lmcs as BaseLmcs, QuadFelt, TestTree, random_lde_matrix, test_lmcs,
-    },
+    util::align::aligned_widths,
 };
 
 fn test_params() -> PcsParams {
@@ -48,9 +50,19 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
 
     let lde_height = trees[0].leaves().last().map(Matrix::height).unwrap_or(0);
     let log_lde_height = log2_strict_u8(lde_height);
+    let log_blowup = params.log_blowup;
+    let max_domain: LiftedDomain<Felt> = canonical_domain(log_lde_height - log_blowup, log_blowup);
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
+    let commitment_groups: Vec<_> = trees
+        .iter()
+        .map(|t| CommitmentGroup {
+            root: t.root(),
+            widths: t.widths(),
+            log_height: log2_strict_u8(t.height()),
+        })
+        .collect();
     let trace_trees: Vec<&_> = trees.iter().collect();
 
     // Prover: observe all commitments before opening.
@@ -63,7 +75,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
         params,
         &lmcs,
-        log_lde_height,
+        &max_domain,
         eval_points,
         &trace_trees,
         &mut prover_channel,
@@ -80,8 +92,8 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let result = verify_aligned::<Felt, QuadFelt, _, _, 2>(
         params,
         &lmcs,
-        &commitments,
-        log_lde_height,
+        &commitment_groups,
+        &max_domain,
         eval_points,
         &mut verifier_channel,
     );
@@ -91,11 +103,15 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
             verifier_channel.finalize().expect("transcript should finalize cleanly");
         assert_eq!(prover_digest, verifier_digest);
 
-        // Re-parse PcsTranscript from a fresh channel and verify digest agreement.
+        // Re-parse PcsProof from a fresh channel and verify digest agreement.
         let alignment = lmcs.alignment();
-        let aligned_commitments: Vec<_> = commitments
+        let aligned_commitments: Vec<_> = commitment_groups
             .iter()
-            .map(|(c, widths)| (*c, aligned_widths(widths.clone(), alignment)))
+            .map(|group| CommitmentGroup {
+                root: group.root,
+                widths: aligned_widths(group.widths.clone(), alignment),
+                log_height: group.log_height,
+            })
             .collect();
 
         let mut challenger = gl::test_challenger();
@@ -104,15 +120,15 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
         }
         let mut reparse_channel = VerifierTranscript::from_data(challenger, &transcript);
 
-        PcsTranscript::<QuadFelt, BaseLmcs>::from_verifier_channel::<_, 2>(
+        PcsProof::<QuadFelt, BaseLmcs>::read_from_channel::<_, 2>(
             params,
             &lmcs,
             &aligned_commitments,
-            log_lde_height,
+            &max_domain,
             eval_points,
             &mut reparse_channel,
         )
-        .expect("PcsTranscript re-parse should succeed");
+        .expect("PcsProof re-parse should succeed");
 
         let reparse_digest = reparse_channel
             .finalize()
@@ -127,24 +143,29 @@ fn test_pcs_cases() {
     let lmcs = test_lmcs();
     let params = test_params();
 
+    let log_blowup = params.log_blowup;
+    // Pass the LDE shift through `LiftedDomain` (the only sanctioned access path).
+    let lde_shift = LiftedDomain::<Felt>::canonical_lde_shift(6 + log_blowup)
+        .expect("test parameters in range");
+
     // Case 1: single matrix, single tree.
     let rng = &mut SmallRng::seed_from_u64(42);
-    let matrix = random_lde_matrix(rng, 6, params.fri.log_blowup, 3, Felt::GENERATOR);
+    let matrix = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![matrix.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree], 100).expect("single-tree roundtrip");
 
     // Case 2: two separate trees with different column counts.
     let rng = &mut SmallRng::seed_from_u64(24);
-    let mat_a = random_lde_matrix(rng, 6, params.fri.log_blowup, 2, Felt::GENERATOR);
-    let mat_b = random_lde_matrix(rng, 6, params.fri.log_blowup, 4, Felt::GENERATOR);
+    let mat_a = random_lde_matrix(rng, 6, log_blowup, 2, lde_shift);
+    let mat_b = random_lde_matrix(rng, 6, log_blowup, 4, lde_shift);
     let tree_a = lmcs.build_aligned_tree(vec![mat_a.bit_reverse_rows()]);
     let tree_b = lmcs.build_aligned_tree(vec![mat_b.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree_a, tree_b], 200).expect("multi-tree roundtrip");
 
     // Case 3: mixed heights in one commitment group (LMCS upsampling).
     let rng = &mut SmallRng::seed_from_u64(99);
-    let short = random_lde_matrix(rng, 4, params.fri.log_blowup, 2, Felt::GENERATOR);
-    let tall = random_lde_matrix(rng, 6, params.fri.log_blowup, 3, Felt::GENERATOR);
+    let short = random_lde_matrix(rng, 4, log_blowup, 2, lde_shift);
+    let tall = random_lde_matrix(rng, 6, log_blowup, 3, lde_shift);
     let tree = lmcs.build_aligned_tree(vec![short.bit_reverse_rows(), tall.bit_reverse_rows()]);
     run_pcs_case(&params, vec![tree], 300).expect("mixed-height roundtrip");
 

@@ -1,19 +1,20 @@
-//! Validated Merkle tree leaf indices and missing sibling iteration.
+//! Validated Merkle tree indices and missing sibling iteration.
 //!
-//! [`TreeIndices`] bundles a sorted, deduplicated set of leaf indices with
-//! the tree depth, enforcing the invariant that every index is in `0..2^depth`.
+//! [`TreeIndices`] bundles a sorted, deduplicated set of domain indices with
+//! their source depth, enforcing the invariant that every index is in `0..2^depth`.
 //!
 //! [`MissingSiblingsIter`] walks the tree upward from a set of leaf positions
 //! and yields the sibling nodes absent from the set — exactly the nodes whose
 //! hashes must be provided to reconstruct the root.
 
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use crate::lmcs::{LmcsError, node_id::NodeId};
 
-/// A validated set of Merkle tree leaf indices at a given depth.
+/// A validated set of Merkle tree indices at a given source depth.
 ///
-/// Invariants (enforced by [`new`](Self::new) and [`shrink_depth`](Self::shrink_depth)):
+/// Invariants (enforced by [`new`](Self::new), [`fold_to_depth`](Self::fold_to_depth),
+/// and [`shrink_depth`](Self::shrink_depth)):
 /// - `indices` is sorted ascending with no duplicates.
 /// - Every index satisfies `index < 2^depth`.
 ///
@@ -64,30 +65,77 @@ impl TreeIndices {
     }
 
     /// Iterator over sibling nodes absent from this leaf set, bottom-to-top.
-    pub fn missing_siblings(&self) -> MissingSiblingsIter {
+    pub(super) fn missing_siblings(&self) -> MissingSiblingsIter {
         MissingSiblingsIter::new(&self.indices, self.depth)
     }
 
-    /// Map domain indices to folded domain indices `shift` levels down, in place.
+    /// Fold these source-domain indices onto a committed tree at `target_depth`.
     ///
-    /// In natural (domain) order, folding by `2^shift` maps each index to its
-    /// low `(depth - shift)` bits: `index & ((1 << (depth - shift)) - 1)`.
-    /// The depth is reduced and duplicates (from indices in the same coset)
-    /// are removed.
+    /// In natural (domain) order, a query index opens the leaf selected by its low
+    /// `target_depth` bits: `query & ((1 << target_depth) - 1)`. Returns the
+    /// deduplicated leaf indices, leaving `self` unchanged. Use
+    /// [`expand_leaf_values`](Self::expand_leaf_values) to re-key leaf-keyed
+    /// results back to the original query indices.
     ///
-    /// Unlike the bit-reversed right-shift, masking can reorder indices,
-    /// so `sort_unstable()` is needed before `dedup()`.
+    /// Returns `InvalidProof` if `target_depth` is above the current source depth.
+    pub fn fold_to_depth(&self, target_depth: u8) -> Result<TreeIndices, LmcsError> {
+        let mut leaf_indices = self.clone();
+        leaf_indices.fold_in_place(target_depth)?;
+        Ok(leaf_indices)
+    }
+
+    /// Re-key leaf-keyed values back to the original query indices.
     ///
-    /// Shrinking a root-only set (depth 0) has no effect.
-    pub fn shrink_depth(&mut self, shift: u8) {
-        let new_depth = self.depth.saturating_sub(shift);
-        let mask = (1usize << new_depth as usize) - 1;
+    /// Each query index maps to the leaf selected by its low `target_depth` bits;
+    /// `target_depth` must match the depth passed to the [`fold_to_depth`](Self::fold_to_depth)
+    /// that produced `leaf_values`. Returns `InvalidProof` if a required leaf is absent.
+    pub fn expand_leaf_values<T: Clone>(
+        &self,
+        target_depth: u8,
+        leaf_values: &BTreeMap<usize, T>,
+    ) -> Result<BTreeMap<usize, T>, LmcsError> {
+        let leaf_mask = (1usize << target_depth as usize) - 1;
+        self.indices
+            .iter()
+            .map(|&query| {
+                let value = leaf_values.get(&(query & leaf_mask)).ok_or(LmcsError::InvalidProof)?;
+                Ok((query, value.clone()))
+            })
+            .collect()
+    }
+
+    /// Map domain indices to folded domain indices at `target_depth`, in place.
+    ///
+    /// In natural (domain) order, folding maps each index to its low `target_depth`
+    /// bits: `index & ((1 << target_depth) - 1)`. The depth is reduced and duplicates
+    /// from indices in the same coset are removed. Returns `InvalidProof` if
+    /// `target_depth` is above the current source depth.
+    fn fold_in_place(&mut self, target_depth: u8) -> Result<(), LmcsError> {
+        if target_depth > self.depth {
+            return Err(LmcsError::InvalidProof);
+        }
+
+        let mask = (1usize << target_depth as usize) - 1;
         for idx in &mut self.indices {
             *idx &= mask;
         }
         self.indices.sort_unstable();
         self.indices.dedup();
-        self.depth = new_depth;
+        self.depth = target_depth;
+        Ok(())
+    }
+
+    /// Map domain indices to folded domain indices `shift` levels down, in place.
+    ///
+    /// Shifts at or beyond the current depth collapse every index to depth 0,
+    /// where the tree has a single root/leaf at index 0 (for example, the
+    /// commitment tree of a one-row matrix). Use
+    /// [`fold_to_depth`](Self::fold_to_depth) when invalid target depths
+    /// should be rejected instead of saturated.
+    pub fn shrink_depth(&mut self, shift: u8) {
+        let target_depth = self.depth.saturating_sub(shift);
+        self.fold_in_place(target_depth)
+            .expect("target depth is derived from current depth");
     }
 }
 
@@ -122,7 +170,7 @@ impl TreeIndices {
 ///
 /// The gap never closes because each pair of siblings produces at most one
 /// parent, so `next_len` grows slower than `current.start` advances.
-pub struct MissingSiblingsIter {
+pub(super) struct MissingSiblingsIter {
     /// Shared buffer: `nodes[current]` are unprocessed nodes in the current
     /// layer; `nodes[..next_len]` accumulates their parents for the next layer.
     nodes: Vec<NodeId>,
@@ -212,6 +260,29 @@ mod tests {
         assert!(TreeIndices::new([3], 2).is_ok());
         assert!(TreeIndices::new([4], 2).is_err());
         assert!(TreeIndices::new([0, 4], 2).is_err());
+    }
+
+    #[test]
+    fn fold_to_depth_then_expand_leaf_values() {
+        // Query indices at depth 3 fold to their low 2 bits: 0,4→0; 5→1; 7→3.
+        let ti = TreeIndices::new([0, 4, 5, 7], 3).unwrap();
+        let leaves = ti.fold_to_depth(2).unwrap();
+        assert_eq!(leaves.iter().copied().collect::<Vec<_>>(), [0, 1, 3]);
+        assert_eq!(leaves.depth(), 2);
+
+        // Folding leaves the source untouched and rejects a depth above it.
+        assert_eq!(ti.iter().copied().collect::<Vec<_>>(), [0, 4, 5, 7]);
+        assert_eq!(ti.depth(), 3);
+        assert!(ti.fold_to_depth(4).is_err());
+
+        // Each query index reads its low-2-bit leaf: 0,4→'a'; 5→'b'; 7→'c'.
+        let leaf_values: BTreeMap<usize, char> =
+            [(0, 'a'), (1, 'b'), (3, 'c')].into_iter().collect();
+        let expanded = ti.expand_leaf_values(2, &leaf_values).unwrap();
+        assert_eq!(
+            expanded.into_iter().collect::<Vec<_>>(),
+            vec![(0, 'a'), (4, 'a'), (5, 'b'), (7, 'c')]
+        );
     }
 
     #[test]

@@ -42,12 +42,15 @@ pub trait Channel {
     type Challenger: TranscriptChallenger<Self::F, Self::Commitment>;
 
     /// Sample a random field element from the challenger.
+    #[must_use = "sampled transcript challenges must be consumed or explicitly bound"]
     fn sample(&mut self) -> Self::F;
 
     /// Sample a random `bits`-bit integer from the challenger.
+    #[must_use = "sampled transcript challenges must be consumed or explicitly bound"]
     fn sample_bits(&mut self, bits: usize) -> usize;
 
     /// Sample a random algebra element (e.g. extension field) from the challenger.
+    #[must_use = "sampled transcript challenges must be consumed or explicitly bound"]
     fn sample_algebra_element<A: BasedVectorSpace<Self::F>>(&mut self) -> A {
         A::from_basis_coefficients_fn(|_| self.sample())
     }

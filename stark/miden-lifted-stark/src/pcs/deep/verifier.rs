@@ -7,11 +7,13 @@ use p3_matrix::Matrix;
 use thiserror::Error;
 
 use crate::{
+    domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
     pcs::{
         deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
-        utils::horner_acc,
+        verifier::CommitmentGroup,
     },
+    util::horner::horner_acc,
 };
 
 /// Verifier's view of the DEEP quotient as a point-query oracle.
@@ -31,18 +33,19 @@ use crate::{
 /// - reduces the opened row to `f_red(X)` using Horner with the same `α`,
 /// - reconstructs `Q(X)` and returns it to the FRI verifier.
 ///
-/// Lifting is transparent at this layer: the prover commits to lifted codewords, so
-/// every opened column is interpreted as a polynomial over the same max domain.
-pub struct DeepOracle<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> {
-    /// Trace commitments with their widths (one per trace tree).
+/// Full-height groups live on the max domain. Shorter groups are interpreted by
+/// folding query indices to their committed depth.
+pub(in crate::pcs) struct DeepOracle<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> {
+    /// Committed groups (root + widths + tree depth), one per tree.
     ///
     /// Widths must match the committed rows (including any alignment padding if
-    /// `build_aligned_tree` was used).
-    commitments: Vec<(L::Commitment, Vec<usize>)>,
+    /// `build_aligned_tree` was used). A group's `log_height` may be below the
+    /// query depth — a virtually-lifted, setup-fixed preprocessed tree.
+    commitments: Vec<CommitmentGroup<L::Commitment>>,
 
-    /// Log₂ of the LDE domain height (tree has 2^log_lde_height leaves).
-    /// Verifier expects all commitments to be lifted to this same LDE height.
-    log_lde_height: u8,
+    /// Max LDE coset; query indices are sampled at `domain.log_lde_height()` and
+    /// folded down to each group's committed depth when shorter.
+    domain: LiftedDomain<F>,
 
     /// Reduced openings: pairs of `(zⱼ, f_reduced(zⱼ))` from the prover's claims.
     reduced_openings: Vec<(EF, EF)>,
@@ -59,28 +62,25 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
     /// Construct by reading evaluations, checking PoW, and sampling challenges.
     ///
     /// Commitment widths must match the committed rows (including any alignment padding).
-    /// All commitments are expected to be lifted to the same `log_lde_height`.
+    /// Each group's `log_height` must be `≤ domain.log_lde_height()`; shorter groups
+    /// are virtually lifted at query time.
     ///
     /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
     /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
-    ///
-    /// `log_lde_height` is the log₂ of the LDE evaluation domain height (i.e. the height of
-    /// the committed LDE matrices). When a trace degree is known, it is typically
-    /// `log_trace_height + params.fri.log_blowup` (plus any extension used by the caller).
     ///
     /// Returns the oracle and per-matrix evaluations: `evals[g][m]` is a
     /// `RowMajorMatrix<EF>` with one row per evaluation point.
     pub fn new<Ch>(
         params: DeepParams,
         eval_points: &[EF],
-        commitments: Vec<(L::Commitment, Vec<usize>)>,
-        log_lde_height: u8,
+        commitments: Vec<CommitmentGroup<L::Commitment>>,
+        domain: &LiftedDomain<F>,
         channel: &mut Ch,
     ) -> Result<(Self, OpenedValues<EF>), DeepError>
     where
         Ch: VerifierChannel<F = F, Commitment = L::Commitment>,
     {
-        let group_widths: Vec<&[usize]> = commitments.iter().map(|(_, gw)| gw.as_slice()).collect();
+        let group_widths: Vec<&[usize]> = commitments.iter().map(|g| g.widths.as_slice()).collect();
         let evals = read_eval_matrices::<F, EF, Ch>(&group_widths, eval_points.len(), channel)?;
 
         // 1. Check grinding witness
@@ -109,7 +109,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
 
         let oracle = Self {
             commitments,
-            log_lde_height,
+            domain: *domain,
             reduced_openings,
             challenge_columns,
             challenge_points,
@@ -142,9 +142,17 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
         let mut reduced_rows: BTreeMap<usize, EF> =
             tree_indices.iter().map(|&idx| (idx, EF::ZERO)).collect();
 
-        for (group_idx, (commit, widths)) in self.commitments.iter().enumerate() {
+        for (group_idx, group) in self.commitments.iter().enumerate() {
+            // `open_lifted_batch` returns rows keyed by the original query indices, even when
+            // this group is committed at a shorter depth, so the reduction is uniform.
             let opened_rows = lmcs
-                .open_batch(commit, widths, tree_indices, channel)
+                .open_lifted_batch(
+                    &group.root,
+                    &group.widths,
+                    tree_indices,
+                    group.log_height,
+                    channel,
+                )
                 .map_err(|source| DeepError::LmcsError { source, tree: group_idx })?;
 
             // Reduce opened rows via Horner: f_reduced(X) = Σᵢ αᵂ⁻¹⁻ⁱ · fᵢ(X).
@@ -162,9 +170,6 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
             }
         }
 
-        let generator = F::two_adic_generator(self.log_lde_height as usize);
-        let shift = F::GENERATOR;
-
         // Reconstruct Q(x) at each queried domain point x from the opened row data.
         // If the prover's OOD claims were correct, these values lie on the
         // low-degree polynomial committed via FRI.
@@ -172,7 +177,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
             .into_iter()
             .map(|(tree_idx, reduced_row)| {
                 // Recover domain point X = g·ω^{tree_idx} (tree index = domain index)
-                let row_point = shift * generator.exp_u64(tree_idx as u64);
+                let row_point = self.domain.lde_coset().point_at(tree_idx as u64);
 
                 // DEEP quotient: Q(X) = Σⱼ βʲ · (f_reduced(zⱼ) - f_reduced(X)) / (zⱼ - X)
                 // Precondition: eval points lie outside the LDE domain.

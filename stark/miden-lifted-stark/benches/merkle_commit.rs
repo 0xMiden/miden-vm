@@ -17,13 +17,10 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::{
-    Lmcs, LmcsTree,
-    testing::{
-        LOG_HEIGHTS, PARALLEL_STR, RELATIVE_SPECS,
-        configs::goldilocks_poseidon2::{Felt, QuadFelt, test_lmcs},
-        generate_matrices_from_specs, total_elements,
-    },
+use miden_lifted_stark::testing::{
+    LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS,
+    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_lmcs},
+    generate_matrices_from_specs, total_elements,
 };
 use p3_matrix::{bitrev::BitReversalPerm, dense::RowMajorMatrix, extension::FlatMatrixView};
 use rand::{SeedableRng, rngs::SmallRng};

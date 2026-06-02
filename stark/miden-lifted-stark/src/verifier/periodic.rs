@@ -10,12 +10,14 @@ use alloc::vec::Vec;
 use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
 
+use crate::util::horner::horner_acc;
+
 /// Verifier-side periodic polynomials for OOD evaluation.
 ///
 /// Stores polynomial coefficients computed from the AIR's periodic columns.
 /// Used to evaluate periodic values at the OOD point during verification.
 #[derive(Clone, Debug)]
-pub struct PeriodicPolys<F> {
+pub(super) struct PeriodicPolys<F> {
     /// Polynomial coefficients for each column.
     polys: Vec<Vec<F>>,
 }
@@ -27,8 +29,9 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
     ///
     /// # Panics
     /// Panics if any column length is zero or not a power of two.
-    /// This is a trusted path — the AIR should pass
-    /// [`LiftedAir::validate`](miden_lifted_air::LiftedAir::validate).
+    /// This is a trusted path — the AIR is assumed structurally valid (see
+    /// [`assert_multi_air_valid`](miden_lifted_air::debug::assert_multi_air_valid) for the
+    /// debug-only check).
     pub fn new(column_evals: &[Vec<F>]) -> Self {
         let dft = NaiveDft;
         let mut polys = Vec::with_capacity(column_evals.len());
@@ -71,22 +74,11 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
         for coeffs in &self.polys {
             let period = coeffs.len();
             let y = z.exp_u64((trace_height / period) as u64);
-            result.push(horner_eval(coeffs, y));
+            // Coefficients are stored in ascending degree (idft output): [c₀, c₁, ..., cₙ₋₁].
+            // Horner needs descending order (highest degree first), hence `.rev()`.
+            result.push(horner_acc(EF::ZERO, y, coeffs.iter().rev().copied()));
         }
 
         result
     }
-}
-
-/// Evaluate a polynomial at a point using Horner's method.
-fn horner_eval<F, EF>(coeffs: &[F], x: EF) -> EF
-where
-    F: TwoAdicField,
-    EF: ExtensionField<F>,
-{
-    let mut acc = EF::ZERO;
-    for coeff in coeffs.iter().rev() {
-        acc = acc * x + *coeff;
-    }
-    acc
 }

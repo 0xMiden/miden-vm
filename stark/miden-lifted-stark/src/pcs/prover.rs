@@ -8,6 +8,7 @@ use p3_matrix::Matrix;
 use tracing::{info_span, instrument};
 
 use crate::{
+    domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
     pcs::{deep::prover::DeepPoly, fri::prover::FriPolys, params::PcsParams},
 };
@@ -18,14 +19,14 @@ use crate::{
 /// - `eval_points` must lie outside both the trace-domain subgroup `H` and the LDE evaluation coset
 ///   `gK` used by the PCS. If a point lies in either set, denominators `(zⱼ − X)` in the DEEP
 ///   quotient become zero for some domain element, making the quotient undefined.
-/// - All trace trees must be built at the same LDE height `2^log_lde_height`. Multiple LDE heights
-///   are not supported yet and will panic.
+/// - Every trace tree's height must be a power of two `≤ domain.lde_height()`. A tree shorter than
+///   the max (e.g. a setup-fixed preprocessed tree) is virtually lifted — the query phase folds the
+///   sampled indices down to each tree's own depth.
+/// - At least one trace tree must have height `domain.lde_height()`, so the DEEP quotient is
+///   constructed over the full max domain.
 ///
-/// `log_lde_height` is the log₂ of the LDE evaluation domain height (i.e. the height of
-/// the committed LDE matrices). When a trace degree is known, it is typically
-/// `log_trace_height + params.fri.log_blowup` (plus any extension used by the caller).
-/// In that common case, the trace subgroup `H` has size `2^(log_lde_height -
-/// params.fri.log_blowup)`, while the LDE coset `gK` has size `2^log_lde_height`.
+/// `domain` is the max LDE coset the trace trees were committed on; `domain.log_lde_height`
+/// equals `log_trace_height + domain.log_blowup()` for the tallest trace.
 ///
 /// Alignment is derived from the trace trees to pad DEEP evaluations consistently.
 /// Trace trees must be built with `build_aligned_tree` to match this padding.
@@ -33,7 +34,7 @@ use crate::{
 pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
-    log_lde_height: u8,
+    domain: &LiftedDomain<F>,
     eval_points: [EF; N],
     trace_trees: &[&L::Tree<M>],
     channel: &mut Ch,
@@ -46,25 +47,15 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
 {
     const { assert!(N > 0, "at least one evaluation point required") };
 
-    // Determine LDE domain size from the supplied LDE height.
-    // For now, all trace trees must share this height; mixed LDE heights are not supported yet.
-    assert!(!trace_trees.is_empty(), "at least one trace tree required");
-    let expected_height = 1 << log_lde_height as usize;
-    assert!(
-        trace_trees.iter().all(|tree| tree.height() == expected_height),
-        "mixed LDE heights are not supported yet",
-    );
+    // Trees shorter than the max (e.g. a setup-fixed preprocessed tree) are virtually
+    // lifted: `prove_lifted_batch` projects sampled query indices down to each tree's
+    // own depth. `DeepPoly::from_trees` validates the tree-height preconditions below.
+    let log_lde_height = domain.log_lde_height();
     // ─────────────────────────────────────────────────────────────────────────
     // Construct DEEP quotient (observes evals, grinds, samples alpha and beta)
     // ─────────────────────────────────────────────────────────────────────────
     let deep_poly = info_span!("DEEP quotient").in_scope(|| {
-        DeepPoly::from_trees::<L, M, N, Ch>(
-            params.deep,
-            trace_trees,
-            eval_points,
-            params.fri.log_blowup,
-            channel,
-        )
+        DeepPoly::from_trees::<L, M, N, Ch>(params.deep, domain, trace_trees, eval_points, channel)
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -72,8 +63,9 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     // ─────────────────────────────────────────────────────────────────────────
     // The deep_poly contains evaluations on the LDE domain (size 2^log_lde_height).
     // FRI will prove that this polynomial is low-degree.
-    let fri_polys = info_span!("FRI commit phase")
-        .in_scope(|| FriPolys::<F, EF, L>::new(&params.fri, lmcs, deep_poly.deep_evals, channel));
+    let fri_polys = info_span!("FRI commit phase").in_scope(|| {
+        FriPolys::<F, EF, L>::new(&params.fri, lmcs, domain, deep_poly.deep_evals, channel)
+    });
 
     // ─────────────────────────────────────────────────────────────────────────
     // Grind for query sampling
@@ -98,7 +90,7 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
         // Open input trees at all query indices at once (one proof per tree)
         info_span!("open input trees", n_trees = trace_trees.len()).in_scope(|| {
             for tree in trace_trees {
-                tree.prove_batch(&tree_indices, channel);
+                tree.prove_lifted_batch(&tree_indices, channel);
             }
         });
 

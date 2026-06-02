@@ -1,54 +1,68 @@
 //! STARK proof types and structured transcript.
 //!
 //! This module defines the proof artifact types shared by prover and verifier:
-//! - [`StarkProof`]: raw transcript data (field elements and commitments)
+//! - [`StarkProofData`]: raw transcript data (field elements and commitments)
 //! - [`StarkDigest`]: binding digest committing to the entire interaction
 //! - [`StarkOutput`]: combined prover output (proof + digest)
-//! - [`StarkTranscript`]: structured parse-only view of the full protocol interaction
+//! - [`StarkProof`]: structured parse-only view of the full protocol interaction
 //!
-//! [`StarkTranscript`] has a [`from_proof`](StarkTranscript::from_proof) constructor
-//! that parses it from proof data and a challenger, following the same pattern as
-//! [`PcsTranscript`] alongside the PCS verifier.
+//! [`StarkProof`] has a [`from_data`](StarkProof::from_data) constructor
+//! that parses it from a verifier instance, proof data, and a challenger, following
+//! the same pattern as [`PcsProof`] alongside the PCS verifier. After parsing,
+//! custom verifiers can use the structured proof plus the same
+//! [`VerifierInstance`] without replaying the challenger.
 
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::LiftedAir;
-use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
-use p3_challenger::CanFinalizeDigest;
+use miden_lifted_air::{BaseAir, LiftedAir, MultiAir};
+use miden_stark_transcript::{Channel, VerifierChannel, VerifierTranscript};
+// Re-exported here so the crate root does not need a dedicated `transcript` module: callers
+// reach these via `proof::` alongside the proof types they parameterize.
+pub use miden_stark_transcript::{TranscriptChallenger, TranscriptData, TranscriptError};
+use p3_challenger::{CanFinalizeDigest, CanObserve};
 use p3_field::{ExtensionField, Field, TwoAdicField};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     StarkConfig,
-    coset::LiftedCoset,
-    instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
-    lmcs::{Lmcs, utils::aligned_len},
-    pcs::proof::PcsTranscript,
-    verifier::VerifierError,
+    domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    lmcs::Lmcs,
+    order::TraceOrder,
+    pcs::{proof::PcsProof, verifier::CommitmentGroup},
+    util::align::aligned_len,
+    verifier::{VerifierError, VerifierInstance},
 };
 
 /// Commitment type alias for convenience.
 type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitment;
 
-/// STARK proof: per-instance shape metadata plus raw transcript data.
+/// STARK proof: per-AIR log trace heights (instance order) plus the raw
+/// transcript data.
 ///
-/// Fields are opaque. The accessors below expose wire-format summaries
-/// (trace count, transcript sizes). Read per-instance log trace heights by
-/// parsing via [`StarkTranscript::from_proof`], which validates the shape
-/// metadata and binds it into the Fiat-Shamir challenger —
-/// [`verify_multi`](crate::verifier::verify_multi) runs the same validation.
+/// The proof's AIR ordering is *not* stored. Both sides reconstruct it with a
+/// stable sort by `(log_trace_height, instance_index)`, where `instance_index`
+/// is the AIR's position in [`miden_lifted_air::Statement::airs`]. The derived
+/// order then drives commitment grouping, aux-value layout, quotient accumulation, and PCS
+/// opening widths. The proof therefore commits to the instance-order heights,
+/// not an explicit ordering permutation.
+///
+/// The heights themselves are not exposed as a direct accessor: parse the
+/// proof through [`StarkProof::from_data`] and read them via
+/// [`StarkProof::log_trace_heights`].
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
 #[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
-pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
-    pub(crate) instance_shapes: InstanceShapes,
+pub struct StarkProofData<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
+    /// Per-AIR log₂ trace heights, in instance order. Matches
+    /// [`miden_lifted_air::Statement::airs`] position-for-position.
+    pub(crate) log_trace_heights: Vec<u8>,
     pub(crate) transcript: TranscriptData<F, Commitment<F, EF, SC>>,
 }
 
-impl<F, EF, SC> core::fmt::Debug for StarkProof<F, EF, SC>
+impl<F, EF, SC> core::fmt::Debug for StarkProofData<F, EF, SC>
 where
     F: TwoAdicField + core::fmt::Debug,
     EF: ExtensionField<F>,
@@ -56,31 +70,22 @@ where
     Commitment<F, EF, SC>: core::fmt::Debug,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StarkProof")
-            .field("instance_shapes", &self.instance_shapes)
+        f.debug_struct("StarkProofData")
+            .field("log_trace_heights", &self.log_trace_heights)
             .field("transcript", &self.transcript)
             .finish()
     }
 }
 
-impl<F, EF, SC> StarkProof<F, EF, SC>
+impl<F, EF, SC> StarkProofData<F, EF, SC>
 where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
-    /// The AIR ordering used by the proof: `air_order()[j]` is the caller's
-    /// original index of the instance at position `j`.
-    ///
-    /// Read this before building the Fiat-Shamir challenger so you can bind
-    /// AIR configurations and the ordering — see the prover module-level docs.
-    pub fn air_order(&self) -> &[u32] {
-        self.instance_shapes.air_order()
-    }
-
     /// Number of traces (instances) the proof was produced for.
     pub fn num_traces(&self) -> usize {
-        self.instance_shapes.log_trace_heights.len()
+        self.log_trace_heights.len()
     }
 
     /// Number of base-field elements in the transcript.
@@ -95,7 +100,7 @@ where
 
     /// Total byte size of the proof.
     pub fn size_in_bytes(&self) -> usize {
-        self.instance_shapes.size_in_bytes() + self.transcript.size_in_bytes()
+        self.log_trace_heights.len() + self.transcript.size_in_bytes()
     }
 }
 
@@ -105,13 +110,13 @@ where
 pub type StarkDigest<F, EF, SC> =
     <<SC as StarkConfig<F, EF>>::Challenger as CanFinalizeDigest>::Digest;
 
-/// Output of [`crate::prover::prove_single`] / [`crate::prover::prove_multi`]: the proof data and
-/// its transcript digest.
+/// Output of [`ProverInstance::prove`](crate::ProverInstance::prove): the proof
+/// data and its transcript digest.
 pub struct StarkOutput<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     /// Transcript digest committing to the entire prover–verifier interaction.
     pub digest: StarkDigest<F, EF, SC>,
     /// Proof data consumed by the verifier.
-    pub proof: StarkProof<F, EF, SC>,
+    pub proof: StarkProofData<F, EF, SC>,
 }
 
 impl<F, EF, SC> core::fmt::Debug for StarkOutput<F, EF, SC>
@@ -132,31 +137,36 @@ where
 
 /// Structured transcript view for the full lifted STARK protocol.
 ///
-/// Captures instance shape metadata, commitments, sampled challenges, the OOD
-/// evaluation point, and the PCS sub-transcript. Constructed via
-/// [`from_proof`](Self::from_proof), which mirrors steps 0–9 of
-/// [`verify_multi`](crate::verifier::verify_multi) but skips the constraint
-/// check.
-pub struct StarkTranscript<EF, L>
+/// Captures the proof-carried commitments, sampled challenges, OOD point, parsed
+/// PCS sub-transcript, and LMCS hint data needed to implement verification logic
+/// without replaying the Fiat-Shamir challenger. Verification context that is not
+/// proof data — the STARK config, statement, and optional preprocessed setup
+/// commitment — remains on [`VerifierInstance`].
+///
+/// Constructed via [`from_data`](Self::from_data), which mirrors the transcript
+/// steps of [`VerifierInstance::verify`](crate::VerifierInstance::verify),
+/// finalizes the challenger once, and returns the binding digest alongside this
+/// parsed view. Custom verifiers in external crates should use this type together
+/// with the same verifier instance to avoid re-parsing raw transcript data.
+pub struct StarkProof<EF, L>
 where
     L: Lmcs,
     L::F: Field,
     EF: ExtensionField<L::F>,
 {
-    /// Per-instance shape metadata. Validated and observed into the challenger
-    /// by [`from_proof`](Self::from_proof).
-    pub instance_shapes: InstanceShapes,
-    /// Throwaway challenge squeezed right after observing the instance shapes,
-    /// used to clear the challenger's absorb buffer so that later sampled
-    /// challenges depend on the full shape metadata regardless of sponge state.
-    pub instance_challenge: EF,
+    /// AIR ordering reconstructed from the proof's log trace heights.
+    /// Validated and observed into the challenger by
+    /// [`from_data`](Self::from_data). Read its data through
+    /// [`log_trace_heights`](Self::log_trace_heights) and
+    /// [`air_order`](Self::air_order).
+    pub(crate) trace_order: TraceOrder,
     /// Main trace commitment.
     pub main_commit: L::Commitment,
     /// Randomness sampled for auxiliary traces.
     pub randomness: Vec<EF>,
     /// Auxiliary trace commitment.
     pub aux_commit: L::Commitment,
-    /// Aux values per AIR instance, observed into the transcript after the aux commitment.
+    /// Aux values per AIR instance, in the proof's AIR ordering.
     pub all_aux_values: Vec<Vec<EF>>,
     /// Constraint folding challenge alpha.
     pub alpha: EF,
@@ -166,73 +176,118 @@ where
     pub quotient_commit: L::Commitment,
     /// Out-of-domain evaluation point z.
     pub z: EF,
-    /// PCS sub-transcript (DEEP evals, FRI rounds, query openings).
-    pub pcs_transcript: PcsTranscript<EF, L>,
+    /// PCS sub-proof (DEEP evals, FRI rounds, query openings).
+    pub pcs_proof: PcsProof<EF, L>,
 }
 
-impl<EF, L> StarkTranscript<EF, L>
+impl<EF, L> StarkProof<EF, L>
 where
     L: Lmcs,
     L::F: TwoAdicField,
     EF: ExtensionField<L::F>,
 {
-    /// Parse a STARK transcript from proof data and a challenger.
+    /// Per-AIR log₂ trace heights in instance order (matches
+    /// [`miden_lifted_air::Statement::airs`] position-for-position).
+    pub fn log_trace_heights(&self) -> &[u8] {
+        self.trace_order.log_heights()
+    }
+
+    /// The proof's AIR ordering: position `j` holds the instance index of the
+    /// AIR at proof position `j`. Derived deterministically from the heights.
+    pub fn air_order(&self) -> Vec<u8> {
+        self.trace_order.instance_indices().to_vec()
+    }
+
+    /// Parse a STARK transcript from a verifier instance, proof data, and a challenger.
     ///
-    /// Mirrors steps 0–9 of [`verify_multi`](crate::verifier::verify_multi):
-    /// 0. Validate instance shapes, then observe log trace heights into the challenger and squeeze
-    ///    a throwaway `instance_challenge` to clear the absorb buffer
-    /// 1. Receive main trace commitment
-    /// 2. Sample randomness for auxiliary traces
-    /// 3. Receive auxiliary trace commitment
-    /// 4. Receive aux values (per AIR instance)
-    /// 5. Sample constraint folding alpha and accumulation beta
-    /// 6. Receive quotient commitment
-    /// 7. Sample OOD point z
-    /// 8. Build commitment widths for PCS
-    /// 9. Parse PCS sub-transcript via [`PcsTranscript::from_verifier_channel`]
+    /// Mirrors the transcript-facing steps of
+    /// [`VerifierInstance::verify`](crate::VerifierInstance::verify):
+    /// 0. Reconstruct and validate AIR ordering from the proof heights, observe the optional
+    ///    preprocessed commitment, then absorb statement-owned inputs and trace-shape data.
+    /// 1. Receive the main trace commitment.
+    /// 2. Sample randomness for auxiliary traces.
+    /// 3. Receive the auxiliary trace commitment.
+    /// 4. Receive auxiliary values, per AIR instance in proof order.
+    /// 5. Sample the constraint folding challenge `alpha` and accumulation challenge `beta`.
+    /// 6. Receive the quotient commitment.
+    /// 7. Sample the OOD point `z`.
+    /// 8. Build PCS commitment groups, including per-group tree depths for any virtually lifted
+    ///    preprocessed tree.
+    /// 9. Parse the PCS sub-proof via `PcsProof::read_from_channel`.
     ///
     /// Does **not** verify constraints or check the quotient identity.
     /// Finalizes the transcript and returns the digest alongside the parsed view.
     #[allow(clippy::type_complexity)]
-    pub fn from_proof<A, SC>(
-        config: &SC,
-        instances: &[(&A, AirInstance<'_, L::F>)],
-        proof: &StarkProof<L::F, EF, SC>,
+    pub fn from_data<MA, SC>(
+        instance: &VerifierInstance<'_, L::F, EF, MA, SC>,
+        data: &StarkProofData<L::F, EF, SC>,
         mut challenger: SC::Challenger,
     ) -> Result<(Self, StarkDigest<L::F, EF, SC>), VerifierError>
     where
-        A: LiftedAir<L::F, EF>,
+        MA: MultiAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
-        validate_air_order(proof.instance_shapes.air_order(), instances.len())?;
-        let instances = proof.instance_shapes.reorder(instances.to_vec())?;
+        let config = instance.config();
+        let statement = instance.statement();
+        let preprocessed_commitment = instance.preprocessed_commitment();
+
+        // Shape well-formedness and per-AIR periodic-height feasibility, both
+        // against the (untrusted) proof heights — catches malicious
+        // `log_h` > usize::BITS and infeasible heights before any later use.
+        let trace_order = TraceOrder::from_log_heights::<L::F, EF, _>(
+            statement.airs(),
+            data.log_trace_heights.clone(),
+        )?;
+
+        let preprocessed_trace_to_air = if preprocessed_commitment.is_some() {
+            trace_order.preprocessed_air_for_trace_index::<L::F, EF, _>(statement.airs())
+        } else {
+            Vec::new()
+        };
+
+        let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
+        let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
 
         let log_blowup = config.pcs().log_blowup();
-        let log_max_trace_height = validate_inputs(&instances, &proof.instance_shapes, log_blowup)?;
-        proof.instance_shapes.observe_heights::<L::F, _>(&mut challenger);
+        let log_max_trace_height = trace_order.max_log_height();
+        let max_lde_domain = LiftedDomain::<L::F>::try_canonical(log_max_trace_height, log_blowup)?;
 
-        let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
+        // The preprocessed commitment is a trusted statement input and must be bound
+        // before the rest of the instance data, matching the prover/verifier transcript.
+        if let Some(commitment) = preprocessed_commitment {
+            challenger.observe(commitment.clone());
+        }
 
-        // Clear the challenger's absorb buffer after observing instance shapes.
-        // Mirrors `prove_multi` / `verify_multi`.
-        let instance_challenge: EF = channel.sample_algebra_element::<EF>();
+        // `Statement::observe` absorbs statement-owned inputs. The protocol then
+        // binds the proof's instance count and log trace heights in instance order.
+        statement.observe(&mut challenger, trace_order.log_heights());
+        trace_order.observe_shape::<L::F, _>(&mut challenger);
+
+        let mut channel = VerifierTranscript::from_data(challenger, &data.transcript);
 
         let alignment = config.lmcs().alignment();
 
-        // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
-        let constraint_degree =
-            instances.iter().map(|(air, _)| air.constraint_degree()).max().unwrap_or(2);
-        let log_lde_height = log_max_trace_height + log_blowup;
-
-        // Max LDE coset (for the largest trace, no lifting)
-        let max_lde_coset = LiftedCoset::unlifted(log_max_trace_height, log_blowup);
+        // Infer quotient degree from symbolic AIR analysis (max across all AIRs)
+        let max_log_quotient_degree = proof_ordered_airs
+            .iter()
+            .map(|&air| log_quotient_degree::<L::F, EF, _>(air))
+            .max()
+            .expect("TraceOrder construction rejects empty AIR sets");
+        if max_log_quotient_degree > log_blowup {
+            return Err(DomainError::ConstraintDegreeTooHigh {
+                log_quotient: max_log_quotient_degree,
+                log_blowup,
+            }
+            .into());
+        }
+        let quotient_degree = 1usize << max_log_quotient_degree as usize;
 
         // 1. Receive main trace commitment
         let main_commit = channel.receive_commitment()?.clone();
 
         // 2. Sample randomness for aux traces
         let max_num_randomness =
-            instances.iter().map(|(air, _)| air.num_randomness()).max().unwrap_or(0);
+            proof_ordered_airs.iter().map(|air| air.num_randomness()).max().unwrap_or(0);
 
         let randomness: Vec<EF> = (0..max_num_randomness)
             .map(|_| channel.sample_algebra_element::<EF>())
@@ -242,9 +297,9 @@ where
         let aux_commit = channel.receive_commitment()?.clone();
 
         // 4. Receive aux values from the transcript (one EF element per aux value, per instance).
-        let all_aux_values: Vec<Vec<EF>> = instances
+        let all_aux_values: Vec<Vec<EF>> = proof_ordered_airs
             .iter()
-            .map(|(air, _)| {
+            .map(|air| {
                 let count = air.num_aux_values();
                 (0..count)
                     .map(|_| channel.receive_algebra_element::<EF>())
@@ -260,38 +315,69 @@ where
         let quotient_commit = channel.receive_commitment()?.clone();
 
         // 7. Sample OOD point (outside max trace domain H and max LDE coset gK)
-        let z: EF = max_lde_coset.sample_ood_point(&mut channel);
-        let h = L::F::two_adic_generator(log_max_trace_height.into());
+        let z: EF = max_lde_domain.sample_ood_point(&mut channel);
+        let h = max_lde_domain.trace_subgroup().generator();
         let z_next = z * h;
 
-        // 8. Build commitment widths for PCS.
+        // 8. Build commitment groups for PCS.
         //
-        // The LMCS commits to rows padded to `alignment` boundary, so DEEP evals and
-        // batch openings are stored at aligned widths in the transcript. We must use
-        // aligned widths here to parse the transcript correctly.
-        // (The verifier's `verify_aligned` does the same alignment internally, then
-        // truncates the returned evals back to original widths for constraint checking.)
-        let main_widths: Vec<usize> =
-            instances.iter().map(|(air, _)| aligned_len(air.width(), alignment)).collect();
-        let quotient_width = aligned_len(constraint_degree * EF::DIMENSION, alignment);
-
-        let aux_widths: Vec<usize> = instances
+        // The structured parser consumes the transcript directly, so widths here are
+        // the aligned widths stored in LMCS committed matrices. Each group also carries its tree
+        // depth for virtually lifted preprocessed traces.
+        let main_widths: Vec<usize> = proof_ordered_airs
             .iter()
-            .map(|(air, _)| aligned_len(air.aux_width() * EF::DIMENSION, alignment))
+            .map(|air| aligned_len(air.width(), alignment))
+            .collect();
+        let quotient_width = aligned_len(quotient_degree * EF::DIMENSION, alignment);
+
+        let aux_widths: Vec<usize> = proof_ordered_airs
+            .iter()
+            .map(|air| aligned_len(air.aux_width() * EF::DIMENSION, alignment))
             .collect();
 
-        let commitments = vec![
-            (main_commit.clone(), main_widths),
-            (aux_commit.clone(), aux_widths),
-            (quotient_commit.clone(), vec![quotient_width]),
-        ];
+        let full_log_height = log_max_trace_height + log_blowup;
+        let mut commitments = Vec::with_capacity(4);
+        if let Some(commitment) = preprocessed_commitment {
+            let preprocessed_widths: Vec<usize> = preprocessed_trace_to_air
+                .iter()
+                .map(|&air_idx| {
+                    aligned_len(statement.airs()[air_idx as usize].preprocessed_width(), alignment)
+                })
+                .collect();
+            let preprocessed_log_height = preprocessed_trace_to_air
+                .iter()
+                .map(|&air_idx| trace_order.log_heights()[air_idx as usize])
+                .max()
+                .expect("preprocessed commitment implies at least one preprocessed AIR")
+                + log_blowup;
+            commitments.push(CommitmentGroup {
+                root: commitment.clone(),
+                widths: preprocessed_widths,
+                log_height: preprocessed_log_height,
+            });
+        }
+        commitments.push(CommitmentGroup {
+            root: main_commit.clone(),
+            widths: main_widths,
+            log_height: full_log_height,
+        });
+        commitments.push(CommitmentGroup {
+            root: aux_commit.clone(),
+            widths: aux_widths,
+            log_height: full_log_height,
+        });
+        commitments.push(CommitmentGroup {
+            root: quotient_commit.clone(),
+            widths: vec![quotient_width],
+            log_height: full_log_height,
+        });
 
-        // 9. Parse PCS sub-transcript
-        let pcs_transcript = PcsTranscript::from_verifier_channel::<_, 2>(
+        // 9. Parse PCS sub-proof
+        let pcs_proof = PcsProof::read_from_channel::<_, 2>(
             config.pcs(),
             config.lmcs(),
             &commitments,
-            log_lde_height,
+            &max_lde_domain,
             [z, z_next],
             &mut channel,
         )?;
@@ -301,8 +387,7 @@ where
 
         Ok((
             Self {
-                instance_shapes: proof.instance_shapes.clone(),
-                instance_challenge,
+                trace_order,
                 main_commit,
                 randomness,
                 aux_commit,
@@ -311,7 +396,7 @@ where
                 beta,
                 quotient_commit,
                 z,
-                pcs_transcript,
+                pcs_proof,
             },
             digest,
         ))

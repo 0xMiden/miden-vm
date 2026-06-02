@@ -7,7 +7,7 @@ use alloc::{
 
 use assert_matches::assert_matches;
 use proptest::prelude::*;
-use rand::{Rng, SeedableRng, prelude::IteratorRandom};
+use rand::{RngExt, SeedableRng, prelude::IteratorRandom};
 use rand_chacha::ChaCha20Rng;
 
 use super::{
@@ -132,7 +132,7 @@ fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Wo
     );
     let mut sorted_entries: Vec<(Word, Word)> = entries
         .into_iter()
-        .choose_multiple(&mut rng, updates)
+        .sample(&mut rng, updates)
         .into_iter()
         .map(|(key, _)| {
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {

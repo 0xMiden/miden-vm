@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 
 use super::{IesError, IesScheme};
 use crate::{
@@ -42,7 +42,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
     // BYTE-SPECIFIC METHODS
     // --------------------------------------------------------------------------------------------
 
-    pub fn seal_bytes_with_associated_data<R: CryptoRng + RngCore>(
+    pub fn seal_bytes_with_associated_data<R: CryptoRng>(
         rng: &mut R,
         recipient_public_key: &K::PublicKey,
         scheme: IesScheme,
@@ -103,7 +103,7 @@ impl<K: KeyAgreementScheme, A: AeadScheme> CryptoBox<K, A> {
     // ELEMENT-SPECIFIC METHODS
     // --------------------------------------------------------------------------------------------
 
-    pub fn seal_elements_with_associated_data<R: CryptoRng + RngCore>(
+    pub fn seal_elements_with_associated_data<R: CryptoRng>(
         rng: &mut R,
         recipient_public_key: &K::PublicKey,
         scheme: IesScheme,

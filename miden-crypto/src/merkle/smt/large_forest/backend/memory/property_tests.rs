@@ -9,7 +9,7 @@ use proptest::prelude::*;
 use crate::{
     EMPTY_WORD,
     merkle::smt::{
-        Backend, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeWithRoot,
+        BackendReader, Smt, SmtForestUpdateBatch, SmtUpdateBatch, TreeWithRoot,
         large_forest::{
             InMemoryBackend,
             test_utils::{

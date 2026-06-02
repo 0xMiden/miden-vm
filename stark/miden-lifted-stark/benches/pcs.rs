@@ -7,26 +7,23 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use miden_lifted_stark::{
-    Lmcs, LmcsTree, log2_strict_u8,
-    testing::{
-        BENCH_PCS_PARAMS, LOG_HEIGHTS, PARALLEL_STR, RELATIVE_SPECS,
-        configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
-        generate_matrices_from_specs, open_with_channel, total_elements,
-    },
+use miden_lifted_stark::testing::{
+    BENCH_PCS_PARAMS, LOG_HEIGHTS, Lmcs, LmcsTree, PARALLEL_STR, RELATIVE_SPECS, canonical_domain,
+    configs::goldilocks_poseidon2::{Felt, QuadFelt, test_challenger, test_lmcs},
+    generate_matrices_from_specs, open_with_channel, total_elements,
 };
 use miden_stark_transcript::ProverTranscript;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 fn bench_pcs(c: &mut Criterion) {
     let dft = Radix2DitParallel::<Felt>::default();
-    let shift = Felt::GENERATOR;
     let lmcs = test_lmcs();
 
     for &log_lde_height in LOG_HEIGHTS {
+        let domain = canonical_domain::<Felt>(log_lde_height, 0);
+        let shift = domain.lde_shift();
         let max_lde_size = 1usize << log_lde_height;
         let group_name = format!("PCS_Open/{max_lde_size}/goldilocks/poseidon2/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
@@ -48,7 +45,6 @@ fn bench_pcs(c: &mut Criterion) {
 
         let tree = lmcs.build_aligned_tree(all_lde_matrices);
         let commitment = tree.root();
-        let log_lde_height = log2_strict_u8(tree.height());
 
         let base_challenger = test_challenger();
 
@@ -65,7 +61,7 @@ fn bench_pcs(c: &mut Criterion) {
                     open_with_channel::<Felt, QuadFelt, _, _, _, 2>(
                         &BENCH_PCS_PARAMS,
                         &lmcs,
-                        log_lde_height,
+                        &domain,
                         [z1, z2],
                         trace_trees,
                         &mut channel,

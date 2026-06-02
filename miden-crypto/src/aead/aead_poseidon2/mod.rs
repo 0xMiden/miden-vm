@@ -13,7 +13,7 @@ use core::ops::Range;
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
 use num::Integer;
 use rand::{
-    Rng,
+    Rng, RngExt,
     distr::{Distribution, StandardUniform, Uniform},
 };
 use subtle::ConstantTimeEq;
@@ -772,7 +772,7 @@ impl AeadScheme for AeadPoseidon2 {
             .map_err(|_| EncryptionError::FailedOperation)
     }
 
-    fn encrypt_bytes<R: rand::CryptoRng + rand::RngCore>(
+    fn encrypt_bytes<R: rand::CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[u8],
@@ -801,7 +801,7 @@ impl AeadScheme for AeadPoseidon2 {
     // OPTIMIZED FELT METHODS
     // --------------------------------------------------------------------------------------------
 
-    fn encrypt_elements<R: rand::CryptoRng + rand::RngCore>(
+    fn encrypt_elements<R: rand::CryptoRng>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[Felt],

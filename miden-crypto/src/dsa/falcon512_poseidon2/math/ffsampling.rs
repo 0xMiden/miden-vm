@@ -199,7 +199,7 @@ pub fn ffsampling<R: Rng>(
 #[cfg(test)]
 mod tests {
     use num_complex::Complex64;
-    use rand::{Rng, SeedableRng};
+    use rand::{Rng, RngExt, SeedableRng};
     use rand_chacha::ChaCha20Rng;
 
     use super::*;

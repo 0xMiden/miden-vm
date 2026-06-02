@@ -1,9 +1,10 @@
 //! Selector container for constraint folding.
 //!
 //! The [`Selectors`] struct is a plain container holding selector values.
-//! Computation is done via [`LiftedCoset`](crate::coset::LiftedCoset) methods:
-//! - [`LiftedCoset::selectors`](crate::coset::LiftedCoset::selectors) for coset evaluation (prover)
-//! - [`LiftedCoset::selectors_at`](crate::coset::LiftedCoset::selectors_at) for lifted OOD point
+//! Computation is done via [`LiftedDomain`](crate::domain::LiftedDomain) methods:
+//! - [`LiftedDomain::selectors`](crate::domain::LiftedDomain::selectors) for coset evaluation
+//!   (prover)
+//! - [`LiftedDomain::selectors_at`](crate::domain::LiftedDomain::selectors_at) for lifted OOD point
 //!   evaluation (verifier)
 
 use alloc::vec::Vec;
@@ -12,7 +13,7 @@ use p3_field::{PackedField, TwoAdicField};
 
 /// Selector values for constraint evaluation.
 ///
-/// Plain container for selector values. Use [`LiftedCoset`](crate::coset::LiftedCoset) methods
+/// Plain container for selector values. Use [`LiftedDomain`](crate::domain::LiftedDomain) methods
 /// to compute selectors.
 ///
 /// Generic over `T` to support:
@@ -52,22 +53,25 @@ mod tests {
 
     use super::*;
     use crate::{
-        coset::LiftedCoset,
-        testing::configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        domain::{Coset, LiftedDomain},
+        testing::{
+            canonical_domain,
+            configs::goldilocks_poseidon2::{Felt, QuadFelt},
+        },
     };
 
     #[test]
     fn test_selectors_at_point() {
         let log_n = 4;
-        let coset = LiftedCoset::unlifted(log_n, 0);
+        let domain: LiftedDomain<Felt> = canonical_domain(log_n, 0);
 
         // Sample a point outside the domain
         let z = QuadFelt::from(Felt::from_u32(12345));
 
-        let _sels = coset.selectors_at::<Felt, _>(z);
+        let _sels = domain.selectors_at(z);
 
-        // Verify vanishing_at matches manual computation
-        let vanishing = coset.vanishing_at::<Felt, _>(z);
+        // Verify trace-subgroup vanishing matches manual computation
+        let vanishing = domain.trace_subgroup().vanishing_at(z);
         let n = 1usize << log_n;
         let expected = z.exp_u64(n as u64) - QuadFelt::ONE;
         assert_eq!(vanishing, expected);
@@ -77,9 +81,9 @@ mod tests {
     fn test_selectors_on_coset() {
         let log_trace = 3;
         let log_blowup = 2; // 4x blowup
-        let coset = LiftedCoset::unlifted(log_trace, log_blowup);
+        let domain = canonical_domain::<Felt>(log_trace, log_blowup).evaluation_domain(log_blowup);
 
-        let sels: Selectors<Vec<Felt>> = coset.selectors();
+        let sels: Selectors<Vec<Felt>> = domain.selectors();
 
         // Check lengths
         let coset_size = 1 << (log_trace + log_blowup);

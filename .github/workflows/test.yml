@@ -90,7 +90,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
       - name: Install LLVM/Clang
         uses: ./.github/actions/install-llvm
         with:
@@ -100,26 +100,6 @@ jobs:
           rustup update --no-self-update
           rustup default ${{ matrix.toolchain }}
           make test-docs
-
-  doc-build:
-    name: doc-build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'next') }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
-        with:
-          persist-credentials: false
-      - name: Cleanup large tools for build space
-        uses: ./.github/actions/cleanup-runner
-      - name: Install LLVM/Clang
-        uses: ./.github/actions/install-llvm
-        with:
-          version: "17"
-      - name: Build docs
-        run: |
-          rustup update --no-self-update nightly
-          rustup default nightly
-          make doc
 
   test-p3-parallel:
     name: test Miden STARK crates parallel ${{ matrix.toolchain }}

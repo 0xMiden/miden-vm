@@ -25,7 +25,7 @@ use p3_field::{ExtensionField, PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrixView};
 use p3_maybe_rayon::prelude::*;
 
-use crate::pcs::utils::PackedFieldExtensionExt;
+use crate::util::packing::PackedFieldExtensionExt;
 
 /// FRI folding strategy.
 ///
@@ -46,12 +46,12 @@ impl FriFold {
     }
 
     #[inline]
-    pub const fn arity(&self) -> usize {
+    pub const fn arity(self) -> usize {
         1 << self.log_arity as usize
     }
 
     #[inline]
-    pub const fn log_arity(&self) -> u8 {
+    pub const fn log_arity(self) -> u8 {
         self.log_arity
     }
 
@@ -190,6 +190,7 @@ impl FriFold {
 pub mod tests {
     use alloc::vec::Vec;
 
+    use p3_dft::{NaiveDft, Radix2DFTSmallBatch, TwoAdicSubgroupDft};
     use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_util::reverse_slice_index_bits;
@@ -201,11 +202,12 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        pcs::utils::horner,
+        domain::{Coset, TwoAdicSubgroup},
         testing::{
             configs::goldilocks_poseidon2::{Felt, QuadFelt},
             params::{FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8},
         },
+        util::horner::horner,
     };
 
     // Type alias for tests using packed fields
@@ -216,8 +218,6 @@ pub mod tests {
     /// Generates a random polynomial, computes evaluations on a coset using NaiveDft,
     /// then verifies fold_evals correctly recovers f(β).
     fn test_fold_evals_naive_dft(fold: FriFold) {
-        use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
-
         let mut rng = SmallRng::seed_from_u64(42);
         let arity = fold.arity();
 
@@ -258,15 +258,13 @@ pub mod tests {
         let rng = &mut SmallRng::seed_from_u64(1);
         let beta: Ext = rng.sample(StandardUniform);
         let arity = fold.arity();
-        let log_arity = fold.log_arity() as usize;
+        let log_arity = fold.log_arity();
 
         // Random polynomial of degree arity - 1
         let poly: Vec<Ext> = (0..arity).map(|_| rng.sample(StandardUniform)).collect();
 
-        // Compute roots of unity in bit-reversed order for this arity
-        let mut roots: Vec<Base> =
-            Base::two_adic_generator(log_arity).powers().take(arity).collect();
-        reverse_slice_index_bits(&mut roots);
+        // Roots of unity in bit-reversed order for this arity.
+        let roots: Vec<Base> = TwoAdicSubgroup::<Base>::new(log_arity).bit_reversed_points();
 
         let s: Base = rng.sample(StandardUniform);
         let s_inv = s.inverse();
@@ -324,13 +322,13 @@ pub mod tests {
     fn test_folding_preserves_low_degree(fold: FriFold) {
         let rng = &mut SmallRng::seed_from_u64(42);
         let arity = fold.arity();
-        let log_arity = fold.log_arity() as usize;
+        let log_arity: u8 = fold.log_arity();
 
-        let log_blowup = 2;
-        let log_poly_degree = 4; // degree 16 polynomial
-        let poly_degree = 1 << log_poly_degree;
-        let log_lde_size = log_poly_degree + log_blowup;
-        let lde_size = 1 << log_lde_size;
+        let log_blowup: u8 = 2;
+        let log_poly_degree: u8 = 4; // degree 16 polynomial
+        let poly_degree = 1usize << log_poly_degree;
+        let log_lde_size: u8 = log_poly_degree + log_blowup;
+        let lde_size = 1usize << log_lde_size;
 
         // Generate random low-degree polynomial
         let coeffs: Vec<QuadFelt> = (0..poly_degree).map(|_| rng.sample(StandardUniform)).collect();
@@ -338,14 +336,14 @@ pub mod tests {
         // Compute LDE in bit-reversed order
         let mut full_coeffs = coeffs;
         full_coeffs.resize(lde_size, QuadFelt::ZERO);
-        let dft = p3_dft::Radix2DFTSmallBatch::<QuadFelt>::default();
-        let mut evals = p3_dft::TwoAdicSubgroupDft::dft_algebra(&dft, full_coeffs);
+        let dft = Radix2DFTSmallBatch::<QuadFelt>::default();
+        let mut evals = dft.dft_algebra(full_coeffs);
         reverse_slice_index_bits(&mut evals);
 
         // Compute s_invs
         let log_num_cosets = log_lde_size - log_arity;
-        let num_cosets = 1 << log_num_cosets;
-        let g_inv = Felt::two_adic_generator(log_lde_size).inverse();
+        let num_cosets = 1usize << log_num_cosets;
+        let g_inv = TwoAdicSubgroup::<Felt>::new(log_lde_size).generator_inverse();
         let mut s_invs: Vec<Felt> = g_inv.powers().take(num_cosets).collect();
         reverse_slice_index_bits(&mut s_invs);
 
@@ -357,7 +355,7 @@ pub mod tests {
         // IDFT the result to get coefficients
         let mut folded_for_idft = folded;
         reverse_slice_index_bits(&mut folded_for_idft);
-        let folded_coeffs = p3_dft::TwoAdicSubgroupDft::idft_algebra(&dft, folded_for_idft);
+        let folded_coeffs = dft.idft_algebra(folded_for_idft);
 
         // Check that all coefficients beyond degree/arity are zero
         let expected_degree = poly_degree / arity;

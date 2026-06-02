@@ -12,7 +12,7 @@ use crate::{EMPTY_WORD, Map, Set, Word, merkle::smt::large_forest::root::Lineage
 
 /// The operations that can be performed on an arbitrary leaf in a tree in a forest.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ForestOperation {
+pub enum SmtForestOperation {
     /// An insertion of `value` under `key` into the tree.
     ///
     /// If `key` already exists in the tree, the associated value will be replaced with `value`
@@ -22,7 +22,7 @@ pub enum ForestOperation {
     /// The removal of the `key` and its associated value from the tree.
     Remove { key: Word },
 }
-impl ForestOperation {
+impl SmtForestOperation {
     /// Insert the provided `value` into a tree under the provided `key`.
     pub fn insert(key: Word, value: Word) -> Self {
         Self::Insert { key, value }
@@ -36,17 +36,17 @@ impl ForestOperation {
     /// Retrieves the key from the operation.
     pub fn key(&self) -> Word {
         match self {
-            ForestOperation::Insert { key, .. } => *key,
-            ForestOperation::Remove { key } => *key,
+            SmtForestOperation::Insert { key, .. } => *key,
+            SmtForestOperation::Remove { key } => *key,
         }
     }
 }
 
-impl From<ForestOperation> for (Word, Word) {
-    fn from(value: ForestOperation) -> Self {
+impl From<SmtForestOperation> for (Word, Word) {
+    fn from(value: SmtForestOperation) -> Self {
         match value {
-            ForestOperation::Insert { key, value } => (key, value),
-            ForestOperation::Remove { key } => (key, EMPTY_WORD),
+            SmtForestOperation::Insert { key, value } => (key, value),
+            SmtForestOperation::Remove { key } => (key, EMPTY_WORD),
         }
     }
 }
@@ -58,7 +58,7 @@ impl From<ForestOperation> for (Word, Word) {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SmtUpdateBatch {
     /// The operations to be performed on a tree.
-    operations: Vec<ForestOperation>,
+    operations: Vec<SmtForestOperation>,
 }
 impl SmtUpdateBatch {
     /// Creates an empty batch of operations.
@@ -67,33 +67,33 @@ impl SmtUpdateBatch {
     }
 
     /// Creates a batch containing the provided `operations`.
-    pub fn new(operations: impl Iterator<Item = ForestOperation>) -> Self {
+    pub fn new(operations: impl Iterator<Item = SmtForestOperation>) -> Self {
         Self {
             operations: operations.collect::<Vec<_>>(),
         }
     }
 
     /// Adds the provided `operations` to the batch.
-    pub fn add_operations(&mut self, operations: impl Iterator<Item = ForestOperation>) {
+    pub fn add_operations(&mut self, operations: impl Iterator<Item = SmtForestOperation>) {
         self.operations.extend(operations);
     }
 
-    /// Adds the [`ForestOperation::Insert`] operation for the provided `key` and `value` pair to
+    /// Adds the [`SmtForestOperation::Insert`] operation for the provided `key` and `value` pair to
     /// the batch.
     pub fn add_insert(&mut self, key: Word, value: Word) {
-        self.operations.push(ForestOperation::insert(key, value));
+        self.operations.push(SmtForestOperation::insert(key, value));
     }
 
-    /// Adds the [`ForestOperation::Remove`] operation for the provided `key` to the batch.
+    /// Adds the [`SmtForestOperation::Remove`] operation for the provided `key` to the batch.
     pub fn add_remove(&mut self, key: Word) {
-        self.operations.push(ForestOperation::remove(key));
+        self.operations.push(SmtForestOperation::remove(key));
     }
 
     /// Consumes the batch as a vector of operations, containing the last operation for any given
     /// `key` in the case that multiple operations per key are encountered.
     ///
     /// This vector is guaranteed to be sorted by the key on which an operation is performed.
-    pub fn consume(self) -> Vec<ForestOperation> {
+    pub fn consume(self) -> Vec<SmtForestOperation> {
         // As we want to keep the LAST operation for each key, rather than the first, we filter in
         // reverse.
         let mut seen_keys: Set<Word> = Set::new();
@@ -103,13 +103,13 @@ impl SmtUpdateBatch {
             .rev()
             .filter(|o| seen_keys.insert(o.key()))
             .collect::<Vec<_>>();
-        ops.sort_by_key(ForestOperation::key);
+        ops.sort_by_key(SmtForestOperation::key);
         ops
     }
 }
 
 impl IntoIterator for SmtUpdateBatch {
-    type Item = ForestOperation;
+    type Item = SmtForestOperation;
     type IntoIter = alloc::vec::IntoIter<Self::Item>;
 
     /// Consumes the batch as an iterator yielding operations while respecting the guarantees given
@@ -127,8 +127,8 @@ impl From<SmtUpdateBatch> for Vec<(Word, Word)> {
             .consume()
             .into_iter()
             .map(|op| match op {
-                ForestOperation::Insert { key, value } => (key, value),
-                ForestOperation::Remove { key } => (key, EMPTY_WORD),
+                SmtForestOperation::Insert { key, value } => (key, value),
+                SmtForestOperation::Remove { key } => (key, EMPTY_WORD),
             })
             .collect()
     }
@@ -141,9 +141,9 @@ where
     fn from(value: I) -> Self {
         Self::new(value.map(|(k, v)| {
             if v.is_empty() {
-                ForestOperation::Remove { key: k }
+                SmtForestOperation::Remove { key: k }
             } else {
-                ForestOperation::Insert { key: k, value: v }
+                SmtForestOperation::Insert { key: k, value: v }
             }
         }))
     }
@@ -176,7 +176,7 @@ impl SmtForestUpdateBatch {
     pub fn add_operations(
         &mut self,
         lineage: LineageId,
-        operations: impl Iterator<Item = ForestOperation>,
+        operations: impl Iterator<Item = SmtForestOperation>,
     ) {
         let batch = self.operations.entry(lineage).or_insert_with(SmtUpdateBatch::empty);
         batch.add_operations(operations);
@@ -198,14 +198,14 @@ impl SmtForestUpdateBatch {
 
     /// Consumes the batch as a map of batches, with each individual batch guaranteed to be in
     /// sorted order and contain only the last operation in the batch for any given key.
-    pub fn consume(self) -> Map<LineageId, Vec<ForestOperation>> {
+    pub fn consume(self) -> Map<LineageId, Vec<SmtForestOperation>> {
         self.operations.into_iter().map(|(k, v)| (k, v.consume())).collect()
     }
 }
 
 impl IntoIterator for SmtForestUpdateBatch {
-    type Item = (LineageId, Vec<ForestOperation>);
-    type IntoIter = crate::MapIntoIter<LineageId, Vec<ForestOperation>>;
+    type Item = (LineageId, Vec<SmtForestOperation>);
+    type IntoIter = crate::MapIntoIter<LineageId, Vec<SmtForestOperation>>;
 
     /// Consumes the batch as an iterator yielding pairs of `(lineage, operations)` while respecting
     /// the guarantees given by [`Self::consume`].
@@ -240,9 +240,9 @@ mod test {
         let o3_key: Word = rng.value();
         let o3_value: Word = rng.value();
 
-        let o1 = ForestOperation::insert(o1_key, o1_value);
-        let o2 = ForestOperation::remove(o2_key);
-        let o3 = ForestOperation::insert(o3_key, o3_value);
+        let o1 = SmtForestOperation::insert(o1_key, o1_value);
+        let o2 = SmtForestOperation::remove(o2_key);
+        let o3 = SmtForestOperation::insert(o3_key, o3_value);
 
         // ... and stick them in the batch in various ways
         batch.add_operations(vec![o1.clone()].into_iter());
@@ -254,7 +254,7 @@ mod test {
 
         // If we then consume the batch, we should have the operations ordered by their key.
         let ops = batch.consume();
-        assert!(ops.is_sorted_by_key(ForestOperation::key));
+        assert!(ops.is_sorted_by_key(SmtForestOperation::key));
 
         // Let's now make two additional operations with keys that overlay with keys from the first
         // three...
@@ -262,8 +262,8 @@ mod test {
         let o4_value: Word = rng.value();
         let o5_key = o1_key;
 
-        let o4 = ForestOperation::insert(o4_key, o4_value);
-        let o5 = ForestOperation::remove(o5_key);
+        let o4 = SmtForestOperation::insert(o4_key, o4_value);
+        let o5 = SmtForestOperation::remove(o5_key);
 
         // ... and also stick them into the batch.
         let mut batch = batch_tmp;
@@ -274,7 +274,7 @@ mod test {
         let ops = batch.consume();
 
         assert_eq!(ops.len(), 3);
-        assert!(ops.is_sorted_by_key(ForestOperation::key));
+        assert!(ops.is_sorted_by_key(SmtForestOperation::key));
 
         assert!(ops.contains(&o3));
         assert!(ops.contains(&o4));
@@ -292,14 +292,14 @@ mod test {
 
         // Let's start by adding a few operations to a tree.
         let t1_lineage: LineageId = rng.value();
-        let t1_o1 = ForestOperation::insert(rng.value(), rng.value());
-        let t1_o2 = ForestOperation::remove(rng.value());
+        let t1_o1 = SmtForestOperation::insert(rng.value(), rng.value());
+        let t1_o2 = SmtForestOperation::remove(rng.value());
         batch.add_operations(t1_lineage, vec![t1_o1, t1_o2].into_iter());
 
         // We can also add them differently.
         let t2_lineage: LineageId = rng.value();
-        let t2_o1 = ForestOperation::remove(rng.value());
-        let t2_o2 = ForestOperation::insert(rng.value(), rng.value());
+        let t2_o1 = SmtForestOperation::remove(rng.value());
+        let t2_o2 = SmtForestOperation::insert(rng.value(), rng.value());
         batch.operations(t2_lineage).add_operations(vec![t2_o1, t2_o2].into_iter());
 
         // When we consume the batch, each per-tree batch should be unique by key and sorted.
@@ -307,11 +307,11 @@ mod test {
         assert_eq!(ops.len(), 2);
 
         let t1_ops = ops.get(&t1_lineage).unwrap();
-        assert!(t1_ops.is_sorted_by_key(ForestOperation::key));
+        assert!(t1_ops.is_sorted_by_key(SmtForestOperation::key));
         assert_eq!(t1_ops.iter().unique_by(|o| o.key()).count(), 2);
 
         let t2_ops = ops.get(&t2_lineage).unwrap();
-        assert!(t2_ops.is_sorted_by_key(ForestOperation::key));
+        assert!(t2_ops.is_sorted_by_key(SmtForestOperation::key));
         assert_eq!(t2_ops.iter().unique_by(|o| o.key()).count(), 2);
     }
 }

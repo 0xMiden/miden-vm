@@ -44,12 +44,14 @@ skip = [
   { name = "thiserror-impl" },
 ]
 skip-tree = [
-  # miden-crypto uses rand 0.9 while Plonky3 0.5 uses rand 0.10,
-  # causing duplicate rand / rand_core / getrandom trees
+  # Stable crypto crates still depend on rand_core 0.6 and chacha20 0.9.
+  { name = "chacha20", version = "=0.9.1" },
   { name = "cpufeatures", version = "0.2.17" },
-  { name = "getrandom", version = "=0.2.17" },
-  { name = "rand", version = "=0.9.4" },
   { name = "rand_core", version = "=0.6.4" },
+
+  # Dev/test-only proptest still depends on rand 0.9.
+  { name = "rand", version = "=0.9.4" },
+  { name = "rand_chacha", version = "=0.9.0" },
   { name = "rand_core", version = "=0.9.5" },
 ]
 wildcards = "allow"

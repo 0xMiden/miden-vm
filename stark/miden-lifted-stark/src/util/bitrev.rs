@@ -1,4 +1,4 @@
-//! Local copy of `BitReversibleMatrix` with additional impls for [`FlatMatrixView`].
+//! Bit-reversal helpers and a stopgap [`BitReversibleMatrix`] trait.
 //!
 //! # Temporary stopgap
 //!
@@ -6,8 +6,8 @@
 //! [`DenseMatrix`], not for [`FlatMatrixView`]. This module provides an identical
 //! trait with impls for all matrix types used by the LMCS and FRI.
 //!
-//! Once an upstream impl is available, this module can be removed and all uses
-//! replaced with `p3_matrix::bitrev::BitReversibleMatrix`.
+//! Once an upstream impl is available, this trait (and `materialize_bitrev`) can
+//! be removed and all uses replaced with `p3_matrix::bitrev::BitReversibleMatrix`.
 
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{
@@ -16,21 +16,6 @@ use p3_matrix::{
     dense::{DenseMatrix, DenseStorage, RowMajorMatrix},
     extension::FlatMatrixView,
 };
-
-/// Materialize a matrix into domain-ordered `BitReversedMatrixView<RowMajorMatrix<T>>`.
-///
-/// Temporary adapter for types that implement the upstream
-/// [`p3_matrix::bitrev::BitReversibleMatrix`] but not this crate's local copy.
-/// The returned type implements both traits and can be passed directly to
-/// [`Lmcs::build_tree`](crate::lmcs::Lmcs::build_tree) /
-/// [`Lmcs::build_aligned_tree`](crate::lmcs::Lmcs::build_aligned_tree).
-///
-/// Remove alongside this module when upstream impls cover all DFT output types.
-pub fn materialize_bitrev<T: Clone + Send + Sync>(
-    evals: impl p3_matrix::bitrev::BitReversibleMatrix<T>,
-) -> BitReversedMatrixView<RowMajorMatrix<T>> {
-    BitReversalPerm::new_view(evals.bit_reverse_rows().to_row_major_matrix())
-}
 
 /// A matrix that supports bit-reversed row reordering.
 ///
@@ -100,4 +85,19 @@ where
     fn bit_reverse_rows(self) -> Self::BitRev {
         self.inner
     }
+}
+
+/// Materialize a matrix into domain-ordered `BitReversedMatrixView<RowMajorMatrix<T>>`.
+///
+/// Temporary adapter for types that implement the upstream
+/// [`p3_matrix::bitrev::BitReversibleMatrix`] but not this crate's local copy.
+/// The returned type implements both traits and can be passed directly to
+/// [`Lmcs::build_tree`](crate::lmcs::Lmcs::build_tree) /
+/// [`Lmcs::build_aligned_tree`](crate::lmcs::Lmcs::build_aligned_tree).
+///
+/// Remove alongside [`BitReversibleMatrix`] when upstream impls cover all DFT output types.
+pub(crate) fn materialize_bitrev<T: Clone + Send + Sync>(
+    evals: impl p3_matrix::bitrev::BitReversibleMatrix<T>,
+) -> BitReversedMatrixView<RowMajorMatrix<T>> {
+    BitReversalPerm::new_view(evals.bit_reverse_rows().to_row_major_matrix())
 }

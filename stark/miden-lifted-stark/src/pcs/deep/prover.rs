@@ -10,15 +10,10 @@ use p3_maybe_rayon::prelude::*;
 use tracing::info_span;
 
 use crate::{
-    lmcs::{
-        Lmcs, LmcsTree,
-        row_list::RowList,
-        utils::{aligned_widths, log2_strict_u8},
-    },
-    pcs::{
-        deep::{DeepParams, interpolate::PointQuotients},
-        utils::{PackedFieldExtensionExt, bit_reversed_coset_points, horner},
-    },
+    domain::{Coset, LiftedDomain},
+    lmcs::{Lmcs, LmcsTree, row_list::RowList},
+    pcs::deep::{DeepParams, interpolate::PointQuotients},
+    util::{align::aligned_widths, horner::horner, packing::PackedFieldExtensionExt},
 };
 
 /// The DEEP quotient `Q(X)` evaluated over the LDE domain.
@@ -47,16 +42,20 @@ pub struct DeepPoly<EF> {
 impl<EF> DeepPoly<EF> {
     /// Construct `Q(X)` by evaluating trace trees at the opening points.
     ///
-    /// This computes the LDE coset points from the trace tree height, evaluates the committed
+    /// This computes the LDE coset points from `domain`, evaluates the committed
     /// matrices at `eval_points`, and then calls [`Self::from_evals`].
     ///
-    /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
-    /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
+    /// Preconditions:
+    /// - `eval_points` must be distinct and lie outside the trace subgroup `H` and LDE evaluation
+    ///   coset `gK`. The outer protocol is expected to enforce this.
+    /// - Every trace tree height must be a power of two `≤ domain.lde_height()`. Shorter trees are
+    ///   virtually lifted to the max domain during batched evaluation.
+    /// - At least one trace tree must have height `domain.lde_height()`.
     pub fn from_trees<L, M, const N: usize, Ch>(
         params: DeepParams,
+        domain: &LiftedDomain<L::F>,
         trace_trees: &[&L::Tree<M>],
         eval_points: [EF; N],
-        log_blowup: u8,
         channel: &mut Ch,
     ) -> Self
     where
@@ -66,14 +65,21 @@ impl<EF> DeepPoly<EF> {
         M: Matrix<L::F>,
         Ch: ProverChannel<F = L::F, Commitment = L::Commitment>,
     {
-        let lde_height = trace_trees.first().expect("at least one trace tree required").height();
+        assert!(!trace_trees.is_empty(), "at least one trace tree required");
+        let lde_height = domain.lde_height();
         assert!(
-            trace_trees.iter().all(|tree| tree.height() == lde_height),
-            "mixed trace tree heights are not supported"
+            trace_trees
+                .iter()
+                .all(|tree| tree.height().is_power_of_two() && tree.height() <= lde_height),
+            "tree heights must be powers of two ≤ the max LDE height"
+        );
+        assert!(
+            trace_trees.iter().any(|tree| tree.height() == lde_height),
+            "at least one tree must fill the max LDE height"
         );
 
-        let log_lde_height = log2_strict_u8(lde_height);
-        let coset_points = bit_reversed_coset_points::<L::F>(log_lde_height);
+        let coset_points = domain.lde_coset().bit_reversed_points();
+        let log_blowup = domain.log_blowup();
 
         let matrices_groups: Vec<Vec<&M>> =
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
@@ -131,9 +137,8 @@ impl<EF> DeepPoly<EF> {
             "mixed trace tree alignments are not supported"
         );
 
-        // Collect the LDE matrices from each committed tree, grouped by commitment.
-        // matrices_groups[group_idx][matrix_idx] is a reference to the LDE matrix
-        // whose rows are bit-reversed coset evaluations at height `lde_height`.
+        // Collect LDE matrices grouped by commitment. Each matrix is at its
+        // committed tree height; shorter groups are lifted when combined/opened.
         let matrices_groups: Vec<Vec<&M>> =
             trace_trees.iter().map(|tree| tree.leaves().iter().collect()).collect();
 
@@ -207,23 +212,52 @@ impl<EF> DeepPoly<EF> {
         // full-domain allocation and improving cache locality.
 
         let deep_evals = info_span!("DEEP reduce + assemble").in_scope(|| {
+            // Fast path: when every matrix has the same height (the common single-AIR /
+            // uniform-height case for `prove_*`), accumulate every group directly into one
+            // shared buffer.
+            let uniform_height =
+                matrices_groups.iter().flat_map(|g| g.iter()).all(|m| m.height() == n);
+
             let mut neg_column_coeffs_iter = neg_column_coeffs.iter();
-            let mut neg_f_reduced = zip(matrices_groups.iter(), &group_sizes)
-                .map(|(matrices_group, &size)| {
+            let mut neg_f_reduced = if uniform_height {
+                let mut acc = EF::zero_vec(n);
+                let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
+                for (matrices_group, &size) in zip(matrices_groups.iter(), &group_sizes) {
                     let group_coeffs: Vec<&Vec<EF>> =
                         neg_column_coeffs_iter.by_ref().take(size).collect();
-                    accumulate_matrices(matrices_group, &group_coeffs)
-                })
-                .reduce(|mut acc, next| {
-                    debug_assert_eq!(acc.len(), next.len());
-                    acc.par_chunks_mut(w).zip(next.par_chunks(w)).for_each(
-                        |(acc_chunk, next_chunk)| {
-                            EF::add_slices(acc_chunk, next_chunk);
-                        },
-                    );
-                    acc
-                })
-                .unwrap_or_else(|| EF::zero_vec(n));
+                    for (&matrix, coeffs) in zip(matrices_group, group_coeffs.iter()) {
+                        let active_coeffs = &coeffs[..matrix.width()];
+                        packed_coeffs.clear();
+                        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
+                            if chunk.len() == w {
+                                EF::ExtensionPacking::from_ext_slice(chunk)
+                            } else {
+                                let mut padded = EF::zero_vec(w);
+                                padded[..chunk.len()].copy_from_slice(chunk);
+                                EF::ExtensionPacking::from_ext_slice(&padded)
+                            }
+                        }));
+                        matrix
+                            .rowwise_packed_dot_product::<EF>(&packed_coeffs)
+                            .zip(acc.par_iter_mut())
+                            .for_each(|(dot_result, acc_val)| {
+                                *acc_val += dot_result;
+                            });
+                    }
+                }
+                acc
+            } else {
+                zip(matrices_groups.iter(), &group_sizes)
+                    .map(|(matrices_group, &size)| {
+                        let group_coeffs: Vec<&Vec<EF>> =
+                            neg_column_coeffs_iter.by_ref().take(size).collect();
+                        accumulate_matrices(matrices_group, &group_coeffs)
+                    })
+                    // Combine groups of different heights; `add_lifted` lifts the shorter
+                    // buffer onto the taller one before adding.
+                    .reduce(|a, b| add_lifted(w, a, b))
+                    .unwrap_or_else(|| EF::zero_vec(n))
+            };
 
             // Pre-compute βʲ for all N points
             let point_coeffs: [EF; N] =
@@ -300,7 +334,11 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
     let n = matrices.last().unwrap().height();
 
     let mut acc = EF::zero_vec(n);
-    let mut scratch = EF::zero_vec(n);
+    // When all matrices in this group share a single height,
+    // it is a tad more efficient to skip preallocating the buffer.
+    let mut scratch: Vec<EF> = Vec::new();
+    let w = F::Packing::WIDTH;
+    let mut packed_coeffs: Vec<EF::ExtensionPacking> = Vec::new();
 
     let mut active_height = matrices.first().unwrap().height();
 
@@ -317,6 +355,9 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
 
         // Upsample: [a, b] → [a, a, b, b] when height doubles
         if height > active_height {
+            if scratch.len() < height {
+                scratch.resize(height, EF::ZERO);
+            }
             let scaling_factor = height / active_height;
             scratch[..height]
                 .par_chunks_mut(scaling_factor)
@@ -327,21 +368,18 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
 
         // SIMD path using horizontal packing.
         // Slice to matrix width to avoid packing alignment-padding coefficients.
-        let w = F::Packing::WIDTH;
         let active_coeffs = &coeffs[..matrix.width()];
-        let packed_coeffs: Vec<EF::ExtensionPacking> = active_coeffs
-            .chunks(w)
-            .map(|chunk| {
-                if chunk.len() == w {
-                    EF::ExtensionPacking::from_ext_slice(chunk)
-                } else {
-                    // Pad with zeros for the last chunk
-                    let mut padded = EF::zero_vec(w);
-                    padded[..chunk.len()].copy_from_slice(chunk);
-                    EF::ExtensionPacking::from_ext_slice(&padded)
-                }
-            })
-            .collect();
+        packed_coeffs.clear();
+        packed_coeffs.extend(active_coeffs.chunks(w).map(|chunk| {
+            if chunk.len() == w {
+                EF::ExtensionPacking::from_ext_slice(chunk)
+            } else {
+                // Pad with zeros for the last chunk
+                let mut padded = EF::zero_vec(w);
+                padded[..chunk.len()].copy_from_slice(chunk);
+                EF::ExtensionPacking::from_ext_slice(&padded)
+            }
+        }));
 
         matrix
             .rowwise_packed_dot_product::<EF>(&packed_coeffs)
@@ -354,6 +392,34 @@ fn accumulate_matrices<F: Field, EF: ExtensionField<F>, M: Matrix<F>, C: AsRef<[
     }
 
     acc
+}
+
+/// Sum two DEEP reduced-eval buffers whose power-of-two heights may differ, lifting
+/// the shorter onto the taller by bit-reversed nearest-neighbor repetition
+/// (`long[j*r + k] += short[j]`). Returns the taller buffer, reused in place — no fresh
+/// allocation. `w` is the base-field packing width for the equal-height SIMD add.
+///
+/// `reduce` folds groups left-to-right, so a short group (e.g. a setup-fixed
+/// preprocessed tree, opened first) is lifted into the first full-height group it meets.
+fn add_lifted<EF: Field>(w: usize, a: Vec<EF>, b: Vec<EF>) -> Vec<EF> {
+    let (mut long, short) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+    debug_assert!(
+        !short.is_empty() && long.len() % short.len() == 0,
+        "DEEP group heights must be nested powers of two"
+    );
+    let r = long.len() / short.len();
+    if r == 1 {
+        long.par_chunks_mut(w)
+            .zip(short.par_chunks(w))
+            .for_each(|(x, y)| EF::add_slices(x, y));
+    } else {
+        // `short[j]` covers the `r` contiguous slots `[j*r, (j+1)*r)` of the taller
+        // buffer — the bit-reversed nearest-neighbor lift, fused with the add.
+        long.par_chunks_mut(r)
+            .zip(short.par_iter())
+            .for_each(|(chunk, &v)| chunk.iter_mut().for_each(|x| *x += v));
+    }
+    long
 }
 
 #[cfg(test)]

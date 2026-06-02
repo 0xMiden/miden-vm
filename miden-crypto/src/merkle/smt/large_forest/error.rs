@@ -84,6 +84,9 @@ impl LargeSmtForestError {
 impl From<BackendError> for LargeSmtForestError {
     fn from(value: BackendError) -> Self {
         match value {
+            BackendError::BadVersion { provided, latest } => {
+                LargeSmtForestError::BadVersion { provided, latest }
+            },
             BackendError::CorruptedData(_) => LargeSmtForestError::fatal_from(value),
             BackendError::DuplicateLineage(l) => LargeSmtForestError::DuplicateLineage(l),
             BackendError::Internal(e) => LargeSmtForestError::Fatal(e),

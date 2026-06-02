@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 
 use super::{IesError, IesScheme, crypto_box::CryptoBox, message::SealedMessage};
 use crate::{
@@ -38,7 +38,7 @@ macro_rules! impl_seal_bytes_with_associated_data {
         ///
         /// The returned message can be unsealed with the [UnsealingKey] associated with this
         /// sealing key.
-        pub fn seal_bytes_with_associated_data<R: CryptoRng + RngCore>(
+        pub fn seal_bytes_with_associated_data<R: CryptoRng>(
             &self,
             rng: &mut R,
             plaintext: &[u8],
@@ -75,7 +75,7 @@ macro_rules! impl_seal_elements_with_associated_data {
         ///
         /// The returned message can be unsealed with the [UnsealingKey] associated with this
         /// sealing key.
-        pub fn seal_elements_with_associated_data<R: CryptoRng + RngCore>(
+        pub fn seal_elements_with_associated_data<R: CryptoRng>(
             &self,
             rng: &mut R,
             plaintext: &[Felt],
@@ -221,7 +221,7 @@ impl SealingKey {
     ///
     /// The returned message can be unsealed with the [UnsealingKey] associated with this sealing
     /// key.
-    pub fn seal_bytes<R: CryptoRng + RngCore>(
+    pub fn seal_bytes<R: CryptoRng>(
         &self,
         rng: &mut R,
         plaintext: &[u8],
@@ -240,7 +240,7 @@ impl SealingKey {
     ///
     /// The returned message can be unsealed with the [UnsealingKey] associated with this sealing
     /// key.
-    pub fn seal_elements<R: CryptoRng + RngCore>(
+    pub fn seal_elements<R: CryptoRng>(
         &self,
         rng: &mut R,
         plaintext: &[Felt],

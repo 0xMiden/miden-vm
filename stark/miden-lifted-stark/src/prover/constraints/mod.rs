@@ -20,9 +20,12 @@ use p3_field::{
 use p3_matrix::{Matrix, bitrev::BitReversedMatrixView, dense::RowMajorMatrixView};
 #[cfg(feature = "parallel")]
 use p3_maybe_rayon::prelude::*;
-use packed_row_bitrev::RowMajorMatrixBitrevPackedExt;
+use packed_row_bitrev::collect_vertically_packed_row_pair_bitrev_into;
 
-use crate::{coset::LiftedCoset, prover::periodic::PeriodicLde};
+use crate::{
+    domain::{Coset, EvaluationDomain},
+    prover::periodic::PeriodicLde,
+};
 
 /// Row-blocks (`i_start = r * packing_width`) processed per rayon task.
 const ROW_BLOCKS_PER_PARALLEL_TASK: usize = 32;
@@ -33,19 +36,31 @@ type PackedVal<F> = <F as Field>::Packing;
 /// Type alias for packed extension field from EF.
 type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 
-/// Evaluate constraints on the quotient domain, adding results into `output`.
+/// Evaluate an AIR's constraints on its native quotient coset and write the
+/// per-AIR quotient evaluations (constraint numerator divided by `Z_{H_j}`)
+/// into `output`.
 ///
-/// Here `gJ` is the quotient evaluation coset of size `N * D`, the subset of the
-/// committed LDE coset `gK` (size `N * B`) that contains just enough points to
-/// evaluate the quotient point-wise. For each point on `gJ`, we evaluate all AIR
-/// constraints, fold them with powers of `alpha`, and add the resulting numerator value:
+/// `coset` is the AIR's native quotient evaluation coset `gJ_j` of size `n_j * D_j`,
+/// where `n_j` is the AIR's trace height and `D_j = 2^log_quotient_degree` is its
+/// per-AIR constraint-degree bound. For each point on `gJ_j` we evaluate every
+/// constraint, fold with powers of `alpha`, multiply by the precomputed `1 / Z_H`
+/// value, and write the result:
 ///
-/// `output[i] += folded_constraints(xᵢ)`.
+/// `output[i] = folded_constraints(x_i) / Z_{H_j}(x_i)`.
 ///
-/// The caller is responsible for preparing `output` before calling this function
-/// (e.g. cyclically extending and scaling by beta for multi-trace accumulation).
-/// Trace views must be [`BitReversedMatrixView`] over dense row-major storage (as returned by
-/// [`crate::prover::commit::Committed::evals_on_quotient_domain`]), in natural order on gJ.
+/// `inv_z_h` is a length-`D_j` slice: `Z_{H_j}(x)` takes only `D_j` distinct
+/// values over `gJ_j` by periodicity, so batch-inverting them once suffices
+/// (use [`crate::domain::EvaluationDomain::inv_vanishing_evals`]). Fusing the
+/// divide into the write loop saves a second pass over the `n_j · D_j`-point
+/// output buffer.
+///
+/// `output` must be a fresh zero-initialized buffer of length `n_j * D_j`; each
+/// point is written once. Upsampling to the batch-wide target and beta-accumulation
+/// into the shared quotient accumulator happen in the caller.
+///
+/// Trace views must be [`BitReversedMatrixView`] over dense row-major storage (as
+/// returned by [`crate::prover::commit::Committed::evals_on_quotient_domain`]), in
+/// natural order on `gJ_j`.
 ///
 /// Uses SIMD-packed parallel iteration via rayon for optimal performance:
 /// - Processes `WIDTH` points simultaneously using packed field types
@@ -60,23 +75,25 @@ type PackedExt<F, EF> = <EF as ExtensionField<F>>::ExtensionPacking;
 /// collapses them into one numerator polynomial while preserving soundness (a non-zero
 /// constraint survives with high probability).
 ///
-/// Why we only evaluate on `gJ`: `gJ` (size `N * D`) is a subset of the committed LDE
-/// coset `gK` (size `N * B`). For `B >= D`, these `N * D` points are sufficient for
-/// the quotient-degree bounds used by the protocol; division by the vanishing polynomial
-/// happens later.
+/// Why we evaluate on the native coset: the quotient `Q_j = C_j / Z_{H_j}` has degree
+/// `< n_j * D_j` by construction, so `n_j * D_j` evaluation points suffice to determine
+/// it. The committed LDE coset (size `n_j * B`, with `B >= D_j`) contains `gJ_j` as a
+/// subset, so the truncated view the caller passes in is zero-copy.
 #[allow(clippy::too_many_arguments)]
-pub fn evaluate_constraints_into<F, EF, A>(
+pub(super) fn evaluate_constraints_into<F, EF, A>(
     output: &mut [EF],
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
+    preprocessed_on_gj: Option<&BitReversedMatrixView<RowMajorMatrixView<'_, F>>>,
     aux_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
-    coset: &LiftedCoset,
+    eval_domain: &EvaluationDomain<F>,
     alpha: EF,
     randomness: &[EF],
     public_values: &[F],
     periodic_lde: &PeriodicLde<F>,
     layout: &ConstraintLayout,
     permutation_values: &[EF],
+    inv_z_h: &[F],
 ) where
     F: TwoAdicField,
     EF: ExtensionField<F>,
@@ -86,15 +103,18 @@ pub fn evaluate_constraints_into<F, EF, A>(
     type P<F> = PackedVal<F>;
     type PE<F, EF> = PackedExt<F, EF>;
 
-    let gj_height = coset.lde_height();
+    let quotient_degree = eval_domain.quotient_degree();
+    let gj_height = eval_domain.size();
     assert_eq!(output.len(), gj_height);
-    let constraint_degree = coset.blowup();
     let width = P::<F>::WIDTH;
 
     assert_eq!(gj_height % width, 0, "quotient height must be divisible by packing width");
+    assert_eq!(inv_z_h.len(), quotient_degree, "inv_z_h length must equal D_j");
+    // Bitmask for `i % inv_z_h.len()`; len is `2^log_blowup` by construction.
+    let inv_z_h_mask: usize = inv_z_h.len() - 1;
 
-    // Precompute selectors via coset method
-    let sels = coset.selectors::<F>();
+    // Precompute selectors over the quotient evaluation coset.
+    let sels = eval_domain.selectors();
 
     // ─── Decompose alpha powers by constraint layout ───
     let aux_ef_width = air.aux_width();
@@ -105,6 +125,12 @@ pub fn evaluate_constraints_into<F, EF, A>(
 
     // Main trace width
     let main_width = main_on_gj.width();
+    // Preprocessed trace view, constructed only when the AIR declares one.
+    let preproc_trace_view = preprocessed_on_gj.map(|m| {
+        let w = m.width();
+        RowMajorMatrixView::new(m.inner.values, w)
+    });
+    let preprocessed_width = preproc_trace_view.as_ref().map_or(0, Matrix::width);
 
     // Pack randomness for aux trace
     let packed_randomness: Vec<PE<F, EF>> = randomness.iter().copied().map(Into::into).collect();
@@ -122,6 +148,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
     let points_per_task = width * ROW_BLOCKS_PER_PARALLEL_TASK;
 
     let eval_big_slice = |main_buf: &mut Vec<P<F>>,
+                          preproc_buf: &mut Vec<P<F>>,
                           aux_base_buf: &mut Vec<P<F>>,
                           aux_pe_buf: &mut Vec<PE<F, EF>>,
                           g: usize,
@@ -134,17 +161,36 @@ pub fn evaluate_constraints_into<F, EF, A>(
             let selectors = sels.packed_at::<P<F>>(i_start);
 
             // Get main trace as packed row pair (stays in base field)
-            main_trace_view.collect_vertically_packed_row_pair_bitrev_into(
+            collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                &main_trace_view,
                 i_start,
-                constraint_degree,
+                quotient_degree,
                 main_buf,
             );
             let main_mat = RowMajorMatrixView::new(main_buf.as_slice(), main_width);
 
+            // Get preprocessed trace as packed row pair (when present). For AIRs
+            // without preprocessed columns, the window is empty and the AIR must
+            // not call `builder.preprocessed()`.
+            let preprocessed = if let Some(view) = preproc_trace_view.as_ref() {
+                collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                    view,
+                    i_start,
+                    quotient_degree,
+                    preproc_buf,
+                );
+                let m = RowMajorMatrixView::new(preproc_buf.as_slice(), preprocessed_width);
+                RowWindow::from_view(&m)
+            } else {
+                let empty: &[P<F>] = &[];
+                RowWindow::from_two_rows(empty, empty)
+            };
+
             // Get aux trace as packed row pair and convert to packed extension field
-            aux_trace_view.collect_vertically_packed_row_pair_bitrev_into(
+            collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                &aux_trace_view,
                 i_start,
-                constraint_degree,
+                quotient_degree,
                 aux_base_buf,
             );
 
@@ -166,6 +212,7 @@ pub fn evaluate_constraints_into<F, EF, A>(
             let mut folder: ProverConstraintFolder<'_, F, EF, P<F>, PE<F, EF>> =
                 ProverConstraintFolder {
                     main: RowWindow::from_view(&main_mat),
+                    preprocessed,
                     aux: RowWindow::from_view(&aux_mat),
                     packed_randomness: &packed_randomness,
                     public_values,
@@ -182,32 +229,50 @@ pub fn evaluate_constraints_into<F, EF, A>(
                 };
 
             #[cfg(debug_assertions)]
-            air.is_valid_builder(&folder).expect("builder dimensions must match AIR");
+            miden_lifted_air::debug::check_builder_shape(air, &folder);
             air.eval(&mut folder);
             let folded = folder.finalize_constraints();
 
-            // Unpack folded result and add scalars directly into the output chunk.
-            for (slot, val) in chunk.iter_mut().zip(PE::<F, EF>::to_ext_iter([folded])) {
-                *slot += val;
+            // Unpack the folded result, multiply by 1/Z_H (modular indexing since Z_H
+            // takes only D_j distinct values on gJ_j), and write into the output chunk.
+            for (k, (slot, val)) in
+                chunk.iter_mut().zip(PE::<F, EF>::to_ext_iter([folded])).enumerate()
+            {
+                *slot = val * inv_z_h[(i_start + k) & inv_z_h_mask];
             }
         }
     };
 
     #[cfg(feature = "parallel")]
     output.par_chunks_mut(points_per_task).enumerate().for_each_init(
-        || (Vec::<P<F>>::new(), Vec::<P<F>>::new(), Vec::<PE<F, EF>>::new()),
-        |(main_buf, aux_base_buf, aux_pe_buf), (g, big_slice)| {
-            eval_big_slice(main_buf, aux_base_buf, aux_pe_buf, g, big_slice);
+        || {
+            (
+                Vec::<P<F>>::new(),
+                Vec::<P<F>>::new(),
+                Vec::<P<F>>::new(),
+                Vec::<PE<F, EF>>::new(),
+            )
+        },
+        |(main_buf, preproc_buf, aux_base_buf, aux_pe_buf), (g, big_slice)| {
+            eval_big_slice(main_buf, preproc_buf, aux_base_buf, aux_pe_buf, g, big_slice);
         },
     );
 
     #[cfg(not(feature = "parallel"))]
     {
         let mut main_buf = Vec::<P<F>>::new();
+        let mut preproc_buf = Vec::<P<F>>::new();
         let mut aux_base_buf = Vec::<P<F>>::new();
         let mut aux_pe_buf = Vec::<PE<F, EF>>::new();
         output.chunks_mut(points_per_task).enumerate().for_each(|(g, big_slice)| {
-            eval_big_slice(&mut main_buf, &mut aux_base_buf, &mut aux_pe_buf, g, big_slice);
+            eval_big_slice(
+                &mut main_buf,
+                &mut preproc_buf,
+                &mut aux_base_buf,
+                &mut aux_pe_buf,
+                g,
+                big_slice,
+            );
         });
     }
 }

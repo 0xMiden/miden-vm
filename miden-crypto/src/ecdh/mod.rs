@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 use thiserror::Error;
 
 use crate::utils::{
@@ -26,7 +26,7 @@ pub(crate) trait KeyAgreementScheme {
     type SharedSecret: AsRef<[u8]> + Zeroize + ZeroizeOnDrop;
 
     /// Returns an ephemeral key pair generated from the provided RNG.
-    fn generate_ephemeral_keypair<R: CryptoRng + RngCore>(
+    fn generate_ephemeral_keypair<R: CryptoRng>(
         rng: &mut R,
     ) -> (Self::EphemeralSecretKey, Self::EphemeralPublicKey);
 

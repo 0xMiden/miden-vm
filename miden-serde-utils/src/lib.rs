@@ -482,6 +482,10 @@ where
         let v1 = T1::read_from(source)?;
         Ok((v1,))
     }
+
+    fn min_serialized_size() -> usize {
+        T1::min_serialized_size()
+    }
 }
 
 impl<T1, T2> Deserializable for (T1, T2)
@@ -690,7 +694,16 @@ impl<T: Deserializable> Deserializable for Vec<T> {
 impl<K: Deserializable + Ord, V: Deserializable> Deserializable for BTreeMap<K, V> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let len = source.read_usize()?;
-        source.read_many_iter(len)?.collect()
+        let mut map = BTreeMap::new();
+        for entry in source.read_many_iter(len)? {
+            let (key, value) = entry?;
+            if map.insert(key, value).is_some() {
+                return Err(DeserializationError::InvalidValue(String::from(
+                    "duplicate key in BTreeMap encoding",
+                )));
+            }
+        }
+        Ok(map)
     }
 
     fn min_serialized_size() -> usize {
@@ -701,7 +714,15 @@ impl<K: Deserializable + Ord, V: Deserializable> Deserializable for BTreeMap<K, 
 impl<T: Deserializable + Ord> Deserializable for BTreeSet<T> {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let len = source.read_usize()?;
-        source.read_many_iter(len)?.collect()
+        let mut set = BTreeSet::new();
+        for item in source.read_many_iter(len)? {
+            if !set.insert(item?) {
+                return Err(DeserializationError::InvalidValue(String::from(
+                    "duplicate item in BTreeSet encoding",
+                )));
+            }
+        }
+        Ok(set)
     }
 
     fn min_serialized_size() -> usize {
@@ -829,5 +850,41 @@ mod tests {
         let bytes = string.to_bytes();
         let as_arc = Arc::<str>::read_from_bytes(&bytes).unwrap();
         assert_eq!(&*as_arc, "other direction");
+    }
+
+    #[test]
+    fn btree_map_rejects_duplicate_keys() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&2usize.to_bytes());
+        bytes.extend_from_slice(&7u8.to_bytes());
+        bytes.extend_from_slice(&1u8.to_bytes());
+        bytes.extend_from_slice(&7u8.to_bytes());
+        bytes.extend_from_slice(&2u8.to_bytes());
+
+        let result = BTreeMap::<u8, u8>::read_from_bytes(&bytes);
+
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn btree_set_rejects_duplicate_items() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&2usize.to_bytes());
+        bytes.extend_from_slice(&7u8.to_bytes());
+        bytes.extend_from_slice(&7u8.to_bytes());
+
+        let result = BTreeSet::<u8>::read_from_bytes(&bytes);
+
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn budgeted_vec_of_one_element_tuples_accepts_exact_budget() {
+        let values = Vec::<(usize,)>::from([(0,), (1,), (2,)]);
+        let bytes = values.to_bytes();
+
+        let decoded = Vec::<(usize,)>::read_from_bytes_with_budget(&bytes, bytes.len()).unwrap();
+
+        assert_eq!(decoded, values);
     }
 }
