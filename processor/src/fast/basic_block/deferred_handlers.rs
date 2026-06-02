@@ -44,6 +44,18 @@ const CHUNK_TAG_OFFSET: usize = 1;
 /// Stack offset of the memory pointer for chunk data.
 const CHUNK_PTR_OFFSET: usize = 5;
 
+/// Number of field elements occupied by a deferred node tag.
+const TAG_NUM_ELEMENTS: usize = 4;
+/// Number of field elements in one deferred chunk block.
+const CHUNK_NUM_ELEMENTS: usize = 8;
+
+fn chunk_node_num_elements(n_chunks: u32) -> usize {
+    (n_chunks as usize)
+        .checked_mul(CHUNK_NUM_ELEMENTS)
+        .and_then(|payload_elements| payload_elements.checked_add(TAG_NUM_ELEMENTS))
+        .unwrap_or(usize::MAX)
+}
+
 /// Reads the expression node described by the deferred-register stack layout.
 fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
     let lo = processor.stack_get_word(DEFERRED_PAYLOAD_LO_OFFSET);
@@ -121,6 +133,19 @@ pub(super) fn handle_deferred_register_chunk(
         NodeType::Value | NodeType::Join => return Err(PrecompileError::InvalidNode.into()),
     };
 
+    // Reject chunk nodes that can never fit in the configured deferred-state budget before
+    // reading memory. Remaining-budget accounting still belongs to `DeferredState::register`,
+    // because only materializing the node tells us whether this registration is an idempotent
+    // duplicate (which must remain free).
+    let num_elements = chunk_node_num_elements(n);
+    let max_deferred_elements = processor.options.max_deferred_elements();
+    if num_elements > max_deferred_elements {
+        return Err(SystemEventError::DeferredStateTooLarge {
+            num_elements,
+            max: max_deferred_elements,
+        });
+    }
+
     // Bounds + alignment validation.
     if ptr > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: ptr }.into());
@@ -157,7 +182,7 @@ pub(super) fn handle_deferred_register_chunk(
 mod tests {
     use alloc::vec;
 
-    use miden_core::testing::precompile::Hash;
+    use miden_core::testing::precompile::{Hash, Uint};
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs};
@@ -170,7 +195,7 @@ mod tests {
     }
 
     fn test_precompiles() -> PrecompileRegistry {
-        PrecompileRegistry::default().with_precompile(Hash)
+        PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash)
     }
 
     fn write_chunk_stack(processor: &mut FastProcessor, tag: Tag, ptr: u32) {
@@ -205,5 +230,52 @@ mod tests {
 
         write_chunk_stack(&mut processor, tag, ptr);
         handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
+    }
+
+    /// Lay out `DeferredRegister`'s `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` operand stack.
+    fn write_register_stack(processor: &mut FastProcessor, tag: Tag, payload: [Felt; 8]) {
+        for (i, felt) in payload.iter().enumerate() {
+            processor.stack_write(DEFERRED_PAYLOAD_LO_OFFSET + i, *felt);
+        }
+        for (i, felt) in tag.as_word().iter().enumerate() {
+            processor.stack_write(DEFERRED_TAG_OFFSET + i, *felt);
+        }
+    }
+
+    #[test]
+    fn register_past_budget_is_rejected() {
+        // Budget = 12 elements = exactly one expression node (4 tag + 8 payload).
+        let mut processor = processor_with_budget(12);
+        let precompiles = test_precompiles();
+
+        // The first node fills the budget exactly.
+        write_register_stack(&mut processor, Uint::leaf_tag(), [Felt::from_u32(1); 8]);
+        handle_deferred_register(&mut processor, &precompiles).unwrap();
+
+        // A second, distinct node needs 12 more elements, but the first insertion left none.
+        write_register_stack(&mut processor, Uint::leaf_tag(), [Felt::from_u32(2); 8]);
+        let err = handle_deferred_register(&mut processor, &precompiles).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::DeferredStateTooLarge { num_elements: 12, max: 0 }
+        ));
+    }
+
+    #[test]
+    fn register_chunk_over_budget_is_rejected_before_reading_memory() {
+        // A near-`u32::MAX` byte count decodes to ~125M chunks. Without the pre-read budget check
+        // the handler would attempt a multi-GB `Vec::with_capacity` before failing; the pre-check
+        // rejects it on the projected element count alone, so this test stays cheap.
+        let mut processor = processor_with_budget(16);
+        let precompiles = test_precompiles();
+        let n_bytes = 4_000_000_000u32;
+        let expected = chunk_node_num_elements(Hash::n_chunks(n_bytes));
+
+        write_chunk_stack(&mut processor, Hash::preimage_tag(n_bytes), 0);
+        let err = handle_deferred_register_chunk(&mut processor, &precompiles).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::DeferredStateTooLarge { num_elements, max: 16 } if num_elements == expected
+        ));
     }
 }
