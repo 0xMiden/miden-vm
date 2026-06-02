@@ -1,0 +1,113 @@
+# ===== DEFERRED-DAG HELPERS =======================================================================
+#
+# NOTE: these procedures are duplicated verbatim from `miden::core::sys`
+# (crates/lib/core/asm/sys/mod.masm) so the `miden-precompiles` package is self-contained while the
+# crate is being stood up on this tracking branch. They should be deduplicated against a single
+# shared source once the precompile proof-model migration settles.
+#
+# `register_expr` / `register_chunk` are safe by default: they derive the node digest in-circuit,
+# so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
+# proc here — `adv.evaluate_deferred` returns an *unbound* host hint (the canonical `tag || payload`
+# on the advice stack), and using it soundly requires re-hashing in-circuit and logging a predicate
+# the verifier re-checks. That discipline is precompile-specific, so each precompile wraps the raw
+# event itself rather than calling a deceptively "safe" shared helper.
+
+#! Folds a precompile commitment into the rolling transcript via `log_precompile` and removes
+#! the helper words produced by the instruction.
+#!
+#! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
+#! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
+#! `log_precompile` opcode fold it into the transcript state using framework AND capacity
+#! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
+#! don't clobber data deeper in the stack.
+#!
+#! Input: `[COMM, TAG, ...]`
+#! Output: Stack with `COMM` and `TAG` consumed and the three helper words produced by
+#!         `log_precompile` dropped.
+pub proc log_precompile_request
+    hmerge
+    # => [STMNT, ...]
+    padw padw movdnw.2
+    # => [_, STMNT, _, ...]
+    log_precompile
+    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
+    dropw dropw dropw
+end
+
+#! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and
+#! returns its content-addressed digest on top of the operand stack.
+#!
+#! `adv.register_deferred` interns the node host-side (no stack or advice output); the digest is
+#! then derived *in-circuit* so it is constrained to the operand-stack payload rather than supplied
+#! by advice. The input is already in Poseidon2 sponge layout — `[R0=PAYLOAD_LO, R1=PAYLOAD_HI,
+#! C=TAG]` — so one `hperm` produces the permuted state and the digest is its rate0 word
+#! (`state[0..4]`), matching `Node::digest`.
+#!
+#! Input:  `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]`
+#! Output: `[NODE_DIGEST, ...]`
+pub proc register_expr
+    adv.register_deferred
+    # => [PAYLOAD_LO, PAYLOAD_HI, TAG, ...]  (rate = payload, capacity = tag)
+    hperm
+    # => [R0', R1', C', ...]
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, ...]  (digest = rate0 = state[0..4])
+end
+
+#! Registers a chunk-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
+#!
+#! `adv.register_deferred_chunk` interns the node host-side (reading `8n` felts from memory at
+#! `ptr`; `n` derived from the tag); it produces no stack or advice output. The digest is then
+#! derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity = `TAG`,
+#! one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather than
+#! supplied by advice, and the rate0 word matches `Node::digest`. The chunk count `n` is taken as
+#! an operand (the caller knows it); the event ignores it. Empty chunk bodies are forbidden, so
+#! `n ≥ 1` and the linear-hash loop always runs at least one permutation.
+#!
+#! Input:  `[TAG, ptr, n_chunks, ...]`
+#! Output: `[NODE_DIGEST, ...]`
+pub proc register_chunk
+    adv.register_deferred_chunk
+    # => [TAG, ptr, n_chunks, ...]
+
+    # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
+    movup.5 mul.8 dup.5 add movdn.5
+    # => [TAG, ptr, end_addr, ...]
+
+    # Build the sponge state: rate = 0, capacity = TAG, with [start_addr, end_addr] beneath it.
+    padw padw
+    # => [R0=0w, R1=0w, C=TAG, start_addr=ptr, end_addr, ...]
+
+    # Linear hash: absorb one 8-felt block per iteration until start_addr reaches end_addr.
+    # (Mirrors poseidon2::absorb_double_words_from_memory, inlined to keep `sys` dependency-free.)
+    dup.13 dup.13 neq
+    while.true
+        mem_stream hperm
+        dup.13 dup.13 neq
+    end
+    # => [R0', R1', C', end_addr, end_addr, ...]
+
+    swapw.2 dropw dropw
+    # => [NODE_DIGEST, end_addr, end_addr, ...]  (digest = rate0)
+    movup.4 drop movup.4 drop
+    # => [NODE_DIGEST, ...]
+end
+
+#! Folds a deferred node digest into the rolling deferred commitment using the existing
+#! `log_precompile` commitment state. The digest must reference a node that will reduce to TRUE
+#! under the installed precompiles.
+#!
+#! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees
+#! NODE_DIGEST at stack[4..8] (the HPERM rate1 lanes). The opcode folds with framework AND
+#! capacity `[1, 0, 0, 0]`, then this helper drops the three words it writes to stack[0..12].
+#!
+#! Input:  `[NODE_DIGEST, ...]`
+#! Output: `[...]` (the deferred commitment root advances; node is folded in)
+pub proc log_node_digest
+    padw padw movdnw.2
+    # => [_, NODE_DIGEST, _, ...]
+    log_precompile
+    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
+    dropw dropw dropw
+end

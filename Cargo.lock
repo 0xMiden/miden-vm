@@ -1652,7 +1652,12 @@ dependencies = [
 name = "miden-precompiles"
 version = "0.24.0"
 dependencies = [
+ "miden-assembly",
  "miden-core",
+ "miden-mast-package",
+ "miden-package-registry",
+ "miden-processor",
+ "miden-utils-sync",
 ]
 
 [[package]]
