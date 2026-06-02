@@ -41,8 +41,8 @@ const SECP256K1_SCALAR_MODULUS: &[u16] = &[
 /// - `a`, `b`: operand-stack inputs encoded as 8 u32 limbs. The generated proc assumes this bound;
 ///   callers must validate untrusted or advice-derived values before calling.
 /// - On success, the proc returns the canonical residue `c = a * b mod p`, with `c < p`.
-/// - The standard witness handler is complete when `floor(a * b / p) < 2^256`. This holds if
-///   either input is canonical (`< p`) and the other is any well-formed u256.
+/// - The standard witness handler is complete when `floor(a * b / p) < 2^256`. This holds if either
+///   input is canonical (`< p`) and the other is any well-formed u256.
 /// - Malformed or inconsistent advice traps.
 ///
 /// Identity: `a(alpha) * b(alpha) - q(alpha) * p(alpha) - c(alpha)
