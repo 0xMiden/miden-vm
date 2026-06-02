@@ -1096,7 +1096,7 @@ mod tests {
 
     use miden_assembly_syntax::{
         ast::Path as AstPath,
-        debuginfo::{DefaultSourceManager, SourceManagerExt, Span},
+        debuginfo::{DefaultSourceManager, Span},
     };
     use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
@@ -1827,21 +1827,6 @@ mod tests {
             .expect_err("mismatched digest requirement should fail for preassembled packages");
 
         assert!(error.to_string().contains("resolved version was '1.0.0#"));
-    }
-
-    #[test]
-    fn validates_bin_path_is_required() {
-        let tempdir = TempDir::new().unwrap();
-        let manifest_path = tempdir.path().join("miden-project.toml");
-        write_file(
-            &manifest_path,
-            "[package]\nname = \"root\"\nversion = \"1.0.0\"\n\n[[bin]]\nname = \"cli\"\n",
-        );
-
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let source = source_manager.load_file(&manifest_path).unwrap();
-        let error = Package::load(source).expect_err("manifest should be rejected");
-        assert!(error.to_string().contains("invalid build target configuration"));
     }
 
     #[test]

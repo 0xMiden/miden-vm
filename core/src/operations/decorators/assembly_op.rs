@@ -42,12 +42,12 @@ impl AssemblyOp {
         &self.context_name
     }
 
-    /// Returns the number of VM cycles taken to execute the assembly instruction of this decorator.
+    /// Returns the number of VM cycles taken to execute the assembly instruction.
     pub const fn num_cycles(&self) -> u8 {
         self.num_cycles
     }
 
-    /// Returns the assembly instruction corresponding to this decorator.
+    /// Returns the assembly instruction corresponding to this source mapping.
     pub fn op(&self) -> &str {
         &self.op
     }
@@ -55,7 +55,7 @@ impl AssemblyOp {
     // STATE MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Change cycles corresponding to an AsmOp decorator to the specified number of cycles.
+    /// Change cycles corresponding to this AssemblyOp to the specified number of cycles.
     pub fn set_num_cycles(&mut self, num_cycles: u8) {
         self.num_cycles = num_cycles;
     }

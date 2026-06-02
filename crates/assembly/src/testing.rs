@@ -3,7 +3,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
-    Library, Parse, ParseOptions, Path, Word,
+    Parse, ParseOptions, Path, Word,
     ast::{Module, ModuleKind},
     debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
@@ -17,6 +17,7 @@ pub use miden_assembly_syntax::{
 #[cfg(feature = "testing")]
 use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::program::Program;
+use miden_mast_package::PackageId;
 #[cfg(feature = "std")]
 use miden_project::TargetType;
 
@@ -98,7 +99,7 @@ impl TestContext {
     #[cfg(feature = "testing")]
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        parser::parse_forms(source.clone()).map_err(|err| Report::new(err).with_source_code(source))
+        parser::parse_forms(source)
     }
 
     /// Parse the given source file into an executable [Module].
@@ -153,11 +154,12 @@ impl TestContext {
         path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<Box<Module>, Report> {
+        let path = path.as_ref().to_absolute().map_err(Report::msg)?;
         source.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
-                ..ParseOptions::new(ModuleKind::Library, path.as_ref().to_absolute())
+                ..ParseOptions::new(ModuleKind::Library, path)
             },
         )
     }
@@ -180,10 +182,11 @@ impl TestContext {
         path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<(), Report> {
+        let path = path.as_ref().to_absolute().map_err(Report::msg)?;
         let module = source.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
-                path: Some(path.as_ref().to_absolute().into_owned().into()),
+                path: Some(path.into_owned().into()),
                 ..ParseOptions::for_library()
             },
         )?;
@@ -192,8 +195,8 @@ impl TestContext {
 
     /// Add the modules of `library` to the [Assembler] constructed by this context.
     #[track_caller]
-    pub fn add_library(&mut self, library: impl AsRef<Library>) -> Result<(), Report> {
-        self.assembler.link_dynamic_library(library)
+    pub fn add_library(&mut self, package: Arc<miden_mast_package::Package>) -> Result<(), Report> {
+        self.assembler.link_package(package, miden_project::Linkage::Dynamic)
     }
 
     /// Compile a [Program] from `source` using the [Assembler] constructed by this context.
@@ -202,19 +205,23 @@ impl TestContext {
     /// module represented in `source`.
     #[track_caller]
     pub fn assemble(&self, source: impl Parse) -> Result<Program, Report> {
-        self.assembler().assemble_program(source)
+        Ok(self.assembler().assemble_program("test", source)?.unwrap_program())
     }
 
-    /// Compile a [Library] from `modules` using the [Assembler] constructed by this
-    /// context.
+    /// Compile a library package from `modules` using the [Assembler] constructed by this context.
     ///
     /// NOTE: Any modules added by, e.g. `add_module`, will be available to the library
     #[track_caller]
     pub fn assemble_library(
         &self,
+        name: impl Into<PackageId>,
+        version: Option<&str>,
         modules: impl IntoIterator<Item = Box<Module>>,
-    ) -> Result<Arc<Library>, Report> {
-        self.assembler().assemble_library(modules)
+    ) -> Result<Box<miden_mast_package::Package>, Report> {
+        let version = version.unwrap_or("0.0.0").parse().unwrap();
+        let mut package = self.assembler().assemble_library(name, modules)?;
+        package.version = version;
+        Ok(package)
     }
 
     /// Compile a module from `source`, with the fully-qualified name `path`, to MAST, returning
@@ -494,20 +501,24 @@ mod package_features {
                 self.source_manager(),
             )
             .unwrap();
-            let library = self.assemble_library([module]).expect("failed to assemble library");
-
-            Package::from_library(
-                name.into(),
-                version.parse().unwrap(),
-                TargetType::Library,
-                library,
-                dependencies.into_iter().map(|(name, version, kind, digest)| Dependency {
-                    name: name.into(),
-                    version: version.parse().unwrap(),
-                    kind,
-                    digest,
-                }),
-            )
+            let name = PackageId::from(name);
+            let mut package = self
+                .assembler()
+                .assemble_library(name, [module])
+                .expect("failed to assemble library");
+            package.version = version.parse().unwrap();
+            for (name, version, kind, digest) in dependencies {
+                package
+                    .manifest
+                    .add_dependency(Dependency {
+                        name: name.into(),
+                        kind,
+                        version: version.parse().unwrap(),
+                        digest,
+                    })
+                    .expect("failed to add dependency");
+            }
+            package
         }
     }
 }

@@ -1,13 +1,9 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_air::{
-    ProcessorAir,
+    MidenAir,
     lookup::build_logup_aux_trace,
-    trace::{
-        DECODER_TRACE_OFFSET,
-        chiplets::hasher::HASH_CYCLE_LEN,
-        decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
-    },
+    trace::{RowIndex, chiplets::hasher::HASH_CYCLE_LEN},
 };
 use miden_core::{
     Felt, Word,
@@ -15,8 +11,8 @@ use miden_core::{
     field::QuadFelt,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
-        SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestId,
+        MastNodeExt, MastNodeId, SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
     precompile::PrecompileRequest,
@@ -47,7 +43,7 @@ fn dyn_target_proc_hash() -> &'static [Felt] {
     static HASH: LazyLock<Vec<Felt>> = LazyLock::new(|| {
         // Build the same target basic block as in dyn_program/dyncall_program
         let mut forest = MastForest::new();
-        let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
             .add_to_forest(&mut forest)
             .unwrap();
         // FastProcessor::new now expects first element to be top of stack
@@ -62,10 +58,9 @@ fn external_lib_proc_digest() -> Word {
     use std::sync::LazyLock;
     static DIGEST: LazyLock<Word> = LazyLock::new(|| {
         let mut forest = MastForest::new();
-        let swap_block =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
-                .add_to_forest(&mut forest)
-                .unwrap();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut forest)
+            .unwrap();
         forest.get_node_by_id(swap_block).unwrap().digest()
     });
     *DIGEST
@@ -128,39 +123,44 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // Join node. Same execution as case 4, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
 #[case(split_program(), 9, &[ZERO, SENTINEL_VALUE])]
-// Case 7: LOOP start
+// Case 7: LOOP start — fragment boundary lands on the LOOP row. The LOOP is do-while: with
+// stack `[ZERO, SENTINEL]` the body runs once (Pad+Drop is net-zero, so the trailing condition
+// at the body's exit is the same `ZERO` that drove entry), then END exits the loop.
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
-//  5:   LOOP END
-//  7: END
-//  8: HALT
-#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
-// Case 8: LOOP END, when loop was not entered
-//  0: JOIN
-//  1:   BLOCK SWAP SWAP END
-//  5:   LOOP END
-//  7: END
-//  8: HALT
-#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
-// Case 9: LOOP END, when loop was entered
-//  0: JOIN
-//  1:   BLOCK SWAP SWAP END
-//  5:   LOOP
+//  5:   LOOP                <-- fragment boundary
 //  6:     BLOCK PAD DROP END
 // 10:   END
 // 11: END
 // 12: HALT
-#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
-// Case 10: LOOP REPEAT
+#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
+// Case 8: fragment boundary one row inside the loop body (SPAN of body) — same execution as
+// Case 7, just a different boundary.
+#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
+// Case 9: LOOP REPEAT — `[ONE, ZERO, SENTINEL]` makes the body run twice (first iteration
+// trailing condition is ONE, second is ZERO).
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP
 //  6:     BLOCK PAD DROP END
-// 10:   REPEAT
+// 10:   REPEAT              <-- fragment boundary
 // 11:     BLOCK PAD DROP END
 // 15:   END
 // 16: END
 // 17: HALT
+#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
+// Case 10: LOOP REPEAT (deeper) — `[ONE, ONE, ZERO, SENTINEL]` makes the body run three times.
+//  0: JOIN
+//  1:   BLOCK SWAP SWAP END
+//  5:   LOOP
+//  6:     BLOCK PAD DROP END
+// 10:   REPEAT              <-- fragment boundary
+// 11:     BLOCK PAD DROP END
+// 15:   REPEAT
+// 16:     BLOCK PAD DROP END
+// 20:   END
+// 21: END
+// 22: HALT
 #[case(loop_program(), 10, &[ONE, ONE, ZERO, SENTINEL_VALUE])]
 // Case 11: CALL START
 //  0: JOIN
@@ -428,20 +428,32 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let main_from_fragments = trace_from_fragments.main_trace().to_row_major();
-    let main_from_single = trace_from_single_fragment.main_trace().to_row_major();
-    let (aux_from_fragments, committed_from_fragments) =
-        build_logup_aux_trace(&ProcessorAir, &main_from_fragments, &challenges);
-    let (aux_from_single, committed_from_single) =
-        build_logup_aux_trace(&ProcessorAir, &main_from_single, &challenges);
-    assert_eq!(
-        aux_from_fragments.values, aux_from_single.values,
-        "LogUp aux trace mismatch between fragments and single fragment"
-    );
-    assert_eq!(
-        committed_from_fragments, committed_from_single,
-        "LogUp committed finals mismatch between fragments and single fragment"
-    );
+    let (core_from_fragments, chip_from_fragments) =
+        trace_from_fragments.main_trace().to_core_chiplets_matrices();
+    let (core_from_single, chip_from_single) =
+        trace_from_single_fragment.main_trace().to_core_chiplets_matrices();
+    for (label, air_frag, air_single) in [
+        ("Core", &core_from_fragments, &core_from_single),
+        ("Chiplets", &chip_from_fragments, &chip_from_single),
+    ] {
+        let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
+            let (a, c) = build_logup_aux_trace(&MidenAir::CORE, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::CORE, air_single, &challenges);
+            (a, c, b, d)
+        } else {
+            let (a, c) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_frag, &challenges);
+            let (b, d) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_single, &challenges);
+            (a, c, b, d)
+        };
+        assert_eq!(
+            aux_frag.values, aux_single.values,
+            "{label} LogUp aux trace mismatch between fragments and single fragment"
+        );
+        assert_eq!(
+            committed_frag, committed_single,
+            "{label} LogUp committed finals mismatch between fragments and single fragment"
+        );
+    }
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
     // We use DeterministicTrace to produce stable Debug output, since ExecutionTrace contains
@@ -507,11 +519,11 @@ fn test_nested_loop_end_flags_stable_across_fragmentation() {
     );
     assert!(
         end_flags.contains(&[ONE, ONE, ZERO, ZERO].into()),
-        "expected an END row for inner loop node (is_loop_body=1, loop_entered=1)"
+        "expected an END row for inner loop node (is_loop_body=1, is_loop=1)"
     );
     assert!(
         end_flags.contains(&[ZERO, ONE, ZERO, ZERO].into()),
-        "expected an END row for outer loop node (is_loop_body=0, loop_entered=1)"
+        "expected an END row for outer loop node (is_loop_body=0, is_loop=1)"
     );
 }
 
@@ -540,7 +552,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     );
 
     let trace = build_trace(trace_inputs).unwrap();
-    let total_rows_without_halt = trace.main_trace().num_rows() - 1;
+    let total_rows_without_halt = trace.main_trace().core_height() - 1;
 
     assert_ne!(
         total_rows_without_halt % FRAGMENT_SIZE,
@@ -577,7 +589,7 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 /// Creates a library with a single procedure containing just a SWAP operation.
 fn create_simple_library() -> HostLibrary {
     let mut mast_forest = MastForest::new();
-    let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+    let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(swap_block);
@@ -591,13 +603,13 @@ fn create_simple_library() -> HostLibrary {
 fn join_program() -> Program {
     let mut program = MastForest::new();
 
-    let basic_block_mul = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+    let basic_block_mul = BasicBlockNodeBuilder::new(vec![Operation::Mul])
         .add_to_forest(&mut program)
         .unwrap();
-    let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut program)
         .unwrap();
-    let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+    let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap])
         .add_to_forest(&mut program)
         .unwrap();
 
@@ -622,15 +634,15 @@ fn split_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
                 .add_to_forest(&mut program)
                 .unwrap();
 
         let target_split_node = {
-            let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add])
                 .add_to_forest(&mut program)
                 .unwrap();
-            let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+            let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap])
                 .add_to_forest(&mut program)
                 .unwrap();
 
@@ -657,13 +669,13 @@ fn loop_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
                 .add_to_forest(&mut program)
                 .unwrap();
 
         let target_loop_node = {
             let basic_block_pad_drop =
-                BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+                BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
                     .add_to_forest(&mut program)
                     .unwrap();
 
@@ -685,7 +697,7 @@ fn nested_loop_program() -> Program {
 
     let inner_loop = {
         let basic_block_pad_drop =
-            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
                 .add_to_forest(&mut program)
                 .unwrap();
 
@@ -707,7 +719,7 @@ fn call_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
                 .add_to_forest(&mut program)
                 .unwrap();
 
@@ -733,7 +745,7 @@ fn syscall_program() -> Program {
     let (root_join_node, kernel_proc_digest) = {
         // In this test, we also include this procedure in the kernel so that it can be syscall'ed.
         let basic_block_swap_swap =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
                 .add_to_forest(&mut program)
                 .unwrap();
 
@@ -765,13 +777,11 @@ fn basic_block_program_small() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let target_basic_block = BasicBlockNodeBuilder::new(
-            vec![Operation::Swap, Operation::Push(Felt::from_u32(42))],
-            Vec::new(),
-        )
-        .add_to_forest(&mut program)
-        .unwrap();
-        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let target_basic_block =
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Push(Felt::from_u32(42))])
+                .add_to_forest(&mut program)
+                .unwrap();
+        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut program)
             .unwrap();
 
@@ -795,11 +805,10 @@ fn basic_block_program_multiple_batches() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let target_basic_block =
-            BasicBlockNodeBuilder::new(vec![Operation::Swap; NUM_SWAPS], Vec::new())
-                .add_to_forest(&mut program)
-                .unwrap();
-        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let target_basic_block = BasicBlockNodeBuilder::new(vec![Operation::Swap; NUM_SWAPS])
+            .add_to_forest(&mut program)
+            .unwrap();
+        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut program)
             .unwrap();
 
@@ -822,18 +831,15 @@ fn dyn_program() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let basic_block = BasicBlockNodeBuilder::new(
-            vec![
-                Operation::Push(HASH_ADDR),
-                Operation::MStoreW,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Push(HASH_ADDR),
-            ],
-            Vec::new(),
-        )
+        let basic_block = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(HASH_ADDR),
+            Operation::MStoreW,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(HASH_ADDR),
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
@@ -846,7 +852,7 @@ fn dyn_program() -> Program {
     program.make_root(root_join_node);
 
     // Add the procedure that DYN will call. Its digest is computed by dyn_target_proc_hash().
-    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
         .add_to_forest(&mut program)
         .unwrap();
     program.make_root(target);
@@ -864,18 +870,15 @@ fn dyncall_program() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let basic_block = BasicBlockNodeBuilder::new(
-            vec![
-                Operation::Push(HASH_ADDR),
-                Operation::MStoreW,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Drop,
-                Operation::Push(HASH_ADDR),
-            ],
-            Vec::new(),
-        )
+        let basic_block = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(HASH_ADDR),
+            Operation::MStoreW,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(HASH_ADDR),
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
@@ -888,7 +891,7 @@ fn dyncall_program() -> Program {
     program.make_root(root_join_node);
 
     // Add the procedure that DYNCALL will call. Its digest is computed by dyn_target_proc_hash().
-    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap])
         .add_to_forest(&mut program)
         .unwrap();
     program.make_root(target);
@@ -907,7 +910,7 @@ fn external_program() -> Program {
 
     let root_join_node = {
         let basic_block_pad_drop =
-            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
                 .add_to_forest(&mut program)
                 .unwrap();
 
@@ -978,23 +981,109 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     let mut host = DefaultHost::default();
     let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
-    // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
-    // forest.
-    let empty_forest = Arc::new(MastForest::new());
-    // Build a small forest just to get a valid MastNodeId, then pair it with the empty forest.
-    let mut temp_forest = MastForest::new();
-    let valid_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
-        .add_to_forest(&mut temp_forest)
-        .unwrap();
+    // Inject a HashBasicBlock entry that references the executed program's forest (id 0 in the
+    // store, which the tracer always populates with the entrypoint's forest) with a node ID that
+    // is well past any node actually in the sparse forest.
+    let bogus_node_id = MastNodeId::new_unchecked(u32::MAX);
+    let forest_id = MastForestId::from(0u32);
     trace_inputs
         .trace_generation_context_mut()
         .hasher_for_chiplet
-        .record_hash_basic_block(empty_forest, valid_id, [ZERO; 4].into());
+        .record_hash_basic_block(forest_id, bogus_node_id, [ZERO; 4].into());
 
     let result = build_trace(trace_inputs);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
+    );
+}
+
+/// Where to tamper with a [`miden_core::mast::MastForestId`] in a [`TraceBuildInputs`].
+#[derive(Debug, Clone, Copy)]
+enum BadForestIdLocation {
+    /// Replace the first fragment's `initial_mast_forest_id`.
+    InitialForestId,
+    /// Replace the forest id of the first entry in the first fragment's `mast_forest_resolution`
+    /// replay (DYN/External resolution path).
+    ResolutionReplay,
+}
+
+/// Verifies that `build_trace` returns `Err` (instead of panicking) when a fragment carries a
+/// [`miden_core::mast::MastForestId`] that does not exist in `mast_forest_store`.
+///
+/// `CoreTraceFragmentContext` can come from outside this process (e.g. when serialized and
+/// rebuilt), and so its [`miden_core::mast::MastForestId`]s must be treated as
+/// untrusted/attacker-controlled. Both the up-front ids (`initial_mast_forest_id`, continuation
+/// stack) and the per-resolution ids in `mast_forest_resolution` (the DYN/External path that is
+/// most likely to be hit when libraries are involved) must be validated rather than indexed
+/// into, and the error must propagate up through `build_trace`.
+#[rstest]
+#[case::initial_forest_id(
+    basic_block_program_small(),
+    DEFAULT_STACK,
+    false,
+    BadForestIdLocation::InitialForestId
+)]
+#[case::dyn_resolution(
+    dyn_program(),
+    external_lib_proc_hash_for_stack(),
+    true,
+    BadForestIdLocation::ResolutionReplay
+)]
+#[case::external_resolution(
+    external_program(),
+    DEFAULT_STACK,
+    true,
+    BadForestIdLocation::ResolutionReplay
+)]
+fn test_build_trace_returns_err_on_invalid_mast_forest_id(
+    #[case] program: Program,
+    #[case] stack_inputs: &[Felt],
+    #[case] load_library: bool,
+    #[case] tamper_at: BadForestIdLocation,
+) {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+    if load_library {
+        host.load_library(create_simple_library()).unwrap();
+    }
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+
+    let store_len = trace_inputs.trace_generation_context().mast_forest_store.len();
+    let bogus_forest_id = MastForestId::from(store_len as u32);
+    let ctx = &mut trace_inputs.trace_generation_context_mut().core_trace_contexts[0];
+    match tamper_at {
+        BadForestIdLocation::InitialForestId => {
+            ctx.initial_mast_forest_id = bogus_forest_id;
+        },
+        BadForestIdLocation::ResolutionReplay => {
+            let resolution = &mut ctx.replay.mast_forest_resolution;
+            let mut entries = Vec::new();
+            while let Ok(entry) = resolution.replay_resolution() {
+                entries.push(entry);
+            }
+            assert!(!entries.is_empty(), "expected at least one resolution to tamper with");
+            entries[0].1 = bogus_forest_id;
+            for (node_id, forest_id) in entries {
+                resolution.record_resolution(node_id, forest_id);
+            }
+        },
+    }
+
+    let result = build_trace(trace_inputs);
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when a fragment carries a MastForestId out of range of \
+         the mast_forest_store"
     );
 }
 
@@ -1241,22 +1330,11 @@ fn build_trace_for_program(
 fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
     let main_trace = trace.main_trace();
 
-    (0..main_trace.num_rows())
+    (0..main_trace.core_height())
         .filter_map(|row_idx| {
-            if read_opcode(main_trace, row_idx) == opcodes::END {
-                Some(
-                    [
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6)
-                            [row_idx],
-                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7)
-                            [row_idx],
-                    ]
-                    .into(),
-                )
+            let idx = RowIndex::from(row_idx);
+            if read_opcode(main_trace, idx) == opcodes::END {
+                Some(main_trace.decoder_hasher_state_second_half(idx))
             } else {
                 None
             }
@@ -1264,15 +1342,10 @@ fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
         .collect()
 }
 
-fn read_opcode(main_trace: &MainTrace, row_idx: usize) -> u8 {
-    let mut result = 0;
-    for i in 0..NUM_OP_BITS {
-        let op_bit = main_trace.get_column(DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i)[row_idx]
-            .as_canonical_u64();
-        assert!(op_bit <= 1, "invalid op bit");
-        result += op_bit << i;
-    }
-    result as u8
+fn read_opcode(main_trace: &MainTrace, row_idx: RowIndex) -> u8 {
+    let opcode = main_trace.get_op_code(row_idx).as_canonical_u64();
+    assert!(opcode <= u8::MAX as u64, "invalid opcode");
+    opcode as u8
 }
 
 /// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.

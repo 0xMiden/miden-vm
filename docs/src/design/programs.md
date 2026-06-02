@@ -23,9 +23,15 @@ A **split** block is used to describe conditional execution. When the VM encount
 A *split* block must always have two children, and thus, cannot be a leaf node in the tree.
 
 ### Loop block
-A **loop** block is used to describe condition-based iterative execution. When the VM encounters a *loop* block, it checks the top of the stack. If the top of the stack is $1$, it executes the loop body, if the top of the stack is $0$, the block is not executed. If the top of the stack is neither $0$ nor $1$, the execution fails.
+A **loop** block is used to describe condition-based iterative execution with do-while semantics:
+when the VM encounters a *loop* block, the loop body is executed unconditionally for the first
+iteration. After the body has finished, the VM checks the top of the stack: if it is $1$, the body
+is executed again; if it is $0$, the loop is exited. If the top of the stack is neither $0$ nor
+$1$, the execution fails.
 
-After the body of the loop is executed, the VM checks the top of the stack again. If the top of the stack is $1$, the body is executed again, if the top of the stack is $0$, the loop is exited. If the top of the stack is neither $0$ nor $1$, the execution fails.
+Source-level constructs that need an entry-time check (`while.true` in Miden assembly) are compiled
+to a *split* block wrapping the loop, so the body is skipped entirely when the initial condition
+is false.
 
 ![loop_block](../img/design/programs/loop_block.png)
 
@@ -37,6 +43,10 @@ A **dyn** block is used to describe a node whose target is specified dynamically
 ![dyn_block](../img/design/programs/dyn_block.png)
 
 A *dyn* block must always have one (dynamically-specified) child. Thus, it cannot be a leaf node in the tree.
+
+### Dyncall block
+
+A **dyncall** block is used to describe a function call whose target is specified dynamically via the stack. It behaves like a dynamic target combined with a call: the target is not hardcoded, and execution enters a new user context before returning to the caller.
 
 ### Call block
 
@@ -115,7 +125,11 @@ Execution of this program would proceed as follows:
 4. Block $B_3$ is a *split block*, and thus, the VM will pop the value off the top of the stack. If the popped value is $1$, operations from block $b$ will be executed in sequence. If the popped value is $0$, then the VM will attempt to execute block $B_2$.
 5. $B_2$ is a *join block*, thus, the VM will try to execute block $B_1$ first, and then execute operations from block $e$.
 6. Block $B_1$ is also a *join_block*, and thus, the VM will first execute all operations in block $c$, and then will attempt to execute block $B_0$.
-7. Block $B_0$ is a loop block, thus, the VM will pop the value off the top of the stack. If the popped value is $1$, the VM will execute the body of the loop defined by block $d$. If the popped value is $0$, the VM will not execute block $d$ and instead will move up the tree executing first block $e$, then $f$.
+7. Block $B_0$ corresponds to a `while.true`. The assembler desugars this into a *split* whose
+   true branch is the do-while *loop* containing block $d$, and whose false branch is a no-op. The
+   VM pops the value off the top of the stack: if the popped value is $1$, the VM enters the loop
+   and executes block $d$; if the popped value is $0$, the VM takes the false branch and skips
+   $d$, then moves up the tree executing first block $e$, then $f$.
 8. If the VM does enter the loop, then after operation $d_n$ is executed, the VM will pop the value off the top of the stack again. If the popped value is $1$, the VM will execute block $d$ again, and again until the top of the stack becomes $0$. Once the top of the stack becomes $0$, the VM will exit the loop and will move up the tree executing first block $e$, then $f$.
 
 ## Program hash computation

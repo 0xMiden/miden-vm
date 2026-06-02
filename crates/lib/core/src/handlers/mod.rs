@@ -10,6 +10,7 @@ use core::mem::size_of;
 /// Used for converting between byte arrays and u32-packed field elements in memory.
 pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 
+pub mod debug;
 pub mod ecdsa;
 pub mod eddsa_ed25519;
 pub mod falcon_div;
@@ -18,6 +19,7 @@ pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u128_div;
+pub mod u256_div;
 pub mod u64_div;
 
 // HELPER FUNCTIONS

@@ -34,7 +34,9 @@ pub use self::{
         ByteIndex, ByteOffset, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceContent,
         SourceContentUpdateError, SourceFile, SourceFileRef, SourceLanguage,
     },
-    source_manager::{DefaultSourceManager, SourceId, SourceManager, SourceManagerSync},
+    source_manager::{
+        DefaultSourceManager, SourceId, SourceManager, SourceManagerError, SourceManagerSync,
+    },
     span::{SourceSpan, Span, Spanned},
 };
 
@@ -114,6 +116,17 @@ impl Uri {
         match path.split_once(['?', '#']) {
             Some((path, _)) => path,
             None => path,
+        }
+    }
+
+    /// Convert this URI to a [std::path::PathBuf], if it represents a file path
+    #[cfg(feature = "std")]
+    pub fn to_path(&self) -> Option<std::path::PathBuf> {
+        let uri = self.0.as_ref();
+        match uri.split_once("//") {
+            None => Some(std::path::PathBuf::from(uri)),
+            Some(("file", rest)) => Some(std::path::PathBuf::from(rest)),
+            Some(_) => None,
         }
     }
 }

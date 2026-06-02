@@ -11,7 +11,7 @@ pub struct CompileCmd {
     /// Path to .masm assembly file
     #[arg(short = 'a', long = "assembly", value_parser)]
     assembly_file: PathBuf,
-    /// Paths to .masl library files
+    /// Paths to .masp library files
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
     /// Path to output file
@@ -33,7 +33,7 @@ impl CompileCmd {
 
         // compile the program
         // Note: assembler debug mode is always enabled (issue #1821)
-        let compiled_program = program.compile(&libraries.libraries)?;
+        let compiled_program = program.compile(libraries.libraries.iter().cloned())?;
 
         // report program hash to user
         let program_hash: [u8; 32] = compiled_program.hash().into();

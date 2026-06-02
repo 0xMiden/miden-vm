@@ -1,5 +1,5 @@
-# Allow actionlint to recognize the org's custom Warp runner label used by the
-# non-regression benchmark workflows.
+# Allow actionlint to recognize custom runner labels used by benchmark workflows.
 self-hosted-runner:
   labels:
+    - codspeed-macro
     - warp-ubuntu-latest-x64-8x

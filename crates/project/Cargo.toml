@@ -13,9 +13,6 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
-[package.metadata.cargo-shear]
-ignored = ["serde_json"]
-
 [features]
 default = ["std"]
 arbitrary = ["std", "dep:proptest", "dep:proptest-derive", "miden-assembly-syntax/arbitrary"]
@@ -52,3 +49,6 @@ toml = { workspace = true, features = ["std", "serde", "parse"] }
 # with build scripts and such, we just disable this warning for now, as it is essentially useless
 # until we get the same behavior on stable and nightly
 unused_assignments = "allow"
+
+[package.metadata.cargo-shear]
+ignored = ["proptest", "serde_json"]

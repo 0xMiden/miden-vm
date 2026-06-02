@@ -56,9 +56,13 @@ impl PrettyPrint for Instruction {
             Self::NeqImm(value) => inst_with_felt_imm("neq", value),
             Self::Eqw => const_text("eqw"),
             Self::Lt => const_text("lt"),
+            Self::LtImm(value) => inst_with_felt_imm("lt", value),
             Self::Lte => const_text("lte"),
+            Self::LteImm(value) => inst_with_felt_imm("lte", value),
             Self::Gt => const_text("gt"),
+            Self::GtImm(value) => inst_with_felt_imm("gt", value),
             Self::Gte => const_text("gte"),
+            Self::GteImm(value) => inst_with_felt_imm("gte", value),
             Self::IsOdd => const_text("is_odd"),
 
             // ----- ext2 operations --------------------------------------------------------------
@@ -329,13 +333,9 @@ impl PrettyPrint for Instruction {
                 flatten(const_text("procref") + const_text(".") + display(path))
             },
 
-            // ----- debug decorators -------------------------------------------------------------
-            Self::Debug(options) => inst_with_imm("debug", options),
-
             // ----- event decorators -------------------------------------------------------------
             Self::Emit => const_text("emit"),
             Self::EmitImm(value) => inst_with_felt_imm("emit", value),
-            Self::Trace(value) => inst_with_imm("trace", value),
 
             // Handled by the early return for !has_textual_representation()
             Self::DebugVar(_) => unreachable!(),

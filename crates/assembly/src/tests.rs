@@ -1,45 +1,30 @@
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     string::{String, ToString},
     vec::Vec,
 };
-use core::str::FromStr;
-use std::{
-    eprintln,
-    sync::{Arc, LazyLock},
-};
+use core::{fmt::Write, str::FromStr};
+use std::{eprintln, sync::Arc};
 
-use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT,
-    ast::Path,
-    diagnostics::WrapErr,
-    library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
-};
+use miden_assembly_syntax::{MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr};
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
     mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
     },
-    operations::{Decorator, Operation},
+    operations::Operation,
     program::Program,
-    serde::{Deserializable, DeserializationError, Serializable},
+    serde::{Deserializable, Serializable},
 };
-use miden_mast_package::{
-    ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest,
-    ProcedureExport, TargetType, TypeExport,
-};
-use proptest::{
-    prelude::*,
-    test_runner::{Config, TestRunner},
-};
+use miden_mast_package::{MastForest, Package, PackageExport, ProcedureExport, TargetType};
+use miden_project::Linkage;
 
 use crate::{
-    Assembler, KernelLibrary, Library, ModuleParser, PathBuf, ProjectSourceInputs,
-    ProjectTargetSelector,
+    Assembler, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -113,21 +98,19 @@ fn empty_program() -> TestResult {
 }
 
 #[test]
-fn empty_if() -> TestResult {
+fn empty_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: expected a non-empty `if` block",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin if.true end end",
-        "  :               ^|^",
-        "  :                `-- found a end here",
-        "  `----",
-        " help: expected primitive opcode (e.g. \"add\"), or \"else\", or control flow opcode (e.g. \"if.true\")"
+        "  :               ^",
+        "  :               `-- expected a non-empty `if` block",
+        "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -241,7 +224,7 @@ fn library_exports() -> Result<(), Report> {
     "#;
     let baz = parse_module!(&context, "lib1::baz", baz);
 
-    let lib1 = Assembler::new(context.source_manager()).assemble_library([baz])?;
+    let lib1 = Assembler::new(context.source_manager()).assemble_library("lib1", [baz])?;
 
     // build the second library
     let foo = r#"
@@ -291,8 +274,8 @@ fn library_exports() -> Result<(), Report> {
     let lib2_modules = [foo, bar];
 
     let lib2 = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib1)?
-        .assemble_library(lib2_modules.iter().cloned())?;
+        .with_package(Arc::from(lib1), Linkage::Dynamic)?
+        .assemble_library("lib2", lib2_modules.iter().cloned())?;
 
     let foo2 = Path::new("::lib2::foo::foo2");
     let foo3 = Path::new("::lib2::foo::foo3");
@@ -304,7 +287,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<Arc<Path>> =
         [foo2.into(), foo3.into(), bar1.into(), bar2.into(), bar3.into(), bar5.into()].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().map(LibraryExport::path).collect();
+    let actual_exports: BTreeSet<_> = lib2.manifest.exports().map(PackageExport::path).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -326,6 +309,7 @@ fn library_exports() -> Result<(), Report> {
 }
 
 #[test]
+#[ignore = "disabled until #3040 is resolved"]
 fn library_procedure_collision() -> Result<(), Report> {
     let context = TestContext::new();
 
@@ -341,7 +325,7 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let foo = parse_module!(&context, "lib1::foo", foo);
-    let lib1 = Assembler::new(context.source_manager()).assemble_library([foo])?;
+    let lib1 = Assembler::new(context.source_manager()).assemble_library("lib1", [foo])?;
 
     // build the second library which defines the same procedure as the first one
     let bar = r#"
@@ -360,18 +344,21 @@ fn library_procedure_collision() -> Result<(), Report> {
     "#;
     let bar = parse_module!(&context, "lib2::bar", bar);
     let lib2 = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib1)?
-        .assemble_library([bar])?;
+        .with_package(Arc::from(lib1), Linkage::Dynamic)?
+        .assemble_library("lib2", [bar])?;
 
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
-    assert_eq!(lib2.num_exports(), 2);
+    assert_eq!(lib2.manifest.num_exports(), 2);
 
-    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
-    // procedure and a locally defined procedure with the same operations remain distinct when
-    // their source mappings differ.
+    // The re-exported procedure and the locally defined procedure have the same MAST shape, so
+    // they share the same node.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    let export_id_bar1 = lib2.get_export_node_id(&lib2_bar_bar1);
+    assert!(lib2.mast_forest()[export_id_bar1].is_external());
+    let export_id_bar2 = lib2.get_export_node_id(&lib2_bar_bar2);
+    assert!(!lib2.mast_forest()[export_id_bar2].is_external());
+    assert_ne!(export_id_bar1, export_id_bar2);
 
     // Keeping those procedures distinct adds one more node to the library forest.
     assert_eq!(lib2.mast_forest().num_nodes(), 6);
@@ -380,341 +367,7 @@ fn library_procedure_collision() -> Result<(), Report> {
 }
 
 #[test]
-fn static_library_same_digest_procedure_uses_exact_root_metadata() -> Result<(), Report> {
-    let context = TestContext::new();
-
-    let aliases = r#"
-        pub proc alias_a
-            add
-        end
-
-        pub proc alias_b
-            add
-        end
-    "#;
-    let aliases = parse_module!(&context, "lib::aliases", aliases);
-    let library = Assembler::new(context.source_manager()).assemble_library([aliases])?;
-
-    let program_source = source_file!(
-        &context,
-        r#"
-        use lib::aliases
-
-        begin
-            exec.aliases::alias_b
-        end
-        "#
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_static_library(library)?
-        .assemble_program(program_source)?;
-
-    let body_node_id = {
-        let root = program.entrypoint();
-        match &program.mast_forest()[root] {
-            MastNode::Join(join_node) => join_node.second(),
-            _ => root,
-        }
-    };
-    let context_name = program
-        .mast_forest()
-        .debug_info()
-        .first_asm_op_for_node(body_node_id)
-        .expect("statically linked procedure should preserve asm-op metadata")
-        .context_name();
-
-    assert!(
-        context_name.ends_with("alias_b"),
-        "expected alias_b metadata, got {context_name}"
-    );
-
-    Ok(())
-}
-
-#[test]
-fn library_serialization() -> Result<(), Report> {
-    let context = TestContext::new();
-    // declare foo module
-    let foo = r#"
-        pub proc foo
-            add
-        end
-        pub proc foo_mul
-            mul
-        end
-    "#;
-    let foo = parse_module!(&context, "test::foo", foo);
-
-    // declare bar module
-    let bar = r#"
-        pub proc bar
-            mtree_get
-        end
-        pub proc bar_mul
-            mul
-        end
-    "#;
-    let bar = parse_module!(&context, "test::bar", bar);
-    let modules = [foo, bar];
-
-    // serialize/deserialize the bundle with locations
-    let bundle =
-        Assembler::new(context.source_manager()).assemble_library(modules.iter().cloned())?;
-
-    let bytes = bundle.to_bytes();
-    let deserialized = Library::read_from_bytes(&bytes).unwrap();
-    assert_eq!(bundle.as_ref(), &deserialized);
-
-    Ok(())
-}
-
-/// Verifies that deserializing a library rejects procedure exports whose `MastNodeId` is not a
-/// procedure root in the underlying MAST forest (issue #2831).
-#[test]
-fn library_deserialization_rejects_non_root_export() {
-    use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForestContributor},
-        serde::ByteWriter,
-    };
-
-    let context = TestContext::new();
-    let source = r#"
-        pub proc foo
-            add
-        end
-    "#;
-    let module = parse_module!(&context, "test::foo", source);
-
-    // Build a valid library.
-    let lib = Assembler::new(context.source_manager()).assemble_library([module]).unwrap();
-
-    // Clone the forest and add a non-root node.
-    let mut forest: MastForest = (**lib.mast_forest()).clone();
-    let builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
-    let non_root_id = builder.add_to_forest(&mut forest).unwrap();
-    assert!(
-        !forest.is_procedure_root(non_root_id),
-        "sanity check: new node should not be a root"
-    );
-
-    // Manually serialize a tampered library: forest + one export referencing the non-root node.
-    let mut tampered_bytes = Vec::new();
-    forest.write_into(&mut tampered_bytes);
-
-    // Number of exports.
-    1usize.write_into(&mut tampered_bytes);
-    // Tag: 0 = Procedure export.
-    0u8.write_into(&mut tampered_bytes);
-    // Fully qualified procedure path.
-    let path = PathBuf::new("::test::foo::foo").unwrap();
-    path.write_into(&mut tampered_bytes);
-    // MastNodeId of the non-root node.
-    u32::from(non_root_id).write_into(&mut tampered_bytes);
-    // No function signature.
-    tampered_bytes.write_bool(false);
-    // Empty attribute set.
-    miden_assembly_syntax::ast::AttributeSet::default().write_into(&mut tampered_bytes);
-
-    // Deserializing should fail because the export references a non-root node.
-    let result = Library::read_from_bytes(&tampered_bytes);
-    assert!(
-        result.is_err(),
-        "deserialization should reject exports referencing non-root nodes"
-    );
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("no procedure root"),
-        "error should mention missing procedure root, got: {err_msg}"
-    );
-}
-
-fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
-    // This test patches raw bytes in place, so it needs byte offsets that ByteReader::read_usize
-    // does not expose.
-    let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
-    let length = first_byte.trailing_zeros() as usize + 1;
-
-    if length == 9 {
-        *offset += 1;
-        let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
-        let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
-        *offset = end;
-        let value = u64::from_le_bytes(chunk);
-        usize::try_from(value).expect("encoded usize does not fit host usize")
-    } else {
-        let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
-        let mut encoded = [0u8; 8];
-        encoded[..length].copy_from_slice(&bytes[*offset..end]);
-        *offset = end;
-        let value = u64::from_le_bytes(encoded) >> length;
-        usize::try_from(value).expect("encoded usize does not fit host usize")
-    }
-}
-
-fn locate_first_node_hash(bytes: &[u8]) -> (usize, usize) {
-    // Header: magic[4] + flags[1] + version[3]
-    let mut offset = 0usize;
-    offset += 4;
-    offset += 1;
-    offset += 3;
-
-    let internal_node_count = read_usize_vint64(bytes, &mut offset);
-    let external_node_count = read_usize_vint64(bytes, &mut offset);
-    let node_count = internal_node_count
-        .checked_add(external_node_count)
-        .expect("node count overflow");
-
-    // Roots: len (usize) + elements (u32 LE)
-    let roots_len = read_usize_vint64(bytes, &mut offset);
-    offset += roots_len * 4;
-
-    // Basic block data: len (usize) + bytes
-    let bb_len = read_usize_vint64(bytes, &mut offset);
-    offset += bb_len;
-
-    offset += node_count * 8;
-    offset += external_node_count * 32;
-
-    (offset, internal_node_count)
-}
-
-fn build_library_bytes_with_spoofed_first_node_digest(
-    lib: &Library,
-    spoof_seed: &str,
-) -> (Vec<u8>, Word) {
-    use miden_core::serde::{ByteWriter, Serializable};
-
-    // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
-    let forest = lib.mast_forest().as_ref();
-    let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
-    let mut forest_bytes = Vec::new();
-    forest.write_stripped(&mut forest_bytes);
-
-    let (node_hashes_start, node_count) = locate_first_node_hash(&forest_bytes);
-    assert!(node_count > 0, "expected at least one node info entry");
-
-    // Patch node 0 digest in-place.
-    let spoofed_digest = miden_core::utils::hash_string_to_word(spoof_seed);
-    assert_ne!(spoofed_digest, original_digest, "spoofed digest must differ");
-
-    let mut spoofed_digest_bytes = Vec::new();
-    spoofed_digest.write_into(&mut spoofed_digest_bytes);
-    assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
-
-    let node0_digest_offset = node_hashes_start;
-    forest_bytes[node0_digest_offset..node0_digest_offset + 32]
-        .copy_from_slice(&spoofed_digest_bytes);
-
-    // Re-encode a library byte stream using the spoofed forest bytes.
-    let mut bytes = forest_bytes;
-    bytes.write_usize(lib.exports().count());
-    for export in lib.exports() {
-        export.write_into(&mut bytes);
-    }
-    (bytes, spoofed_digest)
-}
-
-#[test]
-fn regression_library_deserialisation_rejects_spoofed_mast_node_digests() {
-    let lib_src = r#"
-pub proc p
-    push.1
-end
-"#;
-    let lib = Assembler::default()
-        .assemble_library([lib_src])
-        .expect("library assembly must succeed");
-
-    let (bytes, _) =
-        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
-    let err = Library::read_from_bytes(&bytes)
-        .expect_err("expected library deserialization to reject inconsistent node digests");
-    assert!(
-        err.to_string().contains("invalid untrusted MAST forest"),
-        "expected untrusted-MAST validation failure, got: {err}"
-    );
-    assert!(
-        err.to_string().contains("hash mismatch for node"),
-        "expected digest mismatch failure, got: {err}"
-    );
-}
-
-#[test]
-fn unchecked_library_deserialisation_accepts_spoofed_mast_node_digests() {
-    let lib_src = r#"
-pub proc p
-    push.1
-end
-"#;
-    let lib = Assembler::default()
-        .assemble_library([lib_src])
-        .expect("library assembly must succeed");
-
-    let (bytes, spoofed_digest) =
-        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
-    let deserialized = Library::read_from_bytes_unchecked(&bytes)
-        .expect("unchecked library deserialization must accept spoofed node digests");
-
-    assert_eq!(
-        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
-        spoofed_digest
-    );
-}
-
-#[test]
-fn regression_kernel_library_deserialisation_rejects_spoofed_mast_node_digests() {
-    let kernel_src = r#"
-pub proc k1
-    push.1
-end
-"#;
-    let kernel_lib = Assembler::default()
-        .assemble_kernel(kernel_src)
-        .expect("kernel assembly must succeed");
-
-    let (bytes, _) = build_library_bytes_with_spoofed_first_node_digest(
-        kernel_lib.as_ref(),
-        "spoofed-kernel-digest",
-    );
-    let err = KernelLibrary::read_from_bytes(&bytes)
-        .expect_err("expected kernel library deserialization to reject inconsistent node digests");
-    assert!(
-        err.to_string().contains("invalid untrusted MAST forest"),
-        "expected untrusted-MAST validation failure, got: {err}"
-    );
-    assert!(
-        err.to_string().contains("hash mismatch for node"),
-        "expected digest mismatch failure, got: {err}"
-    );
-}
-
-#[test]
-fn unchecked_kernel_library_deserialisation_accepts_spoofed_mast_node_digests() {
-    let kernel_src = r#"
-pub proc k1
-    push.1
-end
-"#;
-    let kernel_lib = Assembler::default()
-        .assemble_kernel(kernel_src)
-        .expect("kernel assembly must succeed");
-
-    let (bytes, spoofed_digest) = build_library_bytes_with_spoofed_first_node_digest(
-        kernel_lib.as_ref(),
-        "spoofed-kernel-digest",
-    );
-    let deserialized = KernelLibrary::read_from_bytes_unchecked(&bytes)
-        .expect("unchecked kernel deserialization must accept spoofed node digests");
-
-    assert_eq!(
-        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
-        spoofed_digest
-    );
-}
-
-#[test]
-fn get_module_by_path() -> Result<(), Report> {
+fn get_module_by_path() {
     let context = TestContext::new();
     // declare foo module
     let foo_source = r#"
@@ -727,7 +380,7 @@ fn get_module_by_path() -> Result<(), Report> {
 
     // create the bundle with locations
     let bundle = Assembler::new(context.source_manager())
-        .assemble_library(modules.iter().cloned())
+        .assemble_library("test", modules.iter().cloned())
         .unwrap();
 
     let foo_module_info = bundle.module_infos().next().unwrap();
@@ -735,8 +388,6 @@ fn get_module_by_path() -> Result<(), Report> {
 
     let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
-
-    Ok(())
 }
 
 #[test]
@@ -755,15 +406,16 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
     let testing_module = parse_module!(&context, "test::names", testing_module_source);
 
     // create the bundle with locations
-    let library = Assembler::new(context.source_manager())
-        .assemble_library([testing_module])
+    let package = Assembler::new(context.source_manager())
+        .assemble_library("test", [testing_module])
         .context("failed to assemble library from testing module")?;
 
     // get the vector of library procedure digests
-    let library_procedure_digests = library
+    let library_procedure_digests = package
+        .manifest
         .exports()
         .filter_map(|export| match export {
-            LibraryExport::Procedure(export) => Some(library.mast_forest()[export.node].digest()),
+            PackageExport::Procedure(export) => Some(export.digest),
             _ => None,
         })
         .collect::<Vec<Word>>();
@@ -771,24 +423,24 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
     // valid procedure names
     assert!(
         library_procedure_digests.contains(
-            &library
+            &package
                 .get_procedure_root_by_path("test::names::foo")
                 .expect("procedure with name 'foo' must exist in the test library")
         )
     );
     assert!(
         library_procedure_digests.contains(
-            &library
+            &package
                 .get_procedure_root_by_path("test::names::bar")
                 .expect("procedure with name 'bar' must exist in the test library")
         )
     );
 
     // invalid procedure name
-    assert_eq!(None, library.get_procedure_root_by_path("test::names::baz"));
+    assert_eq!(None, package.get_procedure_root_by_path("test::names::baz"));
 
     // invalid namespace
-    assert_eq!(None, library.get_procedure_root_by_path("invalid::namespace::foo"));
+    assert_eq!(None, package.get_procedure_root_by_path("invalid::namespace::foo"));
 
     Ok(())
 }
@@ -1002,7 +654,7 @@ fn get_proc_name_of_unknown_module() -> TestResult {
     let module1 = context.parse_module_with_path(module_path_one, module_source1)?;
 
     let report = Assembler::new(context.source_manager())
-        .assemble_library(core::iter::once(module1))
+        .assemble_library("test", core::iter::once(module1))
         .expect_err("expected unknown module error");
 
     assert_diagnostic_lines!(
@@ -1106,7 +758,7 @@ end
 }
 
 #[test]
-fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+fn enum_felt_discriminant_negative_is_rejected() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1124,11 +776,10 @@ end
         .assemble(source)
         .expect_err("expected negative discriminant to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
-fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+fn enum_felt_discriminant_too_large_is_rejected() {
     let context = TestContext::default();
     let modulus = Felt::ORDER_U64;
     let source = source_file!(
@@ -1149,11 +800,10 @@ end
         .assemble(source)
         .expect_err("expected out-of-range felt discriminant to be rejected");
     assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
-    Ok(())
 }
 
 #[test]
-fn constant_expression_overflow_is_rejected() -> TestResult {
+fn constant_expression_overflow_is_rejected() {
     let context = TestContext::default();
     let modulus_minus_one = Felt::ORDER_U64 - 1;
     let source = source_file!(
@@ -1166,7 +816,6 @@ fn constant_expression_overflow_is_rejected() -> TestResult {
         .assemble(source)
         .expect_err("expected constant expression overflow to be rejected");
     assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
-    Ok(())
 }
 
 #[test]
@@ -1252,7 +901,7 @@ fn constant_field_division() -> TestResult {
 }
 
 #[test]
-fn constant_err_const_not_initialized() -> TestResult {
+fn constant_err_const_not_initialized() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1274,11 +923,10 @@ fn constant_err_const_not_initialized() -> TestResult {
         "  `----",
         " help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero() -> TestResult {
+fn constant_err_div_by_zero() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1290,6 +938,8 @@ fn constant_err_div_by_zero() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5/0 begin push.TEST_CONSTANT end",
@@ -1307,17 +957,18 @@ fn constant_err_div_by_zero() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5//0 begin push.TEST_CONSTANT end",
         "  :                       ^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_err_div_by_zero_indirect() -> TestResult {
+fn constant_err_div_by_zero_indirect() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1344,8 +995,6 @@ fn constant_err_div_by_zero_indirect() -> TestResult {
         "4 |",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
@@ -1388,7 +1037,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
 }
 
 #[test]
-fn constants_must_be_uppercase() -> TestResult {
+fn constants_must_be_uppercase() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1401,20 +1050,18 @@ fn constants_must_be_uppercase() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:1:7\]"#),
         "1 | const constant_1 = 12 begin push.constant_1 end",
-        "  :       ^^^^^|^^^^",
-        "  :            `-- found a identifier here",
+        "  :       ^^^^^^^^^^",
         "  `----",
-        "        help: expected constant identifier"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
-
-    Ok(())
 }
 
 #[test]
-fn duplicate_constant_name() -> TestResult {
+fn duplicate_constant_name() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1433,16 +1080,15 @@ fn duplicate_constant_name() -> TestResult {
         "symbol conflict: found duplicate definitions of the same name",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | const CONSTANT = 12 const CONSTANT = 14 begin push.CONSTANT end",
-        "  : ^^^^^^^^^|^^^^^^^^^ ^^^^^^^^^|^^^^^^^^^",
-        "  :          |                   `-- conflict occurs here",
-        "  :          `-- previously defined here",
+        "  : ^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^|^^^^^^^^^",
+        "  :           |                   `-- conflict occurs here",
+        "  :           `-- previously defined here",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_valid_felt() -> TestResult {
+fn constant_must_be_valid_felt() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1455,20 +1101,17 @@ fn constant_must_be_valid_felt() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: unexpected trailing tokens in expression",
         regex!(r#",-\[test[\d]+:1:22\]"#),
         "1 | const CONSTANT = 1122INVALID begin push.CONSTANT end",
         "  :                      ^^^|^^^",
-        "  :                         `-- found a constant identifier here",
-        "  `----",
-        " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", or \"enum\", \
-or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or doc comment"
+        "  :                         `-- unexpected trailing tokens in expression",
+        "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn constant_must_be_within_valid_felt_range() -> TestResult {
+fn constant_must_be_within_valid_felt_range() {
     let context = TestContext::default();
 
     // test the u64::MAX value
@@ -1527,12 +1170,10 @@ fn constant_must_be_within_valid_felt_range() -> TestResult {
         "  :                  ^^^^^^^^^^^^^^^^^^",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn constants_defined_in_global_scope() -> TestResult {
+fn constants_defined_in_global_scope() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -1543,24 +1184,16 @@ fn constants_defined_in_global_scope() -> TestResult {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:2:11\]"#),
-        "1 |",
-        "2 |     begin const CONSTANT = 12",
-        "  :           ^^|^^",
-        "  :             `-- found a const here",
-        "3 |     push.CONSTANT end",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
-    );
-    Ok(())
+    let err = context
+        .assemble(source)
+        .expect_err("expected block-local constants to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before top-level item");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
-fn constant_not_found() -> TestResult {
+fn constant_not_found() {
     let context = TestContext::new();
     let source = source_file!(
         &context,
@@ -1584,7 +1217,6 @@ fn constant_not_found() -> TestResult {
         "  `----",
         "help: are you missing an import?"
     );
-    Ok(())
 }
 
 #[test]
@@ -1701,7 +1333,7 @@ fn mem_operations_with_constants() -> TestResult {
 }
 
 #[test]
-fn const_conversion_failed_to_u16() -> TestResult {
+fn const_conversion_failed_to_u16() {
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u16::MAX as u64 + 1;
 
@@ -1737,11 +1369,10 @@ fn const_conversion_failed_to_u16() -> TestResult {
         "6 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn const_conversion_failed_to_u32() -> TestResult {
+fn const_conversion_failed_to_u32() {
     let context = TestContext::default();
     // Define constant value greater than u16::MAX
     let constant_value: u64 = u32::MAX as u64 + 1;
@@ -1772,11 +1403,10 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "5 |     end",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_mem_loadw_instruction() -> TestResult {
+fn deprecated_mem_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1801,11 +1431,10 @@ fn deprecated_mem_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_loadw_instruction() -> TestResult {
+fn deprecated_loc_loadw_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1834,11 +1463,10 @@ fn deprecated_loc_loadw_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
-fn deprecated_loc_storew_instruction() -> TestResult {
+fn deprecated_loc_storew_instruction() {
     let context = TestContext::default();
 
     let source = source_file!(
@@ -1867,7 +1495,6 @@ fn deprecated_loc_storew_instruction() -> TestResult {
         "  `----",
         regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
-    Ok(())
 }
 
 #[test]
@@ -1958,62 +1585,52 @@ fn test_push_word_slice() -> TestResult {
 }
 
 #[test]
-fn test_push_word_slice_invalid() -> TestResult {
+fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[6..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[2..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_VALUE = 6
     begin
         push.SAMPLE_VALUE[1..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     begin
         push.5[0..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
-
-    Ok(())
 }
 
 #[test]
@@ -2027,7 +1644,7 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
         "#;
     let a = parse_module!(&context, "lib::a", a);
 
-    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [a])?;
 
     let program_source = source_file!(
         &context,
@@ -2043,8 +1660,9 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
     );
 
     let program = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib)?
-        .assemble_program(program_source)?;
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", program_source)?
+        .unwrap_program();
     insta::assert_snapshot!(program);
 
     Ok(())
@@ -2060,7 +1678,7 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         "#;
     let a = parse_module!(&context, "lib::a", a);
 
-    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [a])?;
 
     let source = source_file!(
         &context,
@@ -2074,8 +1692,8 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     );
 
     let error = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib)?
-        .assemble_program(source)
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic_lines!(
         error,
@@ -2102,7 +1720,7 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
         "#;
     let a = parse_module!(&context, "lib::a", a);
 
-    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [a])?;
 
     let source = source_file!(
         &context,
@@ -2114,269 +1732,25 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
     );
 
     let error = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib)?
-        .assemble_program(source)
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("program", source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic_lines!(
         error,
-        "invalid syntax",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
+        "invalid identifier: only uppercase characters or underscores are allowed, and must start with an alphabetic character",
         regex!(r#",-\[test[\d]+:3:14\]"#),
         "2 |     begin",
         "3 |         push.f",
-        "  :              |",
-        "  :              `-- found a identifier here",
+        "  :              ^",
         "4 |     end",
         "  `----",
-        "help: expected \"[\", or constant identifier, or hex-encoded literal, or hex_word, or integer literal"
+        "help: bare identifiers must be lowercase alphanumeric with '_', quoted identifiers can include any graphical character"
     );
 
     Ok(())
 }
-// DECORATORS
-// ================================================================================================
-
-#[test]
-fn decorators_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        add
-        trace.1
-        mul
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        push.1
-        push.2
-        trace.1
-        add
-        trace.2
-    end"
-    );
-
-    let program = context.assemble(source)?;
-    let forest = program.mast_forest();
-    let (block_id, block) = forest
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, node)| {
-            node.get_basic_block().map(|block| (MastNodeId::from(idx as u32), block))
-        })
-        .find(|(_, block)| matches!(block.raw_operations().last(), Some(Operation::Add)))
-        .expect("expected a basic block ending in add");
-
-    let raw_ops = block.raw_operations().collect::<Vec<_>>();
-    let last_real_op_idx = raw_ops.len() - 1;
-    assert!(
-        matches!(raw_ops.last(), Some(Operation::Add)),
-        "expected add to be the last real operation in the block",
-    );
-
-    let indexed_decorators = block.indexed_decorator_iter(forest).collect::<Vec<_>>();
-    let last_op_trace_decorators = indexed_decorators
-        .iter()
-        .filter_map(|(op_idx, decorator_id)| {
-            (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
-                Decorator::Trace(value) => Some(*value),
-                _ => None,
-            })?
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        last_op_trace_decorators,
-        vec![1],
-        "only the pre-add decorator should be attached to the last real op",
-    );
-
-    let after_exit_trace_decorators = block
-        .after_exit(forest)
-        .iter()
-        .map(|decorator_id| match &forest[*decorator_id] {
-            Decorator::Trace(value) => *value,
-            decorator => panic!("expected trace decorator in after_exit, got {decorator:?}"),
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        after_exit_trace_decorators,
-        vec![2],
-        "trailing decorator should be placed in the containing block's after_exit set",
-    );
-
-    assert!(
-        forest.after_exit_decorators(block_id) == block.after_exit(forest),
-        "block-level and forest-level after_exit accessors should agree",
-    );
-
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_one_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2 add end
-        trace.1
-        repeat.2 mul end
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2
-            if.true
-                trace.1 push.42 trace.2
-            else
-                trace.3 push.22 trace.3
-            end
-            trace.4
-        end
-        trace.5
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_call() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_dyn() -> TestResult {
-    // single line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        dynexec
-        trace.1
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-
-    // multi line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1 trace.2 trace.3 trace.4
-        dynexec
-        trace.5 trace.6 trace.7 trace.8 trace.9
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_external() -> TestResult {
-    let context = TestContext::default();
-    let baz = r#"
-        pub proc f
-            push.7 push.8 sub
-        end
-    "#;
-    let baz = parse_module!(&context, "lib::baz", baz);
-
-    let lib = Assembler::new(context.source_manager()).assemble_library([baz])?;
-
-    let program_source = source_file!(
-        &context,
-        "\
-    use lib::baz
-    begin
-        trace.0
-        exec.baz::f
-        trace.1
-    end"
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib)?
-        .assemble_program(program_source)?;
-    insta::assert_snapshot!(program);
-
-    Ok(())
-}
-
-#[test]
-fn decorators_join_and_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        if.true
-            trace.2 add trace.3
-        else
-            trace.4 mul trace.5
-        end
-        trace.6
-        if.true
-            trace.7 push.42 trace.8
-        else
-            trace.9 push.22 trace.10
-        end
-        trace.11
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
 // ASSERTIONS
 // ================================================================================================
 
@@ -2548,8 +1922,8 @@ fn u32assertw_with_code() -> TestResult {
     Ok(())
 }
 
-/// Ensure that there is no collision between `Assert`, `U32assert2`, and `MpVerify`
-/// instructions with different inner values (which all don't contribute to the MAST root).
+/// Ensure that assertion and `mtree_verify` error codes are preserved after assembly, including
+/// through duplicate procedures with metadata-neutral MAST roots.
 #[test]
 fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     let context = TestContext::default();
@@ -2692,7 +2066,7 @@ fn control_flow_nesting_depth_boundary() -> TestResult {
 }
 
 #[test]
-fn control_flow_nesting_depth_exceeded() -> TestResult {
+fn control_flow_nesting_depth_exceeded() {
     let context = TestContext::default();
     let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
     let source = source_file!(&context, source.as_str());
@@ -2700,66 +2074,10 @@ fn control_flow_nesting_depth_exceeded() -> TestResult {
         .assemble(source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
     assert_diagnostic!(&error, "control-flow nesting depth exceeded");
-    Ok(())
 }
 
 // PROGRAMS WITH PROCEDURES
 // ================================================================================================
-
-/// If the program has 2 procedures with the same MAST root (but possibly different decorators), the
-/// correct procedure is chosen on exec
-#[test]
-fn ensure_correct_procedure_selection_on_collision() -> TestResult {
-    let context = TestContext::default();
-
-    // if with else
-    let source = source_file!(
-        &context,
-        "
-        proc f
-            add
-        end
-
-        proc g
-            trace.2
-            add
-        end
-
-        begin
-            if.true
-                exec.f
-            else
-                exec.g
-            end
-        end"
-    );
-    let program = context.assemble(source)?;
-
-    // Note: those values were taken from adding prints to the assembler at the time of writing. It
-    // is possible that this test starts failing if we end up ordering procedures differently.
-    let expected_f_node_id =
-        MastNodeId::from_u32_safe(1_u32, program.mast_forest().as_ref()).unwrap();
-    let expected_g_node_id =
-        MastNodeId::from_u32_safe(0_u32, program.mast_forest().as_ref()).unwrap();
-
-    let (exec_f_node_id, exec_g_node_id) = {
-        let split_node_id = {
-            // Note: the program starts with a join node, which joins:
-            // - left: the fmp initialization sequence,
-            // - right: the actual entrypoint of the program (the if statement).
-            let root_join_id = program.entrypoint();
-            program.mast_forest()[root_join_id].unwrap_join().second()
-        };
-        let split_node = &program.mast_forest()[split_node_id].unwrap_split();
-
-        (split_node.on_true(), split_node.on_false())
-    };
-
-    assert_eq!(program.mast_forest()[expected_f_node_id], program.mast_forest()[exec_f_node_id]);
-    assert_eq!(program.mast_forest()[expected_g_node_id], program.mast_forest()[exec_g_node_id]);
-
-    Ok(())
-}
 
 #[test]
 fn program_with_one_procedure() -> TestResult {
@@ -2812,7 +2130,7 @@ fn program_with_proc_locals() -> TestResult {
 }
 
 #[test]
-fn program_with_proc_locals_fail() -> TestResult {
+fn program_with_proc_locals_fail() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2845,12 +2163,10 @@ end"
         "7 |     begin",
         "  `----"
     );
-
-    Ok(())
 }
 
 #[test]
-fn program_with_exported_procedure() -> TestResult {
+fn program_with_exported_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -2869,7 +2185,6 @@ fn program_with_exported_procedure() -> TestResult {
         "  `----",
         "        help: perhaps you meant to use `proc` instead of `export`?"
     );
-    Ok(())
 }
 
 // PROGRAMS WITH DYNAMIC CODE BLOCKS
@@ -2897,7 +2212,7 @@ fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
 // ================================================================================================
 
 #[test]
-fn program_with_incorrect_mast_root_length() -> TestResult {
+fn program_with_incorrect_mast_root_length() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin call.0x1234 end");
 
@@ -2910,7 +2225,6 @@ fn program_with_incorrect_mast_root_length() -> TestResult {
         "  :            ^^^^^^",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
@@ -2961,7 +2275,7 @@ fn program_with_phantom_mast_call() -> TestResult {
     let ast = context.parse_program(source)?;
 
     let assembler = Assembler::new(context.source_manager());
-    assembler.assemble_program(ast)?;
+    assembler.assemble_program("test", ast)?;
     Ok(())
 }
 
@@ -2986,10 +2300,10 @@ fn program_with_one_import_and_hex_call() -> TestResult {
     let ast =
         context.parse_module_with_path(path, source_file!(&context, PROCEDURE.to_string()))?;
     let library = Assembler::new(context.source_manager())
-        .assemble_library(core::iter::once(ast))
+        .assemble_library("dummy", core::iter::once(ast))
         .unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     let source = source_file!(
         &context,
@@ -3036,10 +2350,10 @@ fn program_with_two_imported_procs_with_same_mast_root() -> TestResult {
     let ast =
         context.parse_module_with_path(path, source_file!(&context, PROCEDURE.to_string()))?;
     let library = Assembler::new(context.source_manager())
-        .assemble_library(core::iter::once(ast))
+        .assemble_library("dummy", core::iter::once(ast))
         .unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     let source = source_file!(
         &context,
@@ -3118,10 +2432,10 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
     let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, context.source_manager()).unwrap();
 
     let library = Assembler::new(context.source_manager())
-        .assemble_library([ast, ref_ast])
+        .assemble_library("dummy1", [ast, ref_ast])
         .unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     let source = source_file!(
         &context,
@@ -3179,10 +2493,10 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
     let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, context.source_manager()).unwrap();
 
     let library = Assembler::new(context.source_manager())
-        .assemble_library([ast, ref_ast])
+        .assemble_library("dummy1", [ast, ref_ast])
         .unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     let source = source_file!(
         &context,
@@ -3239,11 +2553,11 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     let dummy_library = {
         let mut assembler = Assembler::new(source_manager);
         assembler.compile_and_statically_link(ref_ast)?;
-        assembler.assemble_library([ast])?
+        Arc::<Package>::from(assembler.assemble_library("dummy1", [ast])?)
     };
 
     // Now we want to use the the library we've compiled
-    context.add_library(&dummy_library)?;
+    context.add_library(dummy_library.clone())?;
 
     let source = source_file!(
         &context,
@@ -3314,9 +2628,9 @@ fn module_alias() -> TestResult {
     let source_manager = context.source_manager();
     let mut parser = Module::parser(ModuleKind::Library);
     let ast = parser.parse_str(MODULE, PROCEDURE, source_manager.clone()).unwrap();
-    let library = Assembler::new(source_manager).assemble_library([ast]).unwrap();
+    let library = Assembler::new(source_manager).assemble_library("dummy", [ast]).unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     let source = source_file!(
         &context,
@@ -3345,19 +2659,12 @@ fn module_alias() -> TestResult {
             exec.bigint->invalidname::checked_add
         end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:2:37\]"#),
-        "1 |",
-        "2 |         use dummy::math::u64->bigint->invalidname",
-        "  :                                     ^|",
-        "  :                                      `-- found a -> here",
-        "3 |",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected chained module alias to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "use dummy::math::u64->bigint->invalidname");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     Ok(())
 }
@@ -3384,9 +2691,9 @@ fn module_alias_unused_import() -> TestResult {
     let source_manager = context.source_manager();
     let mut parser = Module::parser(ModuleKind::Library);
     let ast = parser.parse_str(MODULE, PROCEDURE, source_manager.clone()).unwrap();
-    let library = Assembler::new(source_manager).assemble_library([ast]).unwrap();
+    let library = Assembler::new(source_manager).assemble_library("dummy", [ast]).unwrap();
 
-    context.add_library(&library)?;
+    context.add_library(Arc::from(library))?;
 
     // --- duplicate module import --------------------------------------------
     let source = source_file!(
@@ -3414,7 +2721,7 @@ fn module_alias_unused_import() -> TestResult {
         "  :             ^^^^^^^^^^^^^^^^",
         "3 |         use dummy::math::u64->bigint",
         "  `----",
-        " help: this import is never used and can be safely removed"
+        "help: this import is never used and can be safely removed"
     );
 
     // --- duplicate module imports with different aliases --------------------
@@ -3616,19 +2923,19 @@ fn invalid_empty_program() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "`----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, ""),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:1\]"#),
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid program: no entrypoint defined",
+        "help: ensure you define an entrypoint somewhere in the body with `begin`..`end`"
     );
 }
 
@@ -3638,13 +2945,12 @@ fn invalid_program_unrecognized_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "none"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "1 | none",
         "  : ^^|^",
-        "  :   `-- found a identifier here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or doc comment"#
+        "  :   `-- unexpected top-level token",
+        "  `----"
     );
 }
 
@@ -3654,11 +2960,12 @@ fn invalid_program_unmatched_begin() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add"),
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:10\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:9\]"#),
         "1 | begin add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :         ^",
+        "  :         `-- expected `end` to close `begin` block",
+        "  `----"
     );
 }
 
@@ -3668,14 +2975,26 @@ fn invalid_program_invalid_top_level_token() {
     assert_assembler_diagnostic!(
         context,
         source_file!(&context, "begin add end mul"),
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:15\]"#),
         "1 | begin add end mul",
         "  :               ^|^",
-        "  :                `-- found a mul here",
-        "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        "  :                `-- unexpected top-level token",
+        "  `----"
     );
+}
+
+#[test]
+fn removed_debug_instructions_are_rejected_by_assembler() {
+    let context = TestContext::default();
+
+    for spelling in ["debug.stack.4", "debug.mem", "debug.local.0.2", "debug.adv_stack.4"] {
+        let source = source_file!(&context, format!("begin {spelling} end"));
+        let error = context
+            .assemble(source)
+            .expect_err("removed debug.* instruction should be rejected");
+        assert_diagnostic!(&error, "invalid instruction");
+    }
 }
 
 #[test]
@@ -3685,13 +3004,12 @@ fn invalid_proc_missing_end_unexpected_begin() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul begin push.1 end",
         "  :                  ^^|^^",
-        "  :                    `-- found a begin here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3702,13 +3020,12 @@ fn invalid_proc_missing_end_unexpected_proc() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | proc foo add mul proc bar push.3 end begin push.1 end",
         "  :                  ^^|^",
-        "  :                    `-- found a proc here",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                    `-- expected `end` to close procedure before top-level item",
+        "  `----"
     );
 }
 
@@ -3761,18 +3078,12 @@ fn missing_import() {
 fn invalid_proc_invalid_numeric_name() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc 123 add mul end begin push.1 exec.123 end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:6\]"#),
-        "1 | proc 123 add mul end begin push.1 exec.123 end",
-        "  :      ^|^",
-        "  :       `-- found a integer here",
-        "  `----",
-        " help: expected primitive opcode",
-        "      identifier"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected numeric procedure name to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected a procedure name");
+    assert_diagnostic!(&err, "unexpected token in block");
 }
 
 #[test]
@@ -3802,11 +3113,12 @@ fn invalid_if_missing_end_no_else() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:28\]"#),
         "1 | begin push.1 add if.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "else", or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                            ^",
+        "  :                            `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
@@ -3814,30 +3126,16 @@ fn invalid_if_missing_end_no_else() {
 fn invalid_else_with_no_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add else mul end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:18\]"#),
-        "1 | begin push.1 add else mul end",
-        "  :                  ^^|^",
-        "  :                    `-- found a else here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
-    );
+    let err = context.assemble(source).expect_err("expected unmatched else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
-        "1 | begin push.1 while.true add else mul end end",
-        "  :                             ^^|^",
-        "  :                               `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
-    );
+    let err = context.assemble(source).expect_err("expected while-local else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `while` before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -3846,17 +3144,11 @@ fn invalid_unmatched_else_within_if_else() {
 
     let source =
         source_file!(&context, "begin push.1 if.true add else mul else push.1 end end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:35\]"#),
-        "1 | begin push.1 if.true add else mul else push.1 end end end",
-        "  :                                   ^^|^",
-        "  :                                     `-- found a else here",
-        "  `----",
-        r#" help: expected "end""#
-    );
+    let err = context.assemble(source).expect_err("expected duplicate else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `if` before `else`");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -3867,16 +3159,17 @@ fn invalid_if_else_no_matching_end() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:38\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:37\]"#),
         "1 | begin push.1 add if.true mul else add",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                                     ^",
+        "  :                                     `-- expected `end` to close `if`",
+        "  `----"
     );
 }
 
 #[test]
-fn invalid_repeat() -> TestResult {
+fn invalid_repeat() {
     let context = TestContext::default();
 
     // unmatched repeat
@@ -3884,11 +3177,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:31\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:30\]"#),
         "1 | begin push.1 add repeat.10 mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                              ^",
+        "  :                              `-- expected `end` to close `repeat`",
+        "  `----"
     );
 
     // invalid iter count
@@ -3896,13 +3190,12 @@ fn invalid_repeat() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
+        "invalid syntax: invalid instruction `x3` or malformed operands",
         regex!(r#",-\[test[\d]+:1:27\]"#),
         "1 | begin push.1 add repeat.23x3 mul end end",
         "  :                           ^|",
-        "  :                            `-- found a identifier here",
-        "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        "  :                            `-- invalid instruction `x3` or malformed operands",
+        "  `----"
     );
 
     // Overflow iter count
@@ -3933,28 +3226,25 @@ fn invalid_repeat() -> TestResult {
         "4 |                     add",
         "  `----"
     );
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero() -> TestResult {
+fn invalid_repeat_count_zero() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.0 nop end end");
     let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+fn invalid_repeat_count_zero_in_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
         "\
 proc foo
-    trace.1
     repeat.0
         nop
     end
@@ -3964,17 +3254,14 @@ begin
     call.foo
 end"
     );
-    let error = context
-        .assemble(source)
-        .expect_err("expected repeat.0 with decorator to be rejected");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_too_large() -> TestResult {
+fn invalid_repeat_count_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
@@ -3984,11 +3271,10 @@ fn invalid_repeat_count_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_zero() -> TestResult {
+fn invalid_repeat_count_constant_zero() {
     let context = TestContext::default();
     let source =
         source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
@@ -3998,11 +3284,10 @@ fn invalid_repeat_count_constant_zero() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn invalid_repeat_count_constant_too_large() -> TestResult {
+fn invalid_repeat_count_constant_too_large() {
     let context = TestContext::default();
     let repeat_count = MAX_REPEAT_COUNT + 1;
     let source = source_file!(
@@ -4015,11 +3300,10 @@ fn invalid_repeat_count_constant_too_large() -> TestResult {
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
-    Ok(())
 }
 
 #[test]
-fn repeat_count_constant_at_limit_allowed() -> TestResult {
+fn repeat_count_constant_at_limit_allowed() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
@@ -4028,7 +3312,6 @@ fn repeat_count_constant_at_limit_allowed() -> TestResult {
     context
         .assemble(source)
         .expect("expected repeat count at limit from constant to be accepted");
-    Ok(())
 }
 
 #[test]
@@ -4041,7 +3324,7 @@ begin
 end
 "#;
 
-    let assembled = Assembler::default().assemble_program(program_src);
+    let assembled = Assembler::default().assemble_program("test", program_src);
     assert!(
         assembled.is_err(),
         "expected constants >= field modulus to be rejected (must not silently alias to 0)"
@@ -4060,7 +3343,7 @@ begin
 end
 "#;
 
-    let assembled = Assembler::default().assemble_program(program_src);
+    let assembled = Assembler::default().assemble_program("test", program_src);
     assert!(
         assembled.is_err(),
         "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new_unchecked`)"
@@ -4078,7 +3361,7 @@ end
 "#;
 
     let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Assembler::default().assemble_program(program_src)
+        Assembler::default().assemble_program("test", program_src)
     }));
 
     assert!(
@@ -4103,7 +3386,7 @@ begin
 end
 "#;
 
-    let assembled = Assembler::default().assemble_program(program_src);
+    let assembled = Assembler::default().assemble_program("test", program_src);
     assert!(
         assembled.is_err(),
         "expected subtraction underflow in constant expressions to be rejected"
@@ -4130,8 +3413,9 @@ end
 "#;
 
     let program = Assembler::default()
-        .assemble_program(program_src)
-        .expect("program assembly must succeed");
+        .assemble_program("test", program_src)
+        .expect("program assembly must succeed")
+        .unwrap_program();
 
     let entry = program.get_node_by_id(program.entrypoint()).expect("missing entrypoint node");
     let mast = format!("{}", entry.to_display(program.mast_forest()));
@@ -4155,7 +3439,7 @@ begin
 end
 "#;
 
-    let assembled = Assembler::default().assemble_program(program_src);
+    let assembled = Assembler::default().assemble_program("test", program_src);
     assert!(
         assembled.is_err(),
         "expected division by zero in constant expressions to be rejected"
@@ -4173,7 +3457,7 @@ end
 "#;
 
     let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Assembler::default().assemble_program(program_src)
+        Assembler::default().assemble_program("test", program_src)
     }));
 
     assert!(
@@ -4199,7 +3483,7 @@ end
 "#;
 
     let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Assembler::default().assemble_program(program_src)
+        Assembler::default().assemble_program("test", program_src)
     }));
 
     assert!(
@@ -4225,7 +3509,7 @@ end
 "#;
 
     let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Assembler::default().assemble_program(program_src)
+        Assembler::default().assemble_program("test", program_src)
     }));
 
     assert!(
@@ -4241,46 +3525,44 @@ end
 }
 
 #[test]
-fn invalid_while() -> TestResult {
+fn invalid_while() {
     let context = TestContext::default();
 
     let source = source_file!(&context, "begin push.1 add while mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a mul here",
-        "  `----",
-        r#" help: expected ".""#
+        "  :                  ^^^^^^|^^^^^^",
+        "  :                        `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.abc mul end end");
     assert_assembler_diagnostic!(
         context,
         source,
-        "invalid syntax",
-        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "invalid syntax: expected `while.true`",
+        regex!(r#",-\[test[\d]+:1:18\]"#),
         "1 | begin push.1 add while.abc mul end end",
-        "  :                        ^|^",
-        "  :                         `-- found a identifier here",
-        "  `----",
-        r#" help: expected "true""#
+        "  :                  ^^^^^^^^|^^^^^^^^",
+        "  :                          `-- expected `while.true`",
+        "  `----"
     );
 
     let source = source_file!(&context, "begin push.1 add while.true mul");
     assert_assembler_diagnostic!(
         context,
         source,
-        "unexpected end of file",
-        regex!(r#",-\[test[\d]+:1:32\]"#),
+        "syntax error",
+        regex!(r#",-\[test[\d]+:1:31\]"#),
         "1 | begin push.1 add while.true mul",
-        "  `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        "  :                               ^",
+        "  :                               `-- expected `end` to close `while`",
+        "  `----"
     );
-    Ok(())
 }
 
 // COMPILED LIBRARIES
@@ -4333,15 +3615,15 @@ fn test_compiled_library() {
 
     let compiled_library = {
         let assembler = Assembler::new(context.source_manager());
-        assembler.assemble_library([mod1, mod2]).unwrap()
+        assembler.assemble_library("mylib", [mod1, mod2]).unwrap()
     };
 
-    assert_eq!(compiled_library.exports().count(), 4);
+    assert_eq!(compiled_library.manifest.num_exports(), 4);
 
     // Compile program that uses compiled library
     let mut assembler = Assembler::new(context.source_manager());
 
-    assembler.link_dynamic_library(&compiled_library).unwrap();
+    assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 
     let program_source = "
     use mylib::mod1
@@ -4361,7 +3643,7 @@ fn test_compiled_library() {
     end
     ";
 
-    let _program = assembler.assemble_program(program_source).unwrap();
+    let _program = assembler.assemble_program("test", program_source).unwrap();
 }
 
 #[test]
@@ -4398,15 +3680,15 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
 
     let compiled_library = {
         let assembler = Assembler::new(context.source_manager());
-        assembler.assemble_library([mod1, mod2]).unwrap()
+        assembler.assemble_library("test", [mod1, mod2]).unwrap()
     };
 
-    assert_eq!(compiled_library.exports().count(), 2);
+    assert_eq!(compiled_library.manifest.num_exports(), 2);
 
     // Compile program that uses compiled library
     let mut assembler = Assembler::new(context.source_manager());
 
-    assembler.link_dynamic_library(&compiled_library).unwrap();
+    assembler.link_package(Arc::from(compiled_library), Linkage::Dynamic).unwrap();
 
     let program_source = "
     use test::mod1
@@ -4423,7 +3705,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     end
     ";
 
-    let _program = assembler.assemble_program(program_source).unwrap();
+    let _program = assembler.assemble_program("test", program_source).unwrap();
 }
 
 // PROGRAM SERIALIZATION AND DESERIALIZATION
@@ -4439,7 +3721,7 @@ fn test_program_serde_simple() {
     ";
 
     let assembler = Assembler::default();
-    let original_program = assembler.assemble_program(source).unwrap();
+    let original_program = assembler.assemble_program("test", source).unwrap().unwrap_program();
 
     let mut target = Vec::new();
     original_program.write_into(&mut target);
@@ -4448,38 +3730,186 @@ fn test_program_serde_simple() {
     assert_eq!(original_program, deserialized_program);
 }
 
+// MAST BUILDER ACCEPTANCE CORPUS
+// ================================================================================================
+
 #[test]
-fn test_program_serde_with_decorators() {
-    let source = "
-    const DEFAULT_CONST = 100
-    const EVENT_CONST = event(\"serde::evt\")
+fn mast_builder_acceptance_corpus() -> TestResult {
+    let context = TestContext::default();
+    let mut summary = String::new();
 
-    proc foo
-        push.1.2 add
-        debug.stack.8
-    end
+    let cases = [
+        (
+            "straight_line_events",
+            source_file!(
+                &context,
+                r#"
+                const EVT = event("acceptance::straight_line")
 
-    begin
-        emit.EVENT_CONST
+                begin
+                    push.1 push.2 add
+                    emit.EVT
+                end
+                "#
+            ),
+        ),
+        (
+            "nested_control_flow",
+            source_file!(
+                &context,
+                r#"
+                begin
+                    push.1
+                    if.true
+                        push.2
+                    else
+                        push.3
+                    end
 
-        exec.foo
+                    repeat.3
+                        push.1 add
+                    end
+                end
+                "#
+            ),
+        ),
+        (
+            "procedure_calls_and_repeated_subtrees",
+            source_file!(
+                &context,
+                r#"
+                proc repeated_a
+                    push.9 push.3 add
+                end
 
-        debug.stack.4
+                proc repeated_b
+                    push.9 push.3 add
+                end
 
-        drop
+                proc decorated
+                    push.0 drop
+                end
 
-        trace.DEFAULT_CONST
-    end
-    ";
+                begin
+                    exec.repeated_a
+                    exec.repeated_b
+                    exec.decorated
+                end
+                "#
+            ),
+        ),
+    ];
 
-    let assembler = Assembler::default();
-    let original_program = assembler.assemble_program(source).unwrap();
+    for (case_name, source) in cases {
+        let program = context.assemble(source)?;
+        append_program_acceptance_summary(&mut summary, case_name, &program);
+    }
 
-    let mut target = Vec::new();
-    original_program.write_into(&mut target);
-    let deserialized_program = Program::read_from_bytes(&target).unwrap();
+    let mut static_context = TestContext::default();
+    static_context.add_module_from_source(
+        "acceptance::helpers",
+        source_file!(
+            &static_context,
+            r#"
+            pub proc inc
+                push.1 add
+            end
 
-    assert_eq!(original_program, deserialized_program);
+            pub proc inspect
+                push.0 drop
+            end
+            "#
+        ),
+    )?;
+    let static_program = static_context.assemble(source_file!(
+        &static_context,
+        r#"
+        use acceptance::helpers
+
+        begin
+            push.41
+            exec.helpers::inc
+            exec.helpers::inspect
+        end
+        "#
+    ))?;
+    append_program_acceptance_summary(&mut summary, "static_imports", &static_program);
+
+    insta::assert_snapshot!("mast_builder_acceptance_corpus", summary);
+
+    Ok(())
+}
+
+fn append_program_acceptance_summary(output: &mut String, case_name: &str, program: &Program) {
+    let forest = program.mast_forest();
+    let debug_info = forest.debug_info();
+    let serialized_program_len = program.to_bytes().len();
+    let serialized_forest_len = forest.to_bytes().len();
+
+    writeln!(output, "=== {case_name} ===").unwrap();
+    writeln!(output, "program_hash={:?}", program.hash()).unwrap();
+    writeln!(output, "entrypoint={}", u32::from(program.entrypoint())).unwrap();
+    writeln!(output, "num_procedures={}", program.num_procedures()).unwrap();
+    writeln!(output, "num_nodes={}", forest.num_nodes()).unwrap();
+    writeln!(output, "forest_commitment={:?}", forest.commitment()).unwrap();
+    writeln!(output, "serialized_program_len={serialized_program_len}").unwrap();
+    writeln!(output, "serialized_forest_len={serialized_forest_len}").unwrap();
+
+    let roots = forest
+        .procedure_roots()
+        .iter()
+        .map(|&node_id| u32::from(node_id))
+        .collect::<Vec<_>>();
+    let procedure_digests = forest.procedure_digests().collect::<Vec<_>>();
+    let node_digests = forest.nodes().iter().map(MastNodeExt::digest).collect::<Vec<_>>();
+    writeln!(output, "roots={roots:?}").unwrap();
+    writeln!(output, "procedure_digests={procedure_digests:?}").unwrap();
+    writeln!(output, "node_digests={node_digests:?}").unwrap();
+
+    writeln!(
+        output,
+        "debug_counts=asm_ops:{} debug_vars:{} procedure_names:{}",
+        debug_info.num_asm_ops(),
+        debug_info.num_debug_vars(),
+        debug_info.num_procedure_names(),
+    )
+    .unwrap();
+
+    let asm_ops = debug_info
+        .asm_ops()
+        .iter()
+        .map(|asm_op| {
+            format!(
+                "{}:{}:{}:loc={}",
+                asm_op.context_name(),
+                asm_op.op(),
+                asm_op.num_cycles(),
+                asm_op.location().is_some(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
+    writeln!(output, "asm_ops={asm_ops:?}").unwrap();
+    writeln!(output, "debug_vars={debug_vars:?}").unwrap();
+
+    for node_idx in 0..forest.num_nodes() {
+        let node_id = MastNodeId::new_unchecked(node_idx);
+        let asm_op_links = debug_info
+            .asm_ops_for_node(node_id)
+            .into_iter()
+            .map(|(op_idx, asm_op_id)| (op_idx, u32::from(asm_op_id)))
+            .collect::<Vec<_>>();
+        let debug_var_links = debug_info
+            .debug_vars_for_node(node_id)
+            .into_iter()
+            .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
+            .collect::<Vec<_>>();
+
+        if !asm_op_links.is_empty() || !debug_var_links.is_empty() {
+            writeln!(output, "node[{node_idx}]=asm:{asm_op_links:?} debug:{debug_var_links:?}",)
+                .unwrap();
+        }
+    }
 }
 
 #[test]
@@ -4491,7 +3921,7 @@ fn vendoring() -> TestResult {
         let mod1 = mod_parser
             .parse(PathBuf::new("test::mod1").unwrap(), source, context.source_manager())
             .unwrap();
-        Assembler::default().assemble_library([mod1]).unwrap()
+        Assembler::default().assemble_library("vendor", [mod1]).unwrap()
     };
 
     let lib = {
@@ -4501,8 +3931,8 @@ fn vendoring() -> TestResult {
             .unwrap();
 
         let mut assembler = Assembler::default();
-        assembler.link_static_library(vendor_lib)?;
-        assembler.assemble_library([mod2]).unwrap()
+        assembler.link_package(Arc::from(vendor_lib), Linkage::Static)?;
+        Arc::<Package>::from(assembler.assemble_library("lib", [mod2]).unwrap())
     };
 
     // Rigorous testing of vendoring functionality
@@ -4516,7 +3946,7 @@ fn vendoring() -> TestResult {
     let expected_lib = {
         let source = source_file!(&context, "pub proc foo push.1 end");
         let mod2 = mod_parser.parse("test::expected", source, context.source_manager()).unwrap();
-        Assembler::default().assemble_library([mod2]).unwrap()
+        Assembler::default().assemble_library("test", [mod2]).unwrap()
     };
 
     // 3. Verify that the expected library (which has push.1) has AssemblyOps
@@ -4527,7 +3957,7 @@ fn vendoring() -> TestResult {
 
     // 4. Verify we can create an assembler that successfully links the vendored library
     let mut assembler_with_vendored_lib = Assembler::default();
-    let link_result = assembler_with_vendored_lib.link_static_library(lib.clone());
+    let link_result = assembler_with_vendored_lib.link_package(lib.clone(), Linkage::Static);
     assert!(link_result.is_ok(), "Should be able to link the vendored library");
 
     // 5. Test that a simple program can be assembled with the linked library
@@ -4538,7 +3968,8 @@ fn vendoring() -> TestResult {
         add
     end
     "#;
-    let assemble_result = assembler_with_vendored_lib.assemble_program(program_with_lib_source);
+    let assemble_result =
+        assembler_with_vendored_lib.assemble_program("test", program_with_lib_source);
     assert!(
         assemble_result.is_ok(),
         "Should be able to assemble program with linked library"
@@ -4610,154 +4041,6 @@ fn test_assert_diagnostic_lines() {
     assert_diagnostic_lines!(report!("the error string"), "the error string", "other", "lines");
 }
 
-// PACKAGE SERIALIZATION AND DESERIALIZATION
-// ================================================================================================
-
-prop_compose! {
-    fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-        let ArbitraryMastArtifact { ty, lib } = artifact;
-
-        // Ensure the manifest reflects exports of the actual MAST artifact
-        let mut exports = Vec::default();
-        for export in lib.exports() {
-            match export {
-                LibraryExport::Procedure(export) => {
-                    let digest = lib.mast_forest()[export.node].digest();
-                    exports.push(PackageExport::Procedure(ProcedureExport {
-                        path: export.path.clone(),digest,
-                        signature: export.signature.clone(),
-                        attributes: export.attributes.clone(),
-                    }));
-                }
-                LibraryExport::Constant(export) => {
-                    exports.push(PackageExport::Constant(ConstantExport {
-                        path: export.path.clone(),
-                        value: export.value.clone(),
-                    }));
-                }
-                LibraryExport::Type(export) => {
-                    exports.push(PackageExport::Type(TypeExport {
-                        path: export.path.clone(),
-                        ty: export.ty.clone(),
-                    }));
-                }
-            }
-        }
-
-        let manifest = PackageManifest::new(exports)
-            .and_then(|package_manifest| {
-                package_manifest.with_dependencies(manifest.dependencies().cloned())
-            })
-            .expect("test package manifest should be valid");
-
-        let name = PackageId::from(name);
-        let version = miden_assembly_syntax::Version::new(0, 0, 0);
-        Package { name, version, description: None, kind: ty, mast: lib, manifest, sections: Default::default() }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ArbitraryMastArtifact {
-    ty: TargetType,
-    lib: Arc<Library>,
-}
-
-impl ArbitraryMastArtifact {
-    fn library(lib: Arc<Library>) -> Self {
-        Self { ty: TargetType::Library, lib }
-    }
-
-    fn executable(lib: Arc<Library>) -> Self {
-        Self { ty: TargetType::Executable, lib }
-    }
-}
-
-impl Arbitrary for ArbitraryMastArtifact {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![
-            Just(Self::library(LIB_EXAMPLE.clone())),
-            Just(Self::executable(PRG_EXAMPLE.clone()))
-        ]
-        .boxed()
-    }
-
-    type Strategy = BoxedStrategy<Self>;
-}
-
-static LIB_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_library_example);
-static PRG_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_program_example);
-
-fn build_library_example() -> Arc<Library> {
-    let context = TestContext::new();
-    // declare foo module
-    let foo_src = r#"
-        pub proc foo(a: felt, b: felt) -> felt
-            add
-        end
-        pub proc foo_mul(a: felt, b: felt) -> felt
-            mul
-        end
-    "#;
-    let foo_module = parse_module!(&context, "test::foo", foo_src);
-
-    // declare bar module
-    let bar_src = r#"
-        pub proc bar
-            mtree_get
-        end
-        pub proc bar_mul
-            mul
-        end
-    "#;
-    let bar_module = parse_module!(&context, "test::bar", bar_src);
-    let modules = [foo_module, bar_module];
-
-    // serialize/deserialize the bundle with locations
-    Assembler::new(context.source_manager())
-        .assemble_library(modules.iter().cloned())
-        .expect("failed to assemble library")
-}
-
-fn build_program_example() -> Arc<Library> {
-    use crate::{Parse, ParseOptions};
-    let source = "
-    begin
-        push.1.2
-        add
-        drop
-    end
-    ";
-    let assembler = Assembler::default();
-
-    let options = ParseOptions {
-        kind: ModuleKind::Executable,
-        warnings_as_errors: assembler.warnings_as_errors(),
-        path: Some(Path::exec_path().into()),
-    };
-
-    let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
-    assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
-}
-
-#[test]
-fn package_serialization_roundtrip() {
-    // since the test is quite expensive, 128 cases should be enough to cover all edge cases
-    // (default is 256)
-    let cases = 128;
-    TestRunner::new(Config::with_cases(cases))
-        .run(&any_package(), move |package| {
-            let bytes = package.to_bytes();
-            let deserialized = Package::read_from_bytes(&bytes).unwrap();
-            prop_assert_eq!(package, deserialized);
-            Ok(())
-        })
-        .unwrap_or_else(|err| {
-            panic!("{err}");
-        });
-}
-
 // MAST TESTS
 // ================================================================================================
 
@@ -4775,15 +4058,18 @@ fn nested_blocks() -> Result<(), Report> {
 
     let context = TestContext::new();
     let assembler = {
-        let kernel_lib = Assembler::new(context.source_manager()).assemble_kernel(KERNEL).unwrap();
+        let kernel_lib = Assembler::new(context.source_manager())
+            .assemble_kernel("kernel", KERNEL)
+            .map(Arc::<Package>::from)
+            .unwrap();
 
         let dummy_module = context.parse_module_with_path(MODULE, MODULE_PROCEDURE)?;
         let dummy_library = Assembler::new(context.source_manager())
-            .assemble_library([dummy_module])
+            .assemble_library("dummy", [dummy_module])
             .unwrap();
 
-        let mut assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
-        assembler.link_dynamic_library(dummy_library).unwrap();
+        let mut assembler = Assembler::with_kernel(context.source_manager(), kernel_lib)?;
+        assembler.link_package(Arc::from(dummy_library), Linkage::Dynamic).unwrap();
 
         assembler
     };
@@ -4798,15 +4084,11 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+            .ensure_block(vec![Operation::Add], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                CallNodeBuilder::new_syscall(kernel_foo_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(CallNodeBuilder::new_syscall(kernel_foo_node_id))
             .unwrap()
     };
 
@@ -4846,92 +4128,44 @@ fn nested_blocks() -> Result<(), Report> {
         syscall.foo
     end"#;
 
-    let program = assembler.assemble_program(program).unwrap();
+    let program = assembler.assemble_program("program", program).unwrap().unwrap_program();
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(29))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(2))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(3))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(5))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true1, r#false1])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true1, r#false1]))
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(7))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(11))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true3, r#false3])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true3, r#false3]))
         .unwrap();
 
     let r#while = {
+        // The assembler desugars `while.true { body }` to `if.true { LOOP { body } } else { noop
+        // }`.
         let body_node_id = expected_mast_forest_builder
             .ensure_block(
                 vec![
@@ -4939,46 +4173,31 @@ fn nested_blocks() -> Result<(), Report> {
                     Operation::Push(Felt::from_u32(19)),
                     Operation::Push(Felt::from_u32(23)),
                 ],
-                Vec::new(),
-                vec![],
-                vec![],
                 vec![],
                 vec![],
             )
             .unwrap();
 
+        let loop_node_id = expected_mast_forest_builder
+            .ensure_node(LoopNodeBuilder::new(body_node_id))
+            .unwrap();
+        let noop_node_id = expected_mast_forest_builder
+            .ensure_block(vec![Operation::Noop], vec![], vec![])
+            .unwrap();
+
         expected_mast_forest_builder
-            .ensure_node(
-                LoopNodeBuilder::new(body_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_node(SplitNodeBuilder::new([loop_node_id, noop_node_id]))
             .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(13))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_node(
-            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(JoinNodeBuilder::new([push_13_basic_block_id, r#while]))
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true2, r#false2])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .ensure_node(SplitNodeBuilder::new([r#true2, r#false2]))
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
@@ -5119,10 +4338,9 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
-    // `foo` and `bar` have the same operations, they carry different source mappings and
-    // therefore must remain distinct procedures. The entrypoint is a third procedure.
-    assert_eq!(program.num_procedures(), 3);
+    // `foo` and `bar` have the same body, so they are deduplicated. The entrypoint is the second
+    // procedure.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
@@ -5133,7 +4351,8 @@ fn distinguish_grandchildren_correctly() {
     begin
         if.true
             while.true
-                trace.1234
+                push.2
+                drop
                 push.1
             end
         end
@@ -5170,17 +4389,18 @@ fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
     let context = TestContext::default();
     let bar = context.parse_module_with_path(BAR_NAME, BAR)?;
     let baz = context.parse_module_with_path(BAZ_NAME, BAZ)?;
-    let library = context.assemble_library([bar, baz]).unwrap();
+    let library = context.assemble_library("foo", None, [bar, baz]).unwrap();
 
-    let assembler =
-        Assembler::new(context.source_manager()).with_dynamic_library(&library).unwrap();
+    let assembler = Assembler::new(context.source_manager())
+        .with_package(library.into(), Linkage::Dynamic)
+        .unwrap();
 
     let program = r#"
     begin
         exec.::foo::baz::baz
     end"#;
 
-    assert_matches!(assembler.assemble_program(program), Ok(_));
+    assert_matches!(assembler.assemble_program("program", program), Ok(_));
     Ok(())
 }
 
@@ -5205,10 +4425,11 @@ fn re_exports() -> Result<(), Report> {
     let context = TestContext::new();
     let bar = context.parse_module_with_path(BAR_NAME, BAR)?;
     let baz = context.parse_module_with_path(BAZ_NAME, BAZ)?;
-    let library = context.assemble_library([bar, baz]).unwrap();
+    let library = context.assemble_library("foo", None, [bar, baz]).unwrap();
 
-    let assembler =
-        Assembler::new(context.source_manager()).with_dynamic_library(&library).unwrap();
+    let assembler = Assembler::new(context.source_manager())
+        .with_package(library.into(), Linkage::Dynamic)
+        .unwrap();
 
     let program = r#"
     use foo::baz
@@ -5220,7 +4441,7 @@ fn re_exports() -> Result<(), Report> {
         exec.baz::qux
     end"#;
 
-    assert_matches!(assembler.assemble_program(program), Ok(_));
+    assert_matches!(assembler.assemble_program("test", program), Ok(_));
     Ok(())
 }
 
@@ -5251,7 +4472,7 @@ fn module_ordering_can_be_arbitrary() -> Result<(), Report> {
 
     let mut assembler = Assembler::new(context.source_manager());
     assembler.compile_and_statically_link(b)?.compile_and_statically_link(a)?;
-    assembler.assemble_library([c])?;
+    assembler.assemble_library("lib", [c])?;
 
     Ok(())
 }
@@ -5281,12 +4502,13 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 
         let mut assembler = Assembler::new(context.source_manager());
         assembler.compile_and_statically_link(helpers)?;
-        assembler.assemble_kernel(kernel).unwrap()
+        assembler.assemble_kernel("kernel", kernel).unwrap()
     };
 
-    assert_eq!(kernel_lib.kernel().proc_hashes().len(), 1);
+    assert_eq!(kernel_lib.to_kernel().ok().map(|k| k.proc_hashes().len()), Some(1));
 
-    Assembler::with_kernel(context.source_manager(), kernel_lib).assemble_program(PROGRAM)?;
+    Assembler::with_kernel(context.source_manager(), Arc::from(kernel_lib))?
+        .assemble_program("program", PROGRAM)?;
 
     Ok(())
 }
@@ -5299,46 +4521,9 @@ fn regression_empty_kernel_library_is_rejected() {
     // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "pub const FOO = 1\n";
     let err = Assembler::new(source_manager)
-        .assemble_kernel(kernel_masm)
+        .assemble_kernel("kernel", kernel_masm)
         .expect_err("expected empty kernel to be rejected");
-    assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
-}
-
-#[test]
-fn regression_empty_kernel_package_is_rejected_without_panicking() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
-    let context = TestContext::default();
-    let source_manager = context.source_manager();
-    let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel(
-            r#"
-            pub proc foo
-                add
-            end
-            "#,
-        )
-        .expect("kernel assembly should succeed");
-    let mut package = *Package::from_library(
-        PackageId::from("kernel"),
-        "1.0.0".parse().unwrap(),
-        TargetType::Kernel,
-        Arc::new(kernel_lib.as_ref().clone()),
-        [],
-    );
-    package.manifest = PackageManifest::new([]).expect("empty package manifest should be valid");
-
-    let linked = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(source_manager)
-            .link_package(Arc::new(package), miden_project::Linkage::Dynamic)
-    }));
-    assert!(linked.is_ok(), "assembler panicked while linking an empty kernel package");
-
-    let error = linked.unwrap().expect_err("empty kernel packages should be rejected");
-    assert_diagnostic_lines!(
-        error,
-        "invalid kernel package: does not export any kernel procedures"
-    );
+    assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
 }
 
 /// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
@@ -5359,7 +4544,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         ),
     )?;
 
-    let library = Assembler::new(context.source_manager()).assemble_library([module])?;
+    let library = Assembler::new(context.source_manager()).assemble_library("lib", [module])?;
     let mut forest = library.mast_forest().as_ref().clone();
     assert!(
         forest
@@ -5588,7 +4773,7 @@ end
         assembler
             .compile_and_statically_link(module_b)
             .expect("linking module b must succeed");
-        assembler.assemble_program(module_a_src)
+        assembler.assemble_program("test", module_a_src)
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -5604,17 +4789,15 @@ fn test_issue_2181_locaddr_bug_assembly() -> TestResult {
         &context,
         r#"
 proc some_proc
-    debug.stack.4
     nop
 end
 
 @locals(4)
 proc main
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
+    locaddr.0
+    locaddr.0
+    locaddr.0
     exec.some_proc
-    debug.stack.4
     dropw
 end
 
@@ -5644,11 +4827,11 @@ fn test_assembler_debug_info_present() {
 
     // Test: With debug mode always enabled (issue #1821), debug info should always be present
     let assembler = Assembler::default();
-    let library = assembler.assemble_library([module]).unwrap();
+    let library = assembler.assemble_library("test", [module]).unwrap();
     let mast_forest = library.mast_forest();
 
     // Debug info should be present since debug mode is always enabled.
-    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    // AssemblyOps are stored separately in DebugInfo.
     let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
     assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }
@@ -5688,7 +4871,7 @@ fn test_cross_module_constant_resolution() -> TestResult {
 
     let assembler = Assembler::new(context.source_manager());
 
-    let _ = assembler.assemble_library([module_a, module_b])?;
+    let _ = assembler.assemble_library("test", [module_a, module_b])?;
 
     Ok(())
 }
@@ -5727,7 +4910,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 
     let assembler = Assembler::new(context.source_manager());
 
-    let _ = assembler.assemble_library([module_a, module_b])?;
+    let _ = assembler.assemble_library("cycle", [module_a, module_b])?;
 
     Ok(())
 }
@@ -5763,7 +4946,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
     )?;
 
     let err = Assembler::new(context.source_manager())
-        .assemble_library([module_a, module_b])
+        .assemble_library("library", [module_a, module_b])
         .expect_err("expected private constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -5802,7 +4985,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
     )?;
 
     let err = Assembler::new(context.source_manager())
-        .assemble_library([module_a, module_b])
+        .assemble_library("library", [module_a, module_b])
         .expect_err("expected private absolute constant import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -5841,7 +5024,7 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
     )?;
 
     let err = Assembler::new(context.source_manager())
-        .assemble_library([module_a, module_b])
+        .assemble_library("library", [module_a, module_b])
         .expect_err("expected private type import to be rejected");
     assert_diagnostic!(&err, "private symbol reference");
     assert_diagnostic!(&err, "only public items can be referenced from another module");
@@ -5891,7 +5074,7 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
         "#
     );
 
-    let lib = Assembler::new(context.source_manager()).assemble_library([a, b, c])?;
+    let lib = Assembler::new(context.source_manager()).assemble_library("dcrc", [a, b, c])?;
 
     let src = source_file!(
         &context,
@@ -5906,8 +5089,8 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
     );
 
     let _program = Assembler::new(context.source_manager())
-        .with_dynamic_library(lib)?
-        .assemble_program(src)?;
+        .with_package(Arc::from(lib), Linkage::Dynamic)?
+        .assemble_program("test", src)?;
 
     Ok(())
 }
@@ -5938,7 +5121,7 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
         "#
     );
 
-    Assembler::new(context.source_manager()).assemble_library([memory, account])?;
+    Assembler::new(context.source_manager()).assemble_library("wallet", [memory, account])?;
 
     Ok(())
 }
@@ -5957,7 +5140,7 @@ fn imported_main_alias_self_call_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program(program)
+        Assembler::new(context.source_manager()).assemble_program("test", program)
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -5984,7 +5167,7 @@ fn rootless_call_cycle_is_structured_error() {
     "#;
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_program(program)
+        Assembler::new(context.source_manager()).assemble_program("test", program)
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6065,7 +5248,7 @@ fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library([a, b])
+        Assembler::new(context.source_manager()).assemble_library("cycle", [a, b])
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6105,7 +5288,7 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
     );
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library([a, b])
+        Assembler::new(context.source_manager()).assemble_library("cycle", [a, b])
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
@@ -6134,7 +5317,7 @@ fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
         .expect("module parsing must succeed");
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library([module])
+        Assembler::new(context.source_manager()).assemble_library("m", [module])
     }));
 
     assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
@@ -6168,7 +5351,7 @@ fn path_alias_chain_to_digest_assembles_without_panicking() {
         .expect("module parsing must succeed");
 
     let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library([module])
+        Assembler::new(context.source_manager()).assemble_library("m", [module])
     }));
 
     assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
@@ -6191,8 +5374,9 @@ fn imported_digest_alias_invoke_assembles_without_panicking() {
         end
     "#;
 
-    let assembled =
-        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::default().assemble_program("program", program)
+    }));
 
     assert!(
         assembled.is_ok(),
@@ -6359,8 +5543,9 @@ fn imported_digest_alias_subpath_is_rejected_without_panicking() {
         end
     "#;
 
-    let assembled =
-        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::default().assemble_program("program", program)
+    }));
 
     assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
     let err = assembled
@@ -6375,7 +5560,8 @@ fn invoking_local_type_alias_returns_error_instead_of_panicking() {
 
     let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
 
-    let result = catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(masm)));
+    let result =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program("program", masm)));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");
@@ -6400,18 +5586,29 @@ fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
+    let lib_src = source_file!(
+        &context,
+        "\
+pub type foo = u32
+
+pub proc fun(in: foo)
+    push.1
+end"
+    );
     let lib = context
-        .parse_module_with_path("test::types", source_file!(&context, "pub type foo = u32\n"))
+        .parse_module_with_path("test::types", lib_src)
         .expect("library module parsing must succeed");
     let library = Assembler::new(context.source_manager())
-        .assemble_library([lib])
+        .assemble_library("test", [lib])
         .expect("library assembly must succeed");
 
     let mut assembler = Assembler::new(context.source_manager());
-    assembler.link_dynamic_library(library).expect("library linking must succeed");
+    assembler
+        .link_package(Arc::from(library), Linkage::Dynamic)
+        .expect("library linking must succeed");
 
     let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
-    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program)));
+    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program("program", program)));
 
     let result = result.expect("assembly panicked, expected a structured error");
     let err = result.expect_err("assembly unexpectedly succeeded");
@@ -6465,14 +5662,14 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
 
     let assembler = Assembler::new(context.source_manager());
 
-    let _ = assembler.assemble_library([module_a, module_b])?;
+    let _ = assembler.assemble_library("cycle", [module_a, module_b])?;
 
     Ok(())
 }
 
 #[test]
 fn regression_symbol_resolution_duplicate_module_paths_are_rejected_during_linking() {
-    fn try_assemble_program_with_link_order(libs: &[Arc<Library>]) -> Result<(), Report> {
+    fn try_assemble_program_with_link_order(libs: &[Arc<Package>]) -> Result<(), Report> {
         let program_source = r#"
 begin
     exec.::foo::bar::add
@@ -6481,10 +5678,10 @@ end
 
         let mut assembler = Assembler::default();
         for lib in libs {
-            assembler.link_static_library(lib)?;
+            assembler.link_package(lib.clone(), Linkage::Static)?;
         }
 
-        assembler.assemble_program(program_source).map(|_| ())
+        assembler.assemble_program("program", program_source).map(|_| ())
     }
 
     let context = TestContext::default();
@@ -6506,10 +5703,12 @@ end
         .expect("module must parse and analyse");
 
     let legit_lib = Assembler::new(source_manager.clone())
-        .assemble_library([legit_mod])
+        .assemble_library("legit", [legit_mod])
+        .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
     let attacker_lib = Assembler::new(source_manager)
-        .assemble_library([attacker_mod])
+        .assemble_library("legit", [attacker_mod])
+        .map(Arc::<Package>::from)
         .expect("library assembly must succeed");
 
     let err = try_assemble_program_with_link_order(&[legit_lib.clone(), attacker_lib.clone()])
@@ -6533,7 +5732,7 @@ fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejecte
         .expect("module must parse and analyse");
 
     let err = Assembler::new(source_manager)
-        .assemble_library([legit_mod, attacker_mod])
+        .assemble_library("lib", [legit_mod, attacker_mod])
         .expect_err("expected duplicate canonical export paths to be rejected during assembly");
     assert_diagnostic!(err, "duplicate definition found for export path '::foo::bar::add'");
 }
@@ -6541,62 +5740,73 @@ fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejecte
 #[test]
 fn regression_symbol_resolution_export_leaf_name_collision_should_be_rejected() {
     let base = Assembler::default()
-        .assemble_library([r#"
+        .assemble_library(
+            "lib",
+            [r#"
 pub proc p
     push.1
 end
-"#])
+"#],
+        )
         .expect("base library assembly must succeed");
-    let node = base
+    let (node, digest) = base
+        .manifest
         .exports()
         .find_map(|e| e.as_procedure())
-        .expect("expected at least one procedure export")
-        .node;
+        .map(|e| (e.node, e.digest))
+        .expect("expected at least one procedure export");
 
     let quoted = Arc::<Path>::from(Path::validate(r#"::foo::"bar""#).unwrap());
     let unquoted = Arc::<Path>::from(Path::validate("::foo::bar").unwrap());
 
-    let mut exports = BTreeMap::new();
-    exports.insert(
-        quoted.clone(),
-        LibraryExport::Procedure(LibraryProcedureExport::new(node, quoted)),
-    );
-    exports.insert(
-        unquoted.clone(),
-        LibraryExport::Procedure(LibraryProcedureExport::new(node, unquoted)),
-    );
+    let exports = vec![
+        PackageExport::Procedure(ProcedureExport::new(quoted, node, digest, None)),
+        PackageExport::Procedure(ProcedureExport::new(unquoted, node, digest, None)),
+    ];
 
-    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
-    let err = Library::read_from_bytes(&lib.to_bytes()).expect_err(
-        "expected duplicate canonical export paths to be rejected during deserialization",
-    );
-    assert_matches!(err, DeserializationError::InvalidValue(_));
+    Package::create(
+        "test".into(),
+        "0.0.0".parse().unwrap(),
+        TargetType::Library,
+        Arc::clone(base.mast_forest()),
+        exports,
+        None,
+    )
+    .expect_err("duplicate export paths must be rejected");
 }
 
 #[test]
 fn regression_symbol_resolution_malformed_quoted_export_leaf_should_return_error_not_panic() {
     let base = Assembler::default()
-        .assemble_library([r#"
+        .assemble_library(
+            "test",
+            [r#"
 pub proc p
     push.1
 end
-"#])
+"#],
+        )
         .expect("base library assembly must succeed");
-    let node = base
+    let (node, digest) = base
+        .manifest
         .exports()
         .find_map(|e| e.as_procedure())
-        .expect("expected at least one procedure export")
-        .node;
+        .map(|e| (e.node, e.digest))
+        .expect("expected at least one procedure export");
 
     let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
 
-    let mut exports = BTreeMap::new();
-    exports.insert(bad.clone(), LibraryExport::Procedure(LibraryProcedureExport::new(node, bad)));
+    let exports = vec![PackageExport::Procedure(ProcedureExport::new(bad, node, digest, None))];
 
-    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
-    let err = Library::read_from_bytes(&lib.to_bytes())
-        .expect_err("expected malformed procedure export leaf names to be rejected");
-    assert_matches!(err, DeserializationError::InvalidValue(_));
+    Package::create(
+        "test".into(),
+        "0.0.0".parse().unwrap(),
+        TargetType::Library,
+        Arc::clone(base.mast_forest()),
+        exports,
+        None,
+    )
+    .expect_err("expected malformed procedure export leaf names to be rejected");
 }
 
 #[test]
@@ -6634,7 +5844,7 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
 
     assembler.compile_and_statically_link(lib)?;
 
-    let _ = assembler.assemble_kernel(kernel)?;
+    let _ = assembler.assemble_kernel("kernel", kernel)?;
 
     Ok(())
 }
@@ -6688,13 +5898,13 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel)?;
     let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
     let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
 
-    let mut assembler = Assembler::with_kernel(context.source_manager(), kernel);
+    let mut assembler = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?;
     assembler.compile_and_statically_link(lib)?;
-    let program = assembler.assemble_program(source)?;
+    let program = assembler.assemble_program("program", source)?.unwrap_program();
 
     let mast = {
         let entry = program.get_node_by_id(program.entrypoint()).unwrap();
@@ -6751,12 +5961,12 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
-    let lib = Assembler::new(context.source_manager()).assemble_library([lib])?;
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel)?;
+    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [lib])?;
 
-    let error = Assembler::with_kernel(context.source_manager(), kernel)
-        .with_static_library(lib)?
-        .assemble_program(source)
+    let error = Assembler::with_kernel(context.source_manager(), Arc::from(kernel))?
+        .with_package(Arc::from(lib), Linkage::Static)?
+        .assemble_program("program", source)
         .expect_err("expected diagnostic to be raised, but compilation succeeded");
 
     assert_diagnostic_lines!(
@@ -6789,10 +5999,11 @@ end
 "#;
 
     let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel(kernel_src)
+        .assemble_kernel("kernel", kernel_src)
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
+        .expect("test package should be valid");
 
     let program_src = r#"
 proc dup
@@ -6805,7 +6016,8 @@ begin
 end
 "#;
 
-    let assembled = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program_src)));
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| assembler.assemble_program("program", program_src)));
     assert!(assembled.is_ok(), "assembler panicked while assembling a valid program");
     assert!(assembled.unwrap().is_ok(), "expected program assembly to succeed");
 }
@@ -6822,10 +6034,11 @@ end
 "#;
 
     let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel(kernel_src)
+        .assemble_kernel("kernel", kernel_src)
         .expect("kernel assembly must succeed");
 
-    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+    let assembler = Assembler::with_kernel(source_manager, Arc::from(kernel_lib))
+        .expect("test kernel should be valid");
 
     let program_src = r#"
 begin
@@ -6834,7 +6047,7 @@ end
 "#;
 
     let err = assembler
-        .assemble_program(program_src)
+        .assemble_program("program", program_src)
         .expect_err("expected unknown digest syscall to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -6851,7 +6064,7 @@ end
 "#;
 
     let err = assembler
-        .assemble_program(program_src)
+        .assemble_program("program", program_src)
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
 }
@@ -6868,7 +6081,8 @@ end
 "#;
 
     let kernel = Assembler::new(source_manager.clone())
-        .assemble_kernel(kernel_src)
+        .assemble_kernel("kernel", kernel_src)
+        .map(Arc::<Package>::from)
         .expect("kernel assembly must succeed");
 
     let cases = vec![
@@ -6888,8 +6102,9 @@ end
     ];
 
     for (kind, program_src) in cases {
-        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
-            .assemble_program(program_src)
+        let err = Assembler::with_kernel(source_manager.clone(), Arc::clone(&kernel))
+            .expect("test kernel should be valid")
+            .assemble_program("program", program_src)
             .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
         assert_diagnostic!(err, "syscall");
     }
@@ -6913,7 +6128,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     )?;
 
     let assembler = Assembler::new(context.source_manager());
-    let lib = assembler.assemble_library([lib])?;
+    let lib = assembler.assemble_library("lib", [lib])?;
 
     // This program triggers a pathological edge case in symbol resolution, caused by the
     // import-relative reference `exec.lib::lib_proc`. This causes the following to occur:
@@ -6927,7 +6142,8 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     // The fix for this is to disregard import expansions of the same import in the same module
     // after the first time an import is expanded.
     let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.with_static_library(lib)?.assemble_program(
+    let _ = assembler.with_package(Arc::from(lib), Linkage::Static)?.assemble_program(
+        "program",
         r#"
         use lib::lib
 
@@ -6972,7 +6188,7 @@ fn test_linking_recursive_expansion_is_structured_error() -> TestResult {
 
     let assembler = Assembler::new(context.source_manager());
     let err = assembler
-        .assemble_library([a_lib, b_lib])
+        .assemble_library("lib", [a_lib, b_lib])
         .expect_err("expected recursive alias expansion to fail with a diagnostic");
     assert_diagnostic!(&err, "alias expansion cycle detected");
 
@@ -7011,7 +6227,7 @@ fn test_linking_recursive_expansion_via_renamed_aliases_is_structured_error() ->
 
     let assembler = Assembler::new(context.source_manager());
     let err = assembler
-        .assemble_library([a_lib, b_lib])
+        .assemble_library("lib", [a_lib, b_lib])
         .expect_err("expected recursive alias expansion to fail with a diagnostic");
     assert_diagnostic!(&err, "invalid procedure reference");
 
@@ -7056,7 +6272,7 @@ fn test_linking_recursive_expansion_depth_boundary_resolves() -> TestResult {
     let modules = linker_alias_chain_modules(&context, MODULE_COUNT)?;
 
     let assembler = Assembler::new(context.source_manager());
-    let _ = assembler.assemble_library(modules)?;
+    let _ = assembler.assemble_library("lib", modules)?;
 
     Ok(())
 }
@@ -7070,7 +6286,7 @@ fn test_linking_recursive_expansion_depth_limit_is_structured_error() -> TestRes
 
     let assembler = Assembler::new(context.source_manager());
     let err = assembler
-        .assemble_library(modules)
+        .assemble_library("lib", modules)
         .expect_err("expected recursive alias expansion to hit the depth limit");
     assert_diagnostic!(&err, "alias expansion depth exceeded");
 

@@ -4,9 +4,43 @@
 
 #### Changes
 
+- Added an event-based `miden::core::debug` module providing `print_*` procedures for print-style debugging of the operand stack, memory, advice stack, and advice map ([#3169](https://github.com/0xMiden/miden-vm/issues/3169)).
+- [BREAKING] Removed `debug.*` decorators in favor of `miden::core::debug` procedures, and bumped the MAST wire format to `0.0.4` ([#3201](https://github.com/0xMiden/miden-vm/pull/3201)).
 - Improved performances of auxiliary trace generation ([#3119](https://github.com/0xMiden/miden-vm/pull/3119)).
 - Aligned replay stack word access bounds with `StackInterface`, allowing the maximum valid start index for word reads and writes ([#3014](https://github.com/0xMiden/miden-vm/pull/3014)).
+- [BREAKING] Enabled `clippy::unnecessary_wraps` lint and removed all unnecessary `Option`/`Result` wrappings across the workspace ([#3143](https://github.com/0xMiden/miden-vm/pull/3143)).
+- [BREAKING] Split the execution AIR into Core + Chiplets AIRs ([#3115](https://github.com/0xMiden/miden-vm/pull/3115)).
+- [BREAKING] Complete adapting trace generation to row-major ([#3171](https://github.com/0xMiden/miden-vm/pull/3171)).
+- Brought the core-lib `u256` module to full parity with the `u64` and `u128` modules ([#3167](https://github.com/0xMiden/miden-vm/pull/3167)).
+- [BREAKING] Removed `prettier::pretty_print_csv`, `MastNodeId::from_usize_safe`, `DecoratorId::from_u32_bounded`, `OpBatch::end_indices`, — unused private API ([#3197](https://github.com/0xMiden/miden-vm/pull/3197)).
+- [BREAKING] Removed MASM `trace` decorators, remaining decorator execution scaffolding, the CLI `--trace` flag, trace-specific processor and host APIs, and decorator wire slots from the unreleased MAST format `0.0.4` ([#3208](https://github.com/0xMiden/miden-vm/pull/3208)).
+- [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
+- Removed the legacy LALRPOP parser backend
 
+#### Fixes
+
+- Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
+- [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
+- Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
+- Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
+- Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
+
+#### Enhancements
+
+- Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
+- Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
+
+## v0.23.3 (2026-05-26)
+
+- Pure version bump to attach build artifacts to the release.
+
+## v0.23.2 (2026-05-26)
+
+- Restored `DebugVarInfo::set_value_location` and `DebugVarLocation::FrameBase` for debug metadata compatibility ([#3189](https://github.com/0xMiden/miden-vm/pull/3189)).
+
+## v0.23.1 (2026-05-20)
+
+- Restored metadata-neutral MAST node identity so public procedure roots do not depend on debug/decorator metadata shape; this reopens debug metadata precision issues from #2955 and #3054.
 
 ## v0.23.0 (2026-05-07)
 
@@ -14,6 +48,13 @@
 
 - Added the `miden-vm-synthetic-bench` crate for VM-level proving regression detection driven by row-count snapshots from an external producer ([#3024](https://github.com/0xMiden/miden-vm/pull/3024)).
 - Implemented the `miden-registry` tool for managing a local filesystem-based package registry. This is intended to help us explore what package management in Miden projects might look like with a central registry for sharing packages, without needing to go all-in on implementing one. [#2881](https://github.com/0xMiden/miden-vm/pull/2881).
+- Introduce `SparseMastForest`, and use it to shrink the size of `TraceGenerationContext` [#3105](https://github.com/0xMiden/miden-vm/pull/3105).
+
+#### Enhancements
+
+- Implemented new lossless parser for Miden Assembly sources ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
+- Created new `miden-format` tool for formatting Miden Assembly sources while preserving comments and certain whitespace choices ([#2906](https://github.com/0xMiden/miden-vm/pull/2906))
+- Switched the default parser backend for Miden Assembly to use the new lossless parser ([#2907](https://github.com/0xMiden/miden-vm/pull/2907))
 
 #### Fixes
 
@@ -64,9 +105,12 @@
 
 #### Changes
 
+- [BREAKING] The `Library` struct was removed, along with related APIs, in favor of `Package` and `Package`-oriented APIs ([#3106](https://github.com/0xMiden/miden-vm/pull/3106))
+- [BREAKING] The `Package` struct no longer implements `serde`-based deserialization
 - [BREAKING] Refactored MAST forest serialization around fixed-layout full, stripped, and hashless sections, and bumped the MAST wire format to `0.0.3` ([#2765](https://github.com/0xMiden/miden-vm/pull/2765)).
 - Optimized call graph topological sort from O(V\*E) to O(V + E) by pre-computing in-degrees ([#2830](https://github.com/0xMiden/miden-vm/pull/2830)).
 - [BREAKING] Cleaned up the unreleased MAST forest wire format, with stable node IDs and stricter untrusted validation ([#3055](https://github.com/0xMiden/miden-vm/pull/3055)).
+- [BREAKING] Refined MAST forest read policies with trusted wire-backed views, options-based untrusted reads, and separate wire and validation budgets ([#3077](https://github.com/0xMiden/miden-vm/pull/3077)).
 - Documented sortedness precondition more prominently for sorted array operations ([#2832](https://github.com/0xMiden/miden-vm/pull/2832)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
 - [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
@@ -107,6 +151,8 @@
 - [BREAKING] Updated the Miden crypto stack to `miden-crypto` v0.25, and switched SMT leaf hashing to use Poseidon2 domain separation so masm-side leaf digests match `SmtLeaf::hash()` ([#3095](https://github.com/0xMiden/miden-vm/pull/3095)).
 - [BREAKING] Reject post-last operation-indexed decorators in block assembly and serialized MAST forests; use `after_exit` for decorators that run after a block exits ([#3114](https://github.com/0xMiden/miden-vm/pull/3114)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
+- Drop dead `clk` argument from u32 range-check ([#3135](https://github.com/0xMiden/miden-vm/issues/3135)).
+- Added binary artifact compilation to CI to aid `midenup`'s installation speed ([#3029](https://github.com/0xMiden/miden-vm/pull/3029)).
 
 ## 0.22.3 (2026-05-01)
 
@@ -115,12 +161,11 @@
 ## 0.22.2 (2026-04-28)
 
 - Improve debug var loc tracking ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
-
+ 
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
 - Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
-- Added `FrameBase` variant to `DebugVarLocation` and `set_value_location` to `DebugVarInfo` for frame-pointer-relative debug variable locations ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.0 (2026-03-18)
 

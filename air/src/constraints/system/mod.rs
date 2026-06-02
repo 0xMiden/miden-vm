@@ -34,7 +34,7 @@ pub mod columns;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    CoreCols, MidenAirBuilder,
     constraints::{constants::F_1, op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -44,8 +44,8 @@ use crate::{
 /// Enforces system constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

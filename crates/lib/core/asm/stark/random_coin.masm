@@ -154,12 +154,19 @@ end
 #! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
 #! already be stored in memory before calling this procedure.
 #!
-#! Input: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+#! Input: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
 #! Output: [...]
 pub proc init_seed
 
-    # Save log(trace_length) in memory for later use.
-    dup exec.constants::set_trace_length_log
+    # Save per-AIR log heights, then derive and store the max (used everywhere
+    # downstream for lifted-domain math, LDE size, and trace generator).
+    dup exec.constants::set_core_trace_length_log
+    dup.1 exec.constants::set_chiplets_trace_length_log
+    dup dup.2
+    # => [log_chip, log_core, log_core, log_chip, rd0, ..., ...]
+    u32max
+    exec.constants::set_trace_length_log
+    # => [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # Initialize the zero word and buffers to zero.
     padw
@@ -167,7 +174,7 @@ pub proc init_seed
     dropw
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [log(tl), rd0, rd1, rd2, rd3, ...]
+    #=> [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
 
@@ -176,9 +183,9 @@ pub proc init_seed
     #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
     #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
     #
-    # Drop log(tl) from the stack (saved in memory, not part of Phase 1 rate).
+    # Drop both per-AIR log heights from the stack (saved in memory above).
 
-    drop
+    drop drop
     #=> [rd0, rd1, rd2, rd3, ...]
 
     # Build R1 from security parameters stored in memory.
@@ -273,18 +280,18 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the single AIR instance shape and discard the instance challenge.
+#! Observe the multi-AIR instance shape (air_order + heights) and discard the
+#! instance challenge.
 #!
-#! miden-lifted-stark 0.24 observes each log(trace_length) after public inputs and then samples
-#! one extension-field instance challenge before absorbing the main trace commitment. The VM
-#! recursive verifier only supports one AIR instance, so this helper observes the stored
-#! log(trace_length), performs the partial-rate duplexing, and marks two base-field outputs as
-#! consumed without materializing the unused extension element.
-#!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. The current random coin state has just absorbed the public inputs.
-#!   3. On exit: input_len=0, output_len=6.
+#! Rust side: the caller observes `air_order` (zero-padded to a full `SPONGE_RATE`
+#! block), then `prove_multi`/`verify_multi` invoke `observe_heights`. The
+#! DuplexChallenger therefore performs TWO permutations:
+#!   1. air_order block: rate = `[a0, a1, 0, 0, 0, 0, 0, 0]` (full-rate overwrite).
+#!   2. heights block: rate[0..2] = `[log_min, log_max]`; the DuplexChallenger only
+#!      overwrites the buffered prefix, so rate[2..8] and the capacity keep the
+#!      permuted output of step 1.
+#! `air_order` is reconstructed locally from per-AIR heights in memory; ties
+#! break to caller-order (a0 = 0) per Rust's `InstanceShapes::from_trace_heights`.
 #!
 #! Input: [...]
 #! Output: [...]
@@ -298,10 +305,46 @@ pub proc observe_trace_height_and_discard_instance_challenge
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 
-    # observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
-    exec.constants::get_trace_length_log
-    # => [log(trace_length), ...]
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, ...]
+
+    dup.1 dup.1 u32max exec.constants::tmp1 mem_store
+    dup.1 dup.1 u32min exec.constants::tmp2 mem_store
+    # => [log_chip, log_core, ...]
+
+    # a0 = (log_chip < log_core ? 1 : 0): u32lte returns log_core <= log_chip; not
+    # gives strict log_chip < log_core, so equal heights tie-break to a0 = 0.
+    u32lte not
+    dup not swap
+    # => [a0, a1, ...]
+
+    # --- Permutation 1: rate-aligned air_order block ---
+    # rate = [a0, a1, 0, 0, 0, 0, 0, 0]; the caller zero-pads air_order to a full
+    # SPONGE_RATE block, so this is a clean full-rate overwrite.
     exec.constants::r1_ptr mem_store
+    exec.constants::r1_ptr add.1 mem_store
+    push.0 exec.constants::r1_ptr add.2 mem_store
+    push.0 exec.constants::r1_ptr add.3 mem_store
+    push.0 exec.constants::r1_ptr add.4 mem_store
+    push.0 exec.constants::r1_ptr add.5 mem_store
+    push.0 exec.constants::r1_ptr add.6 mem_store
+    push.0 exec.constants::r1_ptr add.7 mem_store
+    # => [...]
+
+    exec.load_random_coin_state
+    # => [R1, R2, C, ...]
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
+    exec.store_random_coin_state
+    # => [...]   (coin state is now the air_order-block permutation output)
+
+    # --- Permutation 2: heights block over carried state ---
+    # Only rate[0..2] = [log_min, log_max] is overwritten; rate[2..8] and the
+    # capacity keep the permutation-1 output (already in memory from the store above),
+    # mirroring the DuplexChallenger's partial-prefix absorption.
+    exec.constants::tmp2 mem_load exec.constants::r1_ptr mem_store
+    exec.constants::tmp1 mem_load exec.constants::r1_ptr add.1 mem_store
     # => [...]
 
     exec.load_random_coin_state
@@ -313,6 +356,8 @@ pub proc observe_trace_height_and_discard_instance_challenge
 
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     # => [...]
+    # The instance_challenge (1 EF) sample consumes rate[7] and rate[6] of the
+    # permutation-2 output, leaving 6 elements valid in the output buffer.
     push.6 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 end
@@ -491,10 +536,35 @@ pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     mem_storew_le dropw
 
-    # Sample beta (multi-AIR accumulation challenge) to keep transcript in sync.
-    # For a single AIR, beta is unused but must be sampled from the random coin.
+    # Sample β (multi-AIR accumulation challenge), then write Word 5 = β-coefficient
+    # word into the stark-vars region as [mab_core_0, mab_core_1, mab_chip_0, mab_chip_1]:
+    #   - if `core_height ≤ chiplets_height` (proof_order [Core, Chiplets]):
+    #         mab_core = β, mab_chip = 1   →  yields β·core_acc + 1·chip_acc
+    #   - else (proof_order [Chiplets, Core]):
+    #         mab_core = 1, mab_chip = β   →  yields 1·core_acc + β·chip_acc
+    # Both forms match upstream's Horner accumulation `acc[j] = acc[j-1]·β + folded[j]`.
     exec.sample_ext
-    drop drop
+    # => [β_0, β_1, ...]
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, β_0, β_1, ...]
+    # u32lte returns 1 iff log_chip >= log_core, equivalent to log_core <= log_chip,
+    # which means Core is at proof_order position 0 (with the caller_idx=0 tiebreak).
+    u32lte
+    # => [core_first?, β_0, β_1, ...]
+    if.true
+        # core_first: word [mab_core=β, mab_chip=1] = [β_0, β_1, 1, 0]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+        movup.3 movup.3
+        # => [β_0, β_1, 1, 0, ...]
+    else
+        # chip_first: word [mab_core=1, mab_chip=β] = [1, 0, β_0, β_1]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+    end
+    exec.constants::auxiliary_ace_inputs_ptr add.20
+    mem_storew_le dropw
 end
 
 #! Draw deep composition polynomial random coefficient and save it at `deep_rand_coef_ptr`.

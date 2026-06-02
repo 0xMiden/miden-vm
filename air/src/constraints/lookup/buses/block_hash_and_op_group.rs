@@ -12,7 +12,7 @@
 //! `(max(6, 7), max(8, 8)) = (7, 8)`, giving a column transition of
 //! `max(1 + 8, 7) = 9` — the same saturated cost the two original columns had
 //! individually, but using **one** column instead of two, saving one accumulator column in
-//! `ProcessorAir::num_columns` (LookupAir impl).
+//! `CoreAir`'s LogUp column count.
 //!
 //! The emitter uses the plain `col.group` path (no cached encoding) for both buses; the
 //! merged group's degree is unchanged under either mode. The cached-encoding optimization
@@ -74,7 +74,9 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     // op flags, bound locally since each is consumed once inside its `.add(...)` call.
     let f_join = op_flags.join();
     let f_split = op_flags.split();
-    let f_loop_body = op_flags.loop_op() * s0 + op_flags.repeat();
+    // LOOP unconditionally enqueues the body (do-while semantics) and REPEAT enqueues each
+    // subsequent iteration.
+    let f_loop_body = op_flags.loop_op() + op_flags.repeat();
     let f_child = op_flags.dyn_op() + op_flags.dyncall() + op_flags.call() + op_flags.syscall();
     let f_end = op_flags.end();
     let f_push = op_flags.push();
@@ -153,7 +155,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
-                        Deg { v: 6, u: 7 },
+                        Deg { v: 5, u: 6 },
                     );
 
                     // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.

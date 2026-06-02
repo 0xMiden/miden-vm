@@ -28,10 +28,14 @@ miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core = { workspace = true, features = ["testing"] }
 miden-crypto.workspace = true
+miden-mast-package.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-verifier.workspace = true
+serde-wincode.workspace = true
 test-case = "3.2"
+thiserror.workspace = true
+wincode.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { workspace = true, default-features = false, features = [

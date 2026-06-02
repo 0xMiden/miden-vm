@@ -1,31 +1,28 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::borrow::{Borrow, BorrowMut};
 
 use itertools::Itertools;
 use miden_air::{
-    Felt,
+    CoreCols, Felt, StackCols, SystemCols,
     trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex,
-        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        decoder::{
-            HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS, NUM_OP_BITS, OP_BITS_EXTRA_COLS_OFFSET,
-            OP_BITS_OFFSET,
-        },
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
+        DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, decoder::NUM_OP_BITS,
     },
 };
 use miden_core::{
     ONE, Word, ZERO,
-    field::batch_inversion_allow_zeros,
-    mast::{MastForest, MastNode},
+    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    mast::{ExecutableMastForest, MastForestId, MastNode, SparseMastForest},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
+    utils::Idx,
 };
 use rayon::prelude::*;
 use tracing::instrument;
 
 use crate::{
     ContextId, ExecutionError,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     trace::{
         ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
@@ -35,7 +32,14 @@ use crate::{
     },
 };
 
+/// Per-row payload written by the core tracer (system + decoder + stack).
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
+
+/// Physical row width of the core buffer: the [`CORE_TRACE_WIDTH`] payload plus the two
+/// trailing range-checker columns, which together form the per-AIR Core matrix
+/// (`NUM_CORE_COLS`) consumed directly by proving. The range columns are filled in-place
+/// after padding (see `write_range_into_core`).
+pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH + RANGE_CHECK_TRACE_WIDTH;
 
 /// `build_trace()` uses this as a hard cap on trace rows.
 ///
@@ -71,7 +75,10 @@ mod tests;
 /// use miden_assembly::Assembler;
 /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 ///
-/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+/// let program = Assembler::default()
+///     .assemble_program("prg", "begin push.1 drop end")
+///     .unwrap()
+///     .unwrap_program();
 /// let mut host = DefaultHost::default();
 ///
 /// let trace_inputs = FastProcessor::new(StackInputs::default())
@@ -108,6 +115,7 @@ pub fn build_trace_with_max_len(
 
     let TraceGenerationContext {
         core_trace_contexts,
+        mast_forest_store,
         range_checker_replay,
         memory_writes,
         bitwise_replay: bitwise,
@@ -147,6 +155,7 @@ pub fn build_trace_with_max_len(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
+        &mast_forest_store,
         max_trace_len,
     )?;
 
@@ -156,41 +165,52 @@ pub fn build_trace_with_max_len(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
+        &mast_forest_store,
         max_stack_depth,
     )?;
 
-    let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
+    let core_trace_len = core_trace_data.len() / CORE_STORAGE_WIDTH;
 
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
 
-    let trace_len_summary =
-        TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
+    let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    let chiplets_height = pad_to_trace_length(chiplets.trace_len());
+    let padded_trace_len = core_height.max(chiplets_height);
 
-    // Compute the final main trace length
-    let main_trace_len =
-        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+    // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
+    // when the unpadded check above passed.
+    if padded_trace_len > max_trace_len {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
 
-    let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
-        || {
-            rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
-                || chiplets.into_trace(main_trace_len),
-            )
-        },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+    let trace_len_summary = TraceLenSummary::new_with_padded(
+        core_trace_len,
+        range_table_len,
+        ChipletsLengths::new(&chiplets),
+        padded_trace_len,
+    );
+
+    // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
+    let (chiplets_trace, ()) = rayon::join(
+        || chiplets.into_trace(chiplets_height),
+        || pad_core_row_major(&mut core_trace_data, core_height),
+    );
+
+    // The range checker occupies the two trailing columns of the core buffer.
+    range_checker.write_range_into_core(
+        &mut core_trace_data,
+        CORE_STORAGE_WIDTH,
+        CORE_TRACE_WIDTH,
+        CORE_TRACE_WIDTH + 1,
+        range_table_len,
+        core_height,
     );
 
     // Create the MainTrace
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(
-            core_trace_data,
-            chiplets_trace.trace,
-            range_checker_trace.trace,
-            main_trace_len,
-            last_program_row,
-        )
+        MainTrace::from_parts(core_trace_data, chiplets_trace.trace, last_program_row)
     };
 
     Ok(ExecutionTrace::new_from_parts(
@@ -204,17 +224,9 @@ pub fn build_trace_with_max_len(
 // HELPERS
 // ================================================================================================
 
-fn compute_main_trace_length(
-    core_trace_len: usize,
-    range_table_len: usize,
-    chiplets_trace_len: usize,
-) -> usize {
-    // Get the trace length required to hold all execution trace steps
-    let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
-
-    // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
-    core::cmp::max(trace_len, MIN_TRACE_LEN)
+/// Pad a logical row count to a valid trace length: next power of two, clamped to `MIN_TRACE_LEN`.
+fn pad_to_trace_length(logical_len: usize) -> usize {
+    logical_len.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
@@ -222,12 +234,13 @@ fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
-    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_rows * CORE_TRACE_WIDTH];
+    let mut core_trace_data = Felt::zero_vec(total_allocated_rows * CORE_STORAGE_WIDTH);
 
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
@@ -237,8 +250,10 @@ fn generate_core_trace_row_major(
     };
 
     let writers: Vec<RowMajorTraceWriter<'_, Felt>> = core_trace_data
-        .chunks_exact_mut(fragment_size * CORE_TRACE_WIDTH)
-        .map(|chunk| RowMajorTraceWriter::new(chunk, CORE_TRACE_WIDTH))
+        .chunks_exact_mut(fragment_size * CORE_STORAGE_WIDTH)
+        .map(|chunk| {
+            RowMajorTraceWriter::with_stride(chunk, CORE_STORAGE_WIDTH, CORE_STORAGE_WIDTH)
+        })
         .collect();
 
     // Build the core trace fragments in parallel
@@ -247,7 +262,13 @@ fn generate_core_trace_row_major(
         .zip(writers.into_par_iter())
         .map(|(trace_state, writer)| {
             let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
-                split_trace_fragment_context(trace_state, writer, fragment_size, max_stack_depth);
+                split_trace_fragment_context(
+                    trace_state,
+                    writer,
+                    fragment_size,
+                    mast_forest_store,
+                    max_stack_depth,
+                )?;
 
             processor.execute(
                 &mut continuation_stack,
@@ -284,23 +305,27 @@ fn generate_core_trace_row_major(
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
     // row of each fragment with non-inverted values.
     {
-        let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
-        let w = CORE_TRACE_WIDTH;
+        let w = CORE_STORAGE_WIDTH;
         core_trace_data[..total_core_trace_rows * w]
             .par_chunks_mut(fragment_size * w)
             .for_each(|fragment_chunk| {
                 let num_rows = fragment_chunk.len() / w;
-                let mut h0_vals: Vec<Felt> =
-                    (0..num_rows).map(|r| fragment_chunk[r * w + h0_col_offset]).collect();
+                let mut h0_vals: Vec<Felt> = (0..num_rows)
+                    .map(|r| {
+                        let row: &CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow();
+                        row.stack.h0
+                    })
+                    .collect();
                 batch_inversion_allow_zeros(&mut h0_vals);
                 for (r, &val) in h0_vals.iter().enumerate() {
-                    fragment_chunk[r * w + h0_col_offset] = val;
+                    let row: &mut CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow_mut();
+                    row.stack.h0 = val;
                 }
             });
     }
 
     // Truncate the core trace columns to the actual number of rows written.
-    core_trace_data.truncate(total_core_trace_rows * CORE_TRACE_WIDTH);
+    core_trace_data.truncate(total_core_trace_rows * CORE_STORAGE_WIDTH);
 
     push_halt_opcode_row(
         &mut core_trace_data,
@@ -325,24 +350,24 @@ fn generate_core_trace_row_major(
 fn fixup_stack_and_system_rows(
     core_trace_data: &mut [Felt],
     fragment_size: usize,
-    stack_rows: &[[Felt; STACK_TRACE_WIDTH]],
-    system_rows: &[[Felt; SYS_TRACE_WIDTH]],
+    stack_rows: &[StackCols<Felt>],
+    system_rows: &[SystemCols<Felt>],
     first_stack_top: &[Felt],
 ) {
     const MIN_STACK_DEPTH_FELT: Felt = Felt::new_unchecked(MIN_STACK_DEPTH as u64);
-    let w = CORE_TRACE_WIDTH;
+    let w = CORE_STORAGE_WIDTH;
 
     {
-        let row = &mut core_trace_data[..w];
+        let row: &mut CoreCols<Felt> = core_trace_data[..w].borrow_mut();
 
         // Stack order in the trace is reversed vs `first_stack_top`.
         for (stack_col_idx, &value) in first_stack_top.iter().rev().enumerate() {
-            row[STACK_TRACE_OFFSET + STACK_TOP_OFFSET + stack_col_idx] = value;
+            row.stack.top[stack_col_idx] = value;
         }
 
-        row[STACK_TRACE_OFFSET + B0_COL_IDX] = MIN_STACK_DEPTH_FELT;
-        row[STACK_TRACE_OFFSET + B1_COL_IDX] = ZERO;
-        row[STACK_TRACE_OFFSET + H0_COL_IDX] = ZERO;
+        row.stack.b0 = MIN_STACK_DEPTH_FELT;
+        row.stack.b1 = ZERO;
+        row.stack.h0 = ZERO;
     }
 
     let total_rows = core_trace_data.len() / w;
@@ -351,13 +376,9 @@ fn fixup_stack_and_system_rows(
     for frag_idx in 1..num_fragments {
         let row_idx = frag_idx * fragment_size;
         let row_start = row_idx * w;
-        let system_row = &system_rows[frag_idx - 1];
-        let stack_row = &stack_rows[frag_idx - 1];
-
-        core_trace_data[row_start..row_start + SYS_TRACE_WIDTH].copy_from_slice(system_row);
-
-        let stack_start = row_start + STACK_TRACE_OFFSET;
-        core_trace_data[stack_start..stack_start + STACK_TRACE_WIDTH].copy_from_slice(stack_row);
+        let row: &mut CoreCols<Felt> = core_trace_data[row_start..row_start + w].borrow_mut();
+        row.system = system_rows[frag_idx - 1].clone();
+        row.stack = stack_rows[frag_idx - 1].clone();
     }
 }
 
@@ -368,46 +389,47 @@ fn fixup_stack_and_system_rows(
 fn push_halt_opcode_row(
     core_trace_data: &mut Vec<Felt>,
     num_rows_before: usize,
-    last_system_state: &[Felt; SYS_TRACE_WIDTH],
-    last_stack_state: &[Felt; STACK_TRACE_WIDTH],
+    last_system_state: &SystemCols<Felt>,
+    last_stack_state: &StackCols<Felt>,
 ) {
-    let w = CORE_TRACE_WIDTH;
-    let mut row = [ZERO; CORE_TRACE_WIDTH];
+    let w = CORE_STORAGE_WIDTH;
+    let mut row_data = [ZERO; CORE_STORAGE_WIDTH];
 
-    // system columns
-    // ---------------------------------------------------------------------------------------
-    row[..SYS_TRACE_WIDTH].copy_from_slice(last_system_state);
-
-    // stack columns
-    // ---------------------------------------------------------------------------------------
-    row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
-        .copy_from_slice(last_stack_state);
-
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for bit_idx in 0..NUM_OP_BITS {
-        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx] =
-            Felt::from_u8((halt_opcode >> bit_idx) & 1);
-    }
-
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    if num_rows_before > 0 {
+    // Read the previous row's hasher state first half before we take a mutable borrow on
+    // `row_data` (propagates the program hash into the HALT padding).
+    let prev_hasher_state_first_half: [Felt; 4] = if num_rows_before > 0 {
         let last_row_start = (num_rows_before - 1) * w;
-        // For first 4 hasher columns, copy the last value to propagate program hash
-        for hasher_col_idx in 0..4 {
-            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
-            row[col_idx] = core_trace_data[last_row_start + col_idx];
+        let prev: &CoreCols<Felt> = core_trace_data[last_row_start..last_row_start + w].borrow();
+        let hs = &prev.decoder.hasher_state;
+        [hs[0], hs[1], hs[2], hs[3]]
+    } else {
+        [ZERO; 4]
+    };
+
+    {
+        let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+
+        row.system = last_system_state.clone();
+        row.stack = last_stack_state.clone();
+
+        // Pad op_bits columns with HALT opcode bits
+        let halt_opcode = opcodes::HALT;
+        for bit_idx in 0..NUM_OP_BITS {
+            row.decoder.op_bits[bit_idx] = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         }
+
+        // Pad hasher state columns (8 columns)
+        // - First 4 columns: copy the last value (to propagate program hash)
+        // - Remaining 4 columns: fill with ZEROs
+        row.decoder.hasher_state[..4].copy_from_slice(&prev_hasher_state_first_half);
+
+        // Pad op_bit_extra columns (2 columns)
+        // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
+        // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
+        row.decoder.extra[1] = ONE;
     }
 
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
-
-    core_trace_data.extend_from_slice(&row);
+    core_trace_data.extend_from_slice(&row_data);
 }
 
 /// Initializes the ranger checker from the recorded range checks during execution and returns it.
@@ -422,7 +444,7 @@ fn initialize_range_checker(
     let mut range_checker = RangeChecker::new();
 
     // Add all u32 range checks recorded during execution
-    for (_clk, values) in range_checker_replay.into_iter() {
+    for values in range_checker_replay {
         range_checker.add_range_checks(&values);
     }
 
@@ -442,6 +464,7 @@ fn initialize_chiplets(
     kernel_replay: KernelReplay,
     hasher_for_chiplet: HasherRequestReplay,
     ace_replay: AceReplay,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
     let check_chiplets_trace_len = |chiplets: &Chiplets| -> Result<(), ExecutionError> {
@@ -464,7 +487,11 @@ fn initialize_chiplets(
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
                 check_chiplets_trace_len(&chiplets)?;
             },
-            HasherOp::HashBasicBlock((forest, node_id, expected_hash)) => {
+            HasherOp::HashBasicBlock((forest_id, node_id, expected_hash)) => {
+                let forest =
+                    mast_forest_store.get(forest_id.to_usize()).ok_or(ExecutionError::Internal(
+                        "MAST forest id in hasher replay out of range of mast_forest_store",
+                    ))?;
                 let node = forest
                     .get_node_by_id(node_id)
                     .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
@@ -593,58 +620,55 @@ fn initialize_chiplets(
     Ok(chiplets)
 }
 
-/// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
-fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
-    let w = CORE_TRACE_WIDTH;
+/// Pads the core trace to `core_height` rows (HALT template, CLK incremented per row).
+fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, core_height: usize) {
+    let w = CORE_STORAGE_WIDTH;
     let total_program_rows = core_trace_data.len() / w;
-    assert!(total_program_rows <= main_trace_len);
+    assert!(total_program_rows <= core_height);
     assert!(total_program_rows > 0);
 
-    let num_padding_rows = main_trace_len - total_program_rows;
+    let num_padding_rows = core_height - total_program_rows;
     if num_padding_rows == 0 {
         return;
     }
     let last_row_start = (total_program_rows - 1) * w;
 
-    // Decoder columns
-    // ------------------------
+    // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
+    // and row `total_program_rows - 1` is initialized.
+    let (last_hasher_first_half, last_stack): ([Felt; 4], StackCols<Felt>) = {
+        let last: &CoreCols<Felt> = core_trace_data[last_row_start..last_row_start + w].borrow();
+        let hs = &last.decoder.hasher_state;
+        let last_hasher: [Felt; 4] = [hs[0], hs[1], hs[2], hs[3]];
+        (last_hasher, last.stack.clone())
+    };
 
-    let mut template = [ZERO; CORE_TRACE_WIDTH];
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for i in 0..NUM_OP_BITS {
-        let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
-        template[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit_value;
-    }
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    for i in 0..NUM_HASHER_COLUMNS {
-        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
-        template[col_idx] = if i < 4 {
-            // For first 4 hasher columns, copy the last value to propagate program hash
-            // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-            // and row `total_program_rows - 1` is initialized.
-            core_trace_data[last_row_start + col_idx]
-        } else {
-            ZERO
-        };
-    }
+    let mut template_data = [ZERO; CORE_STORAGE_WIDTH];
+    {
+        let template: &mut CoreCols<Felt> = template_data.as_mut_slice().borrow_mut();
 
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    template[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+        // Decoder columns
+        // ------------------------
 
-    // Stack columns
-    // ------------------------
+        // Pad op_bits columns with HALT opcode bits
+        let halt_opcode = opcodes::HALT;
+        for i in 0..NUM_OP_BITS {
+            template.decoder.op_bits[i] = Felt::from_u8((halt_opcode >> i) & 1);
+        }
+        // Pad hasher state columns (8 columns)
+        // - First 4 columns: copy the last value (to propagate program hash)
+        // - Remaining 4 columns: fill with ZEROs
+        template.decoder.hasher_state[..4].copy_from_slice(&last_hasher_first_half);
 
-    // Pad stack columns with the last value in each column (analogous to Stack::into_trace())
-    for i in 0..STACK_TRACE_WIDTH {
-        let col_idx = STACK_TRACE_OFFSET + i;
-        // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-        // and row `total_program_rows - 1` is initialized.
-        template[col_idx] = core_trace_data[last_row_start + col_idx];
+        // Pad op_bit_extra columns (2 columns)
+        // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
+        // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
+        template.decoder.extra[1] = ONE;
+
+        // Stack columns
+        // ------------------------
+
+        // Pad stack columns with the last value in each column (analogous to Stack::into_trace())
+        template.stack = last_stack;
     }
 
     // System columns
@@ -657,25 +681,39 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     core_trace_data[pad_start..]
         .par_chunks_mut(w)
         .enumerate()
-        .for_each(|(idx, row)| {
-            row.copy_from_slice(&template);
-            row[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        .for_each(|(idx, row_buf)| {
+            row_buf.copy_from_slice(&template_data);
+            let row: &mut CoreCols<Felt> = row_buf.borrow_mut();
+            row.system.clk = Felt::from_u32((total_program_rows + idx) as u32);
         });
 }
 
+type SplitFragmentContext<'a> = (
+    ReplayProcessor,
+    CoreTraceGenerationTracer<'a>,
+    ContinuationStack<Arc<SparseMastForest>>,
+    Arc<SparseMastForest>,
+);
+
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
 /// `CoreTraceGenerationTracer` that can be used to execute the fragment.
+///
+/// `mast_forest_store` provides the [`SparseMastForest`]s that the indices stored in the fragment
+/// (the initial forest index and the `EnterForest` continuations) refer to.
+///
+/// # Errors
+///
+/// Returns [`ExecutionError::Internal`] if any [`MastForestId`] referenced by the fragment
+/// (either `initial_mast_forest_id` or an `EnterForest` continuation) is out of range of
+/// `mast_forest_store`. Because [`CoreTraceFragmentContext`] is attacker-controllable when fed in
+/// from outside, we validate these indices rather than indexing-and-panicking.
 fn split_trace_fragment_context<'a>(
     fragment_context: CoreTraceFragmentContext,
     writer: RowMajorTraceWriter<'a, Felt>,
     fragment_size: usize,
+    mast_forest_store: &[Arc<SparseMastForest>],
     max_stack_depth: usize,
-) -> (
-    ReplayProcessor,
-    CoreTraceGenerationTracer<'a>,
-    ContinuationStack,
-    Arc<MastForest>,
-) {
+) -> Result<SplitFragmentContext<'a>, ExecutionError> {
     let CoreTraceFragmentContext {
         state: CoreTraceState { system, decoder, stack },
         replay:
@@ -690,8 +728,14 @@ fn split_trace_fragment_context<'a>(
                 mast_forest_resolution: mast_forest_resolution_replay,
             },
         continuation,
-        initial_mast_forest,
+        initial_mast_forest_id,
     } = fragment_context;
+
+    let translated_continuation =
+        translate_snapshot_continuation_stack(continuation, mast_forest_store)?;
+
+    let initial_mast_forest =
+        lookup_mast_forest(mast_forest_store, initial_mast_forest_id)?.clone();
 
     let processor = ReplayProcessor::new(
         system,
@@ -702,11 +746,57 @@ fn split_trace_fragment_context<'a>(
         memory_reads_replay,
         hasher_response_replay,
         mast_forest_resolution_replay,
+        mast_forest_store.to_vec(),
         max_stack_depth,
         fragment_size.into(),
     );
     let tracer =
         CoreTraceGenerationTracer::new(writer, decoder, block_address_replay, block_stack_replay);
 
-    (processor, tracer, continuation, initial_mast_forest)
+    Ok((processor, tracer, translated_continuation, initial_mast_forest))
+}
+
+/// Translates a snapshotted `ContinuationStack<MastForestId>` into one carrying actual
+/// [`Arc<SparseMastForest>`] handles, ready to drive `execute_impl`.
+///
+/// Returns [`ExecutionError::Internal`] if any `EnterForest` continuation carries a
+/// [`MastForestId`] that is out of range of `mast_forest_store`.
+fn translate_snapshot_continuation_stack(
+    snapshot: ContinuationStack<MastForestId>,
+    mast_forest_store: &[Arc<SparseMastForest>],
+) -> Result<ContinuationStack<Arc<SparseMastForest>>, ExecutionError> {
+    let mut out: ContinuationStack<Arc<SparseMastForest>> = ContinuationStack::default();
+    for cont in snapshot.into_inner() {
+        let translated = match cont {
+            Continuation::EnterForest(id) => {
+                Continuation::EnterForest(lookup_mast_forest(mast_forest_store, id)?.clone())
+            },
+            Continuation::StartNode(id) => Continuation::StartNode(id),
+            Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
+            Continuation::FinishSplit(id) => Continuation::FinishSplit(id),
+            Continuation::FinishLoop(node_id) => Continuation::FinishLoop(node_id),
+            Continuation::FinishCall(id) => Continuation::FinishCall(id),
+            Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
+            },
+            Continuation::Respan { node_id, batch_index } => {
+                Continuation::Respan { node_id, batch_index }
+            },
+            Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
+        };
+        out.push_continuation(translated);
+    }
+    Ok(out)
+}
+
+/// Looks up `id` in `mast_forest_store`, returning [`ExecutionError::Internal`] if it is out of
+/// range.
+pub(super) fn lookup_mast_forest(
+    mast_forest_store: &[Arc<SparseMastForest>],
+    id: MastForestId,
+) -> Result<&Arc<SparseMastForest>, ExecutionError> {
+    mast_forest_store
+        .get(id.to_usize())
+        .ok_or(ExecutionError::Internal("MastForestId out of range of mast_forest_store"))
 }

@@ -33,7 +33,7 @@ use miden_core::{
 
 use crate::constraints::{decoder::columns::DecoderCols, stack::columns::StackCols};
 #[cfg(test)]
-use crate::trace::decoder::{NUM_OP_BITS, OP_BITS_RANGE};
+use crate::trace::decoder::NUM_OP_BITS;
 
 // CONSTANTS
 // ================================================================================================
@@ -327,7 +327,7 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<10>(&[
+        let no_shift_depth0 = E::sum_array::<11>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
@@ -338,6 +338,8 @@ where
             op5(opcodes::SPAN),
             // +JOIN         — control flow: begins join block
             op5(opcodes::JOIN),
+            // +LOOP         — control flow: do-while LOOP reads no stack input
+            op5(opcodes::LOOP),
             // +EMIT         — emits event, no stack change
             op7(opcodes::EMIT),
             // +RESPAN       — control flow: next batch in basic block
@@ -346,7 +348,7 @@ where
             op4(opcodes::HALT),
             // +CALL         — control flow: enters procedure
             op4(opcodes::CALL),
-            // +END*(1-loop) — no-shift only when NOT ending a loop body
+            // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
             op4(opcodes::END) * (E::ONE - is_loop_end),
         ]);
 
@@ -436,7 +438,7 @@ where
         let all_mov_pairs = E::sum_array::<7>(&movup_or_movdn);
         let all_movdn = all_mov_pairs.clone() * bits[0][1].clone();
 
-        let left_shift_depth1 = E::sum_array::<11>(&[
+        let left_shift_depth1 = E::sum_array::<10>(&[
             // +ASSERT      — consumes s0 (must be 1)
             op7(opcodes::ASSERT),
             // +MOVDN{2..8} — move s0 down, shifts left above
@@ -451,9 +453,7 @@ where
             deg7[47].clone(),
             // +SPLIT        — control flow: pops condition from s0
             op5(opcodes::SPLIT),
-            // +LOOP         — control flow: pops condition from s0
-            op5(opcodes::LOOP),
-            // +END*loop     — END when ending a loop: pops the loop flag
+            // +END*loop     — END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
             // +DYN          — control flow: consumes s0..s3 (target hash)
             op5(opcodes::DYN),
@@ -583,7 +583,7 @@ where
         // decoder hasher state (h5) for overflow constraints, not the generic path.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
-        let left_shift_scalar = E::sum_array::<7>(&[
+        let left_shift_scalar = E::sum_array::<6>(&[
             // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, DROP,
             //                        CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
             prefix_010,
@@ -591,11 +591,9 @@ where
             u32_add3_madd_group,
             // +SPLIT               — control flow: pops condition
             op5(opcodes::SPLIT),
-            // +LOOP                — control flow: pops condition
-            op5(opcodes::LOOP),
             // +REPEAT              — control flow: pops condition for next iteration
             op4(opcodes::REPEAT),
-            // +END*loop            — END when ending a loop: pops loop flag
+            // +END*loop            — END when ending a loop: pops the trailing condition
             end_loop_flag,
             // +DYN                 — control flow: consumes target hash
             op5(opcodes::DYN),
@@ -932,6 +930,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
         /// Operation Flag of LOOP operation.
+        #[expect(dead_code)]
         loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,
@@ -1046,36 +1045,39 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 // TEST HELPERS
 // ================================================================================================
 
-/// Generates a test trace row with the op bits set for a given opcode.
+/// Generates a test Core trace row with the op bits set for a given opcode.
 ///
-/// This creates a minimal trace row where:
+/// This creates a minimal Core row where:
 /// - Op bits are set according to the opcode's binary representation
 /// - Op bits extra columns are computed for degree reduction
 /// - All other columns are zero
 #[cfg(test)]
-pub fn generate_test_row(opcode: usize) -> crate::MainCols<miden_core::Felt> {
+pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols<miden_core::Felt> {
+    use core::borrow::{Borrow, BorrowMut};
+
     use miden_core::{Felt, ZERO};
 
-    use crate::trace::{TRACE_WIDTH, decoder::OP_BITS_EXTRA_COLS_RANGE};
+    use crate::constraints::columns::{CoreCols, NUM_CORE_COLS};
 
     let op_bits = get_op_bits(opcode);
 
-    // Build a flat zeroed row, then set the decoder op bits via the col map.
-    let mut row = [ZERO; TRACE_WIDTH];
-    for (i, &bit) in op_bits.iter().enumerate() {
-        row[OP_BITS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET + i] = bit;
+    let mut row_data = [ZERO; NUM_CORE_COLS];
+    {
+        let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+        for (i, &bit) in op_bits.iter().enumerate() {
+            row.decoder.op_bits[i] = bit;
+        }
+
+        // Compute and set op bits extra columns for degree reduction.
+        let bit_6 = op_bits[6];
+        let bit_5 = op_bits[5];
+        let bit_4 = op_bits[4];
+        row.decoder.extra[0] = bit_6 * (Felt::ONE - bit_5) * bit_4;
+        row.decoder.extra[1] = bit_6 * bit_5;
     }
 
-    // Compute and set op bits extra columns for degree reduction.
-    let bit_6 = op_bits[6];
-    let bit_5 = op_bits[5];
-    let bit_4 = op_bits[4];
-    row[OP_BITS_EXTRA_COLS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET] =
-        bit_6 * (Felt::ONE - bit_5) * bit_4;
-    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
-
-    // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
-    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainCols<Felt>>(row) }
+    let row: &CoreCols<Felt> = row_data.as_slice().borrow();
+    row.clone()
 }
 
 /// Returns a 7-bit array representation of an opcode.

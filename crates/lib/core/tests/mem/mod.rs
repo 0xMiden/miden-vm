@@ -1,3 +1,4 @@
+use miden_assembly::Linkage;
 use miden_processor::{
     ContextId, DefaultHost, FastProcessor, Felt, ONE, Program, StackInputs, Word, ZERO,
     trace::RowIndex,
@@ -68,11 +69,13 @@ fn test_memcopy_words() {
 
     let core_lib = CoreLibrary::default();
     let assembler = miden_assembly::Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
 
-    let program: Program =
-        assembler.assemble_program(source).expect("Failed to compile test source.");
+    let program: Program = assembler
+        .assemble_program("program", source)
+        .expect("Failed to compile test source.")
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
@@ -184,11 +187,13 @@ fn test_memcopy_elements() {
 
     let core_lib = CoreLibrary::default();
     let assembler = miden_assembly::Assembler::default()
-        .with_dynamic_library(&core_lib)
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("failed to load core library");
 
-    let program: Program =
-        assembler.assemble_program(source).expect("Failed to compile test source.");
+    let program: Program = assembler
+        .assemble_program("program", source)
+        .expect("Failed to compile test source.")
+        .unwrap_program();
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 

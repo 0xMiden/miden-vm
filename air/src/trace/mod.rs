@@ -1,11 +1,5 @@
-use core::ops::Range;
-
-use miden_core::utils::range;
-
 pub mod chiplets;
 pub mod decoder;
-pub mod range;
-pub mod stack;
 
 mod rows;
 pub use rows::{RowIndex, RowIndexError};
@@ -27,108 +21,74 @@ pub const MIN_TRACE_LEN: usize = 64;
 //    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (21 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
-pub const SYS_TRACE_OFFSET: usize = 0;
 pub const SYS_TRACE_WIDTH: usize = 6;
-pub const SYS_TRACE_RANGE: Range<usize> = range(SYS_TRACE_OFFSET, SYS_TRACE_WIDTH);
 
-pub const CLK_COL_IDX: usize = SYS_TRACE_OFFSET;
-pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
-pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 2;
-pub const FN_HASH_RANGE: Range<usize> = range(FN_HASH_OFFSET, 4);
-
-// decoder trace
-pub const DECODER_TRACE_OFFSET: usize = SYS_TRACE_RANGE.end;
 pub const DECODER_TRACE_WIDTH: usize = 24;
-pub const DECODER_TRACE_RANGE: Range<usize> = range(DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH);
 
-// Stack trace
-pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
-pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
 
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::utils::range;
-
-    use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
+    use super::chiplets::hasher::{CAPACITY_LEN, Hasher};
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
 
     /// Decoder helper register index where the hasher address is stored for `log_precompile`.
     pub const HELPER_ADDR_IDX: usize = 0;
-    /// Decoder helper register offset where `CAP_PREV` begins; spans four consecutive registers.
-    pub const HELPER_CAP_PREV_OFFSET: usize = 1;
-    /// Range covering the four helper registers holding `CAP_PREV`.
-    pub const HELPER_CAP_PREV_RANGE: Range<usize> = range(HELPER_CAP_PREV_OFFSET, CAPACITY_LEN);
+    /// Range covering the four helper registers holding `STATE_PREV`.
+    pub const HELPER_STATE_PREV_RANGE: Range<usize> = Range {
+        start: HELPER_ADDR_IDX + 1,
+        end: HELPER_ADDR_IDX + 1 + CAPACITY_LEN,
+    };
 
     // STACK LAYOUT (TOP OF STACK)
     // --------------------------------------------------------------------------------------------
-    // After executing `log_precompile`, the top 12 stack elements contain `[R0, R1, CAP_NEXT]`
-    // in LE (structural) order.
-
-    pub const STACK_R0_BASE: usize = 0;
-    pub const STACK_R0_RANGE: Range<usize> = range(STACK_R0_BASE, DIGEST_LEN);
-
-    pub const STACK_R1_BASE: usize = STACK_R0_RANGE.end;
-    pub const STACK_R1_RANGE: Range<usize> = range(STACK_R1_BASE, DIGEST_LEN);
-
-    pub const STACK_CAP_NEXT_BASE: usize = STACK_R1_RANGE.end;
-    pub const STACK_CAP_NEXT_RANGE: Range<usize> = range(STACK_CAP_NEXT_BASE, CAPACITY_LEN);
-
-    /// Stack range containing `COMM` prior to executing `log_precompile`.
-    pub const STACK_COMM_RANGE: Range<usize> = STACK_R0_RANGE;
-    /// Stack range containing `TAG` prior to executing `log_precompile`.
-    pub const STACK_TAG_RANGE: Range<usize> = STACK_R1_RANGE;
-
-    // HASHER STATE LAYOUT
-    // --------------------------------------------------------------------------------------------
-    // The hasher permutation uses a 12-element state. With LE layout, the state is interpreted
-    // as [RATE0, RATE1, CAPACITY]:
-    // - RATE0 occupies the first 4 lanes (0..4),
-    // - RATE1 occupies the next 4 lanes (4..8),
-    // - CAPACITY occupies the last 4 lanes (8..12).
     //
-    // For `log_precompile` this corresponds to:
-    // - input state words:  [COMM, TAG, CAP_PREV]
-    // - output state words: [R0,   R1,  CAP_NEXT]
+    // The opcode identity-maps the 12-lane Poseidon2 output to `stack_next[0..12]` and reads
+    // STMNT from `stack[4..8]`. So stack-side and lane-side ranges coincide; we alias to
+    // `Hasher::{RATE0,RATE1}_RANGE` rather than redefine.
+    //
+    //   Input  (current row): `[_, STMNT, _, ...]`
+    //     - stack[4..8] = STMNT — the per-call statement word.
+    //   Output (next row):    `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
+    //     - stack[0..4] = STATE_NEW (rate0 output, kept by the wrapper);
+    //     - stack[4..12] hold output rate1 / capacity (discarded).
+    //
+    // STMNT sits at stack[4..8] so the chiplet bus's β⁶..β⁹ products coincide with HPERM's
+    // rate1 products — `β^k · stack[4..7]` is computed once and reused.
 
-    pub const STATE_RATE_0_RANGE: Range<usize> = range(0, DIGEST_LEN);
-    pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);
-    pub const STATE_CAP_RANGE: Range<usize> = range(STATE_RATE_1_RANGE.end, CAPACITY_LEN);
+    /// Stack range containing the precomputed statement word on opcode entry.
+    pub const STACK_STMNT_RANGE: Range<usize> = Hasher::RATE1_RANGE;
+    /// Stack range that receives the new transcript state (output rate0) on opcode exit.
+    pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
 }
 
 // Range check trace
-pub const RANGE_CHECK_TRACE_OFFSET: usize = STACK_TRACE_RANGE.end;
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
-pub const RANGE_CHECK_TRACE_RANGE: Range<usize> =
-    range(RANGE_CHECK_TRACE_OFFSET, RANGE_CHECK_TRACE_WIDTH);
 
 // Chiplets trace
-pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
-pub const CHIPLETS_WIDTH: usize = 21;
-pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
+// 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
+// `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
+// hasher responder address on the chiplet side.
+pub const CHIPLETS_WIDTH: usize = 22;
 
-/// Shared chiplet selector columns at the start of the chiplets segment.
-pub const CHIPLET_SELECTORS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, 5);
-pub const CHIPLET_S0_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start;
-pub const CHIPLET_S1_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 1;
-pub const CHIPLET_S2_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 2;
-pub const CHIPLET_S3_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 3;
-pub const CHIPLET_S4_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 4;
-
-pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
+pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
+    + DECODER_TRACE_WIDTH
+    + STACK_TRACE_WIDTH
+    + RANGE_CHECK_TRACE_WIDTH
+    + CHIPLETS_WIDTH;
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built by
-// [`crate::ProcessorAir`]'s `AuxBuilder` impl. It has 7 columns: 4 main-trace LogUp
-// columns followed by 3 chiplet-trace LogUp columns. See
+// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
+// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
+// chiplet-trace LogUp columns for Chiplets. See
 // [`crate::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::constraints::lookup::chiplet_air::ChipletLookupAir`] for the per-column
-// contents.
+// [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
+// per-column contents.
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

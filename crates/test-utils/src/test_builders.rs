@@ -127,7 +127,7 @@ macro_rules! build_debug_test {
 /// Returns a Test struct in the specified debug or non-debug mode using the provided source string
 /// and any specified stack and advice inputs.
 ///
-/// Parameters start with a boolean flag, `in_debug_mode`, specifying whether the test is built in
+/// Parameters start with a boolean flag, `in_tracing_mode`, specifying whether the test is built in
 /// debug or non-debug mode. After that, they match the parameters of `build_test` and
 ///`build_debug_test` macros.
 ///
@@ -135,11 +135,11 @@ macro_rules! build_debug_test {
 /// Instead, the build_test and build_debug_test wrappers should be used.
 #[macro_export]
 macro_rules! build_test_by_mode {
-    ($in_debug_mode:expr, $source:expr) => {{
+    ($in_tracing_mode:expr, $source:expr) => {{
         let name = format!("test{}", line!());
-        $crate::Test::new(&name, $source, $in_debug_mode)
+        $crate::Test::new(&name, $source, $in_tracing_mode)
     }};
-    ($in_debug_mode:expr, $source:expr, $stack_inputs:expr) => {{
+    ($in_tracing_mode:expr, $source:expr, $stack_inputs:expr) => {{
         use $crate::SourceManager;
 
         let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
@@ -159,13 +159,13 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
-    ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
+    ($in_tracing_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
         use $crate::SourceManager;
 
         let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
@@ -190,14 +190,14 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
-        $in_debug_mode:expr,
+        $in_tracing_mode:expr,
         $source:expr,
         $stack_inputs:expr,
         $advice_stack:expr,
@@ -226,14 +226,14 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
-        $in_debug_mode:expr,
+        $in_tracing_mode:expr,
         $source:expr,
         $stack_inputs:expr,
         $advice_stack:expr,
@@ -264,7 +264,7 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),

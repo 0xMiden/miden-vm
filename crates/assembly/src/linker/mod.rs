@@ -14,11 +14,11 @@
 //!    are finally able to be resolved (or not, in which case appropriate errors are raised). This
 //!    is the phase where we catch cyclic references, references to undefined symbols, references to
 //!    non-public symbols from other modules, etc. Once all symbols are linked, the assembler is
-//!    free to compile all of the procedures to MAST, and generate a [crate::Library].
+//!    free to compile all of the procedures to MAST, and generate a [crate::package::Package].
 //! 4. _Assembly_, the final phase, where all of the linked items provided to the assembler are
-//!    lowered to MAST, or to their final representations in the [crate::Library] produced as the
-//!    output of assembly. During this phase, it is expected that the compilation graph has been
-//!    validated by the linker, and we're simply processing the conversion to MAST.
+//!    lowered to MAST, or to their final representations in the [crate::package::Package] produced
+//!    as the output of assembly. During this phase, it is expected that the compilation graph has
+//!    been validated by the linker, and we're simply processing the conversion to MAST.
 //!
 //! This module provides the implementation of the linker and its associated data structures. There
 //! are three primary parts:
@@ -51,21 +51,22 @@ use core::{
 };
 
 use miden_assembly_syntax::{
+    Report,
     ast::{
         self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
         Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    library::{ItemInfo, ModuleInfo},
+    module::{ItemInfo, ModuleInfo},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
-use miden_project::Linkage;
+use miden_mast_package::Package as MastPackage;
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
-    library::{LinkLibrary, LinkLibraryKind},
+    library::{LinkLibrary, Linkage},
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
     symbols::{Symbol, SymbolItem},
 };
@@ -137,6 +138,7 @@ pub struct Linker {
     ///
     /// This is always provided, with an empty kernel being the default.
     kernel: Kernel,
+    kernel_package: Option<Arc<MastPackage>>,
     /// The source manager to use when emitting diagnostics.
     source_manager: Arc<dyn SourceManager>,
 }
@@ -153,6 +155,7 @@ impl Linker {
             procedures_by_mast_root: Default::default(),
             kernel_index: None,
             kernel: Default::default(),
+            kernel_package: None,
             source_manager,
         }
     }
@@ -161,10 +164,10 @@ impl Linker {
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
-        match self.libraries.entry(library.mast.commitment()) {
+        match self.libraries.entry(library.mast().commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.module_infos)
+                self.link_assembled_modules(library.module_infos())
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
@@ -221,7 +224,7 @@ impl Linker {
             self.callgraph.get_or_insert_node(gid);
             match &item {
                 ItemInfo::Procedure(item) => {
-                    self.register_procedure_root(gid, item.digest)?;
+                    self.register_procedure_root(gid, item.digest);
                 },
                 ItemInfo::Constant(_) | ItemInfo::Type(_) => (),
             }
@@ -334,29 +337,16 @@ impl Linker {
     /// Returns a new [Linker] instantiated from the provided kernel and kernel info module.
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
-    ///
-    /// TODO: consider passing `KernelLibrary` into this constructor as a parameter instead.
     pub(super) fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
-        kernel: Kernel,
-        kernel_module: ModuleInfo,
-    ) -> Self {
-        assert!(!kernel.is_empty());
-        assert!(
-            kernel_module.path().is_kernel_path(),
-            "invalid root kernel module path: {}",
-            kernel_module.path()
-        );
-        log::debug!(target: "linker", "instantiating linker with kernel {}", kernel_module.path());
+        kernel_package: Arc<MastPackage>,
+    ) -> Result<Self, Report> {
+        log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
-        let mut graph = Self::new(source_manager);
-        let kernel_index = graph
-            .link_assembled_module(kernel_module)
-            .expect("failed to add kernel module to the module graph");
+        let mut linker = Self::new(source_manager);
+        linker.link_with_kernel(kernel_package)?;
 
-        graph.kernel_index = Some(kernel_index);
-        graph.kernel = kernel;
-        graph
+        Ok(linker)
     }
 
     /// Add a kernel to the linker after the linker is initially constructed.
@@ -368,26 +358,43 @@ impl Linker {
     /// a kernel.
     pub(super) fn link_with_kernel(
         &mut self,
-        kernel: Kernel,
-        kernel_module: ModuleInfo,
-    ) -> Result<(), LinkerError> {
+        kernel_package: Arc<MastPackage>,
+    ) -> Result<(), Report> {
+        if !kernel_package.is_kernel() {
+            return Err(Report::msg("invalid kernel package: not a kernel"));
+        }
+        let kernel = kernel_package.to_kernel()?;
+        if kernel.is_empty() {
+            return Err(Report::msg("invalid kernel package: kernel cannot be empty"));
+        }
         assert!(self.kernel.is_empty());
-        assert!(!kernel.is_empty());
-        assert!(
-            kernel_module.path().is_kernel_path(),
-            "invalid root kernel module path: {}",
-            kernel_module.path()
-        );
-        log::debug!(target: "linker", "modifying linker with kernel {}", kernel_module.path());
-        let kernel_index = self.link_assembled_module(kernel_module)?;
-        self.kernel_index = Some(kernel_index);
+        assert!(self.kernel_package.is_none());
+
+        log::debug!(target: "linker", "modifying linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
+
+        let mut kernel_index = None;
+        for module_info in kernel_package.module_infos() {
+            let is_kernel_module = module_info.path().is_kernel_path();
+            let module_index = self.link_assembled_module(module_info)?;
+            if is_kernel_module {
+                kernel_index = Some(module_index);
+            }
+        }
+        assert!(kernel_index.is_some());
+
+        self.kernel_index = kernel_index;
         self.kernel = kernel;
+        self.kernel_package = Some(kernel_package);
 
         Ok(())
     }
 
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
+    }
+
+    pub fn kernel_package(&self) -> Option<Arc<MastPackage>> {
+        self.kernel_package.clone()
     }
 
     pub fn has_nonempty_kernel(&self) -> bool {
@@ -594,7 +601,7 @@ impl Linker {
                             // calls/symbol refs
                             let proc = proc.borrow();
                             for invoke in proc.invoked() {
-                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
+                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, invoke.target);
 
                                 let context = SymbolResolutionContext {
                                     span: invoke.span(),
@@ -670,8 +677,7 @@ impl Linker {
 
     /// Returns a procedure index which corresponds to the provided procedure digest.
     ///
-    /// Note that there can be many procedures with the same digest - due to having the same code,
-    /// and/or using different decorators which don't affect the MAST root. This method returns an
+    /// Note that there can be many procedures with the same digest. This method returns an
     /// arbitrary one.
     pub fn get_procedure_index_by_digest(
         &self,
@@ -862,7 +868,7 @@ impl Linker {
         &mut self,
         id: GlobalItemIndex,
         procedure_mast_root: Word,
-    ) -> Result<(), LinkerError> {
+    ) {
         use alloc::collections::btree_map::Entry;
         match self.procedures_by_mast_root.entry(procedure_mast_root) {
             Entry::Occupied(ref mut entry) => {
@@ -876,8 +882,6 @@ impl Linker {
                 entry.insert(smallvec![id]);
             },
         }
-
-        Ok(())
     }
 
     /// Resolve a [Path] to a [ModuleIndex] in this graph
@@ -941,7 +945,7 @@ mod tests {
             Visibility, types,
         },
         debuginfo::{SourceSpan, Span},
-        library::{ItemInfo, TypeInfo},
+        module::{ItemInfo, TypeInfo},
     };
 
     use super::*;

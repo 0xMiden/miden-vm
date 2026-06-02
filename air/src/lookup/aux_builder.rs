@@ -80,6 +80,11 @@ where
 {
     let _span = tracing::info_span!("build_aux_trace_logup").entered();
 
+    debug_assert!(
+        challenges.len() >= 2,
+        "build_logup_aux_trace expects at least 2 challenges (alpha, beta), got {}",
+        challenges.len(),
+    );
     let alpha = challenges[0];
     let beta = challenges[1];
     let lookup_challenges =
@@ -588,7 +593,7 @@ mod tests {
         for (col, slow_col) in slow.iter().enumerate() {
             assert_eq!(slow_col.len(), num_rows + 1, "slow col {col} row count mismatch");
             for (row, &s) in slow_col.iter().enumerate() {
-                let f = fast.values[row * num_cols + col];
+                let f = fast.get(row, col).expect("Accessed element is in bounds");
                 assert_eq!(s, f, "row {row} col {col} differs: slow={s:?} fast={f:?}",);
             }
         }

@@ -6,12 +6,13 @@ on:
     paths:
       - "docs/**"
 
+permissions: {}
+
 jobs:
   notify:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
+    permissions: {}
 
     steps:
       - name: Send repository_dispatch to aggregator
