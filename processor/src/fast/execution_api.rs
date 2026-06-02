@@ -15,7 +15,7 @@ use super::{
     step::{BreakReason, NeverStopper, ResumeContext, StepStopper},
 };
 use crate::{
-    ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceBuildInputs,
+    BaseHost, ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceBuildInputs,
     continuation_stack::ContinuationStack,
     errors::{MapExecErr, MapExecErrNoCtx, OperationError, PackageSourceDebugContext},
     execution::{
@@ -567,6 +567,8 @@ impl FastProcessor {
                     procedure_hash,
                     source_node,
                 } => {
+                    let preserve_package_source_context =
+                        package_debug_info.is_some() && source_node.is_some();
                     let (root_id, new_forest) = match self.load_mast_forest_sync(
                         procedure_hash,
                         host,
@@ -577,12 +579,14 @@ impl FastProcessor {
                     ) {
                         Ok(result) => result,
                         Err(err) => {
-                            let maybe_enriched_err = maybe_use_caller_error_context(
-                                err,
-                                current_forest,
-                                continuation_stack,
-                                host,
-                            );
+                            let maybe_enriched_err =
+                                Self::maybe_use_caller_error_context_unless_package_source(
+                                    err,
+                                    preserve_package_source_context,
+                                    current_forest,
+                                    continuation_stack,
+                                    host,
+                                );
 
                             return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
                         },
@@ -695,6 +699,8 @@ impl FastProcessor {
                     procedure_hash,
                     source_node,
                 } => {
+                    let preserve_package_source_context =
+                        package_debug_info.is_some() && source_node.is_some();
                     let (root_id, new_forest) = match self
                         .load_mast_forest(
                             procedure_hash,
@@ -708,12 +714,14 @@ impl FastProcessor {
                     {
                         Ok(result) => result,
                         Err(err) => {
-                            let maybe_enriched_err = maybe_use_caller_error_context(
-                                err,
-                                current_forest,
-                                continuation_stack,
-                                host,
-                            );
+                            let maybe_enriched_err =
+                                Self::maybe_use_caller_error_context_unless_package_source(
+                                    err,
+                                    preserve_package_source_context,
+                                    current_forest,
+                                    continuation_stack,
+                                    host,
+                                );
 
                             return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
                         },
@@ -749,6 +757,25 @@ impl FastProcessor {
 
     // HELPERS
     // ------------------------------------------------------------------------------------------
+
+    fn maybe_use_caller_error_context_unless_package_source<F>(
+        err: ExecutionError,
+        preserve_package_source_context: bool,
+        current_forest: &F,
+        continuation_stack: &ContinuationStack<F>,
+        host: &mut impl BaseHost,
+    ) -> ExecutionError
+    where
+        F: miden_core::mast::ExecutableMastForest,
+    {
+        if preserve_package_source_context
+            && matches!(err, ExecutionError::ProcedureNotFound { .. })
+        {
+            return err;
+        }
+
+        maybe_use_caller_error_context(err, current_forest, continuation_stack, host)
+    }
 
     fn load_mast_forest_sync(
         &mut self,
