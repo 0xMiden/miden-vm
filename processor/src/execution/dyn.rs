@@ -129,6 +129,7 @@ where
             return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
                 dyn_node_id: current_node_id,
                 callee_hash,
+                source_node: state.current_source_node(),
             });
         },
     }

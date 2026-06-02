@@ -46,12 +46,16 @@ where
     // WARNING: if we eventually push another continuation in between the `FinishLoop` and the
     // `StartNode` continuations, then the logic in `ExecutionTracer::start_clock_cycle()` that
     // computes the value for the `is_loop_body` flag will be incorrect and needs to be adjusted.
+    let body_source_node = match state.child_source_node(0) {
+        Ok(source_node) => source_node,
+        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+    };
     state
         .continuation_stack
         .push_finish_loop_with_source(current_node_id, state.current_source_node());
     state
         .continuation_stack
-        .push_start_node_with_source(loop_node.body(), state.child_source_node(0));
+        .push_start_node_with_source(loop_node.body(), body_source_node);
 
     // Finalize the clock cycle corresponding to the LOOP operation.
     finalize_clock_cycle(
@@ -106,12 +110,16 @@ where
             return ControlFlow::Break(BreakReason::Err(err));
         }
 
+        let body_source_node = match state.child_source_node(0) {
+            Ok(source_node) => source_node,
+            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        };
         state
             .continuation_stack
             .push_finish_loop_with_source(current_node_id, state.current_source_node());
         state
             .continuation_stack
-            .push_start_node_with_source(loop_node.body(), state.child_source_node(0));
+            .push_start_node_with_source(loop_node.body(), body_source_node);
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
         finalize_clock_cycle(

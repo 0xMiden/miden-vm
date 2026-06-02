@@ -164,12 +164,14 @@ impl ReplayProcessor {
                     basic_block_node_id: _,
                     op_idx: _,
                     continuation,
+                    source_node,
                 } => {
                     // do nothing - in replay processor we don't need to emit anything
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
                     finish_emit_op_execution(
                         continuation,
+                        source_node,
                         self,
                         continuation_stack,
                         current_forest,

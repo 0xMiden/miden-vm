@@ -1,5 +1,7 @@
 use core::ops::ControlFlow;
 
+use miden_mast_package::debug_info::DebugSourceMastNodeId;
+
 use crate::{
     BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
@@ -271,6 +273,7 @@ where
                         batch_index,
                         op_idx_in_batch,
                     ),
+                    source_node: state.current_source_node(),
                 });
             },
             _ => {
@@ -358,6 +361,7 @@ fn get_continuation_after_executing_operation<F>(
 /// that enum variant for more details.
 pub fn finish_emit_op_execution<P, S, T, F>(
     post_emit_continuation: Continuation<F>,
+    source_node: Option<DebugSourceMastNodeId>,
     processor: &mut P,
     continuation_stack: &mut ContinuationStack<F>,
     current_forest: &F,
@@ -395,7 +399,7 @@ where
         current_forest,
     )?;
 
-    continuation_stack.push_continuation(post_emit_continuation);
+    continuation_stack.push_continuation_with_source(post_emit_continuation, source_node);
 
     ControlFlow::Continue(())
 }

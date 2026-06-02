@@ -142,6 +142,15 @@ impl<F> ContinuationStack<F> {
         self.push_source_node(None);
     }
 
+    pub(crate) fn push_continuation_with_source(
+        &mut self,
+        continuation: Continuation<F>,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) {
+        self.stack.push(continuation);
+        self.push_source_node(source_node);
+    }
+
     /// Pushes a continuation to enter the given MAST forest on the continuation stack.
     ///
     /// # Arguments
