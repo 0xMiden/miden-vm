@@ -6,11 +6,11 @@ use miden_assembly::{
     ast::{Module, ModuleKind},
 };
 use miden_core::{
-    ONE, assert_matches,
+    ONE, Word, assert_matches,
     events::SystemEvent,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForestContributor,
-        SplitNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+        MastForestContributor, SplitNodeBuilder,
     },
     operations::Operation,
     program::StackInputs,
@@ -351,6 +351,96 @@ fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
             source_file: None,
             err: OperationError::FailedAssertion { err_code, .. },
         } if label == SourceSpan::UNKNOWN && err_code == Felt::ZERO
+    );
+}
+
+fn missing_external_package_source_debug_fixture() -> (
+    Program,
+    PackageDebugInfo,
+    DefaultHost,
+    SourceSpan,
+    Arc<miden_debug_types::SourceFile>,
+) {
+    let mut forest = MastForest::new();
+    let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
+    let external_id = ExternalNodeBuilder::new(missing_digest).add_to_forest(&mut forest).unwrap();
+    let root_id = CallNodeBuilder::new(external_id).add_to_forest(&mut forest).unwrap();
+    forest.make_root(root_id);
+    let program = Program::new(forest.into(), root_id);
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let uri = Uri::new("file://pkg/missing-external.masm");
+    let source_file = source_manager.load_from_raw_parts(
+        uri.clone(),
+        SourceContent::new("masm", uri.clone(), "begin\n    call.missing::proc\nend\n"),
+    );
+    let host = DefaultHost::default().with_source_manager(source_manager);
+
+    let source_root = DebugSourceMastNodeId::from(0);
+    let source_external = DebugSourceMastNodeId::from(1);
+    let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
+    let package_debug_info = PackageDebugInfo {
+        source_graph: Some(DebugSourceGraphSection {
+            nodes: vec![
+                DebugSourceMastNode::new(root_id, vec![source_external], 0, 1),
+                DebugSourceMastNode::new(external_id, vec![], 0, 1),
+            ],
+            roots: vec![source_root],
+            ..DebugSourceGraphSection::new()
+        }),
+        source_map: Some(DebugSourceMapSection {
+            asm_ops: vec![DebugSourceAsmOp::new(
+                source_external,
+                0,
+                Some(Location::new(uri, ByteIndex::new(10), ByteIndex::new(28))),
+                "external_call".into(),
+                "call.missing::proc".into(),
+                2,
+            )],
+            ..DebugSourceMapSection::new()
+        }),
+        ..PackageDebugInfo::default()
+    };
+
+    (program, package_debug_info, host, expected_span, source_file)
+}
+
+#[test]
+fn package_source_debug_missing_external_preserves_external_source_span() {
+    let (program, package_debug_info, mut host, expected_span, source_file) =
+        missing_external_package_source_debug_fixture();
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_with_package_debug_info_sync(&program, &package_debug_info, &mut host)
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::ProcedureNotFound {
+            label,
+            source_file: Some(actual_source_file),
+            ..
+        } if label == expected_span && actual_source_file.id() == source_file.id()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn package_source_debug_missing_external_preserves_external_source_span_async() {
+    let (program, package_debug_info, mut host, expected_span, source_file) =
+        missing_external_package_source_debug_fixture();
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_with_package_debug_info(&program, &package_debug_info, &mut host)
+        .await
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::ProcedureNotFound {
+            label,
+            source_file: Some(actual_source_file),
+            ..
+        } if label == expected_span && actual_source_file.id() == source_file.id()
     );
 }
 
