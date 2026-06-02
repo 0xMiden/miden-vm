@@ -5,9 +5,11 @@
 
 use alloc::vec::Vec;
 
+#[cfg(test)]
+use miden_core::deferred::PrecompileRegistry;
 use miden_core::{
     Felt, ZERO,
-    deferred::{Digest, Node, NodeType, Payload, PrecompileError, PrecompileRegistry, Tag},
+    deferred::{Digest, Node, NodeType, Payload, PrecompileError, Tag},
 };
 
 use super::SystemEventError;
@@ -73,10 +75,9 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
 /// unconstrained commitment through advice.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
-    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let (tag, payload) = read_tag_and_payload(processor);
-    processor.deferred_state.register(precompiles, Node::new(tag, payload))?;
+    processor.deferred_state_mut().register(Node::new(tag, payload))?;
     Ok(())
 }
 
@@ -88,11 +89,10 @@ pub(super) fn handle_deferred_register(
 /// rehydration will verify.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
-    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
-    let canonical = processor.deferred_state.evaluate(precompiles, digest)?;
+    let canonical = processor.deferred_state_mut().evaluate(digest)?;
 
     // Serialize the canonical as `tag || payload` in natural order.
     let mut value: Vec<Felt> = Vec::new();
@@ -121,7 +121,6 @@ pub(super) fn handle_deferred_evaluate(
 /// enforces alignment, bounds, and bulk-data limits.
 pub(super) fn handle_deferred_register_chunk(
     processor: &mut FastProcessor,
-    precompiles: &PrecompileRegistry,
 ) -> Result<(), SystemEventError> {
     let tag = Tag::from_word(processor.stack_get_word(CHUNK_TAG_OFFSET).into());
     let ptr = processor.stack_get(CHUNK_PTR_OFFSET).as_canonical_u64();
@@ -129,7 +128,7 @@ pub(super) fn handle_deferred_register_chunk(
     // Decode `n` from the tag before any memory reads — the precompile is the source of truth
     // for chunk length and for rejecting oversized chunk tags.
     // `Chunks` is `NonZeroU32`, so a 0-chunk tag has already been rejected by the registry.
-    let n = match precompiles.decode(tag)? {
+    let n = match processor.deferred_state().decode(tag)? {
         NodeType::Chunks(n) => n.get(),
         NodeType::Value | NodeType::Join => return Err(PrecompileError::InvalidNode.into()),
     };
@@ -175,7 +174,7 @@ pub(super) fn handle_deferred_register_chunk(
         chunks.push(chunk);
     }
 
-    processor.deferred_state.register(precompiles, Node::chunk(tag, chunks))?;
+    processor.deferred_state_mut().register(Node::chunk(tag, chunks))?;
     Ok(())
 }
 
@@ -183,7 +182,7 @@ pub(super) fn handle_deferred_register_chunk(
 mod tests {
     use alloc::vec;
 
-    use miden_core::testing::precompile::{Hash, Uint};
+    use miden_core::testing::precompile::Hash;
 
     use super::*;
     use crate::{ExecutionOptions, StackInputs};
@@ -196,7 +195,13 @@ mod tests {
     }
 
     fn test_precompiles() -> PrecompileRegistry {
-        PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash)
+        PrecompileRegistry::default().with_precompile(Hash)
+    }
+
+    fn bind_precompiles(processor: &mut FastProcessor, precompiles: PrecompileRegistry) {
+        processor
+            .register_deferred_precompiles(precompiles)
+            .expect("test precompile initialization should fit the configured deferred budget");
     }
 
     fn write_chunk_stack(processor: &mut FastProcessor, tag: Tag, ptr: u32) {
@@ -224,13 +229,14 @@ mod tests {
         let exact_budget = node.num_elements();
         let precompiles = test_precompiles();
         let mut processor = processor_with_budget(exact_budget);
+        bind_precompiles(&mut processor, precompiles);
         write_chunk_memory(&mut processor, ptr, &chunks);
 
         write_chunk_stack(&mut processor, tag, ptr);
-        handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
+        handle_deferred_register_chunk(&mut processor).unwrap();
 
         write_chunk_stack(&mut processor, tag, ptr);
-        handle_deferred_register_chunk(&mut processor, &precompiles).unwrap();
+        handle_deferred_register_chunk(&mut processor).unwrap();
     }
 
     /// Lay out `DeferredRegister`'s `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` operand stack.
@@ -247,15 +253,15 @@ mod tests {
     fn register_past_budget_is_rejected() {
         // Budget = 12 elements = exactly one expression node (4 tag + 8 payload).
         let mut processor = processor_with_budget(12);
-        let precompiles = test_precompiles();
+        bind_precompiles(&mut processor, test_precompiles());
 
         // The first node fills the budget exactly.
-        write_register_stack(&mut processor, Uint::leaf_tag(), [Felt::from_u32(1); 8]);
-        handle_deferred_register(&mut processor, &precompiles).unwrap();
+        write_register_stack(&mut processor, Hash::digest_tag(), [Felt::from_u32(1); 8]);
+        handle_deferred_register(&mut processor).unwrap();
 
         // A second, distinct node needs 12 more elements, but the first insertion left none.
-        write_register_stack(&mut processor, Uint::leaf_tag(), [Felt::from_u32(2); 8]);
-        let err = handle_deferred_register(&mut processor, &precompiles).unwrap_err();
+        write_register_stack(&mut processor, Hash::digest_tag(), [Felt::from_u32(2); 8]);
+        let err = handle_deferred_register(&mut processor).unwrap_err();
         assert!(matches!(
             err,
             SystemEventError::DeferredStateTooLarge { num_elements: 12, max: 0 }
@@ -268,12 +274,12 @@ mod tests {
         // the handler would attempt a multi-GB `Vec::with_capacity` before failing; the pre-check
         // rejects it on the projected element count alone, so this test stays cheap.
         let mut processor = processor_with_budget(16);
-        let precompiles = test_precompiles();
+        bind_precompiles(&mut processor, test_precompiles());
         let n_bytes = 4_000_000_000u32;
         let expected = chunk_node_num_elements(Hash::n_chunks(n_bytes));
 
         write_chunk_stack(&mut processor, Hash::preimage_tag(n_bytes), 0);
-        let err = handle_deferred_register_chunk(&mut processor, &precompiles).unwrap_err();
+        let err = handle_deferred_register_chunk(&mut processor).unwrap_err();
         assert!(matches!(
             err,
             SystemEventError::DeferredStateTooLarge { num_elements, max: 16 } if num_elements == expected

@@ -4,7 +4,7 @@ use core::{cmp::min, ops::ControlFlow};
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    deferred::DeferredState,
+    deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
@@ -231,7 +231,11 @@ impl FastProcessor {
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
-        self.deferred_state = DeferredState::new(options.max_deferred_elements());
+        self.deferred_state = DeferredState::new(
+            Arc::new(PrecompileRegistry::new()),
+            options.max_deferred_elements(),
+        )
+        .expect("empty deferred registry initialization cannot fail");
         self.options = options;
         Ok(self)
     }
@@ -268,9 +272,13 @@ impl FastProcessor {
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
-            options,
             pc_transcript: PrecompileTranscript::new(),
-            deferred_state: DeferredState::new(options.max_deferred_elements()),
+            deferred_state: DeferredState::new(
+                Arc::new(PrecompileRegistry::new()),
+                options.max_deferred_elements(),
+            )
+            .expect("empty deferred registry initialization cannot fail"),
+            options,
         })
     }
 
@@ -293,10 +301,38 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
+    /// Registers additional deferred precompiles on this processor.
+    ///
+    /// Existing deferred nodes, evaluation memos, transcript root, and budget accounting are
+    /// preserved. Registration is additive only; duplicate precompile ids panic with the same
+    /// setup-failure behavior as [`PrecompileRegistry::with_precompile`].
+    pub fn register_deferred_precompiles(
+        &mut self,
+        precompiles: PrecompileRegistry,
+    ) -> Result<(), ExecutionError> {
+        self.deferred_state
+            .extend_precompiles(precompiles)
+            .map_err(ExecutionError::deferred_error_no_context)
+    }
+
+    /// Registers additional deferred precompiles and returns `self` for builder-style setup.
+    pub fn with_deferred_precompiles(
+        mut self,
+        precompiles: PrecompileRegistry,
+    ) -> Result<Self, ExecutionError> {
+        self.register_deferred_precompiles(precompiles)?;
+        Ok(self)
+    }
+
     /// Returns the deferred witness accumulated during execution.
     #[inline(always)]
     pub fn deferred_state(&self) -> &DeferredState {
         &self.deferred_state
+    }
+
+    #[inline(always)]
+    pub(super) fn deferred_state_mut(&mut self) -> &mut DeferredState {
+        &mut self.deferred_state
     }
 
     /// Returns the size of the stack.

@@ -27,7 +27,8 @@ pub trait Precompile: Send + Sync {
 
     /// Canonical constants this precompile wants registered before execution.
     ///
-    /// Registry initialization registers them and rejects cross-precompile digest collisions. The
+    /// State initialization loads every installed precompile's init nodes into one bootstrap set,
+    /// then evaluates each init node to ensure the set resolves under the installed registry. The
     /// default contributes no constants.
     fn init(&self) -> Vec<Node> {
         Vec::new()

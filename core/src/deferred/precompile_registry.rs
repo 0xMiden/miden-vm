@@ -5,9 +5,7 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use super::precompile::{Precompile, precompile_id};
 use crate::{
     Felt,
-    deferred::{
-        DeferredContext, DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError, Tag,
-    },
+    deferred::{DeferredContext, Node, NodeType, PrecompileError, Tag},
 };
 
 /// Installed set of precompiles for deferred-node validation and evaluation.
@@ -69,35 +67,18 @@ impl PrecompileRegistry {
         self.precompiles.insert(id, p);
     }
 
-    /// Creates a deferred state booted with constants contributed by installed precompiles.
+    /// Returns all precompile initialization nodes in deterministic registry id order.
     ///
-    /// This is explicit so callers can choose when constants affect node counts.
-    pub fn new_state(&self, max_elements: usize) -> Result<DeferredState, PrecompileError> {
-        let mut state = DeferredState::new(max_elements);
-        self.init(&mut state)?;
-        Ok(state)
-    }
-
-    /// Boots a state with constants contributed by installed precompiles.
-    ///
-    /// This is explicit so callers can choose when constants affect node counts. A digest
-    /// collision between different precompiles is rejected as ambiguous ownership.
-    pub fn init(&self, state: &mut DeferredState) -> Result<(), PrecompileError> {
-        let mut seen: Vec<Digest> = Vec::new();
-        for p in self.precompiles.values() {
-            let nodes = p.init();
-            // Cross-precompile collision: a digest already contributed by a *prior*
-            // precompile. Idempotent re-registrations within one precompile are harmless.
-            let local: Vec<Digest> = nodes.iter().map(Node::digest).collect();
-            if local.iter().any(|d| seen.contains(d)) {
-                return Err(DeferredError::ConflictingNode.into());
-            }
-            for node in nodes {
-                state.register(self, node)?;
-            }
-            seen.extend(local);
+    /// [`DeferredState`](super::DeferredState) loads the full returned set before evaluating each
+    /// init node, so init nodes may depend on TRUE or on any node in the complete init set. Within
+    /// one precompile, nodes retain the order returned by
+    /// [`Precompile::init`](super::Precompile::init).
+    pub(crate) fn init_nodes(&self) -> Vec<Node> {
+        let mut nodes = Vec::new();
+        for precompile in self.precompiles.values() {
+            nodes.extend(precompile.init());
         }
-        Ok(())
+        nodes
     }
 
     /// Decodes a precompile-owned tag by routing its local arguments to the owning precompile.
@@ -172,7 +153,10 @@ fn validate_precompile_id(name: &'static str, id: Felt, derived: Felt) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ZERO, deferred::Payload};
+    use crate::{
+        ZERO,
+        deferred::{DeferredState, Payload},
+    };
 
     /// Minimal honest precompile fixture for registry-routing tests.
     ///
@@ -275,12 +259,12 @@ mod tests {
     fn evaluate_dispatches_to_owning_precompile() {
         let f = Fixture::new("r");
         let tag = f.tag();
-        let registry = PrecompileRegistry::default().with_precompile(f);
+        let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
         let node = Node::leaf(tag, [ZERO; 8]);
-        let mut state = DeferredState::new(usize::MAX);
+        let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
-        let digest = state.register(&registry, node.clone()).unwrap();
-        let canonical = state.evaluate(&registry, digest).unwrap();
+        let digest = state.register(node.clone()).unwrap();
+        let canonical = state.evaluate(digest).unwrap();
         assert_eq!(canonical, node);
     }
 }

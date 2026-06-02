@@ -13,6 +13,7 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
+    sync::Arc,
     vec::Vec,
 };
 
@@ -72,22 +73,19 @@ pub struct DeferredStateWire {
 
 impl DeferredStateWire {
     /// Serializes the root-reachable DAG into deterministic wire form.
-    pub(crate) fn from_state(
-        state: &DeferredState,
-        precompiles: &PrecompileRegistry,
-    ) -> Result<Self, IntegrityError> {
+    pub(crate) fn from_state(state: &DeferredState) -> Result<Self, IntegrityError> {
         let mut build = WireEncoder::default();
-        build.visit_state_digest(state, state.root(), precompiles)?;
+        build.visit_state_digest(state, state.root())?;
         Ok(Self { entries: build.entries })
     }
 
     /// Rebuilds and verifies a deferred state from untrusted wire data.
     pub(crate) fn rehydrate(
         &self,
-        precompiles: &PrecompileRegistry,
+        precompiles: Arc<PrecompileRegistry>,
         max_elements: usize,
     ) -> Result<DeferredState, IntegrityError> {
-        let (entries, root) = decode_wire_entries(self, precompiles)?;
+        let (entries, root) = decode_wire_entries(self, precompiles.as_ref())?;
         rebuild_state_from_wire(self, entries, root, precompiles, max_elements)
     }
 }
@@ -234,16 +232,17 @@ fn rebuild_state_from_wire(
     wire: &DeferredStateWire,
     entries: Vec<(Digest, Node)>,
     root: Digest,
-    precompiles: &PrecompileRegistry,
+    precompiles: Arc<PrecompileRegistry>,
     max_elements: usize,
 ) -> Result<DeferredState, IntegrityError> {
-    let mut state = DeferredState::new(max_elements);
+    let mut state =
+        DeferredState::new(Arc::clone(&precompiles), max_elements).map_err(map_rehydrate_error)?;
 
     // Register entries in strict topological wire order. Join children have already been decoded to
     // earlier digests, so ordinary DeferredState registration enforces the same child-closure and
     // budget rules as execution.
     for (digest, node) in entries {
-        let registered = state.register(precompiles, node).map_err(map_rehydrate_error)?;
+        let registered = state.register(node).map_err(map_rehydrate_error)?;
         if registered != digest {
             return Err(IntegrityError::InvalidStructure);
         }
@@ -253,11 +252,11 @@ fn rebuild_state_from_wire(
 
     // `to_wire` emits the deterministic root-reachable closure. Equality makes the accepted format
     // strict: root-last, canonical DFS order, and no dangling or duplicate entries.
-    if state.to_wire(precompiles)? != *wire {
+    if state.to_wire()? != *wire {
         return Err(IntegrityError::InvalidStructure);
     }
 
-    let canonical = state.evaluate(precompiles, root).map_err(map_rehydrate_error)?;
+    let canonical = state.evaluate(root).map_err(map_rehydrate_error)?;
     if !canonical.is_true_node() {
         return Err(IntegrityError::RootNotTrue);
     }
@@ -281,7 +280,6 @@ impl WireEncoder {
         &mut self,
         state: &DeferredState,
         digest: Digest,
-        precompiles: &PrecompileRegistry,
     ) -> Result<(), IntegrityError> {
         if digest == TRUE_DIGEST {
             return Ok(());
@@ -291,7 +289,7 @@ impl WireEncoder {
         }
 
         let node = state.node(&digest).ok_or(IntegrityError::InvalidStructure)?;
-        let node_type = decode_wire_node_type(precompiles, node)?;
+        let node_type = decode_wire_node_type(state.registry(), node)?;
         node_type
             .validate_payload(&node.payload)
             .map_err(|_| IntegrityError::InvalidStructure)?;
@@ -309,8 +307,8 @@ impl WireEncoder {
                     .children(&node.payload)
                     .map_err(|_| IntegrityError::InvalidStructure)?
                     .ok_or(IntegrityError::InvalidStructure)?;
-                self.visit_state_digest(state, lhs, precompiles)?;
-                self.visit_state_digest(state, rhs, precompiles)?;
+                self.visit_state_digest(state, lhs)?;
+                self.visit_state_digest(state, rhs)?;
                 let lhs = self.index_for(lhs)?;
                 let rhs = self.index_for(rhs)?;
                 WireEntry::Join { tag: node.tag, lhs, rhs }
