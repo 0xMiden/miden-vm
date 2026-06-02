@@ -226,9 +226,12 @@ where
                             .map_break(InternalBreakReason::from)?
                     },
                     MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
-                    MastNode::External(_) => {
-                        external::execute_external_node(node_id, current_forest, state.tracer)?
-                    },
+                    MastNode::External(_) => external::execute_external_node(
+                        node_id,
+                        state.current_source_node(),
+                        current_forest,
+                        state.tracer,
+                    )?,
                 }
             },
             Continuation::FinishJoin(node_id) => {
@@ -354,6 +357,7 @@ pub enum InternalBreakReason<F> {
     LoadMastForestFromExternal {
         external_node_id: MastNodeId,
         procedure_hash: Word,
+        source_node: Option<DebugSourceMastNodeId>,
     },
 }
 
@@ -404,7 +408,7 @@ fn finalize_clock_cycle_with_continuation<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     continuation_stack: &ContinuationStack<F>,
-    continuation_after_stop: impl FnOnce() -> Option<Continuation<F>>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>,
     current_forest: &F,
 ) -> ControlFlow<BreakReason<F>>
 where
@@ -449,7 +453,7 @@ fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     continuation_stack: &ContinuationStack<F>,
-    continuation_after_stop: impl FnOnce() -> Option<Continuation<F>>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>,
     op_helper_registers: OperationHelperRegisters,
     current_forest: &F,
 ) -> ControlFlow<BreakReason<F>>

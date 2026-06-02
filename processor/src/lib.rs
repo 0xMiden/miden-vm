@@ -15,6 +15,8 @@ use core::{
     ops::ControlFlow,
 };
 
+use miden_mast_package::debug_info::DebugSourceMastNodeId;
+
 mod continuation_stack;
 mod errors;
 mod execution;
@@ -292,7 +294,10 @@ pub trait Stopper {
         &self,
         processor: &Self::Processor,
         continuation_stack: &ContinuationStack<Self::Forest>,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation<Self::Forest>>,
+        continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Self::Forest>,
+            Option<DebugSourceMastNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Self::Forest>>;
 }
 

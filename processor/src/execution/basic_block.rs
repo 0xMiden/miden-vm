@@ -41,17 +41,21 @@ where
     );
 
     // Finalize the clock cycle corresponding to the SPAN operation.
+    let source_node = state.current_source_node();
     finalize_clock_cycle_with_continuation(
         state.processor,
         state.tracer,
         state.stopper,
         state.continuation_stack,
         || {
-            Some(Continuation::ResumeBasicBlock {
-                node_id,
-                batch_index: 0,
-                op_idx_in_batch: 0,
-            })
+            Some((
+                Continuation::ResumeBasicBlock {
+                    node_id,
+                    batch_index: 0,
+                    op_idx_in_batch: 0,
+                },
+                source_node,
+            ))
         },
         current_forest,
     )
@@ -156,17 +160,17 @@ where
             // what happens *after* the clock is incremented. For example, if we were to put a
             // `Continuation::Respan` here instead, and execution was stopped after this RESPAN,
             // then the next call to `Processor::execute_impl()` would re-execute the RESPAN.
+            let source_node = state.current_source_node();
             finalize_clock_cycle_with_continuation(
                 state.processor,
                 state.tracer,
                 state.stopper,
                 state.continuation_stack,
                 || {
-                    Some(Continuation::ResumeBasicBlock {
-                        node_id,
-                        batch_index,
-                        op_idx_in_batch: 0,
-                    })
+                    Some((
+                        Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch: 0 },
+                        source_node,
+                    ))
                 },
                 current_forest,
             )
@@ -297,17 +301,21 @@ where
         };
 
         // Finalize the clock cycle corresponding to the operation.
+        let source_node = state.current_source_node();
         finalize_clock_cycle_with_continuation_and_op_helpers(
             state.processor,
             state.tracer,
             state.stopper,
             state.continuation_stack,
             || {
-                Some(get_continuation_after_executing_operation(
-                    basic_block,
-                    node_id,
-                    batch_index,
-                    op_idx_in_batch,
+                Some((
+                    get_continuation_after_executing_operation(
+                        basic_block,
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    ),
+                    source_node,
                 ))
             },
             operation_helpers,
@@ -394,7 +402,7 @@ where
         continuation_stack,
         {
             let post_emit_continuation = post_emit_continuation.clone();
-            || Some(post_emit_continuation)
+            || Some((post_emit_continuation, source_node))
         },
         current_forest,
     )?;
