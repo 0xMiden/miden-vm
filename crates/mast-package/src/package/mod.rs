@@ -27,7 +27,7 @@ use miden_core::{
     Word,
     advice::AdviceMap,
     crypto::hash::Poseidon2,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId},
     program::Kernel,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
@@ -81,6 +81,8 @@ pub enum PackageDebugInfoError {
         /// Section identifier with unused bytes after decoding.
         id: SectionId,
     },
+    #[error("invalid package debug info: {message}")]
+    InvalidReference { message: String },
 }
 
 // PACKAGE
@@ -381,7 +383,12 @@ impl Package {
             source_map: self.read_debug_section(SectionId::DEBUG_SOURCE_MAP)?,
         };
 
-        Ok((!debug_info.is_empty()).then_some(debug_info))
+        if debug_info.is_empty() {
+            return Ok(None);
+        }
+
+        self.validate_debug_info(&debug_info)?;
+        Ok(Some(debug_info))
     }
 
     /// Returns a MAST node ID associated with the specified exported procedure.
@@ -593,6 +600,157 @@ impl Package {
         }
 
         read_section_payload(&id, section.data.as_ref()).map(Some)
+    }
+
+    fn validate_debug_info(
+        &self,
+        debug_info: &PackageDebugInfo,
+    ) -> Result<(), PackageDebugInfoError> {
+        let source_graph = debug_info.source_graph.as_ref();
+        if let Some(source_map) = debug_info.source_map.as_ref()
+            && source_graph.is_none()
+            && !source_map.is_empty()
+        {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: "debug source map is present without a debug source graph".to_string(),
+            });
+        }
+
+        let Some(source_graph) = source_graph else {
+            return Ok(());
+        };
+
+        for root in source_graph.roots.iter().copied() {
+            if source_graph.source_node(root).is_none() {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!("debug source root {root:?} is not present in the graph"),
+                });
+            }
+        }
+
+        for (source_index, source_node) in source_graph.nodes.iter().enumerate() {
+            let source_id = DebugSourceMastNodeId::from(source_index as u32);
+            let Some(exec_node) = self.mast.get_node_by_id(source_node.exec_node) else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} references missing execution node {:?}",
+                        source_node.exec_node,
+                    ),
+                });
+            };
+
+            let mut exec_children = Vec::new();
+            exec_node.for_each_child(|child_id| exec_children.push(child_id));
+            if exec_children.len() != source_node.children.len() {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} has {} children, expected {} from execution node {:?}",
+                        source_node.children.len(),
+                        exec_children.len(),
+                        source_node.exec_node,
+                    ),
+                });
+            }
+
+            for (child_index, child_source_id) in source_node.children.iter().copied().enumerate() {
+                let Some(child_source_node) = source_graph.source_node(child_source_id) else {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} references missing child source node {child_source_id:?}",
+                        ),
+                    });
+                };
+                if child_source_node.exec_node != exec_children[child_index] {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} child {child_index} maps to {:?}, expected {:?}",
+                            child_source_node.exec_node, exec_children[child_index],
+                        ),
+                    });
+                }
+            }
+        }
+
+        if let Some(source_map) = debug_info.source_map.as_ref() {
+            for row in &source_map.asm_ops {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "assembly op",
+                )?;
+            }
+            for row in &source_map.debug_vars {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "debug variable",
+                )?;
+            }
+        }
+
+        for export in self.manifest.exports() {
+            let Some(procedure) = export.as_procedure() else {
+                continue;
+            };
+            let Some(source_node_id) = procedure.source_node else {
+                continue;
+            };
+            let Some(source_node) = source_graph.source_node(source_node_id) else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' references missing source node {source_node_id:?}",
+                        procedure.path,
+                    ),
+                });
+            };
+            let Some(export_node) =
+                procedure.node.or_else(|| self.mast.find_procedure_root(procedure.digest))
+            else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' does not resolve to an execution node",
+                        procedure.path,
+                    ),
+                });
+            };
+            if source_node.exec_node != export_node {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' source node {source_node_id:?} maps to {:?}, expected {export_node:?}",
+                        procedure.path, source_node.exec_node,
+                    ),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_source_map_row(
+        &self,
+        source_graph: &crate::debug_info::DebugSourceGraphSection,
+        source_node_id: DebugSourceMastNodeId,
+        op_idx: u32,
+        row_kind: &'static str,
+    ) -> Result<(), PackageDebugInfoError> {
+        let Some(source_node) = source_graph.source_node(source_node_id) else {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{row_kind} row references missing source node {source_node_id:?}"
+                ),
+            });
+        };
+        if op_idx < source_node.op_start || op_idx >= source_node.op_end {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{row_kind} row for source node {source_node_id:?} has op index {op_idx}, outside source range {}..{}",
+                    source_node.op_start, source_node.op_end,
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -891,7 +1049,7 @@ mod tests {
         advice::AdviceMap,
         mast::{
             BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
-            MastNodeId,
+            MastNodeId, SplitNodeBuilder,
         },
         operations::Operation,
         serde::Serializable,
@@ -916,6 +1074,21 @@ mod tests {
         (forest, node_id)
     }
 
+    fn build_split_forest() -> (MastForest, MastNodeId, MastNodeId, MastNodeId) {
+        let mut forest = MastForest::new();
+        let left_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build left basic block");
+        let right_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .expect("failed to build right basic block");
+        let root_id = SplitNodeBuilder::new([left_id, right_id])
+            .add_to_forest(&mut forest)
+            .expect("failed to build split node");
+        forest.make_root(root_id);
+        (forest, root_id, left_id, right_id)
+    }
+
     fn absolute_path(name: &str) -> Arc<AstPath> {
         let path = PathBuf::new(name).expect("invalid path");
         let path = path.as_path().to_absolute().unwrap().into_owned();
@@ -934,6 +1107,25 @@ mod tests {
         let export = ProcedureExport::new(Arc::clone(&path), Some(node_id), root, None);
 
         (Arc::new(forest), vec![PackageExport::Procedure(export)])
+    }
+
+    fn build_split_package_exports(
+        export: &str,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) -> (Arc<MastForest>, Vec<PackageExport>, MastNodeId, MastNodeId, MastNodeId) {
+        let (forest, root_id, left_id, right_id) = build_split_forest();
+        let root = forest[root_id].digest();
+        let path = absolute_path(export);
+        let export = ProcedureExport::new(Arc::clone(&path), Some(root_id), root, None)
+            .with_source_node(source_node);
+
+        (
+            Arc::new(forest),
+            vec![PackageExport::Procedure(export)],
+            root_id,
+            left_id,
+            right_id,
+        )
     }
 
     fn build_same_digest_package_exports(
@@ -1118,6 +1310,108 @@ mod tests {
             error,
             PackageDebugInfoError::DecodeSection { id, .. } if id == SectionId::DEBUG_SOURCE_GRAPH
         ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_source_graph_child_exec_mismatch() {
+        let source_root = DebugSourceMastNodeId::from(0);
+        let source_left = DebugSourceMastNodeId::from(1);
+        let source_right = DebugSourceMastNodeId::from(2);
+        let (mast, exports, root_id, left_id, right_id) =
+            build_split_package_exports("app::entry", Some(source_root));
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: vec![
+                DebugSourceMastNode::new(root_id, vec![source_right, source_left], 0, 1),
+                DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
+            ],
+            roots: vec![source_root],
+        };
+        package.sections =
+            vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+        let error = package.debug_info().expect_err("mismatched source child should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_source_map_missing_source_node() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceMastNodeId::from(0);
+        let missing_source_node = DebugSourceMastNodeId::from(1);
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            roots: vec![source_node],
+        };
+        let source_map = DebugSourceMapSection {
+            asm_ops: vec![DebugSourceAsmOp::new(
+                missing_source_node,
+                0,
+                None,
+                "app::entry".into(),
+                "add".into(),
+                1,
+            )],
+            ..DebugSourceMapSection::new()
+        };
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let error = package
+            .debug_info()
+            .expect_err("source map row with missing source node should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_export_source_node_exec_mismatch() {
+        let source_root = DebugSourceMastNodeId::from(0);
+        let source_left = DebugSourceMastNodeId::from(1);
+        let source_right = DebugSourceMastNodeId::from(2);
+        let (mast, exports, root_id, left_id, right_id) =
+            build_split_package_exports("app::entry", Some(source_left));
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: vec![
+                DebugSourceMastNode::new(root_id, vec![source_left, source_right], 0, 1),
+                DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
+            ],
+            roots: vec![source_root],
+        };
+        package.sections =
+            vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+        let error = package
+            .debug_info()
+            .expect_err("export source node mapped to child exec node should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
     }
 
     #[test]

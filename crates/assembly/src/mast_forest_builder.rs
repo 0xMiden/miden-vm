@@ -70,6 +70,10 @@ pub struct MastForestBuilder {
     proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
+    /// Procedure roots recorded by builder-local source/debug occurrence ref until finalization.
+    procedure_source_root_refs: Vec<SourceMastNodeRef>,
+    /// Number of source/debug occurrences already selected as procedure roots per execution ref.
+    procedure_source_root_count_by_node_ref: BTreeMap<MastNodeRef, usize>,
     /// A map of MAST node interning keys to their corresponding builder-local node refs.
     node_ref_by_key: BTreeMap<MastNodeKey, MastNodeRef>,
     /// Builder-owned dense storage for node refs.
@@ -78,6 +82,8 @@ pub struct MastForestBuilder {
     source_nodes: IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
     /// Most recent source occurrence for each execution node ref.
     latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceMastNodeRef>,
+    /// Source occurrences recorded for each execution node ref, in creation order.
+    source_refs_by_node_ref: BTreeMap<MastNodeRef, Vec<SourceMastNodeRef>>,
     /// Builder-owned dense storage for assembly op refs.
     asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
     /// Builder-owned dense storage for debug variable refs.
@@ -414,13 +420,31 @@ impl MastForestBuilder {
         &self,
         child_refs: &[MastNodeRef],
     ) -> Vec<SourceMastNodeRef> {
+        let mut child_counts = BTreeMap::<MastNodeRef, usize>::new();
+        for child_ref in child_refs {
+            *child_counts.entry(*child_ref).or_default() += 1;
+        }
+
+        let mut child_seen = BTreeMap::<MastNodeRef, usize>::new();
         child_refs
             .iter()
             .map(|child_ref| {
-                *self
-                    .latest_source_ref_by_node_ref
+                let history = self
+                    .source_refs_by_node_ref
                     .get(child_ref)
-                    .expect("child execution ref must have a source occurrence")
+                    .expect("child execution ref must have a source occurrence");
+                let needed = child_counts[child_ref];
+                let seen = child_seen.entry(*child_ref).or_default();
+                let source_ref = history
+                    .get(history.len().checked_sub(needed).expect(
+                        "child execution ref must have enough source occurrences for this parent",
+                    ) + *seen)
+                    .copied()
+                    .expect(
+                        "child execution ref must have enough source occurrences for this parent",
+                    );
+                *seen += 1;
+                source_ref
             })
             .collect()
     }
@@ -474,7 +498,6 @@ impl MastForestBuilder {
             .push(PendingSourceMastNode {
                 exec_ref,
                 child_refs,
-                is_root_candidate: update_latest,
                 op_start,
                 op_end,
                 asm_ops,
@@ -485,6 +508,7 @@ impl MastForestBuilder {
         if update_latest {
             self.latest_source_ref_by_node_ref.insert(exec_ref, source_ref);
         }
+        self.source_refs_by_node_ref.entry(exec_ref).or_default().push(source_ref);
         Ok(source_ref)
     }
 
@@ -506,6 +530,7 @@ impl MastForestBuilder {
     /// used in reference to this builder should be resolved using this map.
     pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
         let procedure_root_refs = core::mem::take(&mut self.procedure_root_refs);
+        let procedure_source_root_refs = core::mem::take(&mut self.procedure_source_root_refs);
 
         let layout = FinalForestLayout::plan(procedure_root_refs, &self.nodes);
 
@@ -514,6 +539,7 @@ impl MastForestBuilder {
 
         finalizer.into_built_forest(
             &layout.procedure_root_refs,
+            &procedure_source_root_refs,
             &self.source_nodes,
             &self.asm_op_by_ref,
             &self.debug_vars,
@@ -683,6 +709,16 @@ impl MastForestBuilder {
     pub(crate) fn record_procedure_root_ref(&mut self, root_ref: MastNodeRef) {
         if !self.procedure_root_refs.contains(&root_ref) {
             self.procedure_root_refs.push(root_ref);
+        }
+        if let Some(history) = self.source_refs_by_node_ref.get(&root_ref)
+            && let Some(source_ref) = history
+                .get(*self.procedure_source_root_count_by_node_ref.entry(root_ref).or_default())
+                .copied()
+                .or_else(|| history.last().copied())
+            && !self.procedure_source_root_refs.contains(&source_ref)
+        {
+            self.procedure_source_root_refs.push(source_ref);
+            *self.procedure_source_root_count_by_node_ref.entry(root_ref).or_default() += 1;
         }
     }
 
@@ -1590,7 +1626,7 @@ mod tests {
 
         assert_eq!(final_block, remapping[&block_b_ref]);
         assert_eq!(forest.num_nodes(), 1);
-        assert_eq!(source_graph.roots().len(), 2);
+        assert_eq!(source_graph.roots().len(), 1);
         assert_eq!(debug_var_names, BTreeSet::from(["x".to_string(), "y".to_string()]));
     }
 
@@ -1800,8 +1836,47 @@ mod tests {
 
         assert_eq!(final_block, remapping[&block_b_ref]);
         assert_eq!(forest.num_nodes(), 1);
-        assert_eq!(source_graph.roots().len(), 2);
+        assert_eq!(source_graph.roots().len(), 1);
         assert_eq!(asm_contexts, BTreeSet::from(["ctx_a".to_string(), "ctx_b".to_string()]));
+    }
+
+    #[test]
+    fn test_source_graph_preserves_repeated_same_exec_child_occurrences() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let asm_op_a =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()));
+        let asm_op_b =
+            add_test_asm_op(&mut builder, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()));
+        let block_a_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_a)], Vec::new())
+            .unwrap();
+        let block_b_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, asm_op_b)], Vec::new())
+            .unwrap();
+        assert_eq!(block_a_ref, block_b_ref);
+
+        let split_ref = builder
+            .ensure_split_node_ref(
+                [block_a_ref, block_b_ref],
+                AssemblyOp::new(None, "split".into(), 1, "if.true".into()),
+            )
+            .unwrap();
+        record_test_root(&mut builder, split_ref);
+
+        let (_forest, _remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let root = source_graph.roots()[0];
+        let child_contexts = source_graph.nodes()[root]
+            .children()
+            .iter()
+            .map(|child| {
+                let child_node = &source_graph.nodes()[*child];
+                child_node.asm_ops()[0].1.context_name().to_string()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(child_contexts, vec!["ctx_a".to_string(), "ctx_b".to_string()]);
     }
 
     /// Non-block nodes with different AssemblyOps use the same execution node identity.
@@ -2044,6 +2119,49 @@ mod tests {
 
         assert_eq!(linked_source_node.op_start(), expected_partial_start);
         assert_eq!(linked_source_node.op_end(), expected_partial_start + 1);
+    }
+
+    #[test]
+    fn test_static_link_rejects_package_debug_child_exec_mismatch() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+        let left_ref =
+            source_builder.ensure_block_ref(vec![Operation::Add], vec![], vec![]).unwrap();
+        let right_ref =
+            source_builder.ensure_block_ref(vec![Operation::Mul], vec![], vec![]).unwrap();
+        let split_ref = source_builder
+            .ensure_split_node_ref(
+                [left_ref, right_ref],
+                AssemblyOp::new(None, "split_ctx".into(), 1, "if.true".into()),
+            )
+            .unwrap();
+        record_test_root(&mut source_builder, split_ref);
+
+        let (static_forest, source_remapping, static_source_graph, _) =
+            source_builder.build().unwrap().into_parts_with_source_graph();
+        let final_split = source_remapping[&split_ref];
+        let package_source_root =
+            DebugSourceMastNodeId::from(u32::from(static_source_graph.roots()[0]));
+        let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
+        package_debug_info.source_graph.as_mut().unwrap().nodes
+            [u32::from(package_source_root) as usize]
+            .children
+            .swap(0, 1);
+
+        let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
+            &static_forest,
+            Some(package_debug_info),
+        )])
+        .unwrap();
+        let error = builder
+            .ensure_external_link_with_source_ref(
+                static_forest[final_split].digest(),
+                Some(static_forest.commitment()),
+                Some(final_split),
+                Some(package_source_root),
+            )
+            .expect_err("statically linked package debug graph with swapped children is invalid");
+
+        assert!(error.to_string().contains("child 0 maps"), "unexpected error: {error}");
     }
 
     /// A small procedure root that gets merged into a larger block must keep its own

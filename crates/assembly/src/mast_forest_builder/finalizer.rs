@@ -171,6 +171,7 @@ impl MastForestFinalizer {
     pub(super) fn into_built_forest(
         self,
         procedure_root_refs: &[MastNodeRef],
+        procedure_source_root_refs: &[SourceMastNodeRef],
         source_nodes: &IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
@@ -186,7 +187,7 @@ impl MastForestFinalizer {
         }
 
         let (source_graph, source_id_by_ref) = self.finalize_source_graph(
-            procedure_root_refs,
+            procedure_source_root_refs,
             source_nodes,
             asm_op_by_ref,
             debug_vars,
@@ -204,7 +205,7 @@ impl MastForestFinalizer {
 
     fn finalize_source_graph(
         &self,
-        procedure_root_refs: &[MastNodeRef],
+        procedure_source_root_refs: &[SourceMastNodeRef],
         source_nodes: &IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
@@ -281,14 +282,9 @@ impl MastForestFinalizer {
             debug_assert_eq!(inserted_id, source_id_by_ref[&source_ref]);
         }
 
-        let roots = live_source_refs
+        let roots = procedure_source_root_refs
             .iter()
-            .filter_map(|source_ref| {
-                let source_node = &source_nodes[*source_ref];
-                (source_node.is_root_candidate
-                    && procedure_root_refs.contains(&source_node.exec_ref))
-                .then_some(source_id_by_ref[source_ref])
-            })
+            .filter_map(|source_ref| source_id_by_ref.get(source_ref).copied())
             .collect();
 
         Ok((SourceDebugGraph::new(finalized_nodes, roots), source_id_by_ref))

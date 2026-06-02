@@ -523,7 +523,14 @@ impl FastProcessor {
                     continuation,
                     source_node,
                 } => {
-                    self.op_emit_sync(host, current_forest, basic_block_node_id, op_idx)?;
+                    self.op_emit_sync(
+                        host,
+                        current_forest,
+                        basic_block_node_id,
+                        op_idx,
+                        package_debug_info,
+                        source_node,
+                    )?;
 
                     finish_emit_op_execution(
                         continuation,
@@ -652,7 +659,15 @@ impl FastProcessor {
                     continuation,
                     source_node,
                 } => {
-                    self.op_emit(host, current_forest, basic_block_node_id, op_idx).await?;
+                    self.op_emit(
+                        host,
+                        current_forest,
+                        basic_block_node_id,
+                        op_idx,
+                        package_debug_info,
+                        source_node,
+                    )
+                    .await?;
 
                     finish_emit_op_execution(
                         continuation,

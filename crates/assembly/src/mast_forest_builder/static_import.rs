@@ -421,16 +421,6 @@ impl MastForestBuilder {
             ))
         })?;
 
-        let mut child_refs = Vec::new();
-        for child_source_node_id in source_node.children.iter().copied() {
-            child_refs.push(self.copy_package_debug_source_node_ref(
-                source_forest,
-                package_debug_info,
-                child_source_node_id,
-                node_refs_by_source_id,
-            )?);
-        }
-
         let source_exec_node_id = source_node.exec_node;
         let source_exec_node = source_forest
             .get_node_by_id(source_exec_node_id)
@@ -440,6 +430,38 @@ impl MastForestBuilder {
                 ))
             })?
             .clone();
+        let mut exec_child_ids = Vec::new();
+        source_exec_node.for_each_child(|child_id| exec_child_ids.push(child_id));
+        if exec_child_ids.len() != source_node.children.len() {
+            return Err(Report::msg(format!(
+                "statically linked package debug source node {source_node_id:?} has {} children, expected {} from execution node {source_exec_node_id:?}",
+                source_node.children.len(),
+                exec_child_ids.len(),
+            )));
+        }
+
+        let mut child_refs = Vec::new();
+        for (child_index, child_source_node_id) in source_node.children.iter().copied().enumerate()
+        {
+            let child_source_node =
+                package_debug_info.source_node(child_source_node_id).ok_or_else(|| {
+                    Report::msg(format!(
+                        "statically linked package debug graph source node {source_node_id:?} references missing child source node {child_source_node_id:?}"
+                    ))
+                })?;
+            if child_source_node.exec_node != exec_child_ids[child_index] {
+                return Err(Report::msg(format!(
+                    "statically linked package debug graph source node {source_node_id:?} child {child_index} maps to {:?}, expected {:?}",
+                    child_source_node.exec_node, exec_child_ids[child_index],
+                )));
+            }
+            child_refs.push(self.copy_package_debug_source_node_ref(
+                source_forest,
+                package_debug_info,
+                child_source_node_id,
+                node_refs_by_source_id,
+            )?);
+        }
         let metadata = self.package_source_metadata(
             source_forest,
             package_debug_info,

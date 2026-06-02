@@ -126,7 +126,6 @@ pub(super) struct PendingMastNode {
 pub(super) struct PendingSourceMastNode {
     pub(super) exec_ref: MastNodeRef,
     pub(super) child_refs: Vec<SourceMastNodeRef>,
-    pub(super) is_root_candidate: bool,
     pub(super) op_start: usize,
     pub(super) op_end: usize,
     pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
