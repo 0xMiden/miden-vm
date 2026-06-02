@@ -63,6 +63,9 @@ pub(crate) struct ReplayProcessor {
     /// context.
     pub max_stack_depth: usize,
 
+    /// The maximum number of continuations allowed on the continuation stack.
+    pub max_num_continuations: usize,
+
     /// The maximum clock cycle at which this processor should stop execution.
     pub maximum_clock: RowIndex,
 }
@@ -99,6 +102,7 @@ impl ReplayProcessor {
             mast_forest_resolution_replay,
             mast_forest_store,
             max_stack_depth,
+            max_num_continuations: crate::ExecutionOptions::DEFAULT_MAX_NUM_CONTINUATIONS,
             maximum_clock,
         }
     }
@@ -448,6 +452,10 @@ impl Processor for ReplayProcessor {
         &mut self.hasher_response_replay
     }
 
+    fn max_num_continuations(&self) -> usize {
+        self.max_num_continuations
+    }
+
     fn save_context_and_truncate_stack(&mut self) {
         self.stack.start_context();
     }
@@ -502,11 +510,50 @@ impl Stopper for ReplayStopper {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::trace::trace_state::{
-        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
-        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::{
+        assert_matches,
+        mast::{
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, SparseMastForestBuilder,
+            VisitKind,
+        },
+        operations::Operation,
+        program::Program,
     };
+
+    use super::*;
+    use crate::{
+        trace::trace_state::{
+            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+            MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+        },
+        tracer::OperationHelperRegisters,
+    };
+
+    struct ReplayNoopTracer;
+
+    impl Tracer for ReplayNoopTracer {
+        type Processor = ReplayProcessor;
+        type Forest = Arc<SparseMastForest>;
+
+        fn start_clock_cycle(
+            &mut self,
+            _processor: &Self::Processor,
+            _continuation: Continuation<Arc<SparseMastForest>>,
+            _continuation_stack: &ContinuationStack<Arc<SparseMastForest>>,
+            _current_forest: &Arc<SparseMastForest>,
+        ) {
+        }
+
+        fn finalize_clock_cycle(
+            &mut self,
+            _processor: &Self::Processor,
+            _op_helper_registers: OperationHelperRegisters,
+            _current_forest: &Arc<SparseMastForest>,
+        ) {
+        }
+    }
 
     fn build_replay_processor() -> ReplayProcessor {
         let system = SystemState {
@@ -546,5 +593,31 @@ mod tests {
         processor.set_word(start_idx, &word);
 
         assert_eq!(processor.get_word(start_idx), word);
+    }
+
+    #[test]
+    fn replay_processor_enforces_continuation_stack_limit() {
+        let mut processor = build_replay_processor();
+        processor.max_num_continuations = 0;
+        let program = {
+            let mut forest = MastForest::new();
+            let root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+                .add_to_forest(&mut forest)
+                .unwrap();
+            forest.make_root(root);
+            Program::new(forest.into(), root)
+        };
+        let mut continuation_stack = ContinuationStack::new(&program);
+        continuation_stack.push_start_node(program.entrypoint());
+        let mut sparse_forest_builder = SparseMastForestBuilder::new(program.mast_forest().clone());
+        sparse_forest_builder.record_visit(program.entrypoint(), VisitKind::FullVisit);
+        let mut current_forest = Arc::new(sparse_forest_builder.finalize());
+        let mut tracer = ReplayNoopTracer;
+
+        let err = processor
+            .execute(&mut continuation_stack, &mut current_forest, program.kernel(), &mut tracer)
+            .unwrap_err();
+
+        assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
     }
 }

@@ -171,7 +171,13 @@ impl FastProcessor {
             &mut NoopTracer,
             &StepStopper,
         );
-        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(
+            flow,
+            continuation_stack,
+            current_forest,
+            kernel,
+            self.options.max_num_continuations(),
+        )
     }
 
     /// Async variant of [`Self::step_sync`].
@@ -197,7 +203,13 @@ impl FastProcessor {
                 &StepStopper,
             )
             .await;
-        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(
+            flow,
+            continuation_stack,
+            current_forest,
+            kernel,
+            self.options.max_num_continuations(),
+        )
     }
 
     /// Pairs execution output with the trace inputs captured by the tracer.
@@ -221,6 +233,7 @@ impl FastProcessor {
         mut continuation_stack: ContinuationStack<Arc<MastForest>>,
         current_forest: Arc<MastForest>,
         kernel: Kernel,
+        max_num_continuations: usize,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         match flow {
             ControlFlow::Continue(_) => Ok(None),
@@ -229,6 +242,11 @@ impl FastProcessor {
                 BreakReason::Stopped(maybe_continuation) => {
                     if let Some(continuation) = maybe_continuation {
                         continuation_stack.push_continuation(continuation);
+                    }
+                    if continuation_stack.len() > max_num_continuations {
+                        return Err(ExecutionError::Internal(
+                            "continuation stack size exceeded the allowed maximum",
+                        ));
                     }
 
                     Ok(Some(ResumeContext {

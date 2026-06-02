@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use crate::{
-    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
+    BaseHost, BreakReason, ContextId, ExecutionError, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{ExecutableMastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -417,6 +417,12 @@ where
 
     // Increment the processor clock.
     processor.system_mut().increment_clock();
+
+    if continuation_stack.len() > processor.max_num_continuations() {
+        return ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
+            "continuation stack size exceeded the allowed maximum",
+        )));
+    }
 
     stopper.should_stop(processor, continuation_stack, continuation_after_stop)
 }

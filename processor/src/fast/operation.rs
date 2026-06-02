@@ -53,6 +53,11 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
+    fn max_num_continuations(&self) -> usize {
+        self.options.max_num_continuations()
+    }
+
+    #[inline(always)]
     fn system(&self) -> &Self::System {
         self
     }

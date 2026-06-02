@@ -41,6 +41,9 @@ pub(crate) trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
+    /// Returns the maximum number of continuations allowed on the continuation stack.
+    fn max_num_continuations(&self) -> usize;
+
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
     fn save_context_and_truncate_stack(&mut self);
