@@ -540,7 +540,7 @@ mod tests {
     use miden_core::{Felt, ZERO, crypto::hash::Poseidon2};
 
     use super::*;
-    use crate::{StackInputs, fast::FastProcessor};
+    use crate::{ExecutionOptions, StackInputs, fast::FastProcessor};
 
     /// Tests that `insert_hperm_into_adv_map` produces the same key as applying
     /// `Poseidon2::apply_permutation` directly to the same state, and stores the rate portion
@@ -576,5 +576,73 @@ mod tests {
             .get_mapped_values(&expected_key)
             .expect("key should be present in advice map");
         assert_eq!(stored_values, expected_values.as_slice());
+    }
+
+    #[test]
+    fn insert_hdword_into_adv_map_respects_max_adv_map_value_size() {
+        let stack_values = stack_with_values(8, 1);
+        let options = ExecutionOptions::default().with_max_adv_map_value_size(7);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
+            .with_options(options)
+            .expect("test advice inputs should fit advice map limits");
+
+        let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::Advice(AdviceError::AdvMapValueSizeExceeded { size: 8, max: 7 })
+        ));
+    }
+
+    #[test]
+    fn insert_hqword_into_adv_map_respects_max_adv_map_value_size() {
+        let stack_values = stack_with_values(15, 1);
+        let options = ExecutionOptions::default().with_max_adv_map_value_size(15);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
+            .with_options(options)
+            .expect("test advice inputs should fit advice map limits");
+
+        let err = insert_hqword_into_adv_map(&mut processor).unwrap_err();
+        assert!(matches!(
+            err,
+            SystemEventError::Advice(AdviceError::AdvMapValueSizeExceeded { size: 16, max: 15 })
+        ));
+    }
+
+    #[test]
+    fn repeated_hdword_insertions_respect_adv_map_element_budget() {
+        let stack_values = stack_with_values(8, 1);
+        let options = ExecutionOptions::default().with_max_adv_map_elements(24);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap())
+            .with_options(options)
+            .expect("test advice inputs should fit advice map limits");
+
+        for i in 0..2 {
+            write_stack_values(&mut processor, 8, i * 8 + 1);
+            insert_hdword_into_adv_map(&mut processor, ZERO).unwrap();
+        }
+
+        write_stack_values(&mut processor, 8, 17);
+        let err = insert_hdword_into_adv_map(&mut processor, ZERO).unwrap_err();
+        let SystemEventError::Advice(AdviceError::AdvMapElementBudgetExceeded {
+            current,
+            added: 12,
+            max: 24,
+        }) = err
+        else {
+            panic!("expected advice map element budget error, got {err:?}");
+        };
+        assert_eq!(current, 2 * (WORD_SIZE + 2 * WORD_SIZE));
+    }
+
+    fn stack_with_values(count: usize, start: u64) -> Vec<Felt> {
+        let mut stack_values = vec![ZERO];
+        stack_values.extend((0..count).map(|idx| Felt::new_unchecked(start + idx as u64)));
+        stack_values
+    }
+
+    fn write_stack_values(processor: &mut FastProcessor, count: usize, start: u64) {
+        for idx in 0..count {
+            processor.stack_write(idx + 1, Felt::new_unchecked(start + idx as u64));
+        }
     }
 }

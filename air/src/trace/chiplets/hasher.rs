@@ -3,7 +3,6 @@
 //! This module defines the structure of the hasher chiplet's execution trace, including:
 //! - Trace selectors that determine which hash operation is being performed
 //! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
-//! - Column ranges and indices for accessing trace data
 //!
 //! The hasher chiplet supports several operations:
 //! - Linear hashing (absorbing arbitrary-length inputs)
@@ -15,7 +14,7 @@ use core::ops::Range;
 
 pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
-use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
+use super::{Felt, ONE, ZERO};
 
 // TYPES ALIASES
 // ================================================================================================
@@ -38,35 +37,16 @@ pub type HasherState = [Felt; STATE_WIDTH];
 /// The sponge state is `[RATE0(4), RATE1(4), CAPACITY(4)]`.
 pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 
-/// The hasher state portion of the execution trace, located in columns 3..15.
-pub const STATE_COL_RANGE: Range<usize> = create_range(NUM_SELECTORS, STATE_WIDTH);
-
 /// Number of field elements in the capacity portion of the hasher's state.
 pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 
 /// The index in the hasher state where the domain is set when initializing the hasher.
 ///
 /// The domain is stored in the second element of the capacity word.
-/// With LE sponge state layout [RATE0, RATE1, CAP], this is at index 9 (= CAPACITY_RANGE.start +
-/// 1).
 pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
 /// Number of field elements in the rate portion of the hasher's state.
 pub const RATE_LEN: usize = 8;
-
-/// The rate portion of the hasher state in the execution trace, located in columns 3..11.
-/// With LE sponge state layout [RATE0, RATE1, CAP], rate comes first.
-pub const RATE_COL_RANGE: Range<usize> = Range {
-    start: STATE_COL_RANGE.start,
-    end: STATE_COL_RANGE.start + RATE_LEN,
-};
-
-/// The capacity portion of the hasher state in the execution trace, located in columns 11..15.
-/// With LE sponge state layout [RATE0, RATE1, CAP], capacity comes last.
-pub const CAPACITY_COL_RANGE: Range<usize> = Range {
-    start: RATE_COL_RANGE.end,
-    end: RATE_COL_RANGE.end + CAPACITY_LEN,
-};
 
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
@@ -96,27 +76,9 @@ pub const NUM_SELECTORS: usize = 3;
 pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
-/// Index of the node_index column. Holds the Merkle tree node index on controller rows.
-/// This column is reused to hold the permutation request multiplicity on perm segment rows.
-pub const NODE_INDEX_COL_IDX: usize = NUM_SELECTORS + STATE_WIDTH;
-
-/// Index of the mrupdate_id column (domain separator for sibling table across MRUPDATE ops).
-pub const MRUPDATE_ID_COL_IDX: usize = NODE_INDEX_COL_IDX + 1;
-
-/// Index of the is_boundary column (1 on boundary rows: first input or last output of each
-/// operation, 0 otherwise).
-pub const IS_BOUNDARY_COL_IDX: usize = MRUPDATE_ID_COL_IDX + 1;
-
-/// Index of the direction_bit column. On Merkle controller rows, holds the extracted direction
-/// bit from the node index. Zero on non-Merkle rows and perm segment rows.
-pub const DIRECTION_BIT_COL_IDX: usize = IS_BOUNDARY_COL_IDX + 1;
-
-/// Index of the s_perm column (0 = controller region, 1 = permutation segment).
-pub const S_PERM_COL_IDX: usize = DIRECTION_BIT_COL_IDX + 1;
-
 /// Number of columns in Hasher execution trace.
 /// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_perm = 20.
-pub const TRACE_WIDTH: usize = S_PERM_COL_IDX + 1;
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 5;
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
@@ -131,49 +93,24 @@ pub const CONTROLLER_ROWS_PER_PERM_FELT: Felt =
 /// executing linear hash computation. These selectors can also be used for a simple 2-to-1 hash
 /// computation.
 pub const LINEAR_HASH: Selectors = [ONE, ZERO, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 0, 0]`, `flag = rev(selector) + 1 = [0, 0, 1 | 0] + 1 = 3`
-pub const LINEAR_HASH_LABEL: u8 = 0b0010 + 1;
-
 /// Specifies a start of Merkle path verification computation or absorption of a new path node
 /// into the hasher state.
 pub const MP_VERIFY: Selectors = [ONE, ZERO, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 0, 1]`, `flag = rev(selector) + 1 = [1, 0, 1 | 0] + 1 = 11`
-pub const MP_VERIFY_LABEL: u8 = 0b1010 + 1;
 
 /// Specifies a start of Merkle path verification or absorption of a new path node into the hasher
 /// state for the "old" node value during Merkle root update computation.
 pub const MR_UPDATE_OLD: Selectors = [ONE, ONE, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 1, 0]`, `flag = rev(selector) + 1 = [0, 1, 1 | 0] + 1 = 7`
-pub const MR_UPDATE_OLD_LABEL: u8 = 0b0110 + 1;
 
 /// Specifies a start of Merkle path verification or absorption of a new path node into the hasher
 /// state for the "new" node value during Merkle root update computation.
 pub const MR_UPDATE_NEW: Selectors = [ONE, ONE, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 1, 1]`, `flag = rev(selector) + 1 = [1, 1, 1 | 0] + 1 = 15`
-pub const MR_UPDATE_NEW_LABEL: u8 = 0b1110 + 1;
 
 /// Specifies a completion of a computation such that only the hash result (values in h0, h1, h2
 /// h3) is returned.
 pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 0, 0, 0]`, `flag = rev(selector) + 1 = [0, 0, 0 | 0] + 1 = 1`
-#[expect(clippy::identity_op)]
-pub const RETURN_HASH_LABEL: u8 = 0b0000 + 1;
 
 /// Specifies a completion of a computation such that the entire hasher state (values in h0 through
 /// h11) is returned.
 pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 0, 0, 1]`, `flag = rev(selector) + 1 = [1, 0, 0 | 0] + 1 = 9`
-pub const RETURN_STATE_LABEL: u8 = 0b1000 + 1;
 
 // NOTE: Selectors s0/s1/s2 are unconstrained on perm segment rows.
-
-// --- Column accessors in the auxiliary trace ----------------------------------------------------
-
-/// Index of the auxiliary trace column tracking the state of the sibling table.
-pub const P1_COL_IDX: usize = HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET;

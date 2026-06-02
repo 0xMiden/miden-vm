@@ -129,8 +129,12 @@ impl From<&Path> for alloc::sync::Arc<Path> {
 
 /// Conversions
 impl Path {
-    /// Path components  must be 255 bytes or less
-    pub const MAX_COMPONENT_LENGTH: usize = u8::MAX as usize;
+    /// Path components must be no larger than the maximum valid path length, which is u16::MAX
+    /// bytes, minus 2 bytes for the optional absolute path prefix `::`.
+    ///
+    /// While path components of this size are unlikely, it keeps the `Path` API consistent in cases
+    /// where a path is long simply due to a single component.
+    pub const MAX_COMPONENT_LENGTH: usize = (u16::MAX as usize) - 2;
 
     /// An empty path for use as a default value, placeholder, comparisons, etc.
     pub const EMPTY: &Path = unsafe { &*("" as *const str as *const Path) };
@@ -263,14 +267,28 @@ impl Path {
     /// Make this path absolute, if not already
     ///
     /// NOTE: This does not _resolve_ the path, it simply ensures the path has the root prefix
-    pub fn to_absolute(&self) -> Cow<'_, Path> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path contains invalid components (e.g., identifiers with
+    /// invalid characters or exceeding maximum length).
+    pub fn to_absolute(&self) -> Result<Cow<'_, Path>, PathError> {
         if self.is_absolute() {
-            Cow::Borrowed(self)
+            for component in self.components() {
+                component?;
+            }
+            if self.byte_len() > u16::MAX as usize {
+                return Err(PathError::TooLong { max: u16::MAX as usize });
+            }
+            Ok(Cow::Borrowed(self))
         } else {
             let mut buf = PathBuf::with_capacity(self.byte_len() + 2);
             buf.push_component("::");
-            buf.extend_with_components(self.components()).expect("invalid path");
-            Cow::Owned(buf)
+            buf.extend_with_components(self.components())?;
+            if buf.byte_len() > u16::MAX as usize {
+                return Err(PathError::TooLong { max: u16::MAX as usize });
+            }
+            Ok(Cow::Owned(buf))
         }
     }
 
@@ -477,6 +495,9 @@ impl Path {
     pub fn canonicalize(&self) -> Result<PathBuf, PathError> {
         let mut buf = PathBuf::with_capacity(self.byte_len());
         buf.extend_with_components(self.components())?;
+        if buf.byte_len() > u16::MAX as usize {
+            return Err(PathError::TooLong { max: u16::MAX as usize });
+        }
         Ok(buf)
     }
 }
@@ -611,6 +632,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_path_split_with_quotes_and_large_components() -> Result<(), PathError> {
+        let path = Path::new(
+            "::\"miden:counter-contract/counter-contract@0.1.0\"::counter_contract::_RNvXsg_NtNtCseaniv3neBPi_10miden_base5types7storageINtB5_10StorageMapNtNtCscxjsWiPtnzN_11miden_field4word4WordNtNtB19_10wasm_miden4FeltEINtNtCs3NSMmx5ugmE_4core7convert4FromNtNtNtCs52sTGLXFK3W_14miden_base_sys8bindings5types13StorageSlotIdE4fromCsanZ5gV8dMQ0_16counter_contract",
+        );
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
+
+    #[test]
     fn test_canonicalize_path_identity() -> Result<(), PathError> {
         let path = Path::new("foo::bar");
         let canonicalized = path.canonicalize()?;
@@ -637,6 +669,31 @@ mod tests {
         let expected = Path::new("::$exec::$main");
         assert_eq!(canonicalized.as_path(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_to_absolute_rejects_invalid_absolute_path_component() {
+        let source = alloc::format!("::{}", "a".repeat(Path::MAX_COMPONENT_LENGTH + 1));
+        let err = Path::new(&source)
+            .to_absolute()
+            .expect_err("absolute paths must still validate their components");
+
+        assert!(matches!(
+            err,
+            PathError::InvalidComponent(crate::ast::IdentError::InvalidLength { .. })
+        ));
+    }
+
+    #[test]
+    fn test_to_absolute_rejects_oversized_absolute_result() {
+        let source = alloc::format!("{}aa", "a::".repeat(21_844));
+        assert_eq!(source.len(), (u16::MAX as usize) - 1);
+
+        let err = Path::new(&source)
+            .to_absolute()
+            .expect_err("adding the absolute path prefix must preserve the path length bound");
+
+        assert!(matches!(err, PathError::TooLong { max } if max == u16::MAX as usize));
     }
 
     #[test]
@@ -667,5 +724,24 @@ mod tests {
         let expected = Path::new("foo::\"$bar\"");
         assert_eq!(canonicalized.as_path(), expected);
         Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_rejects_canonical_result_longer_than_u16_max() {
+        let component = alloc::format!("{}-", "a".repeat(254));
+        let mut source = alloc::string::String::new();
+        for i in 0..255 {
+            if i > 0 {
+                source.push_str("::");
+            }
+            source.push_str(&component);
+        }
+
+        let path = Path::validate(&source).expect("source path must be pre-canonicalization valid");
+        let err = path.canonicalize().expect_err(
+            "canonicalization must reject paths that exceed the serialization length bound",
+        );
+
+        assert!(matches!(err, PathError::TooLong { max } if max == u16::MAX as usize));
     }
 }

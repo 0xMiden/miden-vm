@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use core::borrow::Borrow;
 
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -195,6 +195,18 @@ impl Profile {
         Span<Arc<str>>: Borrow<Q> + Ord,
     {
         self.metadata.get(key)
+    }
+
+    /// Append the profile settings that affect package artifact reuse to `out`.
+    pub fn append_build_provenance_projection(&self, out: &mut String) {
+        let Self { name: _, debug, trim_paths, metadata: _ } = self;
+
+        out.push_str("profile:debug:");
+        out.push_str(if *debug { "true" } else { "false" });
+        out.push('\n');
+        out.push_str("profile:trim_paths:");
+        out.push_str(if *trim_paths { "true" } else { "false" });
+        out.push('\n');
     }
 }
 

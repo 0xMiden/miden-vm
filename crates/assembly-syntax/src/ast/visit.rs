@@ -133,9 +133,7 @@ pub trait Visit<T = ()> {
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         visit_system_event(self, sys_event)
     }
-    fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
-        visit_debug_options(self, options)
-    }
+
     fn visit_exec(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_exec(self, target)
     }
@@ -232,9 +230,7 @@ where
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_system_event(sys_event)
     }
-    fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
-        (**self).visit_debug_options(options)
-    }
+
     fn visit_exec(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         (**self).visit_exec(target)
     }
@@ -303,6 +299,11 @@ pub fn visit_procedure<V, T>(visitor: &mut V, procedure: &Procedure) -> ControlF
 where
     V: ?Sized + Visit<T>,
 {
+    if let Some(signature) = procedure.signature() {
+        for ty in signature.args.iter().chain(signature.results.iter()) {
+            visitor.visit_type_expr(ty)?;
+        }
+    }
     visitor.visit_block(procedure.body())
 }
 
@@ -457,7 +458,9 @@ where
         | U32AssertWWithError(code)
         | MTreeVerifyWithError(code) => visitor.visit_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
-        | NeqImm(imm) => visitor.visit_immediate_felt(imm),
+        | NeqImm(imm) | LtImm(imm) | LteImm(imm) | GtImm(imm) | GteImm(imm) => {
+            visitor.visit_immediate_felt(imm)
+        },
         Push(imm) => visitor.visit_immediate_push_value(imm),
         PushSlice(imm, _) => visitor.visit_immediate_word_value(imm),
         U32WrappingAddImm(imm)
@@ -475,15 +478,14 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
         SysCall(target) => visitor.visit_syscall(target),
         ProcRef(target) => visitor.visit_procref(target),
-        Debug(options) => visitor.visit_debug_options(Span::new(span, options)),
+
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
@@ -515,28 +517,6 @@ where
     V: ?Sized + Visit<T>,
 {
     ControlFlow::Continue(())
-}
-
-pub fn visit_debug_options<V, T>(visitor: &mut V, options: Span<&DebugOptions>) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    match options.into_inner() {
-        DebugOptions::StackTop(imm) => visitor.visit_immediate_u8(imm),
-        DebugOptions::AdvStackTop(imm) => visitor.visit_immediate_u16(imm),
-        DebugOptions::LocalRangeFrom(imm) => visitor.visit_immediate_u16(imm),
-        DebugOptions::MemInterval(imm1, imm2) => {
-            visitor.visit_immediate_u32(imm1)?;
-            visitor.visit_immediate_u32(imm2)
-        },
-        DebugOptions::LocalInterval(imm1, imm2) => {
-            visitor.visit_immediate_u16(imm1)?;
-            visitor.visit_immediate_u16(imm2)
-        },
-        DebugOptions::StackAll | DebugOptions::MemAll | DebugOptions::LocalAll => {
-            ControlFlow::Continue(())
-        },
-    }
 }
 
 #[inline]
@@ -724,9 +704,7 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         visit_mut_system_event(self, sys_event)
     }
-    fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
-        visit_mut_debug_options(self, options)
-    }
+
     fn visit_mut_exec(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_exec(self, target)
     }
@@ -823,9 +801,7 @@ where
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         (**self).visit_mut_system_event(sys_event)
     }
-    fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
-        (**self).visit_mut_debug_options(options)
-    }
+
     fn visit_mut_exec(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         (**self).visit_mut_exec(target)
     }
@@ -894,6 +870,11 @@ pub fn visit_mut_procedure<V, T>(visitor: &mut V, procedure: &mut Procedure) -> 
 where
     V: ?Sized + VisitMut<T>,
 {
+    if let Some(signature) = procedure.signature_mut() {
+        for ty in signature.args.iter_mut().chain(signature.results.iter_mut()) {
+            visitor.visit_mut_type_expr(ty)?;
+        }
+    }
     visitor.visit_mut_block(procedure.body_mut())
 }
 
@@ -1052,7 +1033,9 @@ where
         | U32AssertWWithError(code)
         | MTreeVerifyWithError(code) => visitor.visit_mut_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
-        | NeqImm(imm) => visitor.visit_mut_immediate_felt(imm),
+        | NeqImm(imm) | LtImm(imm) | LteImm(imm) | GtImm(imm) | GteImm(imm) => {
+            visitor.visit_mut_immediate_felt(imm)
+        },
         Push(imm) => visitor.visit_mut_immediate_push_value(imm),
         PushSlice(imm, _) => visitor.visit_mut_immediate_word_value(imm),
         U32WrappingAddImm(imm)
@@ -1070,15 +1053,14 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
         SysCall(target) => visitor.visit_mut_syscall(target),
         ProcRef(target) => visitor.visit_mut_procref(target),
-        Debug(options) => visitor.visit_mut_debug_options(Span::new(span, options)),
+
         Nop | Assert | AssertEq | AssertEqw | Assertz | Add | Sub | Mul | Div | Neg | ILog2
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
@@ -1113,31 +1095,6 @@ where
     V: ?Sized + VisitMut<T>,
 {
     ControlFlow::Continue(())
-}
-
-pub fn visit_mut_debug_options<V, T>(
-    visitor: &mut V,
-    options: Span<&mut DebugOptions>,
-) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    match options.into_inner() {
-        DebugOptions::StackTop(imm) => visitor.visit_mut_immediate_u8(imm),
-        DebugOptions::AdvStackTop(imm) => visitor.visit_mut_immediate_u16(imm),
-        DebugOptions::LocalRangeFrom(imm) => visitor.visit_mut_immediate_u16(imm),
-        DebugOptions::MemInterval(imm1, imm2) => {
-            visitor.visit_mut_immediate_u32(imm1)?;
-            visitor.visit_mut_immediate_u32(imm2)
-        },
-        DebugOptions::LocalInterval(imm1, imm2) => {
-            visitor.visit_mut_immediate_u16(imm1)?;
-            visitor.visit_mut_immediate_u16(imm2)
-        },
-        DebugOptions::StackAll | DebugOptions::MemAll | DebugOptions::LocalAll => {
-            ControlFlow::Continue(())
-        },
-    }
 }
 
 #[inline]

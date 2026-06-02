@@ -14,11 +14,11 @@
 //!    are finally able to be resolved (or not, in which case appropriate errors are raised). This
 //!    is the phase where we catch cyclic references, references to undefined symbols, references to
 //!    non-public symbols from other modules, etc. Once all symbols are linked, the assembler is
-//!    free to compile all of the procedures to MAST, and generate a [crate::Library].
+//!    free to compile all of the procedures to MAST, and generate a [crate::package::Package].
 //! 4. _Assembly_, the final phase, where all of the linked items provided to the assembler are
-//!    lowered to MAST, or to their final representations in the [crate::Library] produced as the
-//!    output of assembly. During this phase, it is expected that the compilation graph has been
-//!    validated by the linker, and we're simply processing the conversion to MAST.
+//!    lowered to MAST, or to their final representations in the [crate::package::Package] produced
+//!    as the output of assembly. During this phase, it is expected that the compilation graph has
+//!    been validated by the linker, and we're simply processing the conversion to MAST.
 //!
 //! This module provides the implementation of the linker and its associated data structures. There
 //! are three primary parts:
@@ -51,21 +51,22 @@ use core::{
 };
 
 use miden_assembly_syntax::{
+    Report,
     ast::{
         self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
         Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    library::{ItemInfo, ModuleInfo},
+    module::{ItemInfo, ModuleInfo},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
-use miden_project::Linkage;
+use miden_mast_package::Package as MastPackage;
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
-    library::{LinkLibrary, LinkLibraryKind},
+    library::{LinkLibrary, Linkage},
     resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
     symbols::{Symbol, SymbolItem},
 };
@@ -137,6 +138,7 @@ pub struct Linker {
     ///
     /// This is always provided, with an empty kernel being the default.
     kernel: Kernel,
+    kernel_package: Option<Arc<MastPackage>>,
     /// The source manager to use when emitting diagnostics.
     source_manager: Arc<dyn SourceManager>,
 }
@@ -153,6 +155,7 @@ impl Linker {
             procedures_by_mast_root: Default::default(),
             kernel_index: None,
             kernel: Default::default(),
+            kernel_package: None,
             source_manager,
         }
     }
@@ -161,10 +164,10 @@ impl Linker {
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
-        match self.libraries.entry(library.mast.commitment()) {
+        match self.libraries.entry(library.mast().commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.module_infos)
+                self.link_assembled_modules(library.module_infos())
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
@@ -221,7 +224,7 @@ impl Linker {
             self.callgraph.get_or_insert_node(gid);
             match &item {
                 ItemInfo::Procedure(item) => {
-                    self.register_procedure_root(gid, item.digest)?;
+                    self.register_procedure_root(gid, item.digest);
                 },
                 ItemInfo::Constant(_) | ItemInfo::Type(_) => (),
             }
@@ -334,29 +337,16 @@ impl Linker {
     /// Returns a new [Linker] instantiated from the provided kernel and kernel info module.
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
-    ///
-    /// TODO: consider passing `KernelLibrary` into this constructor as a parameter instead.
     pub(super) fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
-        kernel: Kernel,
-        kernel_module: ModuleInfo,
-    ) -> Self {
-        assert!(!kernel.is_empty());
-        assert!(
-            kernel_module.path().is_kernel_path(),
-            "invalid root kernel module path: {}",
-            kernel_module.path()
-        );
-        log::debug!(target: "linker", "instantiating linker with kernel {}", kernel_module.path());
+        kernel_package: Arc<MastPackage>,
+    ) -> Result<Self, Report> {
+        log::debug!(target: "linker", "instantiating linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
 
-        let mut graph = Self::new(source_manager);
-        let kernel_index = graph
-            .link_assembled_module(kernel_module)
-            .expect("failed to add kernel module to the module graph");
+        let mut linker = Self::new(source_manager);
+        linker.link_with_kernel(kernel_package)?;
 
-        graph.kernel_index = Some(kernel_index);
-        graph.kernel = kernel;
-        graph
+        Ok(linker)
     }
 
     /// Add a kernel to the linker after the linker is initially constructed.
@@ -368,26 +358,43 @@ impl Linker {
     /// a kernel.
     pub(super) fn link_with_kernel(
         &mut self,
-        kernel: Kernel,
-        kernel_module: ModuleInfo,
-    ) -> Result<(), LinkerError> {
+        kernel_package: Arc<MastPackage>,
+    ) -> Result<(), Report> {
+        if !kernel_package.is_kernel() {
+            return Err(Report::msg("invalid kernel package: not a kernel"));
+        }
+        let kernel = kernel_package.to_kernel()?;
+        if kernel.is_empty() {
+            return Err(Report::msg("invalid kernel package: kernel cannot be empty"));
+        }
         assert!(self.kernel.is_empty());
-        assert!(!kernel.is_empty());
-        assert!(
-            kernel_module.path().is_kernel_path(),
-            "invalid root kernel module path: {}",
-            kernel_module.path()
-        );
-        log::debug!(target: "linker", "modifying linker with kernel {}", kernel_module.path());
-        let kernel_index = self.link_assembled_module(kernel_module)?;
-        self.kernel_index = Some(kernel_index);
+        assert!(self.kernel_package.is_none());
+
+        log::debug!(target: "linker", "modifying linker with kernel package {}@{}", kernel_package.name, kernel_package.version);
+
+        let mut kernel_index = None;
+        for module_info in kernel_package.module_infos() {
+            let is_kernel_module = module_info.path().is_kernel_path();
+            let module_index = self.link_assembled_module(module_info)?;
+            if is_kernel_module {
+                kernel_index = Some(module_index);
+            }
+        }
+        assert!(kernel_index.is_some());
+
+        self.kernel_index = kernel_index;
         self.kernel = kernel;
+        self.kernel_package = Some(kernel_package);
 
         Ok(())
     }
 
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
+    }
+
+    pub fn kernel_package(&self) -> Option<Arc<MastPackage>> {
+        self.kernel_package.clone()
     }
 
     pub fn has_nonempty_kernel(&self) -> bool {
@@ -398,6 +405,17 @@ impl Linker {
 // ------------------------------------------------------------------------------------------------
 /// Analysis
 impl Linker {
+    fn cycle_error(&self, cycle: CycleError) -> LinkerError {
+        let iter = cycle.into_node_ids();
+        let mut nodes = Vec::with_capacity(iter.len());
+        for node in iter {
+            let module = self[node.module].path();
+            let item = self[node].name();
+            nodes.push(module.join(item).to_string());
+        }
+        LinkerError::Cycle { nodes: nodes.into() }
+    }
+
     /// Links `modules` using the current state of the linker.
     ///
     /// Returns the module indices corresponding to the provided modules, which are expected to
@@ -424,7 +442,18 @@ impl Linker {
         &mut self,
         mut kernel: Box<Module>,
     ) -> Result<Vec<ModuleIndex>, LinkerError> {
+        let original_module_len = self.modules.len();
+        let original_callgraph = self.callgraph.clone();
         let module_index = self.link_module(&mut kernel)?;
+        let original_kernel_index = self.kernel_index;
+        let original_module_kinds = self
+            .modules
+            .iter()
+            .enumerate()
+            .take(module_index.as_usize())
+            .filter(|(_, module)| matches!(module.source(), ModuleSource::Ast))
+            .map(|(module_index, module)| (module_index, module.kind()))
+            .collect::<Vec<_>>();
 
         // Set the module kind of all pending AST modules to Kernel, as we are linking a kernel
         for module in self.modules.iter_mut().take(module_index.as_usize()) {
@@ -435,7 +464,16 @@ impl Linker {
 
         self.kernel_index = Some(module_index);
 
-        self.link_and_rewrite()?;
+        if let Err(err) = self.link_and_rewrite() {
+            self.kernel_index = original_kernel_index;
+            self.callgraph = original_callgraph;
+            self.modules.truncate(original_module_len);
+            for (module_index, module_kind) in original_module_kinds {
+                self.modules[module_index].set_kind(module_kind);
+            }
+
+            return Err(err);
+        }
 
         Ok(vec![module_index])
     }
@@ -498,106 +536,124 @@ impl Linker {
 
         // Obtain a set of resolvers for the pending modules so that we can do name resolution
         // before they are added to the graph
-        let resolver = SymbolResolver::new(self);
-        let mut edges = Vec::new();
-        let mut cache = ResolverCache::default();
+        let pending_modules = self
+            .modules
+            .iter()
+            .enumerate()
+            .filter(|(_, module)| module.is_unlinked())
+            .map(|(module_index, module)| (module_index, module.clone()))
+            .collect::<Vec<_>>();
+        let original_callgraph = self.callgraph.clone();
 
-        for (module_index, module) in self.modules.iter().enumerate() {
-            if !module.is_unlinked() {
-                continue;
-            }
+        let result = {
+            let resolver = SymbolResolver::new(self);
+            let mut edges = Vec::new();
+            let mut cache = ResolverCache::default();
+            let mut linked_modules = Vec::new();
 
-            let module_index = ModuleIndex::new(module_index);
-
-            for (symbol_idx, symbol) in module.symbols().enumerate() {
-                assert!(
-                    symbol.is_unlinked(),
-                    "an unlinked module should only have unlinked symbols"
-                );
-
-                let gid = module_index + ItemIndex::new(symbol_idx);
-
-                // Perform any applicable rewrites to this item
-                rewrites::rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
-
-                // Update the linker graph
-                match symbol.item() {
-                    SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => (),
-                    SymbolItem::Alias { alias, resolved } => {
-                        if let Some(resolved) = resolved.get() {
-                            log::debug!(target: "linker", "  | resolved alias {} to item {resolved}", alias.target());
-                            if self[resolved].is_procedure() {
-                                edges.push((gid, resolved));
-                            }
-                        } else {
-                            log::debug!(target: "linker", "  | resolving alias {}..", alias.target());
-
-                            let context = SymbolResolutionContext {
-                                span: alias.target().span(),
-                                module: module_index,
-                                kind: None,
-                            };
-                            if let Some(callee) =
-                                resolver.resolve_alias_target(&context, alias)?.into_global_id()
-                            {
-                                log::debug!(
-                                    target: "linker",
-                                    "  | resolved alias to gid {:?}:{:?}",
-                                    callee.module,
-                                    callee.index
-                                );
-                                edges.push((gid, callee));
-                                resolved.set(Some(callee));
-                            }
-                        }
-                    },
-                    SymbolItem::Procedure(proc) => {
-                        // Add edges to all transitive dependencies of this item due to calls/symbol
-                        // refs
-                        let proc = proc.borrow();
-                        for invoke in proc.invoked() {
-                            log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
-
-                            let context = SymbolResolutionContext {
-                                span: invoke.span(),
-                                module: module_index,
-                                kind: None,
-                            };
-                            if let Some(callee) = resolver
-                                .resolve_invoke_target(&context, &invoke.target)?
-                                .into_global_id()
-                            {
-                                log::debug!(
-                                    target: "linker",
-                                    "  | resolved dependency to gid {}:{}",
-                                    callee.module.as_usize(),
-                                    callee.index.as_usize()
-                                );
-                                edges.push((gid, callee));
-                            }
-                        }
-                    },
+            for (module_index, module) in self.modules.iter().enumerate() {
+                if !module.is_unlinked() {
+                    continue;
                 }
+
+                let module_index = ModuleIndex::new(module_index);
+
+                for (symbol_idx, symbol) in module.symbols().enumerate() {
+                    let gid = module_index + ItemIndex::new(symbol_idx);
+
+                    // Perform any applicable rewrites to this item
+                    rewrites::rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
+
+                    // Update the linker graph
+                    match symbol.item() {
+                        SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
+                        },
+                        SymbolItem::Alias { alias, resolved } => {
+                            if let Some(resolved) = resolved.get() {
+                                log::debug!(target: "linker", "  | resolved alias {} to item {resolved}", alias.target());
+                                if self[resolved].is_procedure() {
+                                    edges.push((gid, resolved));
+                                }
+                            } else {
+                                log::debug!(target: "linker", "  | resolving alias {}..", alias.target());
+
+                                let context = SymbolResolutionContext {
+                                    span: alias.target().span(),
+                                    module: module_index,
+                                    kind: None,
+                                };
+                                if let Some(callee) =
+                                    resolver.resolve_alias_target(&context, alias)?.into_global_id()
+                                {
+                                    log::debug!(
+                                        target: "linker",
+                                        "  | resolved alias to gid {:?}:{:?}",
+                                        callee.module,
+                                        callee.index
+                                    );
+                                    edges.push((gid, callee));
+                                    resolved.set(Some(callee));
+                                }
+                            }
+                        },
+                        SymbolItem::Procedure(proc) => {
+                            // Add edges to all transitive dependencies of this item due to
+                            // calls/symbol refs
+                            let proc = proc.borrow();
+                            for invoke in proc.invoked() {
+                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, invoke.target);
+
+                                let context = SymbolResolutionContext {
+                                    span: invoke.span(),
+                                    module: module_index,
+                                    kind: None,
+                                };
+                                if let Some(callee) = resolver
+                                    .resolve_invoke_target(&context, &invoke.target)?
+                                    .into_global_id()
+                                {
+                                    log::debug!(
+                                        target: "linker",
+                                        "  | resolved dependency to gid {}:{}",
+                                        callee.module.as_usize(),
+                                        callee.index.as_usize()
+                                    );
+                                    edges.push((gid, callee));
+                                }
+                            }
+                        },
+                    }
+                }
+
+                linked_modules.push(module_index);
             }
 
-            module.set_status(LinkStatus::Linked);
+            let mut callgraph = self.callgraph.clone();
+            for (caller, callee) in edges {
+                callgraph.add_edge(caller, callee).map_err(|cycle| self.cycle_error(cycle))?;
+            }
+
+            // Make sure the graph is free of cycles
+            callgraph.toposort().map_err(|cycle| self.cycle_error(cycle))?;
+
+            Ok::<_, LinkerError>((linked_modules, callgraph))
+        };
+
+        match result {
+            Ok((linked_modules, callgraph)) => {
+                self.callgraph = callgraph;
+                for module_index in linked_modules {
+                    self.modules[module_index.as_usize()].set_status(LinkStatus::Linked);
+                }
+            },
+            Err(err) => {
+                self.callgraph = original_callgraph;
+                for (module_index, module) in pending_modules {
+                    self.modules[module_index] = module;
+                }
+                return Err(err);
+            },
         }
-
-        edges
-            .into_iter()
-            .for_each(|(caller, callee)| self.callgraph.add_edge(caller, callee));
-
-        // Make sure the graph is free of cycles
-        self.callgraph.toposort().map_err(|cycle| {
-            let iter = cycle.into_node_ids();
-            let mut nodes = Vec::with_capacity(iter.len());
-            for node in iter {
-                let module = self[node.module].path();
-                let item = self[node].name();
-                nodes.push(module.join(item).to_string());
-            }
-            LinkerError::Cycle { nodes: nodes.into() }
-        })?;
 
         Ok(())
     }
@@ -621,8 +677,7 @@ impl Linker {
 
     /// Returns a procedure index which corresponds to the provided procedure digest.
     ///
-    /// Note that there can be many procedures with the same digest - due to having the same code,
-    /// and/or using different decorators which don't affect the MAST root. This method returns an
+    /// Note that there can be many procedures with the same digest. This method returns an
     /// arbitrary one.
     pub fn get_procedure_index_by_digest(
         &self,
@@ -813,7 +868,7 @@ impl Linker {
         &mut self,
         id: GlobalItemIndex,
         procedure_mast_root: Word,
-    ) -> Result<(), LinkerError> {
+    ) {
         use alloc::collections::btree_map::Entry;
         match self.procedures_by_mast_root.entry(procedure_mast_root) {
             Entry::Occupied(ref mut entry) => {
@@ -827,8 +882,6 @@ impl Linker {
                 entry.insert(smallvec![id]);
             },
         }
-
-        Ok(())
     }
 
     /// Resolve a [Path] to a [ModuleIndex] in this graph
@@ -875,5 +928,149 @@ impl Index<GlobalItemIndex> for Linker {
 
     fn index(&self, index: GlobalItemIndex) -> &Self::Output {
         &self.modules[index.module.as_usize()][index.index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        string::String,
+        sync::Arc,
+    };
+
+    use miden_assembly_syntax::{
+        ast::{
+            Ident, InvocationTarget, InvokeKind, ItemIndex, Path, SymbolResolutionError,
+            Visibility, types,
+        },
+        debuginfo::{SourceSpan, Span},
+        module::{ItemInfo, TypeInfo},
+    };
+
+    use super::*;
+    use crate::testing::{TestContext, source_file};
+
+    #[test]
+    fn failed_kernel_link_restores_kernel_state() {
+        let context = TestContext::default();
+        let source_manager = context.source_manager();
+        let kernel_source = r#"
+                pub proc a
+                    call.b
+                end
+
+                proc b
+                    call.a
+                end
+                "#;
+
+        let userspace = context
+            .parse_module_with_path(
+                "userspace",
+                source_file!(
+                    &context,
+                    r#"
+                    pub proc helper
+                        push.1
+                    end
+                    "#
+                ),
+            )
+            .expect("userspace module parsing must succeed");
+
+        let mut linker = Linker::new(source_manager);
+        let userspace_index = linker
+            .link([userspace])
+            .expect("userspace module must link successfully")
+            .into_iter()
+            .next()
+            .expect("linked module index must be returned");
+
+        let first_err = linker
+            .link_kernel(
+                context
+                    .parse_kernel(source_file!(&context, kernel_source))
+                    .expect("kernel parsing must succeed"),
+            )
+            .expect_err("expected cyclic kernel to be rejected");
+
+        assert!(first_err.to_string().contains("found a cycle in the call graph"));
+        assert!(!linker.has_nonempty_kernel(), "failed kernel link must not leave a kernel set");
+        assert_eq!(linker[userspace_index].kind(), ast::ModuleKind::Library);
+
+        let second_err = linker
+            .link_kernel(
+                context
+                    .parse_kernel(source_file!(&context, kernel_source))
+                    .expect("kernel parsing must succeed"),
+            )
+            .expect_err("expected cyclic kernel retry to be rejected");
+        assert!(second_err.to_string().contains("found a cycle in the call graph"));
+        assert!(!second_err.to_string().contains("duplicate module"));
+
+        let syscall_context = SymbolResolutionContext {
+            span: SourceSpan::UNKNOWN,
+            module: userspace_index,
+            kind: Some(InvokeKind::SysCall),
+        };
+        let err = linker
+            .resolve_invoke_target(
+                &syscall_context,
+                &InvocationTarget::Symbol(Ident::new("a").expect("valid identifier")),
+            )
+            .expect_err("expected syscall without a linked kernel to be rejected");
+        assert!(matches!(err, LinkerError::InvalidSysCallTarget { .. }));
+    }
+
+    #[test]
+    fn oversized_link_module_resolution_returns_structured_error() {
+        let context = TestContext::default();
+        let mut linker = Linker::new(context.source_manager());
+        let module_id = ModuleIndex::new(0);
+        let path = Arc::<Path>::from(Path::new("::m::huge"));
+        let mut symbols = Vec::with_capacity(ItemIndex::MAX_ITEMS + 1);
+
+        for i in 0..=ItemIndex::MAX_ITEMS {
+            let name = Ident::new(format!("a{i}")).expect("valid identifier");
+            symbols.push(Symbol::new(
+                name.clone(),
+                Visibility::Private,
+                LinkStatus::Unlinked,
+                SymbolItem::Compiled(ItemInfo::Type(TypeInfo { name, ty: types::Type::Felt })),
+            ));
+        }
+
+        linker.modules.push(
+            LinkModule::new(
+                module_id,
+                ast::ModuleKind::Library,
+                LinkStatus::Unlinked,
+                ModuleSource::Mast,
+                path,
+            )
+            .with_symbols(symbols),
+        );
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            linker[module_id].resolve(Span::unknown("a0"), &SymbolResolver::new(&linker))
+        }));
+
+        let result = match result {
+            Ok(result) => result,
+            Err(panic) => {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .expect("panic payload should be a string");
+                panic!("expected graceful error, got panic: {message}");
+            },
+        };
+
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, SymbolResolutionError::TooManyItemsInModule { .. })
+        ));
     }
 }

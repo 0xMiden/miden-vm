@@ -8,11 +8,11 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
-    BaseHost, ContextId, DebugError, Felt, TraceError, Word,
+    BaseHost, ContextId, Felt, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
     utils::to_hex,
 };
 
@@ -58,6 +58,8 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    #[error("operand stack depth {depth} exceeds the maximum of {max}")]
+    StackDepthLimitExceeded { depth: usize, max: usize },
     /// This means trace generation would go over the configured row limit.
     ///
     /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
@@ -108,6 +110,17 @@ pub enum ExecutionError {
     HostError(#[from] HostError),
 }
 
+impl ExecutionError {
+    /// Wraps an advice error without source-location context.
+    pub fn advice_error_no_context(err: AdviceError) -> Self {
+        Self::AdviceError {
+            label: SourceSpan::UNKNOWN,
+            source_file: None,
+            err,
+        }
+    }
+}
+
 impl AsRef<dyn Diagnostic> for ExecutionError {
     fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
         self
@@ -140,24 +153,13 @@ pub enum AceEvalError {
 // HOST ERROR
 // ================================================================================================
 
-/// Error type for host-related operations (event handlers, debug handlers, trace handlers).
+/// Error type for host-related operations.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error("debug handler error: {err}")]
-    DebugHandlerError {
-        #[source]
-        err: DebugError,
-    },
-    #[error("trace handler error for trace ID {trace_id}: {err}")]
-    TraceHandlerError {
-        trace_id: u32,
-        #[source]
-        err: TraceError,
-    },
 }
 
 // IO ERROR
@@ -358,12 +360,15 @@ impl OperationError {
     ///
     /// This is useful when working with `ControlFlow` or other non-`Result` return types
     /// where the `OperationResultExt::map_exec_err` extension trait cannot be used directly.
-    pub fn with_context(
+    pub fn with_context<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> ExecutionError {
+    ) -> ExecutionError
+    where
+        F: ExecutableMastForest,
+    {
         let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
         ExecutionError::OperationError { label, source_file, err: self }
     }
@@ -387,14 +392,17 @@ pub struct MerklePathVerificationFailedInner {
 /// Computes the label and source file for error context.
 ///
 /// This function is called by the extension traits to compute source location
-/// only when an error occurs. Since errors are rare, the cost of decorator
-/// traversal is acceptable.
-fn get_label_and_source_file(
+/// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
+/// acceptable.
+fn get_label_and_source_file<F>(
     op_idx: Option<usize>,
-    mast_forest: &MastForest,
+    mast_forest: &F,
     node_id: MastNodeId,
     host: &impl BaseHost,
-) -> (SourceSpan, Option<Arc<SourceFile>>) {
+) -> (SourceSpan, Option<Arc<SourceFile>>)
+where
+    F: ExecutableMastForest,
+{
     mast_forest
         .get_assembly_op(node_id, op_idx)
         .and_then(|assembly_op| assembly_op.location())
@@ -408,13 +416,16 @@ fn get_label_and_source_file(
 ///
 /// This is useful when working with `ControlFlow` or other non-`Result` return types
 /// where the extension traits cannot be used directly.
-pub fn advice_error_with_context(
+pub fn advice_error_with_context<F>(
     err: AdviceError,
-    mast_forest: &MastForest,
+    mast_forest: &F,
     node_id: MastNodeId,
     host: &impl BaseHost,
     op_idx: Option<usize>,
-) -> ExecutionError {
+) -> ExecutionError
+where
+    F: ExecutableMastForest,
+{
     let (label, source_file) = get_label_and_source_file(op_idx, mast_forest, node_id, host);
     ExecutionError::AdviceError { label, source_file, err }
 }
@@ -423,15 +434,18 @@ pub fn advice_error_with_context(
 ///
 /// This is useful when working with `ControlFlow` or other non-`Result` return types
 /// where an extension trait on `Result` cannot be used directly.
-pub fn event_error_with_context(
+pub fn event_error_with_context<F>(
     error: EventError,
-    mast_forest: &MastForest,
+    mast_forest: &F,
     node_id: MastNodeId,
     host: &impl BaseHost,
     op_idx: Option<usize>,
     event_id: EventId,
     event_name: Option<EventName>,
-) -> ExecutionError {
+) -> ExecutionError
+where
+    F: ExecutableMastForest,
+{
     let (label, source_file) = get_label_and_source_file(op_idx, mast_forest, node_id, host);
     ExecutionError::EventError {
         label,
@@ -443,12 +457,15 @@ pub fn event_error_with_context(
 }
 
 /// Creates a `ProcedureNotFound` error with execution context.
-pub fn procedure_not_found_with_context(
+pub fn procedure_not_found_with_context<F>(
     root_digest: Word,
-    mast_forest: &MastForest,
+    mast_forest: &F,
     node_id: MastNodeId,
     host: &impl BaseHost,
-) -> ExecutionError {
+) -> ExecutionError
+where
+    F: ExecutableMastForest,
+{
     let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
 }
@@ -466,12 +483,14 @@ pub fn procedure_not_found_with_context(
 /// Implement this for error types that can be converted to `ExecutionError` using
 /// just the MAST forest, node ID, and host for source location lookup.
 pub trait MapExecErr<T> {
-    fn map_exec_err(
+    fn map_exec_err<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> Result<T, ExecutionError>;
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest;
 }
 
 /// Extension trait for mapping errors to `ExecutionError` with op index context.
@@ -479,13 +498,15 @@ pub trait MapExecErr<T> {
 /// Implement this for error types that occur within basic blocks where the
 /// operation index is available for more precise source location.
 pub trait MapExecErrWithOpIdx<T> {
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError>;
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest;
 }
 
 /// Extension trait for mapping errors to `ExecutionError` without context.
@@ -499,12 +520,15 @@ pub trait MapExecErrNoCtx<T> {
 // OperationError implementations
 impl<T> MapExecErr<T> for Result<T, OperationError> {
     #[inline(always)]
-    fn map_exec_err(
+    fn map_exec_err<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -518,13 +542,16 @@ impl<T> MapExecErr<T> for Result<T, OperationError> {
 
 impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -553,12 +580,15 @@ impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
 // AdviceError implementations
 impl<T> MapExecErr<T> for Result<T, AdviceError> {
     #[inline(always)]
-    fn map_exec_err(
+    fn map_exec_err<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host, None)),
@@ -583,12 +613,15 @@ impl<T> MapExecErrNoCtx<T> for Result<T, AdviceError> {
 // MemoryError implementations
 impl<T> MapExecErr<T> for Result<T, MemoryError> {
     #[inline(always)]
-    fn map_exec_err(
+    fn map_exec_err<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -602,13 +635,16 @@ impl<T> MapExecErr<T> for Result<T, MemoryError> {
 
 impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -623,12 +659,15 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
 // SystemEventError implementations
 impl<T> MapExecErr<T> for Result<T, SystemEventError> {
     #[inline(always)]
-    fn map_exec_err(
+    fn map_exec_err<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -652,13 +691,16 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
 
 impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -683,13 +725,16 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
 // IoError implementations
 impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -712,13 +757,16 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
 // CryptoError implementations
 impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
@@ -740,13 +788,16 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
 // AceEvalError implementations
 impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
     #[inline(always)]
-    fn map_exec_err_with_op_idx(
+    fn map_exec_err_with_op_idx<F>(
         self,
-        mast_forest: &MastForest,
+        mast_forest: &F,
         node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError> {
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {

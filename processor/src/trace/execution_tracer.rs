@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_air::trace::chiplets::hasher::{
     CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
@@ -6,7 +6,7 @@ use miden_air::trace::chiplets::hasher::{
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
-    decoder::block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
+    block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
@@ -22,12 +22,13 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
-        BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
-        SplitNode,
+        BasicBlockNode, JoinNode, LoopNode, MastForest, MastForestId, MastNode, MastNodeExt,
+        MastNodeId, SparseMastForest, SparseMastForestBuilder, SplitNode, VisitKind,
     },
     processor::{Processor, StackInterface, SystemInterface},
     trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     tracer::{OperationHelperRegisters, Tracer},
+    utils::Idx,
 };
 
 // STATE SNAPSHOT
@@ -37,8 +38,11 @@ use crate::{
 #[derive(Debug)]
 struct StateSnapshot {
     state: CoreTraceState,
-    continuation_stack: ContinuationStack,
-    initial_mast_forest: Arc<MastForest>,
+    /// Continuation stack with forest references already translated to [`MastForestId`]s into the
+    /// `mast_forest_store` of the [`TraceGenerationContext`] being built.
+    continuation_stack: ContinuationStack<MastForestId>,
+    /// The active forest at the start of this fragment, in `mast_forest_store`.
+    initial_mast_forest_id: MastForestId,
 }
 
 // TRACE GENERATION CONTEXT
@@ -48,6 +52,14 @@ struct StateSnapshot {
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
     pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
+
+    /// Sparse MAST forests, one per source [`MastForest`] visited during execution.
+    ///
+    /// Each entry contains only the [`MastNode`]s that were actually visited, while preserving the
+    /// original [`MastNodeId`]s of the source forest. References from `CoreTraceFragmentContext`,
+    /// `MastForestResolutionReplay`, and `HasherOp::HashBasicBlock` are encoded as
+    /// [`MastForestId`]s into this vector.
+    pub mast_forest_store: Vec<Arc<SparseMastForest>>,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
@@ -61,6 +73,10 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -110,8 +126,28 @@ pub struct ExecutionTracer {
     // Output
     fragment_contexts: Vec<CoreTraceFragmentContext>,
 
+    /// Per-source-forest sparse builders, indexed by `mast_forest_indices`.
+    ///
+    /// Each builder accumulates the [`MastNodeId`]s of nodes visited inside its source forest
+    /// during execution, and is finalized into an [`Arc<SparseMastForest>`] in
+    /// [`Self::into_trace_generation_context`].
+    mast_forest_builders: Vec<SparseMastForestBuilder>,
+
+    /// Maps a source forest's `Arc::as_ptr` identity to its [`MastForestId`] in
+    /// `mast_forest_builders` (and, by construction, the eventual id in
+    /// `TraceGenerationContext::mast_forest_store`).
+    ///
+    /// Pointer identity is sound here because the trace-generation flow never crosses a process
+    /// boundary: the tracer builds the store and the replay processor consumes it in the same
+    /// run.
+    mast_forest_ids: BTreeMap<*const MastForest, MastForestId>,
+
     /// The number of rows per core trace fragment.
     fragment_size: usize,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    max_stack_depth: usize,
 
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
@@ -127,7 +163,7 @@ pub struct ExecutionTracer {
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize) -> Self {
+    pub fn new(fragment_size: usize, max_stack_depth: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -146,10 +182,84 @@ impl ExecutionTracer {
             ace: AceReplay::default(),
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
+            mast_forest_builders: Vec::new(),
+            mast_forest_ids: BTreeMap::new(),
             fragment_size,
+            max_stack_depth,
             pending_restore_context: false,
             is_eval_circuit_op: false,
         }
+    }
+
+    /// Returns the [`MastForestId`] of `forest` in [`Self::mast_forest_builders`], creating a new
+    /// builder for it on first encounter. Forests are identified by `Arc::as_ptr`.
+    #[inline]
+    fn forest_id(&mut self, forest: &Arc<MastForest>) -> MastForestId {
+        let key = Arc::as_ptr(forest);
+        if let Some(&id) = self.mast_forest_ids.get(&key) {
+            return id;
+        }
+
+        let id = MastForestId::from(self.mast_forest_builders.len() as u32);
+        self.mast_forest_builders.push(SparseMastForestBuilder::new(forest.clone()));
+        self.mast_forest_ids.insert(key, id);
+        id
+    }
+
+    /// Records that the node with id `node_id` was visited inside `forest`. Also records the
+    /// node's immediate children (if any) as digest-only references.
+    ///
+    /// The parent is recorded as a [`VisitKind::FullVisit`] so its full [`MastNode`] is available
+    /// at replay time. Children are recorded as [`VisitKind::DigestOnly`] because trace
+    /// generation only needs their digest when building the parent's trace row (e.g. a Split
+    /// node needs the digest of *both* branches even if only one is taken; a Join needs both
+    /// children's digests; a Call needs the callee's digest). If a child is later actually
+    /// entered, a subsequent `record_visit` call promotes it to a full visit.
+    ///
+    /// Keeping un-entered children as digest-only means accidental entry into a pruned node
+    /// surfaces as a clean `get_node_by_id` miss rather than a partially-populated node.
+    #[inline]
+    fn record_visit(&mut self, forest: &Arc<MastForest>, node_id: MastNodeId) {
+        let id = self.forest_id(forest);
+        self.mast_forest_builders[id.to_usize()].record_visit(node_id, VisitKind::FullVisit);
+
+        if let Some(node) = forest.get_node_by_id(node_id) {
+            node.for_each_child(|child_id| {
+                self.mast_forest_builders[id.to_usize()]
+                    .record_visit(child_id, VisitKind::DigestOnly);
+            });
+        }
+    }
+
+    /// Translates a live continuation stack carrying `Arc<MastForest>` references into one carrying
+    /// [`MastForestId`]s into `mast_forest_builders`.
+    fn translate_continuation_stack(
+        &mut self,
+        live: ContinuationStack<Arc<MastForest>>,
+    ) -> ContinuationStack<MastForestId> {
+        let mut translated: ContinuationStack<MastForestId> = ContinuationStack::default();
+        for cont in live.into_inner() {
+            let translated_cont = match cont {
+                Continuation::EnterForest(forest) => {
+                    Continuation::EnterForest(self.forest_id(&forest))
+                },
+                Continuation::StartNode(id) => Continuation::StartNode(id),
+                Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
+                Continuation::FinishSplit(id) => Continuation::FinishSplit(id),
+                Continuation::FinishLoop(node_id) => Continuation::FinishLoop(node_id),
+                Continuation::FinishCall(id) => Continuation::FinishCall(id),
+                Continuation::FinishDyn(id) => Continuation::FinishDyn(id),
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                    Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
+                },
+                Continuation::Respan { node_id, batch_index } => {
+                    Continuation::Respan { node_id, batch_index }
+                },
+                Continuation::FinishBasicBlock(id) => Continuation::FinishBasicBlock(id),
+            };
+            translated.push_continuation(translated_cont);
+        }
+        translated
     }
 
     /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
@@ -159,8 +269,18 @@ impl ExecutionTracer {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
+        // Finalize each per-source-forest builder into a `SparseMastForest`. Indices stored on
+        // fragments and replays line up with the position in this vector by construction (the
+        // builders were appended in the same order the indices were assigned).
+        let mast_forest_store = self
+            .mast_forest_builders
+            .into_iter()
+            .map(|builder| Arc::new(builder.finalize()))
+            .collect();
+
         TraceGenerationContext {
             core_trace_contexts: self.fragment_contexts,
+            mast_forest_store,
             range_checker_replay: self.range_checker,
             memory_writes: self.memory_writes,
             bitwise_replay: self.bitwise,
@@ -168,6 +288,7 @@ impl ExecutionTracer {
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
+            max_stack_depth: self.max_stack_depth,
         }
     }
 
@@ -186,47 +307,50 @@ impl ExecutionTracer {
         &mut self,
         system_state: SystemState,
         stack_top: [Felt; MIN_STACK_DEPTH],
-        mut continuation_stack: ContinuationStack,
-        continuation: Continuation,
+        mut continuation_stack: ContinuationStack<Arc<MastForest>>,
+        continuation: Continuation<Arc<MastForest>>,
         current_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
         self.finish_current_fragment_context();
 
         // Start a new snapshot
-        self.state_snapshot = {
-            let decoder_state = {
-                if self.block_stack.is_empty() {
-                    DecoderState { current_addr: ZERO, parent_addr: ZERO }
-                } else {
-                    let block_info = self.block_stack.peek();
+        let decoder_state = {
+            if self.block_stack.is_empty() {
+                DecoderState { current_addr: ZERO, parent_addr: ZERO }
+            } else {
+                let block_info = self.block_stack.peek();
 
-                    DecoderState {
-                        current_addr: block_info.addr,
-                        parent_addr: block_info.parent_addr,
-                    }
+                DecoderState {
+                    current_addr: block_info.addr,
+                    parent_addr: block_info.parent_addr,
                 }
-            };
-            let stack = {
-                let stack_depth =
-                    MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx();
-                let last_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                StackState::new(stack_top, stack_depth, last_overflow_addr)
-            };
-
-            // Push new continuation corresponding to the current execution state
-            continuation_stack.push_continuation(continuation);
-
-            Some(StateSnapshot {
-                state: CoreTraceState {
-                    system: system_state,
-                    decoder: decoder_state,
-                    stack,
-                },
-                continuation_stack,
-                initial_mast_forest: current_forest,
-            })
+            }
         };
+        let stack = {
+            let stack_depth = MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx();
+            let last_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+            StackState::new(stack_top, stack_depth, last_overflow_addr)
+        };
+
+        // Push new continuation corresponding to the current execution state
+        continuation_stack.push_continuation(continuation);
+
+        // Translate the live `Arc<MastForest>`-bearing continuation stack into one indexed by
+        // `MastForestId` into `mast_forest_builders`, registering any newly-encountered forests
+        // along the way.
+        let initial_mast_forest_id = self.forest_id(&current_forest);
+        let translated_stack = self.translate_continuation_stack(continuation_stack);
+
+        self.state_snapshot = Some(StateSnapshot {
+            state: CoreTraceState {
+                system: system_state,
+                decoder: decoder_state,
+                stack,
+            },
+            continuation_stack: translated_stack,
+            initial_mast_forest_id,
+        });
     }
 
     #[inline(always)]
@@ -318,16 +442,29 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                    // the semantics of DYNCALL. That is, the top of the
-                    // stack contains the memory address to where the
-                    // address to dynamically call is located. Then, the
-                    // DYNCALL operation performs a drop, and
-                    // records the stack depth after the drop as the beginning of
-                    // the new context. For more information, look at the docs for how the
-                    // constraints are designed; it's a bit tricky but it works.
-                    let stack_depth_after_drop = processor.stack().depth() - 1;
+                    // DYNCALL drops the top stack element (the memory address holding the
+                    // callee hash) and records the stack state *after* the drop as the new
+                    // context.
+                    //
+                    // `record_control_node_start()` is called *before* `decrement_stack_size()`,
+                    // so we must compute the post-drop overflow address without actually
+                    // performing the pop.  We use `clk_after_pop_in_current_ctx()` which
+                    // returns the clock of the second-to-last overflow entry (i.e. what
+                    // `last_update_clk_in_current_ctx()` would return after the pop), or ZERO
+                    // when the overflow stack has ≤1 entry and would become empty.
+                    //
+                    // When the stack is already at MIN_STACK_DEPTH the drop does not reduce
+                    // the depth and the overflow address is ZERO — mirroring the same guard
+                    // already present in the parallel-tracer path.  See #2813 / PR #2904.
+                    let (stack_depth_after_drop, overflow_addr) =
+                        if processor.stack().depth() > MIN_STACK_DEPTH as u32 {
+                            (
+                                processor.stack().depth() - 1,
+                                self.overflow_table.clk_after_pop_in_current_ctx(),
+                            )
+                        } else {
+                            (processor.stack().depth(), ZERO)
+                        };
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
@@ -403,7 +540,7 @@ impl ExecutionTracer {
                     execution_context: execution_context_replay,
                 },
                 continuation: snapshot.continuation_stack,
-                initial_mast_forest: snapshot.initial_mast_forest,
+                initial_mast_forest_id: snapshot.initial_mast_forest_id,
             };
 
             self.fragment_contexts.push(trace_state);
@@ -431,6 +568,7 @@ impl ExecutionTracer {
 
 impl Tracer for ExecutionTracer {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
@@ -438,8 +576,8 @@ impl Tracer for ExecutionTracer {
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
-        continuation: Continuation,
-        continuation_stack: &ContinuationStack,
+        continuation: Continuation<Arc<MastForest>>,
+        continuation_stack: &ContinuationStack<Arc<MastForest>>,
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state
@@ -454,6 +592,14 @@ impl Tracer for ExecutionTracer {
                 continuation.clone(),
                 current_forest.clone(),
             );
+        }
+
+        // Record that the node being executed at this cycle was visited inside `current_forest`.
+        // This builds up the per-source-forest sparse subset used at trace generation time. Note
+        // that an `ExecutionTracer`'s state is invalidated on error, so it is safe to record the
+        // visit here even if the operation later fails (per Tracer invariants).
+        if let Some(visited_node_id) = node_id_for_visit(&continuation) {
+            self.record_visit(current_forest, visited_node_id);
         }
 
         match continuation {
@@ -474,14 +620,14 @@ impl Tracer for ExecutionTracer {
                 }
             },
             Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
-                MastNode::Join(_) => {
+                MastNode::Join(_) | MastNode::Loop(_) => {
                     self.record_control_node_start(
                         &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
                 },
-                MastNode::Split(_) | MastNode::Loop(_) => {
+                MastNode::Split(_) => {
                     self.record_control_node_start(
                         &current_forest[mast_node_id],
                         processor,
@@ -514,15 +660,15 @@ impl Tracer for ExecutionTracer {
                     }
                 },
                 MastNode::Block(basic_block_node) => {
+                    let forest_id = self.forest_id(current_forest);
                     self.hasher_for_chiplet.record_hash_basic_block(
-                        current_forest.clone(),
+                        forest_id,
                         mast_node_id,
                         basic_block_node.digest(),
                     );
                     let block_addr =
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
-                    let parent_addr =
-                        self.block_stack.push(block_addr, None);
+                    let parent_addr = self.block_stack.push(block_addr, None);
                     self.block_stack_replay.record_node_start_parent_addr(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(
@@ -532,9 +678,7 @@ impl Tracer for ExecutionTracer {
             Continuation::Respan { node_id: _, batch_index: _ } => {
                 self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_PERM_FELT;
             },
-            Continuation::FinishLoop { node_id: _, was_entered }
-                if was_entered && processor.stack_get(0) == ONE =>
-            {
+            Continuation::FinishLoop(_) if processor.stack_get(0) == ONE => {
                 // This is a REPEAT operation, which drops the condition (top element) off the stack
                 self.decrement_stack_size();
             },
@@ -542,12 +686,12 @@ impl Tracer for ExecutionTracer {
             | Continuation::FinishSplit(_)
             | Continuation::FinishCall(_)
             | Continuation::FinishDyn(_)
-            | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
+            | Continuation::FinishLoop(_) // not a REPEAT, which is handled separately above
             | Continuation::FinishBasicBlock(_) => {
-                // The END of a loop that was entered drops the condition from the stack.
+                // The END of a loop drops the condition from the stack (the body always pushes it).
                 if matches!(
                     &continuation,
-                    Continuation::FinishLoop { was_entered, .. } if *was_entered
+                    Continuation::FinishLoop(_)
                 ) {
                     self.decrement_stack_size();
                 }
@@ -565,20 +709,29 @@ impl Tracer for ExecutionTracer {
                     self.pending_restore_context = true;
                 }
             },
-            Continuation::FinishExternal(_)
-            | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_)
-            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
-                panic!(
-                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
-                )
+            Continuation::EnterForest(_) => {
+                panic!("EnterForest continuations are guaranteed not to be passed here")
             },
         }
     }
 
     #[inline(always)]
     fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>) {
-        self.external.record_resolution(node_id, forest.clone());
+        let forest_id = self.forest_id(forest);
+        self.external.record_resolution(node_id, forest_id);
+    }
+
+    #[inline(always)]
+    fn record_external_node_entered(
+        &mut self,
+        external_node_id: MastNodeId,
+        forest: &Arc<MastForest>,
+    ) {
+        // External nodes don't go through `start_clock_cycle`, so we record their visit here so
+        // the per-source-forest sparse builder includes them. The replay path needs the external
+        // node present in the sparse forest because `execute_external_node` indexes the forest by
+        // id to fetch the procedure digest.
+        self.record_visit(forest, external_node_id);
     }
 
     #[inline(always)]
@@ -741,11 +894,11 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
+    fn record_u32_range_checks(&mut self, u32_lo: Felt, u32_hi: Felt) {
         let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
-        self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
+        self.range_checker.record_range_check_u32([t0, t1, t2, t3]);
     }
 
     #[inline(always)]
@@ -812,6 +965,28 @@ impl Tracer for ExecutionTracer {
 
             self.is_eval_circuit_op = false;
         }
+    }
+}
+
+/// Extracts the [`MastNodeId`] that is being executed at the start of a clock cycle from the given
+/// continuation, so that the node can be marked as visited in its source forest's sparse builder.
+///
+/// Continuations not passed to [`Tracer::start_clock_cycle`] (per the trait contract) are matched
+/// pessimistically here, returning `None`.
+#[inline]
+fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
+    match *continuation {
+        Continuation::StartNode(id)
+        | Continuation::FinishJoin(id)
+        | Continuation::FinishSplit(id)
+        | Continuation::FinishCall(id)
+        | Continuation::FinishDyn(id)
+        | Continuation::FinishBasicBlock(id) => Some(id),
+        Continuation::FinishLoop(id) => Some(id),
+        Continuation::ResumeBasicBlock { node_id, .. } | Continuation::Respan { node_id, .. } => {
+            Some(node_id)
+        },
+        Continuation::EnterForest(_) => None,
     }
 }
 

@@ -6,7 +6,8 @@ mod tests;
 
 use alloc::{
     boxed::Box,
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::ToString,
     sync::Arc,
     vec::Vec,
 };
@@ -15,10 +16,11 @@ use miden_core::{Word, crypto::hash::Poseidon2};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
+use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
-    errors::{SemanticAnalysisError, SyntaxError},
-    passes::{ConstEvalVisitor, VerifyInvokeTargets, VerifyRepeatCounts},
+    errors::{LimitKind, SemanticAnalysisError, SyntaxError},
+    passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
 
@@ -49,10 +51,17 @@ pub fn analyze(
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();
     let mut docs = None;
+    let mut module_docs = None;
+    let mut has_doc_anchor = false;
     while let Some(form) = forms.pop_front() {
+        if !matches!(form, Form::ModuleDoc(_) | Form::Doc(_)) {
+            has_doc_anchor = true;
+        }
+
         match form {
             Form::ModuleDoc(docstring) => {
                 assert!(docs.is_none());
+                module_docs = Some(docstring.span());
                 module.set_docs(Some(docstring));
             },
             Form::Doc(docstring) => {
@@ -123,13 +132,17 @@ pub fn analyze(
                 analyzer.error(SemanticAnalysisError::UnexpectedEntrypoint { span: body.span() });
             },
             Form::AdviceMapEntry(entry) => {
-                add_advice_map_entry(&mut module, entry.with_docs(docs.take()), &mut analyzer)?;
+                add_advice_map_entry(&mut module, entry.with_docs(docs.take()), &mut analyzer);
             },
         }
     }
 
+    if !has_doc_anchor && let Some(span) = module_docs.take() {
+        analyzer.error(SemanticAnalysisError::TrailingDocstring { span });
+    }
+
     if let Some(unused) = docs.take() {
-        analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
+        analyzer.error(SemanticAnalysisError::TrailingDocstring { span: unused.span() });
     }
 
     // Simplify all constant declarations
@@ -162,7 +175,7 @@ pub fn analyze(
     analyzer.has_failed()?;
 
     // Run item checks
-    visit_items(&mut module, &mut analyzer)?;
+    visit_items(&mut module, &mut analyzer);
 
     // Check unused imports
     for import in module.aliases() {
@@ -179,9 +192,15 @@ pub fn analyze(
 ///
 /// When this function returns, all local analysis is complete, and all that remains is construction
 /// of a module graph and global program analysis to perform any remaining transformations.
-fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<(), SyntaxError> {
+fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
     let is_kernel = module.is_kernel();
-    let locals = BTreeSet::from_iter(module.items().iter().map(|p| p.name().clone()));
+    let locals = BTreeMap::from_iter(
+        module
+            .items()
+            .iter()
+            .map(|item| (item.name().as_str().to_string(), LocalInvokeTarget::from(item))),
+    );
+    let mut used_aliases = BTreeSet::default();
     let mut items = VecDeque::from(core::mem::take(&mut module.items));
     while let Some(item) = items.pop_front() {
         match item {
@@ -222,40 +241,71 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                         analyzer,
                         module,
                         &locals,
+                        &mut used_aliases,
                         Some(procedure.name().clone()),
                     );
                     let _ = visitor.visit_mut_procedure(&mut procedure);
                 }
-                module.items.push(Export::Procedure(procedure));
+                if let Err(err) = module.push_export(Export::Procedure(procedure)) {
+                    analyzer.error(err);
+                }
             },
             Export::Alias(mut alias) => {
                 log::debug!(target: "verify-invoke", "visiting alias {}", alias.target());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_alias(&mut alias);
                 }
-                module.items.push(Export::Alias(alias));
+                if let Err(err) = module.push_export(Export::Alias(alias)) {
+                    analyzer.error(err);
+                }
             },
             Export::Constant(mut constant) => {
                 log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
-                module.items.push(Export::Constant(constant));
+                if let Err(err) = module.push_export(Export::Constant(constant)) {
+                    analyzer.error(err);
+                }
             },
             Export::Type(mut ty) => {
                 log::debug!(target: "verify-invoke", "visiting type {}", ty.name());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_type_decl(&mut ty);
                 }
-                module.items.push(Export::Type(ty));
+                if let Err(err) = module.push_export(Export::Type(ty)) {
+                    analyzer.error(err);
+                }
             },
         }
     }
 
-    Ok(())
+    for alias in module.aliases_mut() {
+        if alias.uses == 0 && used_aliases.contains(alias.name().as_str()) {
+            alias.uses = 1;
+        }
+    }
 }
 
 fn define_alias(
@@ -310,13 +360,7 @@ fn define_procedure(
 
 /// Inserts a new entry in the Advice Map and defines a constant corresposnding to the entry's
 /// key.
-///
-/// Returns `Err` if the symbol is already defined
-fn add_advice_map_entry(
-    module: &mut Module,
-    entry: AdviceMapEntry,
-    context: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mut AnalysisContext) {
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
         None => Poseidon2::hash_elements(&entry.value),
@@ -336,5 +380,4 @@ fn add_advice_map_entry(
             module.advice_map.insert(key, entry.value);
         },
     }
-    Ok(())
 }

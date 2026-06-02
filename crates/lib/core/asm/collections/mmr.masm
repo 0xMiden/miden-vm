@@ -6,14 +6,20 @@ use miden::core::math::u64
 #!
 #! This MMR implementation supports only u32 positions.
 #!
+#! The position must refer to an existing leaf: `pos < num_leaves`, where `num_leaves` is stored
+#! at `mmr_ptr[0]`. The procedure fails instead of returning an empty or sentinel word when `pos`
+#! is outside the current MMR.
+#!
 #! Stack transition:
 #! Input: [pos, mmr_ptr, ...]
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
-#!
-#! Cycles: 118
 pub proc get
   # load the num_leaves of the MMR (2 cycles)
   dup.1 mem_load
+  # stack: [num_leaves, pos, mmr_ptr, ...]
+
+  # assert `pos < num_leaves`
+  dup.1 dup.1 u32assert2 u32lt assert.err="position is not an existing MMR leaf"
   # stack: [num_leaves, pos, mmr_ptr, ...]
 
   # compute `num_leaves & pos`, this contains all peaks before `pos` (and maybe some after the owning peak) (3 cycles)
@@ -24,7 +30,7 @@ pub proc get
   dup.1 swap sub
   # stack: [owner_candidates, num_leaves, pos, mmr_ptr, ...]
 
-  # compute `ilog2(owner_candidates)` and `2**depth`, it corresponds to the owner peak and its depth (61 cycles)
+  # compute `ilog2(owner_candidates)` and `2**depth`, it corresponds to the owner peak and its depth (83 cycles)
   ilog2 dup.0 pow2
   # stack: [owner_peak, depth, num_leaves, pos, mmr_ptr, ...]
 
@@ -44,7 +50,7 @@ pub proc get
   movup.2 dup.1 sub
   # stack: [relative_pos, peaks_before, depth, mmr_ptr, ...]
 
-  # compute `popcount(peaks_before)`, the count peaks before the target to be skipped when loading from mem (2 cycles)
+  # compute `popcount(peaks_before)`, the count peaks before the target to be skipped when loading from mem (36 cycles)
   swap u32assert u32popcnt
   # stack: [peak_count, relative_pos, depth, mmr_ptr, ...]
 
@@ -67,7 +73,7 @@ pub proc get
     drop drop # (2 cycles)
     # stack: [leaf, ...]
   else
-    # verify and get the leaf (9 cycles)
+    # verify and get the leaf (10 cycles)
     mtree_get
     # stack: [leaf, root, ...]
 
@@ -83,9 +89,9 @@ end
 #!
 #! Input: [num_leaves, ...]
 #! Output: [num_peaks, ...]
-#! Cycles: 69
+#! Cycles: 67
 pub proc num_leaves_to_num_peaks
-  # count number of peaks (69 cycles)
+  # count number of peaks (67 cycles)
   u32split u32popcnt swap u32popcnt add
   # => [count, ...]
 end
@@ -122,7 +128,7 @@ end
 #!    starting with the MMR forest (its total leaves count) followed by its peaks.
 #!    The address is expected to be word-aligned.
 #!
-#! Cycles: 164 + 9 * extra_peak_pair cycles
+#! Cycles: 162 + 9 * extra_peak_pair cycles
 #!    where `extra_peak` is the number of peak pairs in addition to the first
 #!    16, i.e. `round_up((num_of_peaks - 16) / 2)`
 pub proc unpack
@@ -181,13 +187,13 @@ end
 #!
 #! Input: [mmr_ptr, ...]
 #! Output: [HASH, ...]
-#! Cycles: 130 + 3 * num_peaks
+#! Cycles: 128 + 3 * num_peaks
 pub proc pack
   # load num_leaves (2 cycles)
   dup mem_load
   # => [num_leaves, mmr_ptr, ...]
 
-  # compute num_peaks (69 cycles)
+  # compute num_peaks (67 cycles)
   exec.num_leaves_to_num_peaks
   # => [num_peaks, mmr_ptr, ...]
 
@@ -224,7 +230,7 @@ end
 #!
 #! Input: [EL, mmr_ptr, ...]
 #! Output: [...]
-#! Cycles: 147 + 39 * peak_merges
+#! Cycles: 145 + 39 * peak_merges
 pub proc add
   # get num_leaves (2 cycles)
   dup.4 mem_load
@@ -235,7 +241,7 @@ pub proc add
   # => [num_leaves, EL, mmr_ptr]
 
   dup exec.num_leaves_to_num_peaks
-  # [num_peaks, num_leaves, EL, mmr_ptr] (70 cycles)
+  # [num_peaks, num_leaves, EL, mmr_ptr] (68 cycles)
 
   # compute peaks_end (6 cycles)
   mul.4 movup.6 add add.4

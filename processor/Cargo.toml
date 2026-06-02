@@ -28,14 +28,17 @@ std = [
     "thiserror/std",
 ]
 testing = ["miden-air/testing"]
-# Like `testing`, but slows down the processor speed to make it easier to debug.
-bus-debugger = ["testing", "miden-air/testing"]
+# Pulls in the LogUp debug surface from miden-air (under `#[cfg(feature = "std")]`).
+# NOTE: the real-trace bus debugger is not yet wired into the prover/processor paths,
+# so today this feature only compiles in the LookupAir shape-validation walker.
+bus-debugger = ["miden-air/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+miden-mast-package.workspace = true
 miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 

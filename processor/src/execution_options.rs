@@ -1,4 +1,5 @@
 use miden_air::trace::MIN_TRACE_LEN;
+use miden_core::program::MIN_STACK_DEPTH;
 
 // EXECUTION OPTIONS
 // ================================================================================================
@@ -12,16 +13,19 @@ pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
-    enable_tracing: bool,
-    enable_debugging: bool,
     /// Maximum number of field elements that can be inserted into the advice map in a single
     /// `adv.insert_mem` operation.
     max_adv_map_value_size: usize,
+    /// Maximum total number of field elements allowed in live advice map keys and values.
+    max_adv_map_elements: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
+    /// Maximum number of field elements allowed on the operand stack in the active execution
+    /// context.
+    max_stack_depth: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -30,11 +34,11 @@ impl Default for ExecutionOptions {
             max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            enable_tracing: false,
-            enable_debugging: false,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         }
     }
 }
@@ -50,8 +54,14 @@ impl ExecutionOptions {
     pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
 
     /// Default maximum number of field elements in a single advice map value inserted via
-    /// `adv.insert_mem`. Set to 2^17 (~1 MB given 8-byte field elements).
+    /// execution-time advice map mutations. Set to 2^17 (~1 MB given 8-byte field elements).
     pub const DEFAULT_MAX_ADV_MAP_VALUE_SIZE: usize = 1 << 17;
+
+    /// Default maximum total number of field elements in live advice map keys and values.
+    ///
+    /// Set to 2^20 so the default allows multiple maximum-sized entries while still providing a
+    /// finite host-memory backstop. Each entry contributes 4 key elements plus its value length.
+    pub const DEFAULT_MAX_ADV_MAP_ELEMENTS: usize = 1 << 20;
 
     /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
     /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
@@ -60,6 +70,12 @@ impl ExecutionOptions {
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
     pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
+
+    /// Default maximum number of field elements allowed on the operand stack.
+    ///
+    /// This preserves the effective stack depth ceiling imposed by the previous fixed
+    /// `FastProcessor` stack buffer.
+    pub const DEFAULT_MAX_STACK_DEPTH: usize = 6615;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -77,8 +93,6 @@ impl ExecutionOptions {
         max_cycles: Option<u32>,
         expected_cycles: u32,
         core_trace_fragment_size: usize,
-        enable_tracing: bool,
-        enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
         // Validate max cycles.
         let max_cycles = if let Some(max_cycles) = max_cycles {
@@ -118,11 +132,11 @@ impl ExecutionOptions {
             max_cycles,
             expected_cycles,
             core_trace_fragment_size,
-            enable_tracing,
-            enable_debugging,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
         })
     }
 
@@ -138,24 +152,6 @@ impl ExecutionOptions {
         }
         self.core_trace_fragment_size = size;
         Ok(self)
-    }
-
-    /// Enables execution of the `trace` instructions.
-    pub fn with_tracing(mut self, enable_tracing: bool) -> Self {
-        self.enable_tracing = enable_tracing;
-        self
-    }
-
-    /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
-    /// otherwise, debug mode is disabled.
-    ///
-    /// In debug mode the VM does the following:
-    /// - Executes `debug` instructions (these are ignored in regular mode).
-    /// - Records additional info about program execution (e.g., keeps track of stack state at every
-    ///   cycle of the VM) which enables stepping through the program forward and backward.
-    pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
-        self.enable_debugging = enable_debugging;
-        self
     }
 
     // PUBLIC ACCESSORS
@@ -181,23 +177,17 @@ impl ExecutionOptions {
         self.core_trace_fragment_size
     }
 
-    /// Returns a flag indicating whether the VM should execute `trace` instructions.
-    #[inline]
-    pub fn enable_tracing(&self) -> bool {
-        self.enable_tracing
-    }
-
-    /// Returns a flag indicating whether the VM should execute a program in debug mode.
-    #[inline]
-    pub fn enable_debugging(&self) -> bool {
-        self.enable_debugging
-    }
-
-    /// Returns the maximum number of field elements allowed in a single advice map value
-    /// inserted via `adv.insert_mem`.
+    /// Returns the maximum number of field elements allowed in a single live advice map value.
     #[inline]
     pub fn max_adv_map_value_size(&self) -> usize {
         self.max_adv_map_value_size
+    }
+
+    /// Returns the maximum total number of field elements allowed in live advice map keys and
+    /// values.
+    #[inline]
+    pub fn max_adv_map_elements(&self) -> usize {
+        self.max_adv_map_elements
     }
 
     /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
@@ -206,10 +196,15 @@ impl ExecutionOptions {
         self.max_hash_len_bytes
     }
 
-    /// Sets the maximum number of field elements allowed in a single advice map value
-    /// inserted via `adv.insert_mem`.
+    /// Sets the maximum number of field elements allowed in a single live advice map value.
     pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
         self.max_adv_map_value_size = size;
+        self
+    }
+
+    /// Sets the maximum total number of field elements allowed in live advice map keys and values.
+    pub fn with_max_adv_map_elements(mut self, size: usize) -> Self {
+        self.max_adv_map_elements = size;
         self
     }
 
@@ -225,10 +220,33 @@ impl ExecutionOptions {
         self.max_num_continuations
     }
 
+    /// Returns the maximum number of field elements allowed on the operand stack in the active
+    /// execution context.
+    #[inline]
+    pub fn max_stack_depth(&self) -> usize {
+        self.max_stack_depth
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
         self
+    }
+
+    /// Sets the maximum number of field elements allowed on the operand stack in the active
+    /// execution context.
+    pub fn with_max_stack_depth(
+        mut self,
+        max_stack_depth: usize,
+    ) -> Result<Self, ExecutionOptionsError> {
+        if max_stack_depth < MIN_STACK_DEPTH {
+            return Err(ExecutionOptionsError::MaxStackDepthTooSmall {
+                max_stack_depth,
+                min_stack_depth: MIN_STACK_DEPTH,
+            });
+        }
+        self.max_stack_depth = max_stack_depth;
+        Ok(self)
     }
 }
 
@@ -247,6 +265,11 @@ pub enum ExecutionOptionsError {
     MaxCycleNumTooBig { max_cycles: u32, max_cycles_limit: u32 },
     #[error("core trace fragment size must be greater than 0")]
     CoreTraceFragmentSizeTooSmall,
+    #[error("maximum stack depth {max_stack_depth} must be at least {min_stack_depth}")]
+    MaxStackDepthTooSmall {
+        max_stack_depth: usize,
+        min_stack_depth: usize,
+    },
 }
 
 // TESTS
@@ -259,20 +282,20 @@ mod tests {
     #[test]
     fn valid_fragment_size() {
         // Valid power of two values should succeed
-        let opts = ExecutionOptions::new(None, 64, 1024, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().core_trace_fragment_size(), 1024);
 
-        let opts = ExecutionOptions::new(None, 64, 4096, false, false);
+        let opts = ExecutionOptions::new(None, 64, 4096);
         assert!(opts.is_ok());
 
-        let opts = ExecutionOptions::new(None, 64, 1, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1);
         assert!(opts.is_ok());
     }
 
     #[test]
     fn zero_fragment_size_fails() {
-        let opts = ExecutionOptions::new(None, 64, 0, false, false);
+        let opts = ExecutionOptions::new(None, 64, 0);
         assert!(matches!(opts, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
     }
 
@@ -291,7 +314,7 @@ mod tests {
     #[test]
     fn expected_cycles_validated_after_rounding() {
         // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
-        let opts = ExecutionOptions::new(Some(100), 65, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 65, 1024);
         assert!(matches!(
             opts,
             Err(ExecutionOptionsError::ExpectedCyclesTooBig {
@@ -301,8 +324,24 @@ mod tests {
         ));
 
         // expected_cycles=64 rounds to 64; max_cycles=100 -> ok.
-        let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
+    }
+
+    #[test]
+    fn max_stack_depth_validates_minimum_depth() {
+        let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH - 1);
+        assert!(matches!(
+            result,
+            Err(ExecutionOptionsError::MaxStackDepthTooSmall {
+                max_stack_depth,
+                min_stack_depth: MIN_STACK_DEPTH,
+            }) if max_stack_depth == MIN_STACK_DEPTH - 1
+        ));
+
+        let result = ExecutionOptions::default().with_max_stack_depth(MIN_STACK_DEPTH);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().max_stack_depth(), MIN_STACK_DEPTH);
     }
 }

@@ -5,6 +5,7 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     let counts = InputCounts {
         width: 3,
         aux_width: 2,
+        num_aux_boundary: 2,
         num_public: 5,
         num_vlpi: 0,
         num_randomness: 16,

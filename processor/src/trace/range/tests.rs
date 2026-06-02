@@ -1,9 +1,21 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_utils_testing::rand::rand_array;
 
-use super::{RangeCheckTrace, RangeChecker};
+use super::RangeChecker;
 use crate::{Felt, ZERO, utils::ToElements};
+
+/// Drives [`RangeChecker::write_range_into_core`] into a 2-column row-major buffer and
+/// returns the resulting `(m, v)` columns for the assertions below.
+fn range_columns(checker: RangeChecker, target_len: usize) -> [Vec<Felt>; 2] {
+    let table_len = checker.get_number_range_checker_rows();
+    let mut buf = Felt::zero_vec(2 * target_len);
+    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len, target_len);
+    let m = (0..target_len).map(|r| buf[2 * r]).collect();
+    let v = (0..target_len).map(|r| buf[2 * r + 1]).collect();
+    [m, v]
+}
 
 // TESTS
 // ================================================================================================
@@ -19,7 +31,7 @@ fn range_checks() {
         checker.add_value(value.as_canonical_u64() as u16);
     }
 
-    let RangeCheckTrace { trace, aux_builder: _ } = checker.into_trace(64);
+    let trace = range_columns(checker, 64);
     validate_trace(&trace, &values);
 
     // skip the padded rows
@@ -61,19 +73,20 @@ fn range_checks_rand() {
     }
 
     let trace_len = checker.trace_len().next_power_of_two();
-    let RangeCheckTrace { trace, aux_builder: _ } = checker.into_trace(trace_len);
+    let trace = range_columns(checker, trace_len);
     validate_trace(&trace, &values);
 }
 
 #[test]
-#[should_panic(expected = "range checker trace not fully initialized")]
-fn into_trace_with_table_panics_on_mismatched_len() {
+#[should_panic(expected = "range checker table length mismatch vs core height")]
+fn write_range_into_core_panics_on_mismatched_len() {
     let checker = RangeChecker::new();
     let table_len = checker.get_number_range_checker_rows();
     let target_len = table_len.next_power_of_two().saturating_mul(2);
+    let mut buf = Felt::zero_vec(2 * target_len);
 
-    // Pass an inconsistent table length on purpose; this should now panic before unsafe init.
-    let _ = checker.into_trace_with_table(table_len + 1, target_len);
+    // Pass an inconsistent table length on purpose; the production assert must fire.
+    checker.write_range_into_core(&mut buf, 2, 0, 1, table_len + 1, target_len);
 }
 
 // HELPER FUNCTIONS

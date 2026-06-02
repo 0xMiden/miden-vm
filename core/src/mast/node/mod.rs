@@ -4,8 +4,8 @@ use core::fmt;
 
 pub(crate) use basic_block_node::collect_immediate_placements;
 pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
-    GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
+    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder,
+    GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
 };
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
@@ -35,21 +35,11 @@ pub use loop_node::{LoopNode, LoopNodeBuilder};
 mod mast_forest_contributor;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
-mod decorator_store;
-pub use decorator_store::DecoratorStore;
-
-use super::DecoratorId;
-use crate::mast::{MastForest, MastNodeId};
+use crate::mast::{ExecutableMastForest, MastForest, MastNodeId};
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
-
-    /// Returns the decorators to be executed before this node is executed.
-    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
-
-    /// Returns the decorators to be executed after this node is executed.
-    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
     /// Returns a display formatter for this node.
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a>;
@@ -71,9 +61,11 @@ pub trait MastNodeExt {
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
 
-    /// Verifies that this node is stored at the ID in its decorators field in the forest.
+    /// Verifies that this node is internally consistent with the forest in debug builds.
     #[cfg(debug_assertions)]
-    fn verify_node_in_forest(&self, forest: &MastForest);
+    fn verify_node_in_forest<F>(&self, forest: &F)
+    where
+        F: ExecutableMastForest + ?Sized;
 
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;
@@ -202,13 +194,6 @@ impl MastNode {
         }
     }
 }
-
-// MAST INNER NODE EXT
-// ===============================================================================================
-
-// Links an operation index in a block to a decoratorid, to be executed right before this
-// operation's position
-pub type DecoratedOpLink = (usize, DecoratorId);
 
 // HELPERS
 // ===============================================================================================

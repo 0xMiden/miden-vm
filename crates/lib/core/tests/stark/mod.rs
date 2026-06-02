@@ -1,24 +1,26 @@
-use std::array;
+use std::{array, sync::Arc};
 
 use miden_air::PublicInputs;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, WORD_SIZE,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
+use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
-use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
+use miden_utils_testing::{
+    AdviceInputs, ProvingOptions, StackInputs, prove_sync,
+    recursive_verifier::{VerifierData, generate_advice_inputs},
+};
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
-use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
-mod verifier_recursive;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -26,14 +28,14 @@ mod verifier_recursive;
 #[test]
 fn stark_verifier_e2f4_small() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
     run_recursive_verifier(&data);
 }
 
 #[test]
 fn stark_verifier_e2f4_large() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None);
     run_recursive_verifier(&data);
 }
 
@@ -44,8 +46,7 @@ fn stark_verifier_e2f4_with_kernel_even() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_EVEN_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -56,8 +57,7 @@ fn stark_verifier_e2f4_with_kernel_odd() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_ODD_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -68,8 +68,7 @@ fn stark_verifier_e2f4_with_kernel_single() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_SINGLE_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -78,20 +77,26 @@ pub fn generate_recursive_verifier_data(
     source: &str,
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
-) -> Result<VerifierData, VerifierError> {
+) -> VerifierData {
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
                 let context = miden_assembly::testing::TestContext::new();
-                let kernel_lib =
-                    Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
+                let kernel_lib = Assembler::new(context.source_manager())
+                    .assemble_kernel("kernel", kernel)
+                    .map(Arc::<Package>::from)
+                    .unwrap();
                 let assembler =
-                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone());
-                let program: Program = assembler.assemble_program(source).unwrap();
+                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
+                let program: Program =
+                    assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
-                let program: Program = Assembler::default().assemble_program(source).unwrap();
+                let program: Program = Assembler::default()
+                    .assemble_program("program", source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
@@ -125,8 +130,7 @@ pub fn generate_recursive_verifier_data(
         PrecompileTranscriptState::default(),
     );
     let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
-    Ok(data)
+    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.
@@ -196,11 +200,14 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(8)]
 #[case(1000)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
-    let log_trace_length = 10_u64;
+    // init_seed expects [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3,
+    // ...]
+    let log_core_trace_length = 10_u64;
+    let log_chiplets_trace_length = 10_u64;
     // Relation digest values are arbitrary here; the test only validates VLPI reduction.
     let rd = [1_u64, 2, 3, 4];
-    let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
+    let initial_stack =
+        vec![log_core_trace_length, log_chiplets_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -259,8 +266,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     use miden_processor::ContextId;
     let ctx = ContextId::root();
 
-    // Read reduced kernel value from var_len_ptr (in ACE READ section)
-    let var_len_addr_ptr = 3223322666_u32; // VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+    // Read reduced kernel value from var_len_ptr (in ACE READ section).
+    // Must match `VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR` in
+    // `crates/lib/core/asm/stark/constants.masm`.
+    let var_len_addr_ptr = 3223322670_u32;
     let var_len_ptr = output
         .memory
         .read_element(ctx, Felt::from_u32(var_len_addr_ptr))
@@ -312,24 +321,25 @@ fn reduce_kernel_procedures_digests(
     alpha: QuadFelt,
     beta: QuadFelt,
 ) -> QuadFelt {
+    // kernel_corr = Σ_i 1 / term_i  (MASM: chiplet removes, boundary adds — no negation).
     kernel_procedures_digests
         .chunks(2 * WORD_SIZE)
         .map(|digest| reduce_digest(digest, alpha, beta))
-        .fold(QuadFelt::ONE, |acc, term| acc * term)
+        .fold(QuadFelt::ZERO, |acc, term| {
+            acc + term.try_inverse().expect("zero kernel ROM denominator")
+        })
 }
 
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
-    const KERNEL_OP_LABEL: Felt = Felt::new_unchecked(48);
     // gamma = beta^MAX_MESSAGE_WIDTH = beta^16
     let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
-    // CHIPLETS_BUS = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
+    // KERNEL_ROM_INIT = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
     let bus_prefix = alpha + gamma;
+    // Horner evaluation matches MASM `horner_eval_base` over the 8-element reversed digest.
     bus_prefix
-        + QuadFelt::from(KERNEL_OP_LABEL)
-        + beta
-            * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
-                acc * beta + QuadFelt::from(Felt::new_unchecked(*coef))
-            })
+        + digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
+            acc * beta + QuadFelt::from(Felt::new_unchecked(*coef))
+        })
 }
 
 // CONSTANTS

@@ -1,23 +1,18 @@
-#[cfg(test)]
-use alloc::rc::Rc;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-#[cfg(test)]
-use core::cell::Cell;
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    mast::{MastForest, MastNodeExt, MastNodeId},
-    operations::Decorator,
+    mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
+    advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     tracer::{OperationHelperRegisters, Tracer},
@@ -41,7 +36,7 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-/// The size of the stack buffer.
+/// The initial size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some
 /// existing programs need it, so we're forced to push it up (though this should be double-checked).
@@ -49,7 +44,7 @@ mod tests;
 /// example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a better
 /// solution would be to make this value much smaller (~1000), and then fallback to a `Vec` if the
 /// stack overflows.
-const STACK_BUFFER_SIZE: usize = 6850;
+const INITIAL_STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
 ///
@@ -58,6 +53,16 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
+
+/// Default maximum operand stack depth preserving the previous fixed-buffer ceiling.
+const DEFAULT_MAX_STACK_DEPTH: usize =
+    INITIAL_STACK_BUFFER_SIZE - INITIAL_STACK_TOP_IDX - 1 + MIN_STACK_DEPTH;
+
+const _: [(); 1] =
+    [(); (ExecutionOptions::DEFAULT_MAX_STACK_DEPTH == DEFAULT_MAX_STACK_DEPTH) as usize];
+
+/// The stack buffer index where the logical operand stack starts after reset/recenter.
+const STACK_BUFFER_BASE_IDX: usize = INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH;
 
 // FAST PROCESSOR
 // ================================================================================================
@@ -71,7 +76,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 /// # Stack Management
 /// A few key points about how the stack was designed for maximum performance:
 ///
-/// - The stack has a fixed buffer size defined by `STACK_BUFFER_SIZE`.
+/// - The stack starts with a fixed buffer size defined by `INITIAL_STACK_BUFFER_SIZE`.
 ///     - This was observed to increase performance by at least 2x compared to using a `Vec` with
 ///       `push()` & `pop()`.
 ///     - We track the stack top and bottom using indices `stack_top_idx` and `stack_bot_idx`,
@@ -96,7 +101,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
-    stack: Box<[Felt; STACK_BUFFER_SIZE]>,
+    stack: Box<[Felt]>,
     /// The index of the top of the stack.
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
@@ -123,17 +128,13 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Options for execution, including but not limited to whether debug or tracing is enabled,
-    /// the size of core trace fragments during execution, etc.
+    /// Options for execution, including cycle limits, stack limits, advice map limits, and the
+    /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
-
-    /// Tracks decorator retrieval calls for testing.
-    #[cfg(test)]
-    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
@@ -151,7 +152,7 @@ impl FastProcessor {
     /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
     #[inline(always)]
     fn execution_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
@@ -171,7 +172,7 @@ impl FastProcessor {
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     fn stack_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
     ) -> Result<StackOutputs, ExecutionError> {
         match flow {
             ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
@@ -189,8 +190,7 @@ impl FastProcessor {
 
     /// Creates a new `FastProcessor` instance with the given stack inputs.
     ///
-    /// By default, advice inputs are empty and execution options use their defaults
-    /// (debugging and tracing disabled).
+    /// By default, advice inputs are empty and execution options use their defaults.
     ///
     /// # Example
     /// ```ignore
@@ -198,41 +198,36 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
-    ///     .with_debugging(true)
-    ///     .with_tracing(true);
+    ///     .expect("advice inputs should fit advice map limits");
     /// ```
+    ///
+    /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
+    /// inputs are validated against the intended execution options.
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
+            .expect("empty advice inputs should fit default advice map limits")
     }
 
     /// Sets the advice inputs for the processor.
-    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Self {
-        self.advice = advice_inputs.into();
-        self
+    ///
+    /// Advice inputs are loaded into the live advice provider immediately and are validated against
+    /// the processor's current [`ExecutionOptions`]. If the advice map needs non-default limits,
+    /// construct the processor with [`Self::new_with_options`] or call [`Self::with_options`]
+    /// before calling this method.
+    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Result<Self, AdviceError> {
+        self.advice = AdviceProvider::new(advice_inputs, &self.options)?;
+        Ok(self)
     }
 
     /// Sets the execution options for the processor.
     ///
-    /// This will override any previously set debugging or tracing settings.
-    pub fn with_options(mut self, options: ExecutionOptions) -> Self {
+    /// Existing advice inputs are revalidated against the new options before they are applied. To
+    /// load advice inputs that require non-default advice map limits, call this before
+    /// [`Self::with_advice`] or use [`Self::new_with_options`].
+    pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
+        self.advice.set_options(&options)?;
         self.options = options;
-        self
-    }
-
-    /// Enables or disables debugging mode.
-    ///
-    /// When debugging is enabled, debug decorators will be executed during program execution.
-    pub fn with_debugging(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_debugging(enabled);
-        self
-    }
-
-    /// Enables or disables tracing mode.
-    ///
-    /// When tracing is enabled, trace decorators will be executed during program execution.
-    pub fn with_tracing(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_tracing(enabled);
-        self
+        Ok(self)
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -242,14 +237,13 @@ impl FastProcessor {
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
-    ) -> Self {
+    ) -> Result<Self, AdviceError> {
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
             // the array on the stack, and then moves it to the heap. This might cause a
             // stack overflow on some systems.
-            let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
-                vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
+            let mut stack = vec![ZERO; INITIAL_STACK_BUFFER_SIZE].into_boxed_slice();
 
             // Copy inputs in reverse order so first element ends up at top of stack
             for (i, &input) in stack_inputs.iter().enumerate() {
@@ -258,8 +252,8 @@ impl FastProcessor {
             stack
         };
 
-        Self {
-            advice: advice_inputs.into(),
+        Ok(Self {
+            advice: AdviceProvider::new(advice_inputs, &options)?,
             stack,
             stack_top_idx,
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
@@ -270,9 +264,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
-            #[cfg(test)]
-            decorator_retrieval_count: Rc::new(Cell::new(0)),
-        }
+        })
     }
 
     /// Returns the resume context to be used with the first call to `step_sync()`.
@@ -293,27 +285,6 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Returns whether the processor is executing in debug mode.
-    #[inline(always)]
-    pub fn in_debug_mode(&self) -> bool {
-        self.options.enable_debugging()
-    }
-
-    /// Returns true if decorators should be executed.
-    ///
-    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
-    /// enabled (for trace decorators).
-    #[inline(always)]
-    fn should_execute_decorators(&self) -> bool {
-        self.in_debug_mode() || self.options.enable_tracing()
-    }
-
-    #[cfg(test)]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {
-        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
-    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -494,97 +465,86 @@ impl FastProcessor {
         self.stack_write(idx2, a);
     }
 
-    // DECORATOR EXECUTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.before_enter(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.after_exit(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the specified decorator
-    fn execute_decorator(
-        &self,
-        decorator: &Decorator,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        match decorator {
-            Decorator::Debug(options) => {
-                if self.in_debug_mode() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_debug(&processor_state, options) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::DebugHandlerError { err }.into(),
-                        ));
-                    }
-                }
-            },
-            Decorator::Trace(id) => {
-                if self.options.enable_tracing() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_trace(&processor_state, *id) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
-                                .into(),
-                        ));
-                    }
-                }
-            },
-        };
-        ControlFlow::Continue(())
-    }
-
     /// Increments the stack top pointer by 1.
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
     fn increment_stack_size(&mut self) {
         self.stack_top_idx += 1;
+    }
+
+    /// Ensures the internal stack storage can accommodate one additional logical stack element.
+    ///
+    /// The operand stack depth limit is the semantic resource bound; the buffer is only an
+    /// implementation detail. We therefore check the logical depth before allocating so a program
+    /// cannot force memory growth beyond `ExecutionOptions::max_stack_depth()`. When storage does
+    /// need to grow, it grows geometrically and remains heap-allocated as a boxed slice. A
+    /// `SmallVec` would put a useful inline buffer inside `FastProcessor`, and preallocating the
+    /// full limit would penalize ordinary programs. This policy is performance-sensitive and should
+    /// be benchmarked against the fixed-buffer baseline.
+    #[inline(always)]
+    fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
+        let depth = self.stack_size() + 1;
+        let max = self.options.max_stack_depth();
+        if depth > max {
+            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+        }
+
+        if self.stack_top_idx >= self.stack.len() - 1 {
+            self.grow_stack_buffer(self.stack_top_idx + 2);
+        }
+
+        Ok(())
+    }
+
+    fn ensure_stack_capacity_for_top_idx(&mut self, top_idx: usize) {
+        if top_idx >= self.stack.len() {
+            self.grow_stack_buffer(top_idx + 1);
+        }
+    }
+
+    fn grow_stack_buffer(&mut self, requested_min_len: usize) {
+        // The maximum allocation is tied to the logical operand stack depth, not to the current
+        // buffer position. Using `stack_bot_idx` here would make the allocation ceiling drift when
+        // the live stack has moved away from the initial base.
+        let max_len = STACK_BUFFER_BASE_IDX
+            .saturating_add(self.options.max_stack_depth())
+            .saturating_add(1);
+        let live_len = self.stack_size();
+
+        // Growth also recenters the live stack at the normal base. This keeps future push/drop
+        // behavior close to the fixed-buffer layout and avoids carrying unused prefix cells into
+        // the new allocation. The extra slot is for the next checked push that triggered growth.
+        let recentered_min_len = STACK_BUFFER_BASE_IDX.saturating_add(live_len).saturating_add(2);
+        debug_assert!(recentered_min_len <= max_len);
+
+        // Allocation growth is based on the stack's post-recentered live range, not the previous
+        // buffer length. The `requested_min_len` may be beyond the allocation cap when a shallow
+        // context is still positioned near the end of the old buffer; recentering the live stack is
+        // what makes that valid. The VM-visible requirements are that the live stack is restored at
+        // `STACK_BUFFER_BASE_IDX`, the post-recentered push slot is available, and allocation stays
+        // capped by the configured stack depth. The allocation size can differ from the previous
+        // doubling policy: normal push growth may allocate a couple of extra cells because of the
+        // spare push slot, while restoring a deep caller from a shallow callee may allocate only
+        // the requested restored range instead of doubling the old buffer. That smaller
+        // restore allocation is intentional, but it means future pushes can grow again
+        // sooner and should stay covered by benchmarks.
+        let new_len = recentered_min_len.saturating_mul(2).max(requested_min_len).min(max_len);
+        debug_assert!(new_len <= max_len);
+
+        let mut new_stack = vec![ZERO; new_len].into_boxed_slice();
+        let new_stack_bot_idx = STACK_BUFFER_BASE_IDX;
+        let new_stack_top_idx = new_stack_bot_idx + live_len;
+
+        // Only the active stack range carries VM state. Prefix/suffix cells are scratch storage and
+        // stay zeroed, which keeps growth proportional to the live depth instead of the old buffer
+        // length.
+        new_stack[new_stack_bot_idx..new_stack_top_idx]
+            .copy_from_slice(&self.stack[self.stack_bot_idx..self.stack_top_idx]);
+
+        self.stack = new_stack;
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     /// Decrements the stack top pointer by 1.
@@ -667,13 +627,14 @@ pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     #[inline(always)]
     fn start_clock_cycle(
         &mut self,
         _processor: &FastProcessor,
-        _continuation: Continuation,
-        _continuation_stack: &ContinuationStack,
+        _continuation: Continuation<Arc<MastForest>>,
+        _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
     ) {
         // do nothing

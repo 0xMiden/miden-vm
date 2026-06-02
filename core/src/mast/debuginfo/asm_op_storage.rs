@@ -38,8 +38,8 @@ use crate::{
 
 /// CSR storage mapping (NodeId, OpIdx) -> AsmOpId.
 ///
-/// Unlike [`OpToDecoratorIds`](super::OpToDecoratorIds), each operation has at most one
-/// AssemblyOp. We store only the operations that have an AssemblyOp, using sparse storage.
+/// Each operation has at most one AssemblyOp. We store only the operations that have an AssemblyOp,
+/// using sparse storage.
 ///
 /// This structure provides efficient lookup of AssemblyOps by node and operation index, which is
 /// needed for error context reporting and debugging tools.
@@ -186,7 +186,7 @@ impl OpToAsmOpId {
     /// Returns all `(op_idx, AsmOpId)` pairs for the given node, or an empty vec if the
     /// node has no asm ops.
     pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
-        self.inner.row(node_id).unwrap_or_default().to_vec()
+        self.inner.row(node_id).map(<[(usize, AsmOpId)]>::to_vec).unwrap_or_default()
     }
 
     /// Validates the CSR structure integrity.

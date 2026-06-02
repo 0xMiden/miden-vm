@@ -1,23 +1,24 @@
 use alloc::{collections::BTreeMap, vec::Vec};
-use core::fmt::Debug;
+use core::{borrow::BorrowMut, fmt::Debug};
 
-use miden_air::trace::{
-    RowIndex,
-    chiplets::memory::{
-        CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
-        FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
-        IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
+use miden_air::{
+    MemoryCols,
+    trace::{
+        RowIndex,
+        chiplets::memory::{
+            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+            TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        },
     },
 };
 
 use super::{
     super::utils::{split_element_u32_into_u16, split_u32_into_u16},
-    RangeChecker, TraceFragment,
+    ChipletTraceFragment, RangeChecker,
 };
 use crate::{
     ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, WORD_SIZE, Word, ZERO,
-    field::Field,
+    field::batch_inversion_allow_zeros,
 };
 
 mod segment;
@@ -82,7 +83,7 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   - When the context remains the same but the word changes, these columns contain (`new_word`
 ///     - `old_word`).
 ///   - When both the context and the word remain the same, these columns contain (`new_clk` -
-///     `old_clk` - 1).
+///     `old_clk`).
 /// - `d_inv` contains the inverse of the delta between two consecutive context IDs, words, or clock
 ///   cycles computed as described above. It is the field inverse of `(d_1 * 2^16) + d_0`
 /// - `f_scw` is a flag indicating whether the context and the word of the current row are the same
@@ -92,7 +93,8 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   checks on `w0`, `w1`, and `4 * w1`, these columns prove that memory addresses are valid 32-bit
 ///   values.
 ///
-/// For the first row of the trace, values in `d0`, `d1`, and `d_inv` are set to zeros.
+/// For the first row of the trace, `prev_clk` is initialized to `first_clk - 1`, so the delta is
+/// `1`. As a result, `d0` is set to `1`, `d1` to `0`, and `d_inv` to `1`.
 #[derive(Debug, Default)]
 pub struct Memory {
     /// Memory segment traces sorted by their execution context ID.
@@ -252,8 +254,8 @@ impl Memory {
     /// [RangeChecker] chiplet instance, along with their row in the finalized execution trace.
     pub fn append_range_checks(&self, memory_start_row: RowIndex, range: &mut RangeChecker) {
         // set the previous address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // trace; we also adjust the clock cycle back by 1 so that the delta for the first row
+        // equals 1. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64().wrapping_sub(1)),
             None => return,
@@ -279,7 +281,7 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
-                    range.add_range_checks(row, &[delta_lo, delta_hi]);
+                    range.add_range_checks(&[delta_lo, delta_hi]);
 
                     // word index decomposition range checks: prove addr is a valid 32-bit value
                     // by checking w0, w1, and 4*w1 are all in [0, 2^16).
@@ -303,20 +305,22 @@ impl Memory {
     }
 
     /// Fills the provided trace fragment with trace data from this memory instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
-        // set the pervious address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // set the previous address and clock cycle to the first address and clock cycle of the
+        // trace; we also adjust the clock cycle back by 1 so that the delta for the first row
+        // equals 1. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
         };
 
-        // iterate through addresses in ascending order, and write trace row for each memory access
-        // into the trace. we expect the trace to be 17 columns wide.
-        let mut row: RowIndex = 0.into();
+        let num_rows = self.trace_len();
+        let mut buffer = vec![ZERO; num_rows * MEMORY_TRACE_WIDTH];
+        let (out_rows, _) = buffer.as_chunks_mut::<MEMORY_TRACE_WIDTH>();
+        let mut deltas: Vec<Felt> = Vec::with_capacity(num_rows);
+        let mut row: usize = 0;
 
         for (ctx, segment) in self.trace {
             let ctx = Felt::from(ctx);
@@ -328,14 +332,16 @@ impl Memory {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
 
-                    match memory_access.operation() {
-                        MemoryOperation::Read => trace.set(row, IS_READ_COL_IDX, MEMORY_READ),
-                        MemoryOperation::Write => trace.set(row, IS_READ_COL_IDX, MEMORY_WRITE),
-                    }
+                    let (mem_slice, aux_slice) = out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
+                    let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
+
+                    cols.is_read = match memory_access.operation() {
+                        MemoryOperation::Read => MEMORY_READ,
+                        MemoryOperation::Write => MEMORY_WRITE,
+                    };
                     let (idx1, idx0) = match memory_access.access_type() {
                         segment::MemoryAccessType::Element { addr_idx_in_word } => {
-                            trace.set(row, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT);
-
+                            cols.is_word = MEMORY_ACCESS_ELEMENT;
                             match addr_idx_in_word {
                                 0 => (ZERO, ZERO),
                                 1 => (ZERO, ONE),
@@ -345,18 +351,16 @@ impl Memory {
                             }
                         },
                         segment::MemoryAccessType::Word => {
-                            trace.set(row, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_WORD);
+                            cols.is_word = MEMORY_ACCESS_WORD;
                             (ZERO, ZERO)
                         },
                     };
-                    trace.set(row, CTX_COL_IDX, ctx);
-                    trace.set(row, WORD_COL_IDX, felt_addr);
-                    trace.set(row, IDX0_COL_IDX, idx0);
-                    trace.set(row, IDX1_COL_IDX, idx1);
-                    trace.set(row, CLK_COL_IDX, clk);
-                    for (idx, col) in V_COL_RANGE.enumerate() {
-                        trace.set(row, col, value[idx]);
-                    }
+                    cols.ctx = ctx;
+                    cols.word_addr = felt_addr;
+                    cols.idx0 = idx0;
+                    cols.idx1 = idx1;
+                    cols.clk = clk;
+                    cols.values = *value;
 
                     // compute delta as difference between context IDs, addresses, or clock cycles
                     let delta = if prev_ctx != ctx {
@@ -368,31 +372,37 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
-                    trace.set(row, D0_COL_IDX, delta_lo);
-                    trace.set(row, D1_COL_IDX, delta_hi);
-                    trace.set(row, D_INV_COL_IDX, delta.try_inverse().unwrap_or(ZERO));
-
-                    if prev_ctx == ctx && prev_addr == felt_addr {
-                        trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);
+                    cols.d0 = delta_lo;
+                    cols.d1 = delta_hi;
+                    // `cols.d_inv` is filled in the batched-inversion pass below; defer.
+                    deltas.push(delta);
+                    cols.is_same_ctx_and_addr = if prev_ctx == ctx && prev_addr == felt_addr {
+                        ONE
                     } else {
-                        trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ZERO);
+                        ZERO
                     };
 
                     // decompose word address into 16-bit limbs of word index
                     let word_index = addr / WORD_SIZE as u32;
-                    let w0 = (word_index & 0xffff) as u16;
-                    let w1 = (word_index >> 16) as u16;
-                    trace.set(row, WORD_ADDR_LO_COL_IDX, Felt::from_u16(w0));
-                    trace.set(row, WORD_ADDR_HI_COL_IDX, Felt::from_u16(w1));
+                    aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
+                    aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
                     prev_addr = felt_addr;
                     prev_clk = clk;
-                    row += 1_u32;
+                    row += 1;
                 }
             }
         }
+
+        batch_inversion_allow_zeros(&mut deltas);
+        for (r, &inv) in deltas.iter().enumerate() {
+            let cols: &mut MemoryCols<Felt> = out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+            cols.d_inv = inv;
+        }
+
+        trace.copy_rows_from(&buffer);
     }
 
     // HELPER METHODS

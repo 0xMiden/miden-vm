@@ -2,7 +2,7 @@ use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_assembly_syntax::{
-    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, library::ItemInfo,
+    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, module::ItemInfo,
     sema::ConstEvalVisitor,
 };
 use miden_core::Felt;
@@ -191,7 +191,6 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<LinkerError> {
         match alias.target() {
             AliasTarget::MastRoot(_) => return ControlFlow::Continue(()),
-            AliasTarget::Path(path) if path.is_absolute() => return ControlFlow::Continue(()),
             AliasTarget::Path(_) => (),
         }
         log::debug!(target: "linker", "    * rewriting alias target {}", alias.target());

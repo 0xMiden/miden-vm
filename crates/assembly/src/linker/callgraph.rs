@@ -11,6 +11,10 @@ use crate::GlobalItemIndex;
 pub struct CycleError(BTreeSet<GlobalItemIndex>);
 
 impl CycleError {
+    pub fn new(nodes: impl IntoIterator<Item = GlobalItemIndex>) -> Self {
+        Self(nodes.into_iter().collect())
+    }
+
     pub fn into_node_ids(self) -> impl ExactSizeIterator<Item = GlobalItemIndex> {
         self.0.into_iter()
     }
@@ -60,11 +64,15 @@ impl CallGraph {
     /// introduce a cycle, or that [Self::toposort] is run once the graph is built, in order to
     /// verify that the graph is valid and has no cycles.
     ///
-    /// NOTE: This function will panic if you attempt to add an edge from a function to itself,
-    /// which trivially introduces a cycle. All other cycle-inducing edges must be caught by a
-    /// call to [Self::toposort].
-    pub fn add_edge(&mut self, caller: GlobalItemIndex, callee: GlobalItemIndex) {
-        assert_ne!(caller, callee, "a procedure cannot call itself");
+    /// Returns an error if adding the edge would introduce a trivial self-cycle.
+    pub fn add_edge(
+        &mut self,
+        caller: GlobalItemIndex,
+        callee: GlobalItemIndex,
+    ) -> Result<(), CycleError> {
+        if caller == callee {
+            return Err(CycleError::new([caller]));
+        }
 
         // Make sure the callee is in the graph
         self.get_or_insert_node(callee);
@@ -72,10 +80,11 @@ impl CallGraph {
         let callees = self.get_or_insert_node(caller);
         // If the caller already references the callee, we're done
         if callees.contains(&callee) {
-            return;
+            return Ok(());
         }
 
         callees.push(callee);
+        Ok(())
     }
 
     /// Removes the edge between `caller` and `callee` from the graph
@@ -93,64 +102,59 @@ impl CallGraph {
 
     /// Construct the topological ordering of all nodes in the call graph.
     ///
+    /// Uses Kahn's algorithm with pre-computed in-degrees for O(V + E) complexity.
+    ///
     /// Returns `Err` if a cycle is detected in the graph
     pub fn toposort(&self) -> Result<Vec<GlobalItemIndex>, CycleError> {
         if self.nodes.is_empty() {
             return Ok(vec![]);
         }
 
-        let mut output = Vec::with_capacity(self.nodes.len());
-        let mut graph = self.clone();
+        let num_nodes = self.nodes.len();
+        let mut output = Vec::with_capacity(num_nodes);
 
-        // Build the set of roots by finding all nodes
-        // that have no predecessors
-        let mut has_preds = BTreeSet::default();
-        for (_node, out_edges) in graph.nodes.iter() {
-            for succ in out_edges.iter() {
-                has_preds.insert(*succ);
+        // Compute in-degree for each node: O(V + E)
+        let mut in_degree: BTreeMap<GlobalItemIndex, usize> =
+            self.nodes.keys().map(|&k| (k, 0)).collect();
+        for out_edges in self.nodes.values() {
+            for &succ in out_edges {
+                *in_degree.entry(succ).or_default() += 1;
             }
         }
-        let mut roots =
-            VecDeque::from_iter(graph.nodes.keys().copied().filter(|n| !has_preds.contains(n)));
 
-        // If all nodes have predecessors, there must be a cycle, so just pick a node and let the
-        // algorithm find the cycle for that node so we have a useful error. Set a flag so that we
-        // can assert that the cycle was actually found as a sanity check
-        let mut expect_cycle = false;
-        if roots.is_empty() {
-            expect_cycle = true;
-            roots.extend(graph.nodes.keys().next());
-        }
+        // Seed the queue with all zero-in-degree nodes: O(V)
+        let mut queue: VecDeque<GlobalItemIndex> =
+            in_degree.iter().filter(|&(_, &deg)| deg == 0).map(|(&n, _)| n).collect();
 
-        let mut successors = Vec::with_capacity(4);
-        while let Some(id) = roots.pop_front() {
+        // Kahn's algorithm: process each node exactly once, each edge exactly once → O(V + E)
+        while let Some(id) = queue.pop_front() {
             output.push(id);
-            successors.clear();
-            successors.extend(graph.nodes[&id].iter().copied());
-            for mid in successors.drain(..) {
-                graph.remove_edge(id, mid);
-                if graph.num_predecessors(mid) == 0 {
-                    roots.push_back(mid);
+            for &mid in self.out_edges(id) {
+                let deg = in_degree.get_mut(&mid).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    queue.push_back(mid);
                 }
             }
         }
 
-        let has_cycle = graph
-            .nodes
-            .iter()
-            .any(|(n, out_edges)| !output.contains(n) || !out_edges.is_empty());
-        if has_cycle {
+        // If not all nodes were visited, the remaining nodes participate in cycles
+        if output.len() != num_nodes {
+            let visited: BTreeSet<GlobalItemIndex> = output.iter().copied().collect();
             let mut in_cycle = BTreeSet::default();
-            for (n, edges) in graph.nodes.iter() {
-                if edges.is_empty() {
+            for (&n, out_edges) in self.nodes.iter() {
+                if visited.contains(&n) {
                     continue;
                 }
-                in_cycle.insert(*n);
-                in_cycle.extend(edges.as_slice());
+                in_cycle.insert(n);
+                for &succ in out_edges {
+                    if !visited.contains(&succ) {
+                        in_cycle.insert(succ);
+                    }
+                }
             }
             Err(CycleError(in_cycle))
         } else {
-            assert!(!expect_cycle, "we expected a cycle to be found, but one was not identified");
             Ok(output)
         }
     }
@@ -178,6 +182,16 @@ impl CallGraph {
 
     /// Computes the set of nodes in this graph which can reach `root`.
     fn reverse_reachable(&self, root: GlobalItemIndex) -> BTreeSet<GlobalItemIndex> {
+        // Build reverse adjacency map: O(V + E)
+        let mut predecessors: BTreeMap<GlobalItemIndex, Vec<GlobalItemIndex>> =
+            self.nodes.keys().map(|&k| (k, Vec::new())).collect();
+        for (&node, out_edges) in self.nodes.iter() {
+            for &succ in out_edges {
+                predecessors.entry(succ).or_default().push(node);
+            }
+        }
+
+        // BFS on reverse graph: O(V + E)
         let mut worklist = VecDeque::from_iter([root]);
         let mut visited = BTreeSet::default();
 
@@ -186,12 +200,9 @@ impl CallGraph {
                 continue;
             }
 
-            worklist.extend(
-                self.nodes
-                    .iter()
-                    .filter(|(_, out_edges)| out_edges.contains(&gid))
-                    .map(|(pred, _)| *pred),
-            );
+            if let Some(preds) = predecessors.get(&gid) {
+                worklist.extend(preds.iter().copied());
+            }
         }
 
         visited
@@ -200,58 +211,80 @@ impl CallGraph {
     /// Constructs the topological ordering of nodes in the call graph, for which `caller` is an
     /// ancestor.
     ///
+    /// Uses Kahn's algorithm with pre-computed in-degrees for O(V + E) complexity.
+    ///
     /// # Errors
     /// Returns an error if a cycle is detected in the graph.
     pub fn toposort_caller(
         &self,
         caller: GlobalItemIndex,
     ) -> Result<Vec<GlobalItemIndex>, CycleError> {
-        let mut output = Vec::with_capacity(self.nodes.len());
-
         // Build a subgraph of `self` containing only those nodes reachable from `caller`
-        let caller_subgraph = self.subgraph(caller);
-        let mut graph = caller_subgraph.clone();
+        let subgraph = self.subgraph(caller);
+        let num_nodes = subgraph.nodes.len();
+        let mut output = Vec::with_capacity(num_nodes);
 
-        // Preserve the full set of nodes participating in cycles that close back into `caller`
-        // before we erase those back-edges to seed the traversal from `caller`.
-        let caller_cycle = caller_subgraph
-            .nodes
-            .values()
-            .any(|edges| edges.contains(&caller))
-            .then(|| caller_subgraph.reverse_reachable(caller));
+        // Compute in-degree for each node in the subgraph: O(V + E)
+        let mut in_degree: BTreeMap<GlobalItemIndex, usize> =
+            subgraph.nodes.keys().map(|&k| (k, 0)).collect();
+        for out_edges in subgraph.nodes.values() {
+            for &succ in out_edges {
+                *in_degree.entry(succ).or_default() += 1;
+            }
+        }
 
-        // Remove all predecessor edges to `caller`
-        graph.nodes.iter_mut().for_each(|(_pred, out_edges)| {
-            out_edges.retain(|n| *n != caller);
-        });
+        // Check if any cycle closes back to `caller` (i.e. caller has predecessors in its
+        // own reachable subgraph)
+        let caller_has_predecessors = in_degree.get(&caller).copied().unwrap_or(0) > 0;
 
-        let mut roots = VecDeque::from_iter([caller]);
-        let mut successors = Vec::with_capacity(4);
-        while let Some(id) = roots.pop_front() {
+        // Force `caller` as the root by zeroing its in-degree (equivalent to removing
+        // all back-edges to `caller`)
+        in_degree.insert(caller, 0);
+
+        // Seed queue with `caller` as the sole root
+        let mut queue = VecDeque::from_iter([caller]);
+
+        // Kahn's algorithm: O(V + E)
+        while let Some(id) = queue.pop_front() {
             output.push(id);
-            successors.clear();
-            successors.extend(graph.nodes[&id].iter().copied());
-            for mid in successors.drain(..) {
-                graph.remove_edge(id, mid);
-                if graph.num_predecessors(mid) == 0 {
-                    roots.push_back(mid);
+            for &mid in subgraph.out_edges(id) {
+                // Skip back-edges to caller (already processed as root)
+                if mid == caller {
+                    continue;
+                }
+                let deg = in_degree.get_mut(&mid).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    queue.push_back(mid);
                 }
             }
         }
 
-        let has_cycle = output.len() != graph.nodes.len() || caller_cycle.is_some();
+        // Detect cycles: either caller had predecessors in its subgraph (a cycle closes
+        // back to it), or not all nodes were reachable (an internal cycle)
+        let has_cycle = caller_has_predecessors || output.len() != num_nodes;
         if has_cycle {
+            let visited: BTreeSet<GlobalItemIndex> = output.iter().copied().collect();
             let mut in_cycle = BTreeSet::default();
-            for (n, edges) in graph.nodes.iter() {
-                if edges.is_empty() {
-                    continue;
+
+            // Collect nodes not processed by the sort (they're in internal cycles)
+            for (&n, out_edges) in subgraph.nodes.iter() {
+                if !visited.contains(&n) {
+                    in_cycle.insert(n);
+                    for &succ in out_edges {
+                        if !visited.contains(&succ) {
+                            in_cycle.insert(succ);
+                        }
+                    }
                 }
-                in_cycle.insert(*n);
-                in_cycle.extend(edges.as_slice());
             }
-            if let Some(caller_cycle) = caller_cycle {
-                in_cycle.extend(caller_cycle);
+
+            // If caller has back-edges, include all nodes participating in the cycle
+            // through caller
+            if caller_has_predecessors {
+                in_cycle.extend(subgraph.reverse_reachable(caller));
             }
+
             Err(CycleError(in_cycle))
         } else {
             Ok(output)
@@ -375,6 +408,34 @@ mod tests {
             .expect_err("expected toposort_caller to detect cycle closing back into root");
         assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A2, A3, B2, B3]);
     }
+
+    #[test]
+    fn callgraph_add_edge_with_self_cycle_is_error() {
+        let mut graph = CallGraph::default();
+
+        let err = graph.add_edge(A1, A1).expect_err("expected self-edge to be rejected");
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A1]);
+    }
+
+    #[test]
+    fn callgraph_rootless_cycle_toposort_is_error() {
+        let mut graph = CallGraph::default();
+        graph.add_edge(A1, B1).expect("A1 -> B1 must be accepted");
+        graph.add_edge(B1, A1).expect("B1 -> A1 must be accepted");
+
+        let err = graph.toposort().expect_err("expected topological sort to fail with cycle");
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A1, B1]);
+    }
+
+    #[test]
+    fn callgraph_toposort_whole_graph_cycle_without_roots() {
+        let graph = callgraph_cycle_without_roots();
+        let err = graph.toposort().expect_err(
+            "expected topological sort to fail when every node is blocked behind a cycle",
+        );
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A1, A2, A3]);
+    }
+
     /// a::a1 -> a::a2 -> a::a3
     ///            |        ^
     ///            v        |
@@ -382,12 +443,12 @@ mod tests {
     fn callgraph_simple() -> CallGraph {
         // Construct the graph
         let mut graph = CallGraph::default();
-        graph.add_edge(A1, A2);
-        graph.add_edge(B1, B2);
-        graph.add_edge(A2, B2);
-        graph.add_edge(A2, A3);
-        graph.add_edge(B2, B3);
-        graph.add_edge(B3, A3);
+        graph.add_edge(A1, A2).expect("A1 -> A2 must be accepted");
+        graph.add_edge(B1, B2).expect("B1 -> B2 must be accepted");
+        graph.add_edge(A2, B2).expect("A2 -> B2 must be accepted");
+        graph.add_edge(A2, A3).expect("A2 -> A3 must be accepted");
+        graph.add_edge(B2, B3).expect("B2 -> B3 must be accepted");
+        graph.add_edge(B3, A3).expect("B3 -> A3 must be accepted");
 
         graph
     }
@@ -399,12 +460,26 @@ mod tests {
     fn callgraph_cycle() -> CallGraph {
         // Construct the graph
         let mut graph = CallGraph::default();
-        graph.add_edge(A1, A2);
-        graph.add_edge(B1, B2);
-        graph.add_edge(A2, B2);
-        graph.add_edge(B2, B3);
-        graph.add_edge(B3, A3);
-        graph.add_edge(A3, A2);
+        graph.add_edge(A1, A2).expect("A1 -> A2 must be accepted");
+        graph.add_edge(B1, B2).expect("B1 -> B2 must be accepted");
+        graph.add_edge(A2, B2).expect("A2 -> B2 must be accepted");
+        graph.add_edge(B2, B3).expect("B2 -> B3 must be accepted");
+        graph.add_edge(B3, A3).expect("B3 -> A3 must be accepted");
+        graph.add_edge(A3, A2).expect("A3 -> A2 must be accepted");
+
+        graph
+    }
+
+    /// a::a1 -> a::a2 -> a::a3
+    ///   ^                 |
+    ///   +-----------------+
+    ///
+    /// Every node has in-degree 1, so Kahn's algorithm starts with an empty queue.
+    fn callgraph_cycle_without_roots() -> CallGraph {
+        let mut graph = CallGraph::default();
+        graph.add_edge(A1, A2).expect("A1 -> A2 must be accepted");
+        graph.add_edge(A2, A3).expect("A2 -> A3 must be accepted");
+        graph.add_edge(A3, A1).expect("A3 -> A1 must be accepted");
 
         graph
     }

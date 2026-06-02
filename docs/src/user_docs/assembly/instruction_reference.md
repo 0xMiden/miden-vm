@@ -20,7 +20,7 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 | `eq` <br /> `eq.b`   | `[b, a, ...]` | `[c, ...]`       | 1 <br /> 1-2 | $$c = \begin{cases} 1, & \text{if } a = b  0, & \text{otherwise} \end{cases}$$                                |
 | `neq` <br /> `neq.b` | `[b, a, ...]` | `[c, ...]`       | 2 <br /> 2-3 | $$c = \begin{cases} 1, & \text{if } a \neq b  0, & \text{otherwise} \end{cases}$$                             |
 | `eqw`                | `[A, B, ...]` | `[c, A, B, ...]` | 15           | $$c = \begin{cases} 1, & \text{if } a_i = b_i\ \forall i \in \{0,1,2,3\}  0, & \text{otherwise} \end{cases}$$ |
-| `is_odd`             | `[a, ...]`    | `[b, ...]`       | 5            | $$b = \begin{cases} 1, & \text{if $a$ is odd}  0, & \text{otherwise} \end{cases}$$                            |
+| `is_odd`             | `[a, ...]`    | `[b, ...]`       | 6            | $$b = \begin{cases} 1, & \text{if $a$ is odd}  0, & \text{otherwise} \end{cases}$$                            |
 
 ### Assertions and Tests
 
@@ -45,7 +45,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `inv`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = a^{-1} \bmod p$. Fails if $a = 0$.                                        |
 | `pow2`                   | `[a, ...]`    | `[b, ...]`   | 16                    | $b = 2^a$. Fails if $a > 63$.                                                  |
 | `exp.uxx` <br /> `exp.b` | `[b, a, ...]` | `[c, ...]`   | 9+xx <br /> 9+log2(b) | $c = a^b$. Fails if $xx$ is outside $[0, 63)$. `exp` is `exp.u64` (73 cycles). |
-| `ilog2`                  | `[a, ...]`    | `[b, ...]`   | 44                    | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                             |
+| `ilog2`                  | `[a, ...]`    | `[b, ...]`   | 66                    | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                             |
 | `not`                    | `[a, ...]`    | `[b, ...]`   | 1                     | $b = 1 - a$. Fails if $a > 1$.                                                 |
 | `and`                    | `[b, a, ...]` | `[c, ...]`   | 1                     | $c = a \cdot b$. Fails if $\max(a, b) > 1$.                                    |
 | `or`                     | `[b, a, ...]` | `[c, ...]`   | 1                     | $c = a + b - a \cdot b$. Fails if $\max(a, b) > 1$.                            |
@@ -53,16 +53,16 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 
 ### Extension Field Operations
 
-All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - 7)$, with modulus $p = 2^{64} - 2^{32} + 1$.
 
-| Instruction | Stack Input             | Stack Output      | Cycles | Notes                                                                       |
-| ----------- | ----------------------- | ----------------- | ------ | --------------------------------------------------------------------------- |
-| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br /> $c0 = (a0 + b0) \bmod p$                    |
-| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br /> $c0 = (a0 - b0) \bmod p$                    |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br /> $c0 = a0b0 - 2a1b1 \bmod p$ |
-| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br /> $a0' = -a0$                                              |
-| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $a = 0$.         |
-| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $b = 0$.  |
+| Instruction | Stack Input             | Stack Output      | Cycles | Notes                                                                   |
+| ----------- | ----------------------- | ----------------- | ------ | ----------------------------------------------------------------------- |
+| `ext2add`   | `[b0, b1, a0, a1, ...]` | `[c0, c1, ...]`   | 5      | $c0 = (a0 + b0) \bmod p$ <br /> $c1 = (a1 + b1) \bmod p$                |
+| `ext2sub`   | `[b0, b1, a0, a1, ...]` | `[c0, c1, ...]`   | 7      | $c0 = (a0 - b0) \bmod p$ <br /> $c1 = (a1 - b1) \bmod p$                |
+| `ext2mul`   | `[b0, b1, a0, a1, ...]` | `[c0, c1, ...]`   | 3      | $c0 = a0b0 + 7a1b1 \bmod p$ <br /> $c1 = a0b1 + a1b0 \bmod p$           |
+| `ext2neg`   | `[a0, a1, ...]`         | `[a0', a1', ...]` | 4      | $a0' = -a0$ <br /> $a1' = -a1$                                          |
+| `ext2inv`   | `[a0, a1, ...]`         | `[a0', a1', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$. Fails if $a = 0$.         |
+| `ext2div`   | `[b0, b1, a0, a1, ...]` | `[c0, c1, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - 7)$. Fails if $b = 0$.  |
 
 ## U32 Operations
 
@@ -98,7 +98,7 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `u32wrapping_mul` <br /> `u32wrapping_mul.b`       | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = (a \cdot b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                           |
 | `u32widening_madd`                                 | `[b, a, c, ...]` | `[d, e, ...]` | 1            | $d = (a \cdot b+c) \bmod 2^{32}$, $e = \lfloor(a \cdot b+c) / 2^{32}\rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                           |
 | `u32wrapping_madd`                                 | `[b, a, c, ...]` | `[d, ...]`    | 3            | $d = (a \cdot b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                                       |
-| `u32div` <br /> `u32div.b`                         | `[b, a, ...]`    | `[d, c, ...]` | 2 <br /> 3-4 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
+| `u32div` <br /> `u32div.b`                         | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = \lfloor a/b \rfloor$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                |
 | `u32mod` <br /> `u32mod.b`                         | `[b, a, ...]`    | `[c, ...]`    | 3 <br /> 4-5 | $c = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                          |
 | `u32divmod` <br /> `u32divmod.b`                   | `[b, a, ...]`    | `[d, c, ...]` | 1 <br /> 2-3 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
 
@@ -110,14 +110,14 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 | `u32or` <br /> `u32or.b`     | `[b, a, ...]` | `[c, ...]`   | 6 <br /> 7  | Bitwise OR. Fails if $\max(a,b) \geq 2^{32}$.                               |
 | `u32xor` <br /> `u32xor.b`   | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 2  | Bitwise XOR. Fails if $\max(a,b) \geq 2^{32}$.                              |
 | `u32not` <br /> `u32not.a`   | `[a, ...]`    | `[b, ...]`   | 5 <br /> 6  | Bitwise NOT. Fails if $a \geq 2^{32}$.                                      |
-| `u32shl` <br /> `u32shl.b`   | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | $c = (a \cdot 2^b) \bmod 2^{32}$. Undefined if $a \geq 2^{32}$ or $b > 31$. |
-| `u32shr` <br /> `u32shr.b`   | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | $c = \lfloor a / 2^b \rfloor$. Undefined if $a \geq 2^{32}$ or $b > 31$.    |
+| `u32shl` <br /> `u32shl.b`   | `[b, a, ...]` | `[c, ...]`   | 19 <br /> 4 | $c = (a \cdot 2^b) \bmod 2^{32}$. Undefined if $a \geq 2^{32}$ or $b > 31$. |
+| `u32shr` <br /> `u32shr.b`   | `[b, a, ...]` | `[c, ...]`   | 20 <br /> 5 | $c = \lfloor a / 2^b \rfloor$. Undefined if $a \geq 2^{32}$ or $b > 31$.    |
 | `u32rotl` <br /> `u32rotl.b` | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | Rotate left. Undefined if $a \geq 2^{32}$ or $b > 31$.                      |
-| `u32rotr` <br /> `u32rotr.b` | `[b, a, ...]` | `[c, ...]`   | 23 <br /> 3 | Rotate right. Undefined if $a \geq 2^{32}$ or $b > 31$.                     |
-| `u32popcnt`                  | `[a, ...]`    | `[b, ...]`   | 33          | Population count (Hamming weight). Undefined if $a \geq 2^{32}$.            |
-| `u32clz`                     | `[a, ...]`    | `[b, ...]`   | 42          | Count leading zeros. Undefined if $a \geq 2^{32}$.                          |
+| `u32rotr` <br /> `u32rotr.b` | `[b, a, ...]` | `[c, ...]`   | 22 <br /> 3 | Rotate right. Undefined if $a \geq 2^{32}$ or $b > 31$.                     |
+| `u32popcnt`                  | `[a, ...]`    | `[b, ...]`   | 32          | Population count (Hamming weight). Undefined if $a \geq 2^{32}$.            |
+| `u32clz`                     | `[a, ...]`    | `[b, ...]`   | 48          | Count leading zeros. Undefined if $a \geq 2^{32}$.                          |
 | `u32ctz`                     | `[a, ...]`    | `[b, ...]`   | 34          | Count trailing zeros. Undefined if $a \geq 2^{32}$.                         |
-| `u32clo`                     | `[a, ...]`    | `[b, ...]`   | 41          | Count leading ones. Undefined if $a \geq 2^{32}$.                           |
+| `u32clo`                     | `[a, ...]`    | `[b, ...]`   | 40          | Count leading ones. Undefined if $a \geq 2^{32}$.                           |
 | `u32cto`                     | `[a, ...]`    | `[b, ...]`   | 33          | Count trailing ones. Undefined if $a \geq 2^{32}$.                          |
 
 ### Comparison Operations
@@ -221,11 +221,11 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | Instruction                              | Stack Input          | Stack Output     | Cycles       | Notes                                                                                                                                                                                                                    |
 | ---------------------------------------- | -------------------- | ---------------- | ------------ |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `mem_load` <br /> `mem_load.a`           | `[a, ... ]`          | `[v, ... ]`      | 1 <br /> 2   | `v ← mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                          |
-| `mem_loadw_be` <br /> `mem_loadw_be.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 1 <br /> 2   | `A ← mem[a..a+3]` (word, big-endian). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
-| `mem_loadw_le` <br /> `mem_loadw_le.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 4 <br /> 5   | `A ← mem[a..a+3]` (word, little-endian). Overwrites top 4 stack elements (`mem[a]` is top). Equivalent to `mem_loadw_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.          |
+| `mem_loadw_be` <br /> `mem_loadw_be.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 4 <br /> 5   | `A ← mem[a..a+3]` (word, big-endian). Overwrites top 4 stack elements (`mem[a+3]` is top). Equivalent to `mem_loadw_le reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.           |
+| `mem_loadw_le` <br /> `mem_loadw_le.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 1 <br /> 2   | `A ← mem[a..a+3]` (word, little-endian). Overwrites top 4 stack elements (`mem[a]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                 |
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
-| `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                   |
-| `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
+| `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). Equivalent to `reversew mem_storew_le reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.  |
+| `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
 | `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state.                                                                       |
 
 #### Procedure Locals (Context-Specific)
@@ -235,11 +235,11 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ to
 | Instruction       | Stack Input      | Stack Output | Cycles | Notes                                                                                                         |
 | ----------------- | ---------------- | ------------ | ------ | ------------------------------------------------------------------------------------------------------------- |
 | `loc_load.i`      | `[ ... ]`        | `[v, ... ]`  | 5-6    | `v ← local[i]`. Pushes element from local memory at index `i`.                                                |
-| `loc_loadw_be.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 5-6    | `A ← local[i..i+3]`. Reads word in big-endian order, `local[i+3]` is top of stack. Fails if `i` not multiple of 4. |
-| `loc_loadw_le.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 9-10   | `A ← local[i..i+3]`. Reads word in little-endian order, `local[i]` is top of stack. Equivalent to `loc_loadw_be reversew`. Fails if `i` not multiple of 4. |
+| `loc_loadw_be.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 6-7    | `A ← local[i..i+3]`. Reads word in big-endian order, `local[i+3]` is top of stack. Equivalent to `loc_loadw_le reversew`. Fails if `i` not multiple of 4. |
+| `loc_loadw_le.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 3-4    | `A ← local[i..i+3]`. Reads word in little-endian order, `local[i]` is top of stack. Fails if `i` not multiple of 4. |
 | `loc_store.i`     | `[v, ... ]`      | `[ ... ]`    | 6-7    | `local[i] ← v`. Pops `v` to local memory at index `i`.                                                        |
-| `loc_storew_be.i` | `[A, ... ]`      | `[A, ... ]`  | 5-6    | `local[i..i+3] ← A`. Stores word in big-endian order, top stack element at `local[i+3]`.                      |
-| `loc_storew_le.i` | `[A, ... ]`      | `[A, ... ]`  | 13-14  | `local[i..i+3] ← A`. Stores word in little-endian order, top stack element at `local[i]`. Equivalent to `reversew loc_storew_be reversew`. |
+| `loc_storew_be.i` | `[A, ... ]`      | `[A, ... ]`  | 9-10   | `local[i..i+3] ← A`. Stores word in big-endian order, top stack element at `local[i+3]`. Equivalent to `reversew loc_storew_le reversew`. |
+| `loc_storew_le.i` | `[A, ... ]`      | `[A, ... ]`  | 3-4    | `local[i..i+3] ← A`. Stores word in little-endian order, top stack element at `local[i]`. |
 
 ## Cryptographic Operations
 
@@ -256,6 +256,7 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
+| `crypto_stream` | `[rate(8), cap(4), src_ptr, dst_ptr, ...]` | `[ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]` | 1 | Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces rate on stack with ciphertext, preserves capacity, increments both pointers by 8. Primitive used by `miden::core::crypto::aead`. |
 
 ## Flow Control Operations
 
@@ -320,32 +321,29 @@ High-level constructs for controlling the execution flow.
 
 ## Events
 
-Instructions for communicating with the host through events and tracing.
+Instructions for communicating with the host through events.
 
 | Instruction        | Stack Input       | Stack Output      | Cycles | Notes                                                                                                                                                                                                                                                                                                                                                                                                                           |
--|--------------------|-------------------|-------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-+| ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
- | `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
+| ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Note that event IDs in the range `0..256` are reserved for system events.     |
-| `trace.<trace_id>` | `[...]`           | `[...]`           | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1`                                                   |
-| `log_precompile`   | `[COMM, TAG, PAD, ...]` | `[R1, R0, CAP_NEXT, ...]` | 1      | Absorbs a precompile commitment into the transcript used for deferred verification. Takes a precompile commitment (`TAG` and `COMM`) from the stack and performs an Poseidon2 permutation to update the transcript capacity (sponge capacity). Outputs `[R1, R0, CAP_NEXT]`; callers normally drop all three words immediately. See “Precompile flow” for initialization details. |
+| `log_precompile`   | `[_, STMNT, _, ...]` | `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds a precomputed precompile statement into the rolling transcript. Reads the per-call statement word `STMNT` from `stack[4..8]` (the HPERM rate1 slots), applies the Poseidon2 permutation `Permute(STATE_PREV, STMNT, ZERO)` (with `STATE_PREV` supplied non-deterministically via helper registers), and writes the permutation output back via the identity lane→slot mapping (matching HPERM): `STATE_NEW` (= output `rate0`) at `stack[0..4]`, then `rate1` and `capacity` halves at `stack[4..8]` and `stack[8..12]`. Callers normally drop all three words immediately. See "Precompile flow" for initialization details. |
 
 ## Debugging Operations
 
-Instructions for inspecting VM state during execution. These do not affect VM state or program hash and are only active when the assembler is in debug mode.
+Procedures for inspecting VM state during execution. These are ordinary `core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs. Remove these calls from production programs.
 
-### `debug`
+### `core::debug`
 
-- **Syntax & Parameters:**
-  - `debug.stack`: Prints entire stack.
-  - `debug.stack.N`: Prints top `N` stack items (`0 < N < 256`).
-  - `debug.mem`: Prints entire RAM.
-  - `debug.mem.A`: Prints memory at address `A`.
-  - `debug.mem.A.M`: Prints memory from address `A` to `M` (inclusive, `M >= A`).
-  - `debug.local`: Prints entire local memory of the current procedure.
-  - `debug.local.I`: Prints local memory at index `I` (`0 <= I < 65536`).
-  - `debug.local.I.M`: Prints local memory from index `I` to `M` (inclusive, `M >= I`, `0 <= I, M < 65536`).
-- **Cycles:** 0 (does not consume VM cycles).
+- **Procedures:**
+  - `print_stack`: Prints the entire operand stack. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_mem`: Prints memory in the range `[start, end)` of the current context. Inputs: `[start, end, ...]`. Outputs: `[...]`. Cycles: 5.
+  - `print_mem_all`: Prints the full memory of the current context. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_adv_stack`: Prints the advice stack in the range `[start, end)`. Inputs: `[start, end, ...]`. Outputs: `[...]`. Cycles: 5.
+  - `print_adv_stack_all`: Prints the full advice stack. Inputs: `[...]`. Outputs: `[...]`. Cycles: 7.
+  - `print_adv_map_all`: Prints the full advice map. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.
+  - `print_adv_map_item`: Looks up a WORD key in the advice map and prints the associated list of field elements. Inputs: `[KEY, ...]`. Outputs: `[...]`. Cycles: 7.
 - **Notes:**
-  - Prints the specified part of the VM state.
-  - Ignored if assembler is not in debug mode.
+  - Range-based procedures consume `start` and `end`.
+  - Advice-map item procedures consume the WORD key.
+  - Always active regardless of debug mode.

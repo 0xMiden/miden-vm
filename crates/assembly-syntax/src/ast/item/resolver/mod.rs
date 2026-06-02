@@ -65,18 +65,21 @@ impl Spanned for SymbolResolution {
 ///
 /// This is used as a low-level symbol resolution primitive in the linker as well.
 pub struct LocalSymbolResolver {
+    source_manager: Arc<dyn SourceManager>,
     symbols: LocalSymbolTable,
 }
 
 impl LocalSymbolResolver {
     /// Create a new resolver using the provided [SymbolTable] and [SourceManager].
-    pub fn new<S>(symbols: S, source_manager: Arc<dyn SourceManager>) -> Self
+    pub fn new<S>(
+        symbols: S,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self, SymbolResolutionError>
     where
         S: SymbolTable,
     {
-        Self {
-            symbols: LocalSymbolTable::new(symbols, source_manager),
-        }
+        let symbols = LocalSymbolTable::new(symbols, source_manager.clone())?;
+        Ok(Self { source_manager, symbols })
     }
 
     /// Expand `path` using `get_import` to resolve a raw symbol name to an import in the current
@@ -97,7 +100,7 @@ impl LocalSymbolResolver {
 
     #[inline]
     pub fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.symbols.source_manager_arc()
+        self.source_manager.clone()
     }
 
     /// Try to resolve `name` to an item, either local or external
@@ -142,7 +145,7 @@ impl LocalSymbolResolver {
                 Err(SymbolResolutionError::invalid_sub_path(
                     path.span(),
                     item.span(),
-                    self.symbols.source_manager(),
+                    &*self.source_manager,
                 ))
             },
             SymbolResolution::MastRoot(digest) => {
@@ -156,7 +159,7 @@ impl LocalSymbolResolver {
                 Err(SymbolResolutionError::invalid_sub_path(
                     path.span(),
                     digest.span(),
-                    self.symbols.source_manager(),
+                    &*self.source_manager,
                 ))
             },
             SymbolResolution::Module { id, path, .. } => {

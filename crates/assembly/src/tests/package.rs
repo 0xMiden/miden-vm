@@ -1,23 +1,15 @@
 use alloc::vec::Vec;
 use std::sync::{Arc, LazyLock};
 
-use miden_assembly_syntax::{Version, library::LibraryExport};
-use miden_core::{
-    mast::MastNodeExt,
-    serde::{Deserializable, Serializable},
-};
-use miden_mast_package::{
-    ConstantExport, Package, PackageExport, PackageId, PackageManifest, ProcedureExport,
-    TargetType, TypeExport,
-};
+use miden_core::serde::{Deserializable, Serializable};
+use miden_mast_package::{Dependency, Package, PackageId, PackageManifest, TargetType, Version};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
 };
 
 use crate::{
-    Assembler, Library, Parse, ParseOptions, Path,
-    ast::ModuleKind,
+    Assembler,
     testing::{TestContext, parse_module},
 };
 
@@ -26,61 +18,45 @@ use crate::{
 
 prop_compose! {
     fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-        let ArbitraryMastArtifact { ty, lib } = artifact;
+        let ArbitraryMastArtifact { ty, package } = artifact;
 
         // Ensure the manifest reflects exports of the actual MAST artifact.
-        let mut exports = Vec::default();
-        for export in lib.exports() {
-            match export {
-                LibraryExport::Procedure(export) => {
-                    let digest = lib.mast_forest()[export.node].digest();
-                    exports.push(PackageExport::Procedure(ProcedureExport {
-                        path: export.path.clone(),
-                        digest,
-                        signature: export.signature.clone(),
-                        attributes: export.attributes.clone(),
-                    }));
-                },
-                LibraryExport::Constant(export) => {
-                    exports.push(PackageExport::Constant(ConstantExport {
-                        path: export.path.clone(),
-                        value: export.value.clone(),
-                    }));
-                },
-                LibraryExport::Type(export) => {
-                    exports.push(PackageExport::Type(TypeExport {
-                        path: export.path.clone(),
-                        ty: export.ty.clone(),
-                    }));
-                },
+        let exports = package.manifest.exports().cloned().collect::<Vec<_>>();
+        let mut dependencies = Vec::<Dependency>::new();
+        for dependency in manifest.dependencies() {
+            if dependencies.iter().any(|existing| existing.id() == dependency.id()) {
+                continue;
             }
+            dependencies.push(dependency.clone());
         }
-
-        let manifest = PackageManifest::new(exports)
-            .and_then(|package_manifest| {
-                package_manifest.with_dependencies(manifest.dependencies().cloned())
-            })
-            .expect("test package manifest should be valid");
 
         let name = PackageId::from(name);
         let version = Version::new(0, 0, 0);
-        Package { name, version, description: None, kind: ty, mast: lib, manifest, sections: Default::default() }
+        Package::create(
+            name,
+            version,
+            ty,
+            Arc::clone(package.mast_forest()),
+            exports,
+            dependencies,
+        )
+        .expect("test package should be valid")
     }
 }
 
 #[derive(Debug, Clone)]
 struct ArbitraryMastArtifact {
     ty: TargetType,
-    lib: Arc<Library>,
+    package: Arc<Package>,
 }
 
 impl ArbitraryMastArtifact {
-    fn library(lib: Arc<Library>) -> Self {
-        Self { ty: TargetType::Library, lib }
+    fn library(package: Arc<Package>) -> Self {
+        Self { ty: TargetType::Library, package }
     }
 
-    fn executable(lib: Arc<Library>) -> Self {
-        Self { ty: TargetType::Executable, lib }
+    fn executable(package: Arc<Package>) -> Self {
+        Self { ty: TargetType::Executable, package }
     }
 }
 
@@ -98,10 +74,10 @@ impl Arbitrary for ArbitraryMastArtifact {
     type Strategy = BoxedStrategy<Self>;
 }
 
-static LIB_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_library_example);
-static PRG_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_program_example);
+static LIB_EXAMPLE: LazyLock<Arc<Package>> = LazyLock::new(build_library_example);
+static PRG_EXAMPLE: LazyLock<Arc<Package>> = LazyLock::new(build_program_example);
 
-fn build_library_example() -> Arc<Library> {
+fn build_library_example() -> Arc<Package> {
     let context = TestContext::new();
     // declare foo module
     let foo_src = r#"
@@ -127,12 +103,13 @@ fn build_library_example() -> Arc<Library> {
     let modules = [foo_module, bar_module];
 
     // serialize/deserialize the bundle with locations
-    Assembler::new(context.source_manager())
-        .assemble_library(modules.iter().cloned())
-        .expect("failed to assemble library")
+    let package = Assembler::new(context.source_manager())
+        .assemble_library("test", modules.iter().cloned())
+        .expect("failed to assemble library");
+    Arc::from(package)
 }
 
-fn build_program_example() -> Arc<Library> {
+fn build_program_example() -> Arc<Package> {
     let source = "
     begin
         push.1.2
@@ -140,16 +117,11 @@ fn build_program_example() -> Arc<Library> {
         drop
     end
     ";
-    let assembler = Assembler::default();
 
-    let options = ParseOptions {
-        kind: ModuleKind::Executable,
-        warnings_as_errors: assembler.warnings_as_errors(),
-        path: Some(Path::exec_path().into()),
-    };
-
-    let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
-    assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
+    let package = Assembler::default()
+        .assemble_program("test", source)
+        .expect("failed to assemble executable");
+    Arc::from(package)
 }
 
 #[test]

@@ -97,18 +97,6 @@ impl OpBatch {
         })
     }
 
-    /// Returns the end indexes of each group.
-    pub fn end_indices(&self) -> &[usize; BATCH_SIZE] {
-        debug_assert!(self.indptr.len() == BATCH_SIZE + 1);
-        // SAFETY:
-        // - indptr is an array of length BATCH_SIZE+1, so elements 1..=BATCH_SIZE form exactly
-        //   BATCH_SIZE contiguous `usize`s.
-        // - `as_ptr().add(1)` is in-bounds and properly aligned, since `[T; N]` has the same
-        //   alignment requirements as `T` (see [layout.array] in the reference)
-        // - We immediately reborrow as an immutable reference tied to `&self`.
-        unsafe { &*(self.indptr.as_ptr().add(1) as *const [usize; BATCH_SIZE]) }
-    }
-
     /// Returns the number of groups in this batch.
     pub fn num_groups(&self) -> usize {
         self.num_groups
@@ -429,9 +417,8 @@ impl OpBatchAccumulator {
     }
 
     /// Adds the specified operation to this accumulator. It is expected that the specified
-    /// operation is not a decorator and that (can_accept_op())[OpBatchAccumulator::can_accept_op]
-    /// is called before this function to make sure that the specified operation can be added to
-    /// the accumulator.
+    /// operation can be added to the accumulator. Call
+    /// [`can_accept_op`](OpBatchAccumulator::can_accept_op) before this function.
     pub fn add_op(&mut self, op: Operation) {
         // if the group is full, finalize it and start a new group
         if self.op_idx == GROUP_SIZE {
@@ -763,8 +750,6 @@ mod op_batch_tests {
             // Generate BasicBlockNodes with 73-200 operations to ensure multiple batches
             basic_block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
                 max_ops_len: 200,        // Generate blocks with up to 200 operations
-                max_pairs: 30,           // Allow more decorators
-                max_decorator_id_u32: 100,
             })
         ) {
             // Verify that we actually have a multi-batch block

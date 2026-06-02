@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::SparseMastForest,
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, Stopper,
+    BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -54,6 +54,15 @@ pub(crate) struct ReplayProcessor {
     pub hasher_response_replay: HasherResponseReplay,
     pub mast_forest_resolution_replay: MastForestResolutionReplay,
 
+    /// Per-fragment view of the [`crate::TraceGenerationContext`]'s `mast_forest_store`. Used to
+    /// resolve `usize` indices recorded in the replays back to [`Arc<SparseMastForest>`] handles
+    /// during execution.
+    pub mast_forest_store: Vec<Arc<SparseMastForest>>,
+
+    /// The maximum number of field elements allowed on the operand stack in an active execution
+    /// context.
+    pub max_stack_depth: usize,
+
     /// The maximum clock cycle at which this processor should stop execution.
     pub maximum_clock: RowIndex,
 }
@@ -73,6 +82,8 @@ impl ReplayProcessor {
         memory_reads_replay: MemoryReadsReplay,
         hasher_response_replay: HasherResponseReplay,
         mast_forest_resolution_replay: MastForestResolutionReplay,
+        mast_forest_store: Vec<Arc<SparseMastForest>>,
+        max_stack_depth: usize,
         num_clocks_to_execute: RowIndex,
     ) -> Self {
         let maximum_clock = initial_system.clk + num_clocks_to_execute.as_usize();
@@ -86,6 +97,8 @@ impl ReplayProcessor {
             memory_reads_replay,
             hasher_response_replay,
             mast_forest_resolution_replay,
+            mast_forest_store,
+            max_stack_depth,
             maximum_clock,
         }
     }
@@ -93,13 +106,13 @@ impl ReplayProcessor {
     /// Executes the processor until it reaches the end of the fragment, or until an error occurs.
     pub fn execute<T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
-        current_forest: &mut Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
+        current_forest: &mut Arc<SparseMastForest>,
         kernel: &Kernel,
         tracer: &mut T,
     ) -> Result<(), ExecutionError>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<SparseMastForest>>,
     {
         match self.execute_impl(continuation_stack, current_forest, kernel, tracer) {
             ControlFlow::Continue(_) => {
@@ -124,13 +137,13 @@ impl ReplayProcessor {
     /// execution loop. See its documentation for more details.
     fn execute_impl<T>(
         &mut self,
-        continuation_stack: &mut ContinuationStack,
-        current_forest: &mut Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack<Arc<SparseMastForest>>,
+        current_forest: &mut Arc<SparseMastForest>,
         kernel: &Kernel,
         tracer: &mut T,
-    ) -> ControlFlow<BreakReason>
+    ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>>
     where
-        T: Tracer<Processor = Self>,
+        T: Tracer<Processor = Self, Forest = Arc<SparseMastForest>>,
     {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
@@ -159,12 +172,17 @@ impl ReplayProcessor {
                 },
                 InternalBreakReason::LoadMastForestFromDyn { .. } => {
                     // load mast forest from replay
-                    let (root_id, new_forest) =
+                    let (root_id, new_forest_id) =
                         match self.mast_forest_resolution_replay.replay_resolution() {
                             Ok(v) => v,
                             Err(err) => {
                                 return ControlFlow::Break(BreakReason::Err(err));
                             },
+                        };
+                    let new_forest =
+                        match super::lookup_mast_forest(&self.mast_forest_store, new_forest_id) {
+                            Ok(f) => f.clone(),
+                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
                         };
 
                     // Finish loading the MAST forest from the Dyn node, as per the sans-IO
@@ -184,12 +202,17 @@ impl ReplayProcessor {
                     procedure_hash: _,
                 } => {
                     // load mast forest from replay
-                    let (root_id, new_forest) =
+                    let (root_id, new_forest_id) =
                         match self.mast_forest_resolution_replay.replay_resolution() {
                             Ok(v) => v,
                             Err(err) => {
                                 return ControlFlow::Break(BreakReason::Err(err));
                             },
+                        };
+                    let new_forest =
+                        match super::lookup_mast_forest(&self.mast_forest_store, new_forest_id) {
+                            Ok(f) => f.clone(),
+                            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
                         };
 
                     // Finish loading the MAST forest from the External node, as per the sans-IO
@@ -238,6 +261,11 @@ impl SystemInterface for ReplayProcessor {
     }
 }
 
+#[inline(always)]
+fn stack_word_start_idx(stack_len: usize, start_idx: usize) -> usize {
+    stack_len - start_idx - WORD_SIZE
+}
+
 impl StackInterface for ReplayProcessor {
     fn top(&self) -> &[Felt] {
         &self.stack.stack_top
@@ -255,9 +283,9 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn get_word(&self, start_idx: usize) -> Word {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
+        debug_assert!(start_idx + WORD_SIZE <= MIN_STACK_DEPTH);
 
-        let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
+        let word_start_idx = stack_word_start_idx(MIN_STACK_DEPTH, start_idx);
         let mut result: [Felt; WORD_SIZE] =
             self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         // Reverse so top of stack (idx 0) goes to word[0]
@@ -274,8 +302,8 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn set_word(&mut self, start_idx: usize, word: &Word) {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
-        let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
+        debug_assert!(start_idx + WORD_SIZE <= MIN_STACK_DEPTH);
+        let word_start_idx = stack_word_start_idx(MIN_STACK_DEPTH, start_idx);
 
         // Reverse so word[0] ends up at the top of stack (highest internal index)
         let mut source: [Felt; WORD_SIZE] = (*word).into();
@@ -335,6 +363,12 @@ impl StackInterface for ReplayProcessor {
 
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
         const SENTINEL_VALUE: Felt = Felt::new_unchecked(Felt::ORDER_U64 - 1);
+
+        let depth = self.depth() as usize + 1;
+        let max = self.max_stack_depth;
+        if depth > max {
+            return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
+        }
 
         // push the last element on the overflow table
         {
@@ -438,48 +472,6 @@ impl Processor for ReplayProcessor {
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.system.pc_transcript_state = state;
     }
-
-    fn execute_before_enter_decorators(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &MastForest,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_after_exit_decorators(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &MastForest,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_decorators_for_op(
-        &self,
-        _node_id: MastNodeId,
-        _op_idx_in_block: usize,
-        _current_forest: &MastForest,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_end_of_block_decorators(
-        &self,
-        _basic_block_node: &BasicBlockNode,
-        _node_id: MastNodeId,
-        _current_forest: &Arc<MastForest>,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
 }
 
 // REPLAY STOPPER
@@ -492,17 +484,67 @@ pub(crate) struct ReplayStopper;
 
 impl Stopper for ReplayStopper {
     type Processor = ReplayProcessor;
+    type Forest = Arc<SparseMastForest>;
 
     fn should_stop(
         &self,
         processor: &ReplayProcessor,
-        _continuation_stack: &ContinuationStack,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
-    ) -> ControlFlow<BreakReason> {
+        _continuation_stack: &ContinuationStack<Arc<SparseMastForest>>,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<SparseMastForest>>>,
+    ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>> {
         if processor.system().clock() >= processor.maximum_clock {
             ControlFlow::Break(BreakReason::Stopped(continuation_after_stop()))
         } else {
             ControlFlow::Continue(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace::trace_state::{
+        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    };
+
+    fn build_replay_processor() -> ReplayProcessor {
+        let system = SystemState {
+            clk: 0_u32.into(),
+            ctx: ContextId::root(),
+            fn_hash: Word::default(),
+            pc_transcript_state: Word::default(),
+        };
+        let stack = StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO);
+
+        ReplayProcessor::new(
+            system,
+            stack,
+            StackOverflowReplay::default(),
+            ExecutionContextReplay::default(),
+            AdviceReplay::default(),
+            MemoryReadsReplay::default(),
+            HasherResponseReplay::default(),
+            MastForestResolutionReplay::default(),
+            Vec::new(),
+            MIN_STACK_DEPTH,
+            1_u32.into(),
+        )
+    }
+
+    #[test]
+    fn stack_set_word_allows_max_start_idx() {
+        let mut processor = build_replay_processor();
+        let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
+        let word = Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]);
+
+        processor.set_word(start_idx, &word);
+
+        assert_eq!(processor.get_word(start_idx), word);
     }
 }

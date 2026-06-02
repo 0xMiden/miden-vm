@@ -48,12 +48,16 @@ fn program_execution_for_trace(c: &mut Criterion) {
                 group.bench_function(file_stem, |bench| {
                     let mut assembler = Assembler::default();
                     assembler
-                        .link_dynamic_library(CoreLibrary::default())
+                        .link_package(
+                            CoreLibrary::default().package(),
+                            miden_assembly::Linkage::Dynamic,
+                        )
                         .expect("failed to load core library");
 
                     let program = assembler
-                        .assemble_program(&source)
-                        .expect("Failed to compile test source.");
+                        .assemble_program("program", &source)
+                        .expect("Failed to compile test source.")
+                        .unwrap_program();
                     let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
@@ -68,7 +72,8 @@ fn program_execution_for_trace(c: &mut Criterion) {
                                 ExecutionOptions::default()
                                     .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
                                     .unwrap(),
-                            );
+                            )
+                            .expect("processor advice inputs should fit advice map limits");
 
                             (host, program.clone(), processor)
                         },

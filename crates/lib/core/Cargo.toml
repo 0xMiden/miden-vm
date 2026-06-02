@@ -27,12 +27,12 @@ path = "tests/main.rs"
 
 [features]
 default = ["std"]
-std = ["miden-assembly/std", "miden-utils-sync/std"]
+std = ["miden-assembly/std", "miden-processor/std", "miden-utils-sync/std"]
 constraints-tools = ["std", "dep:miden-air", "dep:miden-ace-codegen"]
 
 [dependencies]
 # Miden dependencies
-miden-assembly.workspace = true
+miden-mast-package.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-processor.workspace = true
@@ -47,7 +47,7 @@ thiserror.workspace = true
 criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
-miden-lifted-stark.workspace = true
+miden-assembly.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
@@ -56,7 +56,6 @@ num = { version = "0.4" }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
-bincode.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true

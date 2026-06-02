@@ -137,8 +137,8 @@ end
 #! Outputs: [R0', R1', C', write_ptr]
 #!
 #! Where:
-#! - R0 is the first rate word (positions 0-3, on top of stack).
-#! - R1 is the second rate word / digest (positions 4-7).
+#! - R0 is the first rate word / digest (positions 0-3, on top of stack).
+#! - R1 is the second rate word (positions 4-7).
 #! - C is the capacity word (positions 8-11).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - end_ptr is the memory pointer where the copying should end.
@@ -291,7 +291,7 @@ end
 #! - COMMITMENT is the commitment that the one calculated during this procedure will be compared
 #!   with.
 #!
-#! Total cycles: 56 + 3 * num_words / 2
+#! Total cycles: 56 + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
@@ -308,7 +308,7 @@ pub proc pipe_double_words_preimage_to_memory
   # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
-  # (e.g., 25 cycles for 4 words)
+  # (e.g., 21 cycles for 4 words)
   exec.pipe_double_words_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
@@ -321,4 +321,57 @@ pub proc pipe_double_words_preimage_to_memory
 
   # Assert the commitment (11 cycles).
   assert_eqw.err="pipe_double_words_preimage_to_memory: COMMITMENT does not match"
+end
+
+#! Moves an even number of words from the advice stack to memory and asserts that their
+#! domain-tagged sequential hash matches a given commitment.
+#!
+#! Like `pipe_double_words_preimage_to_memory`, but initializes the Poseidon2 capacity word to
+#! `[0, domain, 0, 0]`.
+#!
+#! Inputs:  [domain, num_words, write_ptr, COMMITMENT]
+#! Outputs: [write_ptr']
+#!
+#! Where:
+#! - domain is the domain identifier placed into the second element of the capacity word.
+#! - num_words is the number of words which will be copied to the memory (must be even).
+#! - write_ptr is the memory pointer where the words will be copied.
+#! - write_ptr' is the memory pointer to the end of the copied words.
+#! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
+#!
+#! Total cycles: 57 + 3 * num_words
+pub proc pipe_double_words_preimage_to_memory_with_domain
+  # Bring `num_words` to the top so we can check and consume it below (1 cycle).
+  swap
+  # => [num_words, domain, write_ptr, COMMITMENT, ...]
+
+  # Assert precondition (8 cycles).
+  dup is_odd assertz.err="pipe_double_words_preimage_to_memory_with_domain: num_words must be even"
+  # => [num_words, domain, write_ptr, COMMITMENT, ...]
+
+  # Compute end_ptr = write_ptr + num_words * 4 and reorder the stack (5 cycles).
+  mul.4 dup.2 add movup.2
+  # => [write_ptr, end_ptr, domain, COMMITMENT, ...]
+
+  # Build the capacity word `[0, domain, 0, 0]` on top of the stack (4 cycles).
+  push.0.0 movup.4 push.0
+  # => [C=[0, domain, 0, 0], write_ptr, end_ptr, COMMITMENT, ...]
+
+  # Fill in R0 and R1 with zeros (8 cycles).
+  exec.poseidon2::init_with_capacity
+  # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
+
+  # (9 + 3 * num_words cycles)
+  exec.pipe_double_words_to_memory
+  # => [R0', R1', C', write_ptr', COMMITMENT, ...]
+
+  # Leave just the digest on the stack (9 cycles).
+  exec.poseidon2::squeeze_digest
+  # => [DIGEST, write_ptr', COMMITMENT, ...]
+
+  # Move write_ptr out of the way so we can assert the commitment (2 cycles).
+  movup.4 movdn.8
+
+  # Assert the commitment (11 cycles).
+  assert_eqw.err="pipe_double_words_preimage_to_memory_with_domain: COMMITMENT does not match"
 end

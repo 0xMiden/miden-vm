@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
@@ -10,7 +9,8 @@ use crate::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
         finalize_clock_cycle_with_continuation, get_next_ctx_id,
     },
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
+    option_map_break_reason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
 };
@@ -20,16 +20,17 @@ use crate::{
 
 /// Executes a Dyn node from the start.
 #[inline(always)]
-pub(super) fn start_dyn_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn start_dyn_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     current_node_id: MastNodeId,
-    current_forest: &mut Arc<MastForest>,
-) -> ControlFlow<InternalBreakReason>
+    current_forest: &mut F,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -38,13 +39,12 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
-
-    let dyn_node = current_forest[current_node_id].unwrap_dyn();
+    let dyn_node = option_map_break_reason(
+        current_forest.get_node_by_id(current_node_id),
+        "dyn node not found in current forest",
+    )
+    .map_break(InternalBreakReason::from)?
+    .unwrap_dyn();
 
     // Retrieve callee hash from memory, using stack top as the memory address.
     let read_ctx = state.processor.system().ctx();
@@ -137,25 +137,26 @@ where
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
 /// documentation of that enum variant for more details.
-pub fn finish_load_mast_forest_from_dyn_start<P, S, T>(
+pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
     root_id: MastNodeId,
-    new_forest: Arc<MastForest>,
+    new_forest: F,
     processor: &mut P,
-    current_forest: &mut Arc<MastForest>,
-    continuation_stack: &mut ContinuationStack,
+    current_forest: &mut F,
+    continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
     stopper: &S,
-) -> ControlFlow<BreakReason>
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     // Save the old forest: the continuation from start_clock_cycle references nodes in it.
-    let old_forest = Arc::clone(current_forest);
+    let old_forest = current_forest.clone();
 
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(Arc::clone(current_forest));
+    continuation_stack.push_enter_forest(current_forest.clone());
 
     // Push the root node of the external MAST forest onto the continuation stack.
     continuation_stack.push_start_node(root_id);
@@ -175,16 +176,17 @@ where
 
 /// Executes the finish phase of a Dyn node.
 #[inline(always)]
-pub(super) fn finish_dyn_node<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn finish_dyn_node<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -193,7 +195,11 @@ where
         current_forest,
     );
 
-    let dyn_node = current_forest[node_id].unwrap_dyn();
+    let dyn_node = option_map_break_reason(
+        current_forest.get_node_by_id(node_id),
+        "dyn node not found in current forest",
+    )?
+    .unwrap_dyn();
     // For dyncall, restore the context.
     if dyn_node.is_dyncall()
         && let Err(e) = state.processor.restore_context()
@@ -211,11 +217,7 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }

@@ -7,7 +7,7 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    self as masm, Assembler, Library, Parse, ParseOptions, Report,
+    self as masm, Assembler, Parse, ParseOptions, Report,
     ast::{self, ModuleKind},
     debuginfo::DefaultSourceManager,
     diagnostics::IntoDiagnostic,
@@ -200,7 +200,7 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
 fn main() -> Result<(), Report> {
     use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
 
-    // re-build the `[OUT_DIR]/assets/core.masl` file iff something in the `./asm` directory
+    // re-build the `[OUT_DIR]/assets/core.masp` file iff something in the `./asm` directory
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_LIB_DOCS");
@@ -233,18 +233,6 @@ fn main() -> Result<(), Report> {
 
     // write the masp output
     package.write_masp_file(build_dir.join(ASL_DIR_PATH)).into_diagnostic()?;
-
-    // write the masl output
-    package
-        .mast
-        .write_to_file(
-            build_dir
-                .join(ASL_DIR_PATH)
-                .join("core")
-                .with_extension(Library::LIBRARY_EXTENSION),
-        )
-        .map_err(|e| io::Error::other(e.to_string()))
-        .into_diagnostic()?;
 
     // Generate documentation
     if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {

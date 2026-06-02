@@ -102,6 +102,20 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
 }
 
 #[test]
+fn test_mmr_get_fails_for_absent_leaf() {
+    let source = "
+    use miden::core::collections::mmr
+
+    begin
+        push.4 push.1000 mem_store
+        push.1000 push.4 exec.mmr::get
+    end";
+
+    let test = build_test!(source, &[]);
+    assert!(test.execute().is_err());
+}
+
+#[test]
 fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     // This test uses two merkle trees for the MMR, one with 8 elements, and one with 2
     let leaves1 = &[1, 2, 3, 4, 5, 6, 7, 8];

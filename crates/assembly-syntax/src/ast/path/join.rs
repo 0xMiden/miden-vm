@@ -44,7 +44,10 @@ impl Join<Path> for Path {
         if self.is_empty() {
             other.to_path_buf()
         } else if other.is_absolute() || other.is_in_kernel() || other.is_in_exec() {
-            other.to_absolute().into_owned()
+            match other.to_absolute() {
+                Ok(path) => path.into_owned(),
+                Err(_) => other.to_path_buf(),
+            }
         } else {
             let mut buf = self.to_path_buf();
             buf.push(other);
@@ -193,6 +196,17 @@ mod tests {
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("baz"))));
         assert_matches!(components.next(), None);
+    }
+
+    #[test]
+    fn test_join_invalid_absolute_path_does_not_panic() {
+        let p1 = Path::new("foo");
+        let invalid = alloc::format!("::{}", "a".repeat(Path::MAX_COMPONENT_LENGTH + 1));
+        let p2 = Path::new(&invalid);
+
+        let joined = Join::join(p1, p2);
+
+        assert_eq!(joined.as_path(), p2);
     }
 
     #[test]

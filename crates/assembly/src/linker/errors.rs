@@ -44,6 +44,16 @@ pub enum LinkerError {
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
     DuplicateModule { path: Arc<Path> },
+    #[error("ambiguous module path resolution for '{path}'")]
+    #[diagnostic(help("matching module prefixes: {}", matches.join(", ")))]
+    AmbiguousModulePath {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+        matches: Box<[String]>,
+    },
     #[error("undefined module '{path}'")]
     #[diagnostic()]
     UndefinedModule {

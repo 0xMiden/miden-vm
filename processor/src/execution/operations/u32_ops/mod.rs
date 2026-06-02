@@ -4,9 +4,9 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
-    mast::MastForest,
+    mast::ExecutableMastForest,
     operation::OperationError,
-    processor::{Processor, StackInterface, SystemInterface},
+    processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -63,7 +63,7 @@ where
         let top = processor.stack().get(0);
         split_element(top)
     };
-    tracer.record_u32_range_checks(processor.system().clock(), top_lo, top_hi);
+    tracer.record_u32_range_checks(top_lo, top_hi);
 
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, top_lo);
@@ -88,7 +88,7 @@ pub(super) fn op_u32add<P: Processor, T: Tracer>(
         let result = Felt::new_unchecked(a.as_canonical_u64() + b.as_canonical_u64());
         split_element(result)
     };
-    tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
+    tracer.record_u32_range_checks(sum, carry);
 
     processor.stack_mut().set(0, sum);
     processor.stack_mut().set(1, carry);
@@ -119,7 +119,7 @@ where
             Felt::new_unchecked(a.as_canonical_u64() + b.as_canonical_u64() + c.as_canonical_u64());
         split_element(result)
     };
-    tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
+    tracer.record_u32_range_checks(sum, carry);
 
     // write sum to the new top of the stack, and carry after
     processor.stack_mut().decrement_size()?;
@@ -146,7 +146,7 @@ pub(super) fn op_u32sub<P: Processor, T: Tracer>(
     let borrow = Felt::new_unchecked(result >> 63);
     let diff = Felt::new_unchecked(result & u32::MAX as u64);
 
-    tracer.record_u32_range_checks(processor.system().clock(), diff, ZERO);
+    tracer.record_u32_range_checks(diff, ZERO);
 
     processor.stack_mut().set(0, borrow);
     processor.stack_mut().set(1, diff);
@@ -168,7 +168,7 @@ pub(super) fn op_u32mul<P: Processor, T: Tracer>(
 
     let result = Felt::new_unchecked(a.as_canonical_u64() * b.as_canonical_u64());
     let (hi, lo) = split_element(result);
-    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
+    tracer.record_u32_range_checks(lo, hi);
 
     processor.stack_mut().set(0, lo);
     processor.stack_mut().set(1, hi);
@@ -196,7 +196,7 @@ where
     let result =
         Felt::new_unchecked(a.as_canonical_u64() * b.as_canonical_u64() + c.as_canonical_u64());
     let (hi, lo) = split_element(result);
-    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
+    tracer.record_u32_range_checks(lo, hi);
 
     // write lo to the new top of the stack, and hi after
     processor.stack_mut().decrement_size()?;
@@ -243,7 +243,7 @@ pub(super) fn op_u32div<P: Processor, T: Tracer>(
     // These range checks help enforce that remainder < denominator.
     let hi = Felt::new_unchecked(denominator - remainder - 1);
 
-    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
+    tracer.record_u32_range_checks(lo, hi);
     Ok(OperationHelperRegisters::U32Div { lo, hi })
 }
 
@@ -301,12 +301,15 @@ where
 /// the high values are equal to 0; if they are, puts the original elements back onto the
 /// stack; if they are not, returns an error.
 #[inline(always)]
-pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
+pub(super) fn op_u32assert2<P: Processor, T: Tracer, F>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-    program: &MastForest,
-) -> Result<OperationHelperRegisters, OperationError> {
+    program: &F,
+) -> Result<OperationHelperRegisters, OperationError>
+where
+    F: ExecutableMastForest + ?Sized,
+{
     let first = processor.stack().get(0);
     let second = processor.stack().get(1);
 
@@ -337,7 +340,7 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
         return Err(OperationError::NotU32Values { values: invalid_values });
     }
 
-    tracer.record_u32_range_checks(processor.system().clock(), first, second);
+    tracer.record_u32_range_checks(first, second);
 
     // Stack remains unchanged for assert operations
 

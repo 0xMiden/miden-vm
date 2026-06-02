@@ -6,12 +6,13 @@ use miden::core::stark::verifier
 #! verifier can be built. It expects the following parameters on the stack from the caller:
 #!
 #! 1. `[D0, D1, D2, D3, D4]` which are respectively the digests for dynamic execution of procedures
-#!   i. `compute_deep_composition_polynomial_queries`
-#!   ii. `execute_constraint_evaluation_check`
-#!   iii. `process_row_ood_evaluations`
-#!   iv. `process_public_inputs`
-#!   v. `observe_aux_trace`
-#! 2. Per-proof parameter: `log(trace_length)`
+#!   D0. `observe_aux_trace`
+#!   D1. `process_public_inputs`
+#!   D2. `process_row_ood_evaluations`
+#!   D3. `execute_constraint_evaluation_check`
+#!   D4. `compute_deep_composition_polynomial_queries`
+#! 2. Per-proof parameters: `log(core_trace_length), log(chiplets_trace_length)` — the two
+#!    per-AIR log heights, in caller order (Core first, Chiplets second).
 #! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
 #!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
 #!
@@ -27,6 +28,6 @@ use miden::core::stark::verifier
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4, log(trace_length), rd0, rd1, rd2, rd3]
+#! Inputs:  [D0, D1, D2, D3, D4, log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3]
 #! Outputs: []
 pub use verifier::verify

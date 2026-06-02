@@ -1,6 +1,3 @@
-use alloc::sync::Arc;
-use core::ops::ControlFlow;
-
 use miden_air::{
     Felt,
     trace::{RowIndex, chiplets::hasher::HasherState},
@@ -8,15 +5,13 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
-use super::step::BreakReason;
 use crate::{
-    AdviceProvider, BaseHost, ContextId, ExecutionError,
+    AdviceProvider, ContextId, ExecutionError,
     errors::OperationError,
-    fast::{FastProcessor, STACK_BUFFER_SIZE, memory::Memory},
+    fast::{FastProcessor, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 
@@ -85,57 +80,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.pc_transcript = PrecompileTranscript::from_state(state);
-    }
-
-    #[inline(always)]
-    fn execute_before_enter_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        self.execute_before_enter_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_after_exit_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        self.execute_after_exit_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_decorators_for_op(
-        &self,
-        node_id: MastNodeId,
-        op_idx_in_block: usize,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if self.should_execute_decorators() {
-            #[cfg(test)]
-            self.record_decorator_retrieval();
-
-            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
-                self.execute_decorator(decorator, host)?;
-            }
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    #[inline(always)]
-    fn execute_end_of_block_decorators(
-        &self,
-        basic_block_node: &BasicBlockNode,
-        node_id: MastNodeId,
-        current_forest: &Arc<MastForest>,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }
 
@@ -309,12 +253,9 @@ impl StackInterface for FastProcessor {
 
     #[inline(always)]
     fn increment_size(&mut self) -> Result<(), ExecutionError> {
-        if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
-            self.increment_stack_size();
-            Ok(())
-        } else {
-            Err(ExecutionError::Internal("stack overflow"))
-        }
+        self.ensure_stack_capacity_for_push()?;
+        self.increment_stack_size();
+        Ok(())
     }
 
     #[inline(always)]

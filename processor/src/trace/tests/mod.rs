@@ -14,7 +14,8 @@ use crate::{
 
 mod chiplets;
 mod decoder;
-mod hasher;
+mod lookup;
+mod lookup_harness;
 mod range;
 mod stack;
 
@@ -36,7 +37,30 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
+}
+
+/// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
+///
+/// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
+/// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
+/// convert them through `u64` first.
+pub fn build_trace_from_program_with_stack(
+    program: &Program,
+    stack_inputs: StackInputs,
+) -> ExecutionTrace {
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
@@ -46,9 +70,8 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
 pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
 
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let basic_block_id =
+        BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -56,18 +79,18 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> Execut
     build_trace_from_program(&program, stack)
 }
 
-/// Builds a sample trace by executing a span block containing the specified operations. Unlike the
-/// function above, this function accepts the full [AdviceInputs] object, which means it can run
-/// the programs with initialized advice provider.
+/// Builds a sample trace by executing a span block containing the specified operations. Unlike
+/// [`build_trace_from_ops`], this variant accepts the full [`AdviceInputs`] object, so the
+/// program can run against an initialised advice provider (e.g. to seed a Merkle tree for the
+/// sibling-table tests).
 pub fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
 ) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let basic_block_id =
+        BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -78,7 +101,8 @@ pub fn build_trace_from_ops_with_inputs(
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
-    );
+    )
+    .expect("processor advice inputs should fit advice map limits");
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }

@@ -10,15 +10,13 @@ pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainCols, MidenAirBuilder, constraints::constants::*};
-
-pub mod bus;
+use crate::{CoreCols, MidenAirBuilder, constraints::constants::*};
 
 // ENTRY POINTS
 // ================================================================================================
 
 /// Enforces range checker main-trace constraints.
-pub fn enforce_main<AB>(builder: &mut AB, local: &MainCols<AB::Var>, next: &MainCols<AB::Var>)
+pub fn enforce_main<AB>(builder: &mut AB, local: &CoreCols<AB::Var>, next: &CoreCols<AB::Var>)
 where
     AB: MidenAirBuilder,
 {

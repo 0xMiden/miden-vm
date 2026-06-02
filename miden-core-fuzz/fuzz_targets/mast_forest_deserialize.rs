@@ -11,13 +11,15 @@ use libfuzzer_sys::fuzz_target;
 use miden_core::{mast::MastForest, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
+    let budget = data.len().saturating_mul(64);
+
     // Primary target: raw MastForest deserialization
     // This should never panic - all errors should be returned as Result::Err
     let _ = MastForest::read_from_bytes(data);
 
     // Also test Vec<MastForest> deserialization (tests length prefix handling)
-    let _ = Vec::<MastForest>::read_from_bytes(data);
+    let _ = Vec::<MastForest>::read_from_bytes_with_budget(data, budget);
 
     // Test Option<MastForest> deserialization
-    let _ = Option::<MastForest>::read_from_bytes(data);
+    let _ = Option::<MastForest>::read_from_bytes_with_budget(data, budget);
 });

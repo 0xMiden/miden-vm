@@ -91,12 +91,14 @@ fn naive_composites(
     let prefix_011 = not_6 * bit_5 * bit_4;
     let add3_madd_prefix = bit_6 * not_5 * not_4 * bit_3 * bit_2;
 
-    let split_loop_flag = deg5[4] + deg5[5];
+    // Under do-while semantics, LOOP (deg5[5]) does not shift the stack — only SPLIT (deg5[4])
+    // contributes here.
+    let split_flag = deg5[4];
     let shift_left_on_end = deg4[4] * is_loop_end;
 
     let right_shift_flag = prefix_011 + deg5[11] + deg6[4];
     let left_shift_flag =
-        prefix_010 + add3_madd_prefix + split_loop_flag + deg5[8] + deg4[5] + shift_left_on_end;
+        prefix_010 + add3_madd_prefix + split_flag + deg5[8] + deg4[5] + shift_left_on_end;
 
     let control_flow = deg5[4] + deg5[5] + deg5[6] + deg5[7] // SPAN/JOIN/SPLIT/LOOP
         + deg4[4] + deg4[5] + deg4[6] + deg4[7] // END/REPEAT/RESPAN/HALT
@@ -414,21 +416,18 @@ fn composite_hperm_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests left shift composite flags for LOOP operation.
+/// Tests composite shift flags for LOOP operation. Under do-while semantics LOOP reads no stack
+/// input, so it is classified as no-shift at every depth.
 #[test]
-fn composite_loop_left_shift() {
+fn composite_loop_no_shift() {
     let op_flags = op_flags_for_opcode(opcodes::LOOP.into());
 
-    assert_eq!(op_flags.left_shift_at(0), ZERO);
-    // LOOP shifts the stack left
-    for i in 1..16 {
-        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({i}) should be ONE for LOOP");
-    }
     for i in 0..16 {
-        assert_eq!(op_flags.no_shift_at(i), ZERO);
+        assert_eq!(op_flags.left_shift_at(i), ZERO, "left_shift_at({i}) should be ZERO for LOOP");
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOOP");
     }
 
-    assert_eq!(op_flags.left_shift(), ONE);
+    assert_eq!(op_flags.left_shift(), ZERO);
     assert_eq!(op_flags.right_shift(), ZERO);
     assert_eq!(op_flags.control_flow(), ONE);
 }
@@ -596,38 +595,5 @@ proptest! {
             prop_assert_eq!(no_shift * right_shift, ZERO);
             prop_assert_eq!(left_shift * right_shift, ZERO);
         }
-    }
-}
-
-/// Tests u32_rc_op flag for u32 operations.
-#[test]
-fn u32_rc_op_flag() {
-    // U32 operations that require range checks (degree 6)
-    let u32_ops = [
-        Operation::U32add,
-        Operation::U32sub,
-        Operation::U32mul,
-        Operation::U32div,
-        Operation::U32split,
-        Operation::U32assert2(ZERO),
-        Operation::U32add3,
-        Operation::U32madd,
-    ];
-
-    for op in u32_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op, ONE, "u32_rc_op should be ONE for {op:?}");
-    }
-
-    // Non-u32 operations
-    let non_u32_ops = [
-        Operation::Add,
-        Operation::Mul,
-        Operation::And, // Bitwise AND is degree 7, not u32
-    ];
-
-    for op in non_u32_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op, ZERO, "u32_rc_op should be ZERO for {op:?}");
     }
 }

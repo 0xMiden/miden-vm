@@ -94,9 +94,9 @@ Input at `src_ptr`:
 
 Output at `dst_ptr`:
 ```
-[plaintext_block_0(8), ..., plaintext_block_n(8), padding(8)]
+[plaintext_block_0(8), ..., plaintext_block_n(8)]
 ```
-Length: `(num_blocks + 1) * 8` elements
+Length: `num_blocks * 8` elements. The padding block is authenticated but **not** written to the plaintext output.
 
 **Decryption Flow:**
 1. Computes tag location: `src_ptr + (num_blocks + 1) * 8`

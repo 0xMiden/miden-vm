@@ -1,27 +1,8 @@
-/// Simple macro used in the grammar definition for constructing spans
-macro_rules! span {
-    ($id:expr, $l:expr, $r:expr) => {
-        ::miden_debug_types::SourceSpan::new($id, $l..$r)
-    };
-    ($id:expr, $i:expr) => {
-        ::miden_debug_types::SourceSpan::at($id, $i)
-    };
-}
-
-lalrpop_util::lalrpop_mod!(
-    #[expect(clippy::all)]
-    #[expect(clippy::redundant_closure_for_method_calls)]
-    #[expect(clippy::trivially_copy_pass_by_ref)]
-    #[expect(unused_lifetimes)]
-    #[expect(unused_qualifications)]
-    grammar,
-    "/parser/grammar.rs"
-);
-
+mod cst;
 mod error;
-mod lexer;
-mod scanner;
-mod token;
+#[cfg(test)]
+mod tests;
+mod value;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
@@ -29,17 +10,11 @@ use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
 use miden_utils_diagnostics::Report;
 
 pub use self::{
+    cst::parse_inline_masm,
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
-    lexer::Lexer,
-    scanner::Scanner,
-    token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
+    value::{IntValue, PushValue, WordValue},
 };
 use crate::{Path, ast, sema};
-
-// TYPE ALIASES
-// ================================================================================================
-
-type ParseError<'a> = lalrpop_util::ParseError<u32, Token<'a>, ParsingError>;
 
 // MODULE PARSER
 // ================================================================================================
@@ -100,8 +75,7 @@ impl ModuleParser {
         if let Err(err) = Path::validate(path.as_str()) {
             return Err(Report::msg(err.to_string()).with_source_code(source));
         }
-        let forms = parse_forms_internal(source.clone(), &mut self.interned)
-            .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
+        let forms = parse_forms_internal(source.clone(), &mut self.interned)?;
         sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
             .map_err(Report::new)
     }
@@ -155,7 +129,7 @@ impl ModuleParser {
 ///
 /// NOTE: This does _not_ run semantic analysis.
 #[cfg(any(test, feature = "testing"))]
-pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingError> {
+pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, Report> {
     let mut interned = BTreeSet::default();
     parse_forms_internal(source, &mut interned)
 }
@@ -167,14 +141,8 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingErr
 fn parse_forms_internal(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
-) -> Result<Vec<ast::Form>, ParsingError> {
-    let source_id = source.id();
-    let scanner = Scanner::new(source.as_str());
-    let lexer = Lexer::new(source_id, scanner);
-    let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
-    grammar::FormsParser::new()
-        .parse(source_id, interned, &felt_type, core::marker::PhantomData, lexer)
-        .map_err(|err| ParsingError::from_parse_error(source_id, err))
+) -> Result<Vec<ast::Form>, Report> {
+    cst::parse_forms(source, interned)
 }
 
 // DIRECTORY PARSER
@@ -338,150 +306,5 @@ mod module_walker {
                 }
             }
         }
-    }
-}
-
-// TESTS
-// ================================================================================================
-
-#[cfg(test)]
-mod tests {
-    use miden_core::assert_matches;
-    use miden_debug_types::SourceId;
-
-    use super::*;
-
-    // This test checks the lexer behavior with regard to tokenizing `exp(.u?[\d]+)?`
-    #[test]
-    fn lex_exp() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new("begin exp.u9 end");
-        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
-        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
-        assert_matches!(lexer.next(), Some(Ok(Token::ExpU)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Int(n))) if n == 9);
-        assert_matches!(lexer.next(), Some(Ok(Token::End)));
-    }
-
-    #[test]
-    fn lex_block() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new(
-            "\
-const ERR1 = 1
-
-begin
-    u32assertw
-    u32assertw.err=ERR1
-    u32assertw.err=2
-end
-",
-        );
-        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
-        assert_matches!(lexer.next(), Some(Ok(Token::Const)));
-        assert_matches!(lexer.next(), Some(Ok(Token::ConstantIdent("ERR1"))));
-        assert_matches!(lexer.next(), Some(Ok(Token::Equal)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Int(1))));
-        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
-        assert_matches!(lexer.next(), Some(Ok(Token::U32Assertw)));
-        assert_matches!(lexer.next(), Some(Ok(Token::U32Assertw)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Err)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Equal)));
-        assert_matches!(lexer.next(), Some(Ok(Token::ConstantIdent("ERR1"))));
-        assert_matches!(lexer.next(), Some(Ok(Token::U32Assertw)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Err)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Equal)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Int(2))));
-        assert_matches!(lexer.next(), Some(Ok(Token::End)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Eof)));
-    }
-
-    #[test]
-    fn lex_emit() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new(
-            "\
-begin
-    push.1
-    emit.event(\"abc\")
-end
-",
-        );
-        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
-        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Push)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Int(1))));
-        assert_matches!(lexer.next(), Some(Ok(Token::Emit)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Event)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Lparen)));
-        assert_matches!(lexer.next(), Some(Ok(Token::QuotedIdent("abc"))));
-        assert_matches!(lexer.next(), Some(Ok(Token::Rparen)));
-        assert_matches!(lexer.next(), Some(Ok(Token::End)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Eof)));
-    }
-
-    #[test]
-    fn lex_invalid_token_after_whitespace_returns_error() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new("begin \u{0001}\nend\n");
-        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
-
-        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
-        assert_matches!(
-            lexer.next(),
-            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
-        );
-    }
-
-    #[test]
-    fn lex_invalid_underscore_token_span() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new("begin _-\nend\n");
-        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
-
-        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
-        assert_matches!(
-            lexer.next(),
-            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
-        );
-    }
-
-    #[test]
-    fn lex_single_char_token_and_ident_spans() {
-        let source_id = SourceId::default();
-        let scanner = Scanner::new("@\nA\n");
-        let mut lexer = Lexer::new(source_id, scanner);
-
-        assert_matches!(lexer.next(), Some(Ok((0, Token::At, 1))));
-        assert_matches!(lexer.next(), Some(Ok((2, Token::ConstantIdent("A"), 3))));
-    }
-
-    #[test]
-    fn overlong_path_component_is_rejected_without_panic() {
-        use std::{
-            panic::{AssertUnwindSafe, catch_unwind},
-            sync::Arc,
-        };
-
-        use crate::{
-            debuginfo::DefaultSourceManager,
-            parse::{Parse, ParseOptions},
-        };
-
-        let big_component = "a".repeat(256);
-        let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
-
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let parsed = catch_unwind(AssertUnwindSafe(|| {
-            source.parse_with_options(source_manager, ParseOptions::default())
-        }));
-
-        assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
-        let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
-        crate::assert_diagnostic!(err, "this reference is invalid without a corresponding import");
     }
 }

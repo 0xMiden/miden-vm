@@ -9,15 +9,15 @@ use miden_assembly_syntax::{
     ast::{ModuleKind, Path as MasmPath},
     diagnostics::Report,
 };
-use miden_core::serde::{Deserializable, Serializable};
-use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
-use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
+use miden_core::serde::Deserializable;
+use miden_mast_package::{Package as MastPackage, TargetType};
+use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
     ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
+use crate::{Assembler, ast::Module};
 
 mod build_provenance;
 mod dependency_graph;
@@ -45,7 +45,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageStore + ?Sized,
+        S: PackageCache + ?Sized,
     {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
@@ -69,7 +69,7 @@ impl Assembler {
         store: &'a mut S,
     ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        S: PackageStore + ?Sized,
+        S: PackageCache + ?Sized,
     {
         let source_manager = self.source_manager();
         let dependency_graph =
@@ -91,7 +91,7 @@ pub struct ProjectSourceInputs {
     pub support: Vec<Box<Module>>,
 }
 
-pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
+pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
@@ -100,7 +100,7 @@ pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
 
 impl<'a, S> ProjectAssembler<'a, S>
 where
-    S: PackageStore + ?Sized,
+    S: PackageCache + ?Sized,
 {
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
@@ -189,9 +189,15 @@ where
             .with_emit_debug_info(profile.should_emit_debug_info())
             .with_trim_paths(profile.should_trim_paths());
         let mut runtime_dependencies = RuntimeDependencies::default();
+        debug_assert!(
+            required_lib.is_none() || target.ty.is_executable(),
+            "expected required_lib only for executable targets"
+        );
         match required_lib {
             Some(required_lib) if required_lib.package.is_kernel() => {
-                assembler.link_package(required_lib.package.clone(), Linkage::Dynamic)?;
+                // We do not link the package here, as by definition a required library is only
+                // present for executable targets, and we always unconditionally link kernel
+                // dependencies just prior to assembling the package
                 runtime_dependencies.record_linked_kernel_dependency(required_lib.package)?;
             },
             Some(required_lib) => {
@@ -215,7 +221,9 @@ where
                 )));
             }
 
-            assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            if !dependency_package.package.is_kernel() {
+                assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            }
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
@@ -225,29 +233,37 @@ where
             None => self.load_target_sources(project.as_ref(), target)?,
         };
 
-        let product = match target.ty {
-            TargetType::Executable => assembler.assemble_executable_modules(root, support)?,
+        if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
+            if matches!(target.ty, TargetType::Kernel) {
+                return Err(Report::msg(format!(
+                    "kernel targets cannot depend on a kernel, dependency '{}' is a kernel",
+                    kernel_package.name
+                )));
+            }
+            assembler.link_package(kernel_package, Linkage::Dynamic)?;
+        }
+        let mut product = match target.ty {
+            TargetType::Executable => {
+                assembler.assemble_executable_modules(package_id.clone(), root, support)?
+            },
             TargetType::Kernel => {
                 if !support.is_empty() {
                     assembler.compile_and_statically_link_all(support)?;
                 }
-                assembler.assemble_kernel_module(root)?
+                assembler.assemble_kernel_module(package_id.clone(), root)?
             },
             _ if target.ty.is_library() => {
                 let mut modules = Vec::with_capacity(support.len() + 1);
                 modules.push(root);
                 modules.extend(support);
-                assembler.assemble_library_modules(modules, target.ty)?
+                assembler.assemble_library_modules(package_id.clone(), modules, target.ty)?
             },
             _ => unreachable!("non-exhaustive target type"),
         };
 
-        let manifest = product
-            .manifest()
-            .clone()
-            .with_dependencies(runtime_dependencies.deps.into_values())
+        product
+            .extend_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
-        let debug_info = product.debug_info().cloned();
 
         // Emit custom sections
         let mut sections = Vec::new();
@@ -263,38 +279,15 @@ where
             sections.push(provenance.to_section());
         }
 
-        // Section: embedded kernel package
-        if target.ty.is_executable()
-            && let Some(kernel_package) = runtime_dependencies.kernel.clone()
-        {
-            sections.push(linked_kernel_package_section(kernel_package.as_ref()));
-        }
-
-        // Section: debug info
-        if let Some(DebugInfoSections {
-            debug_sources_section,
-            debug_functions_section,
-            debug_types_section,
-        }) = debug_info.as_ref()
-        {
-            sections.push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
-            sections
-                .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));
-            sections.push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
-        }
-
-        let package = Arc::new(MastPackage {
-            name: project.target_package_name(target),
-            version: project.version().into_inner().clone(),
-            description: project.description().map(|description| description.to_string()),
-            kind: product.kind(),
-            mast: product.into_artifact(),
-            manifest,
-            sections,
-        });
+        let mut package = product.into_artifact()?;
+        package.name = project.target_package_name(target);
+        package.version = project.version().into_inner().clone();
+        package.description = project.description().map(|description| description.to_string());
+        package.sections.extend(sections);
+        let package = Arc::from(package);
 
         let resolved = ResolvedPackage {
-            package: Arc::clone(&package),
+            package,
             linked_kernel_package: runtime_dependencies.kernel,
         };
         if !has_provided_sources {
@@ -317,7 +310,7 @@ where
         let node = self.dependency_graph.get(package_id)?;
         let node_version = node.version.clone();
 
-        let package = match &node.provenance {
+        let (package, should_cache) = match &node.provenance {
             ProjectDependencyNodeProvenance::Source(ProjectSource::Virtual { .. }) => {
                 return Err(Report::msg(format!(
                     "package '{package_id}' is missing a manifest path",
@@ -353,11 +346,14 @@ where
                     manifest_path,
                     workspace_root.as_deref(),
                 )? {
-                    RegisteredSourcePackage::Loaded(package) => ResolvedPackage {
-                        linked_kernel_package: self
-                            .resolve_linked_kernel_package(package.clone())?,
-                        package,
-                    },
+                    RegisteredSourcePackage::Loaded(package) => (
+                        ResolvedPackage {
+                            linked_kernel_package: self
+                                .resolve_linked_kernel_package(package.clone())?,
+                            package,
+                        },
+                        false,
+                    ),
                     reuse => {
                         let package = self.assemble_source_package(
                             package_id.clone(),
@@ -369,9 +365,7 @@ where
                             cache,
                         )?;
                         match reuse {
-                            RegisteredSourcePackage::Missing => {
-                                self.publish_source_dependency(package.package.clone())?;
-                            },
+                            RegisteredSourcePackage::Missing => (),
                             RegisteredSourcePackage::IndexedButUnreadable(expected) => {
                                 let actual = PackageVersion::new(
                                     package.package.version.clone(),
@@ -385,7 +379,7 @@ where
                             },
                             RegisteredSourcePackage::Loaded(_) => unreachable!(),
                         }
-                        package
+                        (package, true)
                     },
                 }
             },
@@ -396,17 +390,25 @@ where
                             "dependency '{package_id}' version '{node_version}' was not found in the package registry"
                         ))
                     })?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    false,
+                )
             },
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
                 let package = self.store.load_package(package_id, selected)?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    false,
+                )
             },
             ProjectDependencyNodeProvenance::Preassembled {
                 path,
@@ -421,13 +423,21 @@ where
                     *kind,
                     requirements,
                 )?;
-                ResolvedPackage {
-                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
-                    package,
-                }
+                let should_cache = self.should_cache_preassembled_package(package_id, selected);
+                (
+                    ResolvedPackage {
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    },
+                    should_cache,
+                )
             },
         };
 
+        if should_cache {
+            self.cache_resolved_package(&package)?;
+        }
         cache.insert(package_id.clone(), package.clone());
         Ok(package)
     }
@@ -463,7 +473,7 @@ where
                 Err(load_error) => {
                     if let Some(kernel_package) = package
                         .try_embedded_kernel_package()
-                        .map(|kernel_package| kernel_package.map(Arc::new))?
+                        .map(|kernel_package| kernel_package.map(Arc::from))?
                     {
                         return Ok(Some(kernel_package));
                     }
@@ -474,7 +484,7 @@ where
 
         package
             .try_embedded_kernel_package()
-            .map(|kernel_package| kernel_package.map(Arc::new))
+            .map(|kernel_package| kernel_package.map(Arc::from))
     }
 
     fn load_canonical_package(
@@ -536,9 +546,46 @@ where
         Ok(RegisteredSourcePackage::Loaded(package))
     }
 
-    fn publish_source_dependency(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
+    fn should_cache_preassembled_package(
+        &self,
+        package_id: &PackageId,
+        selected: &PackageVersion,
+    ) -> bool {
+        let Some(record) = self.store.get_by_semver(package_id, &selected.version) else {
+            return true;
+        };
+        if record.version() != selected {
+            return false;
+        }
+
+        self.store.load_package(package_id, selected).is_err()
+    }
+
+    fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
+        self.cache_package(package.package.clone())?;
+        if let Some(kernel_package) = package.linked_kernel_package.clone()
+            && self.should_cache_linked_kernel_package(kernel_package.as_ref())
+        {
+            self.cache_package(kernel_package)?;
+        }
+        Ok(())
+    }
+
+    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> bool {
+        let version = PackageVersion::new(package.version.clone(), package.digest());
+        let Some(record) = self.store.get_by_semver(&package.name, &package.version) else {
+            return true;
+        };
+        if record.version() != &version {
+            return false;
+        }
+
+        self.store.load_package(&package.name, &version).is_err()
+    }
+
+    fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
         self.store
-            .publish_package(package)
+            .cache_package(package)
             .map(|_| ())
             .map_err(|error| Report::msg(error.to_string()))
     }
@@ -664,10 +711,6 @@ fn target_root_module_kind(ty: TargetType) -> ModuleKind {
         TargetType::Kernel => ModuleKind::Kernel,
         _ => ModuleKind::Library,
     }
-}
-
-fn linked_kernel_package_section(package: &MastPackage) -> Section {
-    Section::new(SectionId::KERNEL, package.to_bytes())
 }
 
 fn module_path_from_relative(

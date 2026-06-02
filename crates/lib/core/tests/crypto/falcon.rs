@@ -1,7 +1,7 @@
 use std::{sync::Arc, vec};
 
 use miden_air::Felt;
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
     events::EventName,
@@ -356,6 +356,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     const M_INV: u64 = 15010777177727684609;
 
     // Malicious event handler that always returns remainder = 0.
+    // Signature matches the event-handler callback contract.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -388,7 +390,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // falcon_div handler from CoreLibrary.
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
@@ -412,6 +414,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     const FORGED_R: u64 = 5_664;
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
@@ -435,7 +438,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
@@ -452,6 +455,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -479,7 +483,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
 
     let core_lib = CoreLibrary::default();
     let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
+    test.libraries.push(core_lib.package());
     test.add_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
@@ -498,10 +502,11 @@ fn falcon_prove_verify() {
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
-        .with_dynamic_library(CoreLibrary::default())
+        .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
         .expect("failed to load core library")
-        .assemble_program(source)
-        .expect("failed to compile test source");
+        .assemble_program("program", source)
+        .expect("failed to compile test source")
+        .unwrap_program();
 
     let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
@@ -512,6 +517,7 @@ fn falcon_prove_verify() {
 
     let trace_inputs =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+            .expect("processor advice inputs should fit advice map limits")
             .execute_trace_inputs_sync(&program, &mut host)
             .expect("failed to execute");
     let trace = miden_processor::trace::build_trace(trace_inputs).expect("failed to build trace");

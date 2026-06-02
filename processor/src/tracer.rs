@@ -1,11 +1,9 @@
-use alloc::sync::Arc;
-
 use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
     field::{BasedVectorSpace, Field, QuadFelt},
-    mast::{MastForest, MastNodeId},
+    mast::{ExecutableMastForest, MastNodeId},
 };
 
 use crate::{
@@ -60,6 +58,14 @@ use crate::{
 pub trait Tracer {
     type Processor;
 
+    /// The forest representation passed to this tracer's [`start_clock_cycle`] /
+    /// [`finalize_clock_cycle`] / [`record_mast_forest_resolution`] hooks.
+    ///
+    /// For live execution this is `Arc<MastForest>`; for the replay path it is
+    /// `Arc<SparseMastForest>`. Continuation stacks and continuations carrying forest references
+    /// (e.g. `Continuation::EnterForest`) use the same type.
+    type Forest: ExecutableMastForest + Clone;
+
     /// Signals the start of a new clock cycle, guaranteed to be called at the start of the clock
     /// cycle, before any mutations to the processor state is made. For example, it is safe to
     /// access the processor's stack and memory state as they are before executing the operation at
@@ -68,23 +74,17 @@ pub trait Tracer {
     /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
     /// `continuation_stack` represents whatever comes after executing `continuation`.
     ///
-    /// The following continuations do not occur at the start of a clock cycle, and hence will never
-    /// be passed to this method:
-    /// - Continuation::FinishExternal: because external nodes are resolved before starting a clock
-    ///   cycle,
-    /// - Continuation::EnterForest: because entering a new forest does not consume a clock cycle,
-    /// - Continuation::AfterExitDecorators and Continuation::AfterExitDecoratorsBasicBlock: because
-    ///   after-exit decorators are executed at the end of an `END` operation; never at the start of
-    ///   a clock cycle
+    /// `Continuation::EnterForest` does not occur at the start of a clock cycle because entering a
+    /// new forest does not consume a clock cycle, and hence will never be passed to this method.
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
     fn start_clock_cycle(
         &mut self,
         processor: &Self::Processor,
-        continuation: Continuation,
-        continuation_stack: &ContinuationStack,
-        current_forest: &Arc<MastForest>,
+        continuation: Continuation<Self::Forest>,
+        continuation_stack: &ContinuationStack<Self::Forest>,
+        current_forest: &Self::Forest,
     );
 
     /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
@@ -99,7 +99,7 @@ pub trait Tracer {
         &mut self,
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
-        current_forest: &Arc<MastForest>,
+        current_forest: &Self::Forest,
     );
 
     // MAST FOREST RESOLUTION
@@ -116,7 +116,20 @@ pub trait Tracer {
     /// [Tracer::start_clock_cycle] is called on the resolved node (i.e. *not* the external node).
     /// This method is called on the external node before it is resolved, and hence is guaranteed to
     /// be called before [Tracer::start_clock_cycle] for clock cycles involving an external node.
-    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {}
+    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Self::Forest) {}
+
+    /// Records that the [miden_core::mast::ExternalNode] with the given id is being entered in
+    /// `forest`. Because external nodes are resolved before [Tracer::start_clock_cycle], they are
+    /// otherwise invisible to the tracer; this hook is provided so that implementations that
+    /// accumulate visited nodes (for building a sparse forest, for example) can include them.
+    ///
+    /// Default: no-op.
+    fn record_external_node_entered(
+        &mut self,
+        _external_node_id: MastNodeId,
+        _forest: &Self::Forest,
+    ) {
+    }
 
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
@@ -298,7 +311,7 @@ pub trait Tracer {
     ///
     /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
     /// `U32ASSERT2`.
-    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {}
+    fn record_u32_range_checks(&mut self, _u32_lo: Felt, _u32_hi: Felt) {}
 
     /// Records the procedure hash of a syscall.
     ///
@@ -464,13 +477,13 @@ pub enum OperationHelperRegisters {
         k1: Felt,
         acc_tmp: QuadFelt,
     },
-    /// Helper for the `LOG_PRECOMPILE` operation, which absorbs `TAG` and `COMM` into the
-    /// precompile sponge via a Poseidon2 permutation.
+    /// Helper for the `LOG_PRECOMPILE` operation, which folds the per-call statement word into
+    /// the rolling precompile-transcript state via a Poseidon2 permutation.
     ///
     /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
-    /// - `cap_prev`: the previous sponge capacity word, provided non-deterministically and used as
-    ///   the capacity input to the permutation.
-    LogPrecompile { addr: Felt, cap_prev: Word },
+    /// - `state_prev`: the previous transcript state word, provided non-deterministically and used
+    ///   as the rate0 input to the permutation.
+    LogPrecompile { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
 }
@@ -616,8 +629,8 @@ impl OperationHelperRegisters {
                 acc_tmp.as_basis_coefficients_slice()[0],
                 acc_tmp.as_basis_coefficients_slice()[1],
             ],
-            Self::LogPrecompile { addr, cap_prev } => {
-                [*addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
+            Self::LogPrecompile { addr, state_prev } => {
+                [*addr, state_prev[0], state_prev[1], state_prev[2], state_prev[3], ZERO]
             },
             Self::Empty => [ZERO; NUM_USER_OP_HELPERS],
         }
