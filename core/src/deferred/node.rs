@@ -1,4 +1,4 @@
-//! Shared precompile vocabulary: node shapes and reducer errors.
+//! Shared precompile vocabulary: node shapes and evaluation errors.
 //!
 //! The processor stores deferred nodes opaquely. Tag ownership, shape validation, and recursive
 //! evaluation live behind the [`Precompile`](super::Precompile)s in a
@@ -16,7 +16,7 @@ use super::{DeferredError, Digest, Payload};
 ///
 /// The shape tells registration and wire validation whether a body is raw value data, two child
 /// digests, or non-empty chunk data. Predicate status is not a shape; predicates succeed by
-/// reducing to [`super::Node::TRUE`].
+/// evaluating to [`super::Node::TRUE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
     /// One expression block of raw value data.
@@ -52,10 +52,10 @@ impl NodeType {
 // PRECOMPILE ERROR
 // ================================================================================================
 
-/// Errors produced while reducing deferred nodes through precompiles.
+/// Errors produced while evaluating deferred nodes through precompiles.
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileError {
-    /// A referenced child digest is not committed in the DAG.
+    /// A referenced child digest is not present in `DeferredState.nodes`.
     #[error("deferred DAG is missing a node referenced during evaluation")]
     MissingNode,
 
@@ -67,11 +67,11 @@ pub enum PrecompileError {
     #[error("deferred assertion failed: values disagree")]
     AssertionFailed,
 
-    /// A framework-level error surfaced by a precompile reducer.
+    /// A framework-level error surfaced by a precompile evaluation.
     #[error(transparent)]
     Other(#[from] DeferredError),
 
-    /// Adds the owning precompile's name to a tag or reduction failure.
+    /// Adds the owning precompile's name to a tag or evaluation failure.
     ///
     /// Registry construction errors are setup-time panics and are not represented here.
     #[error("precompile `{name}`: {source}")]

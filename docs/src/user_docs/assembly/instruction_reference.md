@@ -201,14 +201,14 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
-| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates (reduces) node, interns the canonical, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload words). |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates the node, stores the canonical node, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload words). |
 
-_Deferred DAG (host-side intern; node digest derived in-circuit, no advice output):_
+_Deferred DAG (host-side registration; node digest derived in-circuit, no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Interns an expression node; digest derived in-circuit by `sys::register_expr` (`hperm`). |
-| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Interns a chunk node (length from `TAG`, data from memory at `ptr`); digest derived in-circuit by `sys::register_chunk` (`mem_stream`). |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an expression node; digest derived in-circuit by `sys::register_expr` (`hperm`). |
+| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a chunk node (length from `TAG`, data from memory at `ptr`); digest derived in-circuit by `sys::register_chunk` (`mem_stream`). |
 
 _Insert into Advice Map:_
 

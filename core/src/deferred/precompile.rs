@@ -1,12 +1,12 @@
 //! Trait and id scheme for deferred precompiles.
 //!
 //! A [`Precompile`] owns a stable slice of tag space and supplies the semantics the framework
-//! cannot know: which tags are valid, what their bodies mean, and how nodes reduce to canonical
+//! cannot know: which tags are valid, what their bodies mean, and how nodes evaluate to canonical
 //! form. The framework owns only id derivation and routing.
 
 use alloc::{format, vec::Vec};
 
-use super::{Node, NodeType, Payload, PrecompileError, WitnessBuilder};
+use super::{DeferredContext, Node, NodeType, Payload, PrecompileError};
 use crate::{Felt, utils::hash_string_to_word};
 
 // PRECOMPILE TRAIT
@@ -25,9 +25,9 @@ pub trait Precompile: Send + Sync {
     /// turning id drift into a setup-time failure.
     fn id(&self) -> Felt;
 
-    /// Canonical constants this precompile wants committed before execution.
+    /// Canonical constants this precompile wants registered before execution.
     ///
-    /// Registry initialization interns them and rejects cross-precompile digest collisions. The
+    /// Registry initialization registers them and rejects cross-precompile digest collisions. The
     /// default contributes no constants.
     fn init(&self) -> Vec<Node> {
         Vec::new()
@@ -39,23 +39,24 @@ pub trait Precompile: Send + Sync {
     /// this only interprets `tag.args`.
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType>;
 
-    /// Reduces one owned node to its canonical form.
+    /// Evaluates one owned node to its canonical form.
     ///
     /// The registry has already matched `tag.id`; implementors receive only local `args` and a
-    /// payload whose outer shape passed [`Self::decode`]. Use [`WitnessBuilder`] to resolve
-    /// committed child digests or to intern helper nodes referenced by a compound canonical.
+    /// payload whose outer shape passed [`Self::decode`]. Use [`DeferredContext`] to evaluate
+    /// registered child digests (digests present in the state's node store) or to register helper
+    /// nodes referenced by a compound canonical.
     ///
     /// Common conventions:
     /// - canonical leaves return themselves after validating payload contents;
-    /// - producing ops resolve children and return the resulting canonical node;
+    /// - producing ops evaluate children and return the resulting canonical node;
     /// - predicates return [`Node::TRUE`] on success and [`PrecompileError::AssertionFailed`] on
     ///   mismatch;
-    /// - chunk leaves usually reduce to an expression digest leaf.
-    fn reduce(
+    /// - chunk leaves usually evaluate to an expression digest leaf.
+    fn evaluate(
         &self,
         args: [Felt; 3],
         payload: &Payload,
-        witness: &mut WitnessBuilder<'_>,
+        context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError>;
 }
 

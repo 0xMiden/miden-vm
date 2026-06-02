@@ -295,7 +295,7 @@ pub enum SystemEvent {
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
-    /// Commits an expression-bodied deferred node to the DAG.
+    /// Registers an expression-bodied deferred node in the DAG.
     ///
     /// Registration validates the tag/payload shape against the host-installed deferred
     /// precompile registry and gives later nodes and transcript steps a stable digest to
@@ -312,11 +312,11 @@ pub enum SystemEvent {
     ///   DAG state:     {... node(TAG, PAYLOAD)}
     DeferredRegister,
 
-    /// Reduces a committed node and exposes its canonical form as advice.
+    /// Evaluates a registered node and exposes its canonical form as advice.
     ///
-    /// The digest must already be committed in deferred state; memo hits are accepted only after
-    /// that membership check. Reduction is routed through the host-installed deferred precompile
-    /// registry. Predicate nodes verify here by reducing to [`crate::deferred::Node::TRUE`] or
+    /// The digest must already be registered in deferred state; memo hits are accepted only after
+    /// that membership check. Evaluation is routed through the host-installed deferred precompile
+    /// registry. Predicate nodes verify here by evaluating to [`crate::deferred::Node::TRUE`] or
     /// failing with the precompile's assertion error.
     ///
     /// The advice output is an unbound host hint. Callers that rely on it must re-hash the
@@ -330,7 +330,7 @@ pub enum SystemEvent {
     ///   Advice stack:  canonical `tag || payload` in felt-index order
     DeferredEvaluate,
 
-    /// Commits a chunk-bodied deferred node to the DAG.
+    /// Registers a chunk-bodied deferred node in the DAG.
     ///
     /// The host-installed deferred precompile registry decodes the tag's chunk count, making
     /// length part of the commitment. The handler checks the projected deferred-state budget before

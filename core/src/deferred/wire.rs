@@ -1,6 +1,6 @@
 //! Compact wire format for deferred-state witnesses.
 //!
-//! Proofs carry a canonical, topologically ordered stream of the materialized DAG entries needed to
+//! Proofs carry a canonical, topologically ordered stream of the explicit DAG entries needed to
 //! open an externally committed deferred root. Wire index 0 is reserved for the implicit TRUE node;
 //! entry `i` has wire index `i + 1`, and join entries may only reference TRUE or earlier entries.
 //! Empty wire opens [`TRUE_DIGEST`]; otherwise the root is the digest of the final entry.
@@ -40,7 +40,7 @@ pub const TRUE_INDEX: u32 = 0;
 // WIRE ENTRY
 // ================================================================================================
 
-/// One materialized deferred DAG entry in topological wire order.
+/// One explicit deferred DAG entry in topological wire order.
 ///
 /// Wire index 0 is implicit TRUE. `entries[i]` has wire index `i + 1`. Join children must reference
 /// `TRUE_INDEX` or an earlier entry.
@@ -476,8 +476,8 @@ pub enum IntegrityError {
     /// Root evaluation failed under the installed precompile registry.
     #[error("deferred root failed evaluation: {0}")]
     EvaluationFailed(#[from] PrecompileError),
-    /// The root reduced, but not to the canonical TRUE node.
-    #[error("deferred root reduced to a non-TRUE canonical form")]
+    /// The root evaluated, but not to the canonical TRUE node.
+    #[error("deferred root evaluated to a non-TRUE canonical form")]
     RootNotTrue,
     /// Rehydrating the wire would exceed the configured deferred-state budget.
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]

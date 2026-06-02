@@ -1,7 +1,7 @@
 //! Mock hash precompile for exercising chunk-bodied deferred nodes.
 //!
-//! A `preimage` chunk node reduces to a `digest` leaf by summing chunks coordinate-wise. The
-//! intentionally simple hash keeps tests focused on framework behavior: chunk arity, reduction,
+//! A `preimage` chunk node evaluates to a `digest` leaf by summing chunks coordinate-wise. The
+//! intentionally simple hash keeps tests focused on framework behavior: chunk arity, evaluation,
 //! and equality predicates.
 
 use alloc::sync::Arc;
@@ -10,8 +10,8 @@ use core::num::NonZeroU32;
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WitnessBuilder, precompile_id,
+        DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
+        PrecompileError, Tag, precompile_id,
     },
 };
 
@@ -124,11 +124,11 @@ impl Precompile for Hash {
         }
     }
 
-    fn reduce(
+    fn evaluate(
         &self,
         args: [Felt; 3],
         payload: &Payload,
-        witness: &mut WitnessBuilder<'_>,
+        context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         match Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)? {
             Discriminant::Preimage => {
@@ -141,7 +141,7 @@ impl Precompile for Hash {
             },
             Discriminant::Eq => {
                 let (h_lhs, h_rhs) = payload.join_children()?;
-                if witness.resolve(h_lhs)? != witness.resolve(h_rhs)? {
+                if context.resolve(h_lhs)? != context.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(Node::TRUE)

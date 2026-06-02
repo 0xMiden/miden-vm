@@ -56,7 +56,7 @@ pub enum ExecutionError {
         #[source]
         error: EventError,
     },
-    /// Deferred system event failed while validating or reducing a committed node.
+    /// Deferred system event failed while validating or evaluating a committed node.
     #[error("{err}")]
     #[diagnostic()]
     DeferredError {

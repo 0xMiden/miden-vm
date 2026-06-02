@@ -1,4 +1,4 @@
-//! Integration coverage for chunk reduction and digest equality in the mock hash precompile.
+//! Integration coverage for chunk evaluation and digest equality in the mock hash precompile.
 
 mod common;
 
@@ -23,7 +23,7 @@ fn fresh() -> (PrecompileRegistry, DeferredState) {
 }
 
 #[test]
-fn preimage_reduces_to_known_digest_and_eq_predicate_passes() {
+fn preimage_evaluates_to_known_digest_and_eq_predicate_passes() {
     let registry = PrecompileRegistry::default().with_precompile(Uint).with_precompile(Hash);
     let mut state = DeferredState::new(usize::MAX);
     registry.init(&mut state).unwrap();

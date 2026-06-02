@@ -1,7 +1,7 @@
 //! Processor glue for deferred-DAG system events.
 //!
 //! These handlers keep the processor agnostic to precompile semantics: they read VM inputs,
-//! update deferred state, and delegate validation/reduction to the installed registry.
+//! update deferred state, and delegate validation/evaluation to the installed registry.
 
 use alloc::vec::Vec;
 
@@ -28,10 +28,11 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler looks it up by digest, reduces it via the precompile registry, interns the canonical,
-// and pushes the canonical's `tag || payload` felts onto the advice stack.
+// handler looks it up by digest, evaluates it via the precompile registry, stores the canonical
+// node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the advice
+// stack.
 
-/// Stack offset of the committed node digest.
+/// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
 
 // STACK LAYOUT — `DeferredRegisterChunk`
@@ -67,7 +68,7 @@ fn read_tag_and_payload(processor: &FastProcessor) -> (Tag, Payload) {
 
 /// Handles expression-node registration for deferred computation.
 ///
-/// The event only commits the node; predicate truth is checked later by evaluation or transcript
+/// The event only registers the node; predicate truth is checked later by evaluation or transcript
 /// rehydration. The MASM wrapper binds the digest in-circuit, so the host cannot supply an
 /// unconstrained commitment through advice.
 pub(super) fn handle_deferred_register(
@@ -81,7 +82,7 @@ pub(super) fn handle_deferred_register(
 
 /// Handles deferred-node evaluation and returns the canonical node as advice.
 ///
-/// The digest must already be committed in deferred state; memo hits are allowed only after that
+/// The digest must already be registered in deferred state; memo hits are allowed only after that
 /// membership check. The advice output is `tag || payload` in felt-index order and is intentionally
 /// unbound: callers that depend on it must re-hash it in-circuit and log a predicate that
 /// rehydration will verify.
@@ -135,8 +136,8 @@ pub(super) fn handle_deferred_register_chunk(
 
     // Reject chunk nodes that can never fit in the configured deferred-state budget before
     // reading memory. Remaining-budget accounting still belongs to `DeferredState::register`,
-    // because only materializing the node tells us whether this registration is an idempotent
-    // duplicate (which must remain free).
+    // because only inserting the node into `nodes` tells us whether this registration is an
+    // idempotent duplicate (which must remain free).
     let num_elements = chunk_node_num_elements(n);
     let max_deferred_elements = processor.options.max_deferred_elements();
     if num_elements > max_deferred_elements {

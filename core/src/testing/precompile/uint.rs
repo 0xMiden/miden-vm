@@ -8,8 +8,8 @@ use alloc::{vec, vec::Vec};
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredError, Digest, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
-        WitnessBuilder, precompile_id,
+        DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
+        PrecompileError, Tag, precompile_id,
     },
 };
 
@@ -149,23 +149,23 @@ impl Precompile for Uint {
         })
     }
 
-    fn reduce(
+    fn evaluate(
         &self,
         args: [Felt; 3],
         payload: &Payload,
-        witness: &mut WitnessBuilder<'_>,
+        context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         match UintNode::parse(args, payload)? {
-            // Leaf canonicality is validated at reduce-time, so a malformed leaf only errors when
-            // used.
+            // Leaf canonicality is validated at evaluation-time, so a malformed leaf only errors
+            // when used.
             UintNode::Leaf => Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?)),
             UintNode::BinaryOp { op, lhs, rhs } => {
-                let a = leaf_limbs(&witness.resolve(lhs)?)?;
-                let b = leaf_limbs(&witness.resolve(rhs)?)?;
+                let a = leaf_limbs(&context.resolve(lhs)?)?;
+                let b = leaf_limbs(&context.resolve(rhs)?)?;
                 Ok(Self::leaf_node(op.apply(a, b)))
             },
             UintNode::Eq { lhs, rhs } => {
-                if witness.resolve(lhs)? != witness.resolve(rhs)? {
+                if context.resolve(lhs)? != context.resolve(rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }
                 Ok(Node::TRUE)
@@ -215,7 +215,7 @@ impl BinaryOp {
     }
 }
 
-/// Parsed uint node ready for reduction.
+/// Parsed uint node ready for evaluation.
 enum UintNode {
     Leaf,
     BinaryOp { op: BinaryOp, lhs: Digest, rhs: Digest },

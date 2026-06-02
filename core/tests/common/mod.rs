@@ -17,7 +17,7 @@ pub fn leaf(low: u64) -> Node {
     Uint::leaf_node(limbs)
 }
 
-/// Registers, verifies, logs, and round-trips a predicate expected to reduce to TRUE.
+/// Registers, verifies, logs, and round-trips a predicate expected to evaluate to TRUE.
 pub fn log_and_verify(registry: &PrecompileRegistry, state: &mut DeferredState, predicate: Node) {
     let stmt_digest = state.register(registry, predicate).unwrap();
     let root = state.append_statement(registry, stmt_digest).unwrap();
