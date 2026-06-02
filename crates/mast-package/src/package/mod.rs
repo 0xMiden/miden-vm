@@ -43,7 +43,10 @@ pub use self::{
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
 };
-use crate::{Dependency, Version, debug_info::PackageDebugInfo};
+use crate::{
+    Dependency, Version,
+    debug_info::{DebugSourceMastNodeId, PackageDebugInfo},
+};
 
 /// Errors raised while stripping package-owned debug information.
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +61,8 @@ pub enum PackageStripError {
 /// Errors raised while decoding trusted package-owned debug information.
 #[derive(Debug, thiserror::Error)]
 pub enum PackageDebugInfoError {
+    #[error("package debug sections were preserved from an untrusted read and are not trusted")]
+    UntrustedSections,
     #[error("package contains multiple '{id}' debug sections")]
     DuplicateSection {
         /// Duplicated section identifier.
@@ -120,6 +125,11 @@ pub struct Package {
     /// The set of custom sections included with the package, e.g. debug information, account
     /// metadata, etc.
     pub sections: Vec<Section>,
+    /// Whether package-owned debug sections may be decoded as trusted debug info.
+    ///
+    /// Checked package deserialization preserves section framing but marks debug sections
+    /// untrusted. Trusted local assembly and unchecked trusted-cache reads set this to true.
+    debug_sections_trusted: bool,
 }
 
 /// Construction
@@ -175,6 +185,7 @@ impl Package {
             mast,
             manifest,
             sections: Vec::new(),
+            debug_sections_trusted: true,
         };
 
         package.recompute_mast_commitment()?;
@@ -218,11 +229,9 @@ impl Package {
 
     /// Removes all package-owned debug information from this package.
     ///
-    /// This clears the embedded MAST forest debug info, removes well-known package debug sections,
-    /// and recursively strips an embedded kernel package if one is present.
+    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// package if one is present.
     pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
-        self.mast = Arc::new(self.mast.as_ref().clone().without_debug_info());
-
         for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
             let mut kernel_package = Self::read_from_bytes(section.data.as_ref())
                 .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
@@ -353,24 +362,17 @@ impl Package {
         Ok(Some(kernel_dependency))
     }
 
-    /// Returns the procedure name for the given MAST root digest, if present.
-    ///
-    /// This allows debuggers to resolve human-readable procedure names during execution.
-    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.mast.procedure_name(digest)
-    }
-
-    /// Returns an iterator over all (digest, name) pairs of procedure names.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
-        self.mast.procedure_names()
-    }
-
     /// Decodes trusted package-owned debug sections, if any are present.
     ///
     /// This does not read legacy debug metadata from the embedded [`MastForest`]. During the
     /// migration, forest debug info may still exist as compatibility data, but package-owned debug
     /// consumers should use this section-backed API.
     pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
+        if !self.debug_sections_trusted && self.sections.iter().any(|section| section.id.is_debug())
+        {
+            return Err(PackageDebugInfoError::UntrustedSections);
+        }
+
         let debug_info = PackageDebugInfo {
             types: self.read_debug_section(SectionId::DEBUG_TYPES)?,
             sources: self.read_debug_section(SectionId::DEBUG_SOURCES)?,
@@ -455,6 +457,7 @@ impl Package {
             match export {
                 PackageExport::Procedure(ProcedureExport {
                     node,
+                    source_node,
                     digest,
                     path,
                     signature,
@@ -467,6 +470,7 @@ impl Package {
                         signature.clone().map(Arc::new),
                         attributes.clone(),
                         *node,
+                        source_node.map(u32::from),
                         Some(self.mast.commitment()),
                     );
                 },
@@ -857,7 +861,7 @@ impl Package {
     #[cfg(feature = "std")]
     pub fn deserialize_from_file(
         path: impl AsRef<std::path::Path>,
-    ) -> Result<Self, miden_core::serde::DeserializationError> {
+    ) -> Result<Self, DeserializationError> {
         use miden_core::serde::DeserializationError;
 
         let path = path.as_ref();
@@ -886,10 +890,10 @@ mod tests {
     use miden_core::{
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestContributor, MastNode,
-            MastNodeExt, MastNodeId,
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
+            MastNodeId,
         },
-        operations::{AssemblyOp, Operation},
+        operations::Operation,
         serde::Serializable,
         utils::IndexVec,
     };
@@ -934,39 +938,55 @@ mod tests {
 
     fn build_same_digest_package_exports(
         exports: &[(&str, &str)],
-    ) -> (Arc<MastForest>, Vec<PackageExport>) {
+    ) -> (Arc<MastForest>, Vec<PackageExport>, Vec<Section>) {
         let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
         let mut roots = Vec::new();
-        let mut debug_info = DebugInfo::new();
         let mut new_exports = vec![];
+        let mut source_nodes = Vec::new();
+        let mut asm_ops = Vec::new();
 
-        for (path_str, context_name) in exports {
-            let asm_op_id = debug_info
-                .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
-                .expect("failed to add asm op");
+        for (source_idx, (path_str, context_name)) in exports.iter().enumerate() {
             let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
                 .build()
                 .expect("failed to build basic block");
             let num_ops = node.num_operations() as usize;
             let digest = node.digest();
             let node_id = nodes.push(node.into()).expect("failed to add basic block");
-            debug_info
-                .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
-                .expect("failed to register asm ops");
+            let source_node = DebugSourceMastNodeId::from(source_idx as u32);
+            source_nodes.push(DebugSourceMastNode::new(node_id, Vec::new(), 0, num_ops as u32));
+            asm_ops.push(DebugSourceAsmOp::new(
+                source_node,
+                0,
+                None,
+                (*context_name).into(),
+                "add".into(),
+                1,
+            ));
             roots.push(node_id);
 
             let path = absolute_path(path_str);
-            new_exports.push(PackageExport::Procedure(ProcedureExport::new(
-                path,
-                Some(node_id),
-                digest,
-                None,
-            )));
+            new_exports.push(PackageExport::Procedure(
+                ProcedureExport::new(path, Some(node_id), digest, None)
+                    .with_source_node(Some(source_node)),
+            ));
         }
 
-        let forest = MastForest::from_raw_parts(nodes, roots, AdviceMap::default(), debug_info)
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: source_nodes,
+            roots: (0..exports.len())
+                .map(|source_idx| DebugSourceMastNodeId::from(source_idx as u32))
+                .collect(),
+        };
+        let source_map = DebugSourceMapSection { asm_ops, ..DebugSourceMapSection::new() };
+        let sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let forest = MastForest::from_raw_parts(nodes, roots, AdviceMap::default())
             .expect("failed to build forest");
-        (Arc::new(forest), new_exports)
+        (Arc::new(forest), new_exports, sections)
     }
 
     fn build_package(
@@ -995,9 +1015,18 @@ mod tests {
     }
 
     fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
-        let (mast, exports) = build_same_digest_package_exports(&[(export, context)]);
-        Package::create(PackageId::from(name), Version::new(1, 0, 0), kind, mast, exports, None)
-            .unwrap()
+        let (mast, exports, sections) = build_same_digest_package_exports(&[(export, context)]);
+        let mut package = Package::create(
+            PackageId::from(name),
+            Version::new(1, 0, 0),
+            kind,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        package.sections = sections;
+        package
     }
 
     fn debug_sections() -> Vec<Section> {
@@ -1170,7 +1199,7 @@ mod tests {
         kernel
             .sections
             .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![42, 43, 44]));
-        assert!(kernel.mast_forest().debug_info().num_asm_ops() > 0);
+        assert!(kernel.sections.iter().any(|section| section.id.is_debug()));
 
         let mut package =
             build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
@@ -1181,13 +1210,12 @@ mod tests {
             .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 3, 5]));
         package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
         let content_digest = package.content_digest();
-        assert!(package.mast_forest().debug_info().num_asm_ops() > 0);
+        assert!(package.sections.iter().any(|section| section.id.is_debug()));
 
         package.strip_debug_info().expect("strip should succeed");
 
         assert_eq!(package.digest(), digest);
         assert_eq!(package.content_digest(), content_digest);
-        assert!(package.mast_forest().debug_info().is_empty());
         assert!(!package.sections.iter().any(|section| section.id.is_debug()));
         assert!(
             package
@@ -1200,7 +1228,6 @@ mod tests {
             .embedded_kernel_package()
             .unwrap()
             .expect("kernel should remain embedded");
-        assert!(stripped_kernel.mast_forest().debug_info().is_empty());
         assert!(!stripped_kernel.sections.iter().any(|section| section.id.is_debug()));
         assert!(
             stripped_kernel
@@ -1248,11 +1275,11 @@ mod tests {
 
     #[test]
     fn make_executable_preserves_selected_same_digest_root_metadata() {
-        let (mast, exports) = build_same_digest_package_exports(&[
+        let (mast, exports, sections) = build_same_digest_package_exports(&[
             ("app::alias_a", "alias_a"),
             ("app::alias_b", "alias_b"),
         ]);
-        let package = Package::create(
+        let mut package = Package::create(
             PackageId::from("app"),
             Version::new(1, 0, 0),
             TargetType::Library,
@@ -1261,32 +1288,32 @@ mod tests {
             None,
         )
         .expect("package should be valid");
+        package.sections = sections;
 
         let entrypoint = QualifiedProcedureName::from_str("app::alias_b").unwrap();
         let executable = package.make_executable(&entrypoint).unwrap();
 
         let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
         let entrypoint_node = executable.get_procedure_node_by_path(&main_path).unwrap();
+        let main_export = executable
+            .manifest
+            .get_export(&main_path)
+            .and_then(PackageExport::as_procedure)
+            .expect("main export should exist");
+        let source_node = main_export.source_node.expect("main export should retain source node");
+        let debug_info = executable
+            .debug_info()
+            .expect("debug sections should decode")
+            .expect("debug sections should be present");
+
+        assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, entrypoint_node);
         assert_eq!(
-            executable
-                .mast_forest()
-                .debug_info()
-                .first_asm_op_for_node(entrypoint_node)
-                .unwrap()
-                .context_name(),
+            debug_info.first_asm_op_for_source_node(source_node).unwrap().context_name,
             "alias_b"
         );
 
         let program = executable.try_into_program().unwrap();
-        assert_eq!(
-            program
-                .mast_forest()
-                .debug_info()
-                .first_asm_op_for_node(program.entrypoint())
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
+        assert_eq!(program.entrypoint(), entrypoint_node);
     }
 
     #[test]

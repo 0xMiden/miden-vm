@@ -264,119 +264,6 @@ impl DebugInfo {
         self.asm_op_storage.add_asm_ops_for_node(node_id, num_operations, asm_ops)
     }
 
-    /// Remaps the asm_op_storage to use new node IDs after nodes have been removed/reordered.
-    ///
-    /// This should be called after nodes are removed from the MastForest to ensure the asm_op
-    /// storage still references valid node IDs.
-    #[cfg(test)]
-    pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
-        self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
-    }
-
-    /// Remaps the op-indexed debug-variable storage to use new node IDs after nodes have been
-    /// removed/reordered.
-    #[cfg(test)]
-    pub(super) fn remap_debug_var_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
-        self.op_debug_var_storage = self.op_debug_var_storage.remap_nodes(remapping);
-    }
-
-    /// Drops debug metadata entries that are no longer referenced by any retained node, and remaps
-    /// node-indexed storage to the compacted metadata IDs.
-    #[cfg(test)]
-    pub(super) fn compact_node_metadata(&mut self) {
-        self.compact_asm_ops();
-        self.compact_debug_vars();
-    }
-
-    #[cfg(test)]
-    fn compact_asm_ops(&mut self) {
-        if self.asm_ops.is_empty() {
-            return;
-        }
-
-        let old_asm_ops = core::mem::replace(&mut self.asm_ops, IndexVec::new());
-        let old_storage = core::mem::take(&mut self.asm_op_storage);
-
-        let mut remapping = BTreeMap::<AsmOpId, AsmOpId>::new();
-        let mut new_storage = OpToAsmOpId::new();
-
-        for node_idx in 0..old_storage.num_nodes() {
-            let node_id = MastNodeId::new_unchecked(node_idx as u32);
-            let entries = old_storage
-                .asm_ops_for_node(node_id)
-                .into_iter()
-                .map(|(op_idx, old_id)| {
-                    let new_id = if let Some(&new_id) = remapping.get(&old_id) {
-                        new_id
-                    } else {
-                        let asm_op = old_asm_ops
-                            .get(old_id)
-                            .expect("asm-op storage must reference a valid asm op");
-                        let new_id = self
-                            .asm_ops
-                            .push(asm_op.clone())
-                            .expect("compacted asm-op count cannot exceed original count");
-                        remapping.insert(old_id, new_id);
-                        new_id
-                    };
-
-                    (op_idx, new_id)
-                })
-                .collect::<Vec<_>>();
-
-            let num_operations = entries.last().map_or(0, |(op_idx, _)| op_idx + 1);
-            new_storage
-                .add_asm_ops_for_node(node_id, num_operations, entries)
-                .expect("compacted asm-op storage must preserve valid node order");
-        }
-
-        self.asm_op_storage = new_storage;
-    }
-
-    #[cfg(test)]
-    fn compact_debug_vars(&mut self) {
-        if self.debug_vars.is_empty() {
-            return;
-        }
-
-        let old_debug_vars = core::mem::replace(&mut self.debug_vars, IndexVec::new());
-        let old_storage = core::mem::take(&mut self.op_debug_var_storage);
-
-        let mut remapping = BTreeMap::<DebugVarId, DebugVarId>::new();
-        let mut new_storage = OpToDebugVarIds::new();
-
-        for node_idx in 0..old_storage.num_nodes() {
-            let node_id = MastNodeId::new_unchecked(node_idx as u32);
-            let entries = old_storage
-                .debug_vars_for_node(node_id)
-                .into_iter()
-                .map(|(op_idx, old_id)| {
-                    let new_id = if let Some(&new_id) = remapping.get(&old_id) {
-                        new_id
-                    } else {
-                        let debug_var = old_debug_vars
-                            .get(old_id)
-                            .expect("debug-var storage must reference a valid debug var");
-                        let new_id = self
-                            .debug_vars
-                            .push(debug_var.clone())
-                            .expect("compacted debug-var count cannot exceed original count");
-                        remapping.insert(old_id, new_id);
-                        new_id
-                    };
-
-                    (op_idx, new_id)
-                })
-                .collect::<Vec<_>>();
-
-            new_storage
-                .add_debug_var_info_for_node(node_id, entries)
-                .expect("compacted debug-var storage must preserve valid node order");
-        }
-
-        self.op_debug_var_storage = new_storage;
-    }
-
     // DEBUG VARIABLE MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -470,12 +357,6 @@ impl DebugInfo {
     /// Clears all procedure names.
     pub fn clear_procedure_names(&mut self) {
         self.procedure_names.clear();
-    }
-
-    /// Retains only procedure names whose digest satisfies `keep_digest`.
-    #[cfg(test)]
-    pub(super) fn retain_procedure_names(&mut self, mut keep_digest: impl FnMut(&Word) -> bool) {
-        self.procedure_names.retain(|digest, _| keep_digest(digest));
     }
 
     // VALIDATION

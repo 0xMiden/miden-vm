@@ -58,7 +58,7 @@ impl Deserializable for DebugTypesSection {
                 "debug_types strings count {strings_len} exceeds budget {max_strings}"
             )));
         }
-        let mut strings = alloc::vec::Vec::with_capacity(strings_len);
+        let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
@@ -110,7 +110,7 @@ impl Deserializable for DebugSourcesSection {
                 "debug_sources strings count {strings_len} exceeds budget {max_strings}"
             )));
         }
-        let mut strings = alloc::vec::Vec::with_capacity(strings_len);
+        let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
@@ -162,7 +162,7 @@ impl Deserializable for DebugFunctionsSection {
                 "debug_functions strings count {strings_len} exceeds budget {max_strings}"
             )));
         }
-        let mut strings = alloc::vec::Vec::with_capacity(strings_len);
+        let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
@@ -438,7 +438,7 @@ impl Deserializable for DebugTypeInfo {
                 } else {
                     None
                 };
-                let param_type_indices = alloc::vec::Vec::<DebugTypeIdx>::read_from(source)?;
+                let param_type_indices = Vec::<DebugTypeIdx>::read_from(source)?;
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
             TYPE_TAG_ENUM => {
@@ -773,8 +773,8 @@ mod tests {
         }
     }
 
-    fn section_with_strings(version: u8, strings_len: usize) -> alloc::vec::Vec<u8> {
-        let mut bytes = alloc::vec::Vec::new();
+    fn section_with_strings(version: u8, strings_len: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
         bytes.write_u8(version);
         bytes.write_usize(strings_len);
         for _ in 0..strings_len {
@@ -784,8 +784,8 @@ mod tests {
         bytes
     }
 
-    fn function_type_bytes(params_len: usize) -> alloc::vec::Vec<u8> {
-        let mut bytes = alloc::vec::Vec::new();
+    fn function_type_bytes(params_len: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
         bytes.write_u8(TYPE_TAG_FUNCTION);
         bytes.write_bool(false);
         bytes.write_usize(params_len);
@@ -796,7 +796,7 @@ mod tests {
     }
 
     fn roundtrip<T: Serializable + Deserializable + PartialEq + core::fmt::Debug>(value: &T) {
-        let mut bytes = alloc::vec::Vec::new();
+        let mut bytes = Vec::new();
         value.write_into(&mut bytes);
         let result = T::read_from(&mut miden_core::serde::SliceReader::new(&bytes)).unwrap();
         assert_eq!(value, &result);

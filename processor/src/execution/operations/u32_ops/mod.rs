@@ -305,7 +305,7 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer, F>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-    program: &F,
+    _program: &F,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     F: ExecutableMastForest + ?Sized,
@@ -329,8 +329,11 @@ where
             // A custom error code was provided: surface it as a U32AssertionFailed so
             // callers get both the error context *and* the offending values for
             // richer diagnostics (addresses bobbinth's review suggestion).
-            let err_msg = program.resolve_error_message(err_code);
-            return Err(OperationError::U32AssertionFailed { err_code, err_msg, invalid_values });
+            return Err(OperationError::U32AssertionFailed {
+                err_code,
+                err_msg: None,
+                invalid_values,
+            });
         }
 
         // No custom error code: report the specific out-of-range values so

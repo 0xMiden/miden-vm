@@ -30,7 +30,8 @@ use miden_core::{
 };
 use miden_mast_package::{
     ConstantExport, Package, PackageExport, PackageId, PackageModule, PackageSubmodule,
-    ProcedureExport, Section, SectionId, TypeExport,
+    PackageDebugInfoError, ProcedureExport,
+    Section, SectionId, TypeExport, debug_info::DebugSourceMastNodeId,
 };
 use miden_project::{Linkage, TargetType};
 
@@ -41,7 +42,10 @@ use crate::{
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::{MastForestBuilder, MastNodeRef, SourceDebugGraph},
+    mast_forest_builder::{
+        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceMastNodeId, SourceMastNodeRef,
+        StaticLibrary,
+    },
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -60,6 +64,7 @@ enum PendingPackageExport {
 #[derive(Debug)]
 struct PendingProcedureExport {
     node_ref: MastNodeRef,
+    source_ref: Option<SourceMastNodeRef>,
     digest: Word,
     path: Arc<Path>,
     signature: Option<FunctionType>,
@@ -70,9 +75,10 @@ impl PendingPackageExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
     ) -> Result<PackageExport, Report> {
         match self {
-            Self::Procedure(export) => export.into_package_export(node_id_by_ref),
+            Self::Procedure(export) => export.into_package_export(node_id_by_ref, source_id_by_ref),
             Self::Constant(export) => Ok(PackageExport::Constant(export)),
             Self::Type(export) => Ok(PackageExport::Type(export)),
         }
@@ -83,14 +89,20 @@ impl PendingProcedureExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
     ) -> Result<PackageExport, Report> {
         let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
             Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
         })?;
+        let source_node = self
+            .source_ref
+            .and_then(|source_ref| source_id_by_ref.get(&source_ref).copied())
+            .map(|source_id| DebugSourceMastNodeId::from(u32::from(source_id)));
         Ok(PackageExport::Procedure(ProcedureExport {
             digest: self.digest,
             path: self.path,
             node: Some(node),
+            source_node,
             signature: self.signature,
             attributes: self.attributes,
         }))
@@ -489,14 +501,8 @@ impl Assembler {
         module_indices: &[ModuleIndex],
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.linkage, Linkage::Static) {
-                Some(lib.mast().as_ref())
-            } else {
-                None
-            }
-        });
-        let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        let staticlibs = self.static_libraries_for_builder()?;
+        let mut mast_forest_builder = MastForestBuilder::new_with_static_libraries(staticlibs)?;
         let exports = {
             let mut exports = BTreeMap::new();
 
@@ -570,12 +576,14 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, node_id_by_ref, source_graph, _) =
+        let (mast_forest, node_id_by_ref, source_graph, source_id_by_ref) =
             mast_forest_builder.build()?.into_parts_with_source_graph();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
-                export.into_package_export(&node_id_by_ref).map(|export| (path, export))
+                export
+                    .into_package_export(&node_id_by_ref, &source_id_by_ref)
+                    .map(|export| (path, export))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
@@ -655,6 +663,7 @@ impl Assembler {
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
+                            item.source_debug_root_id().map(DebugSourceMastNodeId::from),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -680,6 +689,7 @@ impl Assembler {
                     digest,
                     path: symbol_path,
                     node_ref: node,
+                    source_ref: mast_forest_builder.latest_source_ref_for_node_ref(node),
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
@@ -705,6 +715,8 @@ impl Assembler {
                     digest,
                     path: symbol_path,
                     node_ref: proc.body_node_ref(),
+                    source_ref: mast_forest_builder
+                        .latest_source_ref_for_node_ref(proc.body_node_ref()),
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
                 })
@@ -811,14 +823,8 @@ impl Assembler {
             .ok_or(SemanticAnalysisError::MissingEntrypoint)?;
 
         // Compile the linked module graph rooted at the entrypoint
-        let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.linkage, Linkage::Static) {
-                Some(lib.mast().as_ref())
-            } else {
-                None
-            }
-        });
-        let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        let staticlibs = self.static_libraries_for_builder()?;
+        let mut mast_forest_builder = MastForestBuilder::new_with_static_libraries(staticlibs)?;
 
         if let Some(advice_map) = self.linker[module_index].advice_map() {
             mast_forest_builder.merge_advice_map(advice_map)?;
@@ -886,6 +892,26 @@ impl Assembler {
         Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
     }
 
+    fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
+        self.linker
+            .libraries()
+            .filter(|lib| matches!(lib.linkage, Linkage::Static))
+            .map(|lib| {
+                let debug_info = match lib.package.debug_info() {
+                    Ok(debug_info) => debug_info,
+                    Err(PackageDebugInfoError::UntrustedSections) => None,
+                    Err(err) => {
+                        return Err(Report::msg(format!(
+                            "failed to decode debug info for statically linked package '{}': {err}",
+                            lib.package.name
+                        )));
+                    },
+                };
+                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info))
+            })
+            .collect()
+    }
+
     fn finish_program_product(
         &self,
         name: PackageId,
@@ -900,18 +926,21 @@ impl Assembler {
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
+        let entry_source_node = source_graph
+            .roots()
+            .first()
+            .copied()
+            .map(|source_id| DebugSourceMastNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(
                 name,
                 miden_mast_package::Version::new(0, 0, 0),
                 TargetType::Executable,
                 mast,
-                vec![PackageExport::Procedure(ProcedureExport::new(
-                    entry,
-                    Some(entrypoint),
-                    entry_digest,
-                    None,
-                ))],
+                vec![PackageExport::Procedure(
+                    ProcedureExport::new(entry, Some(entrypoint), entry_digest, None)
+                        .with_source_node(entry_source_node),
+                )],
                 None,
             )
             .map_err(Report::msg)?,
@@ -936,20 +965,6 @@ impl Assembler {
         &self,
         mast_forest: miden_core::mast::MastForest,
     ) -> miden_core::mast::MastForest {
-        if !self.emit_debug_info {
-            return mast_forest.without_debug_info();
-        }
-
-        if self.trim_paths {
-            #[cfg(feature = "std")]
-            if let Some(trimmer) = self.source_path_trimmer() {
-                return mast_forest.with_rewritten_source_locations(
-                    |location| trimmer.trim_location(location),
-                    |location| trimmer.trim_file_line_col(location),
-                );
-            }
-        }
-
         mast_forest
     }
 
@@ -1390,6 +1405,7 @@ impl Assembler {
                     mast_root.into_inner(),
                     None,
                     None,
+                    None,
                     mast_forest_builder,
                 )?;
                 Ok(ResolvedProcedure { node, signature: None })
@@ -1410,6 +1426,7 @@ impl Assembler {
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
+                                p.source_debug_root_id().map(DebugSourceMastNodeId::from),
                                 mast_forest_builder,
                             )?;
                             Ok(ResolvedProcedure { node, signature: p.signature.clone() })
@@ -1440,6 +1457,7 @@ impl Assembler {
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
+        source_debug_root_id: Option<DebugSourceMastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeRef, Report> {
         // Get the procedure from the assembler
@@ -1487,6 +1505,7 @@ impl Assembler {
             mast_root,
             source_library_commitment,
             source_root_id,
+            source_debug_root_id,
         )
     }
 }

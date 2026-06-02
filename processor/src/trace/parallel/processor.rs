@@ -230,6 +230,7 @@ impl ReplayProcessor {
                         external_node_id,
                         current_forest,
                         continuation_stack,
+                        None,
                         host,
                         tracer,
                     )?;

@@ -1,7 +1,9 @@
-use miden_mast_package::Dependency;
-use miden_mast_package::debug_info::{
-    DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-    DebugSourceMastNodeId, DebugSourceVar,
+use miden_mast_package::{
+    Dependency,
+    debug_info::{
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+        DebugSourceMastNodeId, DebugSourceVar,
+    },
 };
 
 use super::*;

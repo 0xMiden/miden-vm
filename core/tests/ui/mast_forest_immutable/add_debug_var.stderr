@@ -2,10 +2,4 @@ error[E0599]: no method named `add_debug_var` found for struct `MastForest` in t
  --> tests/ui/mast_forest_immutable/add_debug_var.rs:9:16
   |
 9 |         forest.add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0))).unwrap();
-  |                ^^^^^^^^^^^^^
-  |
-help: there is a method `debug_var` with a similar name
-  |
-9 -         forest.add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0))).unwrap();
-9 +         forest.debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0))).unwrap();
-  |
+  |                ^^^^^^^^^^^^^ method not found in `MastForest`

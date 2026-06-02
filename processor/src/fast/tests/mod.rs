@@ -291,6 +291,67 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 }
 
 #[test]
+fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program(
+            "program",
+            "
+        proc foo
+            assert
+        end
+
+        begin
+            procref.foo mem_storew_le.100 dropw push.100
+            dynexec
+        end
+        ",
+        )
+        .expect("program should assemble")
+        .unwrap_program();
+
+    let entrypoint = program.entrypoint();
+    let callee_root = program
+        .mast_forest()
+        .procedure_roots()
+        .iter()
+        .copied()
+        .find(|&root| root != entrypoint)
+        .expect("program should contain a callee procedure root");
+
+    let source_entry = DebugSourceMastNodeId::from(0);
+    let source_callee_a = DebugSourceMastNodeId::from(1);
+    let source_callee_b = DebugSourceMastNodeId::from(2);
+    let package_debug_info = PackageDebugInfo {
+        source_graph: Some(DebugSourceGraphSection {
+            nodes: vec![
+                DebugSourceMastNode::new(entrypoint, vec![], 0, 1),
+                DebugSourceMastNode::new(callee_root, vec![], 0, 1),
+                DebugSourceMastNode::new(callee_root, vec![], 0, 1),
+            ],
+            roots: vec![source_entry, source_callee_a, source_callee_b],
+            ..DebugSourceGraphSection::new()
+        }),
+        ..PackageDebugInfo::default()
+    };
+
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = processor
+        .execute_with_package_debug_info_sync(
+            &program,
+            &package_debug_info,
+            &mut DefaultHost::default(),
+        )
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::Internal(message)
+            if message.contains("ambiguous or malformed dynamic callee roots")
+    );
+}
+
+#[test]
 fn test_stack_write_word_max_start_idx() {
     let stack_inputs = StackInputs::new(&[]).unwrap();
     let mut processor = FastProcessor::new(stack_inputs);

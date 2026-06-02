@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Felt, ZERO,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
@@ -197,19 +197,19 @@ fn test_op_u32assert2_valid_inputs_succeed_with_nonzero_err_code() {
 // --------------------------------------------------------------------------------------------
 //
 // These tests use the full assembler + FastProcessor::execute_sync pipeline to verify that
-// error messages stored in the MastForest are correctly resolved and surfaced through the
-// execute_op dispatch layer (addresses huitseeker's review request).
+// `.err="..."` lowers to the expected assertion error code.
 
 #[test]
 fn test_op_u32assert2_assembled_err_msg_lookup() {
-    // Compile a program whose MastForest stores "value exceeded u32 range" as an error
-    // string keyed to the err_code emitted by `u32assert2.err=...`.
+    let expected_message = "value exceeded u32 range";
+
+    // Compile a program whose `u32assert2.err=...` text lowers to a stable error code.
     // Push 2^32 (invalid) and 1 (valid) so the assertion fails on the first element.
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            r#"begin push.4294967296 push.1 u32assert2.err="value exceeded u32 range" end"#,
+            format!(r#"begin push.4294967296 push.1 u32assert2.err="{expected_message}" end"#),
         )
         .expect("program should assemble")
         .unwrap_program();
@@ -226,15 +226,10 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
         other => panic!("expected OperationError, got {other:?}"),
     };
 
-    // The resolved message must be present, confirming that resolve_error_message
-    // correctly looks up the string from the assembled MastForest.
     match op_err {
-        OperationError::U32AssertionFailed { err_msg, ref invalid_values, .. } => {
-            assert_eq!(
-                err_msg.as_deref(),
-                Some("value exceeded u32 range"),
-                "err_msg should be resolved from the MastForest, got {err_msg:?}"
-            );
+        OperationError::U32AssertionFailed { err_code, err_msg, ref invalid_values } => {
+            assert_eq!(err_code, error_code_from_msg(expected_message));
+            assert!(err_msg.is_none(), "package debug text is not carried by MastForest");
             assert!(!invalid_values.is_empty(), "at least one invalid value should be reported");
         },
         other => panic!("expected U32AssertionFailed, got {other:?}"),
@@ -243,14 +238,15 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
 
 #[test]
 fn test_u32assert_err_wrapper_assembled() {
+    let expected_message = "value must fit in u32";
+
     // `u32assert.err=...` lowers to [Pad, U32assert2(err_code), Drop].
-    // Push a value > u32::MAX so the assertion fires; verify the resolved
-    // error message makes it through the full execute_sync pipeline.
+    // Push a value > u32::MAX so the assertion fires.
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#,
+            format!(r#"begin push.4294967296 u32assert.err="{expected_message}" end"#),
         )
         .expect("program should assemble")
         .unwrap_program();
@@ -265,12 +261,9 @@ fn test_u32assert_err_wrapper_assembled() {
         other => panic!("expected OperationError, got {other:?}"),
     };
     match op_err {
-        OperationError::U32AssertionFailed { err_msg, ref invalid_values, .. } => {
-            assert_eq!(
-                err_msg.as_deref(),
-                Some("value must fit in u32"),
-                "err_msg should be resolved from MastForest, got {err_msg:?}"
-            );
+        OperationError::U32AssertionFailed { err_code, err_msg, ref invalid_values } => {
+            assert_eq!(err_code, error_code_from_msg(expected_message));
+            assert!(err_msg.is_none(), "package debug text is not carried by MastForest");
             assert!(!invalid_values.is_empty(), "at least one invalid value expected");
         },
         other => panic!("expected U32AssertionFailed, got {other:?}"),
@@ -279,15 +272,18 @@ fn test_u32assert_err_wrapper_assembled() {
 
 #[test]
 fn test_u32assertw_err_wrapper_assembled() {
+    let expected_message = "word contains non-u32 element";
+
     // `u32assertw.err=...` lowers to two U32assert2(err_code) ops via `u32assertw`.
-    // Push a word where the third element exceeds u32::MAX; verify the error message
-    // is resolved end-to-end through execute_sync.
+    // Push a word where the third element exceeds u32::MAX.
     let source_manager = Arc::new(DefaultSourceManager::default());
     // Stack (top->bottom): 1 2 2^32 4 — element at position 2 is out of range
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-                r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
+            format!(
+                r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="{expected_message}" end"#
+            ),
         )
         .expect("program should assemble")
         .unwrap_program();
@@ -302,12 +298,9 @@ fn test_u32assertw_err_wrapper_assembled() {
         other => panic!("expected OperationError, got {other:?}"),
     };
     match op_err {
-        OperationError::U32AssertionFailed { err_msg, ref invalid_values, .. } => {
-            assert_eq!(
-                err_msg.as_deref(),
-                Some("word contains non-u32 element"),
-                "err_msg should be resolved from MastForest, got {err_msg:?}"
-            );
+        OperationError::U32AssertionFailed { err_code, err_msg, ref invalid_values } => {
+            assert_eq!(err_code, error_code_from_msg(expected_message));
+            assert!(err_msg.is_none(), "package debug text is not carried by MastForest");
             assert!(!invalid_values.is_empty(), "at least one invalid value expected");
         },
         other => panic!("expected U32AssertionFailed, got {other:?}"),
