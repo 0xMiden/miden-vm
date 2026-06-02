@@ -927,9 +927,7 @@ impl Assembler {
         let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
         let entry_source_node = source_graph
-            .roots()
-            .first()
-            .copied()
+            .unique_root_for_exec_node(entrypoint)
             .map(|source_id| DebugSourceMastNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(

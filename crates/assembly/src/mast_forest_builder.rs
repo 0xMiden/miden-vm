@@ -1981,6 +1981,71 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn test_statically_linked_package_source_range_is_preserved() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+        let ops = vec![
+            Operation::Push(Felt::from_u32(1)),
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(Felt::from_u32(2)),
+        ];
+        let asm_op = AssemblyOp::new(None, "partial_ctx".into(), 1, "push.2".into());
+        let static_asm_op_ref = add_test_asm_op(&mut source_builder, asm_op);
+        let static_block_ref = source_builder
+            .ensure_block_ref(ops, vec![(4, static_asm_op_ref)], vec![])
+            .unwrap();
+        record_test_root(&mut source_builder, static_block_ref);
+
+        let (static_forest, source_remapping, static_source_graph, _) =
+            source_builder.build().unwrap().into_parts_with_source_graph();
+        let final_static_block = source_remapping[&static_block_ref];
+        let static_source_root = static_source_graph.roots()[0];
+        let expected_partial_start = static_source_graph.nodes()[static_source_root].asm_ops()[0].0;
+        let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
+        let package_source_root = DebugSourceMastNodeId::from(u32::from(static_source_root));
+        let package_source_graph = package_debug_info
+            .source_graph
+            .as_mut()
+            .expect("source graph should be present");
+        package_source_graph.nodes[u32::from(package_source_root) as usize].op_start =
+            expected_partial_start as u32;
+        package_source_graph.nodes[u32::from(package_source_root) as usize].op_end =
+            expected_partial_start as u32 + 1;
+
+        let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
+            &static_forest,
+            Some(package_debug_info),
+        )])
+        .unwrap();
+        let copied_block_ref = builder
+            .ensure_external_link_with_source_ref(
+                static_forest[final_static_block].digest(),
+                Some(static_forest.commitment()),
+                Some(final_static_block),
+                Some(package_source_root),
+            )
+            .unwrap();
+
+        record_test_root(&mut builder, copied_block_ref);
+        let (_forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_block_id = remapping[&copied_block_ref];
+        let linked_source_node = source_nodes_for_exec(&source_graph, final_block_id)
+            .into_iter()
+            .find(|source_node| {
+                source_node
+                    .asm_ops()
+                    .iter()
+                    .any(|(_, asm_op)| asm_op.context_name() == "partial_ctx")
+            })
+            .expect("linked source node should preserve package metadata");
+
+        assert_eq!(linked_source_node.op_start(), expected_partial_start);
+        assert_eq!(linked_source_node.op_end(), expected_partial_start + 1);
+    }
+
     /// A small procedure root that gets merged into a larger block must keep its own
     /// debug vars and asm ops, since the root node survives removal.
     #[test]

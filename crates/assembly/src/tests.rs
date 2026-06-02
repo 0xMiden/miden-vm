@@ -7056,6 +7056,52 @@ end
 }
 
 #[test]
+fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResult {
+    let context = TestContext::default();
+    let lib_module = context.parse_module_with_path(
+        "lib::lib",
+        r#"
+        pub proc lib_proc
+            push.1
+        end
+        "#,
+    )?;
+    let lib = Assembler::new(context.source_manager().clone())
+        .assemble_library("lib", [lib_module])
+        .map(Arc::<Package>::from)?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(lib, Linkage::Static)?
+        .assemble_program(
+            "program",
+            r#"
+            use lib::lib
+
+            begin
+                exec.lib::lib_proc
+            end
+            "#,
+        )?;
+
+    let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+    let entrypoint = package
+        .get_procedure_node_by_path(&main_path)
+        .expect("main procedure should have an execution node");
+    let main_export = package
+        .manifest
+        .get_export(&main_path)
+        .and_then(PackageExport::as_procedure)
+        .expect("main export should exist");
+    let source_node = main_export.source_node.expect("main export should retain source debug root");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain source debug info");
+
+    assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, entrypoint);
+    Ok(())
+}
+
+#[test]
 fn regression_symbol_resolution_malformed_quoted_export_leaf_should_return_error_not_panic() {
     let context = TestContext::default();
     let module = context
