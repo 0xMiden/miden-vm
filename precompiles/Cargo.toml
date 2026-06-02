@@ -19,8 +19,18 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-core/std"]
+std = ["miden-core/std", "miden-processor/std", "miden-utils-sync/std"]
 
 [dependencies]
 # Miden dependencies
 miden-core.workspace = true
+miden-mast-package.workspace = true
+miden-processor.workspace = true
+miden-utils-sync.workspace = true
+
+[dev-dependencies]
+miden-assembly.workspace = true
+
+[build-dependencies]
+miden-assembly = { workspace = true, features = ["std"] }
+miden-package-registry = { workspace = true, features = ["resolver"] }
