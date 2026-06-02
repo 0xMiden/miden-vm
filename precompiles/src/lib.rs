@@ -57,7 +57,6 @@ impl From<&PrecompilesLibrary> for HostLibrary {
         Self {
             mast_forest: precompiles_lib.mast_forest().clone(),
             handlers: vec![],
-            precompiles: registry(),
         }
     }
 }
