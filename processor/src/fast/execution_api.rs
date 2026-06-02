@@ -459,8 +459,8 @@ impl FastProcessor {
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(maybe_continuation) => {
-                    if let Some(continuation) = maybe_continuation {
-                        continuation_stack.push_continuation(continuation);
+                    if let Some((continuation, source_node)) = maybe_continuation {
+                        continuation_stack.push_continuation_with_source(continuation, source_node);
                     }
 
                     Ok(Some(ResumeContext {
@@ -565,14 +565,15 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash,
+                    source_node,
                 } => {
                     let (root_id, new_forest) = match self.load_mast_forest_sync(
                         procedure_hash,
                         host,
                         current_forest,
                         external_node_id,
-                        None,
-                        None,
+                        package_debug_info,
+                        source_node,
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -692,6 +693,7 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash,
+                    source_node,
                 } => {
                     let (root_id, new_forest) = match self
                         .load_mast_forest(
@@ -699,8 +701,8 @@ impl FastProcessor {
                             host,
                             current_forest,
                             external_node_id,
-                            None,
-                            None,
+                            package_debug_info,
+                            source_node,
                         )
                         .await
                     {

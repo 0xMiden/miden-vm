@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::Kernel};
+use miden_mast_package::debug_info::DebugSourceMastNodeId;
 
 use crate::{
     ExecutionError, FastProcessor, Stopper,
@@ -55,7 +56,10 @@ impl Stopper for NeverStopper {
         &self,
         processor: &FastProcessor,
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
-        _continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+        _continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Arc<MastForest>>,
+            Option<DebugSourceMastNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
         check_if_continuation_stack_too_large(processor, continuation_stack)
@@ -75,7 +79,10 @@ impl Stopper for StepStopper {
         &self,
         processor: &FastProcessor,
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+        continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Arc<MastForest>>,
+            Option<DebugSourceMastNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
         check_if_continuation_stack_too_large(processor, continuation_stack)?;
@@ -129,5 +136,5 @@ pub enum BreakReason<F> {
     ///
     /// If yes, then `None` should be returned. If not, then the continuation that runs the next
     /// step in `FastProcessor::execute_impl()` should be returned.
-    Stopped(Option<Continuation<F>>),
+    Stopped(Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>),
 }

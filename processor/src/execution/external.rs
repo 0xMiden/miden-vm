@@ -1,6 +1,6 @@
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::PackageDebugInfo;
+use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason,
@@ -19,6 +19,7 @@ use crate::{
 #[inline(always)]
 pub(super) fn execute_external_node<T, F>(
     external_node_id: MastNodeId,
+    source_node: Option<DebugSourceMastNodeId>,
     current_forest: &mut F,
     tracer: &mut T,
 ) -> ControlFlow<InternalBreakReason<F>>
@@ -44,6 +45,7 @@ where
     ControlFlow::Break(InternalBreakReason::LoadMastForestFromExternal {
         external_node_id,
         procedure_hash: external_node.digest(),
+        source_node,
     })
 }
 
