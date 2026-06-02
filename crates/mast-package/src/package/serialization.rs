@@ -39,6 +39,7 @@ use miden_core::{
 use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
 use crate::{
     Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
+    debug_info::DebugSourceMastNodeId,
 };
 
 // CONSTANTS
@@ -107,7 +108,7 @@ impl Package {
     ) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, false)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest)
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
     }
 
     /// Reads a package from `bytes` without validating the embedded MAST forest.
@@ -123,14 +124,11 @@ impl Package {
         validate_mast_forest: bool,
     ) -> Result<Arc<MastForest>, DeserializationError> {
         if validate_mast_forest {
-            UntrustedMastForest::read_from(source)?
-                .validate()
-                .map(MastForest::without_debug_info)
-                .map_err(|err| {
-                    DeserializationError::InvalidValue(format!(
-                        "library contains an invalid untrusted MAST forest: {err}"
-                    ))
-                })
+            UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "library contains an invalid untrusted MAST forest: {err}"
+                ))
+            })
         } else {
             MastForest::read_from(source)
         }
@@ -198,6 +196,7 @@ impl Package {
         source: &mut R,
         header: PackageHeader,
         mast: Arc<MastForest>,
+        debug_sections_trusted: bool,
     ) -> Result<Self, DeserializationError> {
         let PackageHeader { name, version, description, kind } = header;
 
@@ -206,6 +205,11 @@ impl Package {
 
         // Read custom sections
         let sections = Vec::<Section>::read_from(source)?;
+        if !debug_sections_trusted && sections.iter().any(|section| section.id.is_debug()) {
+            log::warn!(
+                "Package read preserved debug sections from an untrusted artifact; Package::debug_info() will not expose them as trusted debug info"
+            );
+        }
 
         let mut package = Self {
             name,
@@ -216,6 +220,7 @@ impl Package {
             mast,
             manifest,
             sections,
+            debug_sections_trusted,
         };
 
         package
@@ -233,7 +238,7 @@ impl Deserializable for Package {
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast)
+        Self::read_from_with_header_and_mast(source, header, mast, false)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -467,6 +472,12 @@ impl Serializable for ProcedureExport {
         } else {
             target.write_bool(false);
         }
+        if let Some(source_node) = self.source_node {
+            target.write_bool(true);
+            source_node.write_into(target);
+        } else {
+            target.write_bool(false);
+        }
         self.digest.write_into(target);
         match self.signature.as_ref() {
             Some(sig) => {
@@ -499,6 +510,11 @@ impl ProcedureExport {
         } else {
             None
         };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceMastNodeId::read_from(source)?)
+        } else {
+            None
+        };
         let digest = Word::read_from(source)?;
         // Ensure that the digest associated with `node` matches the provided digest
         if let Some(node) = node
@@ -517,6 +533,7 @@ impl ProcedureExport {
         Ok(Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -533,6 +550,11 @@ impl Deserializable for ProcedureExport {
         } else {
             None
         };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceMastNodeId::read_from(source)?)
+        } else {
+            None
+        };
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
             Some(FunctionType::read_from(source)?)
@@ -543,6 +565,7 @@ impl Deserializable for ProcedureExport {
         Ok(Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -597,10 +620,10 @@ mod tests {
         advice::AdviceMap,
         assert_matches,
         mast::{
-            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestContributor, MastNode,
-            MastNodeExt, MastNodeId,
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
+            MastNodeId,
         },
-        operations::{AssemblyOp, Operation},
+        operations::Operation,
         serde::{
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
             SliceReader,
@@ -613,8 +636,12 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
-        TargetType,
+        Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
+        ProcedureExport, SectionId, TargetType,
+        debug_info::{
+            DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
+            DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+        },
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -657,30 +684,22 @@ mod tests {
 
     fn build_package_with_debug_info() -> Package {
         let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
-        let mut debug_info = DebugInfo::new();
         let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .build()
             .expect("failed to build basic block");
         let digest = node.digest();
         let node_id = nodes.push(node.into()).expect("failed to add basic block");
-        let asm_op = debug_info
-            .add_asm_op(AssemblyOp::new(None, "trusted".into(), 1, "add".into()))
-            .expect("asm op should be added");
-        debug_info
-            .register_asm_ops(node_id, 1, vec![(0, asm_op)])
-            .expect("asm op should be registered");
+        let source_node = DebugSourceMastNodeId::from(0);
 
         let mast = Arc::new(
-            MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default(), debug_info)
+            MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default())
                 .expect("forest should be valid"),
         );
         let path = absolute_path("test::proc");
-        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
-            path,
-            Some(node_id),
-            digest,
-            None,
-        ))];
+        let exports = vec![PackageExport::Procedure(
+            ProcedureExport::new(path, Some(node_id), digest, None)
+                .with_source_node(Some(source_node)),
+        )];
         let mut package = Package::create(
             PackageId::from("test_pkg"),
             crate::Version::new(0, 0, 0),
@@ -690,7 +709,28 @@ mod tests {
             None,
         )
         .expect("test package should be valid");
-        package.sections.push(Section::new(SectionId::DEBUG_SOURCE_MAP, vec![1, 2, 3]));
+        let source_graph = DebugSourceGraphSection {
+            version: DEBUG_SOURCE_GRAPH_VERSION,
+            nodes: vec![DebugSourceMastNode::new(node_id, Vec::new(), 0, 1)],
+            roots: vec![source_node],
+        };
+        let source_map = DebugSourceMapSection {
+            asm_ops: vec![DebugSourceAsmOp::new(
+                source_node,
+                0,
+                None,
+                "trusted".into(),
+                "add".into(),
+                1,
+            )],
+            ..DebugSourceMapSection::new()
+        };
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()));
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()));
         package
     }
 
@@ -734,9 +774,7 @@ mod tests {
             .run(&any::<Package>(), move |package| {
                 let bytes = package.to_bytes();
                 let deserialized = Package::read_from_bytes(&bytes).unwrap();
-                let mut expected = package;
-                expected.mast = Arc::new(expected.mast.as_ref().clone().without_debug_info());
-                prop_assert_eq!(expected, deserialized);
+                prop_assert_eq!(bytes, deserialized.to_bytes());
                 Ok(())
             })
             .unwrap_or_else(|err| {
@@ -751,29 +789,32 @@ mod tests {
 
         let deserialized = Package::read_from_bytes(&bytes).unwrap();
 
-        assert!(deserialized.mast_forest().debug_info().is_empty());
         assert!(
             deserialized
                 .sections
                 .iter()
                 .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
         );
+        assert!(matches!(
+            deserialized.debug_info(),
+            Err(PackageDebugInfoError::UntrustedSections)
+        ));
     }
 
     #[test]
-    fn package_unchecked_deserialization_preserves_trusted_forest_debug() {
+    fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
         let package = build_package_with_debug_info();
         let bytes = package.to_bytes();
 
         let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
 
-        assert_eq!(deserialized.mast_forest().debug_info().num_asm_ops(), 1);
         assert!(
             deserialized
                 .sections
                 .iter()
                 .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
         );
+        assert!(deserialized.debug_info().unwrap().is_some());
     }
 
     #[test]
@@ -938,6 +979,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         // Manually serialize the tampered package: forest + one export referencing a non-root node.
@@ -1144,6 +1186,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _) =
@@ -1190,6 +1233,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _spoofed_digest) =
@@ -1233,6 +1277,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _) =
@@ -1280,6 +1325,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _spoofed_digest) =

@@ -62,7 +62,7 @@
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
 //!
-//! (DebugInfo section - omitted if FLAGS bit 0 is set)
+//! (Legacy DebugInfo section - skipped if present; omitted by current writers)
 //! - Error codes map (`BTreeMap<u64, String>`)
 //! - Procedure names map (`BTreeMap<Word, String>`)
 //! - Assembly operation data (raw bytes for AssemblyOp payloads)
@@ -72,8 +72,8 @@
 //! - Debug variables (`Vec<DebugVarInfo>`)
 //! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
-//! In stripped format, the `DebugInfo` section is omitted and readers materialize an empty
-//! `DebugInfo`.
+//! Current writers always omit the legacy `DebugInfo` section. Readers skip legacy wire debug
+//! payloads when present and never materialize them into [`MastForest`].
 //!
 //! In hashless format, the internal node-hash section is omitted and `HASHLESS` also implies
 //! `STRIPPED`. External node digests still stay on the wire because they cannot be rebuilt from
@@ -95,7 +95,7 @@
 
 #[cfg(test)]
 use alloc::string::ToString;
-use alloc::{format, vec::Vec};
+use alloc::{boxed::Box, format, vec::Vec};
 use core::mem::size_of;
 
 use miden_utils_sync::OnceLockCompat;
@@ -155,8 +155,7 @@ type StringIndex = usize;
 /// Default multiplier for the untrusted validation allocation budget.
 ///
 /// The budgeted byte reader limits wire-driven parsing. Hashless and stripped validation also
-/// needs transient per-node allocations for the slot table, empty debug-info scaffolding, and
-/// rebuilt digest data.
+/// needs transient per-node allocations for the slot table and rebuilt digest data.
 /// The generic untrusted path also retains a recorded copy of the consumed
 /// serialized payload for deferred validation.
 ///
@@ -251,20 +250,18 @@ impl Serializable for MastForest {
 impl MastForest {
     /// Internal serialization with options.
     ///
-    /// When `stripped` is true, the DebugInfo section is omitted and the FLAGS byte
-    /// has bit 0 set.
+    /// Current writers always omit the legacy DebugInfo section and set the STRIPPED flag.
     fn write_into_with_options<W: ByteWriter>(
         &self,
         target: &mut W,
-        stripped: bool,
+        _stripped: bool,
         hashless: bool,
     ) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
         target.write_bytes(MAGIC);
-        let flags = if stripped || hashless { FLAG_STRIPPED } else { 0 }
-            | if hashless { FLAG_HASHLESS } else { 0 };
+        let flags = FLAG_STRIPPED | if hashless { FLAG_HASHLESS } else { 0 };
         target.write_u8(flags);
 
         // version
@@ -318,11 +315,6 @@ impl MastForest {
         }
 
         self.advice_map.write_into(target);
-
-        // Serialize DebugInfo only if not stripped
-        if !stripped {
-            self.debug_info.write_into(target);
-        }
     }
 }
 
@@ -338,7 +330,7 @@ pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
     serialized_size_hint(forest, true, false)
 }
 
-fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> usize {
+fn serialized_size_hint(forest: &MastForest, _stripped: bool, hashless: bool) -> usize {
     let node_count = forest.nodes.len();
     let external_count = forest.nodes.iter().filter(|node| node.is_external()).count();
     let non_external_count = node_count - external_count;
@@ -365,9 +357,6 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
         size += non_external_count * Word::min_serialized_size();
     }
     size += forest.advice_map.serialized_size_hint();
-    if !stripped {
-        size += forest.debug_info.get_size_hint();
-    }
 
     size
 }
@@ -387,7 +376,7 @@ pub enum MastForestReadView<'a> {
     /// A fully materialized forest.
     Materialized(MastForest),
     /// A trusted wire-backed cache view.
-    WireBacked(MastForestWireView<'a>),
+    WireBacked(Box<MastForestWireView<'a>>),
 }
 
 /// A trusted wire-backed view over serialized MAST forest bytes.
@@ -777,7 +766,7 @@ impl MastForest {
                 Self::read_from_bytes(bytes).map(MastForestReadView::Materialized)
             },
             MastForestReadMode::WireBacked => {
-                MastForestWireView::new(bytes).map(MastForestReadView::WireBacked)
+                MastForestWireView::new(bytes).map(Box::new).map(MastForestReadView::WireBacked)
             },
         }
     }
@@ -1021,7 +1010,7 @@ impl super::UntrustedMastForest {
             ResolvedSerializedForest::new(&self.bytes, self.layout)?
         };
 
-        resolved.materialize(self.advice_map, self.debug_info)
+        resolved.materialize(self.advice_map)
     }
 }
 
@@ -1066,35 +1055,22 @@ fn decode_from_reader<R: ByteReader>(
 fn decode_from_reader_inner<R: ByteReader>(
     source: &mut R,
     allow_hashless: bool,
-    mut remaining_allocation_budget: Option<usize>,
+    remaining_allocation_budget: Option<usize>,
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
     debug_assert_eq!(recording.offset(), layout.advice_map_offset());
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
-    let debug_info = if flags.is_stripped() {
-        if let Some(allocation_budget) = &mut remaining_allocation_budget {
-            reserve_allocation::<usize>(
-                allocation_budget,
-                layout.node_count.checked_add(1).ok_or_else(|| {
-                    DeserializationError::InvalidValue("debug-info node count overflow".into())
-                })?,
-                "empty debug-info scaffolding",
-            )?;
-        }
-        super::DebugInfo::empty_for_nodes(layout.node_count)
-    } else {
-        super::DebugInfo::read_from(&mut recording)?
-    };
-
+    if !flags.is_stripped() {
+        skip_debug_info(&mut recording)?;
+    }
     Ok((
         flags,
         super::UntrustedMastForest {
             bytes: recording.into_recorded(),
             layout,
             advice_map,
-            debug_info,
             remaining_allocation_budget,
         },
     ))

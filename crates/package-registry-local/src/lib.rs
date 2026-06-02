@@ -1164,7 +1164,14 @@ mod tests {
         assert_eq!(listed[0].artifact_path.as_ref(), Some(&legacy_path));
 
         let loaded = registry.load_package(&PackageId::from("pkg"), &published.version).unwrap();
-        assert_eq!(loaded.as_ref(), package.as_ref());
+        assert_eq!(loaded.name, package.name);
+        assert_eq!(loaded.version, package.version);
+        assert_eq!(loaded.digest(), package.digest());
+        assert_eq!(loaded.description, package.description);
+        assert_eq!(loaded.kind, package.kind);
+        assert_eq!(loaded.mast_forest(), package.mast_forest());
+        assert_eq!(loaded.manifest, package.manifest);
+        assert_eq!(loaded.sections, package.sections);
     }
 
     #[test]

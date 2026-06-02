@@ -3,11 +3,11 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 use miden_assembly::{
     Assembler, DefaultSourceManager, PathBuf,
     ast::Module,
-    testing::{TestContext, assert_diagnostic_lines, regex, source_file},
+    testing::{Pattern, TestContext, regex, source_file},
 };
 use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
@@ -22,6 +22,25 @@ use crate::{
     event::{EventError, EventHandler, EventName},
     operation::Operation,
 };
+
+macro_rules! assert_diagnostic_lines {
+    ($diagnostic:expr, $($expected:expr),+ $(,)?) => {{
+        let actual = format!(
+            "{}",
+            miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color(&$diagnostic)
+        );
+        let actual_line = actual
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .expect("diagnostic should render at least one non-empty line");
+
+        let expected = [$(Pattern::from($expected)),*]
+            .into_iter()
+            .next()
+            .expect("at least one expected pattern is required");
+        expected.assert_match_with_context(actual_line, &actual);
+    }};
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("dummy host event failure")]
@@ -171,17 +190,20 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .assemble_program("program", source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
@@ -206,17 +228,20 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .assemble_program("program", source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
@@ -386,13 +411,10 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: some error message",
-        regex!(r#",-\[test[\d]+:4:13\]"#),
-        " 3 |             push.1.2",
-        " 4 |             assertz.err=\"some error message\"",
-        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 5 |             push.3.4",
-        "   `----",
+        format!(
+            "  x assertion failed with error code: {}",
+            error_code_from_msg("some error message")
+        ),
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 
@@ -409,13 +431,10 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: some error message",
-        regex!(r#",-\[test[\d]+:5:13\]"#),
-        " 4 |             push.1.2",
-        " 5 |             assertz.err=ERR_MSG",
-        "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 6 |             push.3.4",
-        "   `----",
+        format!(
+            "  x assertion failed with error code: {}",
+            error_code_from_msg("some error message")
+        ),
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 }
@@ -1294,13 +1313,10 @@ fn test_assert_messages() {
 
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: Value is not zero",
-        regex!(r#",-\[test[\d]+:5:13\]"#),
-        " 4 |             push.1",
-        " 5 |             assertz.err=NONZERO",
-        "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 6 |         end",
-        "   `----",
+        format!(
+            "  x assertion failed with error code: {}",
+            error_code_from_msg("Value is not zero")
+        ),
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 }

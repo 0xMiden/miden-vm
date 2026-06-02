@@ -69,8 +69,12 @@ fn cli_bundle_debug() {
     cmd.assert().success();
 
     let lib = Package::deserialize_from_file(&output_file).unwrap();
-    // If there are any AssemblyOps in the forest, the bundle is in debug mode.
-    let found_one_asm_op = lib.mast_forest().debug_info().num_asm_ops() > 0;
+    // If there are any package-owned AssemblyOps, the bundle is in debug mode.
+    let found_one_asm_op = lib
+        .debug_info()
+        .expect("package debug info should decode")
+        .and_then(|debug_info| debug_info.source_map)
+        .is_some_and(|source_map| !source_map.asm_ops.is_empty());
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();
 }

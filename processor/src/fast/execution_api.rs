@@ -116,6 +116,28 @@ impl FastProcessor {
         Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
     }
 
+    /// Executes the given program synchronously with package-owned source/debug context and returns
+    /// the bundled trace inputs required by [`crate::trace::build_trace`].
+    #[instrument(name = "execute_trace_inputs_with_package_debug_info_sync", skip_all)]
+    pub fn execute_trace_inputs_with_package_debug_info_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+    ) -> Result<TraceBuildInputs, ExecutionError> {
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let execution_output = self.execute_with_package_debug_info_and_tracer_sync(
+            program,
+            package_debug_info,
+            host,
+            &mut tracer,
+        )?;
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+    }
+
     /// Async variant of [`Self::execute_trace_inputs_sync`] for async hosts.
     #[inline(always)]
     #[instrument(name = "execute_trace_inputs", skip_all)]
@@ -129,6 +151,30 @@ impl FastProcessor {
             self.options.max_stack_depth(),
         );
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+    }
+
+    /// Async variant of [`Self::execute_trace_inputs_with_package_debug_info_sync`].
+    #[inline(always)]
+    #[instrument(name = "execute_trace_inputs_with_package_debug_info", skip_all)]
+    pub async fn execute_trace_inputs_with_package_debug_info(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+    ) -> Result<TraceBuildInputs, ExecutionError> {
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let execution_output = self
+            .execute_with_package_debug_info_and_tracer(
+                program,
+                package_debug_info,
+                host,
+                &mut tracer,
+            )
+            .await?;
         Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
     }
 
@@ -270,6 +316,31 @@ impl FastProcessor {
         Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
     }
 
+    /// Executes a single clock cycle synchronously with package-owned source/debug context.
+    pub fn step_with_package_debug_info_sync(
+        &mut self,
+        host: &mut impl SyncHost,
+        resume_ctx: ResumeContext,
+        package_debug_info: &PackageDebugInfo,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        let ResumeContext {
+            mut current_forest,
+            mut continuation_stack,
+            kernel,
+        } = resume_ctx;
+
+        let flow = self.execute_impl(
+            &mut continuation_stack,
+            &mut current_forest,
+            &kernel,
+            host,
+            &mut NoopTracer,
+            &StepStopper,
+            Some(package_debug_info),
+        );
+        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+    }
+
     /// Async variant of [`Self::step_sync`].
     #[inline(always)]
     pub async fn step(
@@ -292,6 +363,34 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &StepStopper,
                 None,
+            )
+            .await;
+        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+    }
+
+    /// Async variant of [`Self::step_with_package_debug_info_sync`].
+    #[inline(always)]
+    pub async fn step_with_package_debug_info(
+        &mut self,
+        host: &mut impl Host,
+        resume_ctx: ResumeContext,
+        package_debug_info: &PackageDebugInfo,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        let ResumeContext {
+            mut current_forest,
+            mut continuation_stack,
+            kernel,
+        } = resume_ctx;
+
+        let flow = self
+            .execute_impl_async(
+                &mut continuation_stack,
+                &mut current_forest,
+                &kernel,
+                host,
+                &mut NoopTracer,
+                &StepStopper,
+                Some(package_debug_info),
             )
             .await;
         Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
@@ -329,6 +428,22 @@ impl FastProcessor {
         };
 
         Ok(ContinuationStack::new_with_source_node(program, root_cursor.source_node()))
+    }
+
+    fn source_aware_resume_context(
+        &mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+    ) -> Result<ResumeContext, ExecutionError> {
+        self.advice
+            .extend_map(program.mast_forest().advice_map())
+            .map_exec_err_no_ctx()?;
+
+        Ok(ResumeContext {
+            current_forest: program.mast_forest().clone(),
+            continuation_stack: Self::source_aware_continuation_stack(program, package_debug_info)?,
+            kernel: program.kernel().clone(),
+        })
     }
 
     /// Converts a step-wise execution result into the next resume context, if execution stopped.
@@ -468,6 +583,7 @@ impl FastProcessor {
                         external_node_id,
                         current_forest,
                         continuation_stack,
+                        package_debug_info,
                         host,
                         tracer,
                     )?;
@@ -577,6 +693,7 @@ impl FastProcessor {
                         external_node_id,
                         current_forest,
                         continuation_stack,
+                        package_debug_info,
                         host,
                         tracer,
                     )?;
@@ -683,6 +800,31 @@ impl FastProcessor {
         }
     }
 
+    /// Executes the given program synchronously one step at a time with package-owned source/debug
+    /// context.
+    pub fn execute_by_step_with_package_debug_info_sync(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl SyncHost,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut current_resume_ctx =
+            self.source_aware_resume_context(program, package_debug_info)?;
+
+        loop {
+            match self.step_with_package_debug_info_sync(
+                host,
+                current_resume_ctx,
+                package_debug_info,
+            )? {
+                Some(next_resume_ctx) => {
+                    current_resume_ctx = next_resume_ctx;
+                },
+                None => break Ok(self.current_stack_outputs()),
+            }
+        }
+    }
+
     /// Async variant of [`Self::execute_by_step_sync`].
     #[inline(always)]
     pub async fn execute_by_step(
@@ -695,6 +837,31 @@ impl FastProcessor {
 
         loop {
             match processor.step(host, current_resume_ctx).await? {
+                Some(next_resume_ctx) => {
+                    current_resume_ctx = next_resume_ctx;
+                },
+                None => break Ok(processor.current_stack_outputs()),
+            }
+        }
+    }
+
+    /// Async variant of [`Self::execute_by_step_with_package_debug_info_sync`].
+    #[inline(always)]
+    pub async fn execute_by_step_with_package_debug_info(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut current_resume_ctx =
+            self.source_aware_resume_context(program, package_debug_info)?;
+        let mut processor = self;
+
+        loop {
+            match processor
+                .step_with_package_debug_info(host, current_resume_ctx, package_debug_info)
+                .await?
+            {
                 Some(next_resume_ctx) => {
                     current_resume_ctx = next_resume_ctx;
                 },

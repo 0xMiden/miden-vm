@@ -15,11 +15,11 @@
 //! Debuggers can use this information along with MAST debug metadata to provide source-level
 //! variable inspection, stepping, and call stack visualization.
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     Word,
-    mast::MastNodeId,
+    mast::{MastForestRootMap, MastNodeId},
     operations::DebugVarInfo,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -47,6 +47,35 @@ pub enum DebugSourceGraphLookupError {
     AmbiguousChild {
         parent: DebugSourceMastNodeId,
         exec_node: MastNodeId,
+    },
+}
+
+// PACKAGE DEBUG INFO MERGE ERROR
+// ================================================================================================
+
+/// Error returned when package-owned source/debug metadata cannot be remapped after a
+/// [`miden_core::mast::MastForest`] merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PackageDebugInfoMergeError {
+    /// The package has source-keyed metadata rows without a source graph to define source IDs.
+    #[error("debug info for forest {forest_index} has source-map rows but no source graph")]
+    SourceMapWithoutGraph { forest_index: usize },
+    /// A source/debug occurrence points at an execution node that was not present in the merge map.
+    #[error(
+        "debug info for forest {forest_index} references execution node {exec_node:?}, which is not present in the merge map"
+    )]
+    MissingExecNodeMapping {
+        forest_index: usize,
+        exec_node: MastNodeId,
+    },
+    /// A source-keyed metadata row refers to a source/debug occurrence that was not present in the
+    /// corresponding source graph.
+    #[error(
+        "debug info for forest {forest_index} references source/debug occurrence {source_node:?}, which is not present in the source graph"
+    )]
+    MissingSourceNodeMapping {
+        forest_index: usize,
+        source_node: DebugSourceMastNodeId,
     },
 }
 
@@ -335,6 +364,134 @@ impl PackageDebugInfo {
             && self.functions.is_none()
             && self.source_graph.is_none()
             && self.source_map.is_none()
+    }
+
+    /// Merges package-owned source/debug metadata after a [`miden_core::mast::MastForest`] merge.
+    ///
+    /// [`miden_core::mast::MastForest::merge`] remains execution-only. This helper applies the
+    /// returned node mappings to package source/debug sections so callers can merge
+    /// `(MastForest, PackageDebugInfo)` pairs without reattaching debug metadata to the forest.
+    ///
+    /// This merges only `debug_source_graph` and `debug_source_map`; type, source-file, and
+    /// function sections have their own string/index tables and are left for higher-level package
+    /// composition.
+    pub fn merge_source_debug<'a>(
+        inputs: impl IntoIterator<Item = (usize, &'a PackageDebugInfo)>,
+        root_map: &MastForestRootMap,
+    ) -> Result<Self, PackageDebugInfoMergeError> {
+        let mut nodes = Vec::new();
+        let mut roots = Vec::new();
+        let mut asm_ops = Vec::new();
+        let mut debug_vars = Vec::new();
+        let mut saw_source_graph = false;
+        let mut saw_source_map = false;
+
+        for (forest_index, debug_info) in inputs {
+            let source_graph = debug_info.source_graph.as_ref();
+            let source_map = debug_info.source_map.as_ref();
+            if source_graph.is_none() && source_map.is_some_and(|source_map| !source_map.is_empty())
+            {
+                return Err(PackageDebugInfoMergeError::SourceMapWithoutGraph { forest_index });
+            }
+
+            let Some(source_graph) = source_graph else {
+                continue;
+            };
+            saw_source_graph = true;
+
+            let mut source_id_map = BTreeMap::new();
+            for old_source_idx in 0..source_graph.nodes.len() {
+                source_id_map.insert(
+                    DebugSourceMastNodeId::from(old_source_idx as u32),
+                    DebugSourceMastNodeId::from(nodes.len() as u32 + old_source_idx as u32),
+                );
+            }
+
+            for (old_source_idx, source_node) in source_graph.nodes.iter().enumerate() {
+                let exec_node = root_map.map_node(forest_index, &source_node.exec_node).ok_or(
+                    PackageDebugInfoMergeError::MissingExecNodeMapping {
+                        forest_index,
+                        exec_node: source_node.exec_node,
+                    },
+                )?;
+                let children = source_node
+                    .children
+                    .iter()
+                    .map(|child| {
+                        source_id_map.get(child).copied().ok_or(
+                            PackageDebugInfoMergeError::MissingSourceNodeMapping {
+                                forest_index,
+                                source_node: *child,
+                            },
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                nodes.push(DebugSourceMastNode::new(
+                    exec_node,
+                    children,
+                    source_node.op_start,
+                    source_node.op_end,
+                ));
+                debug_assert_eq!(
+                    source_id_map[&DebugSourceMastNodeId::from(old_source_idx as u32)].as_u32()
+                        as usize,
+                    nodes.len() - 1,
+                );
+            }
+
+            for root in source_graph.roots.iter().copied() {
+                roots.push(source_id_map.get(&root).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
+                        forest_index,
+                        source_node: root,
+                    },
+                )?);
+            }
+
+            let Some(source_map) = source_map else {
+                continue;
+            };
+            saw_source_map = true;
+            for row in &source_map.asm_ops {
+                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
+                        forest_index,
+                        source_node: row.source_node,
+                    },
+                )?;
+                asm_ops.push(DebugSourceAsmOp {
+                    source_node,
+                    op_idx: row.op_idx,
+                    location: row.location.clone(),
+                    context_name: row.context_name.clone(),
+                    op: row.op.clone(),
+                    num_cycles: row.num_cycles,
+                });
+            }
+            for row in &source_map.debug_vars {
+                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
+                        forest_index,
+                        source_node: row.source_node,
+                    },
+                )?;
+                debug_vars.push(DebugSourceVar::new(source_node, row.op_idx, row.var.clone()));
+            }
+        }
+
+        Ok(Self {
+            source_graph: saw_source_graph.then_some(DebugSourceGraphSection {
+                version: DEBUG_SOURCE_GRAPH_VERSION,
+                nodes,
+                roots,
+            }),
+            source_map: saw_source_map.then_some(DebugSourceMapSection {
+                version: DEBUG_SOURCE_MAP_VERSION,
+                asm_ops,
+                debug_vars,
+            }),
+            ..Self::default()
+        })
     }
 
     /// Returns a source/debug occurrence by ID.
@@ -1331,6 +1488,153 @@ mod tests {
     }
 
     #[test]
+    fn test_package_source_debug_merge_remaps_execution_nodes_without_collapsing_sources() {
+        use miden_core::{
+            mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+            operations::{DebugVarInfo, DebugVarLocation, Operation},
+        };
+
+        fn forest_with_add_block() -> (MastForest, MastNodeId) {
+            let mut forest = MastForest::new();
+            let block = BasicBlockNodeBuilder::new(alloc::vec![Operation::Add])
+                .add_to_forest(&mut forest)
+                .unwrap();
+            forest.make_root(block);
+            (forest, block)
+        }
+
+        fn debug_info_for_block(
+            block: MastNodeId,
+            context: &str,
+            var_name: &str,
+        ) -> PackageDebugInfo {
+            let source_node = DebugSourceMastNodeId::from(0);
+            PackageDebugInfo {
+                source_graph: Some(DebugSourceGraphSection {
+                    version: DEBUG_SOURCE_GRAPH_VERSION,
+                    nodes: alloc::vec![DebugSourceMastNode::new(block, alloc::vec![], 0, 1,)],
+                    roots: alloc::vec![source_node],
+                }),
+                source_map: Some(DebugSourceMapSection {
+                    version: DEBUG_SOURCE_MAP_VERSION,
+                    asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                        source_node,
+                        0,
+                        None,
+                        context.into(),
+                        "add".into(),
+                        1,
+                    )],
+                    debug_vars: alloc::vec![DebugSourceVar::new(
+                        source_node,
+                        0,
+                        DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
+                    )],
+                }),
+                ..PackageDebugInfo::default()
+            }
+        }
+
+        let (forest_a, block_a) = forest_with_add_block();
+        let (forest_b, block_b) = forest_with_add_block();
+        let debug_a = debug_info_for_block(block_a, "alias_a", "x");
+        let debug_b = debug_info_for_block(block_b, "alias_b", "y");
+
+        let (_merged_forest, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+        let merged_a = root_map.map_root(0, &block_a).unwrap();
+        let merged_b = root_map.map_root(1, &block_b).unwrap();
+        assert_eq!(merged_a, merged_b);
+
+        let merged_debug =
+            PackageDebugInfo::merge_source_debug([(0, &debug_a), (1, &debug_b)], &root_map)
+                .unwrap();
+        let source_graph = merged_debug.source_graph.as_ref().unwrap();
+        assert_eq!(source_graph.nodes.len(), 2);
+        assert_eq!(source_graph.roots.len(), 2);
+        assert!(source_graph.nodes.iter().all(|node| node.exec_node == merged_a));
+
+        let source_a = source_graph.roots[0];
+        let source_b = source_graph.roots[1];
+        assert_ne!(source_a, source_b);
+        assert_eq!(
+            merged_debug.first_asm_op_for_source_node(source_a).unwrap().context_name,
+            "alias_a",
+        );
+        assert_eq!(
+            merged_debug.first_asm_op_for_source_node(source_b).unwrap().context_name,
+            "alias_b",
+        );
+        assert_eq!(
+            merged_debug
+                .debug_vars_for_operation(source_a, 0)
+                .map(|row| row.var.name())
+                .collect::<Vec<_>>(),
+            alloc::vec!["x"],
+        );
+        assert_eq!(
+            merged_debug
+                .debug_vars_for_operation(source_b, 0)
+                .map(|row| row.var.name())
+                .collect::<Vec<_>>(),
+            alloc::vec!["y"],
+        );
+    }
+
+    #[test]
+    fn test_package_source_debug_merge_remaps_non_root_execution_nodes() {
+        use miden_core::{
+            mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor},
+            operations::Operation,
+        };
+
+        let mut forest = MastForest::new();
+        let callee = BasicBlockNodeBuilder::new(alloc::vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let call = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
+        forest.make_root(call);
+
+        let root_source = DebugSourceMastNodeId::from(0);
+        let child_source = DebugSourceMastNodeId::from(1);
+        let debug_info = PackageDebugInfo {
+            source_graph: Some(DebugSourceGraphSection {
+                version: DEBUG_SOURCE_GRAPH_VERSION,
+                nodes: alloc::vec![
+                    DebugSourceMastNode::new(call, alloc::vec![child_source], 0, 1),
+                    DebugSourceMastNode::new(callee, alloc::vec![], 0, 1),
+                ],
+                roots: alloc::vec![root_source],
+            }),
+            source_map: Some(DebugSourceMapSection {
+                version: DEBUG_SOURCE_MAP_VERSION,
+                asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                    child_source,
+                    0,
+                    None,
+                    "callee".into(),
+                    "add".into(),
+                    1,
+                )],
+                debug_vars: alloc::vec![],
+            }),
+            ..PackageDebugInfo::default()
+        };
+
+        let (_merged_forest, root_map) = MastForest::merge([&forest]).unwrap();
+        let merged_callee = root_map.map_node(0, &callee).unwrap();
+
+        let merged_debug =
+            PackageDebugInfo::merge_source_debug([(0, &debug_info)], &root_map).unwrap();
+        let source_graph = merged_debug.source_graph.as_ref().unwrap();
+        let merged_child = source_graph.nodes[source_graph.roots[0].as_u32() as usize].children[0];
+        assert_eq!(source_graph.nodes[merged_child.as_u32() as usize].exec_node, merged_callee,);
+        assert_eq!(
+            merged_debug.first_asm_op_for_source_node(merged_child).unwrap().context_name,
+            "callee",
+        );
+    }
+
+    #[test]
     fn test_source_debug_lookup_uses_source_node_identity() {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
 
@@ -1345,8 +1649,7 @@ mod tests {
             ],
             roots: alloc::vec![source_a, source_b],
         };
-        let source_nodes = graph.source_nodes_for_exec_node(exec_node).collect::<Vec<_>>();
-        assert_eq!(source_nodes.len(), 2);
+        assert_eq!(graph.source_nodes_for_exec_node(exec_node).count(), 2);
         assert_eq!(graph.source_node(source_a).unwrap().exec_node, exec_node);
 
         let source_map = DebugSourceMapSection {

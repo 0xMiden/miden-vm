@@ -363,7 +363,7 @@ end
     let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
         .expect("DEBUG_SOURCE_MAP should deserialize");
 
-    let mut source_nodes_by_exec = std::collections::BTreeMap::new();
+    let mut source_nodes_by_exec = BTreeMap::new();
     for row in &debug_source_map.asm_ops {
         let source_node = row.source_node.as_u32() as usize;
         let exec_node = debug_source_graph.nodes[source_node].exec_node;

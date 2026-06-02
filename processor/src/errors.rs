@@ -464,19 +464,15 @@ fn label_and_source_file_from_location(
 /// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
 /// acceptable.
 fn get_label_and_source_file<F>(
-    op_idx: Option<usize>,
-    mast_forest: &F,
-    node_id: MastNodeId,
-    host: &impl BaseHost,
+    _op_idx: Option<usize>,
+    _mast_forest: &F,
+    _node_id: MastNodeId,
+    _host: &impl BaseHost,
 ) -> (SourceSpan, Option<Arc<SourceFile>>)
 where
     F: ExecutableMastForest,
 {
-    let location = mast_forest
-        .get_assembly_op(node_id, op_idx)
-        .and_then(|assembly_op| assembly_op.location());
-
-    label_and_source_file_from_location(location, host)
+    (SourceSpan::UNKNOWN, None)
 }
 
 /// Wraps an `AdviceError` with execution context to produce an `ExecutionError`.
@@ -1185,13 +1181,14 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
 
 #[cfg(test)]
 mod error_assertions {
-    use super::*;
     use alloc::sync::Arc;
 
     use miden_debug_types::{ByteIndex, SourceId, Uri};
     use miden_mast_package::debug_info::{
         DebugSourceAsmOp, DebugSourceMapSection, PackageDebugInfo,
     };
+
+    use super::*;
 
     /// Asserts at compile time that the passed error has Send + Sync + 'static bounds.
     fn _assert_error_is_send_sync_static<E: core::error::Error + Send + Sync + 'static>(_: E) {}

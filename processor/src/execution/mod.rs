@@ -1,5 +1,7 @@
 use core::ops::ControlFlow;
 
+use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+
 use crate::{
     BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
@@ -8,7 +10,6 @@ use crate::{
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 mod basic_block;
 mod call;

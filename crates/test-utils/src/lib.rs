@@ -33,7 +33,7 @@ use miden_core::{
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
 };
-use miden_mast_package::Package;
+use miden_mast_package::{Package, debug_info::PackageDebugInfo};
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::trace::build_trace;
 pub use miden_processor::{
@@ -117,8 +117,10 @@ struct SourceCacheKey {
     source: String,
 }
 
+pub type CompiledTest = (Program, Option<Arc<Package>>, Option<PackageDebugInfo>);
+
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
-type CompileCacheValue = (Program, Option<Arc<Package>>);
+type CompileCacheValue = CompiledTest;
 
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 type CompileCache = std::collections::HashMap<CompileCacheKey, CompileCacheValue>;
@@ -351,7 +353,7 @@ impl Test {
         expected_mem: &[u64],
     ) {
         // compile the program
-        let (program, host) = self.get_program_and_host();
+        let (program, host, _debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
@@ -425,7 +427,7 @@ impl Test {
     ///
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
-    pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
+    pub fn compile(&self) -> Result<CompiledTest, Report> {
         use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
@@ -436,7 +438,7 @@ impl Test {
             let mut cache_guard = COMPILE_CACHE.lock().unwrap();
             let cache = cache_guard.get_or_insert_with(Default::default);
             if let Some(cached) = cache.get(&cache_key) {
-                return Ok((cached.0.clone(), cached.1.clone()));
+                return Ok((cached.0.clone(), cached.1.clone(), cached.2.clone()));
             }
         }
 
@@ -476,16 +478,17 @@ impl Test {
             assembler.link_package(package.clone(), Linkage::Dynamic).unwrap();
         }
 
-        let result = (
-            assembler.assemble_program("program", self.source.clone())?.unwrap_program(),
-            kernel_lib,
-        );
+        let package = assembler.assemble_program("program", self.source.clone())?;
+        let debug_info = package
+            .debug_info()
+            .map_err(|err| Report::msg(format!("failed to decode test debug info: {err}")))?;
+        let result = (package.unwrap_program(), kernel_lib, debug_info);
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         {
             let mut cache_guard = COMPILE_CACHE.lock().unwrap();
             let cache = cache_guard.get_or_insert_with(Default::default);
-            cache.insert(cache_key, (result.0.clone(), result.1.clone()));
+            cache.insert(cache_key, (result.0.clone(), result.1.clone(), result.2.clone()));
         }
 
         Ok(result)
@@ -527,8 +530,9 @@ impl Test {
         // generation logic - though not too big so as to over-allocate memory.
         const FRAGMENT_SIZE: usize = 1 << 16;
 
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let fast_stack_result = {
             let fast_processor = FastProcessor::new_with_options(
@@ -539,7 +543,13 @@ impl Test {
                     .unwrap(),
             )
             .map_err(ExecutionError::advice_error_no_context)?;
-            fast_processor.execute_trace_inputs_sync(&program, &mut host)
+            if let Some(debug_info) = debug_info.as_ref() {
+                fast_processor.execute_trace_inputs_with_package_debug_info_sync(
+                    &program, debug_info, &mut host,
+                )
+            } else {
+                fast_processor.execute_trace_inputs_sync(&program, &mut host)
+            }
         };
 
         // Compare traced full execution and step/resume execution stack outputs.
@@ -558,14 +568,21 @@ impl Test {
     /// Returns the [`ExecutionOutput`] once execution is finished.
     #[cfg(not(target_family = "wasm"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
             .map_err(ExecutionError::advice_error_no_context)?;
 
-        processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        if let Some(debug_info) = debug_info.as_ref() {
+            processor
+                .execute_with_package_debug_info_sync(&program, debug_info, &mut host)
+                .map(|output| (output, host))
+        } else {
+            processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        }
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -577,7 +594,7 @@ impl Test {
     /// verifier logic, or precompile request handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
-        let (program, mut host) = self.get_program_and_host();
+        let (program, mut host, _debug_info) = self.get_program_and_host();
         let stack_inputs = stack_inputs_from_ints(pub_inputs);
         let (stack_outputs, proof) = prove_sync(
             &program,
@@ -650,8 +667,8 @@ impl Test {
     /// The host is initialized with the advice inputs provided in the test, as well as the kernel
     /// and library MAST forests.
     #[cfg(not(target_family = "wasm"))]
-    fn get_program_and_host(&self) -> (Program, DefaultHost) {
-        let (program, kernel) = self.compile().expect("Failed to compile test source.");
+    fn get_program_and_host(&self) -> (Program, DefaultHost, Option<PackageDebugInfo>) {
+        let (program, kernel, debug_info) = self.compile().expect("Failed to compile test source.");
         let mut host = DefaultHost::default();
         if let Some(kernel) = kernel {
             host.load_library(kernel.mast_forest()).unwrap();
@@ -663,7 +680,7 @@ impl Test {
             host.register_handler(event.clone(), handler.clone()).unwrap();
         }
 
-        (program, host)
+        (program, host, debug_info)
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -677,6 +694,7 @@ impl Test {
             right_result: &Result<StackOutputs, ExecutionError>,
             left_name: &str,
             right_name: &str,
+            compare_error_diagnostics: bool,
         ) {
             match (left_result, right_result) {
                 (Ok(left_stack_outputs), Ok(right_stack_outputs)) => {
@@ -686,6 +704,10 @@ impl Test {
                     );
                 },
                 (Err(left_err), Err(right_err)) => {
+                    if !compare_error_diagnostics {
+                        return;
+                    }
+
                     // assert that diagnostics match
                     let right_diagnostic =
                         format!("{}", PrintDiagnostic::new_without_color(right_err));
@@ -713,14 +735,21 @@ impl Test {
             }
         }
 
-        let (program, host) = self.get_program_and_host();
+        let (program, host, debug_info) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
+        let debug_info = self.in_tracing_mode.then_some(debug_info).flatten();
+        let compare_error_diagnostics = debug_info.is_none();
 
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
                 .expect("test advice inputs should fit default advice map limits");
-            fast_process.execute_by_step_sync(&program, &mut host)
+            if let Some(debug_info) = debug_info.as_ref() {
+                fast_process
+                    .execute_by_step_with_package_debug_info_sync(&program, debug_info, &mut host)
+            } else {
+                fast_process.execute_by_step_sync(&program, &mut host)
+            }
         };
 
         compare_results(
@@ -728,6 +757,7 @@ impl Test {
             &fast_result_by_step,
             "traced execution",
             "step/resume execution",
+            compare_error_diagnostics,
         );
     }
 

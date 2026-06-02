@@ -8,7 +8,7 @@ use crate::{
     Felt, ONE, Word,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder, ExternalNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastForestView,
         MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
         UntrustedMastForestReadOptions,
@@ -536,11 +536,6 @@ fn test_mast_forest_wire_view_large_counts() {
     assert_serialized_view_matches_forest(&forest);
 }
 
-fn debug_info_offset_after_advice_map(bytes: &[u8]) -> usize {
-    let view = MastForestWireView::new(bytes).unwrap();
-    view.debug_info_offset()
-}
-
 fn node_hash_digest_offset(view: &MastForestWireView<'_>, node_index: usize) -> usize {
     let digest_slot = view.digest_slot_at(node_index);
     view.node_hash_offset().unwrap() + digest_slot * Word::min_serialized_size()
@@ -554,31 +549,6 @@ fn external_digest_offset(view: &MastForestWireView<'_>, node_index: usize) -> u
 fn read_word_at(bytes: &[u8], offset: usize) -> Word {
     let mut reader = SliceReader::new(&bytes[offset..offset + Word::min_serialized_size()]);
     Word::read_from(&mut reader).unwrap()
-}
-
-fn rewrite_debug_info_procedure_name_digest(
-    bytes: &[u8],
-    from_digest: Word,
-    to_digest: Word,
-) -> Vec<u8> {
-    let debug_info_offset = debug_info_offset_after_advice_map(bytes);
-    let mut reader = SliceReader::new(&bytes[debug_info_offset..]);
-    let mut debug_info = DebugInfo::read_from(&mut reader).unwrap();
-
-    let procedure_names: Vec<_> = debug_info
-        .procedure_names()
-        .map(|(digest, name)| {
-            let remapped_digest = if digest == from_digest { to_digest } else { digest };
-            (remapped_digest, name.to_string().into())
-        })
-        .collect();
-
-    debug_info.clear_procedure_names();
-    debug_info.extend_procedure_names(procedure_names);
-
-    let mut rewritten = bytes[..debug_info_offset].to_vec();
-    debug_info.write_into(&mut rewritten);
-    rewritten
 }
 
 #[test]
@@ -837,30 +807,7 @@ fn mast_forest_read_from_bytes_rejects_fuzzed_overflow_payload() {
 }
 
 #[test]
-fn mast_forest_serialize_deserialize_procedure_names() {
-    let mut forest = MastForest::new();
-
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(block_id);
-
-    let digest = forest[block_id].digest();
-    forest.insert_procedure_name(digest, "test_procedure".into());
-
-    assert_eq!(forest.procedure_name(&digest), Some("test_procedure"));
-    assert_eq!(forest.debug_info.num_procedure_names(), 1);
-
-    let serialized = forest.to_bytes();
-    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
-
-    assert_eq!(deserialized.procedure_name(&digest), Some("test_procedure"));
-    assert_eq!(deserialized.debug_info.num_procedure_names(), 1);
-    assert_eq!(forest, deserialized);
-}
-
-#[test]
-fn mast_forest_serialize_deserialize_multiple_procedure_names() {
+fn mast_forest_serialize_deserialize_omits_legacy_debug_info() {
     let mut forest = MastForest::new();
 
     let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
@@ -877,23 +824,16 @@ fn mast_forest_serialize_deserialize_multiple_procedure_names() {
     forest.make_root(block2_id);
     forest.make_root(block3_id);
 
-    let digest1 = forest[block1_id].digest();
-    let digest2 = forest[block2_id].digest();
-    let digest3 = forest[block3_id].digest();
-
-    forest.insert_procedure_name(digest1, "proc_add".into());
-    forest.insert_procedure_name(digest2, "proc_mul".into());
-    forest.insert_procedure_name(digest3, "proc_sub".into());
-
-    assert_eq!(forest.debug_info.num_procedure_names(), 3);
-
     let serialized = forest.to_bytes();
-    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+    let mut stripped = Vec::new();
+    forest.write_stripped(&mut stripped);
+    assert_eq!(serialized, stripped);
 
-    assert_eq!(deserialized.procedure_name(&digest1), Some("proc_add"));
-    assert_eq!(deserialized.procedure_name(&digest2), Some("proc_mul"));
-    assert_eq!(deserialized.procedure_name(&digest3), Some("proc_sub"));
-    assert_eq!(deserialized.debug_info.num_procedure_names(), 3);
+    let view = MastForestWireView::new(&serialized).unwrap();
+    assert!(view.is_stripped());
+    assert_eq!(view.debug_info_offset(), serialized.len());
+
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
 
     assert_eq!(forest, deserialized);
 }
@@ -1024,7 +964,7 @@ fn test_header_flags_for_all_serialization_modes() {
         .unwrap();
     forest.make_root(block_id);
 
-    assert_header_flags(&forest.to_bytes(), 0x00);
+    assert_header_flags(&forest.to_bytes(), 0x01);
 
     let mut stripped_bytes = Vec::new();
     forest.write_stripped(&mut stripped_bytes);
@@ -1105,17 +1045,14 @@ fn test_deserialization_rejects_mismatched_header_counts() {
     );
 }
 
-/// Test that stripping and hashless serialization reduce wire size monotonically.
+/// Test that default and stripped serialization match, and hashless is smaller.
 #[test]
-fn test_serialization_sizes_shrink_from_full_to_stripped_to_hashless() {
+fn test_serialization_sizes_shrink_from_digestful_to_hashless() {
     let mut forest = MastForest::new();
 
     let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
     let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
-
-    let digest = forest[block_id].digest();
-    forest.insert_procedure_name(digest, "test_proc".into());
 
     let full_bytes = forest.to_bytes();
 
@@ -1126,12 +1063,12 @@ fn test_serialization_sizes_shrink_from_full_to_stripped_to_hashless() {
     forest.write_hashless(&mut hashless_bytes);
 
     let full_view = MastForestWireView::new(&full_bytes).unwrap();
-    assert!(!full_view.is_stripped());
+    assert!(full_view.is_stripped());
     assert_eq!(full_view.node_count(), forest.num_nodes() as usize);
     assert_eq!(full_view.procedure_root_count(), 1);
     assert!(full_view.node_info_at(0).is_ok());
 
-    assert!(stripped_bytes.len() < full_bytes.len());
+    assert_eq!(stripped_bytes, full_bytes);
     assert!(hashless_bytes.len() < stripped_bytes.len());
 
     let stripped_view = MastForestWireView::new(&stripped_bytes).unwrap();
@@ -1337,13 +1274,8 @@ fn test_untrusted_overspecification_logging_matches_wire_mode() {
     forest.write_stripped(&mut stripped_bytes);
     assert_untrusted_overspec_logging(&stripped_bytes, forest.num_nodes(), &["wire node hashes"]);
 
-    forest.insert_procedure_name(forest[block_id].digest(), "test".into());
     let bytes = forest.to_bytes();
-    assert_untrusted_overspec_logging(
-        &bytes,
-        forest.num_nodes(),
-        &["wire node hashes", "DebugInfo"],
-    );
+    assert_untrusted_overspec_logging(&bytes, forest.num_nodes(), &["wire node hashes"]);
 }
 
 /// Test that untrusted validation in hashless mode recomputes non-external digests without any
@@ -1374,25 +1306,19 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
     assert_eq!(validated_digests, expected_digests);
 }
 
-/// Test that untrusted hashless deserialization accepts external nodes at parse time.
 #[test]
-fn test_debuginfo_serialization_empty() {
-    // Create forest with no debug metadata.
+fn test_mast_forest_serialization_round_trip_without_debug_metadata() {
     let mut forest = MastForest::new();
 
-    // Add a simple basic block with no debug metadata.
     let ops = vec![Operation::Noop; 4];
     let block_id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut forest).unwrap();
     forest.make_root(block_id);
 
-    // Serialize and deserialize
     let bytes = forest.to_bytes();
     let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
 
-    // Verify
     assert_eq!(forest.num_nodes(), deserialized.num_nodes());
-    assert!(forest.debug_info().is_empty());
-    assert!(deserialized.debug_info().is_empty());
+    assert_eq!(forest, deserialized);
 }
 
 /// Test that untrusted forest validation rejects forward node references.
@@ -1434,7 +1360,6 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
         .unwrap();
     forest.make_root(block_id);
     let expected_digest = forest[block_id].digest();
-    forest.insert_procedure_name(expected_digest, "proc".into());
 
     let bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
@@ -1447,8 +1372,7 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     ]
     .into();
 
-    let mut corrupted =
-        rewrite_debug_info_procedure_name_digest(&bytes, expected_digest, bogus_digest);
+    let mut corrupted = bytes.clone();
     bogus_digest.write_into(
         &mut &mut corrupted[digest_offset..digest_offset + Word::min_serialized_size()],
     );
@@ -1467,33 +1391,6 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
 }
 
 #[test]
-fn test_untrusted_forest_rejects_invalid_procedure_name_digest_without_remapping() {
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(block_id);
-    let expected_digest = forest[block_id].digest();
-    forest.insert_procedure_name(expected_digest, "proc".into());
-
-    let bytes = forest.to_bytes();
-    let bogus_digest: Word = [
-        Felt::new_unchecked(9),
-        Felt::new_unchecked(8),
-        Felt::new_unchecked(7),
-        Felt::new_unchecked(6),
-    ]
-    .into();
-
-    let corrupted = rewrite_debug_info_procedure_name_digest(&bytes, expected_digest, bogus_digest);
-
-    let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
-    let result = untrusted.validate();
-
-    assert_matches!(result, Err(MastForestError::InvalidProcedureNameDigest(digest)) if digest == bogus_digest);
-}
-
-#[test]
 fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let mut forest = MastForest::new();
     let left_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
@@ -1507,7 +1404,6 @@ fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
 
     let left_digest = forest[left_root].digest();
     let right_digest = forest[right_root].digest();
-    forest.insert_procedure_name(right_digest, "right".into());
 
     let bytes = forest.to_bytes();
     let view = MastForestWireView::new(&bytes).unwrap();
@@ -1995,10 +1891,10 @@ fn test_untrusted_hashless_validation_respects_custom_allocation_budget() {
     );
 }
 
-/// Test that stripped payloads charge empty debug-info scaffolding with the target pointer width.
+/// Test that stripped payloads do not charge legacy debug-info scaffolding.
 #[cfg(target_pointer_width = "64")]
 #[test]
-fn test_untrusted_stripped_debug_info_budget_uses_usize_slots() {
+fn test_untrusted_stripped_payload_does_not_allocate_debug_info_scaffolding() {
     let mut forest = MastForest::new();
     let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
         .add_to_forest(&mut forest)
@@ -2014,16 +1910,14 @@ fn test_untrusted_stripped_debug_info_budget_uses_usize_slots() {
 
     let validation_budget =
         (usize::try_from(forest.num_nodes()).unwrap() + 1) * size_of::<usize>() - 1;
-    let result = UntrustedMastForest::read_from_bytes_with_options(
+    let untrusted = UntrustedMastForest::read_from_bytes_with_options(
         &bytes,
         UntrustedMastForestReadOptions::new()
             .with_wire_byte_budget(bytes.len())
             .with_validation_allocation_budget(validation_budget),
-    );
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        err.to_string().contains("empty debug-info scaffolding"),
-        "Expected stripped debug-info budget error, got: {err}"
-    );
+    )
+    .expect("stripped reads should not allocate debug-info scaffolding");
+    untrusted
+        .validate()
+        .expect("validation should fit the budget previously consumed by debug scaffolding");
 }

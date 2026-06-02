@@ -1,9 +1,9 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::{
     advice::AdviceMap,
     mast::{
-        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
         ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
     },
@@ -12,9 +12,9 @@ use miden_core::{
 };
 
 use super::{
-    AsmOpMergePolicy, AsmOpRef, DebugMetadataMergePolicy, DebugVarRef, MastNodeRef,
-    PendingMastNode, PendingMastNodeKind, PendingSourceMastNode, SourceDebugGraph, SourceMastNode,
-    SourceMastNodeId, SourceMastNodeRef, compute_operations_and_adjust_mappings,
+    AsmOpRef, DebugVarRef, MastNodeRef, PendingMastNode, PendingMastNodeKind,
+    PendingSourceMastNode, SourceDebugGraph, SourceMastNode, SourceMastNodeId, SourceMastNodeRef,
+    compute_operations_and_adjust_mappings,
 };
 use crate::diagnostics::{Diagnostic, Report, miette};
 
@@ -80,22 +80,6 @@ pub(super) enum MastForestBuilderError {
         #[source]
         source: MastForestError,
     },
-    #[error("failed to add assembly op metadata for node {node_id:?}: {source}")]
-    AddAsmOp {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register assembly op metadata for node {node_id:?}: {source_msg}")]
-    RegisterAsmOps { node_id: MastNodeId, source_msg: String },
-    #[error("failed to add debug variable metadata for node {node_id:?}: {source}")]
-    AddDebugVar {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register debug variable metadata for node {node_id:?}: {source_msg}")]
-    RegisterDebugVars { node_id: MastNodeId, source_msg: String },
     #[error("procedure root {root_ref} was not retained in final MAST forest")]
     MissingProcedureRoot { root_ref: MastNodeRef },
     #[error(
@@ -129,13 +113,12 @@ pub(super) enum MastForestBuilderError {
 ///
 /// Methods are called in finalization order:
 /// 1. materialize live nodes;
-/// 2. register asm-op and debug-variable metadata for materialized node IDs;
+/// 2. finalize source/debug occurrence rows from builder-local source records;
 /// 3. assemble the final forest.
 ///
 /// The helper is private to finalization; keeping the order documented is sufficient because it is
 /// not exposed as a reusable API.
 pub(super) struct MastForestFinalizer {
-    debug_info: DebugInfo,
     nodes: IndexVec<MastNodeId, MastNode>,
     node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
 }
@@ -143,7 +126,6 @@ pub(super) struct MastForestFinalizer {
 impl MastForestFinalizer {
     pub(super) fn new() -> Self {
         Self {
-            debug_info: DebugInfo::new(),
             nodes: IndexVec::new(),
             node_id_by_ref: BTreeMap::new(),
         }
@@ -186,64 +168,14 @@ impl MastForestFinalizer {
         Ok(())
     }
 
-    pub(super) fn register_live_asm_ops(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
-    ) -> Result<(), Report> {
-        let mut asm_op_policy = AsmOpMergePolicy::new(asm_op_by_ref);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.asm_ops.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            asm_op_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.asm_ops,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    pub(super) fn register_live_debug_vars(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
-    ) -> Result<(), Report> {
-        let mut debug_metadata_policy = DebugMetadataMergePolicy::new(debug_vars);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.debug_vars.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            debug_metadata_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.debug_vars,
-            )?;
-        }
-
-        Ok(())
-    }
-
     pub(super) fn into_built_forest(
-        mut self,
+        self,
         procedure_root_refs: &[MastNodeRef],
         source_nodes: &IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
         advice_map: AdviceMap,
-        error_codes: BTreeMap<u64, Arc<str>>,
+        _error_codes: BTreeMap<u64, Arc<str>>,
     ) -> Result<BuiltMastForest, Report> {
         let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in procedure_root_refs {
@@ -253,16 +185,14 @@ impl MastForestFinalizer {
             roots.push(root_id);
         }
 
-        self.debug_info.extend_error_codes(error_codes);
         let (source_graph, source_id_by_ref) = self.finalize_source_graph(
             procedure_root_refs,
             source_nodes,
             asm_op_by_ref,
             debug_vars,
         )?;
-        let mast_forest =
-            MastForest::from_raw_parts(self.nodes, roots, advice_map, self.debug_info)
-                .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
+        let mast_forest = MastForest::from_raw_parts(self.nodes, roots, advice_map)
+            .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
         Ok(BuiltMastForest {
             mast_forest,

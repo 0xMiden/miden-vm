@@ -384,7 +384,7 @@ fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
         "AEAD decrypt handler should be registered by build_test"
     );
 
-    expect_assert_error_message!(test, contains "AEAD ciphertext mismatch");
+    expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
 }
 
 #[test]
@@ -475,7 +475,7 @@ fn test_encrypt_fails_on_overlap() {
     "#;
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }
 
 #[test]
@@ -552,5 +552,5 @@ fn test_decrypt_fails_on_overlap() {
     "#;
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }

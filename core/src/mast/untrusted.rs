@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{AdviceMap, DebugInfo, MastForest, MastForestError, serialization};
+use super::{AdviceMap, MastForest, MastForestError, serialization};
 use crate::serde::{BudgetedReader, DeserializationError, SliceReader};
 
 /// A [`MastForest`] deserialized from untrusted input that has not yet been validated.
@@ -38,7 +38,6 @@ pub struct UntrustedMastForest {
     pub(super) bytes: Vec<u8>,
     pub(super) layout: serialization::ForestLayout,
     pub(super) advice_map: AdviceMap,
-    pub(super) debug_info: DebugInfo,
     pub(super) remaining_allocation_budget: Option<usize>,
 }
 
@@ -154,8 +153,7 @@ impl UntrustedMastForest {
     ///
     /// The wire byte budget limits wire-driven parsing and collection pre-sizing. The validation
     /// helper-allocation budget is derived from that wire budget and caps tracked stripped/hashless
-    /// helper allocations such as digest slot tables, empty debug-info scaffolding, and rebuilt
-    /// digest tables.
+    /// helper allocations such as digest slot tables and rebuilt digest tables.
     pub fn read_from_bytes_with_options(
         bytes: &[u8],
         options: UntrustedMastForestReadOptions,

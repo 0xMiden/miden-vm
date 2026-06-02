@@ -47,7 +47,7 @@ impl ModuleInfo {
         signature: Option<Arc<FunctionType>>,
         attributes: AttributeSet,
     ) {
-        self.add_procedure_with_provenance(name, digest, signature, attributes, None, None);
+        self.add_procedure_with_provenance(name, digest, signature, attributes, None, None, None);
     }
 
     /// Adds a procedure to the module with optional source provenance.
@@ -58,6 +58,7 @@ impl ModuleInfo {
         signature: Option<Arc<FunctionType>>,
         attributes: AttributeSet,
         source_root_id: Option<MastNodeId>,
+        source_debug_root_id: Option<u32>,
         source_library_commitment: Option<Word>,
     ) {
         self.items.push(ItemInfo::Procedure(ProcedureInfo {
@@ -66,6 +67,7 @@ impl ModuleInfo {
             signature,
             attributes,
             source_root_id,
+            source_debug_root_id,
             source_library_commitment,
         }));
     }
@@ -213,6 +215,8 @@ pub struct ProcedureInfo {
     pub source_root_id: Option<MastNodeId>,
     /// The commitment of the source library forest that `source_root_id` belongs to, if known.
     pub source_library_commitment: Option<Word>,
+    /// The exact source/debug occurrence root in package-owned debug info, if known.
+    pub source_debug_root_id: Option<u32>,
 }
 
 impl ProcedureInfo {
@@ -222,6 +226,10 @@ impl ProcedureInfo {
 
     pub fn source_library_commitment(&self) -> Option<Word> {
         self.source_library_commitment
+    }
+
+    pub fn source_debug_root_id(&self) -> Option<u32> {
+        self.source_debug_root_id
     }
 }
 
