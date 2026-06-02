@@ -203,12 +203,12 @@ _Push to Advice Stack:_
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
 | `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates the node, stores the canonical node, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload words). |
 
-_Deferred DAG (host-side registration; node digest derived in-circuit, no advice output):_
+_Deferred DAG (host-side registration; no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an expression node; digest derived in-circuit by `sys::register_expr` (`hperm`). |
-| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a chunk node (length from `TAG`, data from memory at `ptr`); digest derived in-circuit by `sys::register_chunk` (`mem_stream`). |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an expression node in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
+| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a chunk node (length from `TAG`, data from memory at `ptr`) in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
 
 _Insert into Advice Map:_
 

@@ -120,14 +120,15 @@ them, and they are not serialized as trusted state.
 ## Building the DAG from a program
 
 A program grows the DAG through three system events. Each event mutates only the *host-side*
-`DeferredState`; the digest a program uses is **derived in-circuit**, never handed back through
-advice. The `sys` core-library module wraps the two register events in a thin helper.
+`DeferredState`; no register event hands a digest back through advice. Code that later uses or logs
+that digest must derive it **in-circuit** from the same operand-stack or memory data in a
+precompile-owned wrapper.
 
-| Event (`adv.*`)            | `sys` helper     | Operand stack in                 | Effect |
-| -------------------------- | ---------------- | -------------------------------- | ------ |
-| `register_deferred`        | `register_expr`  | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and registers the expression node. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; the helper then computes `NODE_DIGEST` with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_chunk`  | `register_chunk` | raw event: `[TAG, ptr, …]`; helper: `[TAG, ptr, n_chunks, …]` | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and registers the chunk node. No advice/stack output; the helper's `n_chunks` operand is used only to compute `NODE_DIGEST` in-circuit with a `mem_stream` linear hash over the same memory range. |
-| `evaluate_deferred`        | *(none)*         | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it, stores the canonical node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
+| Event (`adv.*`)            | Operand stack in                 | Effect |
+| -------------------------- | -------------------------------- | ------ |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and registers the expression node. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_chunk`  | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and registers the chunk node. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
+| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it, stores the canonical node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure; they do not
 evaluate the node. They are pure host hints that populate the DAG.
@@ -157,8 +158,9 @@ the returned `tag || payload` in-circuit and logging a predicate that `from_wire
 in-circuit `eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
 precompile-specific (which predicate to log is the precompile's business), `evaluate_deferred` is
 intentionally *not* wrapped as a safe `sys` proc: each precompile wraps the raw event itself. The
-register helpers, by contrast, return an already-bound digest, so they are safe by default — the
-worst a misuse can do is make the verifier reject.
+same ownership applies to registration helpers: a wrapper can make a raw register event safe by
+computing the node digest in-circuit from the operand stack or memory, so the worst a misuse can do
+is make the verifier reject.
 
 Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node, which
 serializes to its 12 felts like any other expression. A failed predicate has already surfaced as an
@@ -177,9 +179,10 @@ implicit root and evaluates that root directly. The digest is structural: even `
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-> **Scope note.** This state/API simplification does not change `log_precompile` behavior. The
-> deferred DAG state is accumulated host-side and verified through `DeferredStateWire`; the legacy
-> precompile transcript path remains documented separately.
+> **Scope note.** `log_precompile` folds statements using the same framework `AND` domain as
+> deferred commitments (`Tag::AND`, capacity `[1, 0, 0, 0]`). The deferred DAG state is accumulated
+> host-side and verified through `DeferredStateWire`; the legacy precompile transcript path remains
+> documented separately.
 
 The verifier's obligation collapses to a single fixed point: **evaluate the root to `TRUE`, and
 every logged statement holds.** There is no separate finalization step.
@@ -219,9 +222,9 @@ This framework is an additive substrate. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
 - the deferred DAG root is **not** yet threaded into the STARK proof;
-- this state/API simplification does not change existing `log_precompile` behavior;
 - the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
-  wrapper) remains documented under [Precompiles](../stack/precompiles.md).
+  wrapper) remains documented under [Precompiles](../stack/precompiles.md), with `log_precompile`
+  folded in the framework `AND` domain (`Tag::AND`, capacity `[1, 0, 0, 0]`).
 
 The proof-model cutover — threading the deferred commitment into the proof, migrating the existing
 precompiles onto this model, and retiring the request-list transcript — lands in a follow-up. The
