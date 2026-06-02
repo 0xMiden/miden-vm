@@ -1,0 +1,28 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(AceCols)
+---
+AceCols {
+    s_start: 0,
+    s_block: 1,
+    ctx: 2,
+    ptr: 3,
+    clk: 4,
+    eval_op: 5,
+    id_0: 6,
+    v_0: QuadFeltExpr(
+        7,
+        8,
+    ),
+    id_1: 9,
+    v_1: QuadFeltExpr(
+        10,
+        11,
+    ),
+    mode: [
+        12,
+        13,
+        14,
+        15,
+    ],
+}

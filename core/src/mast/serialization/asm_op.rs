@@ -6,8 +6,6 @@
 //! - A variable-length data blob for AssemblyOp payloads (num_cycles, location, etc.)
 //! - A string table for deduplicating context names, op strings, and URIs
 //! - Fixed-width info records that index into the data blob
-//!
-//! This mirrors the pattern used for decorator serialization in [`super::decorator`].
 
 use alloc::vec::Vec;
 

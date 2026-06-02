@@ -314,13 +314,14 @@ Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ...,
 
 In the above diagram, `blk` is the ID of the *loop* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
-When the VM executes a `LOOP` operation, it does the following:
+The `LOOP` operation has do-while semantics: the body is entered unconditionally for the first iteration, with the condition checked only at the end of each iteration by `REPEAT`/`END`. When the VM executes a `LOOP` operation, it does the following:
 
-1. Pops the stack and:\
-   a. If the popped value is $1$ adds a tuple `(blk, prnt, 1, 0...)` to the block stack table (the `1` indicates that the loop's body is expected to be executed). Then, adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table.\
-   b. If the popped value is $0$, adds `(blk, prnt, 0, 0...)` to the block stack table. In this case, nothing is added to the block hash table.\
-   c. If the popped value is neither $1$ nor $0$, the execution fails.
-2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
+1. Adds a tuple `(blk, prnt, 1, 0...)` to the block stack table (the `1` indicates that the
+   loop's body is expected to be executed).
+2. Adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table.
+3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
+
+The `LOOP` operation does not read or pop the stack.
 
 #### SPAN operation
 
@@ -379,7 +380,8 @@ Similar to `CALL`, `DYNCALL` sets up a new `ctx`, and sets the `fn_hash` registe
 
 Before an `END` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with the hash of the block which is about to end. The prover also sets values in $h_4$ and $h_5$ registers as follows:
 * $h_4$ is set to $1$ if the block is a body of a *loop* block. We denote this value as `f0`.
-* $h_5$ is set to $1$ if the block is a *loop* block. We denote this value as `f1`.
+* $h_5$ is set to $1$ if the block is a *loop* block. We denote this value as `f1`. Under do-while
+  semantics every *loop* block is entered, so $h_5 = 1$ for every loop's `END` row.
 * $h_6$ is set to $1$ if the block is a *call* block. We denote this value as `f2`.
 * $h_7$ is set to $1$ if the block is a *syscall* block. We denote this value as `f3`.
 
@@ -520,32 +522,17 @@ As described previously, when the VM executes a `SPLIT` operation, only the hash
 
 ### LOOP block decoding
 
-When decoding a *loop* bock, we need to consider two possible scenarios:
+A *loop* block has do-while semantics: the body is entered unconditionally for the first iteration, and the trailing condition the body leaves on top of the stack determines whether the VM executes another iteration (`REPEAT`) or exits (`END`).
 
-* When the top of the stack is $1$, we need to enter the loop and execute loop body at least once.
-* When the top of the stack is, $0$ we need to skip the loop.
+When the VM executes a `LOOP` operation, it adds the hash of the loop's body to the block hash table and adds a row to the block stack table with the `is_loop` value set to $1$. The `LOOP` operation itself does not read or pop the stack.
 
-In both cases, we need to pop an element off the top of the stack.
-
-#### Executing the loop
-
-If the top of the stack is $1$, the VM executes a `LOOP` operation. This removes the top element from the stack and adds the hash of the loop's body to the block hash table. It also adds a row to the block stack table setting the `is_loop` value to $1$.
-
-To clear the block hash table, the VM needs to execute the loop body (executing the `END` operation for the loop body block will remove the corresponding row from the block hash table). After loop body is executed, if the top of the stack is $1$, the VM executes a `REPEAT` operation (executing `REPEAT` operation when the top of the stack is $0$ will result in an error). This operation again adds the hash of the loop's body to the block hash table. Thus, the VM needs to execute the loop body again to clear the block hash table.
+To clear the block hash table, the VM needs to execute the loop body (executing the `END` operation for the loop body block will remove the corresponding row from the block hash table). After the loop body is executed, if the top of the stack is $1$, the VM executes a `REPEAT` operation (executing `REPEAT` operation when the top of the stack is $0$ will result in an error). This operation again adds the hash of the loop's body to the block hash table. Thus, the VM needs to execute the loop body again to clear the block hash table.
 
 This process is illustrated on the diagram below.
 
 ![decoder_loop_execution](../../img/design/decoder/decoder_loop_execution.png)
 
-The above steps are repeated until the top of the stack becomes $0$, at which point the VM executes the `END` operation. Since in the beginning we set `is_loop` column in the block stack table to $1$, $h_6$ column will be set to $1$ when the `END` operation is executed. Thus, executing the `END` operation will also remove the top value from the stack. If the removed value is not $0$, the operation will fail. Thus, the VM can exit the loop block only when the top of the stack is $0$.
-
-#### Skipping the loop
-
-If the top of the stack is $0$, the VM still executes the `LOOP` operation. But unlike in the case when we need to enter the loop, the VM sets `is_loop` flag to $0$ in the block stack table, and does not add any rows to the block hash table. The last point means that the only possible operation to be executed after the `LOOP` operation is the `END` operation. This is illustrated in the diagram below.
-
-![decoder_loop_skipping](../../img/design/decoder/decoder_loop_skipping.png)
-
-Moreover, since we've set the `is_loop` flag to $0$, executing the `END` operation does not remove any items from the stack.
+The above steps are repeated until the top of the stack becomes $0$, at which point the VM executes the `END` operation. Since `is_loop` is always $1$ for a loop's `END` row under do-while semantics, the `END` operation always pops the trailing condition off the stack. If the popped value is not $0$, the operation fails. Thus, the VM can exit the loop block only when the top of the stack is $0$.
 
 ### DYN block decoding
 

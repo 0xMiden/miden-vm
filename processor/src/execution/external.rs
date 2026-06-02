@@ -7,7 +7,6 @@ use crate::{
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
     option_map_break_reason,
-    processor::Processor,
     tracer::Tracer,
 };
 
@@ -16,23 +15,15 @@ use crate::{
 
 /// Executes an External node.
 #[inline(always)]
-pub(super) fn execute_external_node<P, T, F>(
-    processor: &mut P,
+pub(super) fn execute_external_node<T, F>(
     external_node_id: MastNodeId,
     current_forest: &mut F,
-    host: &mut impl BaseHost,
     tracer: &mut T,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
-    P: Processor,
-    T: Tracer<Processor = P, Forest = F>,
+    T: Tracer<Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    // Execute decorators that should be executed before entering the node
-    processor
-        .execute_before_enter_decorators(external_node_id, current_forest, host)
-        .map_break(InternalBreakReason::from)?;
-
     // External nodes don't drive a clock cycle and so don't reach `Tracer::start_clock_cycle`.
     // Inform the tracer that we are entering this node so accumulating tracers (e.g. the sparse
     // forest builder) can mark it as visited.
@@ -92,10 +83,6 @@ where
     }
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
-
-    // Push a continuation to execute after_exit decorators when we return from the external
-    // forest
-    continuation_stack.push_finish_external(external_node_id_old_forest);
 
     // Push current forest to the continuation stack so that we can return to it
     continuation_stack.push_enter_forest(old_forest.clone());

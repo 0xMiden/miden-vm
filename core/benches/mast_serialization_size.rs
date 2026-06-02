@@ -43,7 +43,6 @@ fn bench_serialization_sizes(c: &mut Criterion) {
 
     for &blocks_per_forest in sizes {
         let gen_params = MastForestParams {
-            decorators: 32,
             blocks: blocks_per_forest..=blocks_per_forest,
             max_joins: blocks_per_forest.min(8),
             max_splits: blocks_per_forest.min(8),

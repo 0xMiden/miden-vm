@@ -1,23 +1,17 @@
-#[cfg(test)]
-use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-#[cfg(test)]
-use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    mast::{ExecutableMastForest, MastForest, MastNodeExt, MastNodeId},
-    operations::Decorator,
+    mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -134,17 +128,13 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Options for execution, including but not limited to whether debug or tracing is enabled,
-    /// the size of core trace fragments during execution, etc.
+    /// Options for execution, including cycle limits, stack limits, advice map limits, and the
+    /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
-
-    /// Tracks decorator retrieval calls for testing.
-    #[cfg(test)]
-    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
@@ -200,8 +190,7 @@ impl FastProcessor {
 
     /// Creates a new `FastProcessor` instance with the given stack inputs.
     ///
-    /// By default, advice inputs are empty and execution options use their defaults
-    /// (debugging and tracing disabled).
+    /// By default, advice inputs are empty and execution options use their defaults.
     ///
     /// # Example
     /// ```ignore
@@ -209,9 +198,7 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
-    ///     .expect("advice inputs should fit advice map limits")
-    ///     .with_debugging(true)
-    ///     .with_tracing(true);
+    ///     .expect("advice inputs should fit advice map limits");
     /// ```
     ///
     /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
@@ -234,8 +221,6 @@ impl FastProcessor {
 
     /// Sets the execution options for the processor.
     ///
-    /// This will override any previously set debugging or tracing settings.
-    ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
@@ -243,22 +228,6 @@ impl FastProcessor {
         self.advice.set_options(&options)?;
         self.options = options;
         Ok(self)
-    }
-
-    /// Enables or disables debugging mode.
-    ///
-    /// When debugging is enabled, debug decorators will be executed during program execution.
-    pub fn with_debugging(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_debugging(enabled);
-        self
-    }
-
-    /// Enables or disables tracing mode.
-    ///
-    /// When tracing is enabled, trace decorators will be executed during program execution.
-    pub fn with_tracing(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_tracing(enabled);
-        self
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -295,8 +264,6 @@ impl FastProcessor {
             call_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
-            #[cfg(test)]
-            decorator_retrieval_count: Rc::new(Cell::new(0)),
         })
     }
 
@@ -318,27 +285,6 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Returns whether the processor is executing in debug mode.
-    #[inline(always)]
-    pub fn in_debug_mode(&self) -> bool {
-        self.options.enable_debugging()
-    }
-
-    /// Returns true if decorators should be executed.
-    ///
-    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
-    /// enabled (for trace decorators).
-    #[inline(always)]
-    fn should_execute_decorators(&self) -> bool {
-        self.in_debug_mode() || self.options.enable_tracing()
-    }
-
-    #[cfg(test)]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {
-        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
-    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -517,97 +463,6 @@ impl FastProcessor {
         let b = self.stack_get(idx2);
         self.stack_write(idx1, b);
         self.stack_write(idx2, a);
-    }
-
-    // DECORATOR EXECUTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.before_enter(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.after_exit(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the specified decorator
-    fn execute_decorator<F>(
-        &self,
-        decorator: &Decorator,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>> {
-        match decorator {
-            Decorator::Debug(options) => {
-                if self.in_debug_mode() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_debug(&processor_state, options) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::DebugHandlerError { err }.into(),
-                        ));
-                    }
-                }
-            },
-            Decorator::Trace(id) => {
-                if self.options.enable_tracing() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_trace(&processor_state, *id) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
-                                .into(),
-                        ));
-                    }
-                }
-            },
-        };
-        ControlFlow::Continue(())
     }
 
     /// Increments the stack top pointer by 1.

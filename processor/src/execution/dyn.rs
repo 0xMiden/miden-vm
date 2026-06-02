@@ -39,12 +39,6 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
-
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id),
         "dyn node not found in current forest",
@@ -223,11 +217,7 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }

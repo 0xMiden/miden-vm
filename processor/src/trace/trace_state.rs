@@ -107,7 +107,7 @@ impl SystemState {
 /// The subset of the decoder state required to build the trace.
 #[derive(Debug)]
 pub struct DecoderState {
-    /// The value of the [miden_air::trace::decoder::ADDR_COL_IDX] column
+    /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
     /// The address of the current MAST node's parent.
     pub parent_addr: Felt,
@@ -379,17 +379,17 @@ impl BlockStackReplay {
 #[derive(Debug)]
 pub struct NodeFlags {
     is_loop_body: bool,
-    loop_entered: bool,
+    is_loop: bool,
     is_call: bool,
     is_syscall: bool,
 }
 
 impl NodeFlags {
     /// Creates a new instance of `NodeFlags`.
-    pub fn new(is_loop_body: bool, loop_entered: bool, is_call: bool, is_syscall: bool) -> Self {
+    pub fn new(is_loop_body: bool, is_loop: bool, is_call: bool, is_syscall: bool) -> Self {
         Self {
             is_loop_body,
-            loop_entered,
+            is_loop,
             is_call,
             is_syscall,
         }
@@ -400,10 +400,9 @@ impl NodeFlags {
         if self.is_loop_body { ONE } else { ZERO }
     }
 
-    /// Returns ONE if this is a LOOP node and the body of the loop was executed at
-    /// least once; otherwise, returns ZERO.
-    pub fn loop_entered(&self) -> Felt {
-        if self.loop_entered { ONE } else { ZERO }
+    /// Returns ONE if this END is closing a LOOP node; otherwise returns ZERO.
+    pub fn is_loop(&self) -> Felt {
+        if self.is_loop { ONE } else { ZERO }
     }
 
     /// Returns ONE if this node is a CALL or DYNCALL; otherwise returns ZERO.
@@ -419,7 +418,7 @@ impl NodeFlags {
     /// Convenience method that writes the flags in the proper order to be written to the second
     /// word of the hasher state for the trace row of an END operation.
     pub fn to_hasher_state_second_word(&self) -> Word {
-        [self.is_loop_body(), self.loop_entered(), self.is_call(), self.is_syscall()].into()
+        [self.is_loop_body(), self.is_loop(), self.is_call(), self.is_syscall()].into()
     }
 }
 

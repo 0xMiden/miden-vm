@@ -233,7 +233,15 @@ fn verify_exported_signature_type_expr(
             let item = match resolution {
                 SymbolResolution::Local(item) => Some(item.into_inner()),
                 SymbolResolution::External(path)
-                    if path.parent().is_some_and(|parent| parent == module.path()) =>
+                    if path.parent().is_some_and(|parent| {
+                        let Ok(parent) = parent.to_absolute() else {
+                            return false;
+                        };
+                        let Ok(module_path) = module.path().to_absolute() else {
+                            return false;
+                        };
+                        parent.as_ref() == module_path.as_ref()
+                    }) =>
                 {
                     let Some(local_name) = path.last() else {
                         return;

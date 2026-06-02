@@ -1,5 +1,6 @@
 use alloc::string::String;
 
+use miden_assembly::package::Package;
 use rstest::fixture;
 
 use super::*;
@@ -237,17 +238,23 @@ fn test_masm_consistency(
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
+                let kernel_lib = Assembler::new(source_manager.clone())
+                    .assemble_kernel("kernel", kernel_source)
+                    .map(Arc::<Package>::from)
                     .unwrap();
+                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                    .unwrap()
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
+                let program = Assembler::new(source_manager)
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
@@ -316,17 +323,23 @@ fn test_masm_errors_consistency(
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
+                let kernel_lib = Assembler::new(source_manager.clone())
+                    .assemble_kernel("kernel", kernel_source)
+                    .map(Arc::<Package>::from)
                     .unwrap();
+                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                    .unwrap()
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
+                let program = Assembler::new(source_manager)
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
@@ -382,7 +395,10 @@ fn test_log_precompile_correctness() {
     let program_source = "begin log_precompile end";
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        Assembler::new(source_manager).assemble_program(program_source).unwrap()
+        Assembler::new(source_manager)
+            .assemble_program("program", program_source)
+            .unwrap()
+            .unwrap_program()
     };
 
     let mut host = DefaultHost::default();

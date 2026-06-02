@@ -34,6 +34,12 @@ impl PartialEq<str> for PackageId {
     }
 }
 
+impl PartialEq<&str> for PackageId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.as_ref() == *other
+    }
+}
+
 impl Borrow<str> for PackageId {
     fn borrow(&self) -> &str {
         &self.0
@@ -93,7 +99,7 @@ impl From<alloc::string::String> for PackageId {
     }
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for PackageId {
     type Parameters = ();
     type Strategy = proptest::prelude::BoxedStrategy<Self>;

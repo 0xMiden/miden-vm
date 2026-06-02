@@ -38,6 +38,7 @@ bus-debugger = ["miden-air/std"]
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+miden-mast-package.workspace = true
 miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 

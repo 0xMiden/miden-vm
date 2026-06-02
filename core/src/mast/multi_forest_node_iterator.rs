@@ -351,7 +351,7 @@ mod tests {
         let mut forest_b = MastForest::new();
         let id_ext_b =
             ExternalNodeBuilder::new(nodeb0_digest).add_to_forest(&mut forest_b).unwrap();
-        let id_block_b = BasicBlockNodeBuilder::new(vec![Operation::Eqz], Vec::new())
+        let id_block_b = BasicBlockNodeBuilder::new(vec![Operation::Eqz])
             .add_to_forest(&mut forest_b)
             .unwrap();
         let id_split_b = SplitNodeBuilder::new([id_ext_b, id_block_b])
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn multi_mast_forest_external_dependencies() {
         let mut temp_forest = MastForest::new();
-        let id_foo_block = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let id_foo_block = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut temp_forest)
             .unwrap();
         let foo_digest = temp_forest[id_foo_block].digest();
@@ -405,7 +405,7 @@ mod tests {
             .add_to_forest(&mut forest_b)
             .unwrap();
         let id_call_b = CallNodeBuilder::new(id_ext_b).add_to_forest(&mut forest_b).unwrap();
-        BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut forest_b)
             .unwrap();
         forest_b.make_root(id_call_b);
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn multi_mast_forest_child_duplicate() {
         let mut temp_forest = MastForest::new();
-        let id_foo_block = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+        let id_foo_block = BasicBlockNodeBuilder::new(vec![Operation::Drop])
             .add_to_forest(&mut temp_forest)
             .unwrap();
         let foo_digest = temp_forest[id_foo_block].digest();

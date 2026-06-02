@@ -21,7 +21,10 @@ fn assert_prove_verify(
     print_stack_outputs: bool,
     verify_recursively: bool,
 ) {
-    let program = Assembler::default().assemble_program(source).unwrap();
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
     let advice_inputs = AdviceInputs::default();
     let mut host =
@@ -92,7 +95,7 @@ fn assert_recursive_verify(
         verifier_inputs.store,
         verifier_inputs.advice_map
     );
-    test.libraries.push(CoreLibrary::default().library().clone());
+    test.libraries.push(CoreLibrary::default().package());
     test.execute().expect("recursive verifier execution failed");
 }
 
@@ -186,7 +189,7 @@ fn rejects_non_canonical_air_order() {
             push.1 drop
         end
     ";
-    let program = Assembler::default().assemble_program(source).unwrap();
+    let program = Assembler::default().assemble_program("test", source).unwrap().unwrap_program();
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
     let advice_inputs = AdviceInputs::default();
     let mut host =
@@ -352,7 +355,10 @@ mod fast_parallel {
             end
         ";
 
-        let program = Assembler::default().assemble_program(source).unwrap();
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .unwrap()
+            .unwrap_program();
         let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
@@ -364,15 +370,11 @@ mod fast_parallel {
         // Build trace using parallel trace generation
         let trace = build_trace(trace_inputs).unwrap();
 
-        // Convert trace to row-major format for proving
-        let trace_matrix = trace.to_row_major_matrix();
-
         // Build public inputs
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
         // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
         let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
-        let _ = trace_matrix; // exercise unified row-major path for legacy callers.
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
@@ -404,7 +406,10 @@ mod fast_parallel {
             end
         ";
 
-        let program = Assembler::default().assemble_program(source).unwrap();
+        let program = Assembler::default()
+            .assemble_program("program", source)
+            .unwrap()
+            .unwrap_program();
         let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
@@ -492,10 +497,11 @@ mod fast_parallel {
         );
 
         let program = Assembler::default()
-            .with_dynamic_library(CoreLibrary::default())
+            .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .expect("failed to load core library")
-            .assemble_program(source)
-            .expect("failed to assemble log_precompile fixture");
+            .assemble_program("program", source)
+            .expect("failed to assemble log_precompile fixture")
+            .unwrap_program();
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
         let mut host = DefaultHost::default();

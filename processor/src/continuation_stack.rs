@@ -27,15 +27,15 @@ pub enum Continuation<F> {
     FinishSplit(MastNodeId),
     /// Process the finish phase of a Loop node.
     ///
-    /// The `was_entered` field indicates whether the loop body was entered at least once. When
-    /// `was_entered == false`, the loop condition was `ZERO` and the loop body was never executed.
-    FinishLoop { node_id: MastNodeId, was_entered: bool },
+    /// Reached after the loop body has finished executing. Inspects the condition the body left on
+    /// top of the stack and either fires REPEAT (re-enter the body) or END (exit the loop). Loop
+    /// bodies are entered unconditionally — a `while.true` source construct is desugared into a
+    /// SPLIT that wraps the LOOP, so the LOOP itself sees a do-while body.
+    FinishLoop(MastNodeId),
     /// Process the finish phase of a Call node.
     FinishCall(MastNodeId),
     /// Process the finish phase of a Dyn node.
     FinishDyn(MastNodeId),
-    /// Process the finish phase of an External node (execute after_exit decorators).
-    FinishExternal(MastNodeId),
     /// Resume execution at the specified operation of the specified batch in the given basic block
     /// node.
     ResumeBasicBlock {
@@ -48,16 +48,13 @@ pub enum Continuation<F> {
     Respan { node_id: MastNodeId, batch_index: usize },
     /// Process the finish phase of a basic block node.
     ///
-    /// This corresponds to incrementing the clock to account for the inserted END operation, and
-    /// then executing `AfterExitDecorators`.
+    /// This corresponds to incrementing the clock to account for the inserted END operation.
     FinishBasicBlock(MastNodeId),
     /// Enter a new MAST forest, where all subsequent `MastNodeId`s will be relative to this forest.
     ///
     /// When we encounter an `ExternalNode`, we enter the corresponding MAST forest directly, and
     /// push an `EnterForest` continuation to restore the previous forest when done.
     EnterForest(F),
-    /// Process the `after_exit` decorators of the given node.
-    AfterExitDecorators(MastNodeId),
 }
 
 impl<F> Continuation<F> {
@@ -73,7 +70,7 @@ impl<F> Continuation<F> {
             StartNode(_)
             | FinishJoin(_)
             | FinishSplit(_)
-            | FinishLoop { node_id: _, was_entered: _ }
+            | FinishLoop(_)
             | FinishCall(_)
             | FinishDyn(_)
             | ResumeBasicBlock {
@@ -84,7 +81,7 @@ impl<F> Continuation<F> {
             | Respan { node_id: _, batch_index: _ }
             | FinishBasicBlock(_) => true,
 
-            FinishExternal(_) | EnterForest(_) | AfterExitDecorators(_) => false,
+            EnterForest(_) => false,
         }
     }
 }
@@ -147,9 +144,9 @@ impl<F> ContinuationStack<F> {
         self.stack.push(Continuation::FinishSplit(node_id));
     }
 
-    /// Pushes a loop finish continuation onto the stack, for which the loop was entered.
-    pub fn push_finish_loop_entered(&mut self, node_id: MastNodeId) {
-        self.stack.push(Continuation::FinishLoop { node_id, was_entered: true });
+    /// Pushes a loop finish continuation onto the stack.
+    pub fn push_finish_loop(&mut self, node_id: MastNodeId) {
+        self.stack.push(Continuation::FinishLoop(node_id));
     }
 
     /// Pushes a call finish continuation onto the stack.
@@ -160,11 +157,6 @@ impl<F> ContinuationStack<F> {
     /// Pushes a dyn finish continuation onto the stack.
     pub fn push_finish_dyn(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishDyn(node_id));
-    }
-
-    /// Pushes an external finish continuation onto the stack.
-    pub fn push_finish_external(&mut self, node_id: MastNodeId) {
-        self.stack.push(Continuation::FinishExternal(node_id));
     }
 
     /// Pushes a continuation to start processing the given node.
@@ -210,11 +202,11 @@ impl<F> ContinuationStack<F> {
     /// This includes all coming continuations up to and including the first continuation that
     /// increments the clock.
     ///
-    /// Note: for this iterator to function correctly, it must be the case that that executing a
+    /// Note: for this iterator to function correctly, it must be the case that executing a
     /// continuation that doesn't increment the clock *does not* push new continuations on the
     /// stack. This is currently the case, and is a reasonable invariant to maintain, as
-    /// continuations that don't increment the clock can be expected to be simple (e.g. run some
-    /// decorators, or enter a new mast forest).
+    /// continuations that don't increment the clock can be expected to be simple (e.g. enter a new
+    /// mast forest).
     pub fn iter_continuations_for_next_clock(&self) -> impl Iterator<Item = &Continuation<F>> {
         let mut found_incrementing_cont = false;
 
@@ -263,35 +255,34 @@ mod tests {
     }
 
     #[test]
-    fn get_next_clock_cycle_increment_non_incrementing_after_incrementing() {
+    fn get_next_clock_cycle_increment_enter_forest_after_incrementing() {
         let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push a non-incrementing continuation on top
-        stack.push_continuation(Continuation::AfterExitDecorators(MastNodeId::new_unchecked(0)));
+        stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
-        // Should return: AfterExitDecorators (non-incrementing), then StartNode (first
-        // incrementing)
+        // Should return: EnterForest (non-incrementing), then StartNode (first incrementing)
         assert_eq!(result.len(), 2);
-        assert!(matches!(result[0], Continuation::AfterExitDecorators(_)));
+        assert!(matches!(result[0], Continuation::EnterForest(_)));
         assert!(matches!(result[1], Continuation::StartNode(_)));
     }
 
     #[test]
-    fn get_next_clock_cycle_increment_two_non_incrementing_after_incrementing() {
+    fn get_next_clock_cycle_increment_multiple_enter_forest_after_incrementing() {
         let mut stack: ContinuationStack<Arc<MastForest>> = ContinuationStack::default();
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push two non-incrementing continuations on top
-        stack.push_continuation(Continuation::AfterExitDecorators(MastNodeId::new_unchecked(0)));
+        stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
         stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
-        // Should return: EnterForest, AfterExitDecorators, StartNode
+        // Should return: EnterForest, EnterForest, StartNode
         assert_eq!(result.len(), 3);
         assert!(matches!(result[0], Continuation::EnterForest(_)));
-        assert!(matches!(result[1], Continuation::AfterExitDecorators(_)));
+        assert!(matches!(result[1], Continuation::EnterForest(_)));
         assert!(matches!(result[2], Continuation::StartNode(_)));
     }
 }

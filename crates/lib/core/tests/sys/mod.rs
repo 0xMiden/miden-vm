@@ -153,10 +153,11 @@ fn log_precompile_request_procedure() {
 
     // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
     let program: Program = Assembler::default()
-        .with_dynamic_library(CoreLibrary::default())
+        .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
         .expect("failed to load core library")
-        .assemble_program(source)
-        .expect("failed to assemble log_precompile fixture");
+        .assemble_program("program", source)
+        .expect("failed to assemble log_precompile fixture")
+        .unwrap_program();
 
     let stack_inputs = StackInputs::default();
     let advice_inputs = AdviceInputs::default();
