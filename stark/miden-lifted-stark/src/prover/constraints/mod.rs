@@ -84,6 +84,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     output: &mut [EF],
     air: &A,
     main_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
+    preprocessed_on_gj: Option<&BitReversedMatrixView<RowMajorMatrixView<'_, F>>>,
     aux_on_gj: &BitReversedMatrixView<RowMajorMatrixView<'_, F>>,
     eval_domain: &EvaluationDomain<F>,
     alpha: EF,
@@ -124,6 +125,12 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
 
     // Main trace width
     let main_width = main_on_gj.width();
+    // Preprocessed trace view, constructed only when the AIR declares one.
+    let preproc_trace_view = preprocessed_on_gj.map(|m| {
+        let w = m.width();
+        RowMajorMatrixView::new(m.inner.values, w)
+    });
+    let preprocessed_width = preproc_trace_view.as_ref().map_or(0, Matrix::width);
 
     // Pack randomness for aux trace
     let packed_randomness: Vec<PE<F, EF>> = randomness.iter().copied().map(Into::into).collect();
@@ -141,6 +148,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
     let points_per_task = width * ROW_BLOCKS_PER_PARALLEL_TASK;
 
     let eval_big_slice = |main_buf: &mut Vec<P<F>>,
+                          preproc_buf: &mut Vec<P<F>>,
                           aux_base_buf: &mut Vec<P<F>>,
                           aux_pe_buf: &mut Vec<PE<F, EF>>,
                           g: usize,
@@ -160,6 +168,23 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
                 main_buf,
             );
             let main_mat = RowMajorMatrixView::new(main_buf.as_slice(), main_width);
+
+            // Get preprocessed trace as packed row pair (when present). For AIRs
+            // without preprocessed columns, the window is empty and the AIR must
+            // not call `builder.preprocessed()`.
+            let preprocessed = if let Some(view) = preproc_trace_view.as_ref() {
+                collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
+                    view,
+                    i_start,
+                    quotient_degree,
+                    preproc_buf,
+                );
+                let m = RowMajorMatrixView::new(preproc_buf.as_slice(), preprocessed_width);
+                RowWindow::from_view(&m)
+            } else {
+                let empty: &[P<F>] = &[];
+                RowWindow::from_two_rows(empty, empty)
+            };
 
             // Get aux trace as packed row pair and convert to packed extension field
             collect_vertically_packed_row_pair_bitrev_into::<F, P<F>>(
@@ -187,6 +212,7 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
             let mut folder: ProverConstraintFolder<'_, F, EF, P<F>, PE<F, EF>> =
                 ProverConstraintFolder {
                     main: RowWindow::from_view(&main_mat),
+                    preprocessed,
                     aux: RowWindow::from_view(&aux_mat),
                     packed_randomness: &packed_randomness,
                     public_values,
@@ -219,19 +245,34 @@ pub(super) fn evaluate_constraints_into<F, EF, A>(
 
     #[cfg(feature = "parallel")]
     output.par_chunks_mut(points_per_task).enumerate().for_each_init(
-        || (Vec::<P<F>>::new(), Vec::<P<F>>::new(), Vec::<PE<F, EF>>::new()),
-        |(main_buf, aux_base_buf, aux_pe_buf), (g, big_slice)| {
-            eval_big_slice(main_buf, aux_base_buf, aux_pe_buf, g, big_slice);
+        || {
+            (
+                Vec::<P<F>>::new(),
+                Vec::<P<F>>::new(),
+                Vec::<P<F>>::new(),
+                Vec::<PE<F, EF>>::new(),
+            )
+        },
+        |(main_buf, preproc_buf, aux_base_buf, aux_pe_buf), (g, big_slice)| {
+            eval_big_slice(main_buf, preproc_buf, aux_base_buf, aux_pe_buf, g, big_slice);
         },
     );
 
     #[cfg(not(feature = "parallel"))]
     {
         let mut main_buf = Vec::<P<F>>::new();
+        let mut preproc_buf = Vec::<P<F>>::new();
         let mut aux_base_buf = Vec::<P<F>>::new();
         let mut aux_pe_buf = Vec::<PE<F, EF>>::new();
         output.chunks_mut(points_per_task).enumerate().for_each(|(g, big_slice)| {
-            eval_big_slice(&mut main_buf, &mut aux_base_buf, &mut aux_pe_buf, g, big_slice);
+            eval_big_slice(
+                &mut main_buf,
+                &mut preproc_buf,
+                &mut aux_base_buf,
+                &mut aux_pe_buf,
+                g,
+                big_slice,
+            );
         });
     }
 }

@@ -95,6 +95,10 @@ impl<T: Clone> MerkleWitness<T> {
 
     /// Authentication path for a leaf index (sibling hashes, bottom-to-top).
     pub fn path(&self, index: usize) -> Option<Vec<T>> {
+        if index >= (1usize << self.tree_depth) {
+            return None;
+        }
+
         let mut path = Vec::with_capacity(self.tree_depth);
         let mut id = NodeId::new(self.tree_depth, index);
         for _ in 0..self.tree_depth {
@@ -158,5 +162,6 @@ mod tests {
         // path: sibling hashes from leaf to root
         assert_eq!(tree.path(0).unwrap(), vec![2, 7]);
         assert_eq!(tree.path(3).unwrap(), vec![3, 3]);
+        assert!(tree.path(4).is_none());
     }
 }

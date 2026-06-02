@@ -9,15 +9,14 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
+    ProverInstance, VerifierInstance,
     air::{
         AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
         ProverStatement, Statement, WindowAccess,
     },
-    prove,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, test_challenger, test_config,
     },
-    verify,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,12 +158,15 @@ fn external_assertion_holds() {
     let trace = generate_pow4_trace(start, 8);
     let prover_statement = external_prover_statement(input, trace, vec![start], vec![input]);
 
-    let output =
-        prove(&config, &prover_statement, test_challenger()).expect("proving should succeed");
+    let output = ProverInstance::new(&config, &prover_statement, None)
+        .expect("no preprocessed columns")
+        .prove(test_challenger())
+        .expect("proving should succeed");
 
-    let verifier_digest =
-        verify(&config, prover_statement.statement(), &output.proof, test_challenger())
-            .expect("verification should succeed");
+    let verifier_digest = VerifierInstance::new(&config, prover_statement.statement(), None)
+        .expect("no preprocessed columns")
+        .verify(&output.proof, test_challenger())
+        .expect("verification should succeed");
     assert_eq!(output.digest, verifier_digest);
 }
 
@@ -184,7 +186,9 @@ fn missing_external_input_fails_proving() {
     // verifier-side sanity check.
     let broken = external_prover_statement(input, trace, vec![start], vec![]);
 
-    let err = prove(&config, &broken, test_challenger())
+    let err = ProverInstance::new(&config, &broken, None)
+        .expect("no preprocessed columns")
+        .prove(test_challenger())
         .expect_err("missing external input should fail proving");
     assert!(
         matches!(err, crate::ProverError::Reduction(_)),

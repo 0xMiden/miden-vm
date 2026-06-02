@@ -3,14 +3,12 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    StarkConfig,
+    ProverInstance, StarkConfig, VerifierInstance,
     air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, ProverStatement, Statement},
-    prove,
     testing::airs::{
         blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
         poseidon2::LiftedPoseidon2Air,
     },
-    verify,
 };
 use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -138,10 +136,11 @@ where
     let statement =
         Statement::new(BenchMultiAir { airs }, Vec::new(), Vec::new()).expect("statement");
     let prover_statement = ProverStatement::new(statement, traces).expect("prover statement");
+    let prover_instance =
+        ProverInstance::new(config, &prover_statement, None).expect("no preprocessed columns");
 
-    let output = info_span!("prove").in_scope(|| {
-        prove(config, &prover_statement, config.challenger()).expect("proving failed")
-    });
+    let output = info_span!("prove")
+        .in_scope(|| prover_instance.prove(config.challenger()).expect("proving failed"));
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
@@ -151,9 +150,10 @@ where
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
-            let digest =
-                verify(config, prover_statement.statement(), &output.proof, config.challenger())
-                    .expect("verification failed");
+            let digest = VerifierInstance::new(config, prover_statement.statement(), None)
+                .expect("no preprocessed columns")
+                .verify(&output.proof, config.challenger())
+                .expect("verification failed");
             assert_eq!(output.digest, digest);
         });
     }

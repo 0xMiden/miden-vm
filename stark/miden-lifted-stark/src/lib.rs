@@ -40,10 +40,10 @@
 //! These are AIR implementer responsibilities. Run [`debug::assert_prover_setup`] (or its
 //! components) from your test harness to catch structural mistakes early:
 //!
-//! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, no
-//!    preprocessed trace, positive aux width, power-of-two periodic column lengths, and matching
-//!    override helpers. Checked by [`miden_lifted_air::debug::assert_multi_air_valid`]. These are
-//!    not typed `Statement::new` errors.
+//! 1. **AIR structural contract** — non-empty AIR collection, shared public-value count, positive
+//!    aux width, power-of-two periodic column lengths, and matching override helpers. Checked by
+//!    [`miden_lifted_air::debug::assert_multi_air_valid`]. These are not typed `Statement::new`
+//!    errors.
 //! 2. **Window size** — only transition window size 2.
 //! 3. **Deterministic constraints** — `eval()` emits the same number and types of constraints
 //!    regardless of builder implementation.
@@ -69,6 +69,7 @@ pub(crate) mod domain;
 pub mod lmcs;
 mod order;
 pub mod pcs;
+mod preprocessed;
 pub mod proof;
 pub mod prover;
 mod selectors;
@@ -81,8 +82,9 @@ pub use debug::check_constraints;
 // `ProverError` / `VerifierError`, so they need a public path of their own.
 pub use domain::DomainError;
 pub use order::ShapeError;
-pub use prover::{ProverError, prove};
-pub use verifier::{VerifierError, verify};
+pub use preprocessed::{Preprocessed, PreprocessedValidationError};
+pub use prover::{ProverError, ProverInstance};
+pub use verifier::{VerifierError, VerifierInstance};
 
 // ============================================================================
 // Namespaced re-exports from upstream crates
@@ -101,7 +103,6 @@ pub mod air {
         AirBuilderWithContext,
         BaseAir,
         ConstraintDegrees,
-        EmptyWindow,
         ExtensionBuilder,
         FilteredAirBuilder,
         // Lifted AIR types

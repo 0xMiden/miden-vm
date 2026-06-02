@@ -10,7 +10,7 @@ use params::PcsParams;
 use proof::PcsProof;
 use prover::open_with_channel;
 use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
-use verifier::{PcsError, verify_aligned};
+use verifier::{CommitmentGroup, PcsError, verify_aligned};
 
 use super::*;
 use crate::{
@@ -55,6 +55,14 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 
     let commitments: Vec<_> = trees.iter().map(|t| (t.root(), t.widths())).collect();
+    let commitment_groups: Vec<_> = trees
+        .iter()
+        .map(|t| CommitmentGroup {
+            root: t.root(),
+            widths: t.widths(),
+            log_height: log2_strict_u8(t.height()),
+        })
+        .collect();
     let trace_trees: Vec<&_> = trees.iter().collect();
 
     // Prover: observe all commitments before opening.
@@ -84,7 +92,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let result = verify_aligned::<Felt, QuadFelt, _, _, 2>(
         params,
         &lmcs,
-        &commitments,
+        &commitment_groups,
         &max_domain,
         eval_points,
         &mut verifier_channel,
@@ -97,9 +105,13 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
 
         // Re-parse PcsProof from a fresh channel and verify digest agreement.
         let alignment = lmcs.alignment();
-        let aligned_commitments: Vec<_> = commitments
+        let aligned_commitments: Vec<_> = commitment_groups
             .iter()
-            .map(|(c, widths)| (*c, aligned_widths(widths.clone(), alignment)))
+            .map(|group| CommitmentGroup {
+                root: group.root,
+                widths: aligned_widths(group.widths.clone(), alignment),
+                log_height: group.log_height,
+            })
             .collect();
 
         let mut challenger = gl::test_challenger();

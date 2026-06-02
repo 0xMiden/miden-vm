@@ -9,7 +9,10 @@ use thiserror::Error;
 use crate::{
     domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
-    pcs::deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
+    pcs::{
+        deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
+        verifier::CommitmentGroup,
+    },
     util::horner::horner_acc,
 };
 
@@ -30,16 +33,18 @@ use crate::{
 /// - reduces the opened row to `f_red(X)` using Horner with the same `α`,
 /// - reconstructs `Q(X)` and returns it to the FRI verifier.
 ///
-/// Lifting is transparent at this layer: the prover commits to lifted codewords, so
-/// every opened column is interpreted as a polynomial over the same max domain.
+/// Full-height groups live on the max domain. Shorter groups are interpreted by
+/// folding query indices to their committed depth.
 pub(in crate::pcs) struct DeepOracle<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> {
-    /// Trace commitments with their widths (one per trace tree).
+    /// Committed groups (root + widths + tree depth), one per tree.
     ///
     /// Widths must match the committed rows (including any alignment padding if
-    /// `build_aligned_tree` was used).
-    commitments: Vec<(L::Commitment, Vec<usize>)>,
+    /// `build_aligned_tree` was used). A group's `log_height` may be below the
+    /// query depth — a virtually-lifted, setup-fixed preprocessed tree.
+    commitments: Vec<CommitmentGroup<L::Commitment>>,
 
-    /// LDE coset all commitments are lifted to (tree has `domain.lde_height()` leaves).
+    /// Max LDE coset; query indices are sampled at `domain.log_lde_height()` and
+    /// folded down to each group's committed depth when shorter.
     domain: LiftedDomain<F>,
 
     /// Reduced openings: pairs of `(zⱼ, f_reduced(zⱼ))` from the prover's claims.
@@ -57,7 +62,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
     /// Construct by reading evaluations, checking PoW, and sampling challenges.
     ///
     /// Commitment widths must match the committed rows (including any alignment padding).
-    /// All commitments are expected to be lifted to the LDE height of `domain`.
+    /// Each group's `log_height` must be `≤ domain.log_lde_height()`; shorter groups
+    /// are virtually lifted at query time.
     ///
     /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
     /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
@@ -67,14 +73,14 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
     pub fn new<Ch>(
         params: DeepParams,
         eval_points: &[EF],
-        commitments: Vec<(L::Commitment, Vec<usize>)>,
+        commitments: Vec<CommitmentGroup<L::Commitment>>,
         domain: &LiftedDomain<F>,
         channel: &mut Ch,
     ) -> Result<(Self, OpenedValues<EF>), DeepError>
     where
         Ch: VerifierChannel<F = F, Commitment = L::Commitment>,
     {
-        let group_widths: Vec<&[usize]> = commitments.iter().map(|(_, gw)| gw.as_slice()).collect();
+        let group_widths: Vec<&[usize]> = commitments.iter().map(|g| g.widths.as_slice()).collect();
         let evals = read_eval_matrices::<F, EF, Ch>(&group_widths, eval_points.len(), channel)?;
 
         // 1. Check grinding witness
@@ -136,9 +142,17 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
         let mut reduced_rows: BTreeMap<usize, EF> =
             tree_indices.iter().map(|&idx| (idx, EF::ZERO)).collect();
 
-        for (group_idx, (commit, widths)) in self.commitments.iter().enumerate() {
+        for (group_idx, group) in self.commitments.iter().enumerate() {
+            // `open_lifted_batch` returns rows keyed by the original query indices, even when
+            // this group is committed at a shorter depth, so the reduction is uniform.
             let opened_rows = lmcs
-                .open_batch(commit, widths, tree_indices, channel)
+                .open_lifted_batch(
+                    &group.root,
+                    &group.widths,
+                    tree_indices,
+                    group.log_height,
+                    channel,
+                )
                 .map_err(|source| DeepError::LmcsError { source, tree: group_idx })?;
 
             // Reduce opened rows via Horner: f_reduced(X) = Σᵢ αᵂ⁻¹⁻ⁱ · fᵢ(X).

@@ -1,7 +1,7 @@
 //! Lifted STARK verifier.
 //!
 //! This module provides:
-//! - [`verify`]: Verify a [`Statement`].
+//! - [`VerifierInstance::verify`](crate::VerifierInstance::verify): Verify a [`Statement`].
 //!
 //! Takes a challenger (consumed by value) and proof data, constructs the
 //! verifier transcript internally, and returns a [`StarkDigest`] on success.
@@ -13,27 +13,30 @@
 //! prover module-level docs for the full binding contract and recommended
 //! pattern.
 //!
-//! The proof's instance count and per-AIR log trace heights are carried on
-//! [`StarkProofData`] (in instance order) and observed into the challenger by
-//! [`verify`] at the protocol layer. Callers must not pre-observe them.
+//! The proof's per-AIR log trace heights are carried on [`StarkProofData`] (in
+//! instance order); [`VerifierInstance::verify`](crate::VerifierInstance::verify)
+//! observes the derived instance count and those heights at the protocol layer.
+//! Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
 //!
 //! The verifier accepts whatever trace heights the proof carries; it never
 //! compares them against a caller-supplied expectation. If your statement
 //! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
-//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data)
-//! and check `proof.log_trace_heights()` yourself.
+//! with [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using the same
+//! [`VerifierInstance`], and check `proof.log_trace_heights()` yourself.
 //!
 //! # Transcript boundaries (strict consumption)
 //!
-//! [`verify`] finalizes the transcript internally: it rejects proofs with
-//! trailing data (via [`TranscriptError::TrailingData`]) and returns a binding
-//! digest that must match the prover's digest.
+//! [`VerifierInstance::verify`](crate::VerifierInstance::verify) finalizes the
+//! transcript internally: it rejects proofs with trailing data (via
+//! [`TranscriptError::TrailingData`]) and returns a binding digest that must
+//! match the prover's digest.
 //!
 //! If you want to bundle extra data alongside the proof, you must manage
 //! boundaries yourself (e.g. parse and validate that data first, then pass the
-//! remaining transcript to [`verify`]).
+//! remaining transcript to
+//! [`VerifierInstance::verify`](crate::VerifierInstance::verify)).
 
 extern crate alloc;
 
@@ -48,6 +51,7 @@ use miden_lifted_air::{
     BaseAir, InstanceError, LiftedAir, MultiAir, ReductionError, RowWindow, Statement,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
+use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use periodic::PeriodicPolys;
@@ -56,15 +60,97 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     domain::{Coset, DomainError, LiftedDomain, log_quotient_degree},
+    lmcs::Lmcs,
     order::{ShapeError, TraceOrder},
-    pcs::verifier::{PcsError, verify_aligned},
+    pcs::verifier::{CommitmentGroup, PcsError, verify_aligned},
+    preprocessed::PreprocessedValidationError,
     proof::{StarkDigest, StarkProofData},
     util::packing::row_to_packed_ext,
 };
 
-/// Errors from verification — runtime instance / proof-shape failures or
-/// cryptographic verification failures. The AIR's structural contract is
-/// trusted (see the crate-level trust model).
+// ============================================================================
+// VerifierInstance
+// ============================================================================
+
+/// Verifier-side bundle: a [`StarkConfig`], a borrowed [`Statement`], and the
+/// optional preprocessed commitment (a trusted setup input, not read from the
+/// proof).
+///
+/// Construction validates preprocessed presence parity, so holding a
+/// `VerifierInstance` guarantees the commitment is present exactly when the
+/// AIRs declare preprocessed columns.
+pub struct VerifierInstance<'a, F, EF, MA, SC>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+    SC: StarkConfig<F, EF>,
+{
+    config: &'a SC,
+    statement: &'a Statement<F, EF, MA>,
+    preprocessed_commitment: Option<<SC::Lmcs as Lmcs>::Commitment>,
+}
+
+impl<'a, F, EF, MA, SC> VerifierInstance<'a, F, EF, MA, SC>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    MA: MultiAir<F, EF>,
+    SC: StarkConfig<F, EF>,
+{
+    /// Bundle a config + statement with an optional preprocessed commitment.
+    ///
+    /// The commitment must be `Some` exactly when some AIR declares preprocessed
+    /// columns; otherwise this errors with
+    /// [`PreprocessedValidationError::PresenceMismatch`].
+    pub fn new(
+        config: &'a SC,
+        statement: &'a Statement<F, EF, MA>,
+        preprocessed_commitment: Option<<SC::Lmcs as Lmcs>::Commitment>,
+    ) -> Result<Self, PreprocessedValidationError> {
+        let expected = statement.airs().iter().any(|a| a.preprocessed_width() > 0);
+        let actual = preprocessed_commitment.is_some();
+        if expected != actual {
+            return Err(PreprocessedValidationError::PresenceMismatch { expected, actual });
+        }
+        Ok(Self {
+            config,
+            statement,
+            preprocessed_commitment,
+        })
+    }
+
+    /// Verify a proof against this instance.
+    pub fn verify(
+        &self,
+        proof: &StarkProofData<F, EF, SC>,
+        challenger: SC::Challenger,
+    ) -> Result<StarkDigest<F, EF, SC>, VerifierError> {
+        verify(self, proof, challenger)
+    }
+
+    /// Borrow the STARK configuration.
+    pub fn config(&self) -> &SC {
+        self.config
+    }
+
+    /// Borrow the wrapped air-crate statement.
+    pub fn statement(&self) -> &Statement<F, EF, MA> {
+        self.statement
+    }
+
+    /// Borrow the preprocessed commitment, if any.
+    pub fn preprocessed_commitment(&self) -> Option<&<SC::Lmcs as Lmcs>::Commitment> {
+        self.preprocessed_commitment.as_ref()
+    }
+}
+
+/// Errors that can occur during verification.
+///
+/// Returned exclusively for runtime instance / proof-shape failures or
+/// cryptographic verification failures. AIR structural correctness is
+/// trusted — call [`crate::debug::assert_prover_setup`] (or
+/// [`miden_lifted_air::debug::assert_multi_air_valid`]) from tests.
 #[derive(Debug, Error)]
 pub enum VerifierError {
     #[error(transparent)]
@@ -113,13 +199,33 @@ pub enum VerifierError {
 /// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
 /// yields the local/next row pair for the original trace domain.
 ///
-/// As with [`crate::prove`], only runtime statement/proof data is validated; the
-/// AIR structural contract is trusted (see the crate-level trust model). The
-/// proof's declared heights are not compared against any caller expectation —
-/// see the module-level docs to bind them yourself.
-pub fn verify<F, EF, MA, SC>(
-    config: &SC,
-    statement: &Statement<F, EF, MA>,
+/// **Statement-bound heights:** this function does not compare the proof's
+/// declared heights against any caller expectation. If your statement fixes
+/// trace dimensions, parse via
+/// [`StarkProof::from_data`](crate::proof::StarkProof::from_data) using this instance and check
+/// `proof.log_trace_heights()` before calling this. See the module-level docs for the full
+/// contract.
+///
+/// # Trust contract
+///
+/// `verify` validates the runtime statement plus everything carried on the
+/// proof; the AIR list is **trusted** (run
+/// [`miden_lifted_air::debug::assert_multi_air_valid`] from tests).
+///
+/// ## Validated
+/// - Same statement checks as [`prove`](crate::ProverInstance::prove) minus trace shape (no traces
+///   here)
+/// - Same `log_quotient_degree <= log_blowup` compat check
+/// - Proof shape via the internal trace-order reconstruction from log heights
+/// - Proof byte parsing (transcript channel)
+/// - PCS / FRI / DEEP / LMCS / transcript / constraint identity
+/// - External assertions from [`Statement::eval_external`]
+/// - Preprocessed openings against the trusted commitment (via the PCS)
+///
+/// ## Trusted (NOT validated)
+/// - AIR structural shape (same list as in [`prove`](crate::ProverInstance::prove))
+pub(crate) fn verify<F, EF, MA, SC>(
+    instance: &VerifierInstance<'_, F, EF, MA, SC>,
     proof: &StarkProofData<F, EF, SC>,
     mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
@@ -130,6 +236,9 @@ where
     MA: MultiAir<F, EF>,
 {
     // --- Trust boundary (see doc-block above). -------------------------------
+    let config = instance.config();
+    let statement: &Statement<F, EF, MA> = instance.statement();
+    let preprocessed_commitment = instance.preprocessed_commitment();
     //
     // `TraceOrder::from_log_heights` validates the (untrusted) proof heights
     // against the AIRs: it bounds `log_h` within the host's `usize` width
@@ -140,6 +249,13 @@ where
         statement.airs(),
         proof.log_trace_heights.clone(),
     )?;
+
+    // Preprocessed trace↔AIR mappings (instance order), reconstructed from the
+    // heights — the same ones the prover used.
+    let preprocessed_trace_to_air =
+        trace_order.preprocessed_air_for_trace_index::<F, EF, _>(statement.airs());
+    let air_to_preprocessed_trace =
+        trace_order.preprocessed_trace_index_for_air::<F, EF, _>(statement.airs());
 
     let air_refs: Vec<&MA::Air> = statement.airs().iter().collect();
     let proof_ordered_airs = trace_order.to_proof_order(&air_refs);
@@ -153,6 +269,12 @@ where
         .iter()
         .map(|&log_h| max_lde_domain.try_sub_domain(log_h))
         .collect::<Result<_, _>>()?;
+
+    // Observe the preprocessed commitment first (when present); mirrors the
+    // prover. It is a trusted statement input, not read from the proof.
+    if let Some(commitment) = preprocessed_commitment {
+        challenger.observe(commitment.clone());
+    }
 
     // `Statement::observe` absorbs statement-owned inputs. The protocol then
     // binds the instance count and each log trace height in instance order.
@@ -231,11 +353,51 @@ where
 
     // Build commitments with original (unpadded) widths.
     // The PCS aligned wrapper handles alignment and truncation internally.
-    let commitments = vec![
-        (main_commit, main_widths),
-        (aux_commit, aux_widths),
-        (quotient_commit, quotient_widths),
-    ];
+    // The preprocessed group (when present) is first, mirroring the prover; its
+    // widths are in committed preprocessed trace order, while main/aux are in proof order.
+    //
+    // Group indices, in batch order `[preprocessed?, main, aux, quotient]`: the
+    // preprocessed group occupies index 0 only when present, shifting the rest
+    // up by one. The prover builds its `trees` vector in this same order.
+    let s = preprocessed_commitment.is_some() as usize;
+    let (preproc_g, main_g, aux_g, quot_g) =
+        (preprocessed_commitment.is_some().then_some(0), s, s + 1, s + 2);
+    let full_log_height = log_max_trace_height + log_blowup;
+    let mut commitments = Vec::with_capacity(4);
+    if let Some(commitment) = preprocessed_commitment {
+        let preprocessed_widths: Vec<usize> = preprocessed_trace_to_air
+            .iter()
+            .map(|&air_idx| statement.airs()[air_idx as usize].preprocessed_width())
+            .collect();
+        // The preprocessed tree is committed at its own setup-fixed depth, determined by the
+        // tallest preprocessed trace. The PCS virtually lifts it to the max when shorter.
+        let preprocessed_log_height = preprocessed_trace_to_air
+            .iter()
+            .map(|&air_idx| trace_order.log_heights()[air_idx as usize])
+            .max()
+            .expect("preprocessed group is non-empty when a commitment is present")
+            + log_blowup;
+        commitments.push(CommitmentGroup {
+            root: commitment.clone(),
+            widths: preprocessed_widths,
+            log_height: preprocessed_log_height,
+        });
+    }
+    commitments.push(CommitmentGroup {
+        root: main_commit,
+        widths: main_widths,
+        log_height: full_log_height,
+    });
+    commitments.push(CommitmentGroup {
+        root: aux_commit,
+        widths: aux_widths,
+        log_height: full_log_height,
+    });
+    commitments.push(CommitmentGroup {
+        root: quotient_commit,
+        widths: quotient_widths,
+        log_height: full_log_height,
+    });
 
     // 8. Verify PCS openings (returns per-matrix RowMajorMatrix<EF>, truncated to original widths)
     let opened = verify_aligned::<F, EF, SC::Lmcs, _, 2>(
@@ -247,10 +409,7 @@ where
         &mut channel,
     )?;
 
-    // 9. Group indices for accessing opened matrices: [main, aux, quotient].
-    let (main_g, aux_g, quot_g) = (0, 1, 2);
-
-    // 10. Per-AIR constraint evaluation and beta accumulation.
+    // 9. Per-AIR constraint evaluation and beta accumulation.
     //
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
@@ -290,8 +449,24 @@ where
 
         let aux_values_j = &all_aux_values[j];
         let num_rand = air.num_randomness();
+
+        // Extract the opened preprocessed window when this AIR declares
+        // preprocessed columns. The preprocessed trace index comes from the inverse
+        // `air_to_preprocessed_trace` mapping; the opened matrix is a 2-row
+        // `RowMajorMatrix` already truncated to the declared width by `verify_aligned`, so this
+        // is a zero-copy view (mirrors the main window above).
+        let instance_idx = trace_order.instance_indices()[j] as usize;
+        let preprocessed_window = match air_to_preprocessed_trace[instance_idx] {
+            Some(preprocessed_trace_idx) => RowWindow::from_view(
+                &opened[preproc_g.expect("preproc group present")][preprocessed_trace_idx]
+                    .as_view(),
+            ),
+            None => RowWindow::from_two_rows(&[], &[]),
+        };
+
         let mut folder = ConstraintFolder {
             main: main_window,
+            preprocessed: preprocessed_window,
             aux: aux_window,
             randomness: &randomness[..num_rand],
             public_values: air_inputs,

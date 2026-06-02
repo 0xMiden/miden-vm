@@ -5,7 +5,8 @@
 //!
 //! [`LiftedAir::eval`] is generic over `AB: LiftedAirBuilder`, so it cannot branch
 //! on the concrete builder type. All builders expose data through the same trait
-//! methods — [`main()`](crate::AirBuilder::main),
+//! methods — [`preprocessed()`](crate::AirBuilder::preprocessed),
+//! [`main()`](crate::AirBuilder::main),
 //! [`permutation()`](crate::PermutationAirBuilder::permutation),
 //! [`public_values()`](crate::AirBuilder::public_values),
 //! [`permutation_randomness()`](crate::PermutationAirBuilder::permutation_randomness),
@@ -44,6 +45,17 @@ use crate::{
 /// - `F`: Base field
 /// - `EF`: Extension field (for aux trace challenges and aux values)
 pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
+    /// Number of base-field columns in the preprocessed trace.
+    ///
+    /// A preprocessed trace is data fixed per AIR — typically a lookup table
+    /// or selector polynomial — committed once and reused across proofs. AIRs
+    /// without preprocessed columns return 0 (the default). The content comes
+    /// from [`BaseAir::preprocessed_trace`]; this is the cheap width the
+    /// verifier reads without materialising the table.
+    fn preprocessed_width(&self) -> usize {
+        0
+    }
+
     /// Return the periodic table data: a list of columns, each a `Vec<F>` of evaluations.
     ///
     /// Each inner `Vec<F>` represents one periodic column. Its length is the period of
@@ -131,10 +143,9 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     /// Return the [`AirLayout`] describing this AIR's dimensions.
     ///
     /// This is the single source of truth for building symbolic or layout builders.
-    /// `preprocessed_width` is always 0 because lifted AIRs forbid preprocessed traces.
     fn air_layout(&self) -> AirLayout {
         AirLayout {
-            preprocessed_width: 0,
+            preprocessed_width: self.preprocessed_width(),
             main_width: self.width(),
             num_public_values: self.num_public_values(),
             permutation_width: self.aux_width(),

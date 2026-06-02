@@ -1,7 +1,7 @@
 //! LMCS proof structures.
 //!
 //! - [`Proof`]: Single-opening proof with rows, optional salt, and authentication path.
-//! - [`BatchProof`]: Batch opening data with per-index rows/salt and a [`MerkleWitness`].
+//! - [`BatchProof`]: Batch opening data with per-leaf rows/salt and a [`MerkleWitness`].
 //!
 //! Use [`Lmcs::read_batch_proof`] to parse transcript hints
 //! into a [`BatchProof`] without verifying against a commitment.
@@ -29,8 +29,8 @@ pub struct Proof<F, C, const SALT_ELEMS: usize = 0> {
 
 /// Batch opening data parsed from transcript hints without verification.
 ///
-/// Bundles opened leaf data (rows + salt) per index with the reconstructed
-/// [`MerkleWitness`] for authentication path queries.
+/// Bundles opened leaf data (rows + salt) with the reconstructed [`MerkleWitness`] for
+/// authentication path queries. Indices here are leaf indices after any virtual-lift folding.
 pub struct BatchProof<F, C, const SALT_ELEMS: usize = 0> {
     /// Opened leaf data keyed by leaf index.
     pub openings: BTreeMap<usize, LeafOpening<F, SALT_ELEMS>>,
@@ -40,7 +40,7 @@ pub struct BatchProof<F, C, const SALT_ELEMS: usize = 0> {
 
 /// Accessor trait for batch proof data.
 ///
-/// Provides read access to individual openings, authentication paths, and query indices.
+/// Provides read access to individual openings, authentication paths, and leaf indices.
 /// This allows consumers (e.g. the Miden VM recursive verifier) to work with batch proofs
 /// through the opaque `Lmcs::BatchProof` associated type.
 pub trait BatchProofView<F, C> {
@@ -55,7 +55,7 @@ pub trait BatchProofView<F, C> {
     /// Get the authentication path (bottom-to-top sibling hashes) for a given leaf index.
     fn path(&self, index: usize) -> Option<Vec<C>>;
 
-    /// Iterate over the unique query indices (in sorted order).
+    /// Iterate over the unique leaf indices (in sorted order).
     fn indices(&self) -> impl Iterator<Item = usize> + '_;
 }
 

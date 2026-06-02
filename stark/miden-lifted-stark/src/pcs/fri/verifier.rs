@@ -136,6 +136,7 @@ where
             // Shrink indices by log_arity to get this round's row indices.
             tree_indices.shrink_depth(log_arity);
 
+            // FRI round trees are full-height at the (already shrunk) round depth.
             let opened_rows = lmcs
                 .open_batch(&round.commitment, &widths, &tree_indices, channel)
                 .map_err(|source| FriError::LmcsError { source, round: round_idx })?;

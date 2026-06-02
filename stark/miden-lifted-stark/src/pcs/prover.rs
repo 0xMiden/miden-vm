@@ -19,8 +19,11 @@ use crate::{
 /// - `eval_points` must lie outside both the trace-domain subgroup `H` and the LDE evaluation coset
 ///   `gK` used by the PCS. If a point lies in either set, denominators `(zⱼ − X)` in the DEEP
 ///   quotient become zero for some domain element, making the quotient undefined.
-/// - All trace trees must be built at the same LDE height `coset.lde_height()`. Multiple LDE
-///   heights are not supported yet and will panic.
+/// - Every trace tree's height must be a power of two `≤ domain.lde_height()`. A tree shorter than
+///   the max (e.g. a setup-fixed preprocessed tree) is virtually lifted — the query phase folds the
+///   sampled indices down to each tree's own depth.
+/// - At least one trace tree must have height `domain.lde_height()`, so the DEEP quotient is
+///   constructed over the full max domain.
 ///
 /// `domain` is the max LDE coset the trace trees were committed on; `domain.log_lde_height`
 /// equals `log_trace_height + domain.log_blowup()` for the tallest trace.
@@ -44,15 +47,10 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
 {
     const { assert!(N > 0, "at least one evaluation point required") };
 
-    // Determine LDE domain size from the supplied LDE coset.
-    // For now, all trace trees must share this height; mixed LDE heights are not supported yet.
-    assert!(!trace_trees.is_empty(), "at least one trace tree required");
+    // Trees shorter than the max (e.g. a setup-fixed preprocessed tree) are virtually
+    // lifted: `prove_lifted_batch` projects sampled query indices down to each tree's
+    // own depth. `DeepPoly::from_trees` validates the tree-height preconditions below.
     let log_lde_height = domain.log_lde_height();
-    let expected_height = domain.lde_height();
-    assert!(
-        trace_trees.iter().all(|tree| tree.height() == expected_height),
-        "mixed LDE heights are not supported yet",
-    );
     // ─────────────────────────────────────────────────────────────────────────
     // Construct DEEP quotient (observes evals, grinds, samples alpha and beta)
     // ─────────────────────────────────────────────────────────────────────────
@@ -92,7 +90,7 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
         // Open input trees at all query indices at once (one proof per tree)
         info_span!("open input trees", n_trees = trace_trees.len()).in_scope(|| {
             for tree in trace_trees {
-                tree.prove_batch(&tree_indices, channel);
+                tree.prove_lifted_batch(&tree_indices, channel);
             }
         });
 

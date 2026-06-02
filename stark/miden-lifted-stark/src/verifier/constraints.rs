@@ -6,7 +6,7 @@
 use core::marker::PhantomData;
 
 use miden_lifted_air::{
-    AirBuilder, EmptyWindow, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
+    AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
 };
 use p3_field::{ExtensionField, Field};
 
@@ -36,6 +36,7 @@ where
     EF: ExtensionField<F>,
 {
     pub main: RowWindow<'a, EF>,
+    pub preprocessed: RowWindow<'a, EF>,
     pub aux: RowWindow<'a, EF>,
     pub randomness: &'a [EF],
     pub public_values: &'a [F],
@@ -55,7 +56,7 @@ where
     type F = F;
     type Expr = EF;
     type Var = EF;
-    type PreprocessedWindow = EmptyWindow<EF>;
+    type PreprocessedWindow = RowWindow<'a, EF>;
     type MainWindow = RowWindow<'a, EF>;
     type PublicVar = F;
 
@@ -64,7 +65,7 @@ where
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        EmptyWindow::empty_ref()
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {

@@ -21,18 +21,14 @@ mod util;
 
 pub use air::{ConstraintDegrees, LiftedAir, MultiAir, ReductionError};
 pub use builder::LiftedAirBuilder;
-pub use statement::{InstanceError, ProverStatement, Statement};
-pub use util::{log2_ceil_u8, log2_strict_u8};
-
-mod empty_window;
-
-pub use empty_window::EmptyWindow;
 // Re-export upstream p3-air types so downstream crates never need to depend on p3-air
 // directly.
 pub use p3_air::{
     Air, AirBuilder, AirBuilderWithContext, BaseAir, ExtensionBuilder, FilteredAirBuilder,
     PeriodicAirBuilder, PermutationAirBuilder, RowWindow, WindowAccess,
 };
+pub use statement::{InstanceError, ProverStatement, Statement};
+pub use util::{log2_ceil_u8, log2_strict_u8};
 
 /// Symbolic constraint analysis types from upstream p3-air.
 pub mod symbolic {

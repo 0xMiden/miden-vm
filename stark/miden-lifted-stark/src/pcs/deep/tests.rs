@@ -12,6 +12,7 @@ use super::*;
 use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsTree, tree_indices::TreeIndices},
+    pcs::verifier::CommitmentGroup,
     testing::{
         canonical_domain,
         configs::goldilocks_poseidon2::{
@@ -72,7 +73,11 @@ fn deep_quotient_end_to_end() {
     let (prover_digest, transcript) = prover_channel.finalize();
 
     // Create commitments slice for multi-commitment API (single commitment in this case)
-    let commitments = vec![(commitment, widths)];
+    let commitments = vec![CommitmentGroup {
+        root: commitment,
+        widths,
+        log_height: log_lde_height,
+    }];
 
     // Step 4: Verifier constructs DeepOracle with same transcript state
     let mut verifier_channel = verifier_channel_with_commitment(&transcript, &commitment);

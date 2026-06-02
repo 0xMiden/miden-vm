@@ -34,6 +34,20 @@ use crate::{
     util::align::aligned_widths,
 };
 
+/// A committed group to open: its root, per-matrix (unpadded) widths, and tree depth.
+///
+/// `log_height` is `log₂` of the committed tree's leaf count. It is `≤
+/// domain.log_lde_height()`: a tree committed below the query domain (e.g. a
+/// setup-fixed preprocessed tree) is virtually lifted with
+/// [`Lmcs::open_lifted_batch`](crate::lmcs::Lmcs::open_lifted_batch).
+/// Full-height groups set it to `domain.log_lde_height()`.
+#[derive(Clone, Debug)]
+pub(crate) struct CommitmentGroup<C> {
+    pub root: C,
+    pub widths: Vec<usize>,
+    pub log_height: u8,
+}
+
 /// Verify polynomial evaluation claims against commitments.
 ///
 /// Commitment widths must match the committed rows (including any alignment padding
@@ -49,7 +63,8 @@ use crate::{
 /// # Preconditions
 /// - `eval_points` must lie outside both the trace-domain subgroup `H` and the LDE evaluation coset
 ///   `gK`. Otherwise denominators `(zⱼ − X)` in the DEEP quotient become zero, making it undefined.
-/// - All commitments must be lifted to the same LDE height `2^log_lde_height`.
+/// - Each group's `log_height` must be `≤ domain.log_lde_height()`; shorter groups are virtually
+///   lifted (their query indices fold down to the committed depth).
 ///
 /// # Returns
 /// `opened[group][matrix]` as a `RowMajorMatrix<EF>` with `N` rows
@@ -57,7 +72,7 @@ use crate::{
 pub(crate) fn verify<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
-    commitments: &[(L::Commitment, Vec<usize>)],
+    commitments: &[CommitmentGroup<L::Commitment>],
     domain: &LiftedDomain<F>,
     eval_points: [EF; N],
     channel: &mut Ch,
@@ -97,8 +112,7 @@ where
     let tree_indices = TreeIndices::new(sampled_indices_iter, log_lde_height)
         .expect("sampled indices are in range");
 
-    // Verify DEEP openings for all queries at once
-    // tree_indices are bit-reversed positions; deep_evals is keyed by tree index
+    // Verify DEEP openings for all sampled domain indices at once.
     let deep_evals = deep_oracle.open_batch(lmcs, &tree_indices, channel)?;
 
     // Test low-degree proximity for all queries at once
@@ -116,7 +130,7 @@ where
 pub(crate) fn verify_aligned<F, EF, L, Ch, const N: usize>(
     params: &PcsParams,
     lmcs: &L,
-    commitments: &[(L::Commitment, Vec<usize>)],
+    commitments: &[CommitmentGroup<L::Commitment>],
     domain: &LiftedDomain<F>,
     eval_points: [EF; N],
     channel: &mut Ch,
@@ -130,7 +144,11 @@ where
     let alignment = lmcs.alignment();
     let aligned_commitments: Vec<_> = commitments
         .iter()
-        .map(|(c, widths)| (c.clone(), aligned_widths(widths.clone(), alignment)))
+        .map(|g| CommitmentGroup {
+            root: g.root.clone(),
+            widths: aligned_widths(g.widths.clone(), alignment),
+            log_height: g.log_height,
+        })
         .collect();
 
     let evals = verify(params, lmcs, &aligned_commitments, domain, eval_points, channel)?;
@@ -139,10 +157,10 @@ where
     let truncated = evals
         .into_iter()
         .zip(commitments)
-        .map(|(group, (_, orig_widths))| {
+        .map(|(group, g)| {
             group
                 .into_iter()
-                .zip(orig_widths)
+                .zip(&g.widths)
                 .map(|(mat, &orig_w)| {
                     HorizontallyTruncated::new(mat, orig_w)
                         .expect("original width must not exceed aligned width")

@@ -8,7 +8,9 @@ use p3_field::{ExtensionField, Field, TwoAdicField};
 use crate::{
     domain::LiftedDomain,
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
-    pcs::{deep::proof::DeepProof, fri::proof::FriProof, params::PcsParams},
+    pcs::{
+        deep::proof::DeepProof, fri::proof::FriProof, params::PcsParams, verifier::CommitmentGroup,
+    },
 };
 
 /// Structured view of the full PCS sub-proof.
@@ -26,9 +28,13 @@ where
     pub fri_proof: FriProof<L::F, EF, L::Commitment>,
     /// Proof-of-work witness for query sampling.
     pub query_pow_witness: L::F,
-    /// Query indices in sampling order (domain indices, may contain duplicates).
+    /// Query indices in sampling order (original domain indices, may contain duplicates).
     pub query_indices: Vec<usize>,
-    /// Batch witness per trace tree (leaf data + Merkle witness).
+    /// Batch witness per committed group (leaf data + Merkle witness).
+    ///
+    /// The order matches the commitment groups passed to `read_from_channel`; each
+    /// witness is keyed by leaf index after folding `query_indices` to that
+    /// group's depth.
     pub deep_witnesses: Vec<L::BatchProof>,
     /// Batch witness per FRI round (leaf data + Merkle witness).
     pub fri_witnesses: Vec<L::BatchProof>,
@@ -44,13 +50,14 @@ where
     ///
     /// Composes [`DeepProof`], [`FriProof`], and per-query LMCS batch proofs.
     /// Does not verify any claims; validation happens in
-    /// [`verify`](crate::verify).
-    /// Commitment widths must match the committed rows (including any alignment padding),
-    /// and all commitments are expected to be lifted to `coset.lde_height()`.
+    /// [`verify`](crate::VerifierInstance::verify).
+    /// Commitment widths must match the committed rows (including any alignment padding).
+    /// Each commitment carries its tree depth; groups below the query domain are parsed
+    /// using folded leaf indices.
     pub(crate) fn read_from_channel<Ch, const N: usize>(
         params: &PcsParams,
         lmcs: &L,
-        commitments: &[(L::Commitment, Vec<usize>)],
+        commitments: &[CommitmentGroup<L::Commitment>],
         domain: &LiftedDomain<L::F>,
         eval_points: [EF; N],
         channel: &mut Ch,
@@ -64,9 +71,13 @@ where
             return Err(TranscriptError::NoMoreFields);
         }
 
+        let deep_commitments: Vec<_> = commitments
+            .iter()
+            .map(|group| (group.root.clone(), group.widths.clone()))
+            .collect();
         let deep_proof = DeepProof::read_from_channel::<Ch>(
             params.deep,
-            commitments,
+            &deep_commitments,
             eval_points.len(),
             channel,
         )?;
@@ -84,8 +95,14 @@ where
 
         let deep_witnesses: Vec<_> = commitments
             .iter()
-            .map(|(_commitment, widths)| {
-                lmcs.read_batch_proof(widths, &tree_indices, channel).map_err(|e| match e {
+            .map(|group| {
+                lmcs.read_lifted_batch_proof(
+                    &group.widths,
+                    &tree_indices,
+                    group.log_height,
+                    channel,
+                )
+                .map_err(|e| match e {
                     LmcsError::TranscriptError(te) => te,
                     _ => TranscriptError::NoMoreFields,
                 })
