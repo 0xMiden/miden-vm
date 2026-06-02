@@ -1,0 +1,26 @@
+[package]
+name = "miden-precompiles"
+version.workspace = true
+description = "Concrete deferred precompile implementations for the Miden VM"
+documentation = "https://docs.rs/miden-precompiles"
+readme = "README.md"
+categories = ["cryptography", "no-std"]
+keywords = ["miden", "precompile", "deferred", "zkp"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+std = ["miden-core/std"]
+
+[dependencies]
+# Miden dependencies
+miden-core.workspace = true

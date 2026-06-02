@@ -21,6 +21,7 @@ members = [
     "crates/utils-indexing",
     "crates/utils-sync",
     "miden-vm",
+    "precompiles",
     "processor",
     "prover",
     "verifier",
