@@ -128,7 +128,7 @@ pub struct Package {
     /// Whether package-owned debug sections may be decoded as trusted debug info.
     ///
     /// Checked package deserialization preserves section framing but marks debug sections
-    /// untrusted. Trusted local assembly and unchecked trusted-cache reads set this to true.
+    /// trusted. Specialized untrusted readers may set this to false.
     debug_sections_trusted: bool,
 }
 
@@ -872,7 +872,7 @@ impl Package {
             ))
         })?;
 
-        Self::read_from_bytes(&bytes)
+        Self::read_from_bytes_trusted(&bytes)
     }
 }
 

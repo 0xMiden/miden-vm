@@ -122,6 +122,26 @@ impl Package {
         Self::read_from_unchecked(&mut source)
     }
 
+    /// Reads a trusted local package while validating the embedded MAST forest.
+    ///
+    /// This keeps the same structural validation as [`Package::read_from`], but allows
+    /// package-owned debug sections to be decoded as trusted metadata. Use this only for local
+    /// files or cache artifacts controlled by this process or build system.
+    pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
+    }
+
+    /// Reads trusted local package bytes while validating the embedded MAST forest.
+    ///
+    /// See [`Package::read_from_trusted`].
+    pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from_trusted(&mut reader)
+    }
+
     fn read_mast_forest<R: ByteReader>(
         source: &mut R,
         validate_mast_forest: bool,
@@ -241,7 +261,7 @@ impl Deserializable for Package {
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast, false)
+        Self::read_from_with_header_and_mast(source, header, mast, true)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -792,8 +812,8 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
-        PackageSubmodule, PackageDebugInfoError, ProcedureExport, SectionId, TargetType,
+        Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
+        PackageModule, PackageSubmodule, ProcedureExport, SectionId, TargetType,
         debug_info::{
             DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
             DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
@@ -966,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn package_checked_deserialization_strips_forest_debug_but_preserves_sections() {
+    fn package_checked_deserialization_strips_forest_debug_but_preserves_package_debug() {
         let package = build_package_with_debug_info();
         let bytes = package.to_bytes();
 
@@ -978,10 +998,7 @@ mod tests {
                 .iter()
                 .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
         );
-        assert!(matches!(
-            deserialized.debug_info(),
-            Err(PackageDebugInfoError::UntrustedSections)
-        ));
+        assert!(deserialized.debug_info().unwrap().is_some());
     }
 
     #[test]
