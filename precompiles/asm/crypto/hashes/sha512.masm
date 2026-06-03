@@ -40,7 +40,7 @@ const EQ_TAG_ID = 2
 #!   loc[8]     out_ptr
 #!
 #! Identical in shape to `keccak256::hash_bytes`; the only difference is the digest width — SHA-512's
-#! canonical leaf is a two-chunk node (16 felts), so step 3 writes four words and step 4 registers
+#! canonical leaf is a two-chunk data node (16 felts), so step 3 writes four words and step 4 registers
 #! two chunks.
 @locals(9)
 pub proc hash_bytes
@@ -67,18 +67,18 @@ pub proc hash_bytes
     adv_pushw loc_load.8 add.8 mem_storew_le dropw     # out_ptr[8..12]
     adv_pushw loc_load.8 add.12 mem_storew_le dropw    # out_ptr[12..16]
 
-    # ---- Step 4: Register the digest chunk leaf (2 chunks at out_ptr) → LEAF_DIGEST ----
+    # ---- Step 4: Register the digest data leaf (2 chunks at out_ptr) → LEAF_DIGEST ----
     push.2
     loc_load.8
     push.0.0
     push.DIGEST_TAG_ID
     push.PRECOMPILE_ID
     # => [DIGEST_TAG, out_ptr, 2, ...]
-    exec.sys::register_chunk
+    exec.sys::register_data
     # => [LEAF_DIGEST, ...]
     loc_storew_le.4 dropw                              # loc[4..8] = LEAF_DIGEST
 
-    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into the transcript ----
+    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into the deferred root ----
     push.0.0
     push.EQ_TAG_ID
     push.PRECOMPILE_ID

@@ -1,8 +1,8 @@
 //! Shared base for deferred hash precompiles (keccak256, sha512, ...).
 //!
 //! Every hash precompile shares the same tag layout `Tag { id, args: [disc, arg1, ZERO] }`, the
-//! same three nodes — `preimage` (chunk-bodied, hashes to a digest), `digest` (self-evaluating
-//! leaf), `eq` (binary predicate asserting two digests match) — and the same deferred-DAG protocol.
+//! same three nodes — `preimage` (data-bodied, hashes to a digest), `digest` (self-evaluating
+//! data), `eq` (binary predicate asserting two digests match) — and the same deferred-DAG protocol.
 //! A concrete hash supplies only its [`HashFunction`]: the name, the digest width, and the
 //! byte-level hash. [`HashPrecompile<H>`] turns that into a full [`Precompile`].
 
@@ -68,31 +68,35 @@ impl<H: HashFunction> HashPrecompile<H> {
         precompile_id(&Self::default())
     }
 
-    /// Tag for a `preimage` chunk node carrying `n_bytes` of input.
+    /// Tag for a `preimage` data node carrying `n_bytes` of input.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
-        Tag::new(Self::id(), [Felt::from_u32(PREIMAGE_DISC), Felt::from_u32(n_bytes), ZERO])
+        Self::tag([Felt::from_u32(PREIMAGE_DISC), Felt::from_u32(n_bytes), ZERO])
     }
 
-    /// Tag for the canonical `digest` leaf.
+    /// Tag for the canonical `digest` data node.
     pub fn digest_tag() -> Tag {
-        Tag::new(Self::id(), [Felt::from_u32(DIGEST_DISC), ZERO, ZERO])
+        Self::tag([Felt::from_u32(DIGEST_DISC), ZERO, ZERO])
     }
 
     /// Tag for an `eq` predicate node.
     pub fn eq_tag() -> Tag {
-        Tag::new(Self::id(), [Felt::from_u32(EQ_DISC), ZERO, ZERO])
+        Self::tag([Felt::from_u32(EQ_DISC), ZERO, ZERO])
     }
 
-    /// Builds a `preimage` chunk node from caller-supplied 8-felt chunks (the input u32-packed-LE,
+    fn tag(args: [Felt; 3]) -> Tag {
+        Tag::new(Self::id(), args).expect("hash precompile id is not framework-reserved")
+    }
+
+    /// Builds a `preimage` data node from caller-supplied 8-felt chunks (the input u32-packed-LE,
     /// zero-padded to a chunk boundary).
     pub fn preimage_node(n_bytes: u32, chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
-        Node::chunk(Self::preimage_tag(n_bytes), chunks)
+        Node::try_data(Self::preimage_tag(n_bytes), chunks)
+            .expect("preimage requires at least one data chunk")
     }
 
     /// Builds the canonical `digest` node: the `DIGEST_FELTS` u32-packed felts encoded as
     /// `ceil(DIGEST_FELTS / 8)` eight-felt chunks, zero-padded to the chunk boundary — a single,
-    /// width-agnostic encoding. (A one-chunk digest hashes identically to an 8-felt expression
-    /// leaf, so the chunk encoding loses nothing versus a `Value` leaf.)
+    /// width-agnostic encoding.
     pub fn digest_node(felts: &[Felt]) -> Node {
         debug_assert_eq!(felts.len(), H::DIGEST_FELTS, "digest must be DIGEST_FELTS felts");
         let mut padded = felts.to_vec();
@@ -101,12 +105,12 @@ impl<H: HashFunction> HashPrecompile<H> {
             .chunks_exact(8)
             .map(|c| c.try_into().expect("chunk is 8 felts"))
             .collect();
-        Node::chunk(Self::digest_tag(), chunks)
+        Node::try_data(Self::digest_tag(), chunks).expect("digest uses at least one data chunk")
     }
 
     /// Builds an `eq` predicate over two child digests.
     pub fn eq_node(lhs: Digest, rhs: Digest) -> Node {
-        Node::join(Self::eq_tag(), lhs, rhs)
+        Node::join(Self::eq_tag(), lhs, rhs).expect("eq tag is precompile-owned")
     }
 
     /// Number of eight-felt chunks in the canonical digest node.
@@ -114,9 +118,9 @@ impl<H: HashFunction> HashPrecompile<H> {
         H::DIGEST_FELTS.div_ceil(8)
     }
 
-    /// Body shape of the `digest` node — `ceil(DIGEST_FELTS / 8)` chunks for every width.
+    /// Body shape of the `digest` node — `ceil(DIGEST_FELTS / 8)` data chunks for every width.
     fn digest_node_type() -> NodeType {
-        NodeType::Chunks(
+        NodeType::Data(
             NonZeroU32::new(Self::digest_chunks() as u32).expect("digest spans >= 1 chunk"),
         )
     }
@@ -136,7 +140,7 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
         match disc {
             PREIMAGE_DISC if args[2] == ZERO => {
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
-                Some(NodeType::Chunks(n_chunks(n_bytes)))
+                Some(NodeType::Data(n_chunks(n_bytes)))
             },
             DIGEST_DISC if args[1] == ZERO && args[2] == ZERO => Some(Self::digest_node_type()),
             EQ_DISC if args[1] == ZERO && args[2] == ZERO => Some(NodeType::Join),
@@ -154,14 +158,14 @@ impl<H: HashFunction> Precompile for HashPrecompile<H> {
             u32::try_from(args[0].as_canonical_u64()).map_err(|_| PrecompileError::InvalidNode)?;
         match disc {
             PREIMAGE_DISC => evaluate_preimage::<H>(args, payload),
-            DIGEST_DISC => Ok(Node::new(Tag::new(Self::id(), args), payload.clone())),
+            DIGEST_DISC => Ok(Node::try_data(Self::tag(args), payload.as_data()?.to_vec())?),
             EQ_DISC => evaluate_eq::<H>(payload, context),
             _ => Err(PrecompileError::InvalidNode),
         }
     }
 }
 
-/// Evaluates a `preimage` chunk node: unpack chunks to bytes (stripping zero-pad down to the
+/// Evaluates a `preimage` data node: unpack chunks to bytes (stripping zero-pad down to the
 /// `n_bytes` carried in `args[1]`), hash, and emit the canonical `digest` node.
 fn evaluate_preimage<H: HashFunction>(
     args: [Felt; 3],
@@ -169,7 +173,7 @@ fn evaluate_preimage<H: HashFunction>(
 ) -> Result<Node, PrecompileError> {
     let n_bytes = u32::try_from(args[1].as_canonical_u64())
         .map_err(|_| PrecompileError::InvalidNode)? as usize;
-    let bytes = chunks_to_bytes(payload.as_chunks()?, n_bytes)?;
+    let bytes = chunks_to_bytes(payload.as_data()?, n_bytes)?;
     let felts = bytes_to_packed_u32_elements(&H::hash(&bytes));
     debug_assert_eq!(felts.len(), H::DIGEST_FELTS, "hash packs to DIGEST_FELTS felts");
     Ok(HashPrecompile::<H>::digest_node(&felts))
@@ -181,14 +185,14 @@ fn evaluate_eq<H: HashFunction>(
     payload: &Payload,
     context: &mut DeferredContext<'_>,
 ) -> Result<Node, PrecompileError> {
-    let (lhs_digest, rhs_digest) = payload.join_children()?;
+    let (lhs_digest, rhs_digest) = payload.as_join()?;
     let lhs = context.resolve(lhs_digest)?;
     let rhs = context.resolve(rhs_digest)?;
     let digest_tag = HashPrecompile::<H>::digest_tag();
-    if lhs.tag != digest_tag || rhs.tag != digest_tag {
+    if lhs.tag() != digest_tag || rhs.tag() != digest_tag {
         return Err(PrecompileError::InvalidNode);
     }
-    if lhs.payload != rhs.payload {
+    if lhs.payload() != rhs.payload() {
         return Err(PrecompileError::AssertionFailed);
     }
     Ok(Node::TRUE)
@@ -244,7 +248,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     let pc = HashPrecompile::<H>::default();
     assert!(matches!(
         pc.decode([Felt::from_u32(HashPrecompile::<H>::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO]),
-        Some(NodeType::Chunks(n)) if n.get() == 3
+        Some(NodeType::Data(n)) if n.get() == 3
     ));
     assert_eq!(
         pc.decode([Felt::from_u32(HashPrecompile::<H>::DIGEST_TAG_ID), ZERO, ZERO]),

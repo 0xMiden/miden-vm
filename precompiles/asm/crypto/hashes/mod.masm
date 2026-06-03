@@ -9,7 +9,7 @@ use miden::precompiles::sys
 # `HashPrecompile::PREIMAGE_TAG_ID`).
 const PREIMAGE_TAG_ID = 0
 
-#! Registers the `preimage` chunk node for a hash precompile and returns its content-addressed
+#! Registers the `preimage` data node for a hash precompile and returns its content-addressed
 #! digest.
 #!
 #! Input:  [PRECOMPILE_ID, ptr, len_bytes, ...]
@@ -17,8 +17,8 @@ const PREIMAGE_TAG_ID = 0
 #!
 #! Stages the preimage tag `[PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0]` over the
 #! `n_chunks = max(1, ceil(len_bytes/32))` rate-sized blocks at `ptr` and calls
-#! `sys::register_chunk`, which derives the digest in-circuit (a linear hash over the `8*n_chunks`
-#! felts), binding it to the caller's memory. Empty input is one zero chunk (empty chunk bodies are
+#! `sys::register_data`, which derives the digest in-circuit (a linear hash over the `8*n_chunks`
+#! felts), binding it to the caller's memory. Empty input is one zero chunk (empty data bodies are
 #! banned).
 pub proc register_preimage
     # => [PRECOMPILE_ID, ptr, len_bytes, ...]
@@ -38,6 +38,6 @@ pub proc register_preimage
     # => [PREIMAGE_TAG_ID, len_bytes, 0, ptr, n_chunks, PRECOMPILE_ID, ...]
     movup.5
     # => [PRECOMPILE_ID, PREIMAGE_TAG_ID, len_bytes, 0, ptr, n_chunks, ...]
-    exec.sys::register_chunk
+    exec.sys::register_data
     # => [PREIMAGE_DIGEST, ...]
 end

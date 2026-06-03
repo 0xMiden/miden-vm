@@ -49,9 +49,9 @@ const EQ_TAG_ID = 2
 #!      untrusted; it is bound by step 4.
 #!   3. Write the digest from advice straight to `out_ptr` (the caller's result and the buffer
 #!      step 4 binds).
-#!   4. Register the Digest leaf in-circuit as a one-chunk node over `out_ptr`, yielding LEAF_DIGEST.
+#!   4. Register the Digest leaf in-circuit as a one-chunk data node over `out_ptr`, yielding LEAF_DIGEST.
 #!   5. Build & register an Eq predicate `(PREIMAGE_DIGEST, LEAF_DIGEST)` and fold its digest into
-#!      the transcript via `log_node_digest`. The verifier's rehydrate recomputes Keccak256(preimage)
+#!      the deferred root via `log_node_digest`. The verifier's rehydrate recomputes Keccak256(preimage)
 #!      and rejects a forged digest, so the eq is logged, not eagerly evaluated.
 @locals(9)
 pub proc hash_bytes
@@ -76,18 +76,18 @@ pub proc hash_bytes
     adv_pushw loc_load.8 mem_storew_le dropw          # out_ptr[0..4] = DIGEST_LO
     adv_pushw loc_load.8 add.4 mem_storew_le dropw    # out_ptr[4..8] = DIGEST_HI
 
-    # ---- Step 4: Register the digest chunk leaf (1 chunk at out_ptr) → LEAF_DIGEST ----
+    # ---- Step 4: Register the digest data leaf (1 chunk at out_ptr) → LEAF_DIGEST ----
     push.1
     loc_load.8
     push.0.0
     push.DIGEST_TAG_ID
     push.PRECOMPILE_ID
     # => [DIGEST_TAG, out_ptr, 1, ...]
-    exec.sys::register_chunk
+    exec.sys::register_data
     # => [LEAF_DIGEST, ...]
     loc_storew_le.4 dropw                             # loc[4..8] = LEAF_DIGEST
 
-    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into the transcript ----
+    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into the deferred root ----
     push.0.0
     push.EQ_TAG_ID
     push.PRECOMPILE_ID

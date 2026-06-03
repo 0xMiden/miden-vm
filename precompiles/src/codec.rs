@@ -1,5 +1,5 @@
 //! Shared chunk ↔ byte codec for the core precompiles. Each precompile's `evaluate` consumes its
-//! chunk body as a flat byte buffer; the framework guarantees the chunk count via `decode`,
+//! data body as a flat byte buffer; the framework guarantees the chunk count via `decode`,
 //! and this codec strips the trailing zero pad back down to the declared `n_bytes` after
 //! validating that the discarded pad bytes are zero.
 
@@ -13,8 +13,8 @@ pub const BYTES_PER_CHUNK: u32 = 32;
 
 /// Number of 8-felt chunks needed to encode `n_bytes` of u32-packed input.
 ///
-/// Empty input still needs one chunk: the framework bans empty chunk bodies
-/// ([`NodeType::Chunks`](miden_core::deferred::NodeType) holds a [`NonZeroU32`]), so a 0-byte hash
+/// Empty input still needs one chunk: the framework bans empty data bodies
+/// ([`NodeType::Data`](miden_core::deferred::NodeType) holds a [`NonZeroU32`]), so a 0-byte hash
 /// preimage is encoded as a single zero chunk. The count is therefore clamped to at least 1.
 pub fn n_chunks(n_bytes: u32) -> NonZeroU32 {
     NonZeroU32::new(n_bytes.div_ceil(BYTES_PER_CHUNK).max(1)).expect("clamped to at least 1")
