@@ -291,6 +291,48 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 }
 
 #[test]
+fn print_mem_rejects_oversized_range() {
+    // An explicit range wider than the 1024-address cap is rejected, catching a caller that passes
+    // a huge range by accident. The full `[0, 2^32)` range used by `print_mem_all` is exempt (see
+    // `print_mem_all_includes_max_u32_cell`).
+    let source = "
+    use miden::core::debug
+    begin
+        push.1025 push.0
+        exec.debug::print_mem
+    end
+    ";
+
+    let core_lib = CoreLibrary::default();
+    let assembler = Assembler::default()
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to load core library");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
+    let host_lib = HostLibrary {
+        mast_forest: core_lib.mast_forest().clone(),
+        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+    };
+    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+
+    match execute_sync(
+        &program,
+        StackInputs::default(),
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+    ) {
+        Err(ExecutionError::EventError { error, .. }) => {
+            assert_eq!(error.to_string(), "print_mem range length 1025 exceeds maximum of 1024");
+        },
+        Err(err) => panic!("unexpected error type: {err:?}"),
+        Ok(_) => panic!("oversized print_mem range should fail"),
+    }
+}
+
+#[test]
 fn print_adv_stack_all_outputs_advice_stack() {
     let advice = AdviceInputs::default().with_stack([
         Felt::new_unchecked(7),

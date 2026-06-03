@@ -42,6 +42,9 @@ end
 #! - start is the (inclusive) start address of the range to print.
 #! - end is the (exclusive) end address of the range to print.
 #!
+#! The range may span at most 1024 addresses; a wider range aborts execution. Use `print_mem_all`
+#! to print the entire memory of the current context.
+#!
 #! Cycles: 5
 pub proc print_mem
     emit.PRINT_MEM_EVENT

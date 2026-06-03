@@ -17,7 +17,10 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::fmt;
+use core::{
+    fmt,
+    ops::{Bound, RangeBounds},
+};
 
 use miden_core::{Felt, Word};
 use miden_processor::{
@@ -43,6 +46,13 @@ pub const PRINT_ADV_MAP_EVENT_NAME: EventName = EventName::new("miden::core::deb
 /// Looks up a WORD key in the advice map and prints the associated values.
 pub const PRINT_ADV_MAP_ITEM_EVENT_NAME: EventName =
     EventName::new("miden::core::debug::print_adv_map_item");
+
+/// Maximum number of addresses an explicit `print_mem` / `print_mem_addr` range may span.
+///
+/// Guards against a caller accidentally passing an enormous range. The full address space printed
+/// by `print_mem_all` (`[0, 2^32)`) is exempt, since enumerating all of memory is its documented
+/// purpose.
+const MAX_PRINT_MEM_RANGE: u64 = 1024;
 
 /// Returns the default `(EventName, handler)` pairs for print-style debugging.
 ///
@@ -139,6 +149,19 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
             write_stack(w, operand_stack, None, "Stack", process.clock())?;
         } else if id == PRINT_MEM_EVENT_NAME.to_event_id() {
             let range = read_mem_print_range(process, 1, 2)?;
+            // Guard against an accidentally huge explicit range; the full `[0, 2^32)` range used by
+            // `print_mem_all` is exempt.
+            if let Some((first, last)) = resolve_addr_bounds(&range)
+                && (first, last) != (0, u32::MAX)
+            {
+                let len = u64::from(last - first) + 1;
+                if len > MAX_PRINT_MEM_RANGE {
+                    return Err(format!(
+                        "print_mem range length {len} exceeds maximum of {MAX_PRINT_MEM_RANGE}"
+                    )
+                    .into());
+                }
+            }
             write_mem_range(w, process, range)?;
         } else if id == PRINT_ADV_STACK_EVENT_NAME.to_event_id() {
             let start = stack_item_as_usize(process, 1);
@@ -181,26 +204,24 @@ fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
     &slice[start..end]
 }
 
-/// Reads a half-open `[start, end)` memory range off the operand stack (positions `start_idx`,
-/// `end_idx`) and converts it to an inclusive `start..=end-1` range of valid `u32` addresses.
+/// Reads a half-open `[start, end)` memory range off the operand stack and returns it as inclusive
+/// `u32` address bounds.
 ///
-/// Unlike [`ProcessorState::get_mem_addr_range`], the exclusive end may be up to `2^32` so the
-/// cell at `u32::MAX` can be printed (the range `[addr, addr+1)` for `addr == u32::MAX`, or the
-/// full range `[0, 2^32)`). The inclusive representation keeps both bounds within `u32`, so no
-/// address value ever exceeds `u32::MAX`.
+/// Memory addresses are `u32`, so both bounds are valid `u32` values. The half-open end may be
+/// `2^32` (one past the last address) so the cell at `u32::MAX` stays reachable; it folds into an
+/// inclusive end of `u32::MAX`. An empty range (`start == end`) is returned with an excluded end.
 fn read_mem_print_range(
     process: &ProcessorState,
     start_idx: usize,
     end_idx: usize,
-) -> Result<core::ops::RangeInclusive<u32>, MemoryError> {
+) -> Result<(Bound<u32>, Bound<u32>), MemoryError> {
     let start_addr = process.get_stack_item(start_idx).as_canonical_u64();
     let end_addr = process.get_stack_item(end_idx).as_canonical_u64();
 
     if start_addr > u32::MAX as u64 {
         return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
     }
-    // The exclusive end may be one past the last valid address (`2^32`) so that `u32::MAX` is
-    // reachable as the inclusive end below.
+    // The exclusive end may be one past the last valid address (`2^32`).
     if end_addr > u32::MAX as u64 + 1 {
         return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
     }
@@ -208,39 +229,55 @@ fn read_mem_print_range(
         return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
     }
 
-    // Convert half-open `[start, end)` to inclusive. The range is empty when `start == end`;
-    // guard that first, both to return the canonical empty `RangeInclusive` and to avoid the
-    // underflow of `end_addr - 1` when `start == end == 0`. Otherwise `end_addr >= 1`, so
-    // `end_addr - 1` lies in `[0, u32::MAX]` and casts losslessly (subtract in `u64` before the
-    // cast, since `end_addr` may be `2^32`).
+    let start = start_addr as u32;
     if start_addr == end_addr {
-        #[allow(clippy::reversed_empty_ranges)]
-        return Ok(1..=0);
+        // Empty range: an excluded end represents it without a reversed range.
+        Ok((Bound::Included(start), Bound::Excluded(start)))
+    } else {
+        // Subtract in `u64` before the cast, since `end_addr` may be `2^32`; the result is in
+        // `[0, u32::MAX]`.
+        Ok((Bound::Included(start), Bound::Included((end_addr - 1) as u32)))
     }
-    Ok(start_addr as u32..=(end_addr - 1) as u32)
 }
 
-/// Prints the initialized memory cells in the inclusive range `[start, end]` of the current
-/// context.
+/// Resolves `range` to its inclusive `[first, last]` `u32` address bounds, or `None` if the range
+/// is empty.
+fn resolve_addr_bounds<R: RangeBounds<u32>>(range: &R) -> Option<(u32, u32)> {
+    let first = match range.start_bound() {
+        Bound::Included(&a) => a,
+        Bound::Excluded(&a) => a.checked_add(1)?,
+        Bound::Unbounded => 0,
+    };
+    let last = match range.end_bound() {
+        Bound::Included(&b) => b,
+        Bound::Excluded(&b) => b.checked_sub(1)?,
+        Bound::Unbounded => u32::MAX,
+    };
+    (first <= last).then_some((first, last))
+}
+
+/// Prints the initialized memory cells in `range` for the current context.
 ///
-/// Backs `print_mem` (an explicit range), `print_mem_addr` (the single cell `[addr, addr]`), and
-/// `print_mem_all` (the full range `[0, u32::MAX]`). Only cells that have been written are listed,
-/// so a full-range print enumerates just the initialized state rather than the entire address
-/// space. Both bounds are valid `u32` addresses, so the cell at `u32::MAX` is addressable.
-fn write_mem_range<W: fmt::Write>(
-    w: &mut W,
-    process: &ProcessorState,
-    range: core::ops::RangeInclusive<u32>,
-) -> fmt::Result {
+/// `range` may be exclusive (`start..end`) or inclusive (`start..=end`); the inclusive form lets
+/// the cell at `u32::MAX` be printed without the end overflowing `u32`. Only written cells are
+/// listed, so even the full `0..=u32::MAX` range (used by `print_mem_all`) enumerates just the
+/// initialized state, not the entire address space.
+fn write_mem_range<W, R>(w: &mut W, process: &ProcessorState, range: R) -> fmt::Result
+where
+    W: fmt::Write,
+    R: RangeBounds<u32>,
+{
     let (ctx, clk) = (process.ctx(), process.clock());
-    if range.is_empty() {
+    let Some((start, end)) = resolve_addr_bounds(&range) else {
         return writeln!(w, "Memory state before step {clk} for context {ctx}: range is empty.");
-    }
-    let (start, end) = (range.start(), range.end());
+    };
     let items: Vec<_> = process
         .get_mem_state(ctx)
         .into_iter()
-        .filter(|(addr, _)| range.contains(&u32::from(*addr)))
+        .filter(|(addr, _)| {
+            let addr = u32::from(*addr);
+            start <= addr && addr <= end
+        })
         .map(|(addr, value)| (format!("{addr:#010x}"), Some(value.to_string())))
         .collect();
     if items.is_empty() {
