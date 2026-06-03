@@ -1,0 +1,38 @@
+version: 2
+
+multi-ecosystem-groups:
+  dependency-refresh:
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Etc/UTC"
+    labels:
+      - "dependencies"
+      - "no changelog"
+
+updates:
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "/miden-crypto-fuzz"
+      - "/miden-serde-utils/fuzz"
+      - "/tools/zeroize-audit"
+    patterns:
+      - "*"
+    multi-ecosystem-group: "dependency-refresh"
+    open-pull-requests-limit: 1
+    cooldown:
+      semver-patch-days: 7
+      semver-minor-days: 7
+      semver-major-days: 15
+
+  # Action updates still have to pass actionlint and zizmor in actions-hygiene.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    patterns:
+      - "*"
+    multi-ecosystem-group: "dependency-refresh"
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
