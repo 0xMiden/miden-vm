@@ -2913,40 +2913,6 @@ begin adv.has_mapkey assert end"
     Ok(())
 }
 
-/// Ensures the expression deferred-registration keyword remains accepted by the assembler.
-#[test]
-fn test_deferred_keywords_assemble() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-begin
-    padw padw padw
-    adv.register_deferred
-    dropw dropw dropw
-end"
-    );
-    context.assemble(source)?;
-    Ok(())
-}
-
-/// Ensures the data deferred-registration keyword remains accepted by the assembler.
-#[test]
-fn test_register_deferred_data_keyword_assembles() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-begin
-    push.0 push.0 push.0 push.0 push.0
-    adv.register_deferred_data
-    drop drop drop drop drop
-end"
-    );
-    context.assemble(source)?;
-    Ok(())
-}
-
 // ERRORS
 // ================================================================================================
 

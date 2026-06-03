@@ -12,3 +12,18 @@ pub use group::Group;
 pub use hash::Hash;
 pub use sig::Sig;
 pub use uint::Uint;
+
+use crate::deferred::PrecompileRegistry;
+
+/// Builds a registry with every reference precompile installed.
+///
+/// This is the default fixture registry for framework tests, which exercise the deferred framework
+/// rather than any single precompile. Tests that need an empty or narrow registry build one
+/// directly with [`PrecompileRegistry::with_precompile`].
+pub fn mock_precompile_registry() -> PrecompileRegistry {
+    PrecompileRegistry::default()
+        .with_precompile(Uint)
+        .with_precompile(Hash)
+        .with_precompile(Sig)
+        .with_precompile(Group)
+}

@@ -207,6 +207,8 @@ use super::*;
         Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
 // ---- log precompile ops --------------------------------
+// Drift marker only: this snapshot guards the `log_precompile` precompile-transcript output against
+// silent changes. The semantic folding rule is asserted in `test_log_precompile_correctness`.
 // Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
 #[case(None, "begin log_precompile end",
     vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),

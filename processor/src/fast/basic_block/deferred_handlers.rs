@@ -286,4 +286,15 @@ mod tests {
             SystemEventError::DeferredStateTooLarge { num_elements, max: 16 } if num_elements == expected
         ));
     }
+
+    #[test]
+    fn register_data_rejects_unaligned_pointer() {
+        // A non-word-aligned pointer is rejected as an alignment error before any memory read.
+        let mut processor = processor_with_budget(64);
+        bind_precompiles(&mut processor, test_precompiles());
+
+        write_data_stack(&mut processor, Hash::preimage_tag(Hash::BYTES_PER_CHUNK), 1);
+        let err = handle_deferred_register_data(&mut processor).unwrap_err();
+        assert!(matches!(err, SystemEventError::Memory(MemoryError::UnalignedWordAccess { .. })));
+    }
 }
