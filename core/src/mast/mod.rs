@@ -41,7 +41,7 @@
 //!   [`UntrustedMastForest::read_from_bytes_with_options`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.
 
-#[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+#[cfg(test)]
 use alloc::collections::BTreeSet;
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Index};
@@ -229,7 +229,7 @@ impl MastForest {
     /// # Panics
     /// - if `new_root_id`'s internal index is larger than the number of nodes in this forest (i.e.
     ///   clearly doesn't belong to this MAST forest).
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(any(test, feature = "arbitrary"))]
     pub fn make_root(&mut self, new_root_id: MastNodeId) {
         self.mark_root(new_root_id);
     }
@@ -241,7 +241,7 @@ impl MastForest {
     ///
     /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
     /// reference to the old [`MastForest`] should be remapped using this map.
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(test)]
     pub fn remove_nodes(
         &mut self,
         nodes_to_remove: &BTreeSet<MastNodeId>,
@@ -379,7 +379,7 @@ impl MastForest {
 // ------------------------------------------------------------------------------------------------
 /// Helpers
 impl MastForest {
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(test)]
     fn assert_nodes_to_remove_are_orphaned(&self, nodes_to_remove: &BTreeSet<MastNodeId>) {
         for (node_idx, node) in self.nodes.iter().enumerate() {
             let node_id = MastNodeId::new_unchecked(node_idx.try_into().expect("too many nodes"));
@@ -396,7 +396,7 @@ impl MastForest {
         }
     }
 
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(test)]
     fn prune_procedure_names(&mut self) {
         let root_digests: BTreeSet<Word> =
             self.roots.iter().map(|&root_id| self[root_id].digest()).collect();
@@ -408,7 +408,7 @@ impl MastForest {
     ///
     /// # Panics
     /// - Panics if the internal set of nodes is not empty.
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(test)]
     fn remap_and_add_nodes(
         &mut self,
         nodes_to_add: Vec<MastNode>,
@@ -429,7 +429,7 @@ impl MastForest {
     ///
     /// # Panics
     /// - Panics if the internal set of roots is not empty.
-    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+    #[cfg(test)]
     fn remap_and_add_roots(
         &mut self,
         old_root_ids: Vec<MastNodeId>,
@@ -447,7 +447,7 @@ impl MastForest {
 
 /// Returns the set of nodes that are live, as well as the mapping from "old ID" to "new ID" for all
 /// live nodes.
-#[cfg(any(test, feature = "arbitrary", feature = "testing"))]
+#[cfg(test)]
 fn remove_nodes(
     mast_nodes: Vec<MastNode>,
     nodes_to_remove: &BTreeSet<MastNodeId>,
