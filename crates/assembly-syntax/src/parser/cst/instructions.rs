@@ -198,8 +198,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::DeferredRegister),
     },
     PrimitiveSpec {
-        spelling: "adv.register_deferred_chunk",
-        build: || Instruction::SysEvent(SystemEventNode::DeferredRegisterChunk),
+        spelling: "adv.register_deferred_data",
+        build: || Instruction::SysEvent(SystemEventNode::DeferredRegisterData),
     },
     PrimitiveSpec {
         spelling: "adv.evaluate_deferred",

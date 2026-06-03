@@ -85,22 +85,27 @@ impl PrecompileRegistry {
     ///
     /// Unknown ids are registry failures; recognized ids whose arguments are invalid are
     /// attributed to the owning precompile. Framework tags are handled by the internal
-    /// framework-aware decoder and rejected here.
+    /// framework-aware decoder and rejected here. [`NodeType::True`] is reserved for the framework
+    /// TRUE sentinel, so a precompile that returns it is rejected as an invalid node.
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         if tag.is_framework_reserved() {
             return Err(PrecompileError::InvalidNode);
         }
-        let p = self.precompiles.get(&tag.id).ok_or(PrecompileError::InvalidNode)?;
-        p.decode(tag.args).ok_or_else(|| PrecompileError::Precompile {
+        let p = self.precompiles.get(&tag.id()).ok_or(PrecompileError::InvalidNode)?;
+        let invalid = || PrecompileError::Precompile {
             name: p.name(),
             source: Box::new(PrecompileError::InvalidNode),
-        })
+        };
+        match p.decode(tag.args()).ok_or_else(invalid)? {
+            NodeType::True => Err(invalid()),
+            node_type => Ok(node_type),
+        }
     }
 
     /// Decodes either a framework-owned tag or a precompile-owned tag.
     fn decode_node_type(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         if tag == Tag::TRUE {
-            Ok(NodeType::Value)
+            Ok(NodeType::True)
         } else if tag == Tag::AND {
             Ok(NodeType::Join)
         } else {
@@ -110,12 +115,12 @@ impl PrecompileRegistry {
 
     /// Validates a node's tag and payload shape under this registry.
     pub(crate) fn validate_node(&self, node: &Node) -> Result<NodeType, PrecompileError> {
-        let node_type = self.decode_node_type(node.tag)?;
-        if node.tag == Tag::TRUE && !node.is_true_node() {
+        let node_type = self.decode_node_type(node.tag())?;
+        if node.tag() == Tag::TRUE && !node.is_true_node() {
             return Err(PrecompileError::InvalidNode);
         }
         node_type
-            .validate_payload(&node.payload)
+            .validate_payload(node.payload())
             .map_err(|_| PrecompileError::InvalidNode)?;
         Ok(node_type)
     }
@@ -129,11 +134,12 @@ impl PrecompileRegistry {
         node: &Node,
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
-        if node.tag.is_framework_reserved() {
+        let tag = node.tag();
+        if tag.is_framework_reserved() {
             return Err(PrecompileError::InvalidNode);
         }
-        let p = self.precompiles.get(&node.tag.id).ok_or(PrecompileError::InvalidNode)?;
-        p.evaluate(node.tag.args, &node.payload, context).map_err(|source| {
+        let p = self.precompiles.get(&tag.id()).ok_or(PrecompileError::InvalidNode)?;
+        p.evaluate(tag.args(), node.payload(), context).map_err(|source| {
             PrecompileError::Precompile { name: p.name(), source: Box::new(source) }
         })
     }
@@ -152,6 +158,8 @@ fn validate_precompile_id(name: &'static str, id: Felt, derived: Felt) {
 
 #[cfg(test)]
 mod tests {
+    use core::num::NonZeroU32;
+
     use super::*;
     use crate::{
         ZERO,
@@ -172,7 +180,7 @@ mod tests {
             Self { name }
         }
         fn tag(&self) -> Tag {
-            Tag { id: self.id(), args: [ZERO; 3] }
+            Tag::new(self.id(), [ZERO; 3]).expect("fixture id is precompile-owned")
         }
     }
 
@@ -187,7 +195,7 @@ mod tests {
             if args != [ZERO; 3] {
                 return None;
             }
-            Some(NodeType::Value)
+            Some(NodeType::Data(NonZeroU32::MIN))
         }
         fn evaluate(
             &self,
@@ -195,8 +203,34 @@ mod tests {
             payload: &Payload,
             _context: &mut DeferredContext<'_>,
         ) -> Result<Node, PrecompileError> {
-            let felts = payload.as_felts()?;
-            Ok(Node::leaf(Tag::new(self.id(), args), *felts))
+            let chunk = payload.as_value()?;
+            Ok(Node::value(
+                Tag::new(self.id(), args).expect("fixture id is precompile-owned"),
+                *chunk,
+            )?)
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct MaliciousTrue;
+
+    impl Precompile for MaliciousTrue {
+        fn name(&self) -> &'static str {
+            "malicious-true"
+        }
+        fn id(&self) -> Felt {
+            precompile_id(self)
+        }
+        fn decode(&self, _args: [Felt; 3]) -> Option<NodeType> {
+            Some(NodeType::True)
+        }
+        fn evaluate(
+            &self,
+            _args: [Felt; 3],
+            _payload: &Payload,
+            _context: &mut DeferredContext<'_>,
+        ) -> Result<Node, PrecompileError> {
+            unreachable!("registry must reject precompile-owned NodeType::True")
         }
     }
 
@@ -209,17 +243,23 @@ mod tests {
         let mut registry = PrecompileRegistry::default().with_precompile(a);
         registry.merge(PrecompileRegistry::default().with_precompile(b));
 
-        assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Value);
-        assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Value);
+        assert_eq!(registry.decode(tag_a).unwrap(), NodeType::Data(NonZeroU32::MIN));
+        assert_eq!(registry.decode(tag_b).unwrap(), NodeType::Data(NonZeroU32::MIN));
+    }
+
+    #[test]
+    fn registry_rejects_precompile_owned_true_shape() {
+        let registry = PrecompileRegistry::default().with_precompile(MaliciousTrue);
+        let tag = Tag::new(MaliciousTrue.id(), [ZERO; 3]).expect("test id is precompile-owned");
+        assert!(matches!(registry.decode(tag), Err(PrecompileError::Precompile { .. })));
+        assert!(matches!(registry.decode(tag).unwrap_err().root(), PrecompileError::InvalidNode));
     }
 
     #[test]
     fn unknown_id_rejected() {
         let registry = PrecompileRegistry::default().with_precompile(Fixture::new("known"));
-        let bogus = Tag {
-            id: Felt::new_unchecked(9999),
-            args: [ZERO; 3],
-        };
+        let bogus = Tag::new(Felt::new_unchecked(9999), [ZERO; 3])
+            .expect("bogus id is not framework-reserved");
         // Unknown id is rejected by the registry itself (not a precompile), so it is *not*
         // name-wrapped.
         assert!(matches!(registry.decode(bogus), Err(PrecompileError::InvalidNode)));
@@ -228,8 +268,8 @@ mod tests {
     #[test]
     fn fixture_rejects_nonzero_immediate() {
         let f = Fixture::new("f");
-        let mut tag = f.tag();
-        tag.args[2] = Felt::new_unchecked(1);
+        let tag = Tag::new(f.id(), [ZERO, ZERO, Felt::new_unchecked(1)])
+            .expect("fixture id is precompile-owned");
         let registry = PrecompileRegistry::default().with_precompile(f);
         // The fixture chose to reject the immediate, so the registry name-wraps the cause.
         assert!(matches!(registry.decode(tag).unwrap_err().root(), PrecompileError::InvalidNode));
@@ -238,13 +278,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn true_id_is_reserved_for_framework() {
-        validate_precompile_id("reserved-true", Tag::TRUE.id, Tag::TRUE.id);
+        validate_precompile_id("reserved-true", Tag::TRUE.id(), Tag::TRUE.id());
     }
 
     #[test]
     #[should_panic(expected = "framework-reserved id")]
     fn and_id_is_reserved_for_framework() {
-        validate_precompile_id("reserved-and", Tag::AND.id, Tag::AND.id);
+        validate_precompile_id("reserved-and", Tag::AND.id(), Tag::AND.id());
     }
 
     #[test]
@@ -260,7 +300,7 @@ mod tests {
         let f = Fixture::new("r");
         let tag = f.tag();
         let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
-        let node = Node::leaf(tag, [ZERO; 8]);
+        let node = Node::value(tag, [ZERO; 8]).unwrap();
         let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
         // Use the framework's evaluate path so we exercise dispatch end-to-end.
         let digest = state.register(node.clone()).unwrap();

@@ -35,42 +35,44 @@ transcript. The structure was a sequence: commit a request, absorb it, repeat.
 That linearity becomes expensive the moment the Precompile VM must prove computation at a finer
 grain — a *single* curve or field operation. In the linear model every binary operation is its own
 assertion: hash its operands and result into a statement, then absorb that statement into the
-transcript. That is two hashes per operation, and an expression like `(a + b) · c` cannot reference
+transcript. That is two hashes per operation, and a calculation like `(a + b) · c` cannot reference
 or share its sub-results — each step is an opaque, standalone request. For operation-heavy
 precompiles this at least doubles the VM's hashing.
 
 The fix is to stop treating deferred work as a *sequence of requests* and treat it as a **graph of
-expressions**. Once the deferred statements are modelled as a DAG, much falls into place: each node
-is an expression that evaluates to something; an operation *references* its operands by their
-content address instead of re-hashing them; shared sub-expressions are shared in the graph. The
-linear transcript does not disappear — it becomes a special case. The transcript is itself an
-assertion: a chain of AND nodes whose root is a statement that must evaluate to `TRUE`. "Commit to a
-list" and "commit to an expression DAG" are the same mechanism.
+value/data/join nodes**. Once the deferred statements are modelled as a DAG, much falls into place:
+each node evaluates to a canonical node; an operation *references* its operands by their content
+address instead of re-hashing them; shared sub-computations are shared in the graph. The linear
+transcript does not disappear — it becomes a special case. The transcript is itself an assertion: a
+chain of AND nodes whose root is a statement that must evaluate to `TRUE`. "Commit to a list" and
+"commit to a deferred DAG" are the same mechanism.
 
 Crucially, the DAG is the language the Precompile VM already speaks. The way a precompile's
-operations and constraints are described in that VM is inherently a graph of expressions — so by
-modelling deferred computation the same way, **a precompile's native (host) implementation comes to
-mirror its constraint implementation.** One structure drives both. This direction is developed in
-the draft specification in GitHub discussion #3005.
+operations and constraints are described in that VM is inherently a graph of value/data/join nodes —
+so by modelling deferred computation the same way, **a precompile's native (host) implementation
+comes to mirror its constraint implementation.** One structure drives both. This direction is
+developed in the draft specification in GitHub discussion #3005.
 
 ## The model
 
 A **node** is a `(tag, payload)` pair, addressed by its 4-felt Poseidon2 **digest**. Identical
 content yields an identical digest, so equal subterms are shared automatically (hash-consing).
 
-- A **tag** is a node's identity and constructor: `Tag { id, args: [Felt; 3] }`. The `id` selects
-  the owning precompile; the three immediate felts (`args`) are entirely the precompile's to
-  interpret (a discriminant, a chunk length, a small constant, …). The framework reserves ids `0`
+- A **tag** is a node's identity and constructor: externally, precompile tags are built with
+  `Tag::new(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
+  selects the owning precompile; the three immediate felts (`args`) are entirely the precompile's
+  to interpret (a discriminant, a data length, a small constant, …). The framework reserves ids `0`
   and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
   `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes. No precompile may claim either id.
   The transcript is a restricted right-spined use of the same semantic `AND` constructor, not a
   separate tag family.
-- A **payload** is the node's body, in one of two shapes:
-  - an **expression** — exactly 8 felts (one Poseidon2 rate block): raw value data for a leaf, or
-    two packed child digests (`lhs || rhs`) for anything referential (an operation, a predicate,
-    an AND step);
-  - a **chunk** body — `n ≥ 1` 8-felt blocks of bulk data (a hash preimage, a message), whose
-    digest is the linear hash of the `8n` felts under the tag. An empty chunk body is forbidden.
+- A **payload** is the node's body, in one of three shapes:
+  - **`True`** — the framework TRUE sentinel, carrying no data; it is the only zero-payload node;
+  - **`Data(n)`** — `n ≥ 1` 8-felt data chunks, whose digest is the linear hash of the `8n` felts
+    under the tag. A `Data(1)` is a single-block **value** (e.g. a digest or a field element);
+    `Data(n > 1)` is bulk data such as a hash preimage or message. An empty data body is forbidden;
+  - a **`Join`** — two child digests (`lhs`, `rhs`) for anything referential (an operation, a
+    predicate, an AND step).
 
 The digest binds the tag in the Poseidon2 capacity, so a node's address commits to *both* its
 identity and its body.
@@ -78,7 +80,7 @@ identity and its body.
 ## Precompiles
 
 A **precompile** is the framework's extension point: an implementation of the `Precompile` trait
-that claims one `Tag::id` and, within that slice of tag space, defines a *family of node types*
+that claims one tag id and, within that slice of tag space, defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
 DAG — the reference precompiles cover hashes, signatures, elliptic-curve groups, and big-integer
 fields.
@@ -86,20 +88,21 @@ fields.
 A precompile supplies three things:
 
 - `decode(args) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
-  structural shape does it carry (`Value`, `Join`, or `Chunks(n)`)? Tag inspection only. For
-  chunk-bodied tags, this is also the precompile-owned size gate: returning `Chunks(n)` authorizes
-  the host to read exactly `n` chunks, so oversized chunk tags should be rejected here.
+  structural shape does it carry (`Data(n)` or `Join`)? Tag inspection only. For data tags, this is
+  also the precompile-owned size gate: returning `Data(n)` authorizes the host to read
+  exactly `n` data chunks, so oversized data tags should be rejected here. `NodeType::True` is
+  reserved for the framework TRUE sentinel; a precompile must not return it.
 - `evaluate(args, payload, …) -> Result<Node>` — computes a node's **canonical form**. The
-  common roles are: validate a value leaf (its canonical is itself), evaluate an operation (evaluate
-  the child canonicals, then combine), or check a predicate (evaluate operands, return the `TRUE`
-  node on success or fail otherwise). These roles are conventions, not a fixed taxonomy — a
-  precompile is free to define unary operations, multi-ary constructors, and so on over the three
-  structural shapes.
-- `init() -> Vec<Node>` — contributes any canonical constant leaves (e.g. `ZERO`, `ONE`, a curve
+  common roles are: validate a value `Data(1)` (its canonical is itself), evaluate an operation
+  (evaluate the child canonicals, then combine), or check a predicate (evaluate operands, return the
+  `TRUE` node on success or fail otherwise). These roles are conventions, not a fixed taxonomy — a
+  precompile is free to define unary operations, multi-ary constructors, and so on over the data and
+  join shapes.
+- `init() -> Vec<Node>` — contributes any canonical constant values (e.g. `ZERO`, `ONE`, a curve
   generator) at registry-initialization time.
 
 Precompiles are collected in a **`PrecompileRegistry`**, the framework's dispatcher: it routes each
-`Tag::id` to its owning precompile and is otherwise indifferent to how the precompile behaves. A
+tag id to its owning precompile and is otherwise indifferent to how the precompile behaves. A
 precompile's `id` is derived the same way event IDs are — the name hashed with Blake3 and folded
 into a single field element — but in its own domain-separated namespace, so a precompile and an
 event of the same name get different ids by construction. The registry rejects misconfigured or
@@ -126,8 +129,8 @@ precompile-owned wrapper.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag, validates the payload shape, and registers the expression node. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_chunk`  | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, validates the chunk shape, and registers the chunk node. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers a one-block node — a `Data(1)` value or a join over the eight payload felts. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, and registers the `Data(n)` node. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
 | `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it, stores the canonical node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure; they do not
@@ -162,9 +165,10 @@ same ownership applies to registration helpers: a wrapper can make a raw registe
 computing the node digest in-circuit from the operand stack or memory, so the worst a misuse can do
 is make the verifier reject.
 
-Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node, which
-serializes to its 12 felts like any other expression. A failed predicate has already surfaced as an
-error before any felts are pushed.
+Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node, pushed as
+`Node::to_felts()` (tag first, then payload) like any other node — which for `TRUE` is just its
+4-felt tag, since `TRUE` has no payload. A failed predicate has already surfaced as an error before
+any felts are pushed.
 
 ## The deferred commitment
 

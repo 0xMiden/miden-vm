@@ -4,11 +4,12 @@
 //! contributes common constants through [`Precompile::init`] so registry bootstrapping is covered.
 
 use alloc::{vec, vec::Vec};
+use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
+        DataChunk, DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
         PrecompileError, Tag, precompile_id,
     },
 };
@@ -25,7 +26,7 @@ impl Uint {
     pub const NAME: &'static str = "uint256";
 
     /// Tag discriminants owned by this fixture.
-    pub const LEAF_TAG_ID: u32 = 0;
+    pub const VALUE_TAG_ID: u32 = 0;
     pub const ADD_TAG_ID: u32 = 1;
     pub const SUB_TAG_ID: u32 = 2;
     pub const MUL_TAG_ID: u32 = 3;
@@ -36,53 +37,43 @@ impl Uint {
         precompile_id(&Uint)
     }
 
-    /// Tag for a canonical uint leaf.
-    pub fn leaf_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::LEAF_TAG_ID), ZERO, ZERO],
-        }
+    /// Tag for a canonical uint value (`Data(1)`).
+    pub fn value_tag() -> Tag {
+        Self::tag([Felt::from_u32(Self::VALUE_TAG_ID), ZERO, ZERO])
     }
     /// Tag for a wrapping-add op node.
     pub fn add_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO])
     }
     /// Tag for a wrapping-sub op node.
     pub fn sub_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO])
     }
     /// Tag for a wrapping-mul op node.
     pub fn mul_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::MUL_TAG_ID), ZERO, ZERO])
     }
     /// Tag for a uint equality predicate.
     pub fn eq_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO])
     }
 
-    /// Builds a canonical uint leaf from little-endian limbs.
-    pub fn leaf_node(limbs: [u32; 8]) -> Node {
-        Node::leaf(Self::leaf_tag(), limbs.map(Felt::from_u32))
+    fn tag(args: [Felt; 3]) -> Tag {
+        Tag::new(Self::id(), args).expect("uint precompile id is not framework-reserved")
     }
 
-    /// Extracts canonical little-endian limbs from a uint leaf.
-    pub fn limbs_of(node: &Node) -> Result<[u32; 8], DeferredError> {
-        if node.tag != Self::leaf_tag() {
+    /// Builds a canonical uint value from little-endian limbs.
+    pub fn value_node(limbs: [u32; 8]) -> Node {
+        Node::value(Self::value_tag(), limbs.map(Felt::from_u32))
+            .expect("value tag is precompile-owned")
+    }
+
+    /// Extracts canonical little-endian limbs from a uint value.
+    pub fn value_of(node: &Node) -> Result<[u32; 8], DeferredError> {
+        if node.tag() != Self::value_tag() {
             return Err(DeferredError::InvalidPayload);
         }
-        decode_limbs(node.payload.as_felts()?)
+        decode_limbs(node.payload().as_value()?)
     }
 
     /// Adds two little-endian uints modulo `2^256` for fixtures that share uint semantics.
@@ -137,14 +128,14 @@ impl Precompile for Uint {
         // ZERO, ONE, P_MINUS_1 — useful baseline constants.
         let mut one = [0u32; 8];
         one[0] = 1;
-        vec![Self::leaf_node([0; 8]), Self::leaf_node(one), Self::leaf_node([u32::MAX; 8])]
+        vec![Self::value_node([0; 8]), Self::value_node(one), Self::value_node([u32::MAX; 8])]
     }
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-        // Leaf is a `Value` (8 raw u32 limbs); op-nodes and the eq predicate are `Join`
-        // (children encoded as `lhs_digest || rhs_digest`).
+        // A value is `Data(1)` (8 raw u32 limbs); op-nodes and the eq predicate are `Join` over two
+        // child digests.
         Some(match Discriminant::classify(args[0])? {
-            Discriminant::Leaf => NodeType::Value,
+            Discriminant::Value => NodeType::Data(NonZeroU32::MIN),
             Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Join,
         })
     }
@@ -156,13 +147,13 @@ impl Precompile for Uint {
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         match UintNode::parse(args, payload)? {
-            // Leaf canonicality is validated at evaluation-time, so a malformed leaf only errors
+            // Value canonicality is validated at evaluation-time, so a malformed value only errors
             // when used.
-            UintNode::Leaf => Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?)),
+            UintNode::Value => Ok(Node::value(Self::tag(args), *payload.as_value()?)?),
             UintNode::BinaryOp { op, lhs, rhs } => {
-                let a = leaf_limbs(&context.resolve(lhs)?)?;
-                let b = leaf_limbs(&context.resolve(rhs)?)?;
-                Ok(Self::leaf_node(op.apply(a, b)))
+                let a = value_limbs(&context.resolve(lhs)?)?;
+                let b = value_limbs(&context.resolve(rhs)?)?;
+                Ok(Self::value_node(op.apply(a, b)))
             },
             UintNode::Eq { lhs, rhs } => {
                 if context.resolve(lhs)? != context.resolve(rhs)? {
@@ -180,7 +171,7 @@ impl Precompile for Uint {
 /// Recognized local uint operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Discriminant {
-    Leaf,
+    Value,
     BinaryOp(BinaryOp),
     Eq,
 }
@@ -188,7 +179,7 @@ enum Discriminant {
 impl Discriminant {
     fn classify(disc: Felt) -> Option<Self> {
         match disc.as_canonical_u64() {
-            0 => Some(Self::Leaf),
+            0 => Some(Self::Value),
             1 => Some(Self::BinaryOp(BinaryOp::Add)),
             2 => Some(Self::BinaryOp(BinaryOp::Sub)),
             3 => Some(Self::BinaryOp(BinaryOp::Mul)),
@@ -217,7 +208,7 @@ impl BinaryOp {
 
 /// Parsed uint node ready for evaluation.
 enum UintNode {
-    Leaf,
+    Value,
     BinaryOp { op: BinaryOp, lhs: Digest, rhs: Digest },
     Eq { lhs: Digest, rhs: Digest },
 }
@@ -227,16 +218,16 @@ impl UintNode {
     fn parse(args: [Felt; 3], payload: &Payload) -> Result<Self, PrecompileError> {
         let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
         Ok(match kind {
-            Discriminant::Leaf => {
-                decode_limbs(payload.as_felts()?)?;
-                Self::Leaf
+            Discriminant::Value => {
+                decode_limbs(payload.as_value()?)?;
+                Self::Value
             },
             Discriminant::BinaryOp(op) => {
-                let (lhs, rhs) = payload.join_children()?;
+                let (lhs, rhs) = payload.as_join()?;
                 Self::BinaryOp { op, lhs, rhs }
             },
             Discriminant::Eq => {
-                let (lhs, rhs) = payload.join_children()?;
+                let (lhs, rhs) = payload.as_join()?;
                 Self::Eq { lhs, rhs }
             },
         })
@@ -246,14 +237,14 @@ impl UintNode {
 // HELPERS
 // ================================================================================================
 
-fn leaf_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
-    if node.tag != Uint::leaf_tag() {
+fn value_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
+    if node.tag() != Uint::value_tag() {
         return Err(DeferredError::InvalidPayload);
     }
-    decode_limbs(node.payload.as_felts()?)
+    decode_limbs(node.payload().as_value()?)
 }
 
-fn decode_limbs(felts: &[Felt; 8]) -> Result<[u32; 8], DeferredError> {
+fn decode_limbs(felts: &DataChunk) -> Result<[u32; 8], DeferredError> {
     let mut limbs = [0u32; 8];
     for (i, felt) in felts.iter().enumerate() {
         let v = felt.as_canonical_u64();

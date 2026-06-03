@@ -1,7 +1,7 @@
 //! Reference precompiles used to exercise the deferred framework.
 //!
-//! They cover value leaves, join nodes, chunk bodies, predicates, and compound canonicals without
-//! depending on production cryptographic implementations.
+//! They cover values (`Data(1)`), join nodes, multi-chunk data, predicates, and compound canonicals
+//! without depending on production cryptographic implementations.
 
 pub mod group;
 pub mod hash;

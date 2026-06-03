@@ -25,7 +25,7 @@ pub enum SystemEventNode {
     InsertHqword,
     InsertHperm,
     DeferredRegister,
-    DeferredRegisterChunk,
+    DeferredRegisterData,
     DeferredEvaluate,
 }
 
@@ -46,7 +46,7 @@ impl From<&SystemEventNode> for SystemEvent {
             InsertHqword => Self::HqwordToMap,
             InsertHperm => Self::HpermToMap,
             DeferredRegister => Self::DeferredRegister,
-            DeferredRegisterChunk => Self::DeferredRegisterChunk,
+            DeferredRegisterData => Self::DeferredRegisterData,
             DeferredEvaluate => Self::DeferredEvaluate,
         }
     }
@@ -74,7 +74,7 @@ impl fmt::Display for SystemEventNode {
             Self::InsertHqword => write!(f, "insert_hqword"),
             Self::InsertHperm => writeln!(f, "insert_hperm"),
             Self::DeferredRegister => write!(f, "register_deferred"),
-            Self::DeferredRegisterChunk => write!(f, "register_deferred_chunk"),
+            Self::DeferredRegisterData => write!(f, "register_deferred_data"),
             Self::DeferredEvaluate => write!(f, "evaluate_deferred"),
         }
     }

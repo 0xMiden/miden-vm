@@ -4,7 +4,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{leaf, register_and_evaluate};
+use common::{register_and_evaluate, value};
 use miden_core::{
     deferred::{DeferredState, Digest, Node, PrecompileError, PrecompileRegistry},
     testing::precompile::{Group, Uint},
@@ -29,8 +29,8 @@ fn register_group(
     x: u64,
     y: u64,
 ) -> Digest {
-    let h_x = state.register(leaf(x)).unwrap();
-    let h_y = state.register(leaf(y)).unwrap();
+    let h_x = state.register(value(x)).unwrap();
+    let h_y = state.register(value(y)).unwrap();
     state.register(Group::new_node(h_x, h_y)).unwrap()
 }
 
@@ -41,14 +41,14 @@ fn add_produces_minted_new_and_passes_eq_against_expected() {
     let h_g1 = register_group(&registry, &mut state, 3, 4);
     let h_g2 = register_group(&registry, &mut state, 10, 20);
 
-    // Evaluate add: returns new(h_x3_leaf, h_y3_leaf) where leaves are minted.
+    // Evaluate add: returns new(h_x3_value, h_y3_value) where values are minted.
     let add_canonical = register_and_evaluate(&registry, &mut state, Group::add_node(h_g1, h_g2));
-    let expected = Group::new_node(leaf(13).digest(), leaf(24).digest());
+    let expected = Group::new_node(value(13).digest(), value(24).digest());
     assert_eq!(add_canonical, expected);
 
-    // Both minted field leaves must be in the DAG.
-    assert_eq!(state.evaluate(leaf(13).digest()).unwrap(), leaf(13));
-    assert_eq!(state.evaluate(leaf(24).digest()).unwrap(), leaf(24));
+    // Both minted uint values must be in the DAG.
+    assert_eq!(state.evaluate(value(13).digest()).unwrap(), value(13));
+    assert_eq!(state.evaluate(value(24).digest()).unwrap(), value(24));
 
     // Build expected group element via registration, then assert eq.
     let h_expected = register_group(&registry, &mut state, 13, 24);
@@ -73,40 +73,40 @@ fn sub_chains_through_add_with_mint_at_every_step() {
     let h_diff = state.register(Group::sub_node(h_sum, h_g1)).unwrap();
 
     let canonical = state.evaluate(h_diff).unwrap();
-    assert_eq!(canonical, Group::new_node(leaf(100).digest(), leaf(200).digest()));
+    assert_eq!(canonical, Group::new_node(value(100).digest(), value(200).digest()));
 }
 
 #[test]
-fn new_preserves_field_expression_commitments() {
+fn new_preserves_coordinate_commitments() {
     let (registry, mut state) = fresh();
 
-    let h_3 = state.register(leaf(3)).unwrap();
-    let h_4 = state.register(leaf(4)).unwrap();
-    let h_5 = state.register(leaf(5)).unwrap();
-    let h_6 = state.register(leaf(6)).unwrap();
+    let h_3 = state.register(value(3)).unwrap();
+    let h_4 = state.register(value(4)).unwrap();
+    let h_5 = state.register(value(5)).unwrap();
+    let h_6 = state.register(value(6)).unwrap();
 
-    let h_x_expr = state.register(Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_y_expr = state.register(Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
+    let h_x_commitment = state.register(Node::join(Uint::add_tag(), h_3, h_4).unwrap()).unwrap();
+    let h_y_commitment = state.register(Node::join(Uint::add_tag(), h_5, h_6).unwrap()).unwrap();
 
-    let h_group = state.register(Group::new_node(h_x_expr, h_y_expr)).unwrap();
+    let h_group = state.register(Group::new_node(h_x_commitment, h_y_commitment)).unwrap();
 
     let canonical = state.evaluate(h_group).unwrap();
 
     assert_eq!(
         canonical,
-        Group::new_node(h_x_expr, h_y_expr),
-        "new must preserve coordinate expression commitments"
+        Group::new_node(h_x_commitment, h_y_commitment),
+        "new must preserve coordinate commitments"
     );
 
     assert_ne!(
         canonical,
-        Group::new_node(leaf(7).digest(), leaf(11).digest()),
-        "new must not evaluate coordinates to value leaves in its canonical payload"
+        Group::new_node(value(7).digest(), value(11).digest()),
+        "new must not evaluate coordinates to values in its canonical payload"
     );
 
-    let (h_x, h_y) = canonical.payload.join_children().unwrap();
-    assert_eq!(h_x, h_x_expr);
-    assert_eq!(h_y, h_y_expr);
+    let (h_x, h_y) = canonical.payload().as_join().unwrap();
+    assert_eq!(h_x, h_x_commitment);
+    assert_eq!(h_y, h_y_commitment);
 
     let h_value_group = register_group(&registry, &mut state, 7, 11);
     common::log_and_verify(&registry, &mut state, Group::eq_node(h_group, h_value_group));
@@ -126,52 +126,66 @@ fn eq_predicate_errors_on_mismatch() {
 fn eq_compares_coordinate_values_not_coordinate_commitments() {
     let (registry, mut state) = fresh();
 
-    let h_3 = state.register(leaf(3)).unwrap();
-    let h_4 = state.register(leaf(4)).unwrap();
-    let h_5 = state.register(leaf(5)).unwrap();
+    let h_3 = state.register(value(3)).unwrap();
+    let h_4 = state.register(value(4)).unwrap();
+    let h_5 = state.register(value(5)).unwrap();
 
-    let h_x_expr = state.register(Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_expr_group = state.register(Group::new_node(h_x_expr, h_5)).unwrap();
+    let h_x_commitment = state.register(Node::join(Uint::add_tag(), h_3, h_4).unwrap()).unwrap();
+    let h_commitment_group = state.register(Group::new_node(h_x_commitment, h_5)).unwrap();
 
     let h_value_group = register_group(&registry, &mut state, 7, 5);
 
-    let result =
-        register_and_evaluate(&registry, &mut state, Group::eq_node(h_expr_group, h_value_group));
+    let result = register_and_evaluate(
+        &registry,
+        &mut state,
+        Group::eq_node(h_commitment_group, h_value_group),
+    );
 
     assert!(result.is_true_node(), "new(add(3, 4), 5) must equal new(7, 5)");
 
-    let swapped =
-        register_and_evaluate(&registry, &mut state, Group::eq_node(h_value_group, h_expr_group));
+    let swapped = register_and_evaluate(
+        &registry,
+        &mut state,
+        Group::eq_node(h_value_group, h_commitment_group),
+    );
 
     assert!(swapped.is_true_node(), "group equality should not depend on operand order");
 
-    common::log_and_verify(&registry, &mut state, Group::eq_node(h_expr_group, h_value_group));
-    common::log_and_verify(&registry, &mut state, Group::eq_node(h_value_group, h_expr_group));
+    common::log_and_verify(
+        &registry,
+        &mut state,
+        Group::eq_node(h_commitment_group, h_value_group),
+    );
+    common::log_and_verify(
+        &registry,
+        &mut state,
+        Group::eq_node(h_value_group, h_commitment_group),
+    );
 }
 
 #[test]
-fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
+fn add_resolves_op_backed_coordinates_and_mints_values() {
     let (registry, mut state) = fresh();
 
-    let h_3 = state.register(leaf(3)).unwrap();
-    let h_4 = state.register(leaf(4)).unwrap();
-    let h_5 = state.register(leaf(5)).unwrap();
-    let h_6 = state.register(leaf(6)).unwrap();
+    let h_3 = state.register(value(3)).unwrap();
+    let h_4 = state.register(value(4)).unwrap();
+    let h_5 = state.register(value(5)).unwrap();
+    let h_6 = state.register(value(6)).unwrap();
 
-    let h_x_expr = state.register(Node::join(Uint::add_tag(), h_3, h_4)).unwrap();
-    let h_y_expr = state.register(Node::join(Uint::add_tag(), h_5, h_6)).unwrap();
+    let h_x_commitment = state.register(Node::join(Uint::add_tag(), h_3, h_4).unwrap()).unwrap();
+    let h_y_commitment = state.register(Node::join(Uint::add_tag(), h_5, h_6).unwrap()).unwrap();
 
-    let h_g1 = state.register(Group::new_node(h_x_expr, h_y_expr)).unwrap();
+    let h_g1 = state.register(Group::new_node(h_x_commitment, h_y_commitment)).unwrap();
 
     let h_g2 = register_group(&registry, &mut state, 10, 20);
 
     let canonical = register_and_evaluate(&registry, &mut state, Group::add_node(h_g1, h_g2));
 
-    let expected = Group::new_node(leaf(17).digest(), leaf(31).digest());
+    let expected = Group::new_node(value(17).digest(), value(31).digest());
     assert_eq!(canonical, expected);
 
-    assert_eq!(state.evaluate(leaf(17).digest()).unwrap(), leaf(17));
-    assert_eq!(state.evaluate(leaf(31).digest()).unwrap(), leaf(31));
+    assert_eq!(state.evaluate(value(17).digest()).unwrap(), value(17));
+    assert_eq!(state.evaluate(value(31).digest()).unwrap(), value(31));
 
     let h_add = state.register(Group::add_node(h_g1, h_g2)).unwrap();
     let h_expected = register_group(&registry, &mut state, 17, 31);
@@ -179,42 +193,42 @@ fn add_resolves_expression_backed_coordinates_and_mints_value_leaves() {
 }
 
 #[test]
-fn new_requires_coordinate_expression_commitments_to_be_registered() {
+fn new_requires_coordinate_commitments_to_be_registered() {
     let (_registry, mut state) = fresh();
 
-    let h_3 = state.register(leaf(3)).unwrap();
-    let h_4 = state.register(leaf(4)).unwrap();
-    let h_y = state.register(leaf(5)).unwrap();
+    let h_3 = state.register(value(3)).unwrap();
+    let h_4 = state.register(value(4)).unwrap();
+    let h_y = state.register(value(5)).unwrap();
 
-    let x_expr = Node::join(Uint::add_tag(), h_3, h_4);
-    let h_x_expr = x_expr.digest();
+    let x_commitment = Node::join(Uint::add_tag(), h_3, h_4).unwrap();
+    let h_x_commitment = x_commitment.digest();
 
-    let err = state.register(Group::new_node(h_x_expr, h_y)).unwrap_err();
+    let err = state.register(Group::new_node(h_x_commitment, h_y)).unwrap_err();
     assert!(matches!(err.root(), PrecompileError::MissingNode));
 
-    state.register(x_expr).unwrap();
-    let h_group = state.register(Group::new_node(h_x_expr, h_y)).unwrap();
+    state.register(x_commitment).unwrap();
+    let h_group = state.register(Group::new_node(h_x_commitment, h_y)).unwrap();
     let canonical = state.evaluate(h_group).unwrap();
-    assert_eq!(canonical, Group::new_node(h_x_expr, h_y));
+    assert_eq!(canonical, Group::new_node(h_x_commitment, h_y));
 }
 
 #[test]
 fn eq_predicate_commutes_over_minted_children() {
     // Locks in that `DeferredContext::register` writes minted children to `state.nodes`. After
     // `Group::Add` evaluates and mints x3=13 / y3=24, a separately-registered
-    // `val = Group::new(leaf(13).digest(), leaf(24).digest())` references those digests directly
-    // without the leaves being explicitly registered. The eq predicate must succeed regardless
+    // `val = Group::new(value(13).digest(), value(24).digest())` references those digests directly
+    // without the values being explicitly registered. The eq predicate must succeed regardless
     // of operand order — i.e. resolution must not depend on which side evaluates first.
     let (registry, mut state) = fresh();
     let h_g1 = register_group(&registry, &mut state, 3, 4);
     let h_g2 = register_group(&registry, &mut state, 10, 20);
     let h_g_add = state.register(Group::add_node(h_g1, h_g2)).unwrap();
 
-    // Pre-evaluate g_add so its mints (leaf(13), leaf(24)) land in state.nodes.
+    // Pre-evaluate g_add so its mints (value(13), value(24)) land in state.nodes.
     state.evaluate(h_g_add).unwrap();
-    let h_val = state.register(Group::new_node(leaf(13).digest(), leaf(24).digest())).unwrap();
-    assert_eq!(state.evaluate(leaf(13).digest()).unwrap(), leaf(13));
-    assert_eq!(state.evaluate(leaf(24).digest()).unwrap(), leaf(24));
+    let h_val = state.register(Group::new_node(value(13).digest(), value(24).digest())).unwrap();
+    assert_eq!(state.evaluate(value(13).digest()).unwrap(), value(13));
+    assert_eq!(state.evaluate(value(24).digest()).unwrap(), value(24));
 
     let mut state_normal = state.clone();
     let normal =
@@ -228,12 +242,12 @@ fn eq_predicate_commutes_over_minted_children() {
 }
 
 #[test]
-fn evaluate_rejects_new_with_non_field_leaf_children() {
-    // Children resolve to canonical leaves but their tag is *not* the field leaf tag —
-    // new must reject.
+fn evaluate_rejects_new_with_non_value_children() {
+    // Children resolve to canonical values but their tag is *not* the uint value tag, so new must
+    // reject.
     let (registry, mut state) = fresh();
     let h_g = register_group(&registry, &mut state, 1, 1);
-    let h_y = state.register(leaf(2)).unwrap();
+    let h_y = state.register(value(2)).unwrap();
     let bad_new = state.register(Group::new_node(h_g, h_y)).unwrap();
     let err = state.evaluate(bad_new);
     assert!(matches!(

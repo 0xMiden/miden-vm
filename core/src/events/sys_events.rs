@@ -330,11 +330,11 @@ pub enum SystemEvent {
     ///   Advice stack:  canonical `tag || payload` in felt-index order
     DeferredEvaluate,
 
-    /// Registers a chunk-bodied deferred node in the DAG.
+    /// Registers a memory-resident bulk-data deferred node in the DAG.
     ///
-    /// The host-installed deferred precompile registry decodes the tag's chunk count, making
+    /// The host-installed deferred precompile registry decodes the tag's data chunk count, making
     /// length part of the commitment. The handler checks the projected deferred-state budget before
-    /// allocating or reading chunk memory. The MASM wrapper hashes the same memory range
+    /// allocating or reading data memory. The MASM wrapper hashes the same memory range
     /// in-circuit, so the registered digest is bound to memory contents rather than advice.
     ///
     /// Inputs:
@@ -343,8 +343,8 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: unchanged
     ///   Advice stack:  unchanged
-    ///   DAG state:     {... chunk(TAG, [data[ptr..ptr+8n]])}
-    DeferredRegisterChunk,
+    ///   DAG state:     {... data(TAG, [data[ptr..ptr+8n]])}
+    DeferredRegisterData,
 }
 
 impl SystemEvent {
@@ -419,7 +419,7 @@ impl SystemEvent {
             Self::HpermToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
-            Self::DeferredRegisterChunk,
+            Self::DeferredRegisterData,
         ]
     }
 }
@@ -574,9 +574,9 @@ impl SystemEvent {
             name: "sys::adv::evaluate_deferred",
         },
         SystemEventEntry {
-            id: EventId::from_u64(17356669416957691043),
-            event: SystemEvent::DeferredRegisterChunk,
-            name: "sys::adv::register_deferred_chunk",
+            id: EventId::from_u64(13021247594355482329),
+            event: SystemEvent::DeferredRegisterData,
+            name: "sys::adv::register_deferred_data",
         },
     ];
 }
@@ -688,7 +688,7 @@ mod test {
                 | SystemEvent::HpermToMap
                 | SystemEvent::DeferredRegister
                 | SystemEvent::DeferredEvaluate
-                | SystemEvent::DeferredRegisterChunk => {},
+                | SystemEvent::DeferredRegisterData => {},
             }
         }
     }

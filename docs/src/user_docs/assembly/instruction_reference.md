@@ -207,8 +207,8 @@ _Deferred DAG (host-side registration; no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an expression node in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
-| `adv.register_deferred_chunk` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a chunk node (length from `TAG`, data from memory at `ptr`) in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers a one-block deferred node — a `Data(1)` value or a join, decoded from `TAG` — in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
+| `adv.register_deferred_data` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a bulk-data node `Data(n)` (chunk count from `TAG`, data from memory at `ptr`) in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
 
 _Insert into Advice Map:_
 

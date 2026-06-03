@@ -1,4 +1,4 @@
-//! Integration coverage for fixed-size chunk predicates in the mock signature precompile.
+//! Integration coverage for fixed-size data predicates in the mock signature precompile.
 
 mod common;
 
@@ -52,7 +52,7 @@ fn verify_fails_for_zeroed_placeholder_sig() {
 #[test]
 fn decode_classifies_verify_tag_only() {
     let node_type = Sig.decode([Felt::from_u32(Sig::VERIFY_TAG_ID), ZERO, ZERO]).unwrap();
-    assert!(matches!(node_type, NodeType::Chunks(n) if n.get() == 3));
+    assert!(matches!(node_type, NodeType::Data(n) if n.get() == 3));
     assert!(Sig.decode([Felt::from_u32(1), ZERO, ZERO]).is_none());
 }
 
@@ -60,6 +60,6 @@ fn decode_classifies_verify_tag_only() {
 fn verify_rejects_wrong_chunk_count() {
     let registry = Arc::new(PrecompileRegistry::default().with_precompile(Sig));
     let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
-    let node = Node::chunk(Sig::verify_tag(), vec![[Felt::from_u32(1); 8]; 2]);
+    let node = Node::try_data(Sig::verify_tag(), vec![[Felt::from_u32(1); 8]; 2]).unwrap();
     assert!(matches!(state.register(node), Err(PrecompileError::InvalidNode)));
 }

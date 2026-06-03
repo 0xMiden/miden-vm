@@ -1,7 +1,7 @@
 //! Mock group precompile for exercising compound canonical nodes.
 //!
-//! Group elements preserve committed coordinate expressions, while `add` and `sub` mint new
-//! `Uint` leaves during evaluation. This stresses the context path where a canonical result
+//! Group elements preserve committed coordinate value commitments, while `add` and `sub` mint new
+//! `Uint` values during evaluation. This stresses the context path where a canonical result
 //! references helper nodes created by the precompile itself.
 
 use super::uint::Uint;
@@ -35,45 +35,37 @@ impl Group {
     }
 
     pub fn new_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::NEW_TAG_ID), ZERO, ZERO])
     }
     pub fn add_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::ADD_TAG_ID), ZERO, ZERO])
     }
     pub fn sub_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::SUB_TAG_ID), ZERO, ZERO])
     }
     pub fn eq_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO])
     }
 
-    /// Builds a group element from committed coordinate-expression digests.
+    fn tag(args: [Felt; 3]) -> Tag {
+        Tag::new(Self::id(), args).expect("mock group precompile id is not framework-reserved")
+    }
+
+    /// Builds a group element from committed coordinate value digests.
     pub fn new_node(h_x: Digest, h_y: Digest) -> Node {
-        Node::join(Self::new_tag(), h_x, h_y)
+        Node::join(Self::new_tag(), h_x, h_y).expect("new tag is precompile-owned")
     }
     /// Builds a group-add node over two group-element digests.
     pub fn add_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::join(Self::add_tag(), h_g1, h_g2)
+        Node::join(Self::add_tag(), h_g1, h_g2).expect("add tag is precompile-owned")
     }
     /// Builds a group-sub node over two group-element digests.
     pub fn sub_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::join(Self::sub_tag(), h_g1, h_g2)
+        Node::join(Self::sub_tag(), h_g1, h_g2).expect("sub tag is precompile-owned")
     }
     /// Builds a predicate comparing two group elements by value.
     pub fn eq_node(h_g1: Digest, h_g2: Digest) -> Node {
-        Node::join(Self::eq_tag(), h_g1, h_g2)
+        Node::join(Self::eq_tag(), h_g1, h_g2).expect("eq tag is precompile-owned")
     }
 }
 
@@ -88,8 +80,8 @@ impl Precompile for Group {
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         // All Group nodes pack two child digests in their payload — `new` references committed
-        // coordinate-expression digests, `add`/`sub` reference the group operands, and `eq`
-        // references the two compared group elements. So every tag is `NodeType::Join`.
+        // coordinate value digests, `add`/`sub` reference the group operands, and `eq` references
+        // the two compared group elements. So every tag is `NodeType::Join`.
         Discriminant::classify(args[0])?;
         Some(NodeType::Join)
     }
@@ -101,16 +93,16 @@ impl Precompile for Group {
         context: &mut DeferredContext<'_>,
     ) -> Result<Node, PrecompileError> {
         let kind = Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
-        let (h_lhs, h_rhs) = payload.join_children()?;
+        let (h_lhs, h_rhs) = payload.as_join()?;
 
         match kind {
             Discriminant::New => {
-                // Validate that both committed coordinate expressions resolve to field leaves,
-                // but preserve their original commitments in the canonical group element.
-                let x_leaf = context.resolve(h_lhs)?;
-                let y_leaf = context.resolve(h_rhs)?;
-                Uint::limbs_of(&x_leaf).map_err(PrecompileError::from)?;
-                Uint::limbs_of(&y_leaf).map_err(PrecompileError::from)?;
+                // Validate that both committed coordinates resolve to uint values, but preserve
+                // their original commitments in the canonical group element.
+                let x_value = context.resolve(h_lhs)?;
+                let y_value = context.resolve(h_rhs)?;
+                Uint::value_of(&x_value).map_err(PrecompileError::from)?;
+                Uint::value_of(&y_value).map_err(PrecompileError::from)?;
                 Ok(Self::new_node(h_lhs, h_rhs))
             },
             Discriminant::Add | Discriminant::Sub => {
@@ -123,17 +115,17 @@ impl Precompile for Group {
                 let g2 = context.resolve(h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
-                let x1 = Uint::limbs_of(&context.resolve(h_x1)?).map_err(PrecompileError::from)?;
-                let y1 = Uint::limbs_of(&context.resolve(h_y1)?).map_err(PrecompileError::from)?;
-                let x2 = Uint::limbs_of(&context.resolve(h_x2)?).map_err(PrecompileError::from)?;
-                let y2 = Uint::limbs_of(&context.resolve(h_y2)?).map_err(PrecompileError::from)?;
+                let x1 = Uint::value_of(&context.resolve(h_x1)?).map_err(PrecompileError::from)?;
+                let y1 = Uint::value_of(&context.resolve(h_y1)?).map_err(PrecompileError::from)?;
+                let x2 = Uint::value_of(&context.resolve(h_x2)?).map_err(PrecompileError::from)?;
+                let y2 = Uint::value_of(&context.resolve(h_y2)?).map_err(PrecompileError::from)?;
                 let (x3, y3) = match op {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
                 };
-                // Mint new field leaves for the result coordinates.
-                let h_x3 = context.register(Uint::leaf_node(x3))?;
-                let h_y3 = context.register(Uint::leaf_node(y3))?;
+                // Mint new field/uint values for the result coordinates.
+                let h_x3 = context.register(Uint::value_node(x3))?;
+                let h_y3 = context.register(Uint::value_node(y3))?;
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
@@ -156,12 +148,12 @@ impl Precompile for Group {
 // HELPERS
 // ================================================================================================
 
-/// Extracts coordinate-expression digests from a canonical group element.
+/// Extracts coordinate value digests from a canonical group element.
 fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
-    if node.tag != Group::new_tag() {
+    if node.tag() != Group::new_tag() {
         return Err(PrecompileError::InvalidNode);
     }
-    Ok(node.payload.join_children()?)
+    Ok(node.payload().as_join()?)
 }
 
 // TYPED DISCRIMINANT

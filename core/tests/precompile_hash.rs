@@ -1,4 +1,4 @@
-//! Integration coverage for chunk evaluation and digest equality in the mock hash precompile.
+//! Integration coverage for data evaluation and digest equality in the mock hash precompile.
 
 mod common;
 
@@ -37,7 +37,7 @@ fn preimage_evaluates_to_known_digest_and_eq_predicate_passes() {
     let h_expected = state.register(expected_digest.clone()).unwrap();
     let h_preimage = state.register(Hash::preimage_node(64, preimage_chunks)).unwrap();
 
-    // Evaluating the preimage produces the digest leaf.
+    // Evaluating the preimage produces the digest value.
     let canonical = state.evaluate(h_preimage).unwrap();
     assert_eq!(canonical, expected_digest);
 
@@ -46,7 +46,7 @@ fn preimage_evaluates_to_known_digest_and_eq_predicate_passes() {
         register_and_evaluate(&registry, &mut state, Hash::eq_node(h_preimage, h_expected));
     assert!(result.is_true_node());
 
-    // Log the proven equality and round-trip the transcript (chunk-bodied preimage included).
+    // Log the proven equality and round-trip the transcript (multi-chunk data preimage included).
     common::log_and_verify(&registry, &mut state, Hash::eq_node(h_preimage, h_expected));
 }
 
@@ -65,26 +65,26 @@ fn preimage_with_partial_last_chunk_is_handled_by_caller_padding() {
 }
 
 #[test]
-fn n_chunks_rounds_up() {
-    // `n_chunks` is the raw `div_ceil` helper; a 0 result is what `decode` rejects downstream.
-    assert_eq!(Hash::n_chunks(0), 0);
-    assert_eq!(Hash::n_chunks(1), 1);
-    assert_eq!(Hash::n_chunks(31), 1);
-    assert_eq!(Hash::n_chunks(32), 1);
-    assert_eq!(Hash::n_chunks(33), 2);
-    assert_eq!(Hash::n_chunks(64), 2);
-    assert_eq!(Hash::n_chunks(65), 3);
+fn n_data_chunks_rounds_up() {
+    // `n_data_chunks` is the raw `div_ceil` helper; a 0 result is what `decode` rejects downstream.
+    assert_eq!(Hash::n_data_chunks(0), 0);
+    assert_eq!(Hash::n_data_chunks(1), 1);
+    assert_eq!(Hash::n_data_chunks(31), 1);
+    assert_eq!(Hash::n_data_chunks(32), 1);
+    assert_eq!(Hash::n_data_chunks(33), 2);
+    assert_eq!(Hash::n_data_chunks(64), 2);
+    assert_eq!(Hash::n_data_chunks(65), 3);
 }
 
 #[test]
 fn decode_classifies_each_discriminant() {
     assert!(matches!(
         Hash.decode([Felt::from_u32(Hash::PREIMAGE_TAG_ID), Felt::from_u32(65), ZERO]),
-        Some(NodeType::Chunks(n)) if n.get() == 3
+        Some(NodeType::Data(n)) if n.get() == 3
     ));
     assert!(matches!(
         Hash.decode([Felt::from_u32(Hash::DIGEST_TAG_ID), ZERO, ZERO]),
-        Some(NodeType::Value)
+        Some(NodeType::Data(n)) if n.get() == 1
     ));
     assert!(matches!(
         Hash.decode([Felt::from_u32(Hash::EQ_TAG_ID), ZERO, ZERO]),

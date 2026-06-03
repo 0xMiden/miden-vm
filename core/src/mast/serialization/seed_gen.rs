@@ -281,10 +281,13 @@ fn generate_fuzz_seeds() {
         ]);
         let wire = DeferredStateWire {
             entries: vec![
-                WireEntry::Value { tag, block: [Felt::new_unchecked(1); 8] },
-                WireEntry::Chunks {
+                WireEntry::Data {
                     tag,
-                    blocks: vec![[Felt::new_unchecked(2); 8]],
+                    chunks: vec![[Felt::new_unchecked(1); 8]],
+                },
+                WireEntry::Data {
+                    tag,
+                    chunks: vec![[Felt::new_unchecked(2); 8], [Felt::new_unchecked(3); 8]],
                 },
                 WireEntry::Join { tag, lhs: TRUE_INDEX, rhs: 1 },
             ],

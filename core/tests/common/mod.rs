@@ -11,12 +11,12 @@ use miden_core::{
     testing::precompile::Uint,
 };
 
-/// Builds a uint leaf carrying `low` in its least-significant limbs.
-pub fn leaf(low: u64) -> Node {
+/// Builds a uint value carrying `low` in its least-significant limbs.
+pub fn value(low: u64) -> Node {
     let mut limbs = [0u32; 8];
     limbs[0] = low as u32;
     limbs[1] = (low >> 32) as u32;
-    Uint::leaf_node(limbs)
+    Uint::value_node(limbs)
 }
 
 /// Registers, verifies, logs, and round-trips a predicate expected to evaluate to TRUE.

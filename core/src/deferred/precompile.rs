@@ -37,22 +37,22 @@ pub trait Precompile: Send + Sync {
     /// Declares the body shape for recognized local tag arguments.
     ///
     /// Returning `None` rejects the tag. The registry has already matched the precompile id, so
-    /// this only interprets `tag.args`.
+    /// this only interprets the tag's local arguments.
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType>;
 
     /// Evaluates one owned node to its canonical form.
     ///
-    /// The registry has already matched `tag.id`; implementors receive only local `args` and a
+    /// The registry has already matched the tag id; implementors receive only local `args` and a
     /// payload whose outer shape passed [`Self::decode`]. Use [`DeferredContext`] to evaluate
     /// registered child digests (digests present in the state's node store) or to register helper
     /// nodes referenced by a compound canonical.
     ///
     /// Common conventions:
-    /// - canonical leaves return themselves after validating payload contents;
+    /// - canonical values return themselves after validating payload contents;
     /// - producing ops evaluate children and return the resulting canonical node;
     /// - predicates return [`Node::TRUE`] on success and [`PrecompileError::AssertionFailed`] on
     ///   mismatch;
-    /// - chunk leaves usually evaluate to an expression digest leaf.
+    /// - multi-chunk data nodes usually evaluate to a single-chunk value.
     fn evaluate(
         &self,
         args: [Felt; 3],

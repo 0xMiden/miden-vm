@@ -21,7 +21,7 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Chunk, DeferredError, DeferredState, Digest, Node, NodeType, Payload, PrecompileError,
+    DataChunk, DeferredError, DeferredState, Digest, Node, NodeType, PrecompileError,
     PrecompileRegistry, TRUE_DIGEST, Tag,
 };
 use crate::{
@@ -48,11 +48,9 @@ pub const TRUE_INDEX: u32 = 0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WireEntry {
-    /// One expression block interpreted as precompile value data.
-    Value { tag: Tag, block: Chunk },
-    /// Fixed-count chunk payload interpreted by the tag's precompile.
-    Chunks { tag: Tag, blocks: Vec<Chunk> },
-    /// One expression block interpreted as two child references.
+    /// Non-empty data payload interpreted by the tag's precompile; a one-chunk entry is a value.
+    Data { tag: Tag, chunks: Vec<DataChunk> },
+    /// Two child references resolved against `TRUE_INDEX` or earlier wire indices.
     Join { tag: Tag, lhs: u32, rhs: u32 },
 }
 
@@ -98,7 +96,7 @@ fn decode_wire_tag_type(
     tag: Tag,
 ) -> Result<NodeType, IntegrityError> {
     if tag == Tag::TRUE {
-        Ok(NodeType::Value)
+        Ok(NodeType::True)
     } else if tag == Tag::AND {
         Ok(NodeType::Join)
     } else {
@@ -110,8 +108,8 @@ fn decode_wire_node_type(
     precompiles: &PrecompileRegistry,
     node: &Node,
 ) -> Result<NodeType, IntegrityError> {
-    let node_type = decode_wire_tag_type(precompiles, node.tag)?;
-    if node.tag == Tag::TRUE && !node.is_true_node() {
+    let node_type = decode_wire_tag_type(precompiles, node.tag())?;
+    if node.tag() == Tag::TRUE && !node.is_true_node() {
         return Err(IntegrityError::InvalidStructure);
     }
     Ok(node_type)
@@ -155,45 +153,31 @@ fn decode_wire_entry(
     precompiles: &PrecompileRegistry,
 ) -> Result<Node, IntegrityError> {
     match entry {
-        WireEntry::Value { tag, block } => {
-            let node = Node::leaf(*tag, *block);
-            let node_type = decode_wire_node_type(precompiles, &node)?;
-            expect_wire_type(&node, node_type, NodeType::Value)?;
-            Ok(node)
-        },
-        WireEntry::Chunks { tag, blocks } => {
-            let node_type = decode_wire_tag_type(precompiles, *tag)?;
-            let NodeType::Chunks(n) = node_type else {
+        WireEntry::Data { tag, chunks } => {
+            // The tag — never the wire — fixes the chunk count, and `Tag::TRUE`/`Tag::AND` decode
+            // to non-data shapes, so explicit TRUE/join tags are rejected here.
+            let NodeType::Data(n) = decode_wire_tag_type(precompiles, *tag)? else {
                 return Err(IntegrityError::InvalidStructure);
             };
-            if blocks.len() != n.get() as usize {
+            if chunks.len() != n.get() as usize {
                 return Err(IntegrityError::InvalidStructure);
             }
-            Ok(Node::chunk(*tag, blocks.clone()))
+            Node::try_data(*tag, chunks.clone()).map_err(|_| IntegrityError::InvalidStructure)
         },
         WireEntry::Join { tag, lhs, rhs } => {
             let lhs = resolve_wire_index(index_to_digest, *lhs)?;
             let rhs = resolve_wire_index(index_to_digest, *rhs)?;
-            let node = Node::join(*tag, lhs, rhs);
-            let node_type = decode_wire_node_type(precompiles, &node)?;
-            expect_wire_type(&node, node_type, NodeType::Join)?;
-            Ok(node)
+            let node = if *tag == Tag::AND {
+                Node::and(lhs, rhs)
+            } else {
+                Node::join(*tag, lhs, rhs).map_err(|_| IntegrityError::InvalidStructure)?
+            };
+            match decode_wire_node_type(precompiles, &node)? {
+                NodeType::Join => Ok(node),
+                _ => Err(IntegrityError::InvalidStructure),
+            }
         },
     }
-}
-
-fn expect_wire_type(
-    node: &Node,
-    actual: NodeType,
-    expected: NodeType,
-) -> Result<(), IntegrityError> {
-    if node.is_true_node() {
-        return Err(IntegrityError::InvalidStructure);
-    }
-    if actual != expected {
-        return Err(IntegrityError::InvalidStructure);
-    }
-    Ok(())
 }
 
 fn resolve_wire_index(index_to_digest: &[Digest], idx: u32) -> Result<Digest, IntegrityError> {
@@ -291,29 +275,28 @@ impl WireEncoder {
         let node = state.node(&digest).ok_or(IntegrityError::InvalidStructure)?;
         let node_type = decode_wire_node_type(state.registry(), node)?;
         node_type
-            .validate_payload(&node.payload)
+            .validate_payload(node.payload())
             .map_err(|_| IntegrityError::InvalidStructure)?;
 
-        let entry = match (node_type, &node.payload) {
-            (NodeType::Value, Payload::Expression(felts)) => {
-                WireEntry::Value { tag: node.tag, block: *felts }
-            },
-            (NodeType::Chunks(_), Payload::Chunk(chunks)) => WireEntry::Chunks {
-                tag: node.tag,
-                blocks: chunks.iter().copied().collect(),
-            },
-            (NodeType::Join, Payload::Expression(_)) => {
-                let (lhs, rhs) = node_type
-                    .children(&node.payload)
+        let entry = match node_type {
+            NodeType::Data(_) => WireEntry::Data {
+                tag: node.tag(),
+                chunks: node
+                    .payload()
+                    .as_data()
                     .map_err(|_| IntegrityError::InvalidStructure)?
-                    .ok_or(IntegrityError::InvalidStructure)?;
+                    .to_vec(),
+            },
+            NodeType::Join => {
+                let (lhs, rhs) =
+                    node.payload().as_join().map_err(|_| IntegrityError::InvalidStructure)?;
                 self.visit_state_digest(state, lhs)?;
                 self.visit_state_digest(state, rhs)?;
                 let lhs = self.index_for(lhs)?;
                 let rhs = self.index_for(rhs)?;
-                WireEntry::Join { tag: node.tag, lhs, rhs }
+                WireEntry::Join { tag: node.tag(), lhs, rhs }
             },
-            _ => return Err(IntegrityError::InvalidStructure),
+            NodeType::True => return Err(IntegrityError::InvalidStructure),
         };
 
         self.push_entry(digest, entry)
@@ -348,13 +331,13 @@ fn read_tag<R: ByteReader>(source: &mut R) -> Result<Tag, DeserializationError> 
     Tag::read_from(source)
 }
 
-fn write_block<W: ByteWriter>(block: &Chunk, target: &mut W) {
+fn write_block<W: ByteWriter>(block: &DataChunk, target: &mut W) {
     for felt in block {
         felt.write_into(target);
     }
 }
 
-fn read_block<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationError> {
+fn read_block<R: ByteReader>(source: &mut R) -> Result<DataChunk, DeserializationError> {
     let mut block = [ZERO; 8];
     for felt in &mut block {
         *felt = Felt::read_from(source)?;
@@ -365,21 +348,16 @@ fn read_block<R: ByteReader>(source: &mut R) -> Result<Chunk, DeserializationErr
 impl Serializable for WireEntry {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::Value { tag, block } => {
+            Self::Data { tag, chunks } => {
                 target.write_u8(0);
                 write_tag(*tag, target);
-                write_block(block, target);
-            },
-            Self::Chunks { tag, blocks } => {
-                target.write_u8(1);
-                write_tag(*tag, target);
-                target.write_usize(blocks.len());
-                for block in blocks {
-                    write_block(block, target);
+                target.write_usize(chunks.len());
+                for chunk in chunks {
+                    write_block(chunk, target);
                 }
             },
             Self::Join { tag, lhs, rhs } => {
-                target.write_u8(2);
+                target.write_u8(1);
                 write_tag(*tag, target);
                 target.write_u32(*lhs);
                 target.write_u32(*rhs);
@@ -394,19 +372,14 @@ impl Deserializable for WireEntry {
         match discriminant {
             0 => {
                 let tag = read_tag(source)?;
-                let block = read_block(source)?;
-                Ok(Self::Value { tag, block })
+                let chunk_count = source.read_usize()?;
+                let chunks = source
+                    .read_many_iter::<WireBlock>(chunk_count)?
+                    .map(|chunk| chunk.map(|chunk| chunk.0))
+                    .collect::<Result<_, _>>()?;
+                Ok(Self::Data { tag, chunks })
             },
             1 => {
-                let tag = read_tag(source)?;
-                let block_count = source.read_usize()?;
-                let blocks = source
-                    .read_many_iter::<WireBlock>(block_count)?
-                    .map(|block| block.map(|block| block.0))
-                    .collect::<Result<_, _>>()?;
-                Ok(Self::Chunks { tag, blocks })
-            },
-            2 => {
                 let tag = read_tag(source)?;
                 let lhs = source.read_u32()?;
                 let rhs = source.read_u32()?;
@@ -423,7 +396,7 @@ impl Deserializable for WireEntry {
     }
 }
 
-struct WireBlock(Chunk);
+struct WireBlock(DataChunk);
 
 impl Deserializable for WireBlock {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
@@ -510,10 +483,13 @@ mod tests {
     #[test]
     fn wire_serialize_round_trip_all_entries() {
         assert_wire_round_trips(wire(alloc::vec![
-            WireEntry::Value { tag: tag(1), block: felts(10) },
-            WireEntry::Chunks {
+            WireEntry::Data {
+                tag: tag(1),
+                chunks: alloc::vec![felts(10)]
+            },
+            WireEntry::Data {
                 tag: tag(2),
-                blocks: alloc::vec![felts(20), felts(30)],
+                chunks: alloc::vec![felts(20), felts(30)],
             },
             WireEntry::Join { tag: tag(3), lhs: 1, rhs: TRUE_INDEX },
         ]));
@@ -532,10 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_over_budget_chunk_block_count() {
+    fn wire_rejects_over_budget_data_chunk_count() {
         let mut bytes = Vec::new();
         bytes.write_usize(1);
-        bytes.write_u8(1);
+        bytes.write_u8(0); // Data entry discriminant
         write_tag(tag(1), &mut bytes);
         bytes.write_usize(usize::MAX);
 

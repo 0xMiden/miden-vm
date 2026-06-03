@@ -14,25 +14,31 @@ use super::{DeferredError, Digest, Payload};
 
 /// Shape a precompile declares for a recognized tag.
 ///
-/// The shape tells registration and wire validation whether a body is raw value data, two child
-/// digests, or non-empty chunk data. Predicate status is not a shape; predicates succeed by
-/// evaluating to [`super::Node::TRUE`].
+/// The shape tells registration and wire validation whether a body is non-empty opaque data or two
+/// child digests. `True` is the framework sentinel owned exclusively by [`super::Tag::TRUE`];
+/// precompiles never declare it. Predicate status is not a shape; predicates succeed by evaluating
+/// to [`super::Node::TRUE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeType {
-    /// One expression block of raw value data.
-    Value,
-    /// One expression block interpreted as two child digests.
+    /// The framework TRUE sentinel, with no data payload.
+    True,
+    /// Non-empty opaque data whose [`super::DataChunk`] count is fixed by the tag.
+    Data(NonZeroU32),
+    /// Two child digests.
     Join,
-    /// Non-empty bulk data whose chunk count is fixed by the tag.
-    Chunks(NonZeroU32),
 }
 
 impl NodeType {
     /// Validates that a payload variant matches this declared shape.
     pub(crate) fn validate_payload(self, payload: &Payload) -> Result<(), DeferredError> {
-        match (self, payload) {
-            (Self::Value | Self::Join, Payload::Expression(_)) => Ok(()),
-            (Self::Chunks(n), Payload::Chunk(chunks)) if chunks.len() == n.get() as usize => Ok(()),
+        match self {
+            Self::True if payload.is_true() => Ok(()),
+            Self::Data(n)
+                if payload.as_data().is_ok_and(|chunks| chunks.len() == n.get() as usize) =>
+            {
+                Ok(())
+            },
+            Self::Join if payload.as_join().is_ok() => Ok(()),
             _ => Err(DeferredError::InvalidPayload),
         }
     }
@@ -43,8 +49,8 @@ impl NodeType {
         payload: &Payload,
     ) -> Result<Option<(Digest, Digest)>, DeferredError> {
         match self {
-            Self::Join => payload.join_children().map(Some),
-            Self::Value | Self::Chunks(_) => Ok(None),
+            Self::Join => payload.as_join().map(Some),
+            Self::True | Self::Data(_) => Ok(None),
         }
     }
 }

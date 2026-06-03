@@ -1,7 +1,7 @@
-//! Mock signature precompile for exercising fixed-size chunk predicates.
+//! Mock signature precompile for exercising fixed-size data predicates.
 //!
-//! `verify` treats its chunks as an opaque signature blob and succeeds only when the first felt is
-//! non-zero. The stub keeps tests focused on chunk predicate plumbing, not signature math.
+//! `verify` treats its data as an opaque signature blob and succeeds only when the first felt is
+//! non-zero. The stub keeps tests focused on data predicate plumbing, not signature math.
 
 use alloc::sync::Arc;
 use core::num::NonZeroU32;
@@ -9,7 +9,8 @@ use core::num::NonZeroU32;
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredContext, Node, NodeType, Payload, Precompile, PrecompileError, Tag, precompile_id,
+        DataChunk, DeferredContext, Node, NodeType, Payload, Precompile, PrecompileError, Tag,
+        precompile_id,
     },
 };
 
@@ -25,7 +26,7 @@ impl Sig {
 
     pub const VERIFY_TAG_ID: u32 = 0;
 
-    /// Fixed chunk count for the opaque signature blob.
+    /// Fixed data chunk count for the opaque signature blob.
     pub const SIG_CHUNKS: u32 = 3;
 
     pub fn id() -> Felt {
@@ -33,15 +34,14 @@ impl Sig {
     }
 
     pub fn verify_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO],
-        }
+        Tag::new(Self::id(), [Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO])
+            .expect("mock signature precompile id is not framework-reserved")
     }
 
-    /// Builds a signature-verification predicate from fixed-size chunks.
-    pub fn verify_node(chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
-        Node::chunk(Self::verify_tag(), chunks)
+    /// Builds a signature-verification predicate from fixed-size data chunks.
+    pub fn verify_node(chunks: impl Into<Arc<[DataChunk]>>) -> Node {
+        Node::try_data(Self::verify_tag(), chunks)
+            .expect("signature blob carries a fixed nonzero data chunk count")
     }
 }
 
@@ -56,7 +56,7 @@ impl Precompile for Sig {
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(args[0])? {
-            Discriminant::Verify => Some(NodeType::Chunks(
+            Discriminant::Verify => Some(NodeType::Data(
                 NonZeroU32::new(Self::SIG_CHUNKS).expect("SIG_CHUNKS is nonzero"),
             )),
         }
@@ -70,7 +70,7 @@ impl Precompile for Sig {
     ) -> Result<Node, PrecompileError> {
         // `decode` already gated this; `Verify` is the only discriminant.
         Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)?;
-        let chunks = payload.as_chunks()?;
+        let chunks = payload.as_data()?;
         if chunks.len() != Self::SIG_CHUNKS as usize {
             return Err(PrecompileError::InvalidNode);
         }

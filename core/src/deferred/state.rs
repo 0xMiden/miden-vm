@@ -120,7 +120,7 @@ impl DeferredState {
 
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
         if tag == Tag::TRUE {
-            Ok(NodeType::Value)
+            Ok(NodeType::True)
         } else if tag == Tag::AND {
             Ok(NodeType::Join)
         } else {
@@ -134,7 +134,7 @@ impl DeferredState {
             Some(existing) if existing == &node => Ok(digest),
             Some(_) => Err(DeferredError::ConflictingNode.into()),
             None => {
-                let required = node.num_elements();
+                let required = node.storage_felt_len();
                 self.remaining_elements = self.remaining_elements.checked_sub(required).ok_or(
                     DeferredError::DeferredStateTooLarge {
                         num_elements: required,
@@ -204,7 +204,7 @@ impl DeferredState {
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
         let node_type = self.registry.validate_node(node)?;
-        if let Some((lhs, rhs)) = node_type.children(&node.payload)? {
+        if let Some((lhs, rhs)) = node_type.children(node.payload())? {
             for child in [lhs, rhs] {
                 if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
                     return Err(PrecompileError::MissingNode);
@@ -226,10 +226,10 @@ impl DeferredState {
         }
 
         self.validate_node_for_insertion(&node)?;
-        let canonical = if node.tag == Tag::TRUE {
+        let canonical = if node.tag() == Tag::TRUE {
             Node::TRUE
-        } else if node.tag == Tag::AND {
-            let (lhs, rhs) = node.payload.join_children()?;
+        } else if node.tag() == Tag::AND {
+            let (lhs, rhs) = node.payload().as_join()?;
             for child in [lhs, rhs] {
                 if !self.evaluate(child)?.is_true_node() {
                     return Err(PrecompileError::AssertionFailed);
@@ -286,14 +286,12 @@ impl DeferredState {
                 .get(&cur)
                 .expect("statements(): AND-chain references a node not in state");
             debug_assert_eq!(
-                and_node.tag,
+                and_node.tag(),
                 Tag::AND,
                 "statements(): AND-chain step is not tagged Tag::AND"
             );
-            let (prev_root, stmt_digest) = and_node
-                .payload
-                .join_children()
-                .expect("statements(): AND-node has non-expression body");
+            let (prev_root, stmt_digest) =
+                and_node.payload().as_join().expect("statements(): AND-node has non-join body");
             out.push(stmt_digest);
             cur = prev_root;
         }
@@ -366,10 +364,10 @@ mod tests {
         DeferredState::new(Arc::clone(registry), max_elements).unwrap()
     }
 
-    fn test_leaf(value: u32) -> Node {
+    fn test_value(value: u32) -> Node {
         let mut limbs = [0u32; 8];
         limbs[0] = value;
-        Uint::leaf_node(limbs)
+        Uint::value_node(limbs)
     }
 
     fn dummy_digest(seed: u64) -> Word {
@@ -377,9 +375,9 @@ mod tests {
     }
 
     fn value_entry(node: &Node) -> WireEntry {
-        WireEntry::Value {
-            tag: node.tag,
-            block: *node.payload.as_felts().expect("test node is expression-bodied"),
+        WireEntry::Data {
+            tag: node.tag(),
+            chunks: node.payload().as_data().expect("test node is data").to_vec(),
         }
     }
 
@@ -416,8 +414,8 @@ mod tests {
     fn append_statement_advances_root_with_and_node() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(7)).unwrap();
-        let pred = Node::join(Uint::eq_tag(), a, a);
+        let a = state.register(test_value(7)).unwrap();
+        let pred = Node::join(Uint::eq_tag(), a, a).unwrap();
         let stmt_digest = state.register(pred).unwrap();
 
         let expected = Node::and(TRUE_DIGEST, stmt_digest).digest();
@@ -426,7 +424,7 @@ mod tests {
         assert_ne!(expected, TRUE_DIGEST);
         assert_eq!(state.root(), expected);
         assert!(state.nodes.contains_key(&expected));
-        assert_eq!(state.nodes.get(&expected).unwrap().tag, Tag::AND);
+        assert_eq!(state.nodes.get(&expected).unwrap().tag(), Tag::AND);
     }
 
     #[test]
@@ -442,21 +440,21 @@ mod tests {
     fn append_statement_rejects_statement_that_is_not_true() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let leaf = state.register(test_leaf(7)).unwrap();
-        let err = state.append_statement(leaf);
+        let value_digest = state.register(test_value(7)).unwrap();
+        let err = state.append_statement(value_digest);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
         assert_eq!(state.root(), TRUE_DIGEST);
     }
 
     #[test]
-    fn register_leaf_stores_once_and_reinsert_is_free() {
+    fn register_value_stores_once_and_reinsert_is_free() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let node = test_leaf(7);
+        let node = test_value(7);
         let before_len = state.nodes.len();
         let before_remaining = state.remaining_elements;
         let digest = state.register(node.clone()).unwrap();
-        let remaining = before_remaining - node.num_elements();
+        let remaining = before_remaining - node.storage_felt_len();
 
         assert_eq!(digest, node.digest());
         assert_eq!(state.nodes.get(&digest), Some(&node));
@@ -472,13 +470,13 @@ mod tests {
     fn registration_enforces_remaining_budget() {
         let registry = hash_precompiles();
         let node = Hash::digest_node([Felt::from_u32(7); 8]);
-        let mut state = state_with(&registry, node.num_elements() - 1);
+        let mut state = state_with(&registry, node.storage_felt_len() - 1);
 
         let err = state.register(node.clone()).unwrap_err();
         assert!(matches!(
             err.root(),
             PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max })
-                if *num_elements == node.num_elements() && *max == node.num_elements() - 1
+                if *num_elements == node.storage_felt_len() && *max == node.storage_felt_len() - 1
         ));
     }
 
@@ -486,7 +484,7 @@ mod tests {
     fn duplicate_registration_at_limit_is_free() {
         let registry = hash_precompiles();
         let node = Hash::digest_node([Felt::from_u32(7); 8]);
-        let mut state = state_with(&registry, node.num_elements());
+        let mut state = state_with(&registry, node.storage_felt_len());
 
         state.register(node.clone()).unwrap();
         let before = state.remaining_elements;
@@ -499,7 +497,7 @@ mod tests {
         let registry = hash_precompiles();
         let first = Hash::digest_node([Felt::from_u32(7); 8]);
         let second = Hash::digest_node([Felt::from_u32(8); 8]);
-        let registered_elements = first.num_elements() + second.num_elements();
+        let registered_elements = first.storage_felt_len() + second.storage_felt_len();
         let mut state = state_with(&registry, registered_elements);
         let first_digest = state.register(first.clone()).unwrap();
         let second_digest = state.register(second.clone()).unwrap();
@@ -525,11 +523,11 @@ mod tests {
     }
 
     #[test]
-    fn chunk_nodes_decrement_remaining_budget_by_payload_length() {
+    fn data_nodes_decrement_remaining_budget_by_payload_length() {
         let registry = hash_precompiles();
         let chunks = alloc::vec![[Felt::from_u32(1); 8], [Felt::from_u32(2); 8]];
         let node = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks);
-        let expected_elements = node.num_elements();
+        let expected_elements = node.storage_felt_len();
         let mut state = state_with(&registry, expected_elements);
 
         let digest = state.register(node.clone()).unwrap();
@@ -546,11 +544,9 @@ mod tests {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         // Uint id + unknown discriminant: registry decode returns Err.
-        let bad_tag = Tag {
-            id: Uint::id(),
-            args: [Felt::from_u32(99), ZERO, ZERO],
-        };
-        let bad = Node::leaf(bad_tag, [Felt::from_u32(0); 8]);
+        let bad_tag = Tag::new(Uint::id(), [Felt::from_u32(99), ZERO, ZERO])
+            .expect("Uint id is precompile-owned");
+        let bad = Node::value(bad_tag, [Felt::from_u32(0); 8]).unwrap();
         let err = state.register(bad);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::InvalidNode));
     }
@@ -559,10 +555,10 @@ mod tests {
     fn register_join_requires_children_present_in_nodes() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(3)).unwrap();
+        let a = state.register(test_value(3)).unwrap();
         let missing = dummy_digest(99);
 
-        let err = state.register(Node::join(Uint::add_tag(), a, missing));
+        let err = state.register(Node::join(Uint::add_tag(), a, missing).unwrap());
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
     }
 
@@ -573,10 +569,10 @@ mod tests {
         // that want constrained verification call checked append.
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(3)).unwrap();
-        let b = state.register(test_leaf(4)).unwrap();
+        let a = state.register(test_value(3)).unwrap();
+        let b = state.register(test_value(4)).unwrap();
         // A mismatched predicate — would fail if eagerly verified.
-        let bad = Node::join(Uint::eq_tag(), a, b);
+        let bad = Node::join(Uint::eq_tag(), a, b).unwrap();
         let bad_digest = state.register(bad).unwrap();
         assert!(
             state.nodes.contains_key(&bad_digest),
@@ -591,19 +587,19 @@ mod tests {
     fn evaluate_predicate_reports_success_and_child_failures() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(7)).unwrap();
-        let b = state.register(test_leaf(8)).unwrap();
+        let a = state.register(test_value(7)).unwrap();
+        let b = state.register(test_value(8)).unwrap();
 
-        let ok_digest = state.register(Node::join(Uint::eq_tag(), a, a)).unwrap();
+        let ok_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
         let ok = state.evaluate(ok_digest).unwrap();
         assert!(ok.is_true_node(), "predicate success returns the canonical TRUE node");
 
-        let mismatch_digest = state.register(Node::join(Uint::eq_tag(), a, b)).unwrap();
+        let mismatch_digest = state.register(Node::join(Uint::eq_tag(), a, b).unwrap()).unwrap();
         let mismatch = state.evaluate(mismatch_digest);
         assert!(matches!(mismatch.unwrap_err().root(), PrecompileError::AssertionFailed));
 
         let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-        let missing = state.register(Node::join(Uint::eq_tag(), a, dangling));
+        let missing = state.register(Node::join(Uint::eq_tag(), a, dangling).unwrap());
         assert!(matches!(missing.unwrap_err().root(), PrecompileError::MissingNode));
     }
 
@@ -613,25 +609,25 @@ mod tests {
         // registered before digest-addressed evaluation, and its canonical is stored in `nodes`.
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(3)).unwrap();
-        let b = state.register(test_leaf(4)).unwrap();
-        let c = state.register(test_leaf(5)).unwrap();
-        let add = Node::join(Uint::add_tag(), a, b);
+        let a = state.register(test_value(3)).unwrap();
+        let b = state.register(test_value(4)).unwrap();
+        let c = state.register(test_value(5)).unwrap();
+        let add = Node::join(Uint::add_tag(), a, b).unwrap();
         let add_digest = state.register(add).unwrap();
-        let mul = Node::join(Uint::mul_tag(), add_digest, c);
+        let mul = Node::join(Uint::mul_tag(), add_digest, c).unwrap();
         let mul_digest = state.register(mul).unwrap();
 
         let canonical = state.evaluate(mul_digest).unwrap();
-        assert_eq!(canonical, test_leaf(35));
+        assert_eq!(canonical, test_value(35));
         assert!(
             state.nodes.contains_key(&mul_digest),
             "input op is registered before evaluation"
         );
         assert!(
-            state.nodes.contains_key(&test_leaf(35).digest()),
+            state.nodes.contains_key(&test_value(35).digest()),
             "computed canonical is present in nodes"
         );
-        assert_eq!(state.evaluate(mul_digest).unwrap(), test_leaf(35));
+        assert_eq!(state.evaluate(mul_digest).unwrap(), test_value(35));
     }
 
     #[test]
@@ -642,7 +638,7 @@ mod tests {
             .extend_precompiles(PrecompileRegistry::default().with_precompile(Uint))
             .unwrap();
 
-        let uint_node = test_leaf(7);
+        let uint_node = test_value(7);
         let uint_digest = state.register(uint_node.clone()).unwrap();
         assert_eq!(state.evaluate(uint_digest).unwrap(), uint_node);
 
@@ -678,7 +674,7 @@ mod tests {
 
     #[test]
     fn extend_precompiles_replays_existing_init_nodes_for_free() {
-        let init_cost: usize = Uint.init().iter().map(Node::num_elements).sum();
+        let init_cost: usize = Uint.init().iter().map(Node::storage_felt_len).sum();
         let registry = empty_precompiles();
         let mut state = state_with(&registry, init_cost);
 
@@ -721,13 +717,13 @@ mod tests {
     fn built_state_with_logged_predicate() -> DeferredState {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(3)).unwrap();
-        let b = state.register(test_leaf(4)).unwrap();
-        let c = state.register(test_leaf(5)).unwrap();
-        let expected = state.register(test_leaf(35)).unwrap();
-        let add = state.register(Node::join(Uint::add_tag(), a, b)).unwrap();
-        let mul = state.register(Node::join(Uint::mul_tag(), add, c)).unwrap();
-        let assertion = Node::join(Uint::eq_tag(), mul, expected);
+        let a = state.register(test_value(3)).unwrap();
+        let b = state.register(test_value(4)).unwrap();
+        let c = state.register(test_value(5)).unwrap();
+        let expected = state.register(test_value(35)).unwrap();
+        let add = state.register(Node::join(Uint::add_tag(), a, b).unwrap()).unwrap();
+        let mul = state.register(Node::join(Uint::mul_tag(), add, c).unwrap()).unwrap();
+        let assertion = Node::join(Uint::eq_tag(), mul, expected).unwrap();
         let stmt_digest = state.register(assertion).unwrap();
         state.append_statement(stmt_digest).unwrap();
         state
@@ -762,7 +758,7 @@ mod tests {
         assert!(matches!(
             err,
             IntegrityError::DeferredStateTooLarge { num_elements, max }
-                if num_elements == test_leaf(3).num_elements() && max == 0
+                if num_elements == test_value(3).storage_felt_len() && max == 0
         ));
     }
 
@@ -780,18 +776,19 @@ mod tests {
     fn rehydrate_rejects_invalid_structure_cases() {
         let registry = precompiles();
         let hash_registry = hash_precompiles();
-        let leaf = test_leaf(7);
-        let duplicate_leaf = value_entry(&leaf);
+        let value = test_value(7);
+        let duplicate_value = value_entry(&value);
         let duplicate_predicate = WireEntry::Join { tag: Uint::eq_tag(), lhs: 1, rhs: 1 };
-        let unknown_tag = Tag {
-            id: Felt::new_unchecked(0xdead),
-            args: [ZERO; 3],
-        };
+        let unknown_tag = Tag::new(Felt::new_unchecked(0xdead), [ZERO; 3])
+            .expect("unknown test id is not framework-reserved");
 
         let cases = [
             (
-                "explicit TRUE value",
-                wire(alloc::vec![WireEntry::Value { tag: Tag::TRUE, block: [ZERO; 8] }]),
+                "explicit TRUE data",
+                wire(alloc::vec![WireEntry::Data {
+                    tag: Tag::TRUE,
+                    chunks: alloc::vec![[ZERO; 8]]
+                }]),
                 registry.clone(),
             ),
             (
@@ -810,13 +807,13 @@ mod tests {
             ),
             (
                 "duplicate value digest",
-                wire(alloc::vec![duplicate_leaf.clone(), duplicate_leaf]),
+                wire(alloc::vec![duplicate_value.clone(), duplicate_value]),
                 registry.clone(),
             ),
             (
                 "duplicate join digest",
                 wire(alloc::vec![
-                    value_entry(&leaf),
+                    value_entry(&value),
                     duplicate_predicate.clone(),
                     duplicate_predicate,
                 ]),
@@ -824,22 +821,25 @@ mod tests {
             ),
             (
                 "unknown tag",
-                wire(alloc::vec![WireEntry::Value { tag: unknown_tag, block: [ZERO; 8] }]),
+                wire(alloc::vec![WireEntry::Data {
+                    tag: unknown_tag,
+                    chunks: alloc::vec![[ZERO; 8]],
+                }]),
                 registry.clone(),
             ),
             (
-                "chunk entry for value tag",
-                wire(alloc::vec![WireEntry::Chunks {
-                    tag: Uint::leaf_tag(),
-                    blocks: alloc::vec![[ZERO; 8]],
+                "too many chunks for value tag",
+                wire(alloc::vec![WireEntry::Data {
+                    tag: Uint::value_tag(),
+                    chunks: alloc::vec![[ZERO; 8], [ZERO; 8]],
                 }]),
                 registry,
             ),
             (
-                "wrong chunk count",
-                wire(alloc::vec![WireEntry::Chunks {
+                "empty data for preimage tag",
+                wire(alloc::vec![WireEntry::Data {
                     tag: Hash::preimage_tag(Hash::BYTES_PER_CHUNK),
-                    blocks: alloc::vec![],
+                    chunks: alloc::vec![],
                 }]),
                 hash_registry,
             ),
@@ -860,7 +860,7 @@ mod tests {
         let mut state = state_with(&registry, usize::MAX);
         let new_root = state.append_statement(TRUE_DIGEST).unwrap();
         assert_ne!(new_root, TRUE_DIGEST);
-        assert_eq!(state.nodes.get(&new_root).unwrap().tag, Tag::AND);
+        assert_eq!(state.nodes.get(&new_root).unwrap().tag(), Tag::AND);
 
         let wire = state.to_wire().unwrap();
         let rehydrated =
@@ -874,8 +874,8 @@ mod tests {
     fn rehydrate_accepts_logged_nested_transcript_root() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(7)).unwrap();
-        let pred_digest = state.register(Node::join(Uint::eq_tag(), a, a)).unwrap();
+        let a = state.register(test_value(7)).unwrap();
+        let pred_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
 
         let inner_root = state.register(Node::and(TRUE_DIGEST, pred_digest)).unwrap();
         let outer_root = state.append_statement(inner_root).unwrap();
@@ -892,11 +892,13 @@ mod tests {
 
     #[test]
     fn rehydrate_accepts_predicate_root() {
-        let a = test_leaf(7);
-        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let a = test_value(7);
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest()).unwrap();
         let pred_digest = pred.digest();
-        let wire =
-            wire(alloc::vec![value_entry(&a), WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },]);
+        let wire = wire(alloc::vec![
+            value_entry(&a),
+            WireEntry::Join { tag: pred.tag(), lhs: 1, rhs: 1 },
+        ]);
 
         let rehydrated = DeferredState::from_wire(precompiles(), &wire, usize::MAX).unwrap();
         assert_eq!(rehydrated.root(), pred_digest);
@@ -906,24 +908,24 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_root_that_evaluates_non_true() {
-        let wire = wire(alloc::vec![value_entry(&test_leaf(7))]);
+        let wire = wire(alloc::vec![value_entry(&test_value(7))]);
         assert_rehydrate_err!(wire, precompiles(), IntegrityError::RootNotTrue);
     }
 
     #[test]
-    fn to_wire_drops_unreachable_orphan_leaves() {
+    fn to_wire_drops_unreachable_orphan_values() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let _orphan = state.register(test_leaf(99)).unwrap();
-        let a = state.register(test_leaf(7)).unwrap();
-        let stmt_digest = state.register(Node::join(Uint::eq_tag(), a, a)).unwrap();
+        let _orphan = state.register(test_value(99)).unwrap();
+        let a = state.register(test_value(7)).unwrap();
+        let stmt_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
         let new_root = state.append_statement(stmt_digest).unwrap();
         assert_round_trips(&state, &registry);
 
         let wire = state.to_wire().unwrap();
         let rehydrated =
             DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX).unwrap();
-        let orphan_digest = test_leaf(99).digest();
+        let orphan_digest = test_value(99).digest();
         assert!(
             !rehydrated.nodes.contains_key(&orphan_digest),
             "orphan must be trimmed from wire and absent after rehydrate"
@@ -938,23 +940,23 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_noncanonical_but_topological_wire() {
-        let a = test_leaf(3);
-        let b = test_leaf(4);
-        let pred_a = Node::join(Uint::eq_tag(), a.digest(), a.digest());
-        let pred_b = Node::join(Uint::eq_tag(), b.digest(), b.digest());
+        let a = test_value(3);
+        let b = test_value(4);
+        let pred_a = Node::join(Uint::eq_tag(), a.digest(), a.digest()).unwrap();
+        let pred_b = Node::join(Uint::eq_tag(), b.digest(), b.digest()).unwrap();
 
         // This is semantically equivalent to canonical output, but it emits `b` before the first
         // transcript step's closure. Strict wire rejects the non-canonical order.
         let wire = wire(alloc::vec![
             value_entry(&b),
             value_entry(&a),
-            WireEntry::Join { tag: pred_a.tag, lhs: 2, rhs: 2 },
+            WireEntry::Join { tag: pred_a.tag(), lhs: 2, rhs: 2 },
             WireEntry::Join {
                 tag: Tag::AND,
                 lhs: crate::deferred::TRUE_INDEX,
                 rhs: 3,
             },
-            WireEntry::Join { tag: pred_b.tag, lhs: 1, rhs: 1 },
+            WireEntry::Join { tag: pred_b.tag(), lhs: 1, rhs: 1 },
             WireEntry::Join { tag: Tag::AND, lhs: 4, rhs: 5 },
         ]);
 
@@ -965,10 +967,10 @@ mod tests {
     fn rehydrate_rejects_failed_predicate() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let a = state.register(test_leaf(3)).unwrap();
-        let b = state.register(test_leaf(4)).unwrap();
+        let a = state.register(test_value(3)).unwrap();
+        let b = state.register(test_value(4)).unwrap();
 
-        let bad_pred = Node::join(Uint::eq_tag(), a, b);
+        let bad_pred = Node::join(Uint::eq_tag(), a, b).unwrap();
         let bad_digest = bad_pred.digest();
         state.insert_node(bad_pred).unwrap();
         let and_node = Node::and(TRUE_DIGEST, bad_digest);
@@ -984,8 +986,8 @@ mod tests {
     fn rehydrate_rejects_and_with_non_true_child() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let leaf = state.register(test_leaf(3)).unwrap();
-        let and_node = Node::and(TRUE_DIGEST, leaf);
+        let value_digest = state.register(test_value(3)).unwrap();
+        let and_node = Node::and(TRUE_DIGEST, value_digest);
         let and_digest = and_node.digest();
         state.insert_node(and_node).unwrap();
         state.root = and_digest;
@@ -996,11 +998,11 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_and_with_non_true_lhs() {
-        let a = test_leaf(7);
-        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let a = test_value(7);
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest()).unwrap();
         let wire = wire(alloc::vec![
             value_entry(&a),
-            WireEntry::Join { tag: pred.tag, lhs: 1, rhs: 1 },
+            WireEntry::Join { tag: pred.tag(), lhs: 1, rhs: 1 },
             WireEntry::Join { tag: Tag::AND, lhs: 1, rhs: 2 },
         ]);
 
@@ -1009,13 +1011,13 @@ mod tests {
 
     #[test]
     fn rehydrate_rejects_dangling_entry_as_noncanonical() {
-        let a = test_leaf(7);
-        let orphan = test_leaf(99);
-        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest());
+        let a = test_value(7);
+        let orphan = test_value(99);
+        let pred = Node::join(Uint::eq_tag(), a.digest(), a.digest()).unwrap();
         let wire = wire(alloc::vec![
             value_entry(&orphan),
             value_entry(&a),
-            WireEntry::Join { tag: pred.tag, lhs: 2, rhs: 2 },
+            WireEntry::Join { tag: pred.tag(), lhs: 2, rhs: 2 },
             WireEntry::Join {
                 tag: Tag::AND,
                 lhs: crate::deferred::TRUE_INDEX,

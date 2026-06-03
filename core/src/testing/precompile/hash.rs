@@ -1,7 +1,7 @@
-//! Mock hash precompile for exercising chunk-bodied deferred nodes.
+//! Mock hash precompile for exercising data-bodied deferred nodes.
 //!
-//! A `preimage` chunk node evaluates to a `digest` leaf by summing chunks coordinate-wise. The
-//! intentionally simple hash keeps tests focused on framework behavior: chunk arity, evaluation,
+//! A `preimage` data node evaluates to a `digest` value by summing its data chunks coordinate-wise.
+//! The intentionally simple hash keeps tests focused on framework behavior: data arity, evaluation,
 //! and equality predicates.
 
 use alloc::sync::Arc;
@@ -10,7 +10,7 @@ use core::num::NonZeroU32;
 use crate::{
     Felt, ZERO,
     deferred::{
-        DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
+        DataChunk, DeferredContext, DeferredError, Digest, Node, NodeType, Payload, Precompile,
         PrecompileError, Tag, precompile_id,
     },
 };
@@ -29,62 +29,58 @@ impl Hash {
     pub const DIGEST_TAG_ID: u32 = 1;
     pub const EQ_TAG_ID: u32 = 2;
 
-    /// Bytes represented by one 8-felt chunk in this fixture.
+    /// Bytes represented by one 8-felt data chunk in this fixture.
     pub const BYTES_PER_CHUNK: u32 = 32;
 
     pub fn id() -> Felt {
         precompile_id(&Hash)
     }
 
-    /// Tag for a preimage whose byte length determines its chunk count.
+    /// Tag for a preimage whose byte length determines its data chunk count.
     pub fn preimage_tag(n_bytes: u32) -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::PREIMAGE_TAG_ID), Felt::from_u32(n_bytes), ZERO])
     }
 
-    /// Tag for a canonical digest leaf.
+    /// Tag for a canonical digest value.
     pub fn digest_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::DIGEST_TAG_ID), ZERO, ZERO])
     }
 
     /// Tag for a digest-equality predicate.
     pub fn eq_tag() -> Tag {
-        Tag {
-            id: Self::id(),
-            args: [Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO],
-        }
+        Self::tag([Felt::from_u32(Self::EQ_TAG_ID), ZERO, ZERO])
     }
 
-    /// Builds a preimage node from chunks whose count must match `n_bytes`.
-    pub fn preimage_node(n_bytes: u32, chunks: impl Into<Arc<[[Felt; 8]]>>) -> Node {
-        Node::chunk(Self::preimage_tag(n_bytes), chunks)
+    fn tag(args: [Felt; 3]) -> Tag {
+        Tag::new(Self::id(), args).expect("mock hash precompile id is not framework-reserved")
     }
 
-    /// Builds a canonical digest leaf.
-    pub fn digest_node(felts: [Felt; 8]) -> Node {
-        Node::leaf(Self::digest_tag(), felts)
+    /// Builds a preimage node from data chunks whose count must match `n_bytes`.
+    pub fn preimage_node(n_bytes: u32, chunks: impl Into<Arc<[DataChunk]>>) -> Node {
+        Node::try_data(Self::preimage_tag(n_bytes), chunks)
+            .expect("preimage requires at least one data chunk")
+    }
+
+    /// Builds a canonical digest value.
+    pub fn digest_node(felts: DataChunk) -> Node {
+        Node::value(Self::digest_tag(), felts).expect("digest tag is precompile-owned")
     }
 
     /// Builds a predicate comparing two digest-producing nodes.
     pub fn eq_node(h_lhs: Digest, h_rhs: Digest) -> Node {
-        Node::join(Self::eq_tag(), h_lhs, h_rhs)
+        Node::join(Self::eq_tag(), h_lhs, h_rhs).expect("eq tag is precompile-owned")
     }
 
-    /// Extracts digest felts from a canonical digest leaf.
-    pub fn digest_felts(node: &Node) -> Result<[Felt; 8], DeferredError> {
-        if node.tag != Self::digest_tag() {
+    /// Extracts digest felts from a canonical digest value.
+    pub fn digest_felts(node: &Node) -> Result<DataChunk, DeferredError> {
+        if node.tag() != Self::digest_tag() {
             return Err(DeferredError::InvalidPayload);
         }
-        Ok(*node.payload.as_felts()?)
+        Ok(*node.payload().as_value()?)
     }
 
     /// Deterministic mock hash used by tests instead of real cryptography.
-    pub fn hash(chunks: &[[Felt; 8]]) -> [Felt; 8] {
+    pub fn hash(chunks: &[DataChunk]) -> DataChunk {
         let mut acc = [ZERO; 8];
         for c in chunks {
             for (a, x) in acc.iter_mut().zip(c.iter()) {
@@ -94,8 +90,8 @@ impl Hash {
         acc
     }
 
-    /// Returns the chunk count implied by a byte length.
-    pub fn n_chunks(n_bytes: u32) -> u32 {
+    /// Returns the data chunk count implied by a byte length.
+    pub fn n_data_chunks(n_bytes: u32) -> u32 {
         n_bytes.div_ceil(Self::BYTES_PER_CHUNK)
     }
 }
@@ -112,13 +108,13 @@ impl Precompile for Hash {
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(args[0])? {
             Discriminant::Preimage => {
-                // `args[1]` carries n_bytes; the chunk count is derived. A zero-byte preimage
+                // `args[1]` carries n_bytes; the data chunk count is derived. A zero-byte preimage
                 // derives zero chunks, which `NonZeroU32::new` rejects via `?`.
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
-                Some(NodeType::Chunks(NonZeroU32::new(Self::n_chunks(n_bytes))?))
+                Some(NodeType::Data(NonZeroU32::new(Self::n_data_chunks(n_bytes))?))
             },
-            // Self-evaluating leaf carrying 8 raw felts of digest data.
-            Discriminant::Digest => Some(NodeType::Value),
+            // Self-evaluating value (`Data(1)`) carrying the 8 raw felts of digest data.
+            Discriminant::Digest => Some(NodeType::Data(NonZeroU32::MIN)),
             // Binary predicate over two child digests.
             Discriminant::Eq => Some(NodeType::Join),
         }
@@ -132,15 +128,13 @@ impl Precompile for Hash {
     ) -> Result<Node, PrecompileError> {
         match Discriminant::classify(args[0]).ok_or(PrecompileError::InvalidNode)? {
             Discriminant::Preimage => {
-                // Inline hash → canonical digest leaf. No minting needed: the digest IS the
+                // Inline hash → canonical digest value. No minting needed: the digest IS the
                 // canonical payload.
-                Ok(Self::digest_node(Self::hash(payload.as_chunks()?)))
+                Ok(Self::digest_node(Self::hash(payload.as_data()?)))
             },
-            Discriminant::Digest => {
-                Ok(Node::leaf(Tag::new(Self::id(), args), *payload.as_felts()?))
-            },
+            Discriminant::Digest => Ok(Node::value(Self::tag(args), *payload.as_value()?)?),
             Discriminant::Eq => {
-                let (h_lhs, h_rhs) = payload.join_children()?;
+                let (h_lhs, h_rhs) = payload.as_join()?;
                 if context.resolve(h_lhs)? != context.resolve(h_rhs)? {
                     return Err(PrecompileError::AssertionFailed);
                 }

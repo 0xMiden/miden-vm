@@ -60,14 +60,14 @@ registry's `init()` constants, charging them against that same budget.
 
 Every new unique durable node inserted into `nodes` decrements `remaining_elements` by the node's
 field-element footprint using checked subtraction. Duplicate insertion is free, so registering the
-same chunk node at the exact budget limit succeeds. Evaluation memos do not have a separate budget
+same data node at the exact budget limit succeeds. Evaluation memos do not have a separate budget
 and do not double-count canonical payloads; only canonical/helper nodes newly inserted into
 `nodes` are charged.
 
-For chunk-bodied nodes, the precompile's `decode` result is also the size gate: returning
-`NodeType::Chunks(n)` authorizes the host to read and allocate exactly `n` chunks for that tag.
-Precompiles should reject oversized chunk tags in `decode` instead of relying on a separate deferred
-chunk-size limit.
+For data-bodied nodes, the precompile's `decode` result is also the size gate: returning
+`NodeType::Data(n)` authorizes the host to read and allocate exactly `n` data chunks for that tag.
+Precompiles should reject oversized data tags in `decode` instead of relying on a separate deferred
+data-size limit.
 
 If insertion exhausts the remaining budget, execution aborts with a budget error. The insertion path
 owns this accounting; processor deferred handlers do not perform post-mutation deferred budget

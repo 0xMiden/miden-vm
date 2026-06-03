@@ -2930,16 +2930,16 @@ end"
     Ok(())
 }
 
-/// Ensures the chunk deferred-registration keyword remains accepted by the assembler.
+/// Ensures the data deferred-registration keyword remains accepted by the assembler.
 #[test]
-fn test_register_deferred_chunk_keyword_assembles() -> TestResult {
+fn test_register_deferred_data_keyword_assembles() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
         &context,
         "\
 begin
     push.0 push.0 push.0 push.0 push.0
-    adv.register_deferred_chunk
+    adv.register_deferred_data
     drop drop drop drop drop
 end"
     );
