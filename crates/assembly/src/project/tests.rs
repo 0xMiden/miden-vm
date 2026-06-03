@@ -382,6 +382,83 @@ end
     );
 }
 
+#[test]
+fn source_debug_sections_preserve_compiler_merged_block_ranges() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "source-ranges"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc entry
+    mul
+    repeat.5
+        add
+    end
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("debug build should succeed");
+
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+
+    let exec_with_split_ranges = debug_source_graph
+        .nodes
+        .iter()
+        .enumerate()
+        .fold(BTreeMap::new(), |mut ranges_by_exec, (source_idx, source_node)| {
+            let has_asm_op = debug_source_map
+                .asm_ops
+                .iter()
+                .any(|row| row.source_node.as_u32() as usize == source_idx);
+            if has_asm_op {
+                ranges_by_exec
+                    .entry(source_node.exec_node)
+                    .or_insert_with(Vec::new)
+                    .push((source_node.op_start, source_node.op_end));
+            }
+            ranges_by_exec
+        })
+        .into_values()
+        .any(|mut ranges| {
+            ranges.sort_unstable();
+            ranges.contains(&(0, 1)) && ranges.contains(&(1, 2))
+        });
+
+    assert!(
+        exec_with_split_ranges,
+        "compiler-merged basic blocks should keep source nodes with distinct operation ranges",
+    );
+}
+
 fn debug_bearing_static_package(
     name: &str,
     export: &str,
