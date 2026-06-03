@@ -62,7 +62,7 @@
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
 //!
-//! (Legacy DebugInfo section - skipped if present; omitted by current writers)
+//! (Legacy DebugInfo section - rejected if present; omitted by current writers)
 //! - Error codes map (`BTreeMap<u64, String>`)
 //! - Procedure names map (`BTreeMap<Word, String>`)
 //! - Assembly operation data (raw bytes for AssemblyOp payloads)
@@ -72,8 +72,9 @@
 //! - Debug variables (`Vec<DebugVarInfo>`)
 //! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
-//! Current writers always omit the legacy `DebugInfo` section. Readers skip legacy wire debug
-//! payloads when present and never materialize them into [`MastForest`].
+//! Current writers always omit the legacy `DebugInfo` section. Readers reject legacy wire debug
+//! payloads because package-owned debug sections are now the only supported debug serialization
+//! path.
 //!
 //! In hashless format, the internal node-hash section is omitted and `HASHLESS` also implies
 //! `STRIPPED`. External node digests still stay on the wire because they cannot be rebuilt from
@@ -87,8 +88,9 @@
 //! same contiguous array on the wire.
 //!
 //! Public entry points adopt these policies:
-//! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
-//! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless payloads.
+//! - [`MastForest::read_from_bytes`]: trusted stripped execution payload, no hashless support.
+//! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless and legacy
+//!   debug-bearing payloads.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.
@@ -112,7 +114,6 @@ use crate::{
 };
 
 pub(crate) mod asm_op;
-use asm_op::AsmOpInfo;
 
 mod info;
 pub use info::{MastNodeEntry, MastNodeInfo};
@@ -381,9 +382,11 @@ pub enum MastForestReadView<'a> {
 
 /// A trusted wire-backed view over serialized MAST forest bytes.
 ///
-/// This view accepts complete full or stripped payloads with hashes. It validates the header and
-/// the fixed-width structural sections needed for random access, but it does not fully materialize
-/// the forest. Hashless payloads are rejected because trusted cache bytes must be complete.
+/// This view accepts complete stripped payloads with hashes. It validates the header and the
+/// fixed-width structural sections needed for random access, but it does not fully materialize the
+/// forest. Hashless payloads are rejected because trusted cache bytes must be complete. Legacy
+/// debug-bearing forest payloads are rejected because debug metadata now belongs to package-owned
+/// debug sections.
 ///
 /// Use this when callers need random access to roots or node metadata without deserializing the
 /// full forest. For strict trusted deserialization, use
@@ -422,13 +425,12 @@ pub struct MastForestWireView<'a> {
 impl<'a> MastForestWireView<'a> {
     /// Creates a new view from serialized bytes.
     ///
-    /// The input may be full or stripped format, but must include all node hashes.
-    /// Structural parsing is delegated to the same single-pass scanner used by reader-based
-    /// deserialization paths.
+    /// The input must be stripped format and include all node hashes. Structural parsing is
+    /// delegated to the same single-pass scanner used by reader-based deserialization paths.
     ///
     /// This constructor validates the header and sections needed for node/roots/random-access
-    /// metadata, indexes `AdviceMap` keys for on-demand lookup, and length-walks any trailing
-    /// `DebugInfo` payload before ignoring it.
+    /// metadata, indexes `AdviceMap` keys for on-demand lookup, and rejects legacy forest
+    /// `DebugInfo` payloads.
     ///
     /// Treat this as a trusted cache API, not as an untrusted-validation entry point. It is
     /// appropriate for local tools that need random access over serialized structure, but callers
@@ -439,9 +441,9 @@ impl<'a> MastForestWireView<'a> {
     /// - verify that serialized non-external digests match the structure they describe
     /// - check topological ordering / forward-reference constraints
     /// - validate basic-block batch invariants or procedure-name-root consistency
-    /// - materialize or expose trailing `DebugInfo` payloads
+    /// - materialize or expose package-owned debug sections
     ///
-    /// For strict full-payload validation, use
+    /// For strict materialized validation, use
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
     /// Digest lookup follows the wire layout:
@@ -473,7 +475,7 @@ impl<'a> MastForestWireView<'a> {
         let mut scanner = TrackingReader::new(&mut reader);
         let (flags, layout) = read_header_and_scan_layout(&mut scanner, false)?;
         let advice_map = WireAdviceMapView::new(bytes, layout.advice_map_offset())?;
-        check_ignored_debug_payload(bytes, flags, advice_map.end_offset())?;
+        check_no_legacy_debug_payload(bytes, flags, advice_map.end_offset())?;
 
         Ok(Self {
             bytes,
@@ -564,191 +566,28 @@ impl<'a> MastForestWireView<'a> {
     }
 }
 
-fn check_ignored_debug_payload(
+fn check_no_legacy_debug_payload(
     bytes: &[u8],
     flags: WireFlags,
     debug_info_offset: usize,
 ) -> Result<(), DeserializationError> {
+    if !flags.is_stripped() {
+        return Err(legacy_debug_info_error());
+    }
+
     let payload = bytes.get(debug_info_offset..).ok_or(DeserializationError::UnexpectedEOF)?;
-    if flags.is_stripped() {
-        if payload.is_empty() {
-            return Ok(());
-        }
-        log::warn!(
-            "MastForestWireView ignored {} trailing bytes after a STRIPPED MastForest payload",
-            payload.len()
-        );
+    if payload.is_empty() {
         return Ok(());
     }
-
-    if payload.is_empty() {
-        return Err(DeserializationError::UnexpectedEOF);
-    }
-
-    let mut reader = SliceReader::new(payload);
-    skip_debug_info(&mut reader)?;
-    if reader.has_more_bytes() {
-        return Err(DeserializationError::InvalidValue(
-            "extra bytes after DebugInfo section".into(),
-        ));
-    }
-
-    log::warn!(
-        "MastForestWireView ignored {} bytes of DebugInfo because MastForestView is debug-less",
-        payload.len()
-    );
-    Ok(())
+    Err(DeserializationError::InvalidValue(
+        "extra bytes after stripped MastForest payload".into(),
+    ))
 }
 
-fn skip_debug_info<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_btree_map_u64_string(source)?;
-    skip_btree_map_word_string(source)?;
-    skip_len_prefixed_bytes(source)?; // asm_op_data
-    skip_string_table(source)?;
-    skip_fixed_vec(source, AsmOpInfo::min_serialized_size())?;
-    skip_csr_operation_id_pairs(source)?;
-    skip_debug_var_infos(source)?;
-    skip_op_to_u32_ids(source)?;
-    Ok(())
-}
-
-fn skip_string_table<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_usize_vec(source)?;
-    skip_len_prefixed_bytes(source)
-}
-
-fn skip_fixed_vec<R: ByteReader>(
-    source: &mut R,
-    element_size: usize,
-) -> Result<(), DeserializationError> {
-    let len = source.read_usize()?;
-    let byte_len = len.checked_mul(element_size).ok_or_else(|| {
-        DeserializationError::InvalidValue("fixed-width vector length overflow".into())
-    })?;
-    source.read_slice(byte_len).map(|_| ())
-}
-
-fn skip_btree_map_u64_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let len = source.read_usize()?;
-    for _ in 0..len {
-        source.read_u64()?;
-        skip_string(source)?;
-    }
-    Ok(())
-}
-
-fn skip_btree_map_word_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let len = source.read_usize()?;
-    for _ in 0..len {
-        Word::read_from(source)?;
-        skip_string(source)?;
-    }
-    Ok(())
-}
-
-fn skip_op_to_u32_ids<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_u32_vec(source)?;
-    skip_usize_vec(source)?;
-    skip_usize_vec(source)
-}
-
-fn skip_csr_operation_id_pairs<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let data_len = source.read_usize()?;
-    for _ in 0..data_len {
-        source.read_usize()?;
-        source.read_u32()?;
-    }
-    skip_usize_vec(source)
-}
-
-fn skip_debug_var_infos<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let len = source.read_usize()?;
-    for _ in 0..len {
-        skip_string(source)?;
-        skip_debug_var_location(source)?;
-        skip_option(source, |source| source.read_u32().map(|_| ()))?;
-        skip_option(source, |source| {
-            let value = source.read_u32()?;
-            if value == 0 {
-                return Err(DeserializationError::InvalidValue(
-                    "arg_index must be non-zero".into(),
-                ));
-            }
-            Ok(())
-        })?;
-        skip_option(source, skip_file_line_col)?;
-    }
-    Ok(())
-}
-
-fn skip_debug_var_location<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    match source.read_u8()? {
-        0 => source.read_u8().map(|_| ()),
-        1 => source.read_u32().map(|_| ()),
-        2 => source.read_u64().map(|_| ()),
-        3 => source.read_array::<2>().map(|_| ()),
-        4 => skip_len_prefixed_bytes(source),
-        5 => {
-            source.read_u32()?;
-            source.read_array::<8>().map(|_| ())
-        },
-        tag => Err(DeserializationError::InvalidValue(format!(
-            "invalid DebugVarLocation tag: {tag}"
-        ))),
-    }
-}
-
-fn skip_file_line_col<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_string(source)?;
-    for label in ["line", "column"] {
-        let value = source.read_u32()?;
-        if value == 0 {
-            return Err(DeserializationError::InvalidValue(format!(
-                "{label} number cannot be zero"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn skip_option<R, F>(source: &mut R, skip_value: F) -> Result<(), DeserializationError>
-where
-    R: ByteReader,
-    F: FnOnce(&mut R) -> Result<(), DeserializationError>,
-{
-    if source.read_bool()? {
-        skip_value(source)
-    } else {
-        Ok(())
-    }
-}
-
-fn skip_u32_vec<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_fixed_vec(source, size_of::<u32>())
-}
-
-fn skip_usize_vec<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let len = source.read_usize()?;
-    for _ in 0..len {
-        source.read_usize()?;
-    }
-    Ok(())
-}
-
-fn skip_string<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    let bytes = read_len_prefixed_bytes(source)?;
-    core::str::from_utf8(bytes)
-        .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
-    Ok(())
-}
-
-fn skip_len_prefixed_bytes<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    read_len_prefixed_bytes(source).map(|_| ())
-}
-
-fn read_len_prefixed_bytes<R: ByteReader>(source: &mut R) -> Result<&[u8], DeserializationError> {
-    let len = source.read_usize()?;
-    source.read_slice(len)
+fn legacy_debug_info_error() -> DeserializationError {
+    DeserializationError::InvalidValue(
+        "MastForest payloads with legacy DebugInfo are no longer supported; debug metadata belongs in Package debug sections".into(),
+    )
 }
 
 impl MastForest {
@@ -756,7 +595,8 @@ impl MastForest {
     ///
     /// [`MastForestReadMode::Materialized`] is equivalent to [`Self::read_from_bytes`].
     /// [`MastForestReadMode::WireBacked`] returns a trusted random-access cache view and rejects
-    /// hashless payloads because trusted cache bytes must be complete.
+    /// hashless and legacy debug-bearing payloads because trusted cache bytes must be complete
+    /// stripped execution payloads.
     pub fn read_view_from_bytes(
         bytes: &[u8],
         mode: MastForestReadMode,
@@ -1037,12 +877,6 @@ fn log_untrusted_overspecification(flags: WireFlags) {
             "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes, and validation will recompute them and require them to match"
         );
     }
-
-    if !flags.is_stripped() {
-        log::error!(
-            "UntrustedMastForest expected STRIPPED input; supplied artifact includes DebugInfo and other optional payloads over the wire"
-        );
-    }
 }
 
 fn decode_from_reader<R: ByteReader>(
@@ -1063,7 +897,7 @@ fn decode_from_reader_inner<R: ByteReader>(
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     if !flags.is_stripped() {
-        skip_debug_info(&mut recording)?;
+        return Err(legacy_debug_info_error());
     }
     Ok((
         flags,
