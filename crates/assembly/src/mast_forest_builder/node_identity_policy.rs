@@ -13,7 +13,6 @@ pub(super) struct FinalForestLayout {
 impl FinalForestLayout {
     pub(super) fn plan(
         procedure_root_refs: Vec<MastNodeRef>,
-        _removable_node_refs: BTreeSet<MastNodeRef>,
         nodes: &IndexVec<MastNodeRef, PendingMastNode>,
     ) -> Self {
         let node_refs_to_remove = Self::unreachable_node_refs(&procedure_root_refs, nodes);

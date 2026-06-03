@@ -727,7 +727,7 @@ fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
 
     for (raw_op_idx, op) in op_batches.iter().flat_map(OpBatch::raw_ops).enumerate() {
         if matches!(op, Operation::Assert(_) | Operation::U32assert2(_) | Operation::MpVerify(_)) {
-            data.extend_from_slice(&raw_op_idx.to_le_bytes());
+            data.extend_from_slice(&(raw_op_idx as u64).to_le_bytes());
             op.write_into(&mut data);
         }
     }

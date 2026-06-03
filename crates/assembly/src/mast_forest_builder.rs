@@ -1,8 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_core::{
     Felt, Word,
@@ -83,10 +79,6 @@ pub struct MastForestBuilder {
     debug_vars: IndexVec<DebugVarRef, DebugVarInfo>,
     /// Error codes registered while building this forest.
     error_codes: BTreeMap<u64, Arc<str>>,
-    /// A set of refs for basic blocks which have been merged into a bigger basic blocks. This is
-    /// used as a candidate set of nodes that may be eliminated if the are not referenced by any
-    /// other node in the forest and are not a root of any procedure.
-    merged_basic_block_refs: BTreeSet<MastNodeRef>,
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
@@ -364,9 +356,8 @@ impl MastForestBuilder {
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
     /// resulting MAST forest.
     ///
-    /// Finalization preserves every recorded procedure root and every node still referenced by a
-    /// live node. It only removes builder-marked merge predecessors that became unreachable
-    /// through those references.
+    /// Finalization preserves every recorded procedure root and every pending node reachable from
+    /// those roots. Pending records which are unreachable from all roots are pruned.
     ///
     /// External nodes are emitted before non-external nodes. This preserves the positional
     /// convention used by externally linked procedure roots while still keeping final node IDs
@@ -381,8 +372,7 @@ impl MastForestBuilder {
     pub(crate) fn build(mut self) -> Result<BuiltMastForest, Report> {
         let procedure_root_refs = core::mem::take(&mut self.procedure_root_refs);
 
-        let removable_node_refs = core::mem::take(&mut self.merged_basic_block_refs);
-        let layout = FinalForestLayout::plan(procedure_root_refs, removable_node_refs, &self.nodes);
+        let layout = FinalForestLayout::plan(procedure_root_refs, &self.nodes);
 
         let mut finalizer = MastForestFinalizer::new();
         finalizer.materialize_live_nodes(&layout.live_node_refs, &self.nodes)?;
@@ -441,7 +431,7 @@ fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
 
     for (raw_op_idx, op) in op_batches.iter().flat_map(OpBatch::raw_ops).enumerate() {
         if matches!(op, Operation::Assert(_) | Operation::U32assert2(_) | Operation::MpVerify(_)) {
-            data.extend_from_slice(&raw_op_idx.to_le_bytes());
+            data.extend_from_slice(&(raw_op_idx as u64).to_le_bytes());
             op.write_into(&mut data);
         }
     }
@@ -784,9 +774,6 @@ impl MastForestBuilder {
             }
         }
 
-        // Mark the removed basic blocks as merged
-        self.merged_basic_block_refs.extend(contiguous_basic_block_refs.iter().copied());
-
         if !operations.is_empty() {
             let merged_basic_block =
                 self.ensure_block_ref(operations, merged_asm_ops, merged_debug_vars)?;
@@ -882,7 +869,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use alloc::string::String;
+    use alloc::{collections::BTreeSet, string::String};
 
     use miden_core::{
         mast::{DebugInfo, MastNodeBuilder, MastNodeId},
