@@ -5,19 +5,19 @@
 # crate is being stood up on this tracking branch. They should be deduplicated against a single
 # shared source once the precompile proof-model migration settles.
 #
-# `register_expr` / `register_chunk` are safe by default: they derive the node digest in-circuit,
+# `register_expr` / `register_data` are safe by default: they derive the node digest in-circuit,
 # so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
 # proc here — `adv.evaluate_deferred` returns an *unbound* host hint (the canonical `tag || payload`
 # on the advice stack), and using it soundly requires re-hashing in-circuit and logging a predicate
 # the verifier re-checks. That discipline is precompile-specific, so each precompile wraps the raw
 # event itself rather than calling a deceptively "safe" shared helper.
 
-#! Folds a precompile commitment into the rolling transcript via `log_precompile` and removes
-#! the helper words produced by the instruction.
+#! Legacy-only helper: folds a legacy precompile commitment into the rolling deferred root via
+#! `log_precompile` and removes the helper words produced by the instruction.
 #!
 #! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
 #! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
-#! `log_precompile` opcode fold it into the transcript state using framework AND capacity
+#! `log_precompile` opcode fold it into the deferred root using framework AND capacity
 #! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
 #! don't clobber data deeper in the stack.
 #!
@@ -54,21 +54,21 @@ pub proc register_expr
     # => [NODE_DIGEST, ...]  (digest = rate0 = state[0..4])
 end
 
-#! Registers a chunk-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
+#! Registers a data-bodied node (`n` rate-sized blocks of bulk data at `ptr`) in the
 #! deferred-computation DAG and returns its content-addressed digest on top of the operand stack.
 #!
-#! `adv.register_deferred_chunk` interns the node host-side (reading `8n` felts from memory at
+#! `adv.register_deferred_data` interns the node host-side (reading `8n` felts from memory at
 #! `ptr`; `n` derived from the tag); it produces no stack or advice output. The digest is then
 #! derived *in-circuit* by a Poseidon2 linear hash over the same `8n` felts — capacity = `TAG`,
 #! one `hperm` per 8-felt block via `mem_stream` — so it is constrained to memory rather than
-#! supplied by advice, and the rate0 word matches `Node::digest`. The chunk count `n` is taken as
-#! an operand (the caller knows it); the event ignores it. Empty chunk bodies are forbidden, so
+#! supplied by advice, and the rate0 word matches `Node::digest`. The data chunk count `n` is taken as
+#! an operand (the caller knows it); the event ignores it. Empty data bodies are forbidden, so
 #! `n ≥ 1` and the linear-hash loop always runs at least one permutation.
 #!
 #! Input:  `[TAG, ptr, n_chunks, ...]`
 #! Output: `[NODE_DIGEST, ...]`
-pub proc register_chunk
-    adv.register_deferred_chunk
+pub proc register_data
+    adv.register_deferred_data
     # => [TAG, ptr, n_chunks, ...]
 
     # Replace n_chunks with end_addr = ptr + 8 * n_chunks, leaving [TAG, ptr, end_addr, ...].
@@ -95,7 +95,7 @@ pub proc register_chunk
 end
 
 #! Folds a deferred node digest into the rolling deferred commitment using the existing
-#! `log_precompile` commitment state. The digest must reference a node that will reduce to TRUE
+#! the rolling deferred root using `log_precompile`. The digest must reference a node that will reduce to TRUE
 #! under the installed precompiles.
 #!
 #! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees

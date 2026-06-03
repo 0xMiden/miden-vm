@@ -74,7 +74,8 @@ Completed:
   `From<&PrecompilesLibrary> for HostLibrary`.
 - Added an empty `registry() -> PrecompileRegistry`.
 - Duplicated deferred MASM helpers under `miden::precompiles::sys`:
-  `register_expr`, `register_chunk`, `log_node_digest`, and `log_precompile_request`.
+  `register_expr`, `register_data`, `log_node_digest`, and the legacy request-list helper
+  `log_precompile_request`.
 - Added focused package smoke tests for deserialization, exported paths, dynamic linking, and host
   loading.
 
