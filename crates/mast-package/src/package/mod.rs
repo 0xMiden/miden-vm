@@ -1048,8 +1048,8 @@ mod tests {
     use miden_core::{
         advice::AdviceMap,
         mast::{
-            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
-            MastNodeId, SplitNodeBuilder,
+            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
+            MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
         },
         operations::Operation,
         serde::Serializable,
@@ -1633,5 +1633,131 @@ mod tests {
         let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
         assert_eq!(executable.get_procedure_root_by_path(&main_path), Some(digest));
         assert_eq!(executable.get_procedure_node_by_path(&main_path), Some(node_id));
+    }
+
+    #[test]
+    fn merge_source_debug_keeps_concrete_metadata_distinct_from_external_placeholder() {
+        fn debug_info_for_root(root: MastNodeId, context: &str) -> PackageDebugInfo {
+            let source_node = DebugSourceMastNodeId::from(0);
+            PackageDebugInfo {
+                source_graph: Some(DebugSourceGraphSection {
+                    version: DEBUG_SOURCE_GRAPH_VERSION,
+                    nodes: vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+                    roots: vec![source_node],
+                }),
+                source_map: Some(DebugSourceMapSection {
+                    asm_ops: vec![DebugSourceAsmOp::new(
+                        source_node,
+                        0,
+                        None,
+                        context.into(),
+                        "add".into(),
+                        1,
+                    )],
+                    ..DebugSourceMapSection::new()
+                }),
+                ..PackageDebugInfo::default()
+            }
+        }
+
+        let mut concrete_forest = MastForest::new();
+        let concrete_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut concrete_forest)
+            .unwrap();
+        concrete_forest.make_root(concrete_root);
+        let concrete_digest = concrete_forest[concrete_root].digest();
+
+        let mut placeholder_forest = MastForest::new();
+        let placeholder_root = ExternalNodeBuilder::new(concrete_digest)
+            .add_to_forest(&mut placeholder_forest)
+            .unwrap();
+        placeholder_forest.make_root(placeholder_root);
+
+        let placeholder_debug = debug_info_for_root(placeholder_root, "placeholder");
+        let concrete_debug = debug_info_for_root(concrete_root, "concrete");
+
+        let (_merged_forest, root_map) =
+            MastForest::merge([&placeholder_forest, &concrete_forest]).unwrap();
+        let merged_placeholder = root_map.map_root(0, &placeholder_root).unwrap();
+        let merged_concrete = root_map.map_root(1, &concrete_root).unwrap();
+        assert_eq!(merged_placeholder, merged_concrete);
+
+        let merged_debug = PackageDebugInfo::merge_source_debug(
+            [(0, &placeholder_debug), (1, &concrete_debug)],
+            &root_map,
+        )
+        .unwrap();
+        let source_graph = merged_debug.source_graph.as_ref().unwrap();
+        assert_eq!(source_graph.nodes.len(), 2);
+        assert!(source_graph.nodes.iter().all(|node| node.exec_node == merged_concrete));
+
+        let placeholder_source = source_graph.roots[0];
+        let concrete_source = source_graph.roots[1];
+        assert_ne!(placeholder_source, concrete_source);
+        assert_eq!(
+            merged_debug
+                .first_asm_op_for_source_node(placeholder_source)
+                .unwrap()
+                .context_name,
+            "placeholder",
+        );
+        assert_eq!(
+            merged_debug.first_asm_op_for_source_node(concrete_source).unwrap().context_name,
+            "concrete",
+        );
+    }
+
+    #[test]
+    fn make_executable_same_digest_selection_is_export_order_independent() {
+        fn selected_context_for_alias_b(exports: &[(&str, &str)]) -> String {
+            let (mast, exports, sections) = build_same_digest_package_exports(exports);
+            let mut package = Package::create(
+                PackageId::from("app"),
+                Version::new(1, 0, 0),
+                TargetType::Library,
+                mast,
+                exports,
+                None,
+            )
+            .expect("package should be valid");
+            package.sections = sections;
+
+            let executable = package
+                .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
+                .unwrap();
+            let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+            let main_export = executable
+                .manifest
+                .get_export(&main_path)
+                .and_then(PackageExport::as_procedure)
+                .expect("main export should exist");
+            let source_node =
+                main_export.source_node.expect("main export should retain source node");
+            let debug_info = executable
+                .debug_info()
+                .expect("debug sections should decode")
+                .expect("debug sections should be present");
+
+            debug_info
+                .first_asm_op_for_source_node(source_node)
+                .unwrap()
+                .context_name
+                .clone()
+        }
+
+        assert_eq!(
+            selected_context_for_alias_b(&[
+                ("app::alias_a", "alias_a"),
+                ("app::alias_b", "alias_b")
+            ]),
+            "alias_b",
+        );
+        assert_eq!(
+            selected_context_for_alias_b(&[
+                ("app::alias_b", "alias_b"),
+                ("app::alias_a", "alias_a")
+            ]),
+            "alias_b",
+        );
     }
 }
