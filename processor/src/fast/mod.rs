@@ -19,7 +19,6 @@ use crate::{
 };
 
 mod basic_block;
-mod call_and_dyn;
 mod execution_api;
 mod external;
 mod memory;
@@ -90,8 +89,8 @@ const STACK_BUFFER_BASE_IDX: usize = INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH;
 ///       bottom is 15 elements away from the bottom boundary, then we can safely execute 10
 ///       operations that modify the stack depth with no bounds check.
 /// - When switching contexts (e.g., during a call or syscall), all elements past the first 16 are
-///   stored in an `ExecutionContextInfo` struct, and the stack is truncated to 16 elements. This
-///   will be restored when returning from the call or syscall.
+///   stored in `stack_overflow_save_stack`, and the stack is truncated to 16 elements. They will be
+///   restored when returning from the call or syscall.
 ///
 /// # Clock Cycle Management
 /// - The clock cycle (`clk`) is managed in the same way as in `Process`. That is, it is incremented
@@ -114,7 +113,7 @@ pub struct FastProcessor {
     ctx: ContextId,
 
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
-    /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
+    /// ZERO]` if we are in the first context (i.e. when `system_call_state_stack` is empty).
     caller_hash: Word,
 
     /// The advice provider to be used during execution.
@@ -123,10 +122,15 @@ pub struct FastProcessor {
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
-    /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
-    /// `dyncall`) to keep track of the information needed to return to the previous context upon
-    /// return. It is a stack since calls can be nested.
-    call_stack: Vec<ExecutionContextInfo>,
+    /// Stack of saved system state, used when starting a new execution context (from a `call`,
+    /// `syscall` or `dyncall`) to keep track of the previous `(ctx, caller_hash)` upon return.
+    /// Pushed in lockstep with `stack_overflow_save_stack`.
+    system_call_state_stack: Vec<SystemCallState>,
+
+    /// Stack of saved operand-stack overflows, used when starting a new execution context to keep
+    /// the elements that lived past the top 16 of the previous context. Pushed in lockstep with
+    /// `system_call_state_stack`.
+    stack_overflow_save_stack: Vec<Vec<Felt>>,
 
     /// Options for execution, including cycle limits, stack limits, advice map limits, and the
     /// size of core trace fragments during execution.
@@ -261,7 +265,8 @@ impl FastProcessor {
             ctx: 0_u32.into(),
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
-            call_stack: Vec::new(),
+            system_call_state_stack: Vec::new(),
+            stack_overflow_save_stack: Vec::new(),
             options,
             pc_transcript: PrecompileTranscript::new(),
         })
@@ -603,20 +608,17 @@ pub struct ExecutionOutput {
     pub final_precompile_transcript: PrecompileTranscript,
 }
 
-// EXECUTION CONTEXT INFO
+// SYSTEM CALL STATE
 // ===============================================================================================
 
-/// Information about the execution context.
+/// The system-state half of a saved execution context.
 ///
-/// This struct is used to keep track of the information needed to return to the previous context
-/// upon return from a `call`, `syscall` or `dyncall`.
+/// Used to keep track of the `(ctx, caller_hash)` pair that needs to be restored upon return from a
+/// `call`, `syscall` or `dyncall`.
 #[derive(Debug)]
-struct ExecutionContextInfo {
-    /// This stores all the elements on the stack at the call site, excluding the top 16 elements.
-    /// This corresponds to the overflow table in [crate::Process].
-    overflow_stack: Vec<Felt>,
-    ctx: ContextId,
-    fn_hash: Word,
+pub(super) struct SystemCallState {
+    pub ctx: ContextId,
+    pub caller_hash: Word,
 }
 
 // NOOP TRACER

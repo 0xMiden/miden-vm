@@ -13,7 +13,11 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, operation::OperationError};
+use crate::{
+    AdviceInputs, DefaultHost,
+    operation::OperationError,
+    processor::{StackInterface, SystemInterface},
+};
 
 mod advice_provider;
 mod all_ops;
@@ -624,17 +628,20 @@ fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
             .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
-    processor.call_stack.push(ExecutionContextInfo {
-        overflow_stack: vec![Felt::from_u32(42); caller_overflow_len],
+    processor
+        .stack_overflow_save_stack
+        .push(vec![Felt::from_u32(42); caller_overflow_len]);
+    processor.system_call_state_stack.push(SystemCallState {
         ctx: processor.ctx,
-        fn_hash: processor.caller_hash,
+        caller_hash: processor.caller_hash,
     });
 
     // The active callee context is still at the minimum stack depth and the storage has not grown.
     // Restoring this suspended caller is what requires moving the active stack and growing storage.
-    processor
-        .restore_context()
+    StackInterface::restore_context(&mut processor)
         .expect("restoring a suspended caller should grow the stack buffer when needed");
+    SystemInterface::restore_call_state(&mut processor)
+        .expect("restoring system call state should succeed");
     assert!(
         processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
         "context restore should have grown the stack buffer"
