@@ -838,6 +838,76 @@ fn mast_forest_serialize_deserialize_omits_legacy_debug_info() {
     assert_eq!(forest, deserialized);
 }
 
+fn serialized_single_block_forest() -> Vec<u8> {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+    forest.to_bytes()
+}
+
+fn clear_stripped_flag(bytes: &mut [u8]) {
+    let flags_offset = MAGIC.len();
+    bytes[flags_offset] &= !FLAG_STRIPPED;
+}
+
+#[test]
+fn mast_forest_deserializers_reject_legacy_debug_bearing_payloads() {
+    let mut bytes = serialized_single_block_forest();
+    clear_stripped_flag(&mut bytes);
+    bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+    let trusted = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        trusted,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("legacy DebugInfo") && msg.contains("Package debug sections")
+    );
+
+    let materialized_view =
+        MastForest::read_view_from_bytes(&bytes, MastForestReadMode::Materialized);
+    assert_matches!(
+        materialized_view,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("legacy DebugInfo") && msg.contains("Package debug sections")
+    );
+
+    let wire_backed_view = MastForest::read_view_from_bytes(&bytes, MastForestReadMode::WireBacked);
+    assert_matches!(
+        wire_backed_view,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("legacy DebugInfo") && msg.contains("Package debug sections")
+    );
+
+    let wire_view = MastForestWireView::new(&bytes);
+    assert_matches!(
+        wire_view,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("legacy DebugInfo") && msg.contains("Package debug sections")
+    );
+
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        untrusted,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("legacy DebugInfo") && msg.contains("Package debug sections")
+    );
+}
+
+#[test]
+fn mast_forest_wire_view_rejects_trailing_bytes_after_stripped_payload() {
+    let mut bytes = serialized_single_block_forest();
+    bytes.extend_from_slice(&[1, 2, 3]);
+
+    let result = MastForestWireView::new(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("extra bytes after stripped MastForest payload")
+    );
+}
+
 // OPBATCH PRESERVATION TESTS
 // ================================================================================================
 
