@@ -26,7 +26,7 @@ pub fn log_and_verify(
     predicate: Node,
 ) {
     let stmt_digest = state.register(predicate).unwrap();
-    let root = state.append_statement(stmt_digest).unwrap();
+    let root = state.log_statement(stmt_digest).unwrap();
     assert_ne!(root, miden_core::deferred::TRUE_DIGEST);
     assert_round_trips(state, registry);
 }

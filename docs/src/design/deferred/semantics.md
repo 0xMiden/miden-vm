@@ -24,7 +24,7 @@ pub struct DeferredState {
 ## Vocabulary
 
 - **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
-  through `DeferredState::register`, evaluation storing canonical/helper nodes, `append_statement`
+  through `DeferredState::register`, evaluation storing canonical/helper nodes, `log_statement`
   storing framework `AND` nodes, or wire rehydration rebuilding entries.
 - **Evaluated** means a registered input digest has an evaluation memo:
   `evals[input_digest] = canonical_digest`. The canonical node is stored in `nodes`.
@@ -104,12 +104,15 @@ owning `Precompile` with a `DeferredContext` for resolving children and register
 
 ## Transcript and wire
 
-`root` starts at `TRUE_DIGEST`. `append_statement(registry, stmt_digest)` evaluates the statement
-and requires it to evaluate to `Node::TRUE`, then appends one framework `AND` node:
+`root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
+statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node:
 
 ```text
 next_root = digest(Node::and(previous_root, stmt_digest))
 ```
+
+`log_verified_statement(stmt_digest, expected_new_root)` performs the same logging and rejects the
+transition if the resulting root does not match `expected_new_root`.
 
 `to_wire` serializes only the root-reachable closure in canonical child-first order. The wire root
 is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the final entry.
@@ -128,7 +131,8 @@ The preferred public `DeferredState` surface is small:
 - `root()`
 - `register(registry, node)`
 - `evaluate(registry, digest)`
-- `append_statement(registry, stmt_digest)`
+- `log_statement(stmt_digest)`
+- `log_verified_statement(stmt_digest, expected_new_root)`
 - `to_wire(registry)`
 - `from_wire(wire, registry, max_elements)`
 

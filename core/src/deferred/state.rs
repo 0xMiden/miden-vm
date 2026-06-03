@@ -169,26 +169,57 @@ impl DeferredState {
         }
     }
 
-    /// Returns the current transcript root; [`super::TRUE_DIGEST`] means no statements are logged.
+    /// Returns the current deferred root; [`super::TRUE_DIGEST`] means no statements are logged.
     pub fn root(&self) -> Digest {
         self.root
     }
 
-    /// Appends a statement commitment to the transcript after proving it evaluates to TRUE.
+    /// Logs a statement commitment after proving the current root and statement evaluate to TRUE.
     ///
     /// The statement digest must already be registered (present in `nodes`), unless it is the
-    /// implicit [`TRUE_DIGEST`]. The statement is accepted only if its canonical result is TRUE.
-    pub fn append_statement(&mut self, stmt_digest: Digest) -> Result<Digest, PrecompileError> {
-        let canonical = self.evaluate(stmt_digest)?;
+    /// implicit [`TRUE_DIGEST`]. On success, this inserts the framework AND node, advances the
+    /// deferred root, memoizes the new root as TRUE, and returns the new root.
+    pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
+        let prev_root = self.root;
+
+        let current_root = self.evaluate(prev_root)?;
+        if !current_root.is_true_node() {
+            return Err(PrecompileError::AssertionFailed);
+        }
+
+        let canonical = self.evaluate(statement_digest)?;
         if !canonical.is_true_node() {
             return Err(PrecompileError::AssertionFailed);
         }
 
-        let and_node = Node::and(self.root, stmt_digest);
+        let and_node = Node::and(prev_root, statement_digest);
         let new_root = and_node.digest();
         self.insert_node(and_node)?;
         self.root = new_root;
+        self.record_eval(new_root, Node::TRUE)?;
         Ok(new_root)
+    }
+
+    /// Logs a statement and checks the resulting root against an externally computed root.
+    ///
+    /// This is the root-transition verification path for callers such as processor opcodes that
+    /// compute the deferred-root transition outside the framework and need to bind it to
+    /// `DeferredState`'s current root.
+    pub fn log_verified_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Digest,
+    ) -> Result<Digest, PrecompileError> {
+        let actual_new_root = self.log_statement(statement_digest)?;
+        if actual_new_root != expected_new_root {
+            return Err(DeferredError::InvalidDeferredRootTransition {
+                expected: expected_new_root,
+                actual: actual_new_root,
+            }
+            .into());
+        }
+
+        Ok(actual_new_root)
     }
 
     /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
@@ -415,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn append_statement_advances_root_with_and_node() {
+    fn log_statement_advances_root_with_and_node() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let a = state.register(test_value(7)).unwrap();
@@ -423,31 +454,49 @@ mod tests {
         let stmt_digest = state.register(pred).unwrap();
 
         let expected = Node::and(TRUE_DIGEST, stmt_digest).digest();
-        let actual = state.append_statement(stmt_digest).unwrap();
+        let actual = state.log_statement(stmt_digest).unwrap();
         assert_eq!(actual, expected);
         assert_ne!(expected, TRUE_DIGEST);
         assert_eq!(state.root(), expected);
         assert!(state.nodes.contains_key(&expected));
         assert_eq!(state.nodes.get(&expected).unwrap().tag(), Tag::AND);
+        assert_eq!(state.evals.get(&expected), Some(&TRUE_DIGEST));
+        assert_eq!(state.evaluate(expected).unwrap(), Node::TRUE);
     }
 
     #[test]
-    fn append_statement_rejects_missing_statement() {
+    fn log_statement_rejects_invalid_transitions() {
         let registry = precompiles();
+
         let mut state = state_with(&registry, usize::MAX);
-        let err = state.append_statement(dummy_digest(7));
+        let err = state.log_statement(dummy_digest(7));
         assert!(matches!(err.unwrap_err().root(), PrecompileError::MissingNode));
         assert_eq!(state.root(), TRUE_DIGEST);
-    }
 
-    #[test]
-    fn append_statement_rejects_statement_that_is_not_true() {
-        let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let value_digest = state.register(test_value(7)).unwrap();
-        let err = state.append_statement(value_digest);
+        let err = state.log_statement(value_digest);
         assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
         assert_eq!(state.root(), TRUE_DIGEST);
+
+        let mut state = state_with(&registry, usize::MAX);
+        state.root = state.register(test_value(7)).unwrap();
+        let err = state.log_statement(TRUE_DIGEST);
+        assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
+
+        let mut state = state_with(&registry, usize::MAX);
+        let a = state.register(test_value(7)).unwrap();
+        let stmt_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
+        let actual = Node::and(TRUE_DIGEST, stmt_digest).digest();
+        let expected = dummy_digest(99);
+        let err = state.log_verified_statement(stmt_digest, expected).unwrap_err();
+        assert!(matches!(
+            err.root(),
+            PrecompileError::Other(DeferredError::InvalidDeferredRootTransition {
+                expected: got_expected,
+                actual: got_actual,
+            }) if *got_expected == expected && *got_actual == actual
+        ));
     }
 
     #[test]
@@ -732,7 +781,7 @@ mod tests {
         let mul = state.register(Node::join(Uint::mul_tag(), add, c).unwrap()).unwrap();
         let assertion = Node::join(Uint::eq_tag(), mul, expected).unwrap();
         let stmt_digest = state.register(assertion).unwrap();
-        state.append_statement(stmt_digest).unwrap();
+        state.log_statement(stmt_digest).unwrap();
         state
     }
 
@@ -865,7 +914,7 @@ mod tests {
     fn rehydrate_accepts_logged_empty_transcript_root() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let new_root = state.append_statement(TRUE_DIGEST).unwrap();
+        let new_root = state.log_statement(TRUE_DIGEST).unwrap();
         assert_ne!(new_root, TRUE_DIGEST);
         assert_eq!(state.nodes.get(&new_root).unwrap().tag(), Tag::AND);
 
@@ -885,7 +934,7 @@ mod tests {
         let pred_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
 
         let inner_root = state.register(Node::and(TRUE_DIGEST, pred_digest)).unwrap();
-        let outer_root = state.append_statement(inner_root).unwrap();
+        let outer_root = state.log_statement(inner_root).unwrap();
 
         let wire = state.to_wire().unwrap();
         let rehydrated =
@@ -926,7 +975,7 @@ mod tests {
         let _orphan = state.register(test_value(99)).unwrap();
         let a = state.register(test_value(7)).unwrap();
         let stmt_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
-        let new_root = state.append_statement(stmt_digest).unwrap();
+        let new_root = state.log_statement(stmt_digest).unwrap();
         assert_round_trips(&state, &registry);
 
         let wire = state.to_wire().unwrap();
