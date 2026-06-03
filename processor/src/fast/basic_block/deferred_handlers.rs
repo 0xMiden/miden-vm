@@ -31,9 +31,8 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler looks it up by digest, evaluates it via the precompile registry, stores the canonical
-// node in `DeferredState.nodes`, and pushes the canonical's `Node::to_felts()` onto the advice
-// stack.
+// handler calls `DeferredState::evaluate` by digest and pushes the canonical's `Node::to_felts()`
+// onto the advice stack.
 
 /// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -61,13 +60,13 @@ fn data_node_num_elements(n_chunks: u32) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// Handles stack-resident registration of a one-block deferred node.
+/// Stack-resident registration of a one-block deferred node.
 ///
 /// The tag decodes to either a `Data(1)` value or a join over the eight payload felts; TRUE and
-/// multi-chunk data tags are rejected (bulk data uses `adv.register_deferred_data`). The event only
-/// registers the node; predicate truth is checked later by evaluation or transcript rehydration.
-/// The MASM wrapper binds the digest in-circuit, so the host cannot supply an unconstrained
-/// commitment through advice.
+/// multi-chunk data tags are rejected (bulk data uses `adv.register_deferred_data`). Registration
+/// is eager: semantic failures, including false predicates, surface immediately. The MASM wrapper
+/// binds the original digest in-circuit, so the host cannot supply an unconstrained commitment
+/// through advice.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -94,10 +93,10 @@ pub(super) fn handle_deferred_register(
 
 /// Handles deferred-node evaluation and returns the canonical node as advice.
 ///
-/// The digest must already be registered in deferred state; memo hits are allowed only after that
-/// membership check. The advice output is [`Node::to_felts`] (`tag || payload`) and is
-/// intentionally unbound: callers that depend on it must re-hash it in-circuit and log a predicate
-/// that rehydration will verify. The canonical TRUE node emits only its four tag felts.
+/// The digest must already be registered in deferred state. The advice output is
+/// [`Node::to_felts`] (`tag || payload`) and is intentionally unbound: callers that depend on it
+/// must re-hash it in-circuit and log a predicate that rehydration will verify. The canonical TRUE
+/// node emits only its four tag felts.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -119,7 +118,8 @@ pub(super) fn handle_deferred_evaluate(
 /// The tag, not the stack, is the source of truth for the data chunk count. Only `Data(n)` tags are
 /// valid here; TRUE and joins are rejected. The same memory range is hashed by the MASM wrapper
 /// in-circuit, binding the commitment to memory contents while this handler enforces alignment,
-/// bounds, and bulk-data limits.
+/// bounds, and bulk-data limits. Semantic evaluation and final budget checks are delegated to
+/// `DeferredState::register`, so registration failures surface during this event.
 pub(super) fn handle_deferred_register_data(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -227,7 +227,7 @@ mod tests {
         let chunks = vec![core::array::from_fn(|i| Felt::from_u32(1 + i as u32))];
         let tag = Hash::preimage_tag(Hash::BYTES_PER_CHUNK);
         let ptr = 0;
-        let exact_budget = data_node_num_elements(chunks.len() as u32);
+        let exact_budget = data_node_num_elements(chunks.len() as u32) + data_node_num_elements(1);
         let precompiles = test_precompiles();
         let mut processor = processor_with_budget(exact_budget);
         bind_precompiles(&mut processor, precompiles);

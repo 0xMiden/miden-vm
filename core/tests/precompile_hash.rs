@@ -37,7 +37,7 @@ fn preimage_evaluates_to_known_digest_and_eq_predicate_passes() {
     let h_expected = state.register(expected_digest.clone()).unwrap();
     let h_preimage = state.register(Hash::preimage_node(64, preimage_chunks)).unwrap();
 
-    // Evaluating the preimage produces the digest value.
+    // Eager registration memoizes the preimage's digest value; evaluating by digest returns it.
     let canonical = state.evaluate(h_preimage).unwrap();
     assert_eq!(canonical, expected_digest);
 
@@ -101,7 +101,6 @@ fn eq_predicate_errors_on_mismatch() {
     let wrong = Hash::digest_node([Felt::from_u32(0xdead); 8]);
     let h_wrong = state.register(wrong).unwrap();
     let h_preimage = state.register(Hash::preimage_node(32, data)).unwrap();
-    let eq_digest = state.register(Hash::eq_node(h_preimage, h_wrong)).unwrap();
-    let err = state.evaluate(eq_digest);
+    let err = state.register(Hash::eq_node(h_preimage, h_wrong));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }

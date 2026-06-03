@@ -177,8 +177,7 @@ impl DeferredState {
     /// Appends a statement commitment to the transcript after proving it evaluates to TRUE.
     ///
     /// The statement digest must already be registered (present in `nodes`), unless it is the
-    /// implicit [`TRUE_DIGEST`]. Evaluation may populate the registry-bound eval cache and store
-    /// canonical/helper nodes in `nodes`.
+    /// implicit [`TRUE_DIGEST`]. The statement is accepted only if its canonical result is TRUE.
     pub fn append_statement(&mut self, stmt_digest: Digest) -> Result<Digest, PrecompileError> {
         let canonical = self.evaluate(stmt_digest)?;
         if !canonical.is_true_node() {
@@ -192,14 +191,19 @@ impl DeferredState {
         Ok(new_root)
     }
 
-    /// Registers a `PrecompileRegistry`-valid node in the DAG without evaluating it.
+    /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
     ///
-    /// Registration lets later nodes reference this digest and lets predicates be logged, but it
-    /// does not prove predicate truth. Verification happens only through evaluation or through
-    /// the rehydration check of a logged transcript.
+    /// Registration validates the node shape and child references, stores the original node under
+    /// its own digest, evaluates it under the current registry, stores the canonical result node,
+    /// preserves helper nodes registered during evaluation, and records the evaluation memo from
+    /// original digest to canonical digest. The returned digest is always the original node digest.
+    /// If evaluation fails, registration returns that error immediately. Re-registering an
+    /// identical successfully registered node is idempotent and budget-free.
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         self.validate_node_for_insertion(&node)?;
-        self.insert_node(node)
+        let digest = self.insert_node(node)?;
+        self.evaluate(digest)?;
+        Ok(digest)
     }
 
     fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
@@ -327,10 +331,10 @@ impl<'a> DeferredContext<'a> {
         self.state.evaluate(digest)
     }
 
-    /// Registers a freshly minted helper node and returns its digest.
+    /// Registers a freshly minted helper node and returns its original digest.
     ///
     /// Use this when a compound canonical needs stable child commitments that were created during
-    /// evaluation.
+    /// evaluation. Helper registration follows the same eager semantics as ordinary registration.
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         self.state.register(node)
     }
@@ -523,20 +527,39 @@ mod tests {
     }
 
     #[test]
-    fn data_nodes_decrement_remaining_budget_by_payload_length() {
+    fn data_registration_charges_original_and_canonical_nodes() {
         let registry = hash_precompiles();
         let chunks = alloc::vec![[Felt::from_u32(1); 8], [Felt::from_u32(2); 8]];
+        let canonical = Hash::digest_node(Hash::hash(&chunks));
         let node = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks);
-        let expected_elements = node.storage_felt_len();
+        let expected_elements = node.storage_felt_len() + canonical.storage_felt_len();
         let mut state = state_with(&registry, expected_elements);
 
         let digest = state.register(node.clone()).unwrap();
         assert_eq!(digest, node.digest());
-        assert_eq!(expected_elements, 20);
+        assert_eq!(node.storage_felt_len(), 20);
+        assert_eq!(canonical.storage_felt_len(), 12);
+        assert_eq!(state.eval(&digest), Some(canonical.digest()));
         assert_eq!(state.remaining_elements, 0);
 
         state.register(node).unwrap();
         assert_eq!(state.remaining_elements, 0, "idempotent re-registration is free");
+    }
+
+    #[test]
+    fn registration_enforces_budget_for_distinct_canonical_result() {
+        let registry = hash_precompiles();
+        let chunks = alloc::vec![[Felt::from_u32(1); 8], [Felt::from_u32(2); 8]];
+        let canonical = Hash::digest_node(Hash::hash(&chunks));
+        let node = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks);
+        let mut state = state_with(&registry, node.storage_felt_len());
+
+        let err = state.register(node).unwrap_err();
+        assert!(matches!(
+            err.root(),
+            PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max })
+                if *num_elements == canonical.storage_felt_len() && *max == 0
+        ));
     }
 
     #[test]
@@ -563,65 +586,49 @@ mod tests {
     }
 
     #[test]
-    fn register_predicate_does_not_verify_eagerly() {
-        // `register` is a pure host hint — it stores the predicate node in `nodes` without
-        // evaluating. Programs that want host-side verification call `evaluate`; programs
-        // that want constrained verification call checked append.
+    fn register_predicate_rejects_mismatch_eagerly() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let a = state.register(test_value(3)).unwrap();
         let b = state.register(test_value(4)).unwrap();
-        // A mismatched predicate — would fail if eagerly verified.
+
         let bad = Node::join(Uint::eq_tag(), a, b).unwrap();
-        let bad_digest = state.register(bad).unwrap();
-        assert!(
-            state.nodes.contains_key(&bad_digest),
-            "predicate is present in nodes even when it doesn't hold"
-        );
-        // Verification surfaces the mismatch only when explicitly invoked.
-        let err = state.evaluate(bad_digest);
-        assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
+        let err = state.register(bad).unwrap_err();
+
+        assert!(matches!(err.root(), PrecompileError::AssertionFailed));
     }
 
     #[test]
-    fn evaluate_predicate_reports_success_and_child_failures() {
+    fn evaluate_predicate_reports_success() {
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let a = state.register(test_value(7)).unwrap();
-        let b = state.register(test_value(8)).unwrap();
 
         let ok_digest = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
         let ok = state.evaluate(ok_digest).unwrap();
         assert!(ok.is_true_node(), "predicate success returns the canonical TRUE node");
-
-        let mismatch_digest = state.register(Node::join(Uint::eq_tag(), a, b).unwrap()).unwrap();
-        let mismatch = state.evaluate(mismatch_digest);
-        assert!(matches!(mismatch.unwrap_err().root(), PrecompileError::AssertionFailed));
-
-        let dangling = Word::new([Felt::from_u32(0xdead); 4]);
-        let missing = state.register(Node::join(Uint::eq_tag(), a, dangling).unwrap());
-        assert!(matches!(missing.unwrap_err().root(), PrecompileError::MissingNode));
     }
 
     #[test]
-    fn register_then_evaluate_stores_canonical_in_nodes() {
-        // Build (a+b)*c, pre-register only the leaves and `add`. The outer `mul` is explicitly
-        // registered before digest-addressed evaluation, and its canonical is stored in `nodes`.
+    fn register_eagerly_stores_canonical_in_nodes() {
+        // Build (a+b)*c. Registering the outer `mul` returns the original op digest, but eager
+        // registration has already stored and memoized the canonical value.
         let registry = precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let a = state.register(test_value(3)).unwrap();
         let b = state.register(test_value(4)).unwrap();
         let c = state.register(test_value(5)).unwrap();
         let add = Node::join(Uint::add_tag(), a, b).unwrap();
-        let add_digest = state.register(add).unwrap();
+        let add_digest = state.register(add.clone()).unwrap();
         let mul = Node::join(Uint::mul_tag(), add_digest, c).unwrap();
-        let mul_digest = state.register(mul).unwrap();
+        let mul_digest = state.register(mul.clone()).unwrap();
 
-        let canonical = state.evaluate(mul_digest).unwrap();
-        assert_eq!(canonical, test_value(35));
+        assert_eq!(add_digest, add.digest(), "register returns the original add digest");
+        assert_eq!(mul_digest, mul.digest(), "register returns the original mul digest");
+        assert_eq!(state.eval(&mul_digest), Some(test_value(35).digest()));
         assert!(
             state.nodes.contains_key(&mul_digest),
-            "input op is registered before evaluation"
+            "input op is stored under its original digest"
         );
         assert!(
             state.nodes.contains_key(&test_value(35).digest()),

@@ -129,12 +129,13 @@ precompile-owned wrapper.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers a one-block node — a `Data(1)` value or a join over the eight payload felts. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, and registers the `Data(n)` node. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
-| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it, stores the canonical node in `DeferredState.nodes`, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers a one-block node — a `Data(1)` value or a join over the eight payload felts — then evaluates it immediately. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, registers the `Data(n)` node, and evaluates it immediately. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
+| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
 
-`register_*` validate the tag's shape and, for join-shaped nodes, child closure; they do not
-evaluate the node. They are pure host hints that populate the DAG.
+`register_*` validate the tag's shape and, for join-shaped nodes, child closure. They store the
+original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
+fails.
 
 ### Why the digest is computed in-circuit
 

@@ -44,8 +44,9 @@ pub struct DeferredState {
 - Re-registering identical content is idempotent and free.
 - Reusing an existing digest for different content is rejected as a conflicting node.
 
-Registration stores and shape-checks a node in `nodes`. It does not evaluate operations or prove
-predicates; false predicates fail only when evaluated or logged as statements.
+Registration stores and shape-checks a node in `nodes`, evaluates it immediately, stores the
+canonical result, and records the evaluation memo. False predicates and other semantic evaluation
+failures are reported by registration.
 
 ## One remaining budget
 
@@ -132,7 +133,8 @@ The preferred public `DeferredState` surface is small:
 - `from_wire(wire, registry, max_elements)`
 
 Raw node access and direct root mutation remain private or crate-private. Callers that have a
-concrete node should explicitly `register` it and then `evaluate` the returned digest.
+concrete node should explicitly `register` it; they may call `evaluate` on the returned digest when
+they need the canonical form.
 
 ## Scope note
 

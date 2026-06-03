@@ -64,15 +64,6 @@ fn emit_register(src: &mut String, node: Node) {
     }
 }
 
-/// Emits MASM that evaluates an already-registered node for its side effects.
-fn emit_evaluate_for_side_effect(src: &mut String, node: Node) {
-    push_digest(src, node.digest());
-    src.push_str("    adv.evaluate_deferred\n");
-    for _ in 0..4 {
-        src.push_str("    drop\n");
-    }
-}
-
 /// Pushes a digest in VM stack order.
 fn push_digest(src: &mut String, digest: miden_core::Word) {
     use core::fmt::Write;
@@ -190,9 +181,9 @@ fn deferred_evaluate_returns_canonical_value_on_advice() {
 
 #[test]
 fn deferred_evaluate_returns_true_node_for_predicate() {
-    // Register one value, build a self-equal predicate (a == a), evaluate it. The predicate must
-    // verify successfully, and its canonical (the TRUE node) is returned on the advice stack as
-    // only its 4-felt tag — TRUE has no payload.
+    // Register one value, then a self-equal predicate (a == a). Registration verifies it eagerly;
+    // `adv.evaluate_deferred` then returns the memoized canonical TRUE node as only its 4-felt tag
+    // — TRUE has no payload.
     let a = arith_value(7);
     let a_eq_a = Node::join(Uint::eq_tag(), a.digest(), a.digest()).unwrap();
 
@@ -248,8 +239,7 @@ fn deferred_evaluate_true_digest_returns_exactly_true_tag() {
     assert_eq!(output.advice.stack(), Vec::<Felt>::new(), "TRUE evaluation must push one word");
 }
 
-// E2E: a predicate is just a host hint — `adv.register_deferred` does NOT verify it. The
-// mismatch only surfaces when the program explicitly evaluates the predicate.
+// E2E: eager registration rejects over-budget nodes and false predicates.
 // ================================================================================================
 
 #[test]
@@ -277,29 +267,7 @@ fn deferred_register_over_deferred_budget_is_rejected() {
 }
 
 #[test]
-fn deferred_register_predicate_does_not_verify() {
-    let a = arith_value(7);
-    let b = arith_value(8);
-    let mismatch = Node::join(Uint::eq_tag(), a.digest(), b.digest()).unwrap();
-
-    // Just register — execution must succeed because register is a pure host hint.
-    let mut src = String::from("begin\n");
-    emit_register(&mut src, a);
-    emit_register(&mut src, b);
-    emit_register(&mut src, mismatch.clone());
-    src.push_str("end\n");
-
-    let program = assemble_test_program(&src);
-    let mut host = DefaultHost::default();
-    let mut output = build_uint_processor()
-        .execute_sync(&program, &mut host)
-        .expect("register-only execution must succeed even with a bad predicate");
-    let err = output.deferred_state.evaluate(mismatch.digest()).unwrap_err();
-    assert!(matches!(err.root(), PrecompileError::AssertionFailed));
-}
-
-#[test]
-fn deferred_evaluate_predicate_mismatch_fails_execution() {
+fn deferred_register_predicate_mismatch_fails_execution() {
     let a = arith_value(7);
     let b = arith_value(8);
     let mismatch = Node::join(Uint::eq_tag(), a.digest(), b.digest()).unwrap();
@@ -307,15 +275,20 @@ fn deferred_evaluate_predicate_mismatch_fails_execution() {
     let mut src = String::from("begin\n");
     emit_register(&mut src, a);
     emit_register(&mut src, b);
-    emit_register(&mut src, mismatch.clone());
-    emit_evaluate_for_side_effect(&mut src, mismatch);
+    emit_register(&mut src, mismatch);
     src.push_str("end\n");
 
     let program = assemble_test_program(&src);
-
     let mut host = DefaultHost::default();
     let result = build_uint_processor().execute_sync(&program, &mut host);
-    assert!(result.is_err(), "evaluating a mismatched predicate must fail execution");
+
+    match result {
+        Err(ExecutionError::DeferredError { err, .. }) => {
+            assert!(matches!(err.root(), PrecompileError::AssertionFailed));
+        },
+        Err(err) => panic!("expected deferred assertion failure, got {err:?}"),
+        Ok(_) => panic!("registering a mismatched predicate must fail execution"),
+    }
 }
 
 // EQUIVALENCE: the in-circuit digest derivation reproduces `Node::digest` bit-for-bit.
@@ -510,6 +483,31 @@ fn data_register_over_deferred_budget_is_rejected() {
 }
 
 #[test]
+fn data_register_canonical_over_deferred_budget_is_rejected() {
+    let data_chunk_count = 2;
+    let tag = preimage_tag(data_chunk_count);
+
+    let mut src = String::from("begin\n");
+    emit_register_data(&mut src, tag, 0);
+    src.push_str("end\n");
+
+    let program = assemble_test_program(&src);
+    let mut host = DefaultHost::default();
+    let result = build_hash_processor_with_options(
+        ExecutionOptions::default().with_max_deferred_elements(4 + 8 * data_chunk_count as usize),
+    )
+    .execute_sync(&program, &mut host);
+
+    match result {
+        Err(ExecutionError::DeferredStateTooLarge { num_elements, max, .. }) => {
+            assert_eq!(num_elements, 12);
+            assert_eq!(max, 0);
+        },
+        other => panic!("expected DeferredStateTooLarge, got {other:?}"),
+    }
+}
+
+#[test]
 fn deferred_data_one_stack_and_memory_registration_are_equivalent() {
     use core::fmt::Write;
 
@@ -539,7 +537,6 @@ fn deferred_data_one_stack_and_memory_registration_are_equivalent() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    assert_eq!(output.deferred_state.node(&digest), Some(&node));
     assert_eq!(output.deferred_state.evaluate(digest).unwrap(), node);
 }
 
@@ -579,10 +576,11 @@ fn data_register_reads_bulk_data_from_memory_and_materializes_node() {
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
+    assert_eq!(output.deferred_state.node(&data_digest), Some(&data_node));
     let canonical = output.deferred_state.evaluate(data_digest).unwrap();
     assert_eq!(
         canonical, expected_canonical,
-        "data node must be stored with the bulk data read from memory",
+        "registered bulk data must evaluate to the hash digest of memory contents",
     );
 }
 

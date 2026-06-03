@@ -117,8 +117,7 @@ fn eq_predicate_errors_on_mismatch() {
     let (registry, mut state) = fresh();
     let h_g1 = register_group(&registry, &mut state, 7, 11);
     let h_g2 = register_group(&registry, &mut state, 7, 12);
-    let eq_digest = state.register(Group::eq_node(h_g1, h_g2)).unwrap();
-    let err = state.evaluate(eq_digest);
+    let err = state.register(Group::eq_node(h_g1, h_g2));
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
@@ -214,18 +213,16 @@ fn new_requires_coordinate_commitments_to_be_registered() {
 
 #[test]
 fn eq_predicate_commutes_over_minted_children() {
-    // Locks in that `DeferredContext::register` writes minted children to `state.nodes`. After
-    // `Group::Add` evaluates and mints x3=13 / y3=24, a separately-registered
+    // Locks in that `DeferredContext::register` writes minted children to `state.nodes`. When
+    // `Group::Add` is eagerly registered, it mints x3=13 / y3=24; a separately-registered
     // `val = Group::new(value(13).digest(), value(24).digest())` references those digests directly
     // without the values being explicitly registered. The eq predicate must succeed regardless
-    // of operand order — i.e. resolution must not depend on which side evaluates first.
+    // of operand order.
     let (registry, mut state) = fresh();
     let h_g1 = register_group(&registry, &mut state, 3, 4);
     let h_g2 = register_group(&registry, &mut state, 10, 20);
     let h_g_add = state.register(Group::add_node(h_g1, h_g2)).unwrap();
 
-    // Pre-evaluate g_add so its mints (value(13), value(24)) land in state.nodes.
-    state.evaluate(h_g_add).unwrap();
     let h_val = state.register(Group::new_node(value(13).digest(), value(24).digest())).unwrap();
     assert_eq!(state.evaluate(value(13).digest()).unwrap(), value(13));
     assert_eq!(state.evaluate(value(24).digest()).unwrap(), value(24));
@@ -242,14 +239,13 @@ fn eq_predicate_commutes_over_minted_children() {
 }
 
 #[test]
-fn evaluate_rejects_new_with_non_value_children() {
+fn register_rejects_new_with_non_value_children() {
     // Children resolve to canonical values but their tag is *not* the uint value tag, so new must
-    // reject.
+    // reject during eager registration.
     let (registry, mut state) = fresh();
     let h_g = register_group(&registry, &mut state, 1, 1);
     let h_y = state.register(value(2)).unwrap();
-    let bad_new = state.register(Group::new_node(h_g, h_y)).unwrap();
-    let err = state.evaluate(bad_new);
+    let err = state.register(Group::new_node(h_g, h_y));
     assert!(matches!(
         err.unwrap_err().root(),
         PrecompileError::Other(_) | PrecompileError::InvalidNode

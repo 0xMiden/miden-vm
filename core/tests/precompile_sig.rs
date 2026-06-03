@@ -44,8 +44,7 @@ fn verify_fails_for_zeroed_placeholder_sig() {
     let registry = Arc::new(PrecompileRegistry::default().with_precompile(Sig));
     let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
     let node = Sig::verify_node(three_chunks(ZERO));
-    let digest = state.register(node).unwrap();
-    let err = state.evaluate(digest);
+    let err = state.register(node);
     assert!(matches!(err.unwrap_err().root(), PrecompileError::AssertionFailed));
 }
 
