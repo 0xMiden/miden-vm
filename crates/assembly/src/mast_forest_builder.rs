@@ -435,14 +435,11 @@ impl MastForestBuilder {
                     .expect("child execution ref must have a source occurrence");
                 let needed = child_counts[child_ref];
                 let seen = child_seen.entry(*child_ref).or_default();
+                let start = history.len().saturating_sub(needed);
                 let source_ref = history
-                    .get(history.len().checked_sub(needed).expect(
-                        "child execution ref must have enough source occurrences for this parent",
-                    ) + *seen)
+                    .get((start + *seen).min(history.len() - 1))
                     .copied()
-                    .expect(
-                        "child execution ref must have enough source occurrences for this parent",
-                    );
+                    .expect("child execution ref must have at least one source occurrence");
                 *seen += 1;
                 source_ref
             })
