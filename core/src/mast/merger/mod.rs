@@ -257,7 +257,7 @@ impl MastForestMerger {
             // This takes O(n) where n is the number of roots in the merged forest every time to
             // check if the root already exists. As the number of roots is relatively low generally,
             // this should be okay.
-            self.mast_forest.make_root(new_root);
+            self.mast_forest.mark_root(new_root);
         }
     }
 

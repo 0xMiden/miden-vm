@@ -268,23 +268,27 @@ impl DebugInfo {
     ///
     /// This should be called after nodes are removed from the MastForest to ensure the asm_op
     /// storage still references valid node IDs.
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
     /// Remaps the op-indexed debug-variable storage to use new node IDs after nodes have been
     /// removed/reordered.
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(super) fn remap_debug_var_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
         self.op_debug_var_storage = self.op_debug_var_storage.remap_nodes(remapping);
     }
 
     /// Drops debug metadata entries that are no longer referenced by any retained node, and remaps
     /// node-indexed storage to the compacted metadata IDs.
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(super) fn compact_node_metadata(&mut self) {
         self.compact_asm_ops();
         self.compact_debug_vars();
     }
 
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn compact_asm_ops(&mut self) {
         if self.asm_ops.is_empty() {
             return;
@@ -329,6 +333,7 @@ impl DebugInfo {
         self.asm_op_storage = new_storage;
     }
 
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     fn compact_debug_vars(&mut self) {
         if self.debug_vars.is_empty() {
             return;
@@ -468,6 +473,7 @@ impl DebugInfo {
     }
 
     /// Retains only procedure names whose digest satisfies `keep_digest`.
+    #[cfg(any(test, feature = "arbitrary", feature = "testing"))]
     pub(super) fn retain_procedure_names(&mut self, mut keep_digest: impl FnMut(&Word) -> bool) {
         self.procedure_names.retain(|digest, _| keep_digest(digest));
     }
