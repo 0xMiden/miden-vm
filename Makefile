@@ -66,21 +66,21 @@ FEATURES_verifier        :=
 
 .PHONY: clippy
 clippy: ## Runs Clippy with configs (alias for xclippy)
-	cargo +nightly xclippy
+	cargo +stable xclippy
 
 
 .PHONY: xclippy
 xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
-	cargo +nightly xclippy
+	cargo +stable xclippy
 
 
 .PHONY: fix
 fix: ## Runs Fix with configs (alias for xclippy-fix)
-	cargo +nightly xclippy-fix
+	cargo +stable xclippy-fix
 
 .PHONY: xclippy-fix
 xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
-	cargo +nightly xclippy-fix
+	cargo +stable xclippy-fix
 
 
 .PHONY: format

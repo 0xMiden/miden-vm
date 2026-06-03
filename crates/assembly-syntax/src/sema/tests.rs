@@ -181,6 +181,21 @@ fn type_alias_with_name(name: &str) -> TypeAlias {
 }
 
 #[test]
+fn empty_enum_still_reports_type_name_conflicts() {
+    let context = SyntaxTestContext::default();
+    let source = "\
+type thing = felt
+enum thing: u8 {}
+";
+    let error = context
+        .parse_module(source)
+        .expect_err("expected symbol conflict when enum name matches existing type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert_symbol_conflict(&error, "thing");
+    assert!(rendered.contains("symbol conflict"));
+}
+
+#[test]
 fn repeat_count_zero_rejected_in_analysis() {
     let context = SyntaxTestContext::default();
     let error = context
