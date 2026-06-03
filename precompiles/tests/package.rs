@@ -1,8 +1,18 @@
 //! Focused smoke tests for the `miden-precompiles` package and its `PrecompilesLibrary` wrapper.
 
 use miden_assembly::{Assembler, Linkage};
-use miden_core::{Felt, serde::Deserializable, utils::bytes_to_packed_u32_elements};
-use miden_crypto::hash::{keccak::Keccak256, sha2::Sha512};
+use miden_core::{
+    Felt, Word,
+    serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
+};
+use miden_crypto::{
+    dsa::{
+        ecdsa_k256_keccak::SigningKey as EcdsaSigningKey,
+        eddsa_25519_sha512::SigningKey as EddsaSigningKey,
+    },
+    hash::{keccak::Keccak256, sha2::Sha512},
+};
 use miden_mast_package::Package;
 use miden_precompiles::{PrecompilesLibrary, registry};
 use miden_processor::{
@@ -65,6 +75,22 @@ fn exports_sha512_paths() {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
             "sha512 procedure should be exported: {path}",
+        );
+    }
+}
+
+/// The signature `verify_prehash` wrappers are exported under
+/// `miden::precompiles::crypto::dsa::{ecdsa_k256_keccak,eddsa_ed25519}`.
+#[test]
+fn exports_dsa_paths() {
+    let package = PrecompilesLibrary::default().package();
+    for path in [
+        "::miden::precompiles::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
+        "::miden::precompiles::crypto::dsa::eddsa_ed25519::verify_prehash",
+    ] {
+        assert!(
+            package.get_procedure_root_by_path(path).is_some(),
+            "signature procedure should be exported: {path}",
         );
     }
 }
@@ -207,4 +233,151 @@ fn read_digest(output: &ExecutionOutput, ptr: u32, n_felts: u32) -> Vec<Felt> {
                 .expect("digest element")
         })
         .collect()
+}
+
+// SIGNATURE PRECOMPILES
+// ================================================================================================
+
+/// Word-aligned address the signature e2e tests pack the 40-felt verify buffer into.
+const BUF_ADDR: u32 = 128;
+
+/// End-to-end: a valid ECDSA signature registered through `verify_prehash` executes successfully
+/// (the predicate evaluates to TRUE during `register_data`). Surfacing the logged statement through
+/// the deferred root belongs to the proof-wire layer.
+#[test]
+fn ecdsa_verify_prehash_executes_end_to_end() {
+    let sk = EcdsaSigningKey::new();
+    let digest = [7u8; 32];
+    let buf = ecdsa_buffer_felts(
+        &sk.public_key().to_bytes(),
+        &digest,
+        &sk.sign_prehash(digest).to_bytes(),
+    );
+
+    run_verify_prehash("ecdsa_k256_keccak", &buf)
+        .expect("valid ECDSA signature must verify end-to-end");
+}
+
+/// End-to-end: a tampered ECDSA signature traps during `sys::register_data`'s eager evaluation.
+#[test]
+fn ecdsa_verify_prehash_traps_on_invalid_signature() {
+    let sk = EcdsaSigningKey::new();
+    let digest = [7u8; 32];
+    let mut sig = sk.sign_prehash(digest).to_bytes();
+    sig[0] ^= 0xff;
+    let buf = ecdsa_buffer_felts(&sk.public_key().to_bytes(), &digest, &sig);
+
+    assert!(
+        run_verify_prehash("ecdsa_k256_keccak", &buf).is_err(),
+        "invalid ECDSA signature must trap execution",
+    );
+}
+
+/// End-to-end: a valid Ed25519 signature registered through `verify_prehash` executes successfully
+/// (the predicate evaluates to TRUE during `register_data`).
+#[test]
+fn eddsa_verify_prehash_executes_end_to_end() {
+    let sk = EddsaSigningKey::new();
+    let pk = sk.public_key();
+    let message =
+        Word::new([Felt::from_u32(11), Felt::from_u32(22), Felt::from_u32(33), Felt::from_u32(44)]);
+    let sig = sk.sign(message);
+    let k_digest = pk.compute_challenge_k(message, &sig);
+    let buf = eddsa_buffer_felts(&pk.to_bytes(), &k_digest, &sig.to_bytes());
+
+    run_verify_prehash("eddsa_ed25519", &buf)
+        .expect("valid Ed25519 signature must verify end-to-end");
+}
+
+/// End-to-end: a tampered Ed25519 signature traps during `sys::register_data`'s eager evaluation.
+#[test]
+fn eddsa_verify_prehash_traps_on_invalid_signature() {
+    let sk = EddsaSigningKey::new();
+    let pk = sk.public_key();
+    let message =
+        Word::new([Felt::from_u32(11), Felt::from_u32(22), Felt::from_u32(33), Felt::from_u32(44)]);
+    let sig = sk.sign(message);
+    let k_digest = pk.compute_challenge_k(message, &sig);
+    let mut sig_bytes = sig.to_bytes();
+    sig_bytes[0] ^= 0xff;
+    let buf = eddsa_buffer_felts(&pk.to_bytes(), &k_digest, &sig_bytes);
+
+    assert!(
+        run_verify_prehash("eddsa_ed25519", &buf).is_err(),
+        "invalid Ed25519 signature must trap execution",
+    );
+}
+
+/// Packs a `(pk, digest, sig)` ECDSA triple into the precompile's tightly-packed 40-felt buffer.
+fn ecdsa_buffer_felts(pk: &[u8], digest: &[u8; 32], sig: &[u8]) -> Vec<Felt> {
+    assert_eq!(pk.len(), 33);
+    assert_eq!(sig.len(), 65);
+    let mut buf = vec![0u8; 160];
+    buf[0..33].copy_from_slice(pk);
+    buf[33..65].copy_from_slice(digest);
+    buf[65..130].copy_from_slice(sig);
+    bytes_to_packed_u32_elements(&buf)
+}
+
+/// Packs a `(pk, k_digest, sig)` Ed25519 triple into the precompile's 40-felt buffer (no padding).
+fn eddsa_buffer_felts(pk: &[u8], k_digest: &[u8; 64], sig: &[u8]) -> Vec<Felt> {
+    assert_eq!(pk.len(), 32);
+    assert_eq!(sig.len(), 64);
+    let mut buf = Vec::with_capacity(160);
+    buf.extend_from_slice(pk);
+    buf.extend_from_slice(k_digest);
+    buf.extend_from_slice(sig);
+    bytes_to_packed_u32_elements(&buf)
+}
+
+/// Generates MASM that stores `felts` sequentially in memory starting at `base_addr`.
+fn masm_store_felts(felts: &[Felt], base_addr: u32) -> String {
+    felts
+        .iter()
+        .enumerate()
+        .map(|(i, felt)| {
+            format!("push.{} push.{} mem_store", felt.as_canonical_u64(), base_addr + i as u32)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Assembles and executes a program that stores `buf_felts` at [`BUF_ADDR`] and calls
+/// `crypto::dsa::{module}::verify_prehash`, with the crate registry installed on the processor.
+fn run_verify_prehash(
+    module: &str,
+    buf_felts: &[Felt],
+) -> Result<ExecutionOutput, miden_processor::ExecutionError> {
+    let library = PrecompilesLibrary::default();
+    let stores = masm_store_felts(buf_felts, BUF_ADDR);
+    let source = format!(
+        r#"
+            use miden::precompiles::crypto::dsa::{module}
+            begin
+                {stores}
+                push.{BUF_ADDR}
+                exec.{module}::verify_prehash
+            end
+        "#,
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .expect("failed to link miden-precompiles")
+        .assemble_program(module, &source)
+        .expect("failed to assemble signature program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&library)
+        .expect("failed to load PrecompilesLibrary into the host");
+
+    FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
+    .execute_sync(&program, &mut host)
 }

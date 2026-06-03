@@ -6,6 +6,10 @@ The generic deferred-computation framework stays in [`miden-core`](../core), und
 ## Usage
 This crate exposes a `registry()` function that returns a `miden_core::deferred::PrecompileRegistry` — the registry that routes deferred tags to their owning precompile — populated with the precompiles this crate provides.
 
+## Provided precompiles
+- **Hashes** (`keccak256`, `sha512`): a `preimage` → `digest` reduction plus an `eq` predicate, with MASM wrappers under `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`).
+- **Signatures** (`ecdsa_k256_keccak`, `eddsa_ed25519`): a single `verify` predicate over a fixed 5-chunk (40-felt) calldata buffer (`pk || digest || sig`), with a `verify_prehash` MASM wrapper under `miden::precompiles::crypto::dsa::{ecdsa_k256_keccak,eddsa_ed25519}` that registers the buffer and folds the verify statement into the deferred root.
+
 ## Crate features
 Miden precompiles can be compiled with the following features:
 

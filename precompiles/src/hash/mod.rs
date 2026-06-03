@@ -65,7 +65,7 @@ impl<H: HashFunction> HashPrecompile<H> {
 
     /// Derives this precompile's id from its [`HashFunction::NAME`].
     pub fn id() -> Felt {
-        precompile_id(&Self::default())
+        precompile_id(H::NAME)
     }
 
     /// Tag for a `preimage` data node carrying `n_bytes` of input.
@@ -84,7 +84,7 @@ impl<H: HashFunction> HashPrecompile<H> {
     }
 
     fn tag(args: [Felt; 3]) -> Tag {
-        Tag::new(Self::id(), args).expect("hash precompile id is not framework-reserved")
+        Tag::precompile(Self::id(), args).expect("hash precompile id is not framework-reserved")
     }
 
     /// Builds a `preimage` data node from caller-supplied 8-felt chunks (the input u32-packed-LE,
@@ -186,8 +186,9 @@ fn evaluate_eq<H: HashFunction>(
     context: &mut DeferredContext<'_>,
 ) -> Result<Node, PrecompileError> {
     let (lhs_digest, rhs_digest) = payload.as_join()?;
-    let lhs = context.resolve(lhs_digest)?;
-    let rhs = context.resolve(rhs_digest)?;
+    let (lhs_digest, rhs_digest) = context.evaluate_digest_pair(lhs_digest, rhs_digest)?;
+    let lhs = context.get_node(&lhs_digest).ok_or(PrecompileError::InvalidNode)?;
+    let rhs = context.get_node(&rhs_digest).ok_or(PrecompileError::InvalidNode)?;
     let digest_tag = HashPrecompile::<H>::digest_tag();
     if lhs.tag() != digest_tag || rhs.tag() != digest_tag {
         return Err(PrecompileError::InvalidNode);
@@ -241,7 +242,8 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
     };
     let evaluate = |state: &mut DeferredState, node: Node| -> Result<Node, PrecompileError> {
         let digest = state.register(node)?;
-        state.evaluate(digest)
+        let canonical = state.evaluate_digest(digest)?;
+        state.get_node(&canonical).cloned().ok_or(PrecompileError::InvalidNode)
     };
 
     // -- decode routes each tag to its node shape and rejects malformed tags --
@@ -297,7 +299,7 @@ pub(crate) fn assert_hash_precompile<H: HashFunction>() {
         assert!(
             evaluate(&mut state, HashPrecompile::<H>::eq_node(preimage, leaf))
                 .unwrap()
-                .is_true_node()
+                .is_true()
         );
 
         let forged = state

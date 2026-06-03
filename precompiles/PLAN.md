@@ -159,11 +159,39 @@ Out of scope:
 Port the migrated ECDSA-k256-keccak and EdDSA-Ed25519 deferred precompiles from
 #3172 (`adr1anh/deferred/migrate`).
 
-In scope:
+Design intent: these two signatures are deliberately minimal. Each is a single opaque `verify`
+predicate that defers the entire check to a host-side `miden-crypto` call — a placeholder for the
+eventual decomposition into raw elliptic-curve group precompiles, at which point `verify` becomes a
+DAG of group-operation nodes rather than one host call. This crate is a work-in-progress testbed for
+the precompile VM, so the signature surface stays bare-bones (just `verify_prehash`); richer,
+ergonomic wrappers (`verify` and friends) are layered on once the group precompiles and the
+cross-package MASM-helper story exist. Simplifications that keep the core predicate logic easy to
+iterate are preferred over completeness.
 
-- Signature precompile Rust semantics.
-- MASM wrappers under `::miden::precompiles`.
-- Registry update and focused tests.
+Completed:
+
+- `EcdsaK256KeccakPrecompile` and `EddsaEd25519Precompile` Rust semantics under
+  `precompiles/src/dsa`, each a single `verify` predicate over a fixed 5-chunk (40-felt) calldata
+  buffer (`pk || digest || sig`), reusing the shared byte/chunk codec.
+- Preserved the migration hardening: `decode` rejects nonzero unused tag args, ECDSA rejects nonzero
+  pad regions, and the codec rejects non-canonical (nonzero trailing-pad) witnesses.
+- `verify_prehash` MASM wrappers under
+  `::miden::precompiles::crypto::dsa::{ecdsa_k256_keccak,eddsa_ed25519}`: register the buffer as the
+  `verify` data node (digest derived in-circuit, predicate evaluated eagerly so a bad signature traps
+  during `register_data`) and fold the node digest into the deferred root. Eager registration makes
+  a separate `adv.evaluate_deferred` step unnecessary.
+- `registry()` installs both signatures; focused Rust semantic tests, MASM id-pinning tests, package
+  export tests, and execution tests (valid signature verifies and advances the deferred root;
+  tampered signature traps).
+
+Deferred:
+
+- The high-level `verify` wrappers (commit the public key via `poseidon2::hash_elements`, hash the
+  message, assemble the buffer, then call `verify_prehash`). They depend on `poseidon2::hash_elements`
+  and `word::store_word_u32s_le`, which live in the `miden::core` MASM package; the standalone
+  `miden::precompiles` package would have to either depend on `miden::core` or duplicate those
+  helpers. That cross-package-helper decision is tracked under Open Questions and is left for a
+  follow-up.
 
 Out of scope:
 

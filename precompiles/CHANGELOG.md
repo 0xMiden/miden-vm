@@ -14,3 +14,7 @@
   `keccak256` and `sha512` deferred precompiles built on it, with MASM wrappers under
   `miden::precompiles::crypto::hashes::{keccak256,sha512}` (`hash`, `hash_bytes`, `merge`) sharing a
   `register_preimage` helper; `registry()` installs both.
+- Added the `ecdsa_k256_keccak` and `eddsa_ed25519` signature deferred precompiles — each a
+  single `verify` predicate over a fixed 5-chunk calldata buffer — with `verify_prehash` MASM
+  wrappers under `miden::precompiles::crypto::dsa::{ecdsa_k256_keccak,eddsa_ed25519}`; `registry()`
+  installs both.

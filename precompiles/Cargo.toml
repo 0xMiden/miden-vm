@@ -31,6 +31,7 @@ miden-utils-sync.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true
+miden-processor = { workspace = true, features = ["testing"] }
 
 [build-dependencies]
 miden-assembly = { workspace = true, features = ["std"] }

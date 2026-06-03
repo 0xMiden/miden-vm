@@ -13,8 +13,12 @@ use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 mod codec;
+mod dsa;
 mod hash;
 
+pub use dsa::{
+    ecdsa_k256_keccak::EcdsaK256KeccakPrecompile, eddsa_ed25519::EddsaEd25519Precompile,
+};
 pub use hash::{
     HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
 };
@@ -85,4 +89,6 @@ pub fn registry() -> PrecompileRegistry {
     PrecompileRegistry::new()
         .with_precompile(Keccak256Precompile::default())
         .with_precompile(Sha512Precompile::default())
+        .with_precompile(EcdsaK256KeccakPrecompile)
+        .with_precompile(EddsaEd25519Precompile)
 }

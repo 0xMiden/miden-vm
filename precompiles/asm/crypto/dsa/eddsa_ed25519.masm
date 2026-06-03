@@ -1,0 +1,54 @@
+use miden::precompiles::sys
+
+# ENCODING CONVENTIONS
+# ================================================================================================
+#
+# - Byte data is stored in memory as packed u32 values in little-endian format
+# - Each u32 packs four bytes: u32 = u32::from_le_bytes([b0, b1, b2, b3])
+# - Unused bytes in the final u32 must be zero
+# - Memory addresses supplied to this module must be word-aligned (divisible by 4)
+
+# CONSTANTS — EddsaEd25519Precompile precompile tag fields
+# ================================================================================================
+# Pinned to the Rust-side EddsaEd25519Precompile constants. PRECOMPILE_ID is the derived
+# `precompile_id(&EddsaEd25519Precompile)` over NAME ("eddsa_ed25519"); changing the NAME in Rust
+# must update this literal in lockstep. The Rust-side `masm_pinned_ids_match_derived_ids` test
+# asserts these values.
+
+const PRECOMPILE_ID = 7694585564767061637
+const VERIFY_TAG_ID = 0
+
+# PROCEDURES
+# ================================================================================================
+
+#! Verifies an Ed25519 / SHA-512 EdDSA signature with a precomputed nonce digest via the
+#! deferred-DAG framework.
+#!
+#! The caller provides a single pointer to a contiguous 40-felt buffer with the precompile layout:
+#!
+#!   bytes[0..32]    pk
+#!   bytes[32..96]   k_digest = SHA-512(R || A || message)
+#!   bytes[96..160]  sig
+#!
+#! Registers the buffer as the eddsa_ed25519 `verify` data node and folds its digest into the
+#! deferred root. `register_data` derives the node digest in-circuit (binding it to the buffer in
+#! memory) and evaluates the predicate, which runs `PublicKey::verify_with_unchecked_k` host-side
+#! and traps with `PrecompileError::AssertionFailed` on a bad signature. The verifier re-checks the
+#! predicate when it rehydrates the deferred state.
+#!
+#! Input:  [buf_ptr, ...]
+#! Output: [...]
+pub proc verify_prehash
+    # Stage [VERIFY_TAG, buf_ptr, n_chunks] for register_data. The buffer is 40 felts = 5 chunks.
+    # VERIFY_TAG = [PRECOMPILE_ID, VERIFY_TAG_ID, 0, 0].
+    push.5 swap
+    # => [buf_ptr, 5, ...]
+    push.0.0
+    push.VERIFY_TAG_ID
+    push.PRECOMPILE_ID
+    # => [VERIFY_TAG, buf_ptr, 5, ...]
+    exec.sys::register_data
+    # => [VERIFY_DIGEST, ...]  (digest derived in-circuit; predicate evaluated, traps on bad sig)
+    exec.sys::log_node_digest
+    # => [...]  (fold VERIFY_DIGEST into the deferred root)
+end
