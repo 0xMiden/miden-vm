@@ -1876,6 +1876,29 @@ mod tests {
         assert_eq!(child_contexts, vec!["ctx_a".to_string(), "ctx_b".to_string()]);
     }
 
+    #[test]
+    fn test_source_graph_reuses_source_occurrence_for_duplicate_child_refs() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let block_ref =
+            builder.ensure_block_ref(vec![Operation::Add], Vec::new(), Vec::new()).unwrap();
+        let split_ref = builder
+            .ensure_split_node_ref(
+                [block_ref, block_ref],
+                AssemblyOp::new(None, "split".into(), 1, "if.true".into()),
+            )
+            .unwrap();
+        record_test_root(&mut builder, split_ref);
+
+        let (_forest, _remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let root = source_graph.roots()[0];
+        let children = source_graph.nodes()[root].children();
+
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0], children[1]);
+    }
+
     /// Non-block nodes with different AssemblyOps use the same execution node identity.
     #[test]
     fn test_non_block_nodes_keep_different_asm_ops_distinct() {
