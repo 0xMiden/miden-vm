@@ -401,8 +401,8 @@ end
 #! properly sampled in generate_deep_composition_random_coefficients). Using the
 #! same value for both is unsound.
 #!
-#! TODO: Replace with a proper `sample_ext` call once the Rust-side
-#! StarkTranscript is updated to draw gamma between OOD and DEEP phases.
+#! TODO: Replace with a proper `sample_ext` call once the Rust-side transcript
+#! draws gamma between the OOD and DEEP phases.
 #!
 #! Input:  [...]
 #! Output: [gamma_0, gamma_1, ...]

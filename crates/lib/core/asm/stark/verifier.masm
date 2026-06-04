@@ -124,7 +124,7 @@ pub proc verify
     exec.utils::swap_air_regions_if_chip_first
 
     #==============================================================================================
-    #       VI) Draw gamma for reduced_aux_values batching and evaluate constraints
+    #       VI) Draw gamma for the LogUp boundary (eval_external) batching and evaluate constraints
     #==============================================================================================
 
     exec.utils::execute_constraint_evaluation_check

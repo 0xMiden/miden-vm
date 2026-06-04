@@ -45,7 +45,7 @@ const _: () = assert!(
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BusId {
-    // --- Out-of-circuit (boundary correction / reduced_aux_values) ---
+    // --- Out-of-circuit (boundary correction / eval_external) ---
     /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
     KernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.

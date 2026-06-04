@@ -458,10 +458,10 @@ impl ChipletsAir {
 // MIDEN AIR (multi-AIR enum wrapper)
 // ================================================================================================
 
-/// Homogeneous wrapper that lets [`CoreAir`] and [`ChipletsAir`] share a single trait-object
-/// type for `prove_multi`/`verify_multi`. Upstream's `prove_multi<F, EF, A, B, SC>` takes
-/// `&[(&A, AirWitness, &B)]` — both `A` (the AIR) and `B` (the aux builder) must be the same
-/// type across all instances, so we dispatch through this enum.
+/// Homogeneous wrapper that lets [`CoreAir`] and [`ChipletsAir`] share a single AIR type.
+/// [`MultiAir::Air`](miden_crypto::stark::air::MultiAir) is a single associated type, so every
+/// instance in the multi-AIR proof must be the same type; this enum dispatches per-trace work
+/// to the inner [`CoreAir`] / [`ChipletsAir`].
 #[derive(Copy, Clone, Debug)]
 pub enum MidenAir {
     Core(CoreAir),
