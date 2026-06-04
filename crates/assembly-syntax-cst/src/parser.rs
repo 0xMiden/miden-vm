@@ -177,6 +177,8 @@ enum BlockOwner {
     Procedure,
     If,
     While,
+    DoWhileBody,
+    DoWhile,
     Repeat,
 }
 
@@ -187,6 +189,8 @@ impl BlockOwner {
             Self::Procedure => "expected `end` to close procedure",
             Self::If => "expected `end` to close `if`",
             Self::While => "expected `end` to close `while`",
+            Self::DoWhileBody => "expected `while` to close `do` block",
+            Self::DoWhile => "expected `end` to close `do`..`while` loop",
             Self::Repeat => "expected `end` to close `repeat`",
         }
     }
@@ -689,6 +693,11 @@ impl<'input> Parser<'input> {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
+            } else if self.at_keyword("do") {
+                if self.parse_do_while() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.at_keyword("while") {
                 if self.parse_while() {
                     self.finish_node();
@@ -744,6 +753,11 @@ impl<'input> Parser<'input> {
 
             if self.at_keyword("if") {
                 if self.parse_if() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
+            } else if self.at_keyword("do") {
+                if self.parse_do_while() {
                     self.finish_node();
                     return BlockParseOutcome::ReachedEof;
                 }
@@ -812,6 +826,34 @@ impl<'input> Parser<'input> {
         }
         if outcome == BlockParseOutcome::FoundTerminator {
             self.expect_keyword("end", BlockOwner::While.missing_end_message());
+        }
+        self.finish_node();
+        false
+    }
+
+    fn parse_do_while(&mut self) -> bool {
+        self.start_node(SyntaxKind::DoWhileOp);
+        self.expect_keyword("do", "expected `do`");
+        self.parse_line_tail();
+        // The body is terminated by a *bare* `while` (the loop condition). A nested
+        // `while.true` loop inside the body carries a `.` suffix and is therefore not treated
+        // as the terminator (see `at_terminator`).
+        let body_outcome = self.parse_block(BlockOwner::DoWhileBody, &["while"]);
+        if body_outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        if body_outcome == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("while", "expected `while`");
+            self.parse_line_tail();
+            let cond_outcome = self.parse_block(BlockOwner::DoWhile, &["end"]);
+            if cond_outcome == BlockParseOutcome::ReachedEof {
+                self.finish_node();
+                return true;
+            }
+            if cond_outcome == BlockParseOutcome::FoundTerminator {
+                self.expect_keyword("end", BlockOwner::DoWhile.missing_end_message());
+            }
         }
         self.finish_node();
         false
@@ -1067,6 +1109,7 @@ impl<'input> Parser<'input> {
     fn can_start_operation(&self) -> bool {
         self.can_start_instruction()
             || self.at_keyword("if")
+            || self.at_keyword("do")
             || self.at_keyword("while")
             || self.at_keyword("repeat")
     }
@@ -1113,7 +1156,31 @@ impl<'input> Parser<'input> {
     }
 
     fn at_terminator(&self, terminators: &[&str]) -> bool {
-        terminators.iter().any(|terminator| self.at_keyword(terminator))
+        terminators.iter().any(|terminator| {
+            // A `while` terminator (used to close a `do`..`while` body) matches only a *bare*
+            // `while`. A `while.true` token sequence opens a nested head-controlled loop and
+            // must not be mistaken for the terminator.
+            if *terminator == "while" {
+                self.at_bare_while()
+            } else {
+                self.at_keyword(terminator)
+            }
+        })
+    }
+
+    /// Returns `true` if the current token is a `while` keyword that is *not* immediately followed
+    /// by a `.` suffix (i.e. the `while` that closes a `do`..`while` body, not a nested
+    /// `while.true`).
+    ///
+    /// Only a `.` directly adjacent to the `while` keyword opens a header suffix; any intervening
+    /// token (e.g. whitespace, as in `while .true`) is treated as a bare `while`, which makes the
+    /// stray `.true` a syntax error rather than a valid `while.true` spelling.
+    fn at_bare_while(&self) -> bool {
+        self.at_keyword("while")
+            && !matches!(
+                self.tokens.get(self.pos + 1),
+                Some(token) if token.kind() == SyntaxKind::Dot
+            )
     }
 
     fn at_name_like(&self) -> bool {
@@ -1347,6 +1414,7 @@ fn is_reserved_block_keyword(text: &str) -> bool {
         "adv_map"
             | "begin"
             | "const"
+            | "do"
             | "else"
             | "end"
             | "enum"
@@ -1511,6 +1579,77 @@ adv_map TABLE = [
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::RepeatOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
+    }
+
+    #[test]
+    fn parse_do_while_loop() {
+        let source = "\
+            do
+                push.1
+                dup.0 neq.0
+            while
+                dup.0 lt.10
+            end
+        ";
+        let parse = parse_inline_masm_text(source, None);
+        let mut parse = parse;
+        let diagnostics = parse.take_diagnostics();
+        assert!(diagnostics.is_empty(), "unexpected parse errors: {diagnostics:?}");
+        let root = parse.syntax();
+        let child_kinds = root.children().map(|child| child.kind()).collect::<Vec<_>>();
+        assert_eq!(child_kinds, vec![SyntaxKind::DoWhileOp]);
+
+        // A `do`..`while`..`end` op has exactly two block children: the body and the condition.
+        let do_while = root.children().find(|n| n.kind() == SyntaxKind::DoWhileOp).unwrap();
+        let block_count = do_while.children().filter(|n| n.kind() == SyntaxKind::Block).count();
+        assert_eq!(block_count, 2, "expected a body block and a condition block");
+    }
+
+    #[test]
+    fn parse_do_while_with_nested_while_true_in_body() {
+        // The bare `while` that closes the `do` body must not be confused with the nested
+        // head-controlled `while.true` loop inside the body.
+        let source = "\
+            do
+                while.true
+                    nop
+                end
+                push.1
+            while
+                eq.0
+            end
+        ";
+        let parse = parse_inline_masm_text(source, None);
+        let mut parse = parse;
+        let diagnostics = parse.take_diagnostics();
+        assert!(diagnostics.is_empty(), "unexpected parse errors: {diagnostics:?}");
+        let root = parse.syntax();
+        let child_kinds = root.children().map(|child| child.kind()).collect::<Vec<_>>();
+        assert_eq!(child_kinds, vec![SyntaxKind::DoWhileOp]);
+
+        // The nested `while.true` loop is parsed as a `WhileOp` *inside* the do-while body.
+        let do_while = root.children().find(|n| n.kind() == SyntaxKind::DoWhileOp).unwrap();
+        assert!(do_while.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
+    }
+
+    #[test]
+    fn do_while_terminator_requires_dot_adjacent_to_while() {
+        // Only a `.` immediately adjacent to `while` opens a header suffix. With whitespace in
+        // between, the `while` closes the `do` body and the stray `.true` is a syntax error,
+        // rather than being matched as a `while.true` spelling.
+        let source = "\
+            do
+                push.1
+            while .true
+            end
+        ";
+        let mut parse = parse_inline_masm_text(source, None);
+        let diagnostics = parse.take_diagnostics();
+        assert!(!diagnostics.is_empty(), "expected a syntax error for the stray `.true`");
+
+        // The construct is still recognized as a do-while loop (the body terminated at `while`).
+        let root = parse.syntax();
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::DoWhileOp));
     }
 
     #[test]

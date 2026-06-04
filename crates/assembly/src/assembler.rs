@@ -1360,6 +1360,42 @@ impl Assembler {
 
                     body_node_refs.push(split_node_ref);
                 },
+
+                Op::DoWhile { body, condition, span } => {
+                    if let Some(basic_block_id) = block_builder.make_basic_block()? {
+                        body_node_refs.push(basic_block_id);
+                    }
+
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
+
+                    // A `do { body } while { cond } end` loop maps directly onto the LOOP node's
+                    // native do-while semantics: the body executes unconditionally on the first
+                    // pass, and iteration is decided at the tail. Unlike `while.true`, no SPLIT
+                    // wrapper (head-entry check) is needed. The loop body is `body ++ cond`; the
+                    // condition leaves the re-entry boolean on top of the stack, and the
+                    // contiguous basic blocks are merged by the MAST forest builder.
+                    let asm_op = self.create_asm_op(span, "do.while", proc_ctx);
+
+                    let loop_body_node_ref = self.compile_body(
+                        body.iter().chain(condition.iter()),
+                        proc_ctx,
+                        None,
+                        block_builder.mast_forest_builder_mut(),
+                        next_depth,
+                    )?;
+                    let loop_node_ref = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_loop_node_ref(loop_body_node_ref, asm_op)?;
+
+                    body_node_refs.push(loop_node_ref);
+                },
             }
         }
 

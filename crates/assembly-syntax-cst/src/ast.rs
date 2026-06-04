@@ -154,6 +154,12 @@ ast_node!(
     "while loop"
 );
 ast_node!(
+    #[doc = "A `do`..`while`..`end` structured operation (tail-controlled loop)."]
+    DoWhileOp,
+    SyntaxKind::DoWhileOp,
+    "do-while loop"
+);
+ast_node!(
     #[doc = "A `repeat.<count>` structured operation."]
     RepeatOp,
     SyntaxKind::RepeatOp,
@@ -217,6 +223,7 @@ impl Item {
 pub enum Operation {
     If(IfOp),
     While(WhileOp),
+    DoWhile(DoWhileOp),
     Repeat(RepeatOp),
     Instruction(Instruction),
 }
@@ -227,6 +234,7 @@ impl Operation {
         match node.kind() {
             SyntaxKind::IfOp => IfOp::cast(node).map(Self::If),
             SyntaxKind::WhileOp => WhileOp::cast(node).map(Self::While),
+            SyntaxKind::DoWhileOp => DoWhileOp::cast(node).map(Self::DoWhile),
             SyntaxKind::RepeatOp => RepeatOp::cast(node).map(Self::Repeat),
             SyntaxKind::Instruction => Instruction::cast(node).map(Self::Instruction),
             _ => None,
@@ -372,6 +380,18 @@ impl WhileOp {
     /// Returns the loop body.
     pub fn body(&self) -> Option<Block> {
         support::child(&self.syntax)
+    }
+}
+
+impl DoWhileOp {
+    /// Returns the loop body (the block between `do` and `while`).
+    pub fn body(&self) -> Option<Block> {
+        support::children(&self.syntax).next()
+    }
+
+    /// Returns the condition block (the block between `while` and `end`).
+    pub fn condition(&self) -> Option<Block> {
+        support::children(&self.syntax).nth(1)
     }
 }
 
