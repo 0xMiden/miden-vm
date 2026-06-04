@@ -19,9 +19,20 @@ use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
 };
+use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
 /// Memory address the e2e tests pass as the digest output pointer.
 const OUT_PTR: u32 = 0;
+
+fn ecdsa_signing_key() -> EcdsaSigningKey {
+    let mut rng = ChaCha20Rng::from_seed([0xa5; 32]);
+    EcdsaSigningKey::with_rng(&mut rng)
+}
+
+fn eddsa_signing_key() -> EddsaSigningKey {
+    let mut rng = ChaCha20Rng::from_seed([0xad; 32]);
+    EddsaSigningKey::with_rng(&mut rng)
+}
 
 /// The embedded `.masp` is a valid, deserializable package.
 #[test]
@@ -246,7 +257,7 @@ const BUF_ADDR: u32 = 128;
 /// the deferred root belongs to the proof-wire layer.
 #[test]
 fn ecdsa_verify_prehash_executes_end_to_end() {
-    let sk = EcdsaSigningKey::new();
+    let sk = ecdsa_signing_key();
     let digest = [7u8; 32];
     let buf = ecdsa_buffer_felts(
         &sk.public_key().to_bytes(),
@@ -261,7 +272,7 @@ fn ecdsa_verify_prehash_executes_end_to_end() {
 /// End-to-end: a tampered ECDSA signature traps during `sys::register_data`'s eager evaluation.
 #[test]
 fn ecdsa_verify_prehash_traps_on_invalid_signature() {
-    let sk = EcdsaSigningKey::new();
+    let sk = ecdsa_signing_key();
     let digest = [7u8; 32];
     let mut sig = sk.sign_prehash(digest).to_bytes();
     sig[0] ^= 0xff;
@@ -277,7 +288,7 @@ fn ecdsa_verify_prehash_traps_on_invalid_signature() {
 /// (the predicate evaluates to TRUE during `register_data`).
 #[test]
 fn eddsa_verify_prehash_executes_end_to_end() {
-    let sk = EddsaSigningKey::new();
+    let sk = eddsa_signing_key();
     let pk = sk.public_key();
     let message =
         Word::new([Felt::from_u32(11), Felt::from_u32(22), Felt::from_u32(33), Felt::from_u32(44)]);
@@ -292,7 +303,7 @@ fn eddsa_verify_prehash_executes_end_to_end() {
 /// End-to-end: a tampered Ed25519 signature traps during `sys::register_data`'s eager evaluation.
 #[test]
 fn eddsa_verify_prehash_traps_on_invalid_signature() {
-    let sk = EddsaSigningKey::new();
+    let sk = eddsa_signing_key();
     let pk = sk.public_key();
     let message =
         Word::new([Felt::from_u32(11), Felt::from_u32(22), Felt::from_u32(33), Felt::from_u32(44)]);

@@ -187,7 +187,10 @@ mod tests {
 
     fn eddsa_valid_triple(message: Word) -> (Vec<u8>, [u8; 64], Vec<u8>) {
         use miden_crypto::dsa::eddsa_25519_sha512::SigningKey as SecretKey;
-        let sk = SecretKey::new();
+        use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+        let mut rng = ChaCha20Rng::from_seed([0xed; 32]);
+        let sk = SecretKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sig = sk.sign(message);
         let k_digest = pk.compute_challenge_k(message, &sig);

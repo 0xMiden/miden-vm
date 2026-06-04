@@ -191,7 +191,10 @@ mod tests {
 
     fn ecdsa_keypair_and_sig(digest: [u8; 32]) -> (Vec<u8>, Vec<u8>) {
         use miden_crypto::dsa::ecdsa_k256_keccak::SigningKey as SecretKey;
-        let sk = SecretKey::new();
+        use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+        let mut rng = ChaCha20Rng::from_seed([0xe5; 32]);
+        let sk = SecretKey::with_rng(&mut rng);
         let pk_bytes = sk.public_key().to_bytes().to_vec();
         let sig_bytes = sk.sign_prehash(digest).to_bytes().to_vec();
         (pk_bytes, sig_bytes)
