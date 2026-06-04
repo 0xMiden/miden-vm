@@ -26,7 +26,7 @@ use miden_utils_testing::{
     proptest::proptest,
     rand::random_word,
 };
-use rand::{Rng, SeedableRng, rng};
+use rand::{Rng, RngExt, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 

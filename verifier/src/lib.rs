@@ -5,11 +5,13 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 
-use miden_air::{AirInstance, InstanceShapes, MidenAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt};
-use miden_crypto::stark::{StarkConfig, challenger::CanObserve, lmcs::Lmcs, proof::StarkProof};
+use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::stark::{
+    StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
+};
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
 
@@ -187,12 +189,6 @@ pub enum StarkVerificationError {
     Deserialization(#[from] wincode::error::ReadError),
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
     ProofTooLarge { size: usize, max: usize },
-    #[error("log_trace_height {0} exceeds the two-adic order of the field")]
-    InvalidTraceHeight(u8),
-    #[error(
-        "non-canonical multi-AIR instance shape: expected air_order {expected:?}, got {actual:?}"
-    )]
-    NonCanonicalAirOrder { expected: Vec<u32>, actual: Vec<u32> },
     #[error(transparent)]
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
@@ -221,84 +217,28 @@ where
 
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProof<Felt, QuadFelt, SC> =
-        <SerdeCompat<StarkProof<Felt, QuadFelt, SC>> as wincode::config::Deserialize<_>>::deserialize(
-            proof_bytes,
-            proof_encoding_config,
-        )?;
-    validate_canonical_air_order(proof_bytes)?;
+    let proof: StarkProofData<Felt, QuadFelt, SC> = <SerdeCompat<
+        StarkProofData<Felt, QuadFelt, SC>,
+    > as wincode::config::Deserialize<_>>::deserialize(
+        proof_bytes, proof_encoding_config
+    )?;
 
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
-    challenger.observe_slice(public_values);
-    let chiplets_var_len: &[&[Felt]] = &[kernel_felts];
-    config::observe_var_len_public_inputs(&mut challenger, chiplets_var_len, &[WORD_SIZE]);
 
-    config::observe_air_order(&mut challenger, proof.air_order());
+    // `air_inputs` are the fixed public values; `aux_inputs` are the kernel-procedure
+    // digests. The lifted verifier absorbs both into Fiat-Shamir internally, and derives
+    // the multi-AIR ordering deterministically from the proof's per-AIR trace heights.
+    let statement = Statement::<Felt, QuadFelt, _>::new(
+        MidenMultiAir::new(),
+        public_values.to_vec(),
+        kernel_felts.to_vec(),
+    )
+    .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 
-    let core_air = MidenAir::CORE;
-    let chiplets_air = MidenAir::CHIPLETS;
-    let core_instance = AirInstance {
-        public_values,
-        var_len_public_inputs: &[],
-    };
-    let chiplets_instance = AirInstance {
-        public_values,
-        var_len_public_inputs: chiplets_var_len,
-    };
-    let instances = [(&core_air, core_instance), (&chiplets_air, chiplets_instance)];
-
-    miden_crypto::stark::verifier::verify_multi(config, &instances, &proof, challenger)?;
-    Ok(())
-}
-
-fn validate_canonical_air_order(proof_bytes: &[u8]) -> Result<(), StarkVerificationError> {
-    // `StarkProof` serializes `instance_shapes` first, so decoding `InstanceShapes` from
-    // the proof-byte prefix yields the shape metadata; wincode reads exactly what the type
-    // needs and ignores the trailing transcript bytes.
-    let proof_encoding_config = wincode::config::Configuration::default()
-        .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof_shapes: InstanceShapes =
-        <SerdeCompat<InstanceShapes> as wincode::config::Deserialize<_>>::deserialize(
-            proof_bytes,
-            proof_encoding_config,
-        )?;
-
-    let proof_air_order = proof_shapes.air_order();
-    let log_trace_heights = proof_shapes.log_trace_heights();
-    let non_canonical = || StarkVerificationError::NonCanonicalAirOrder {
-        expected: vec![0, 1],
-        actual: proof_air_order.to_vec(),
-    };
-
-    if proof_air_order.len() != 2 || log_trace_heights.len() != 2 {
-        return Err(non_canonical());
-    }
-
-    let mut caller_heights = [0usize; 2];
-    let mut seen = [false; 2];
-    for (&caller_idx, &log_h) in proof_air_order.iter().zip(log_trace_heights) {
-        let seen_slot = seen.get_mut(caller_idx as usize).ok_or_else(non_canonical)?;
-        if *seen_slot {
-            return Err(non_canonical());
-        }
-        *seen_slot = true;
-        caller_heights[caller_idx as usize] = 1usize
-            .checked_shl(log_h as u32)
-            .ok_or(StarkVerificationError::InvalidTraceHeight(log_h))?;
-    }
-
-    let expected_shapes =
-        InstanceShapes::from_trace_heights(caller_heights.to_vec()).map_err(|_| non_canonical())?;
-    if expected_shapes.air_order() != proof_air_order
-        || expected_shapes.log_trace_heights() != log_trace_heights
-    {
-        return Err(StarkVerificationError::NonCanonicalAirOrder {
-            expected: expected_shapes.air_order().to_vec(),
-            actual: proof_air_order.to_vec(),
-        });
-    }
-
+    VerifierInstance::new(config, &statement, None)
+        .expect("Miden AIRs declare no preprocessed columns")
+        .verify(&proof, challenger)?;
     Ok(())
 }
 

@@ -19,9 +19,9 @@ use miden_crypto::{
         GenericStarkConfig,
         challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
         dft::Radix2DitParallel,
-        fri::PcsParams,
         hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
         lmcs::config::LmcsConfig,
+        pcs::PcsParams,
         symmetric::{
             CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
             TruncatedPermutation,
@@ -107,17 +107,6 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
     challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
     challenger.observe(Felt::ZERO);
-}
-
-/// Absorbs the multi-AIR `air_order` permutation into the challenger.
-pub fn observe_air_order<C: CanObserve<Felt>>(challenger: &mut C, air_order: &[u32]) {
-    let padded_len = air_order.len().next_multiple_of(SPONGE_RATE);
-    for &caller_idx in air_order.iter() {
-        challenger.observe(Felt::new_unchecked(caller_idx as u64));
-    }
-    for _ in air_order.len()..padded_len {
-        challenger.observe(Felt::ZERO);
-    }
 }
 
 /// Absorbs variable-length public inputs into the challenger.

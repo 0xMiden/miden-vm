@@ -6,7 +6,7 @@
 
 use miden_core::Felt;
 use miden_processor::ContextId;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 

@@ -6,7 +6,7 @@ use miden_core::{
     operations::opcodes,
 };
 use miden_crypto::stark::{
-    air::{AirBuilder, EmptyWindow, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder},
+    air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow},
     matrix::RowMajorMatrix,
 };
 
@@ -25,6 +25,7 @@ struct ConstraintEvalBuilder {
     randomness: Vec<QuadFelt>,
     permutation_values: Vec<QuadFelt>,
     periodic_values: Vec<Felt>,
+    preprocessed: RowWindow<'static, Felt>,
     evaluations: Vec<QuadFelt>,
 }
 
@@ -36,6 +37,7 @@ impl ConstraintEvalBuilder {
             randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
             permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
             periodic_values: Vec::new(),
+            preprocessed: RowWindow::from_two_rows(&[], &[]),
             evaluations: Vec::new(),
         }
     }
@@ -45,7 +47,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     type F = Felt;
     type Expr = Felt;
     type Var = Felt;
-    type PreprocessedWindow = EmptyWindow<Felt>;
+    type PreprocessedWindow = RowWindow<'static, Felt>;
     type MainWindow = RowMajorMatrix<Felt>;
     type PublicVar = Felt;
 
@@ -54,7 +56,7 @@ impl AirBuilder for ConstraintEvalBuilder {
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        EmptyWindow::empty_ref()
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {

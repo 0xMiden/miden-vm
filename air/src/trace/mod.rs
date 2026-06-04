@@ -6,7 +6,6 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================

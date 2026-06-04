@@ -280,71 +280,65 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the multi-AIR instance shape (air_order + heights) and discard the
-#! instance challenge.
+#! Buffer the multi-AIR instance shape into the Fiat-Shamir transcript.
 #!
-#! Rust side: the caller observes `air_order` (zero-padded to a full `SPONGE_RATE`
-#! block), then `prove_multi`/`verify_multi` invoke `observe_heights`. The
-#! DuplexChallenger therefore performs TWO permutations:
-#!   1. air_order block: rate = `[a0, a1, 0, 0, 0, 0, 0, 0]` (full-rate overwrite).
-#!   2. heights block: rate[0..2] = `[log_min, log_max]`; the DuplexChallenger only
-#!      overwrites the buffered prefix, so rate[2..8] and the capacity keep the
-#!      permuted output of step 1.
-#! `air_order` is reconstructed locally from per-AIR heights in memory; ties
-#! break to caller-order (a0 = 0) per Rust's `InstanceShapes::from_trace_heights`.
+#! Mirrors the framework's `observe_shape`, which observes the instance count followed
+#! by the per-AIR log trace heights in instance order (Core, then Chiplets):
+#!   rate[0] = 2          (instance count)
+#!   rate[1] = log(core trace height)
+#!   rate[2] = log(chiplets trace height)
+#!
+#! No permutation is performed here. The main-trace commitment is buffered onto these
+#! three elements by `reseed_main_after_shape`, and the combined 7-element block is
+#! permuted once — matching the DuplexChallenger's single duplex over the buffered
+#! input before the first post-commitment sample (auxiliary randomness).
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc observe_trace_height_and_discard_instance_challenge
+pub proc observe_instance_shape
     exec.constants::random_coin_input_len_ptr mem_load
     # => [input_len, ...]
-    assertz.err="observe_trace_height_and_discard_instance_challenge: input buffer must be empty"
+    assertz.err="observe_instance_shape: input buffer must be empty"
     # => [...]
 
     # observing clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 
-    exec.constants::get_core_trace_length_log
-    exec.constants::get_chiplets_trace_length_log
-    # => [log_chip, log_core, ...]
-
-    dup.1 dup.1 u32max exec.constants::tmp1 mem_store
-    dup.1 dup.1 u32min exec.constants::tmp2 mem_store
-    # => [log_chip, log_core, ...]
-
-    # a0 = (log_chip < log_core ? 1 : 0): u32lte returns log_core <= log_chip; not
-    # gives strict log_chip < log_core, so equal heights tie-break to a0 = 0.
-    u32lte not
-    dup not swap
-    # => [a0, a1, ...]
-
-    # --- Permutation 1: rate-aligned air_order block ---
-    # rate = [a0, a1, 0, 0, 0, 0, 0, 0]; the caller zero-pads air_order to a full
-    # SPONGE_RATE block, so this is a clean full-rate overwrite.
-    exec.constants::r1_ptr mem_store
-    exec.constants::r1_ptr add.1 mem_store
-    push.0 exec.constants::r1_ptr add.2 mem_store
-    push.0 exec.constants::r1_ptr add.3 mem_store
-    push.0 exec.constants::r1_ptr add.4 mem_store
-    push.0 exec.constants::r1_ptr add.5 mem_store
-    push.0 exec.constants::r1_ptr add.6 mem_store
-    push.0 exec.constants::r1_ptr add.7 mem_store
+    # rate[0] = instance count (2 AIRs).
+    push.2 exec.constants::r1_ptr mem_store
+    # rate[1] = log(core trace height).
+    exec.constants::get_core_trace_length_log exec.constants::r1_ptr add.1 mem_store
+    # rate[2] = log(chiplets trace height).
+    exec.constants::get_chiplets_trace_length_log exec.constants::r1_ptr add.2 mem_store
     # => [...]
 
-    exec.load_random_coin_state
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
-    # => [R1', R2', C', ...]
-    exec.store_random_coin_state
-    # => [...]   (coin state is now the air_order-block permutation output)
+    push.3 exec.constants::random_coin_input_len_ptr mem_store
+    # => [...]
+end
 
-    # --- Permutation 2: heights block over carried state ---
-    # Only rate[0..2] = [log_min, log_max] is overwritten; rate[2..8] and the
-    # capacity keep the permutation-1 output (already in memory from the store above),
-    # mirroring the DuplexChallenger's partial-prefix absorption.
-    exec.constants::tmp2 mem_load exec.constants::r1_ptr mem_store
-    exec.constants::tmp1 mem_load exec.constants::r1_ptr add.1 mem_store
+#! Buffer the main-trace commitment onto the instance-shape elements and permute.
+#!
+#! Writes the commitment word to rate[3..7], completing the 7-element duplex input
+#! buffer `[2, log_core, log_chip, c0, c1, c2, c3]`; rate[7] retains the
+#! post-public-inputs state. Then permutes once and exposes a fresh output, matching
+#! the DuplexChallenger's duplex at the first post-commitment sample.
+#!
+#! SAFETY: requires input_len=3 (the instance-shape elements buffered by
+#! `observe_instance_shape`). On exit: input_len=0, output_len=8.
+#!
+#! Input: [c0, c1, c2, c3, ...]
+#! Output: [...]
+pub proc reseed_main_after_shape
+    exec.constants::random_coin_input_len_ptr mem_load
+    push.3 assert_eq.err="reseed_main_after_shape: expected 3 buffered instance-shape elements"
+    # => [c0, c1, c2, c3, ...]
+
+    # Buffer the commitment word into rate[3..7] (rate[3] is r1_ptr+3; rate[4..7] are r2_ptr+0..2).
+    exec.constants::r1_ptr add.3 mem_store   # c0 -> rate[3]
+    exec.constants::r2_ptr mem_store          # c1 -> rate[4]
+    exec.constants::r2_ptr add.1 mem_store    # c2 -> rate[5]
+    exec.constants::r2_ptr add.2 mem_store    # c3 -> rate[6]
     # => [...]
 
     exec.load_random_coin_state
@@ -355,10 +349,7 @@ pub proc observe_trace_height_and_discard_instance_challenge
     # => [...]
 
     push.0 exec.constants::random_coin_input_len_ptr mem_store
-    # => [...]
-    # The instance_challenge (1 EF) sample consumes rate[7] and rate[6] of the
-    # permutation-2 output, leaving 6 elements valid in the output buffer.
-    push.6 exec.constants::random_coin_output_len_ptr mem_store
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
     # => [...]
 end
 

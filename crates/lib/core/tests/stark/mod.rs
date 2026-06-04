@@ -14,7 +14,7 @@ use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, prove_sync,
     recursive_verifier::{VerifierData, generate_advice_inputs},
 };
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
