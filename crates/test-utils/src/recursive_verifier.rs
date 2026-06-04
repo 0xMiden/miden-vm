@@ -100,7 +100,7 @@ pub fn generate_advice_inputs(
     // 3. Build the statement and verifier instance.
     let statement = Statement::<Felt, QuadFelt, _>::new(
         MidenMultiAir::new(),
-        public_values.clone(),
+        public_values,
         kernel_felts.clone(),
     )
     .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;

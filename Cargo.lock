@@ -1307,7 +1307,6 @@ dependencies = [
  "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
- "miden-lifted-stark",
  "miden-test-serde-macros",
  "miden-utils-indexing",
  "proptest",
@@ -1853,7 +1852,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-lifted-stark",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",
@@ -1863,14 +1861,12 @@ dependencies = [
  "predicates",
  "proptest",
  "serde",
- "serde-wincode",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
  "walkdir",
- "wincode",
 ]
 
 [[package]]

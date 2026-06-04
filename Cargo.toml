@@ -76,7 +76,6 @@ miden-verifier          = { path = "./verifier", version = "0.24", default-featu
 # Miden crates
 miden-crypto     = { version = "0.26", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-miden-lifted-stark = { version = "0.26", default-features = false }
 midenc-hir-type  = { version = "0.7.0", default-features = false }
 
 # Serialization

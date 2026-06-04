@@ -9,12 +9,11 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::Borrow;
 
-use miden_core::program::Kernel;
 use miden_core::{
     WORD_SIZE, Word,
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
-    program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
+    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::{
     air::{ReductionError, WindowAccess},

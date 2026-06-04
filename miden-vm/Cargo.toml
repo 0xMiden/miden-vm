@@ -92,12 +92,9 @@ assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-lifted-stark.workspace = true
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
 proptest.workspace = true
-serde-wincode.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true
-wincode.workspace = true

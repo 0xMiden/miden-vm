@@ -190,7 +190,7 @@ pub enum StarkVerificationError {
     #[error("STARK proof is too large: {size} bytes exceeds the {max} byte limit")]
     ProofTooLarge { size: usize, max: usize },
     #[error(transparent)]
-    Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
+    Verifier(#[from] VerifierError),
 }
 
 /// Verifies a multi-AIR STARK proof for the given (Core, Chiplets) split.
