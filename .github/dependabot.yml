@@ -10,6 +10,7 @@ multi-ecosystem-groups:
     labels:
       - "dependencies"
       - "no changelog"
+    open-pull-requests-limit: 1
 
 updates:
   - package-ecosystem: "cargo"
@@ -21,7 +22,6 @@ updates:
     patterns:
       - "*"
     multi-ecosystem-group: "dependency-refresh"
-    open-pull-requests-limit: 1
     cooldown:
       semver-patch-days: 7
       semver-minor-days: 7
@@ -33,6 +33,5 @@ updates:
     patterns:
       - "*"
     multi-ecosystem-group: "dependency-refresh"
-    open-pull-requests-limit: 1
     cooldown:
       default-days: 7
