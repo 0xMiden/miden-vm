@@ -32,6 +32,7 @@
 #### Enhancements
 
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
+- Added enum and `u256` records to `.debug_types` metadata so debuggers can preserve those type identities ([#3227](https://github.com/0xMiden/miden-vm/pull/3227)).
 - Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
 
 ## v0.23.3 (2026-05-26)
