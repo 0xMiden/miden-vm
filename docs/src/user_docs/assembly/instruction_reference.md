@@ -201,14 +201,36 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
-| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates the node, stores the canonical node, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload felts). The output length depends on the canonical payload shape. |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates a registered deferred node and pushes its canonical `tag \|\| payload` felts to the advice stack. See deferred DAG details below. |
 
 _Deferred DAG (host-side registration; no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an operand-stack deferred node in the host-side DAG. The eight payload felts are either one data chunk or two child digests for a join, as decoded from `TAG`. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
-| `adv.register_deferred_data` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a memory-backed data payload in the host-side deferred DAG. The chunk count is decoded from `TAG`, and exactly that many 8-felt chunks are read from memory at `ptr`. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. See deferred DAG details below. |
+| `adv.register_deferred_data` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. See deferred DAG details below. |
+
+Deferred DAG details:
+
+- `TAG` and every digest are one word (4 field elements). One deferred data chunk is 8 field
+  elements, i.e. two words.
+- `adv.register_deferred` accepts exactly one stack-resident payload block:
+  `PAYLOAD_LO || PAYLOAD_HI` (8 field elements). If `TAG` decodes to a data tag, those eight felts
+  are the complete data payload. If `TAG` decodes to a join tag, those eight felts are
+  `lhs_digest || rhs_digest`. `TRUE` and multi-chunk data payloads are not accepted by this
+  instruction. Code that later uses the node digest must compute it in-circuit from the same
+  `PAYLOAD_LO`, `PAYLOAD_HI`, and `TAG` values, for example with `hperm`.
+- `adv.register_deferred_data` accepts data and join tags. For data tags, the tag determines the
+  chunk count, and the VM reads exactly that many 8-felt chunks from memory starting at word-aligned
+  `ptr`. For join tags, the VM reads exactly 8 field elements and interprets them as
+  `lhs_digest || rhs_digest`. `TRUE` is not accepted. Code that later uses the node digest must
+  compute it in-circuit from the same `TAG` and memory range using the digest rule for the decoded
+  payload shape.
+- `adv.evaluate_deferred` requires `NODE_DIGEST` to be already registered. It pushes the canonical
+  node to the advice stack so that the first `adv_pushw` reads the canonical `TAG` word. Data
+  payloads then return two words per 8-felt chunk; join payloads return `lhs_digest` followed by
+  `rhs_digest`; `TRUE` returns only its tag word. These advice values are host-provided hints, so
+  proof-relevant code must bind them to circuit-visible data before relying on them.
 
 _Insert into Advice Map:_
 

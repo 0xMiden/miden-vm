@@ -132,8 +132,7 @@ impl Deserializable for PrecompileRequest {
 /// The current state of a [`PrecompileTranscript`].
 ///
 /// The transcript state is the rolling digest of all per-call statements absorbed so far. After
-/// every `record` call the state is itself a complete digest — no separate finalization step is
-/// required.
+/// every `record` call the state is itself a complete digest.
 pub type PrecompileTranscriptState = Word;
 
 /// Fixed capacity word used to domain-separate the legacy precompile transcript fold.
@@ -352,7 +351,7 @@ pub trait PrecompileVerifier: Send + Sync {
 /// For each commitment, the transcript first computes the per-call statement
 /// `STMNT = Poseidon2::merge(COMM, TAG)` (see [`PrecompileCommitment::statement`]), then folds the
 /// statement into the rolling state with fixed capacity word [`PRECOMPILE_TRANSCRIPT_DOMAIN`]. The
-/// state is exposed directly as the transcript digest — no finalization step is required.
+/// state is exposed directly as the transcript digest.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
     /// The rolling transcript digest.

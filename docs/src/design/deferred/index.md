@@ -125,13 +125,13 @@ transparent to precompile implementations and is not serialized as trusted state
 A program grows the DAG through three system events. Each event mutates only the *host-side*
 `DeferredState`; no register event hands a digest back through advice. Code that later uses or logs
 that digest must derive it **in-circuit** from the same operand-stack or memory data in a
-precompile-owned wrapper.
+precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers an operand-stack node, then evaluates it immediately. The eight operand-stack payload felts are either one data chunk or two child digests for a join. Join payloads may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes the data chunk count from the tag, reads exactly that many 8-felt chunks from memory at `ptr`, registers the resulting data payload, and evaluates it immediately. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
-| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload felts). The output length depends on the canonical payload shape. |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: either one data chunk or two 4-felt child digests for a join. Join payloads may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. Data tags read the tag-declared number of 8-felt chunks from word-aligned memory at `ptr`; join tags read exactly 8 felts and interpret them as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit from the same `TAG` and memory range using the digest rule for the decoded payload shape. |
+| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical's `tag || payload` felts onto the **advice stack**. The first `adv_pushw` reads `TAG`; data payloads then return two words per 8-felt chunk; join payloads return `lhs_digest` then `rhs_digest`; `TRUE` returns only its tag word. |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure. They store the
 original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
@@ -161,8 +161,9 @@ through advice — but that makes it an **unbound host hint**. Using it soundly 
 the returned `tag || payload` in-circuit and logging a predicate that `from_wire` re-checks; an
 in-circuit `eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
 precompile-specific (which predicate to log is the precompile's business), `evaluate_deferred` is
-intentionally *not* wrapped as a safe `sys` proc: each precompile wraps the raw event itself. The
-same ownership applies to registration helpers: a wrapper can make a raw register event safe by
+intentionally *not* exposed as a generic safe `sys` procedure. A precompile-specific assembly
+procedure must bind the raw event output to the circuit data it cares about. The same ownership
+applies to registration: a precompile-specific procedure can make a raw register event safe by
 computing the node digest in-circuit from the operand stack or memory, so the worst a misuse can do
 is make the verifier reject.
 

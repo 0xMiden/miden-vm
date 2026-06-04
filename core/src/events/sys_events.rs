@@ -295,13 +295,16 @@ pub enum SystemEvent {
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
-    /// Registers an operand-stack deferred node in the DAG.
+    /// Registers and eagerly evaluates a deferred node whose full payload is on the operand stack.
     ///
-    /// Registration validates the tag and eight-felt operand-stack payload against the
-    /// host-installed deferred precompile registry, then evaluates the node immediately. The
-    /// payload is either one data chunk or two child digests for a join. Predicate failures surface
-    /// at registration time. The MASM wrapper derives the original digest in-circuit from the
-    /// operand-stack payload so the node is bound to program data rather than advice.
+    /// `TAG` is one word (4 field elements). `PAYLOAD_LO || PAYLOAD_HI` is eight field elements:
+    /// either one [`crate::deferred::DataChunk`], or two child digests (`lhs || rhs`) for a join.
+    /// The installed registry decodes `TAG` via [`crate::deferred::DeferredState::decode`]; `TRUE`
+    /// and multi-chunk data payloads are not accepted by this event. Registration is performed by
+    /// [`crate::deferred::DeferredState::register`], so semantic failures surface immediately.
+    ///
+    /// This event does not push advice and does not return the node digest. Assembly code that
+    /// later uses that digest must compute it in-circuit from the same `TAG` and payload.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -312,13 +315,17 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegister,
 
-    /// Evaluates a registered node and exposes its canonical form as advice.
+    /// Evaluates a registered deferred node and pushes its canonical node as advice.
     ///
-    /// The digest must already be registered in deferred state. This returns the node's canonical
-    /// form; for successfully registered predicates, that is [`crate::deferred::Node::TRUE`].
+    /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
+    /// state. The handler evaluates it with [`crate::deferred::DeferredState::evaluate_digest`],
+    /// fetches the canonical node, and pushes [`crate::deferred::Node::to_felts`] to the advice
+    /// stack.
     ///
-    /// The advice output is an unbound host hint. Callers that rely on it must re-hash the
-    /// returned felts in-circuit and log a predicate so the verifier re-checks the claim.
+    /// Advice is pushed so that successive `adv_pushw` reads return `TAG` first, then the
+    /// canonical payload words. `TRUE` pushes only its tag word; data payloads push two words per
+    /// 8-felt data chunk; join payloads push `lhs` then `rhs`. These felts are an unbound host
+    /// hint, so proof-relevant code must bind them to circuit-visible data before relying on them.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -328,13 +335,19 @@ pub enum SystemEvent {
     ///   Advice stack:  canonical `tag || payload` in felt-index order
     DeferredEvaluate,
 
-    /// Registers a memory-backed data-payload deferred node in the DAG.
+    /// Registers and eagerly evaluates a memory-backed deferred node.
     ///
-    /// The host-installed deferred precompile registry decodes the tag's data chunk count and the
-    /// handler reads exactly that many 8-felt chunks from memory. The handler performs a cheap
-    /// budget pre-check before allocating or reading data memory; registration then enforces the
-    /// deferred-state budget and semantic checks. The MASM wrapper hashes the same memory range
-    /// in-circuit, so the registered digest is bound to memory contents rather than advice.
+    /// `TAG` is one word (4 field elements). The installed registry decodes `TAG` to determine the
+    /// memory-backed payload shape. Data tags read the tag-declared number of 8-felt
+    /// [`crate::deferred::DataChunk`] values from memory starting at `ptr`; join tags read exactly
+    /// 8 field elements and interpret them as `lhs || rhs`. `TRUE` is not accepted. The handler
+    /// performs a cheap budget pre-check before allocating or reading memory, then delegates
+    /// registration to
+    /// [`crate::deferred::DeferredState::register`].
+    ///
+    /// This event does not push advice and does not return the node digest. Assembly code that
+    /// later uses that digest must compute it in-circuit from the same `TAG` and memory range
+    /// using the digest rule for the decoded payload shape.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, ...]
@@ -342,7 +355,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack:  unchanged
     ///   Advice stack:   unchanged
-    ///   Deferred state: data node registered and semantically evaluated
+    ///   Deferred state: node registered and semantically evaluated
     DeferredRegisterData,
 }
 

@@ -35,15 +35,15 @@ pub proc drop_stack_top()
     dropw dropw dropw dropw
 end
 
-#! Folds a precompile commitment into the rolling transcript via `log_precompile` and removes
+#! Records a precompile commitment in the rolling transcript via `log_precompile` and removes
 #! the helper words produced by the instruction.
 #!
 #! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
 #! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
-#! `log_precompile` opcode apply the domain-separated precompile transcript fold
-#! `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))` using the fixed capacity word
-#! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
-#! don't clobber data deeper in the stack.
+#! `log_precompile` opcode update the transcript state by applying the domain-separated Poseidon2
+#! merge `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))` using the fixed capacity
+#! word `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes
+#! there don't clobber data deeper in the stack.
 #!
 #! Input: `[COMM, TAG, ...]`
 #! Output: Stack with `COMM` and `TAG` consumed and the three helper words produced by
