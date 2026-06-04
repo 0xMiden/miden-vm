@@ -147,7 +147,7 @@ pub fn analyze(
 
     // Simplify all constant declarations
     analyzer.simplify_constants();
-    for item in module.items_mut().iter_mut() {
+    for item in module.items_mut() {
         let Export::Constant(constant) = item else {
             continue;
         };

@@ -549,10 +549,10 @@ impl Module {
     pub fn items(&self) -> &[Export] {
         &self.items
     }
-
-    /// Get a mutable reference to the storage for items defined in this module
-    pub fn items_mut(&mut self) -> &mut Vec<Export> {
-        &mut self.items
+    /// Returns a mutable iterator over the items in this module.
+    /// Note: does not expose `Vec` directly to preserve the `name_map` invariant.
+    pub fn items_mut(&mut self) -> impl Iterator<Item = &mut Export> {
+        self.items.iter_mut()
     }
 
     /// Returns items exported from this module.
