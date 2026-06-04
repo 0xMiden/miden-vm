@@ -6,10 +6,9 @@ sidebar_position: 2
 # Deferred state semantics and API contract
 
 `DeferredState` is the host-side witness for deferred DAG verification and the deferred root
-commitment. The in-memory state is not serialized directly; follow-up proof wiring carries
-`DeferredStateWire`, and
-`DeferredState::from_wire` rebuilds a trusted state by decoding canonical wire and evaluating the
-wire's implicit root under the installed `PrecompileRegistry`.
+commitment. The in-memory state is not serialized directly; execution proofs carry
+`DeferredStateWire`, and `DeferredState::from_wire` rebuilds a trusted state by decoding canonical
+wire and evaluating the wire's implicit root under the installed `PrecompileRegistry`.
 
 The simplified state model is:
 
@@ -120,8 +119,8 @@ next_root = digest(Node::and(previous_root, stmt_digest))
 is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the final entry.
 `from_wire(registry, wire, max_elements)` decodes untrusted wire, rejects non-canonical or dangling
 wire by requiring `state.to_wire() == wire`, then evaluates the implicit wire root to `Node::TRUE`.
-Evaluation may insert canonical/helper nodes in addition to the wire nodes. Follow-up proof plumbing
-compares the returned `state.root()` to the externally committed root.
+Evaluation may insert canonical/helper nodes in addition to the wire nodes. Verifier proof plumbing
+compares the returned `state.root()` to the deferred root committed by the VM proof.
 
 ## Public API
 
@@ -147,7 +146,7 @@ of the public contract.
 
 ## Scope note
 
-This pass simplifies deferred state and budgeting while the legacy precompile request path remains
-documented separately; proof wiring for the deferred root commitment lands in a follow-up.
-The processor default registry is empty in this branch; installing concrete production
-precompiles is left to the follow-up precompile migration.
+The VM proof now binds the final deferred root to the execution proof's `DeferredStateWire`.
+Top-level VM prove/verify paths install the `miden-precompiles` registry, while lower-level
+registry-aware APIs allow callers to supply an explicit registry for custom proof-bound
+precompiles.

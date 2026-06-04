@@ -206,8 +206,8 @@ use super::*;
         Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6), Felt::from_u32(5), Felt::from_u32(4),
         Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
-// ---- log precompile ops --------------------------------
-// Drift marker only: this snapshot guards the `log_deferred` precompile-transcript output against
+// ---- deferred-root ops --------------------------------
+// Drift marker only: this snapshot guards the `log_deferred` deferred-root output against
 // silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
 // Stack: [1, 2, 3, 4, TRUE_DIGEST] with 1 at top. The opcode reads TRUE_DIGEST from
 // stack[4..8], which is implicitly registered in a fresh DeferredState.

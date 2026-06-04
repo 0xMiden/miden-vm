@@ -81,7 +81,7 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Main group per-row max is `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (logpre)) = 4`
+/// Main group per-row max is `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (logdeferred)) = 4`
 /// — the u32rc 4-remove batch is the dominant branch.
 /// Sibling range-table group always contributes 1 fraction.
 /// Both groups run unconditionally (the main group fires at most one branch per row but
@@ -89,7 +89,7 @@ use crate::{
 /// the sum: `4 + 1 = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
-/// Emit the merged block-stack + u32rc + logpre + range-table column.
+/// Emit the merged block-stack + u32rc + logdeferred + range-table column.
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
@@ -135,7 +135,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let range_m = local.range.multiplicity;
     let range_v = local.range.value;
 
-    // ---- u32rc + logpre captures (from range_logcap.rs) ----
+    // ---- u32rc + logdeferred captures (from range_logcap.rs) ----
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
@@ -316,7 +316,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                     // ---- u32 range-check removes (BusId::RangeCheck) ----
                     // Four simultaneous range-check removals under the u32rc flag. Mutually
                     // exclusive with all block-stack branches (u32 ops are disjoint from
-                    // control-flow ops) and with logpre (disjoint from LOGDEFERRED).
+                    // control-flow ops) and with logdeferred (disjoint from LOGDEFERRED).
                     g.batch(
                         "u32_range_check",
                         f_u32rc,

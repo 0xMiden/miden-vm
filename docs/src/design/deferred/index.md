@@ -18,10 +18,9 @@ to `TRUE` proves every claim it transitively references. The framework (`miden_c
 owns the data model, the root commitment, and the wire format; individual *precompiles* plug in the
 meaning of the nodes.
 
-> **Status.** This page describes the framework as an additive substrate: the VM accumulates the
-> DAG during execution and exposes it on the execution output, but it is not yet folded into the
-> STARK proof. The proof-model cutover — and the migration of the existing precompiles onto this
-> model — lands separately. See [Status and scope](#status-and-scope).
+> **Status.** The VM now commits the final deferred root in its proof public inputs, and execution
+> proofs carry `DeferredStateWire` so verifiers can rehydrate and evaluate the committed DAG under
+> the installed precompile registry. See [Status and scope](#status-and-scope).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
@@ -105,10 +104,9 @@ precompile's `id` is derived the same way event IDs are — the name hashed with
 into a single field element — but in its own domain-separated namespace, so a precompile and an
 event of the same name get different ids by construction. The registry rejects misconfigured or
 duplicate ids at construction. The default registry is empty and rejects every precompile-owned
-tag. A `DeferredState` carries the registry it evaluates under; in this branch the processor keeps
-an empty production registry and exposes registry installation only for testing/experimental
-end-to-end coverage. Production registry installation and concrete precompile packages land in the
-follow-up precompile migration work.
+tag. A `DeferredState` carries the registry it evaluates under; top-level VM prove/verify paths
+install the `miden-precompiles` registry, and lower-level APIs accept an explicit registry for
+custom proof-bound precompile sets.
 
 During evaluation the framework hands the precompile a `DeferredContext`, through which it can
 `get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
@@ -146,13 +144,12 @@ a node over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_
 gap, and it composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
-- once the deferred root is threaded into proof public inputs, the **deferred-root match** will
-  bind that digest to the wire the verifier rehydrates;
+- the **deferred-root match** binds that digest to the wire the verifier rehydrates;
 - `DeferredState::from_wire` then rehydrates the canonical wire opening and evaluates the expected
   root from wire data.
 
-Once the root is public, these pieces bind the wire — and therefore every evaluation the verifier
-re-checks — to the data the circuit actually committed to.
+Together, these pieces bind the wire — and therefore every evaluation the verifier re-checks — to
+the data the circuit actually committed to.
 
 ### Why `evaluate_deferred` is a bare event
 
@@ -186,16 +183,13 @@ implicit root and evaluates that root directly. The digest is structural: even `
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-> **Scope note.** The legacy precompile request path remains documented separately; proof wiring
-> for the deferred root commitment lands in a follow-up.
-
-Once proof wiring lands, the verifier's obligation collapses to a single fixed point: **evaluate
-the root to `TRUE`, and every logged statement holds.** There is no separate finalization step.
+The verifier's obligation collapses to a single fixed point: **evaluate the root to `TRUE`, and
+every logged statement holds.** There is no separate finalization step.
 
 ## Wire format and verification
 
-The intended follow-up proof/witness format is `DeferredStateWire`, not the in-memory
-`DeferredState`. `to_wire` lowers state to a passive, canonical, topologically ordered entry
+The proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`. `to_wire`
+lowers state to a passive, canonical, topologically ordered entry
 stream. Wire index `0`
 is the implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by
 index and may reference only `0` or earlier entries. Empty `entries` opens `TRUE_DIGEST`; a non-empty
@@ -204,8 +198,8 @@ root-reachable closure, so unreferenced orphans are dropped.
 
 `DeferredState::from_wire(registry, wire, max_elements)` is the only trusted path from wire bytes
 back to a validated state. It runs as a structural decode, a canonicality check, and a root
-evaluation. This validates the wire's own implicit root; follow-up proof plumbing compares the
-returned `state.root()` against the externally committed root.
+evaluation. This validates the wire's own implicit root; verifier proof plumbing compares the
+returned `state.root()` against the VM proof's committed deferred root.
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
    entry (translating child indices back to digests), decode its tag, check that the entry variant
@@ -224,7 +218,7 @@ wire.
 
 ## Status and scope
 
-This framework is an additive substrate. In its current form:
+This framework is proof-bound in the VM. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
 - execution proofs carry the deferred-state wire needed to reconstruct and verify the committed

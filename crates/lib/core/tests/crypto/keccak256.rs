@@ -1,4 +1,4 @@
-//! Tests for Keccak256 precompile event handlers.
+//! Tests for Keccak256 advice-only compatibility handlers.
 //!
 //! Verifies that:
 //! - Raw event handlers correctly compute Keccak256 and populate advice provider

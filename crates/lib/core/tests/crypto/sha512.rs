@@ -1,4 +1,4 @@
-//! Tests for SHA512 precompile event handlers.
+//! Tests for SHA512 advice-only compatibility handlers.
 //!
 //! Validates that:
 //! - Raw event handlers correctly compute SHA512 and populate advice provider

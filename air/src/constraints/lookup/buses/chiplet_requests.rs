@@ -604,7 +604,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         op_flags.log_deferred(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
+                            let log_deferred_in: [LB::Expr; 12] = array::from_fn(|i| {
                                 if i < 4 {
                                     user_helpers[HELPER_DEFERRED_ROOT_PREV_RANGE.start + i].into()
                                 } else if i < 8 {
@@ -613,17 +613,17 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                     LB::Expr::from(Tag::AND.as_word()[i - 8])
                                 }
                             });
-                            let logpre_out: [LB::Expr; 12] =
+                            let log_deferred_out: [LB::Expr; 12] =
                                 array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
                                 "logdeferred_init",
-                                HasherMsg::linear_hash_init(log_addr.clone(), logpre_in),
+                                HasherMsg::linear_hash_init(log_addr.clone(), log_deferred_in),
                                 Deg { v: 5, u: 6 },
                             );
                             let return_addr = log_addr + last_off;
                             b.remove(
                                 "logdeferred_return",
-                                HasherMsg::return_state(return_addr, logpre_out),
+                                HasherMsg::return_state(return_addr, log_deferred_out),
                                 Deg { v: 5, u: 6 },
                             );
                         },

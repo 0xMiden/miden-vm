@@ -420,10 +420,10 @@ the caller immediately.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
-- $h_1, h_2, h_3, h_4$: Previous transcript state `STATE_PREV`
+- $h_1, h_2, h_3, h_4$: Previous deferred root `DEFERRED_ROOT_PREV`
 
-Note: helper registers expose `STATE_PREV` for bus constraints only; the VM maintains the
-transcript state internally between invocations.
+Note: helper registers expose `DEFERRED_ROOT_PREV` for bus constraints only; the VM maintains the
+deferred root internally between invocations.
 
 ### Bus Communication
 
@@ -480,19 +480,19 @@ rows are consecutive, so their addresses differ by exactly 1.
 
 
 
-### Transcript-state Initialization
+### Deferred-root Initialization
 
-Inside the VM, the transcript state is tracked via the virtual-table bus: each update removes the
-previous entry before inserting the next one.
+Inside the VM, the deferred root is tracked via the virtual-table bus: each update removes the
+previous root before inserting the next one.
 
 We denote the messages for removing and inserting the state as
 
 $$
-v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_PREV}_j
+v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{DEFERRED\_ROOT\_PREV}_j
 $$
 
 $$
-v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_NEW}_j
+v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{DEFERRED\_ROOT\_NEW}_j
 $$
 
 The bus constraint is applied to the virtual table column as follows.
@@ -501,7 +501,7 @@ $$
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final transcript state, the verifier initializes
+To ensure the column accounts for the initial and final deferred root, the verifier initializes
 the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it
 constrains the first value of the bus to be equal to
 
@@ -509,18 +509,17 @@ $$
 b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
 $$
 
-Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be
-used to extend an existing running state from a previous execution. The final transcript state is
-provided to the verifier (as a variable‑length public input) and enforced via the boundary
+The deferred root starts at the empty word `[0,0,0,0]`, which is `TRUE_DIGEST`. The final deferred
+root is provided to the verifier as a variable-length public input and enforced via the boundary
 constraint. The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
 $$
-v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
+v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred},
 $$
 
 $$
-v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
+v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{DEFERRED\_ROOT\_FINAL}_j.
 $$
 
-Because the domain-separated Poseidon2 merge outputs a digest word directly, the precompile
-transcript state is itself the digest at every step. The transcript digest is just the final state.
+Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
+itself the digest at every step. The proof-bound deferred commitment is the final root.

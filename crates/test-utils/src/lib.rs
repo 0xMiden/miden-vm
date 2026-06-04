@@ -574,7 +574,7 @@ impl Test {
     /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
     /// much faster and provides better error diagnostics. Use this method only when you need to
     /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
-    /// verifier logic, or precompile request handling).
+    /// verifier logic, or proof-bound deferred precompile handling).
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();

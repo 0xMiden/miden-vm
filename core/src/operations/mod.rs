@@ -593,8 +593,8 @@ pub enum Operation {
     /// of arithmetic gates, and the sum of the input and constant gates.
     EvalCircuit = opcodes::EVALCIRCUIT,
 
-    /// Logs a precompile event. This instruction is used to signal that a precompile computation
-    /// was requested.
+    /// Advances the deferred root by folding a registered statement digest into the rolling
+    /// proof-bound deferred-state commitment.
     LogDeferred = opcodes::LOGDEFERRED,
 }
 
