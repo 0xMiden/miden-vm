@@ -12,7 +12,7 @@ use super::{
     DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo,
     DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugInlinedCallInfo,
     DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
-    DebugVariableInfo,
+    DebugVariableInfo, DebugVariantInfo,
 };
 
 // DEBUG TYPES SECTION SERIALIZATION
@@ -181,6 +181,7 @@ const TYPE_TAG_ARRAY: u8 = 2;
 const TYPE_TAG_STRUCT: u8 = 3;
 const TYPE_TAG_FUNCTION: u8 = 4;
 const TYPE_TAG_UNKNOWN: u8 = 5;
+const TYPE_TAG_ENUM: u8 = 6;
 
 impl Serializable for DebugTypeInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
@@ -219,6 +220,21 @@ impl Serializable for DebugTypeInfo {
                 target.write_usize(param_type_indices.len());
                 for idx in param_type_indices {
                     target.write_u32(idx.as_u32());
+                }
+            },
+            Self::Enum {
+                name_idx,
+                size,
+                discriminant_type_idx,
+                variants,
+            } => {
+                target.write_u8(TYPE_TAG_ENUM);
+                target.write_u32(*name_idx);
+                target.write_u32(*size);
+                target.write_u32(discriminant_type_idx.as_u32());
+                target.write_usize(variants.len());
+                for variant in variants {
+                    variant.write_into(target);
                 }
             },
             Self::Unknown => {
@@ -268,6 +284,19 @@ impl Deserializable for DebugTypeInfo {
                 let param_type_indices = alloc::vec::Vec::<DebugTypeIdx>::read_from(source)?;
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
+            TYPE_TAG_ENUM => {
+                let name_idx = source.read_u32()?;
+                let size = source.read_u32()?;
+                let discriminant_type_idx = DebugTypeIdx::from(source.read_u32()?);
+                let variants_len = source.read_usize()?;
+                let variants = source.read_many_iter(variants_len)?.collect::<Result<_, _>>()?;
+                Ok(Self::Enum {
+                    name_idx,
+                    size,
+                    discriminant_type_idx,
+                    variants,
+                })
+            },
             TYPE_TAG_UNKNOWN => Ok(Self::Unknown),
             _ => Err(DeserializationError::InvalidValue(alloc::format!("invalid type tag: {tag}"))),
         }
@@ -291,6 +320,39 @@ impl Deserializable for DebugFieldInfo {
         let type_idx = DebugTypeIdx::from(source.read_u32()?);
         let offset = source.read_u32()?;
         Ok(Self { name_idx, type_idx, offset })
+    }
+}
+
+// DEBUG VARIANT INFO SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugVariantInfo {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.name_idx);
+        target.write_bool(self.type_idx.is_some());
+        if let Some(type_idx) = self.type_idx {
+            target.write_u32(type_idx.as_u32());
+        }
+        target.write_u64((self.discriminant >> 64) as u64);
+        target.write_u64(self.discriminant as u64);
+    }
+}
+
+impl Deserializable for DebugVariantInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let name_idx = source.read_u32()?;
+        let type_idx = if source.read_bool()? {
+            Some(DebugTypeIdx::from(source.read_u32()?))
+        } else {
+            None
+        };
+        let hi = source.read_u64()? as u128;
+        let lo = source.read_u64()? as u128;
+        Ok(Self {
+            name_idx,
+            type_idx,
+            discriminant: (hi << 64) | lo,
+        })
     }
 }
 
@@ -609,6 +671,28 @@ mod tests {
             ],
         });
 
+        // Add an enum type
+        let status_idx = section.add_string(Arc::from("Status"));
+        let ok_idx = section.add_string(Arc::from("Ok"));
+        let err_idx = section.add_string(Arc::from("Err"));
+        section.add_type(DebugTypeInfo::Enum {
+            name_idx: status_idx,
+            size: 8,
+            discriminant_type_idx: i32_type_idx,
+            variants: alloc::vec![
+                DebugVariantInfo {
+                    name_idx: ok_idx,
+                    type_idx: None,
+                    discriminant: 0,
+                },
+                DebugVariantInfo {
+                    name_idx: err_idx,
+                    type_idx: Some(felt_type_idx),
+                    discriminant: 1,
+                },
+            ],
+        });
+
         roundtrip(&section);
     }
 
@@ -674,6 +758,7 @@ mod tests {
             DebugPrimitiveType::F64,
             DebugPrimitiveType::Felt,
             DebugPrimitiveType::Word,
+            DebugPrimitiveType::U256,
         ] {
             section.add_type(DebugTypeInfo::Primitive(prim));
         }

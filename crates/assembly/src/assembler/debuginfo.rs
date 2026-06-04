@@ -9,7 +9,7 @@ use std::{
 use miden_assembly_syntax::debuginfo::{FileLineCol, Location, Uri};
 use miden_mast_package::debug_info::{
     DebugFieldInfo, DebugFunctionsSection, DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx,
-    DebugTypeInfo, DebugTypesSection,
+    DebugTypeInfo, DebugTypesSection, DebugVariantInfo,
 };
 
 use crate::{
@@ -206,7 +206,10 @@ fn register_debug_type(
         Type::F64 => {
             debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::F64))
         },
-        Type::U256 | Type::Unknown => debug_types_section.add_type(DebugTypeInfo::Unknown),
+        Type::U256 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U256))
+        },
+        Type::Unknown => debug_types_section.add_type(DebugTypeInfo::Unknown),
         Type::Never => {
             debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void))
         },
@@ -325,13 +328,30 @@ fn register_debug_type(
         Type::Enum(enum_ty) => {
             let discrim_ty =
                 register_debug_type(debug_types_section, None, None, enum_ty.discriminant())?;
-            if enum_ty.is_c_like() {
-                discrim_ty
-            } else {
-                // TODO(pauls): We need to figure out how best to represent this in terms of DWARF
-                // debug info
-                debug_types_section.add_type(DebugTypeInfo::Unknown)
-            }
+            let name_idx = debug_types_section.add_string(enum_ty.name().clone());
+            let size = u32::try_from(enum_ty.size_in_bytes()).map_err(|_| {
+                Report::msg(format!("invalid enum type '{}': enum is too large", enum_ty.name()))
+            })?;
+            let variants = enum_ty
+                .variants()
+                .iter()
+                .zip(enum_ty.discriminant_values())
+                .map(|(variant, discriminant)| {
+                    let name_idx = debug_types_section.add_string(variant.name.clone());
+                    let type_idx = variant
+                        .value
+                        .as_ref()
+                        .map(|ty| register_debug_type(debug_types_section, None, None, ty))
+                        .transpose()?;
+                    Ok(DebugVariantInfo { name_idx, type_idx, discriminant })
+                })
+                .collect::<Result<_, Report>>()?;
+            debug_types_section.add_type(DebugTypeInfo::Enum {
+                name_idx,
+                size,
+                discriminant_type_idx: discrim_ty,
+                variants,
+            })
         },
         Type::Function(fty) => {
             let return_type_index = match fty.results() {
@@ -376,4 +396,79 @@ fn register_debug_type(
             })
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::types::{EnumType, Variant};
+
+    #[test]
+    fn registers_c_like_enum_debug_type() {
+        let mut section = DebugTypesSection::new();
+        let enum_ty = EnumType::new(
+            Arc::from("Status"),
+            Type::U16,
+            [
+                Variant::c_like(Arc::from("Ok"), Some(200)),
+                Variant::c_like(Arc::from("NotFound"), Some(404)),
+            ],
+        )
+        .unwrap();
+        let ty = Type::Enum(Arc::new(enum_ty));
+
+        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
+
+        let DebugTypeInfo::Enum {
+            name_idx,
+            size,
+            discriminant_type_idx,
+            variants,
+        } = section.get_type(type_idx).unwrap()
+        else {
+            panic!("expected enum debug type");
+        };
+        assert_eq!(section.get_string(*name_idx).as_deref(), Some("Status"));
+        assert_eq!(*size, 2);
+        assert_eq!(
+            section.get_type(*discriminant_type_idx),
+            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U16))
+        );
+        assert_eq!(variants.len(), 2);
+        assert_eq!(section.get_string(variants[0].name_idx).as_deref(), Some("Ok"));
+        assert_eq!(variants[0].type_idx, None);
+        assert_eq!(variants[0].discriminant, 200);
+        assert_eq!(section.get_string(variants[1].name_idx).as_deref(), Some("NotFound"));
+        assert_eq!(variants[1].type_idx, None);
+        assert_eq!(variants[1].discriminant, 404);
+    }
+
+    #[test]
+    fn registers_payload_enum_debug_type() {
+        let mut section = DebugTypesSection::new();
+        let enum_ty = EnumType::new(
+            Arc::from("OptionU32"),
+            Type::U8,
+            [
+                Variant::c_like(Arc::from("None"), Some(0)),
+                Variant::new(Arc::from("Some"), Type::U32, Some(1)),
+            ],
+        )
+        .unwrap();
+        let ty = Type::Enum(Arc::new(enum_ty));
+
+        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
+
+        let DebugTypeInfo::Enum { variants, .. } = section.get_type(type_idx).unwrap() else {
+            panic!("expected enum debug type");
+        };
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].type_idx, None);
+        let payload_type_idx = variants[1].type_idx.expect("Some variant should have payload");
+        assert_eq!(
+            section.get_type(payload_type_idx),
+            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U32))
+        );
+        assert_eq!(variants[1].discriminant, 1);
+    }
 }
