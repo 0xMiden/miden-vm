@@ -209,10 +209,11 @@ use super::*;
 // ---- log precompile ops --------------------------------
 // Drift marker only: this snapshot guards the `log_deferred` precompile-transcript output against
 // silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
-// Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
+// Stack: [1, 2, 3, 4, TRUE_DIGEST] with 1 at top. The opcode reads TRUE_DIGEST from
+// stack[4..8], which is implicitly registered in a fresh DeferredState.
 #[case(None, "begin log_deferred end",
-    vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
-         Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
+	vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
+	     ZERO, ZERO, ZERO, ZERO],
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected
