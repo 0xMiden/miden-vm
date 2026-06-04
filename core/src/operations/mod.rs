@@ -117,7 +117,7 @@ pub mod opcodes {
     pub const PUSH: u8           = 0b0101_1011;
     pub const DYNCALL: u8        = 0b0101_1100;
     pub const EVALCIRCUIT: u8    = 0b0101_1101;
-    pub const LOGPRECOMPILE: u8  = 0b0101_1110;
+    pub const LOGDEFERRED: u8  = 0b0101_1110;
 
     pub const MRUPDATE: u8       = 0b0110_0000;
     pub const CRYPTOSTREAM: u8   = 0b0110_0100;
@@ -595,7 +595,7 @@ pub enum Operation {
 
     /// Logs a precompile event. This instruction is used to signal that a precompile computation
     /// was requested.
-    LogPrecompile = opcodes::LOGPRECOMPILE,
+    LogDeferred = opcodes::LOGDEFERRED,
 }
 
 impl Operation {
@@ -800,7 +800,7 @@ impl fmt::Display for Operation {
             Self::HornerBase => write!(f, "horner_eval_base"),
             Self::HornerExt => write!(f, "horner_eval_ext"),
             Self::EvalCircuit => write!(f, "eval_circuit"),
-            Self::LogPrecompile => write!(f, "log_precompile"),
+            Self::LogDeferred => write!(f, "log_deferred"),
         }
     }
 }
@@ -897,7 +897,7 @@ impl Serializable for Operation {
             | Operation::HornerBase
             | Operation::HornerExt
             | Operation::EvalCircuit
-            | Operation::LogPrecompile => (),
+            | Operation::LogDeferred => (),
         }
     }
 }
@@ -991,7 +991,7 @@ impl Operation {
             | Operation::HornerBase
             | Operation::HornerExt
             | Operation::EvalCircuit
-            | Operation::LogPrecompile => (),
+            | Operation::LogDeferred => (),
         }
         size
     }
@@ -1084,7 +1084,7 @@ impl Deserializable for Operation {
             opcodes::CRYPTOSTREAM => Self::CryptoStream,
             opcodes::HORNERBASE => Self::HornerBase,
             opcodes::HORNEREXT => Self::HornerExt,
-            opcodes::LOGPRECOMPILE => Self::LogPrecompile,
+            opcodes::LOGDEFERRED => Self::LogDeferred,
             opcodes::EVALCIRCUIT => Self::EvalCircuit,
 
             opcodes::MRUPDATE => Self::MrUpdate,

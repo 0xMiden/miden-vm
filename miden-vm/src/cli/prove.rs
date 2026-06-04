@@ -1,8 +1,9 @@
 use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
+use miden_precompiles::PrecompilesLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
@@ -111,14 +112,22 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+        let host = DefaultHost::default()
+            .with_library(&CoreLibrary::default())?
+            .with_library(&PrecompilesLibrary::default())?;
         // Use a single match expression to load the program.
         let (program, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
                 let (program, source_manager) =
                     get_masm_program(&self.program_file, &libraries, self.kernel_file.as_deref())?;
-                (program, host.with_source_manager(source_manager))
+                let mut host = host.with_source_manager(source_manager);
+                for lib in libraries.libraries.iter() {
+                    host.load_library(lib.mast_forest())
+                        .into_diagnostic()
+                        .wrap_err("Failed to load library")?;
+                }
+                (program, host)
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };

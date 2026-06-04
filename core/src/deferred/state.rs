@@ -154,6 +154,23 @@ impl DeferredState {
         Ok(new_root)
     }
 
+    /// Logs an opcode-provided statement digest after checking the in-circuit root transition.
+    pub fn log_verified_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Digest,
+    ) -> Result<Digest, PrecompileError> {
+        let actual_new_root = Node::and(self.root, statement_digest).digest();
+        if actual_new_root != expected_new_root {
+            return Err(DeferredError::InvalidDeferredRootTransition {
+                expected: expected_new_root,
+                actual: actual_new_root,
+            }
+            .into());
+        }
+        self.log_statement(statement_digest)
+    }
+
     /// Evaluates a registered node addressed by digest and returns the canonical node digest.
     ///
     /// Evaluation memoization is an implementation detail: callers receive the canonical digest

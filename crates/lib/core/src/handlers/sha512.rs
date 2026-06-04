@@ -1,19 +1,13 @@
 //! SHA2-512 precompile for the Miden VM.
 //!
-//! This mirrors the Keccak256 precompile flow but targets SHA2-512. Execution-time handlers read
-//! packed bytes from memory, compute the digest, extend the advice stack with the 512-bit hash, and
-//! record calldata for deferred verification. Verification-time logic recomputes the digest and
-//! commits to both input and output using Poseidon2 hashing.
+//! This mirrors the Keccak256 advice helper but targets SHA2-512. Execution-time handlers read
+//! packed bytes from memory, compute the digest, and extend the advice stack with the 512-bit hash.
 
 use alloc::{format, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    Felt, Word, ZERO,
-    crypto::hash::{Poseidon2, Sha512},
-    events::EventName,
-    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::bytes_to_packed_u32_elements,
+    Felt, crypto::hash::Sha512, events::EventName, utils::bytes_to_packed_u32_elements,
 };
 use miden_processor::{
     ProcessorState,
@@ -33,7 +27,7 @@ impl EventHandler for Sha512Precompile {
     /// SHA2-512 event handler invoked when the VM emits a hash request.
     ///
     /// Reads packed bytes from memory, computes the SHA2-512 digest, extends the advice stack with
-    /// the 16 u32 limbs of the digest, and stores the raw preimage for verification.
+    /// the 16 u32 limbs of the digest.
     ///
     /// ## Input Format
     /// - **Stack**: `[event_id, ptr, len_bytes, ...]`
@@ -61,17 +55,7 @@ impl EventHandler for Sha512Precompile {
         let preimage = Sha512Preimage::new(input_bytes);
         let digest = preimage.digest();
 
-        Ok(vec![
-            AdviceMutation::extend_stack(digest.0),
-            AdviceMutation::extend_precompile_requests([preimage.into()]),
-        ])
-    }
-}
-
-impl PrecompileVerifier for Sha512Precompile {
-    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        let preimage = Sha512Preimage::new(calldata.to_vec());
-        Ok(preimage.precompile_commitment())
+        Ok(vec![AdviceMutation::extend_stack(digest.0)])
     }
 }
 
@@ -90,10 +74,6 @@ impl Sha512FeltDigest {
             u32::from_le_bytes(limbs)
         });
         Self(packed.map(Felt::from_u32))
-    }
-
-    pub fn to_commitment(&self) -> Word {
-        Poseidon2::hash_elements(&self.0)
     }
 }
 
@@ -123,40 +103,14 @@ impl Sha512Preimage {
         bytes_to_packed_u32_elements(self.as_ref())
     }
 
-    pub fn input_commitment(&self) -> Word {
-        Poseidon2::hash_elements(&self.as_felts())
-    }
-
     pub fn digest(&self) -> Sha512FeltDigest {
         let hash = Sha512::hash(self.as_ref());
         Sha512FeltDigest::from_bytes(&hash)
-    }
-
-    pub fn precompile_commitment(&self) -> PrecompileCommitment {
-        let tag = self.precompile_tag();
-        let comm = Poseidon2::merge(&[self.input_commitment(), self.digest().to_commitment()]);
-        PrecompileCommitment::new(tag, comm)
-    }
-
-    fn precompile_tag(&self) -> Word {
-        [
-            SHA512_HASH_BYTES_EVENT_NAME.to_event_id().as_felt(),
-            Felt::new_unchecked(self.as_ref().len() as u64),
-            ZERO,
-            ZERO,
-        ]
-        .into()
     }
 }
 
 impl AsRef<[u8]> for Sha512Preimage {
     fn as_ref(&self) -> &[u8] {
         &self.0
-    }
-}
-
-impl From<Sha512Preimage> for PrecompileRequest {
-    fn from(preimage: Sha512Preimage) -> Self {
-        PrecompileRequest::new(SHA512_HASH_BYTES_EVENT_NAME.to_event_id(), preimage.into_inner())
     }
 }

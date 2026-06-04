@@ -2,21 +2,16 @@
 //!
 //! Verifies that:
 //! - Raw event handlers correctly compute Keccak256 and populate advice provider
-//! - Public MASM wrappers correctly return the digest and log deferred requests
-//! - Private implementation helpers return the expected commitment and tag
+//! - Public MASM wrappers correctly return the digest
+//! - Private implementation helpers return the expected digest
 //! - Both memory and digest merge operations work correctly
 //! - Various input sizes and edge cases are handled properly
 
 use core::array;
 
 use miden_assembly::Linkage;
-use miden_core::{
-    Felt,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
-};
-use miden_core_lib::handlers::keccak256::{
-    KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
-};
+use miden_core::Felt;
+use miden_core_lib::handlers::keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPreimage};
 use miden_processor::ExecutionError;
 
 use crate::helpers::{masm_push_felts, masm_store_felts};
@@ -80,17 +75,6 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     let advice_stack = output.advice.stack();
     assert_eq!(advice_stack, preimage.digest().as_ref());
-
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
-    let precompile_data = &deferred[0];
-
-    // PrecompileData contains the raw input bytes directly
-    assert_eq!(
-        precompile_data.calldata(),
-        preimage.as_ref(),
-        "data in deferred storage does not match preimage"
-    );
 }
 
 fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
@@ -112,7 +96,7 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
                 # => [ptr, len_bytes]
 
                 exec.hash_bytes_impl
-                # => [COMM, TAG, DIGEST_U32[8]]
+                # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             "#,
@@ -124,21 +108,8 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let (output, _) = test.execute_for_output().unwrap();
 
     let stack = output.stack;
-    let commitment = stack.get_word(0).unwrap();
-    let tag = stack.get_word(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-    let verifier_commitment = KeccakPrecompile.verify(preimage.as_ref()).unwrap();
-    assert_eq!(precompile_commitment, verifier_commitment);
-
-    // Digest occupies the elements after COMM/TAG
-    let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(8 + i).unwrap());
+    let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
-
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "expected a single deferred request");
-    assert_eq!(deferred[0].event_id(), KECCAK_HASH_BYTES_EVENT_NAME.to_event_id());
-    assert_eq!(deferred[0].calldata(), preimage.as_ref());
-    assert_eq!(deferred[0], preimage.into());
 
     let advice_stack = output.advice.stack();
     assert!(advice_stack.is_empty(), "advice stack should be empty after hash_bytes_impl");
@@ -359,5 +330,9 @@ fn run_keccak_with_max_hash_len(
 }
 
 fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
-    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
+    format!(
+        "use miden::core::sys\n{}\n\nbegin\n{}\nend",
+        module_source.replace("pub proc", "proc"),
+        body.as_ref()
+    )
 }

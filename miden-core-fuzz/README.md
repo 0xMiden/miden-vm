@@ -125,18 +125,6 @@ cargo +nightly fuzz run deferred_state_wire_deserialize --fuzz-dir miden-core-fu
 cargo +nightly fuzz run deferred_state_wire_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
-**`precompile_request_deserialize`** — Tests `PrecompileRequest::read_from_bytes`.
-
-```bash
-cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuzz
-```
-
-**`precompile_request_serde_deserialize`** — Tests `PrecompileRequest` JSON deserialization via `serde_json`.
-
-```bash
-cargo +nightly fuzz run precompile_request_serde_deserialize --fuzz-dir miden-core-fuzz
-```
-
 ### Package Deserialization Targets
 
 These targets exercise package deserializers used by `.masp`.

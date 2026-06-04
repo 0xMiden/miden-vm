@@ -9,10 +9,8 @@ use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     deferred::{DeferredStateWire, TRUE_INDEX, Tag, WireEntry},
-    events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
-    precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},
     proof::{ExecutionProof, HashFunction},
     serde::{ByteWriter, Serializable},
@@ -261,14 +259,8 @@ fn generate_fuzz_seeds() {
         write_seed("operation_deserialize", "op_add.bin", &op.to_bytes());
     }
 
-    // Precompile request seed
-    {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        write_seed("precompile_request_deserialize", "precompile_request.bin", &request.to_bytes());
-    }
-
-    // Deferred-state wire seeds. These are standalone compact-wire witnesses; ExecutionProof still
-    // carries legacy PrecompileRequest values on this branch.
+    // Deferred-state wire seeds. These are standalone compact-wire witnesses and are also the
+    // proof-carried opening format for ExecutionProof.
     {
         let empty = DeferredStateWire::default();
         write_seed("deferred_state_wire_deserialize", "empty_wire.bin", &empty.to_bytes());
@@ -318,9 +310,31 @@ fn generate_fuzz_seeds() {
 
     // Execution proof seed (minimal)
     {
-        let request = PrecompileRequest::new(EventId::from_u64(1), vec![1, 2, 3, 4]);
-        let proof = ExecutionProof::new(Vec::new(), HashFunction::Rpo256, vec![request]);
+        let proof =
+            ExecutionProof::new(Vec::new(), HashFunction::Rpo256, DeferredStateWire::default());
         write_seed("execution_proof_deserialize", "minimal_proof.bin", &proof.to_bytes());
+    }
+
+    // Execution proof seed (non-empty deferred wire)
+    {
+        let tag = Tag::from_word([
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+        ]);
+        let wire = DeferredStateWire {
+            entries: vec![WireEntry::Data {
+                tag,
+                chunks: vec![[Felt::new_unchecked(1); 8]],
+            }],
+        };
+        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, wire);
+        write_seed(
+            "execution_proof_deserialize",
+            "non_empty_deferred_wire_proof.bin",
+            &proof.to_bytes(),
+        );
     }
 
     // Execution proof seeds for malicious length-prefix deserialization.
@@ -328,29 +342,6 @@ fn generate_fuzz_seeds() {
         let mut oversized_proof_len = Vec::new();
         oversized_proof_len.write_usize(usize::MAX);
         write_seed("execution_proof_deserialize", "oversized_proof_len.bin", &oversized_proof_len);
-
-        let mut oversized_pc_requests_len = Vec::new();
-        oversized_pc_requests_len.write_usize(0);
-        oversized_pc_requests_len.write_u8(HashFunction::Blake3_256 as u8);
-        oversized_pc_requests_len.write_usize(usize::MAX);
-        write_seed(
-            "execution_proof_deserialize",
-            "oversized_pc_requests_len.bin",
-            &oversized_pc_requests_len,
-        );
-    }
-
-    // Execution proof seed with many small precompile requests.
-    {
-        let pc_requests = (0..64)
-            .map(|event_id| PrecompileRequest::new(EventId::from_u64(event_id), Vec::new()))
-            .collect();
-        let proof = ExecutionProof::new(vec![1, 2, 3], HashFunction::Blake3_256, pc_requests);
-        write_seed(
-            "execution_proof_deserialize",
-            "many_minimal_precompile_requests.bin",
-            &proof.to_bytes(),
-        );
     }
 
     println!("\nSeed corpus generated in ../miden-core-fuzz/corpus");

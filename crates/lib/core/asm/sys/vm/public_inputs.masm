@@ -16,7 +16,7 @@ use miden::core::crypto::hashes::poseidon2
 #               [ VLPI: reduced kernel value (1 word) ]   reduce_variable_length_public_inputs
 #   anchor -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   (loaded ND here, verified in random_coin)
 #
-# The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
+# The FLPI are the input/output stacks (32), program digest (4), and final_deferred_root (4).
 # The VLPI reduction is the LogUp kernel ROM boundary correction
 #     kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)
 # (chiplet-side INIT removes; boundary adds).
@@ -32,8 +32,8 @@ use miden::core::crypto::hashes::poseidon2
 
 # Number of fixed length public inputs (in field elements).
 # This is composed of the input/output operand stacks (16 * 2), the program digest (4), and the
-# precompile transcript state (4). Note that the fixed length public inputs are stored as extension
-# field elements and are double-word aligned.
+# final_deferred_root (4). Note that the fixed length public inputs are stored as extension field
+# elements and are double-word aligned.
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 
 # Number of variable length public input groups.

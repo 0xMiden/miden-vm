@@ -2,9 +2,8 @@
 //!
 //! Validates that:
 //! - Prehash flow (k-digest provided by the caller) works via `verify_prehash`
-//! - Private implementation helper returns the expected commitment, tag, and result on stack
+//! - Private implementation helper returns the expected result on stack
 //! - Full message flow recomputes k-digest via SHA2-512 and verifies signatures
-//! - Deferred requests logged by the runtime match expected host-side requests
 
 use core::convert::TryFrom;
 
@@ -12,13 +11,11 @@ use miden_core::{
     Felt, Word,
     events::EventName,
     field::PrimeCharacteristicRing,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
-    dsa::eddsa_ed25519::sign as eddsa_sign,
-    handlers::eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
+    dsa::eddsa_ed25519::sign as eddsa_sign, handlers::eddsa_ed25519::EddsaRequest,
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey as SecretKey},
@@ -71,10 +68,6 @@ fn test_eddsa_verify_prehash_cases() {
     let result = output.stack.get_element(0).unwrap();
     assert_eq!(result, Felt::ONE, "verification result mismatch");
 
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "expected one deferred request");
-    assert_eq!(deferred[0], valid_request.as_precompile_request());
-
     // Invalid signature case
     let memory_stores = generate_memory_store_masm(&invalid_request, &invalid.message);
     let source = format!(
@@ -98,14 +91,10 @@ fn test_eddsa_verify_prehash_cases() {
 
     let result = output.stack.get_element(0).unwrap();
     assert_eq!(result, Felt::ZERO, "verification result mismatch");
-
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "expected one deferred request");
-    assert_eq!(deferred[0], invalid_request.as_precompile_request());
 }
 
 #[test]
-fn test_eddsa_verify_prehash_impl_commitment() {
+fn test_eddsa_verify_prehash_impl_result() {
     let valid = generate_valid_data();
     let invalid = generate_invalid_signature_data();
 
@@ -134,21 +123,8 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let (output, _) = test.execute_for_output().unwrap();
         let stack = output.stack;
 
-        let commitment = stack.get_word(0).unwrap();
-        let tag = stack.get_word(4).unwrap();
-        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-
-        let verifier_commitment =
-            EddsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
-        assert_eq!(precompile_commitment, verifier_commitment);
-
-        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
-        let result = stack.get_element(5).unwrap();
+        let result = stack.get_element(0).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
-
-        let deferred = output.advice.precompile_requests().to_vec();
-        assert_eq!(deferred.len(), 1, "expected a single deferred request");
-        assert_eq!(deferred[0], request.as_precompile_request());
 
         assert!(
             output.advice.stack().is_empty(),
@@ -349,5 +325,9 @@ fn generate_memory_store_masm(request: &EddsaRequest, message: &[u8; 32]) -> Str
 }
 
 fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
-    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
+    format!(
+        "use miden::core::sys\n{}\n\nbegin\n{}\nend",
+        module_source.replace("pub proc", "proc"),
+        body.as_ref()
+    )
 }

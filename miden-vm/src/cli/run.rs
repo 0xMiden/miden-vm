@@ -3,6 +3,7 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
+use miden_precompiles::PrecompilesLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, FastProcessor,
     trace::{ExecutionTrace, build_trace},
@@ -131,7 +132,9 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
+    let mut host = DefaultHost::default()
+        .with_library(&CoreLibrary::default())?
+        .with_library(&PrecompilesLibrary::default())?;
 
     let program_hash: [u8; 32] = program.hash().into();
 
@@ -187,6 +190,9 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
+    host.load_library(&PrecompilesLibrary::default())
+        .into_diagnostic()
+        .wrap_err("Failed to load precompiles library")?;
     for lib in libraries.libraries {
         host.load_library(lib.mast_forest())
             .into_diagnostic()

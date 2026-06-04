@@ -8,7 +8,9 @@ extern crate std;
 use alloc::{string::ToString, vec, vec::Vec};
 
 use ::serde::Serialize;
-use miden_core::{Felt, WORD_SIZE, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt, WORD_SIZE, deferred::PrecompileRegistry, field::QuadFelt, utils::RowMajorMatrix,
+};
 use miden_crypto::stark::{
     StarkConfig,
     air::VarLenPublicInputs,
@@ -79,9 +81,33 @@ pub async fn prove(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    prove_with_precompiles(
+        program,
+        stack_inputs,
+        advice_inputs,
+        host,
+        execution_options,
+        proving_options,
+        PrecompileRegistry::new(),
+    )
+    .await
+}
+
+/// Identical to [`prove`], with a supplied deferred precompile registry.
+#[instrument("prove_program_with_precompiles", skip_all)]
+pub async fn prove_with_precompiles(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
+    precompiles: PrecompileRegistry,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-        .map_err(ExecutionError::advice_error_no_context)?;
+        .map_err(ExecutionError::advice_error_no_context)?
+        .with_deferred_precompiles(precompiles)?;
 
     let trace_inputs = processor.execute_trace_inputs(program, host).await?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -97,8 +123,31 @@ pub fn prove_sync(
     execution_options: ExecutionOptions,
     proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    prove_sync_with_precompiles(
+        program,
+        stack_inputs,
+        advice_inputs,
+        host,
+        execution_options,
+        proving_options,
+        PrecompileRegistry::new(),
+    )
+}
+
+/// Identical to [`prove_sync`], with a supplied deferred precompile registry.
+#[instrument("prove_program_sync_with_precompiles", skip_all)]
+pub fn prove_sync_with_precompiles(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
+    precompiles: PrecompileRegistry,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
-        .map_err(ExecutionError::advice_error_no_context)?;
+        .map_err(ExecutionError::advice_error_no_context)?
+        .with_deferred_precompiles(precompiles)?;
 
     let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
     prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
@@ -131,8 +180,11 @@ fn prove_execution_trace(
     );
 
     let stack_outputs = *trace.stack_outputs();
-    let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
+    let deferred_wire = trace
+        .deferred_state()
+        .to_wire()
+        .map_err(|err| ExecutionError::ProvingError(err.to_string()))?;
 
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
@@ -166,7 +218,7 @@ fn prove_execution_trace(
         },
     }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, deferred_wire);
 
     Ok((stack_outputs, proof))
 }

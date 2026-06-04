@@ -27,7 +27,7 @@ pub const DECODER_TRACE_WIDTH: usize = 24;
 
 pub const STACK_TRACE_WIDTH: usize = 19;
 
-pub mod log_precompile {
+pub mod log_deferred {
     use core::ops::Range;
 
     use super::chiplets::hasher::{CAPACITY_LEN, Hasher};
@@ -35,10 +35,10 @@ pub mod log_precompile {
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
 
-    /// Decoder helper register index where the hasher address is stored for `log_precompile`.
+    /// Decoder helper register index where the hasher address is stored for `log_deferred`.
     pub const HELPER_ADDR_IDX: usize = 0;
-    /// Range covering the four helper registers holding `STATE_PREV`.
-    pub const HELPER_STATE_PREV_RANGE: Range<usize> = Range {
+    /// Range covering the four helper registers holding `DEFERRED_ROOT_PREV`.
+    pub const HELPER_DEFERRED_ROOT_PREV_RANGE: Range<usize> = Range {
         start: HELPER_ADDR_IDX + 1,
         end: HELPER_ADDR_IDX + 1 + CAPACITY_LEN,
     };
@@ -47,23 +47,23 @@ pub mod log_precompile {
     // --------------------------------------------------------------------------------------------
     //
     // The opcode identity-maps the 12-lane Poseidon2 output to `stack_next[0..12]` and reads
-    // STMNT from `stack[4..8]`. So stack-side and lane-side ranges coincide; we alias to
+    // STATEMENT from `stack[4..8]`. So stack-side and lane-side ranges coincide; we alias to
     // `Hasher::{RATE0,RATE1}_RANGE` rather than redefine.
     //
-    //   Input  (current row): `[_, STMNT, _, ...]`
-    //     - stack[4..8] = STMNT — the per-call statement word.
-    //     - capacity is fixed by the opcode to the precompile transcript domain `[1, 0, 0, 0]`.
-    //   Output (next row):    `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
-    //     - stack[0..4] = STATE_NEW (rate0 output, kept by the wrapper);
+    //   Input  (current row): `[_, STATEMENT, _, ...]`
+    //     - stack[4..8] = STATEMENT — the per-call statement digest.
+    //     - capacity is fixed by the opcode to the deferred AND domain `[1, 0, 0, 0]`.
+    //   Output (next row):    `[DEFERRED_ROOT_NEW, OUT_RATE1, OUT_CAP, ...]`
+    //     - stack[0..4] = DEFERRED_ROOT_NEW (rate0 output, kept by the wrapper);
     //     - stack[4..12] hold output rate1 / capacity (discarded).
     //
-    // STMNT sits at stack[4..8] so the chiplet bus's β⁶..β⁹ products coincide with HPERM's
-    // rate1 products — `β^k · stack[4..7]` is computed once and reused.
+    // STATEMENT sits at stack[4..8] so the chiplet bus's beta products coincide with HPERM's
+    // rate1 products.
 
     /// Stack range containing the precomputed statement word on opcode entry.
-    pub const STACK_STMNT_RANGE: Range<usize> = Hasher::RATE1_RANGE;
-    /// Stack range that receives the new transcript state (output rate0) on opcode exit.
-    pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
+    pub const STACK_STATEMENT_RANGE: Range<usize> = Hasher::RATE1_RANGE;
+    /// Stack range that receives the new deferred root (output rate0) on opcode exit.
+    pub const STACK_DEFERRED_ROOT_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
 }
 
 // Range check trace

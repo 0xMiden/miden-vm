@@ -41,12 +41,14 @@ pub enum DeferredError {
     AssertionFailed,
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
+    #[error("invalid deferred root transition: expected {expected:?}, got {actual:?}")]
+    InvalidDeferredRootTransition { expected: Digest, actual: Digest },
     #[error("operation is not supported by this handler")]
     Unsupported,
 }
 
 /// Errors produced while evaluating deferred nodes through precompiles.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum PrecompileError {
     /// A referenced child digest is not present in `DeferredState.nodes`.
     #[error("deferred DAG is missing a node referenced during evaluation")]

@@ -78,7 +78,7 @@ pub proc hash_bytes
     # => [LEAF_DIGEST, ...]
     loc_storew_le.4 dropw                              # loc[4..8] = LEAF_DIGEST
 
-    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into the deferred root ----
+    # ---- Step 5: Build & register eq(PREIMAGE_DIGEST, LEAF_DIGEST), fold into deferred root ----
     push.0.0
     push.EQ_TAG_ID
     push.PRECOMPILE_ID

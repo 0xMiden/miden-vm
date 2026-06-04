@@ -50,8 +50,8 @@ pub enum BusId {
     KernelRomInit = 0,
     /// Block hash table (decoder p2): root program hash boundary correction.
     BlockHashTable = 1,
-    /// Log-precompile transcript: initial/final capacity state boundary correction.
-    LogPrecompileTranscript = 2,
+    /// Deferred root: initial/final deferred-root boundary correction.
+    DeferredRoot = 2,
 
     // --- In-circuit buses ---
     KernelRomCall = 3,
@@ -103,7 +103,7 @@ impl BusId {
 // expected index here only if necessary, and add a matching assert for the new variant.
 const _: () = assert!(BusId::KernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
-const _: () = assert!(BusId::LogPrecompileTranscript as usize == 2);
+const _: () = assert!(BusId::DeferredRoot as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
 const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
 const _: () = assert!(BusId::HasherReturnState as usize == 5);
@@ -158,7 +158,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 
     /// Linear hash / control block init: full 12-lane sponge state.
     ///
-    /// Used by: HPERM input, LOGPRECOMPILE input.
+    /// Used by: HPERM input, LOGDEFERRED input.
     pub fn linear_hash_init(addr: E, state: [E; 12]) -> Self {
         Self {
             kind: BusId::HasherLinearHashInit,
@@ -196,7 +196,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 
     /// Return full sponge state after permutation.
     ///
-    /// Used by: HPERM output, LOGPRECOMPILE output.
+    /// Used by: HPERM output, LOGDEFERRED output.
     pub fn return_state(addr: E, state: [E; 12]) -> Self {
         Self {
             kind: BusId::HasherReturnState,
@@ -551,13 +551,13 @@ pub struct RangeMsg<E> {
     pub value: E,
 }
 
-// LOG-PRECOMPILE TRANSCRIPT-STATE MESSAGE
+// DEFERRED-ROOT MESSAGE
 // ================================================================================================
 
-/// Log-precompile transcript-state message (4 elements): `state[4]`.
+/// Deferred-root message (4 elements): `root[4]`.
 #[derive(Clone, Debug)]
-pub struct LogPrecompileMsg<E> {
-    pub state: [E; 4],
+pub struct DeferredRootMsg<E> {
+    pub root: [E; 4],
 }
 
 // SIBLING TABLE MESSAGE
@@ -822,15 +822,15 @@ where
     }
 }
 
-// --- LogPrecompileMsg ----------------------------------------------------------------------------
+// --- DeferredRootMsg -----------------------------------------------------------------------------
 
-impl<E, EF> LookupMessage<E, EF> for LogPrecompileMsg<E>
+impl<E, EF> LookupMessage<E, EF> for DeferredRootMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        challenges.encode(BusId::LogPrecompileTranscript as usize, self.state.clone())
+        challenges.encode(BusId::DeferredRoot as usize, self.root.clone())
     }
 }
 

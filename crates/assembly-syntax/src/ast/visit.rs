@@ -508,7 +508,7 @@ where
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit
-        | LogPrecompile | Emit => ControlFlow::Continue(()),
+        | LogDeferred | Emit => ControlFlow::Continue(()),
     }
 }
 
@@ -1083,7 +1083,7 @@ where
         | MemStoreWLe | MemStream | AdvPipe | AdvPush | AdvPushW | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
         | DynCall | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream
-        | LogPrecompile | Emit => ControlFlow::Continue(()),
+        | LogDeferred | Emit => ControlFlow::Continue(()),
     }
 }
 

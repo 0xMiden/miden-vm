@@ -1,6 +1,3 @@
-use miden::core::sys
-use miden::core::crypto::hashes::poseidon2
-
 # ENCODING CONVENTIONS
 # ================================================================================================
 #
@@ -31,10 +28,6 @@ const KECCAK_HASH_BYTES_EVENT = event("miden::core::hash::keccak256::hash_bytes"
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 pub proc hash_bytes
     exec.hash_bytes_impl
-    # => [COMM, TAG, DIGEST_U32[8], ...]
-
-    # Log the precompile request for deferred verification
-    exec.sys::log_precompile_request
     # => [DIGEST_U32[8], ...]
 end
 
@@ -84,57 +77,26 @@ end
 # INTERNAL PROCEDURES
 # ================================================================================================
 
-#! Internal implementation of memory-based Keccak256 computation via deferred computation.
+#! Internal implementation of memory-based Keccak256 computation via advice.
 #!
-#! Emits an event to populate the advice stack with digest and store the preimage for deferred verification.
-#! Returns the commitment to the precompile call and its tag.
+#! Emits an event to populate the advice stack with digest.
 #!
 #! Input: [ptr, len_bytes, ...]
-#! Output: [COMM, TAG, DIGEST_U32[8], ...]
+#! Output: [DIGEST_U32[8], ...]
 #!
 #! Where:
 #! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
 #! - len_bytes: number of bytes to hash
-#! - COMM: the calldata commitment `Poseidon2(Poseidon2(INPUT_U32[..]) || Poseidon2(DIGEST_U32[..]))` consumed by `log_precompile`
-#! - TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-@locals(8)
 proc hash_bytes_impl
     emit.KECCAK_HASH_BYTES_EVENT
     # => [ptr, len_bytes, ...]
 
-    # Compute len_u32 = ceil(len_bytes / 4)
-    dup.1 add.3 u32shr.2 swap
-    # => [ptr, len_u32, len_bytes, ...]
+    drop drop
+    # => [...]
 
-    # Load digest from advice stack (8 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..8])
-    locaddr.0
-    exec.poseidon2::init_no_padding
-    # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
-    adv_pipe
-    exec.poseidon2::permute
-    exec.poseidon2::squeeze_digest
-    # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
-
-    movup.4 drop
-    # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
-
-    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
-    movup.5 movup.5 exec.poseidon2::hash_elements
-    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
-
-    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.poseidon2::merge
-    # => [COMM, len_bytes, ...]
-
-    # Prepare TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0]
-    push.0.0 movup.6 push.KECCAK_HASH_BYTES_EVENT swapw
-    # => [COMM, TAG, ...]
-
-    # Reload digest limbs from locals
-    padw loc_loadw_le.4
-    padw loc_loadw_le.0
-    swapdw
-    # => [COMM, TAG, DIGEST_U32[8], ...]
+    adv_pushw
+    adv_pushw
+    swapw
+    # => [DIGEST_U32[8], ...]
 end

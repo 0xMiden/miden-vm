@@ -430,8 +430,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::IsOdd,
     },
     PrimitiveSpec {
-        spelling: "log_precompile",
-        build: || Instruction::LogPrecompile,
+        spelling: "log_deferred",
+        build: || Instruction::LogDeferred,
     },
     PrimitiveSpec {
         spelling: "nop",

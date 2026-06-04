@@ -58,6 +58,7 @@ std = [
     "hex?/std",
     "miden-assembly/std",
     "miden-processor/std",
+    "miden-precompiles/std",
     "miden-prover/std",
     "miden-verifier/std",
     "proptest?/std",
@@ -72,6 +73,7 @@ internal = ["dep:hex", "serde", "std"]
 miden-assembly.workspace = true
 miden-core.workspace = true
 miden-processor.workspace = true
+miden-precompiles.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true

@@ -14,7 +14,6 @@ use miden_core::program::Kernel;
 use miden_core::{
     WORD_SIZE, Word,
     field::ExtensionField,
-    precompile::PrecompileTranscriptState,
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::air::{
@@ -106,23 +105,23 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    pc_transcript_state: PrecompileTranscriptState,
+    final_deferred_root: Word,
 }
 
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
-    /// and the precompile transcript state (rolling digest of all recorded commitments).
+    /// and the final deferred root.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        pc_transcript_state: PrecompileTranscriptState,
+        final_deferred_root: Word,
     ) -> Self {
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
-            pc_transcript_state,
+            final_deferred_root,
         }
     }
 
@@ -138,9 +137,9 @@ impl PublicInputs {
         self.program_info.clone()
     }
 
-    /// Returns the precompile transcript state.
-    pub fn pc_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript_state
+    /// Returns the final deferred root.
+    pub fn final_deferred_root(&self) -> Word {
+        self.final_deferred_root
     }
 
     /// Returns the fixed-length public values and the variable-length kernel procedure digests
@@ -150,7 +149,7 @@ impl PublicInputs {
     ///   [0..4]   program hash
     ///   [4..20]  stack inputs
     ///   [20..36] stack outputs
-    ///   [36..40] precompile transcript state
+    ///   [36..40] final deferred root
     ///
     /// The kernel procedure digests are returned as a single flat `Vec<Felt>` (concatenated
     /// words), to be passed as a single variable-length public input slice to the verifier.
@@ -159,7 +158,7 @@ impl PublicInputs {
         public_values.extend_from_slice(self.program_info.program_hash().as_elements());
         public_values.extend_from_slice(self.stack_inputs.as_ref());
         public_values.extend_from_slice(self.stack_outputs.as_ref());
-        public_values.extend_from_slice(self.pc_transcript_state.as_ref());
+        public_values.extend_from_slice(self.final_deferred_root.as_ref());
 
         let kernel_felts: Vec<Felt> =
             Word::words_as_elements(self.program_info.kernel_procedures()).to_vec();
@@ -171,12 +170,12 @@ impl PublicInputs {
     /// - program info elements (including kernel procedure hashes)
     /// - stack inputs
     /// - stack outputs
-    /// - precompile transcript state
+    /// - final deferred root
     pub fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.program_info.to_elements();
         result.extend_from_slice(self.stack_inputs.as_ref());
         result.extend_from_slice(self.stack_outputs.as_ref());
-        result.extend_from_slice(self.pc_transcript_state.as_ref());
+        result.extend_from_slice(self.final_deferred_root.as_ref());
         result
     }
 }
@@ -203,8 +202,8 @@ impl Arbitrary for PublicInputs {
             .prop_map(|values| StackOutputs::new(&values).expect("generated stack outputs fit"));
 
         (program_info, stack_inputs, stack_outputs, word_strategy())
-            .prop_map(|(program_info, stack_inputs, stack_outputs, pc_transcript_state)| {
-                Self::new(program_info, stack_inputs, stack_outputs, pc_transcript_state)
+            .prop_map(|(program_info, stack_inputs, stack_outputs, final_deferred_root)| {
+                Self::new(program_info, stack_inputs, stack_outputs, final_deferred_root)
             })
             .boxed()
     }
@@ -218,7 +217,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
-        self.pc_transcript_state.write_into(target);
+        self.final_deferred_root.write_into(target);
     }
 }
 
@@ -227,13 +226,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        let pc_transcript_state = PrecompileTranscriptState::read_from(source)?;
+        let final_deferred_root = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
-            pc_transcript_state,
+            final_deferred_root,
         })
     }
 }
@@ -247,7 +246,7 @@ impl Deserializable for PublicInputs {
 ///   [0..4]   program hash
 ///   [4..20]  stack inputs
 ///   [20..36] stack outputs
-///   [36..40] precompile transcript state
+///   [36..40] final deferred root
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
 /// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
@@ -255,7 +254,7 @@ pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 
 // Public values layout offsets.
 const PV_PROGRAM_HASH: usize = 0;
-const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
+const PV_FINAL_DEFERRED_ROOT: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
 // CORE AIR
 // ================================================================================================

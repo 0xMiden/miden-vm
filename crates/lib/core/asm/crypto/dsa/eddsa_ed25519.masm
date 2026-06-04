@@ -1,6 +1,5 @@
 use miden::core::crypto::hashes::poseidon2
 use miden::core::crypto::hashes::sha512
-use miden::core::sys
 use miden::core::word
 
 # ENCODING CONVENTIONS
@@ -139,10 +138,6 @@ end
 #! in the final word set to zero.
 pub proc verify_prehash
     exec.verify_prehash_impl
-    # => [COMM, TAG, result, ...]
-
-    # Log the precompile request for deferred verification.
-    exec.sys::log_precompile_request
     # => [result, ...]
 end
 
@@ -209,54 +204,24 @@ proc copy_two_words_from_memory
     # => [ptr_out + 8, ...]
 end
 
-#! Internal implementation of EdDSA verification via deferred computation.
+#! Internal implementation of EdDSA verification via advice.
 #!
-#! Emits an event to trigger the host precompile, reads the verification result from the
-#! advice stack, and computes the commitment/tag pair used for deferred verification.
+#! Emits an event to trigger the compatibility handler and reads the verification result from the
+#! advice stack.
 #!
 #! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
-#! Output: `[COMM, TAG, result, ...]`
+#! Output: `[result, ...]`
 #!
 #! Where:
-#! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
-#! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: host verification result (1 or 0)
 proc verify_prehash_impl
     emit.EDDSA_VERIFY_EVENT
     # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
 
+    drop drop drop
+    # => [...]
+
     # Read verification result from advice stack (provided by the host).
     adv_push
-    # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
-
-    # Compute COMM_PK = poseidon2::hash_memory(pk_ptr, PK_LEN_FELTS)
-    push.PK_LEN_FELTS movup.2 exec.poseidon2::hash_elements
-    # => [COMM_PK, result, k_digest_ptr, sig_ptr]
-
-    # Compute COMM_K = poseidon2::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
-    push.K_DIGEST_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_K, COMM_PK, result, sig_ptr]
-
-    # Merge COMM_PK and COMM_K into COMM_PK_K = poseidon2::merge(COMM_PK, COMM_K)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
-    swapw
-    # => [COMM_PK, COMM_K, result, sig_ptr]
-    exec.poseidon2::merge
-    # => [COMM_PK_K, result, sig_ptr]
-
-    # Compute COMM_SIG = poseidon2::hash_memory(sig_ptr, SIG_LEN_FELTS)
-    push.SIG_LEN_FELTS movup.6 exec.poseidon2::hash_elements
-    # => [COMM_SIG, COMM_PK_K, result]
-
-    # Merge into final commitment COMM = poseidon2::merge(COMM_PK_K, COMM_SIG)
-    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
-    swapw
-    # => [COMM_PK_K, COMM_SIG, result]
-    exec.poseidon2::merge
-    # => [COMM, result]
-
-    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack
-    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
-    push.0.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
-    # => [COMM, TAG, result]
+    # => [result, ...]
 end

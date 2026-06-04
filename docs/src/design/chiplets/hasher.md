@@ -583,7 +583,7 @@ This is the core mechanism for memoization.
 The hasher uses this running product for two logically separate purposes:
 
 - sibling-table balancing for `MRUPDATE`,
-- commitment-state tracking for `LOG_PRECOMPILE`.
+- deferred-root tracking for `LOG_DEFERRED`.
 
 For the sibling-table part, the old-path leg inserts siblings and the new-path
 leg removes them. Because the entries are keyed by `(mrupdate_id, node_index,
@@ -634,7 +634,7 @@ The hasher design is implemented across the following files:
   column.
 
 - `air/src/constraints/chiplets/bus/hash_kernel.rs`  
-  Sibling-table balancing and `log_precompile`-related hasher interactions
+  Sibling-table balancing and `log_deferred`-related hasher interactions
   on `b_hash_kernel`.
 
 - `processor/src/trace/chiplets/hasher/trace.rs`  

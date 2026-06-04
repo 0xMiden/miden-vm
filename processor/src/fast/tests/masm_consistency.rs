@@ -207,10 +207,10 @@ use super::*;
         Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
 // ---- log precompile ops --------------------------------
-// Drift marker only: this snapshot guards the `log_precompile` precompile-transcript output against
-// silent changes. The semantic folding rule is asserted in `test_log_precompile_correctness`.
+// Drift marker only: this snapshot guards the `log_deferred` precompile-transcript output against
+// silent changes. The semantic folding rule is asserted in `test_log_deferred_correctness`.
 // Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
-#[case(None, "begin log_precompile end",
+#[case(None, "begin log_deferred end",
     vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
          Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
 )]
@@ -366,40 +366,40 @@ fn test_masm_errors_consistency(
     insta::assert_debug_snapshot!(testname, fast_err);
 }
 
-/// Tests that `log_precompile` correctly folds a precomputed statement word into the rolling
-/// transcript via Poseidon2.
+/// Tests that `log_deferred` correctly folds a precomputed statement word into the rolling
+/// deferred root via Poseidon2.
 ///
 /// Verifies:
-/// 1. Poseidon2 input layout `[STATE_PREV, STMNT, PRECOMPILE_TRANSCRIPT_DOMAIN]`.
-/// 2. Output identity-mapped to the stack: rate0_out → `stack[0..4]` (= `STATE_NEW`), rate1_out →
-///    `stack[4..8]`, cap_out → `stack[8..12]`.
-/// 3. Transcript state initialised to `[0, 0, 0, 0]` for the first call.
+/// 1. Poseidon2 input layout `[DEFERRED_ROOT_PREV, STATEMENT, Tag::AND]`.
+/// 2. Output identity-mapped to the stack: rate0_out -> `stack[0..4]` (= `DEFERRED_ROOT_NEW`),
+///    rate1_out -> `stack[4..8]`, cap_out -> `stack[8..12]`.
+/// 3. Deferred root initialised to `[0, 0, 0, 0]` for the first call.
 #[test]
-fn test_log_precompile_correctness() {
+fn test_log_deferred_correctness() {
     use miden_core::{
         crypto::hash::Poseidon2,
-        precompile::{PRECOMPILE_TRANSCRIPT_DOMAIN, fold_precompile_transcript_state},
+        deferred::{Node, TRUE_DIGEST, Tag},
     };
 
     // The opcode reads STMNT from stack[4..8]; stack[0..4] and stack[8..12] are ignored.
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(Felt::new_unchecked);
-    let stmnt: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
-    let state_prev = Word::empty();
+    let stack_inputs = [1, 2, 3, 4, 0, 0, 0, 0, 9, 10, 11, 12].map(Felt::new_unchecked);
+    let statement = TRUE_DIGEST;
+    let deferred_root_prev = Word::empty();
 
-    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAP = PRECOMPILE_TRANSCRIPT_DOMAIN].
+    // Hasher input: [RATE0 = DEFERRED_ROOT_PREV, RATE1 = STATEMENT, CAP = Tag::AND].
     let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(state_prev.as_slice());
-    hasher_state[4..8].copy_from_slice(stmnt.as_slice());
-    hasher_state[8..12].copy_from_slice(PRECOMPILE_TRANSCRIPT_DOMAIN.as_slice());
+    hasher_state[0..4].copy_from_slice(deferred_root_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(statement.as_slice());
+    hasher_state[8..12].copy_from_slice(&Tag::AND.as_word());
 
     Poseidon2::apply_permutation(&mut hasher_state);
 
-    let expected_state_new: Word = hasher_state[0..4].try_into().unwrap();
-    assert_eq!(expected_state_new, fold_precompile_transcript_state(state_prev, stmnt));
+    let expected_deferred_root_new: Word = hasher_state[0..4].try_into().unwrap();
+    assert_eq!(expected_deferred_root_new, Node::and(deferred_root_prev, statement).digest());
     let expected_out_rate1: Word = hasher_state[4..8].try_into().unwrap();
     let expected_out_cap: Word = hasher_state[8..12].try_into().unwrap();
 
-    let program_source = "begin log_precompile end";
+    let program_source = "begin log_deferred end";
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
         Assembler::new(source_manager)
@@ -412,11 +412,14 @@ fn test_log_precompile_correctness() {
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    let actual_state_new = execution_output.stack.get_word(0).unwrap();
+    let actual_deferred_root_new = execution_output.stack.get_word(0).unwrap();
     let actual_out_rate1 = execution_output.stack.get_word(4).unwrap();
     let actual_out_cap = execution_output.stack.get_word(8).unwrap();
 
-    assert_eq!(expected_state_new, actual_state_new, "STATE_NEW mismatch");
+    assert_eq!(
+        expected_deferred_root_new, actual_deferred_root_new,
+        "DEFERRED_ROOT_NEW mismatch"
+    );
     assert_eq!(expected_out_rate1, actual_out_rate1, "OUT_RATE1 mismatch");
     assert_eq!(expected_out_cap, actual_out_cap, "OUT_CAP mismatch");
 }

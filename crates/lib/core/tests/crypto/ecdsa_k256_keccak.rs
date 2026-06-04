@@ -2,21 +2,17 @@
 //!
 //! Validates that:
 //! - Raw event handlers correctly perform ECDSA verification and populate advice provider
-//! - Private implementation helper returns the expected commitment, tag, and result on stack
+//! - Private implementation helper returns the expected result on stack
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
     Felt, Word,
     events::EventName,
     field::PrimeCharacteristicRing,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_core_lib::{
-    dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
-    handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
-};
+use miden_core_lib::{dsa::ecdsa_k256_keccak::sign as ecdsa_sign, handlers::ecdsa::EcdsaRequest};
 use miden_crypto::{dsa::ecdsa_k256_keccak::SigningKey as SecretKey, hash::poseidon2::Poseidon2};
 use miden_processor::{
     ProcessorState,
@@ -73,16 +69,11 @@ fn test_ecdsa_verify_cases() {
         // Assert result
         let result = output.stack.get_element(0).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
-
-        // Verify the precompile request was logged with the right event ID
-        let deferred = output.advice.precompile_requests().to_vec();
-        assert_eq!(deferred.len(), 1);
-        assert_eq!(deferred[0], request.as_precompile_request());
     }
 }
 
 #[test]
-fn test_ecdsa_verify_impl_commitment() {
+fn test_ecdsa_verify_impl_result() {
     // One valid and one invalid (wrong key) request
     let test_cases = vec![
         (generate_valid_signature(), true),
@@ -102,7 +93,7 @@ fn test_ecdsa_verify_impl_commitment() {
                     # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
                     push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
                     exec.verify_prehash_impl
-                    # => [COMM, TAG, result, ...]
+                    # => [result, ...]
 
                     exec.sys::truncate_stack
                 ",
@@ -113,31 +104,12 @@ fn test_ecdsa_verify_impl_commitment() {
         let (output, _) = test.execute_for_output().unwrap();
         let stack = output.stack;
 
-        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
-        // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
-        // Use get_stack_word to match LE stack convention
-        let commitment = stack.get_word(0).unwrap();
-        let tag = stack.get_word(4).unwrap();
-        // Commitment and tag must match verifier output
-        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-        let verifier_commitment =
-            EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
-        assert_eq!(
-            precompile_commitment, verifier_commitment,
-            "commitment on stack should match verifier output"
-        );
-
-        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
-        let result = stack.get_element(5).unwrap();
+        let result = stack.get_element(0).unwrap();
         assert_eq!(
             result,
             Felt::from_bool(expected_valid),
             "result does not match expected validity"
         );
-
-        let deferred = output.advice.precompile_requests().to_vec();
-        assert_eq!(deferred.len(), 1, "expected a single deferred request");
-        assert_eq!(deferred[0], request.as_precompile_request());
 
         let advice_stack = output.advice.stack();
         assert!(advice_stack.is_empty(), "advice stack should be empty after verify_impl");
@@ -276,5 +248,9 @@ fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
 }
 
 fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
-    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
+    format!(
+        "use miden::core::sys\n{}\n\nbegin\n{}\nend",
+        module_source.replace("pub proc", "proc"),
+        body.as_ref()
+    )
 }

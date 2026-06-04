@@ -25,7 +25,7 @@
 #### Fixes
 
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
-- [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a domain-separated 2-to-1 precompile transcript fold using fixed capacity word `[1, 0, 0, 0]`; the rolling state is itself the transcript digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
+- [BREAKING] Replaced the legacy request-list transcript with deferred-root tracking. The `log_deferred` opcode folds `STATEMENT` from stack offsets 4..8 with `Node::and(DEFERRED_ROOT_PREV, STATEMENT).digest()` and exposes the previous root through helper registers. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
 - Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
@@ -124,7 +124,7 @@
 - [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Removed the immediate form of `adv_push` (`adv_push.N`); use N consecutive `adv_push` instructions (or `repeat.N adv_push end` for large N) instead ([#2900](https://github.com/0xMiden/miden-vm/pull/2900)).
-- Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+- Added `FastProcessor::into_parts()` to extract advice provider and memory after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
 - Redesigned the hasher chiplet to use a controller/permutation split architecture with permutation calls deduplication ([#2927](https://github.com/0xMiden/miden-vm/pull/2927)).
 - Documented that enum variants are module-level constants and must be unique within a module ([#2932])((https://github.com/0xMiden/miden-vm/pull/2932)).
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
@@ -169,7 +169,7 @@
 ## 0.22.1 (2026-04-07)
 
 - Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
-- Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+- Added `FastProcessor::into_parts()` to extract advice provider and memory after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
 
 ## 0.22.0 (2026-03-18)
 
@@ -435,7 +435,7 @@
 - [BREAKING] Added precompile requests to proof ([#2187](https://github.com/0xMiden/miden-vm/issues/2187)).
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Removed O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
-- [BREAKING] Added `log_precompile` opcode ([#2249](https://github.com/0xMiden/miden-vm/pull/2249)).
+- [BREAKING] Added `log_deferred` opcode ([#2249](https://github.com/0xMiden/miden-vm/pull/2249)).
 - [BREAKING] `BaseHost` now exposes `resolve_event` so hosts can provide event names for diagnostics. Unify `SystemEvent` ID derivation ([#2150](https://github.com/0xMiden/miden-vm/issues/2150)).
 - [BREAKING] Deprecated `mem_loadw` and `mem_storew` instructions in favor of explicit endianness variants (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) ([#2186](https://github.com/0xMiden/miden-vm/issues/2186)).
 - [BREAKING] Deprecated `loc_loadw` and `loc_storew` instructions in favor of explicit endianness variants (`loc_loadw_be`, `loc_loadw_le`, `loc_storew_be`, `loc_storew_le`).

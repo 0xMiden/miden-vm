@@ -9,7 +9,7 @@ the intended sequencing so each branch can stay reviewable.
 The deferred framework work started with two related branches:
 
 - #3170 (`adr1anh/deferred/framework`) adds the generic deferred-DAG framework in
-  `miden_core::deferred` and aligns the existing `LOGPRECOMPILE` transcript fold with the
+  `miden_core::deferred` and aligns the existing `LOGDEFERRED` transcript fold with the
   framework `AND` domain.
 - #3172 (`adr1anh/deferred/migrate`) migrates production precompiles to the deferred-DAG proof
   model, but it does so by moving concrete production semantics into `miden-core-lib`.
@@ -25,7 +25,7 @@ as the final branch shape. We are rebuilding that migration in smaller branches 
 
 We considered moving the legacy request-list production precompiles into `precompiles/` before
 adopting the deferred framework. We rejected that sequence because it would create a throwaway
-crate boundary around the old `PrecompileRequest` / `PrecompileVerifier` architecture, add
+crate boundary around the old request-list verifier architecture, add
 unnecessary dependency pressure, and then immediately rewrite the same code into deferred-DAG
 semantics.
 
@@ -81,9 +81,8 @@ Completed:
 - Added `package()`, `mast_forest()`, `Default`, `AsRef<Package>`, and
   `From<&PrecompilesLibrary> for HostLibrary`.
 - Added an empty `registry() -> PrecompileRegistry`.
-- Duplicated deferred MASM helpers under `miden::precompiles::sys`:
-  `register_expr`, `register_data`, `log_node_digest`, and the legacy request-list helper
-  `log_precompile_request`.
+- Added deferred MASM helpers under `miden::precompiles::sys`:
+  `register_expr`, `register_data`, and `log_node_digest`.
 - Added focused package smoke tests for deserialization, exported paths, dynamic linking, and host
   loading.
 
@@ -204,7 +203,7 @@ Remove the old production request-list precompile path after replacement branche
 
 In scope:
 
-- Remove legacy production `PrecompileRequest` proof witness plumbing.
+- Remove legacy production request-list proof witness plumbing.
 - Remove old production request handlers for Keccak, SHA-512, ECDSA, and EdDSA.
 - Remove stale request-list fuzz targets and docs.
 - Update examples/docs to point at `miden-precompiles`.

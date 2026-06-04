@@ -7,6 +7,7 @@ use miden_assembly::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
+use miden_precompiles::PrecompilesLibrary;
 
 #[derive(Debug, Clone, Parser)]
 #[command(
@@ -69,6 +70,8 @@ impl BundleCmd {
                     return Err(Report::msg("`kernel` must be a file"));
                 };
                 assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
+                assembler
+                    .link_package(PrecompilesLibrary::default().package(), Linkage::Dynamic)?;
                 let library =
                     assembler.assemble_kernel_from_dir(namespace, kernel, Some(&self.dir))?;
                 library.write_to_file(output_file).into_diagnostic()?;
@@ -81,6 +84,8 @@ impl BundleCmd {
             None => {
                 let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
                 assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
+                assembler
+                    .link_package(PrecompilesLibrary::default().package(), Linkage::Dynamic)?;
                 let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
                 library.write_to_file(output_file).into_diagnostic()?;
                 println!("Built library {namespace}");

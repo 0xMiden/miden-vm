@@ -7,6 +7,7 @@ use miden_assembly::{
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
+use miden_precompiles::PrecompilesLibrary;
 use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
@@ -70,10 +71,13 @@ pub fn get_masm_program(
         // Assembler debug mode is always enabled (issue #1821)
         let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)?;
 
-        // Link standard library
+        // Link standard libraries
         assembler
             .link_package(CoreLibrary::default().package(), Linkage::Dynamic)
             .wrap_err("Failed to load stdlib")?;
+        assembler
+            .link_package(PrecompilesLibrary::default().package(), Linkage::Dynamic)
+            .wrap_err("Failed to load precompiles library")?;
 
         // Link user libraries
         for library in libraries.libraries.iter().cloned() {

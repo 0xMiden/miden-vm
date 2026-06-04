@@ -1,7 +1,7 @@
 //! Hasher-chiplet bus tests.
 //!
 //! For each of the main hasher scenarios (SPAN/END control block, RESPAN, SPLIT merge, HPERM,
-//! LOGPRECOMPILE, MPVERIFY, MRUPDATE) the test registers the decoder-side `remove` requests and
+//! LOGDEFERRED, MPVERIFY, MRUPDATE) the test registers the decoder-side `remove` requests and
 //! the chiplet-side `add` responses it expects to see, then lets
 //! [`InteractionLog::assert_contains`] confirm every one of them fires somewhere in the trace.
 //!
@@ -22,15 +22,15 @@ use miden_air::{
     trace::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
+        log_deferred::{HELPER_ADDR_IDX, HELPER_DEFERRED_ROOT_PREV_RANGE, STACK_STATEMENT_RANGE},
     },
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    deferred::Tag,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     operations::{Operation, opcodes},
-    precompile::PRECOMPILE_TRANSCRIPT_DOMAIN,
     program::Program,
 };
 use miden_utils_testing::stack;
@@ -316,35 +316,36 @@ fn hperm_hasher_bus() {
 }
 
 #[test]
-fn logprecompile_hasher_bus() {
-    let program = single_block_program(vec![Operation::LogPrecompile]);
-    let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
+fn logdeferred_hasher_bus() {
+    let program = single_block_program(vec![Operation::LogDeferred]);
+    let stack_inputs = stack![0, 0, 0, 0, 0, 0, 0, 0];
     let trace = build_trace_from_program(&program, &stack_inputs);
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
-    let mut logprecompile_addr: Option<Felt> = None;
+    let mut logdeferred_addr: Option<Felt> = None;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
-        if op != opcodes::LOGPRECOMPILE as u64 {
+        if op != opcodes::LOGDEFERRED as u64 {
             continue;
         }
 
         let next = RowIndex::from(row + 1);
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
-        logprecompile_addr = Some(log_addr);
+        logdeferred_addr = Some(log_addr);
 
-        // Input: [STATE_PREV, STMNT, domain] — 4 helpers + 4 stack lanes + fixed capacity.
+        // Input: [DEFERRED_ROOT_PREV, STATEMENT, Tag::AND] — 4 helpers + 4 stack lanes +
+        // framework capacity.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
+                main.helper_register(HELPER_DEFERRED_ROOT_PREV_RANGE.start + i, idx)
             } else if i < 8 {
-                main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
+                main.stack_element(STACK_STATEMENT_RANGE.start + (i - 4), idx)
             } else {
-                PRECOMPILE_TRANSCRIPT_DOMAIN[i - 8]
+                Tag::AND.as_word()[i - 8]
             }
         });
 
@@ -358,7 +359,7 @@ fn logprecompile_hasher_bus() {
         );
         request_count += 2;
     }
-    let log_addr = logprecompile_addr.expect("program should contain a LOGPRECOMPILE row");
+    let log_addr = logdeferred_addr.expect("program should contain a LOGDEFERRED row");
     let log_return_addr = log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
@@ -383,12 +384,9 @@ fn logprecompile_hasher_bus() {
         }
     }
 
-    assert_eq!(request_count, 2, "LOGPRECOMPILE: expected 2 removes (init + return)");
-    assert_eq!(
-        sponge_start_count, 1,
-        "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired sponge_start"
-    );
-    assert_eq!(sout_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired SOUT");
+    assert_eq!(request_count, 2, "LOGDEFERRED: expected 2 removes (init + return)");
+    assert_eq!(sponge_start_count, 1, "LOGDEFERRED: expected 1 LOGDEFERRED-paired sponge_start");
+    assert_eq!(sout_count, 1, "LOGDEFERRED: expected 1 LOGDEFERRED-paired SOUT");
     log.assert_contains(&exp);
 }
 

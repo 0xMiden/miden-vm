@@ -178,20 +178,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "precompile_request_deserialize"
-path = "fuzz_targets/precompile_request_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "precompile_request_serde_deserialize"
-path = "fuzz_targets/precompile_request_serde_deserialize.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "package_deserialize"
 path = "fuzz_targets/package_deserialize.rs"
 test = false

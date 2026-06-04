@@ -4,7 +4,7 @@
 //! cleanup, advice captures, and memory addresses are written out literally, and only the numeric
 //! push-lists (tags, digests, payloads) are interpolated. This keeps the executed program visible
 //! at the test site. Low-level error and budget behavior lives in the handler and core tests;
-//! transcript logging (`log_precompile`) is a separate concern owned by its dedicated tests.
+//! transcript logging (`log_deferred`) is a separate concern owned by its dedicated tests.
 
 use alloc::vec::Vec;
 

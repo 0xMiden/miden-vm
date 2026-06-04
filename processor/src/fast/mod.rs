@@ -6,7 +6,6 @@ use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
     deferred::{DeferredState, PrecompileRegistry},
     mast::{ExecutableMastForest, MastForest},
-    precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
@@ -137,10 +136,6 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
-    pc_transcript: PrecompileTranscript,
-
     /// Deferred witness accumulated during execution and returned for verifier rehydration.
     deferred_state: DeferredState,
 }
@@ -153,7 +148,6 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript: self.pc_transcript,
             deferred_state: self.deferred_state,
         }
     }
@@ -277,7 +271,6 @@ impl FastProcessor {
             memory: Memory::new(),
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
-            pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(
                 Arc::new(PrecompileRegistry::new()),
                 options.max_deferred_elements(),
@@ -306,11 +299,7 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
-    /// Installs deferred precompiles for tests and experimental end-to-end coverage.
-    ///
-    /// This is intentionally gated behind `testing`. Production registry installation is not part
-    /// of this branch; the default processor uses an empty deferred registry.
-    #[cfg(any(test, feature = "testing"))]
+    /// Installs deferred precompiles for proof-bound execution.
     pub fn with_deferred_precompiles(
         mut self,
         precompiles: PrecompileRegistry,
@@ -462,10 +451,9 @@ impl FastProcessor {
         &self.memory
     }
 
-    /// Consumes the processor and returns the advice provider, memory, and precompile
-    /// transcript.
-    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
-        (self.advice, self.memory, self.pc_transcript)
+    /// Consumes the processor and returns the advice provider and memory.
+    pub fn into_parts(self) -> (AdviceProvider, Memory) {
+        (self.advice, self.memory)
     }
 
     /// Returns a reference to the execution options.
@@ -639,14 +627,12 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile transcript at the end of execution.
+/// The output of a program execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_transcript: PrecompileTranscript,
     pub deferred_state: DeferredState,
 }
 

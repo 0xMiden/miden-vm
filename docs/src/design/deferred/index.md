@@ -227,11 +227,10 @@ wire.
 This framework is an additive substrate. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
-- the deferred DAG root is **not** yet threaded into the STARK proof;
-- the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
-  wrapper) remains documented under [Precompiles](../stack/precompiles.md).
+- execution proofs carry the deferred-state wire needed to reconstruct and verify the committed
+  deferred root;
+- legacy core-library crypto wrappers are advice-only compatibility helpers; proof-bound concrete
+  precompile use lives in the `miden-precompiles` package.
 
-The proof-model cutover — threading the deferred root commitment into the proof, migrating the
-existing precompiles onto this model, and retiring the request-list path — lands in a follow-up. The
-external STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub
+The external STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub
 discussion #3005.

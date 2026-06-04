@@ -1,38 +1,11 @@
 # ===== DEFERRED-DAG HELPERS =======================================================================
 #
-# NOTE: these procedures are duplicated verbatim from `miden::core::sys`
-# (crates/lib/core/asm/sys/mod.masm) so the `miden-precompiles` package is self-contained while the
-# crate is being stood up on this tracking branch. They should be deduplicated against a single
-# shared source once the precompile proof-model migration settles.
-#
 # `register_expr` / `register_data` are safe by default: they derive the node digest in-circuit,
 # so the worst a misuse can do is make the verifier reject. There is intentionally no `evaluate`
 # proc here — `adv.evaluate_deferred` returns an *unbound* host hint (the canonical `tag || payload`
 # on the advice stack), and using it soundly requires re-hashing in-circuit and logging a predicate
 # the verifier re-checks. That discipline is precompile-specific, so each precompile wraps the raw
 # event itself rather than calling a deceptively "safe" shared helper.
-
-#! Legacy-only helper: folds a legacy precompile commitment into the rolling deferred root via
-#! `log_precompile` and removes the helper words produced by the instruction.
-#!
-#! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
-#! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
-#! `log_precompile` opcode fold it into the deferred root using framework AND capacity
-#! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
-#! don't clobber data deeper in the stack.
-#!
-#! Input: `[COMM, TAG, ...]`
-#! Output: Stack with `COMM` and `TAG` consumed and the three helper words produced by
-#!         `log_precompile` dropped.
-pub proc log_precompile_request
-    hmerge
-    # => [STMNT, ...]
-    padw padw movdnw.2
-    # => [_, STMNT, _, ...]
-    log_precompile
-    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
-    dropw dropw dropw
-end
 
 #! Registers an expression-bodied node `(tag, payload)` in the deferred-computation DAG and
 #! returns its content-addressed digest on top of the operand stack.
@@ -94,20 +67,19 @@ pub proc register_data
     # => [NODE_DIGEST, ...]
 end
 
-#! Folds a deferred node digest into the rolling deferred commitment using the existing
-#! the rolling deferred root using `log_precompile`. The digest must reference a node that will reduce to TRUE
-#! under the installed precompiles.
+#! Folds a deferred node digest into the rolling deferred root using `log_deferred`. The digest
+#! must reference a node that evaluates to TRUE under the installed precompiles.
 #!
-#! Pads the operand stack so `log_precompile`'s implicit `[_, STMNT, _, ...]` shape sees
+#! Pads the operand stack so `log_deferred`'s implicit `[_, STMNT, _, ...]` shape sees
 #! NODE_DIGEST at stack[4..8] (the HPERM rate1 lanes). The opcode folds with framework AND
 #! capacity `[1, 0, 0, 0]`, then this helper drops the three words it writes to stack[0..12].
 #!
 #! Input:  `[NODE_DIGEST, ...]`
-#! Output: `[...]` (the deferred commitment root advances; node is folded in)
+#! Output: `[...]` (the deferred root advances; node is folded in)
 pub proc log_node_digest
     padw padw movdnw.2
     # => [_, NODE_DIGEST, _, ...]
-    log_precompile
+    log_deferred
     # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
     dropw dropw dropw
 end

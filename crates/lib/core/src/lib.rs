@@ -12,10 +12,7 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_core::{
-    events::EventName, mast::MastForest, precompile::PrecompileVerifierRegistry,
-    serde::Deserializable,
-};
+use miden_core::{events::EventName, mast::MastForest, serde::Deserializable};
 use miden_mast_package::Package;
 use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
@@ -94,8 +91,8 @@ use crate::handlers::{
 /// or into memory. Privacy-sensitive hosts should replace or unregister these handlers. Advice
 /// debug handlers can expose witness data directly, so hosts must opt into those explicitly.
 ///
-/// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
-/// precompile verifiers required to validate core library precompile requests.
+/// Legacy crypto wrappers in this package are advice-only compatibility helpers. Proof-bound
+/// concrete precompiles live in the `miden-precompiles` package.
 ///
 /// [`Package`]: miden_mast_package::Package
 #[derive(Clone)]
@@ -156,16 +153,6 @@ impl CoreLibrary {
         ];
         handlers.extend(default_debug_handlers());
         handlers
-    }
-
-    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
-    /// core library precompile requests.
-    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
-        PrecompileVerifierRegistry::new()
-            .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
-            .with_verifier(&SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile))
-            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
-            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }
 }
 

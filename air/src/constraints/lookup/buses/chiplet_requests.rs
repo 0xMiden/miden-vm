@@ -9,8 +9,7 @@
 use core::array;
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes,
-    precompile::PRECOMPILE_TRANSCRIPT_DOMAIN,
+    FMP_ADDR, FMP_INIT_VALUE, deferred::Tag, field::PrimeCharacteristicRing, operations::opcodes,
 };
 
 use crate::{
@@ -21,7 +20,7 @@ use crate::{
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
-        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
+        log_deferred::{HELPER_ADDR_IDX, HELPER_DEFERRED_ROOT_PREV_RANGE, STACK_STATEMENT_RANGE},
     },
 };
 
@@ -61,7 +60,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let stk_next_0 = stk_next.get(0);
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
-    // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
+    // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGDEFERRED.
     // Strides are measured in controller-trace rows (2 per permutation), not physical
     // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
     // controller output row.
@@ -594,36 +593,36 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // --- LOGPRECOMPILE ---
+                    // --- LOGDEFERRED ---
                     //
                     // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), domain]`.
                     // STMNT lives at stack[4..8] (rate1 lanes) so the bus's β⁶..β⁹ products
                     // share with HPERM's rate1 reads. Output is identity-mapped onto
                     // `stack_next[0..12]`, matching HPERM exactly.
                     g.batch(
-                        "logprecompile",
-                        op_flags.log_precompile(),
+                        "logdeferred",
+                        op_flags.log_deferred(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
                             let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
                                 if i < 4 {
-                                    user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
+                                    user_helpers[HELPER_DEFERRED_ROOT_PREV_RANGE.start + i].into()
                                 } else if i < 8 {
-                                    stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
+                                    stk.get(STACK_STATEMENT_RANGE.start + (i - 4)).into()
                                 } else {
-                                    LB::Expr::from(PRECOMPILE_TRANSCRIPT_DOMAIN[i - 8])
+                                    LB::Expr::from(Tag::AND.as_word()[i - 8])
                                 }
                             });
                             let logpre_out: [LB::Expr; 12] =
                                 array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
-                                "logprecompile_init",
+                                "logdeferred_init",
                                 HasherMsg::linear_hash_init(log_addr.clone(), logpre_in),
                                 Deg { v: 5, u: 6 },
                             );
                             let return_addr = log_addr + last_off;
                             b.remove(
-                                "logprecompile_return",
+                                "logdeferred_return",
                                 HasherMsg::return_state(return_addr, logpre_out),
                                 Deg { v: 5, u: 6 },
                             );

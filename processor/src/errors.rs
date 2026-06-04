@@ -301,6 +301,8 @@ pub enum OperationError {
         "ensure the divisor (second stack element) is non-zero before division or modulo operations"
     ))]
     DivideByZero,
+    #[error("{0}")]
+    Deferred(#[from] PrecompileError),
     #[error(
         "assertion failed with error {}",
         match err_msg {

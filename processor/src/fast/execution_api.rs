@@ -80,7 +80,13 @@ impl FastProcessor {
             self.options.max_stack_depth(),
         );
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        let precompiles = execution_output.deferred_state.registry().clone();
+        Ok(Self::trace_build_inputs_from_parts(
+            program,
+            execution_output,
+            precompiles,
+            tracer,
+        ))
     }
 
     /// Async variant of [`Self::execute_trace_inputs_sync`] for async hosts.
@@ -96,7 +102,13 @@ impl FastProcessor {
             self.options.max_stack_depth(),
         );
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+        let precompiles = execution_output.deferred_state.registry().clone();
+        Ok(Self::trace_build_inputs_from_parts(
+            program,
+            execution_output,
+            precompiles,
+            tracer,
+        ))
     }
 
     /// Executes the given program with the provided tracer using an async host.
@@ -205,11 +217,13 @@ impl FastProcessor {
     fn trace_build_inputs_from_parts(
         program: &Program,
         execution_output: ExecutionOutput,
+        precompiles: miden_core::deferred::PrecompileRegistry,
         tracer: ExecutionTracer,
     ) -> TraceBuildInputs {
         TraceBuildInputs::from_execution(
             program,
             execution_output,
+            precompiles,
             tracer.into_trace_generation_context(),
         )
     }

@@ -2,18 +2,13 @@
 //!
 //! Validates that:
 //! - Raw event handlers correctly compute SHA512 and populate advice provider
-//! - Public MASM wrapper returns the digest and logs deferred requests
-//! - Private implementation helper returns the expected commitment and tag
+//! - Public MASM wrapper returns the digest
+//! - Private implementation helper consumes advice cleanly
 //! - Various input lengths (including empty) are handled correctly
 
 use miden_assembly::Linkage;
-use miden_core::{
-    Felt,
-    precompile::{PrecompileCommitment, PrecompileVerifier},
-};
-use miden_core_lib::handlers::sha512::{
-    SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile, Sha512Preimage,
-};
+use miden_core::Felt;
+use miden_core_lib::handlers::sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Preimage};
 use miden_processor::ExecutionError;
 
 use crate::helpers::masm_store_felts;
@@ -62,11 +57,6 @@ fn test_sha512_handler(bytes: &[u8]) {
 
     let advice_stack: Vec<_> = output.advice.stack().to_vec();
     assert_eq!(advice_stack, preimage.digest().as_ref());
-
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1);
-    let request = &deferred[0];
-    assert_eq!(request.calldata(), preimage.as_ref());
 }
 
 fn test_sha512_hash_memory_impl(bytes: &[u8]) {
@@ -91,24 +81,9 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
     let (output, _) = test.execute_for_output().unwrap();
-    let stack = &output.stack;
 
     // we cannot check the digest since it overflows the stack.
     // we check it in test_sha512_hash_memory
-
-    let deferred = output.advice.precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1);
-    let request = &deferred[0];
-    assert_eq!(request.event_id(), SHA512_HASH_BYTES_EVENT_NAME.to_event_id());
-    assert_eq!(request.calldata(), preimage.as_ref());
-
-    let preimage = Sha512Preimage::new(request.calldata().to_vec());
-
-    let commitment = stack.get_word(0).unwrap();
-    let tag = stack.get_word(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-    let verifier_commitment = Sha512Precompile.verify(preimage.as_ref()).unwrap();
-    assert_eq!(precompile_commitment, verifier_commitment, "commitment mismatch");
 
     assert!(
         output.advice.stack().is_empty(),
@@ -243,5 +218,9 @@ fn run_sha512_with_max_hash_len(
 }
 
 fn private_proc_harness(module_source: &str, body: impl AsRef<str>) -> String {
-    format!("{}\n\nbegin\n{}\nend", module_source.replace("pub proc", "proc"), body.as_ref())
+    format!(
+        "use miden::core::sys\n{}\n\nbegin\n{}\nend",
+        module_source.replace("pub proc", "proc"),
+        body.as_ref()
+    )
 }

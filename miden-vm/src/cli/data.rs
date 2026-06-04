@@ -15,6 +15,7 @@ use miden_assembly::{
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::Package;
+use miden_precompiles::PrecompilesLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -153,6 +154,9 @@ where
         assembler
             .link_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .wrap_err("Failed to load core library")?;
+        assembler
+            .link_package(PrecompilesLibrary::default().package(), miden_assembly::Linkage::Dynamic)
+            .wrap_err("Failed to load precompiles library")?;
 
         for library in libraries {
             assembler

@@ -6,14 +6,11 @@ use miden_air::{
     AirWitness, MidenAir, PublicInputs, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use miden_core::deferred::{DeferredState, PrecompileRegistry};
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    fast::ExecutionOutput,
-    field::QuadFelt,
-    precompile::{PrecompileRequest, PrecompileTranscript},
-    utils::RowMajorMatrix,
+    fast::ExecutionOutput, field::QuadFelt, utils::RowMajorMatrix,
 };
 
 pub(crate) mod utils;
@@ -50,40 +47,27 @@ pub struct TraceBuildInputs {
 #[derive(Debug)]
 pub(crate) struct TraceBuildOutput {
     stack_outputs: StackOutputs,
-    final_precompile_transcript: PrecompileTranscript,
-    precompile_requests: Vec<PrecompileRequest>,
-    precompile_requests_digest: [u8; 32],
+    deferred_state: DeferredState,
+    precompiles: PrecompileRegistry,
 }
 
 impl TraceBuildOutput {
-    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
+    fn from_execution_output(
+        execution_output: ExecutionOutput,
+        precompiles: PrecompileRegistry,
+    ) -> Self {
         let ExecutionOutput {
             stack,
-            mut advice,
+            advice: _,
             memory: _,
-            final_precompile_transcript,
-            deferred_state: _,
+            deferred_state,
         } = execution_output;
 
         Self {
             stack_outputs: stack,
-            final_precompile_transcript,
-            precompile_requests: advice.take_precompile_requests(),
-            precompile_requests_digest: [0; 32],
+            deferred_state,
+            precompiles,
         }
-        .with_precompile_requests_digest()
-    }
-
-    fn with_precompile_requests_digest(mut self) -> Self {
-        self.precompile_requests_digest =
-            Blake3_256::hash(&self.precompile_requests.to_bytes()).into();
-        self
-    }
-
-    fn has_matching_precompile_requests_digest(&self) -> bool {
-        let expected_digest: [u8; 32] =
-            Blake3_256::hash(&self.precompile_requests.to_bytes()).into();
-        self.precompile_requests_digest == expected_digest
     }
 }
 
@@ -91,9 +75,10 @@ impl TraceBuildInputs {
     pub(crate) fn from_execution(
         program: &Program,
         execution_output: ExecutionOutput,
+        precompiles: PrecompileRegistry,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
+        let trace_output = TraceBuildOutput::from_execution_output(execution_output, precompiles);
         let program_info = program.to_info();
         Self {
             trace_output,
@@ -107,26 +92,19 @@ impl TraceBuildInputs {
         &self.trace_output.stack_outputs
     }
 
-    /// Returns deferred precompile requests generated during execution.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.trace_output.precompile_requests
+    /// Returns the final deferred state captured for the execution being replayed.
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.trace_output.deferred_state
     }
 
-    /// Returns the final precompile transcript observed during execution.
-    pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
-        &self.trace_output.final_precompile_transcript
+    /// Returns the precompile registry installed for the execution being replayed.
+    pub fn precompiles(&self) -> &PrecompileRegistry {
+        &self.trace_output.precompiles
     }
 
     /// Returns the program info captured for the execution being replayed.
     pub fn program_info(&self) -> &ProgramInfo {
         &self.program_info
-    }
-
-    // Kept for mismatch and edge-case tests that mutate replay inputs directly.
-    #[cfg(any(test, feature = "testing"))]
-    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
-    pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
-        (self.trace_output, self.trace_generation_context, self.program_info)
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -141,19 +119,6 @@ impl TraceBuildInputs {
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
         &mut self.trace_generation_context
     }
-
-    #[cfg(test)]
-    pub(crate) fn from_parts(
-        trace_output: TraceBuildOutput,
-        trace_generation_context: TraceGenerationContext,
-        program_info: ProgramInfo,
-    ) -> Self {
-        Self {
-            trace_output,
-            trace_generation_context,
-            program_info,
-        }
-    }
 }
 
 // VM EXECUTION TRACE
@@ -164,16 +129,15 @@ impl TraceBuildInputs {
 /// The trace consists of the following components:
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state, deferred precompile requests, and the final
-///   precompile transcript).
+/// - Information about execution outputs (stack state and final deferred state).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     main_trace: MainTrace,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
-    precompile_requests: Vec<PrecompileRequest>,
-    final_precompile_transcript: PrecompileTranscript,
+    deferred_state: DeferredState,
+    precompiles: PrecompileRegistry,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -189,17 +153,16 @@ impl ExecutionTrace {
     ) -> Self {
         let TraceBuildOutput {
             stack_outputs,
-            final_precompile_transcript,
-            precompile_requests,
-            ..
+            deferred_state,
+            precompiles,
         } = trace_output;
 
         Self {
             main_trace,
             program_info,
             stack_outputs,
-            precompile_requests,
-            final_precompile_transcript,
+            deferred_state,
+            precompiles,
             trace_len_summary,
         }
     }
@@ -224,11 +187,12 @@ impl ExecutionTrace {
 
     /// Returns the public inputs for this execution trace.
     pub fn public_inputs(&self) -> PublicInputs {
+        let final_deferred_root = self.deferred_state.root();
         PublicInputs::new(
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
-            self.final_precompile_transcript.state(),
+            final_deferred_root,
         )
     }
 
@@ -247,19 +211,19 @@ impl ExecutionTrace {
         &mut self.main_trace
     }
 
-    /// Returns the precompile requests generated during program execution.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.precompile_requests
+    /// Returns the final deferred state generated during program execution.
+    pub fn deferred_state(&self) -> &DeferredState {
+        &self.deferred_state
     }
 
-    /// Returns the final precompile transcript observed during execution.
-    pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
-        self.final_precompile_transcript
+    /// Returns the precompile registry installed during program execution.
+    pub fn precompiles(&self) -> &PrecompileRegistry {
+        &self.precompiles
     }
 
     /// Returns the owned execution outputs required for proof packaging.
-    pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
-        (self.stack_outputs, self.precompile_requests, self.final_precompile_transcript)
+    pub fn into_outputs(self) -> (StackOutputs, DeferredState) {
+        (self.stack_outputs, self.deferred_state)
     }
 
     /// Returns the initial state of the top 16 stack registers.

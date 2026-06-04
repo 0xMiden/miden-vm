@@ -1,23 +1,6 @@
 //! Keccak256 precompile for the Miden VM.
 //!
-//! This module provides both execution-time and verification-time support for Keccak256 hashing.
-//!
-//! ## Architecture
-//!
-//! ### Event Handler (Execution-Time)
-//! When the VM emits a Keccak event requesting non-deterministic hash results, the processor calls
-//! [`KeccakPrecompile`] which reads input data from memory, computes the hash, provides the digest
-//! via the advice stack, and logs the raw preimage bytes as a precompile request.
-//!
-//! ### Precompile Verifier (Verification-Time)
-//! During verification, the [`PrecompileVerifier`] receives the stored preimage bytes, recomputes
-//! the hash, and generates a commitment `P2(P2(input) || P2(digest))`, where P2 stands
-//! for Poseidon2, that validates the computation was performed correctly.
-//!
-//! ### Commitment Tag Format
-//! Each request is tagged as `[event_id, len_bytes, 0, 0]`. The `len_bytes` field prevents
-//! collisions: since bytes are packed into 32-bit limbs, we must distinguish actual data bytes
-//! from padding in the final limb.
+//! This module provides execution-time advice support for Keccak256 hashing.
 //!
 //! ## Digest Representation
 //! A Keccak256 digest (256 bits) is represented as 8 field elements `[h0, ..., h7]`,
@@ -27,11 +10,7 @@ use alloc::{format, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    Felt, Word, ZERO,
-    crypto::hash::{Keccak256, Poseidon2},
-    events::EventName,
-    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::bytes_to_packed_u32_elements,
+    Felt, crypto::hash::Keccak256, events::EventName, utils::bytes_to_packed_u32_elements,
 };
 use miden_processor::{
     ProcessorState,
@@ -51,7 +30,7 @@ impl EventHandler for KeccakPrecompile {
     /// Keccak256 event handler called by the processor when the VM emits a hash request event.
     ///
     /// Reads packed input data from memory, computes the Keccak256 hash, provides the digest via
-    /// the advice stack, and stores the raw preimage for verification (see [`PrecompileVerifier`]).
+    /// the advice stack.
     ///
     /// ## Input Format
     /// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` is word-aligned (divisible by 4)
@@ -60,8 +39,6 @@ impl EventHandler for KeccakPrecompile {
     ///
     /// ## Output Format
     /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` (least significant u32 on top)
-    /// - **Precompile Request**: Stores tag `[event_id, len_bytes, 0, 0]` and raw preimage bytes
-    ///   for verification time
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_canonical_u64();
@@ -85,33 +62,12 @@ impl EventHandler for KeccakPrecompile {
         // Read input bytes from memory using the shared helper (u32-packed, LE, zero-padded)
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes)?;
 
-        // Build preimage from bytes and compute digest
+        // Build preimage from bytes and compute digest.
         let preimage = KeccakPreimage::new(input_bytes);
         let digest = preimage.digest();
 
         // Extend the stack with the digest [h_0, ..., h_7] for consumption via adv_pipe
-        let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
-
-        // Store the precompile data for deferred verification.
-        let precompile_request_extension =
-            AdviceMutation::extend_precompile_requests([preimage.into()]);
-
-        Ok(vec![advice_stack_extension, precompile_request_extension])
-    }
-}
-
-// KECCAK VERIFIER
-// ================================================================================================
-
-impl PrecompileVerifier for KeccakPrecompile {
-    /// Verifier for Keccak256 precompile computations at verification time.
-    ///
-    /// Receives the raw preimage bytes stored during execution (see [`EventHandler::on_event`]),
-    /// recomputes the Keccak256 hash, and generates a commitment `P2(P2(input) || P2(digest))`
-    /// with tag `[event_id, len_bytes, 0, 0]` that validates against the execution trace.
-    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        let preimage = KeccakPreimage::new(calldata.to_vec());
-        Ok(preimage.precompile_commitment())
+        Ok(vec![AdviceMutation::extend_stack(digest.0)])
     }
 }
 
@@ -136,11 +92,6 @@ impl KeccakFeltDigest {
         });
         Self(packed.map(Felt::from_u32))
     }
-
-    /// Creates a commitment of the digest using Poseidon2 over `[d_0, ..., d_7]`.
-    pub fn to_commitment(&self) -> Word {
-        Poseidon2::hash_elements(&self.0)
-    }
 }
 
 // KECCAK PREIMAGE
@@ -152,7 +103,6 @@ impl KeccakFeltDigest {
 /// hash function, providing utilities for:
 /// - Converting between bytes and field element representations
 /// - Computing the Keccak256 digest
-/// - Generating precompile commitments for verification
 /// - Handling the data packing format used by the VM
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeccakPreimage(Vec<u8>);
@@ -178,15 +128,6 @@ impl KeccakPreimage {
         bytes_to_packed_u32_elements(self.as_ref())
     }
 
-    /// Computes the Poseidon2 hash of the input data in field element format.
-    ///
-    /// This creates a cryptographic commitment to the input data that can be
-    /// used for verification purposes. The input is first converted to field
-    /// elements using the same packing format as the VM.
-    pub fn input_commitment(&self) -> Word {
-        Poseidon2::hash_elements(&self.as_felts())
-    }
-
     /// Computes the Keccak256 hash of the preimage bytes.
     ///
     /// Returns the digest formatted as 8 field elements, each containing a u32 value
@@ -195,37 +136,6 @@ impl KeccakPreimage {
     pub fn digest(&self) -> KeccakFeltDigest {
         let hash_u8 = Keccak256::hash(self.as_ref());
         KeccakFeltDigest::from_bytes(&hash_u8)
-    }
-
-    /// Computes the precompile commitment: `P2(P2(input) || P2(keccak_hash))` with tag
-    /// `[event_id, len_bytes, 0, 0]`.
-    ///
-    /// Generated by the [`PrecompileVerifier`] at verification time and validated against
-    /// commitments tracked during execution by the [`EventHandler`]. The double hash binds
-    /// input and output together, preventing tampering.
-    pub fn precompile_commitment(&self) -> PrecompileCommitment {
-        let tag = self.precompile_tag();
-        let comm = Poseidon2::merge(&[self.input_commitment(), self.digest().to_commitment()]);
-        PrecompileCommitment::new(tag, comm)
-    }
-
-    /// Returns the tag used to identify the commitment to the precompile. defined as
-    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
-    fn precompile_tag(&self) -> Word {
-        [
-            KECCAK_HASH_BYTES_EVENT_NAME.to_event_id().as_felt(),
-            Felt::new_unchecked(self.as_ref().len() as u64),
-            ZERO,
-            ZERO,
-        ]
-        .into()
-    }
-}
-
-impl From<KeccakPreimage> for PrecompileRequest {
-    fn from(preimage: KeccakPreimage) -> Self {
-        let event_id = KECCAK_HASH_BYTES_EVENT_NAME.to_event_id();
-        PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }
 
@@ -298,10 +208,6 @@ mod tests {
             for (felt, &u) in felts.iter().zip((*expected_u32).iter()) {
                 assert_eq!(*felt, Felt::from_u32(u));
             }
-
-            if input.is_empty() {
-                assert_eq!(preimage.input_commitment(), Word::empty());
-            }
         }
 
         // 32-byte boundary sanity check
@@ -327,39 +233,5 @@ mod tests {
         let direct_digest = KeccakFeltDigest::from_bytes(&direct_hash);
 
         assert_eq!(preimage_digest, direct_digest);
-    }
-
-    #[test]
-    fn test_keccak_preimage_commitments() {
-        let input = b"test input for commitments";
-        let preimage = KeccakPreimage::new(input.to_vec());
-
-        // Test input commitment
-        let felts = preimage.as_felts();
-        let expected_input_commitment = Poseidon2::hash_elements(&felts);
-        assert_eq!(preimage.input_commitment(), expected_input_commitment);
-
-        // Test digest commitment
-        let digest = preimage.digest();
-        let expected_digest_commitment = Poseidon2::hash_elements(digest.as_ref());
-        assert_eq!(digest.to_commitment(), expected_digest_commitment);
-
-        // Test precompile commitment (double hash)
-        let expected_precompile_commitment = PrecompileCommitment::new(
-            preimage.precompile_tag(),
-            Poseidon2::merge(&[preimage.input_commitment(), digest.to_commitment()]),
-        );
-
-        assert_eq!(preimage.precompile_commitment(), expected_precompile_commitment);
-    }
-
-    #[test]
-    fn test_keccak_verifier() {
-        let input = b"test verifier input";
-        let preimage = KeccakPreimage::new(input.to_vec());
-        let expected_commitment = preimage.precompile_commitment();
-
-        let commitment = KeccakPrecompile.verify(input).unwrap();
-        assert_eq!(commitment, expected_commitment);
     }
 }

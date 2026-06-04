@@ -1865,6 +1865,7 @@ dependencies = [
  "miden-core-lib",
  "miden-lifted-stark",
  "miden-mast-package",
+ "miden-precompiles",
  "miden-processor",
  "miden-prover",
  "miden-test-serde-macros",

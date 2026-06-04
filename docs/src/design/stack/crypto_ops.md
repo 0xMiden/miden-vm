@@ -382,32 +382,30 @@ $$
 b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
 $$
 
-## LOG_PRECOMPILE
+## LOG_DEFERRED
 
-The `log_precompile` operation merges a precomputed per-call statement word `STMNT` into the
-rolling precompile transcript state. The update is a domain-separated Poseidon2 merge with fixed
-capacity word `[1, 0, 0, 0]`:
-`STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))`. Initialization and boundary
-enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
-for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_deferred` operation merges a precomputed per-call statement word `STMNT` into the
+rolling deferred root. The update is the deferred framework conjunction
+`Node::and(DEFERRED_ROOT_PREV, STMNT).digest()`, implemented as
+`DEFERRED_ROOT_NEW = rate0(Poseidon2([DEFERRED_ROOT_PREV, STMNT, [1,0,0,0]]))` using
+`Tag::AND` as the capacity word. Initialization and boundary enforcement are handled via
+variable-length public inputs. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
 4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
-opcode entry. Callers normally produce `STMNT` via the `sys::log_precompile_request` helper,
-which computes `STMNT = Poseidon2::merge(COMM, TAG)` from the user-provided commitment halves
-and seats it at stack[4..8] before invoking the opcode (see
-[Precompiles](./precompiles.md#core-data) for the commitment model).
+opcode entry. Proof-bound precompile wrappers normally compute or register a deferred node digest
+and seat that digest at stack[4..8] before invoking the opcode.
 
-Additionally, the processor maintains a persistent rolling transcript state word that is updated
-with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑deterministically via
-helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
+Additionally, the processor maintains a persistent rolling deferred root that is updated
+with each `LOG_DEFERRED` invocation. The previous root is provided non-deterministically via
+helper registers and is denoted `DEFERRED_ROOT_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
 
 The operation evaluates
-`[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, [1,0,0,0]])`, with the following
-stack transition:
+`[DEFERRED_ROOT_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([DEFERRED_ROOT_PREV, STMNT, [1,0,0,0]])`,
+with the following stack transition:
 
 ```
 Before:  [_,         STMNT,      _,       ...]

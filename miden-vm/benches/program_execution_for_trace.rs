@@ -2,6 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
+use miden_precompiles::PrecompilesLibrary;
 use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
@@ -53,6 +54,12 @@ fn program_execution_for_trace(c: &mut Criterion) {
                             miden_assembly::Linkage::Dynamic,
                         )
                         .expect("failed to load core library");
+                    assembler
+                        .link_package(
+                            PrecompilesLibrary::default().package(),
+                            miden_assembly::Linkage::Dynamic,
+                        )
+                        .expect("failed to load precompiles library");
 
                     let program = assembler
                         .assemble_program("program", &source)
@@ -64,6 +71,8 @@ fn program_execution_for_trace(c: &mut Criterion) {
                         || {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
+                                .unwrap()
+                                .with_library(&PrecompilesLibrary::default())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_options(
