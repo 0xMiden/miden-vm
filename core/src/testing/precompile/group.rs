@@ -31,7 +31,7 @@ impl Group {
 
     /// Stable precompile id derived from the fixture name.
     pub fn id() -> Felt {
-        precompile_id(&Group)
+        precompile_id(Self::NAME)
     }
 
     pub fn new_tag() -> Tag {
@@ -48,7 +48,8 @@ impl Group {
     }
 
     fn tag(args: [Felt; 3]) -> Tag {
-        Tag::new(Self::id(), args).expect("mock group precompile id is not framework-reserved")
+        Tag::precompile(Self::id(), args)
+            .expect("mock group precompile id is not framework-reserved")
     }
 
     /// Builds a group element from committed coordinate value digests.
@@ -99,8 +100,7 @@ impl Precompile for Group {
             Discriminant::New => {
                 // Validate that both committed coordinates resolve to uint values, but preserve
                 // their original commitments in the canonical group element.
-                let x_value = context.resolve(h_lhs)?;
-                let y_value = context.resolve(h_rhs)?;
+                let (x_value, y_value) = context.resolve_pair(h_lhs, h_rhs)?;
                 Uint::value_of(&x_value).map_err(PrecompileError::from)?;
                 Uint::value_of(&y_value).map_err(PrecompileError::from)?;
                 Ok(Self::new_node(h_lhs, h_rhs))
@@ -111,8 +111,7 @@ impl Precompile for Group {
                     Discriminant::Sub => BinaryOp::Sub,
                     _ => unreachable!(),
                 };
-                let g1 = context.resolve(h_lhs)?;
-                let g2 = context.resolve(h_rhs)?;
+                let (g1, g2) = context.resolve_pair(h_lhs, h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
                 let x1 = Uint::value_of(&context.resolve(h_x1)?).map_err(PrecompileError::from)?;
@@ -129,16 +128,12 @@ impl Precompile for Group {
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
-                let g1 = context.resolve(h_lhs)?;
-                let g2 = context.resolve(h_rhs)?;
+                let (g1, g2) = context.resolve_pair(h_lhs, h_rhs)?;
                 let (h_x1, h_y1) = new_coords(&g1)?;
                 let (h_x2, h_y2) = new_coords(&g2)?;
 
-                if context.resolve(h_x1)? != context.resolve(h_x2)?
-                    || context.resolve(h_y1)? != context.resolve(h_y2)?
-                {
-                    return Err(PrecompileError::AssertionFailed);
-                }
+                context.ensure_equal(h_x1, h_x2)?;
+                context.ensure_equal(h_y1, h_y2)?;
                 Ok(Node::TRUE)
             },
         }
@@ -150,10 +145,7 @@ impl Precompile for Group {
 
 /// Extracts coordinate value digests from a canonical group element.
 fn new_coords(node: &Node) -> Result<(Digest, Digest), PrecompileError> {
-    if node.tag() != Group::new_tag() {
-        return Err(PrecompileError::InvalidNode);
-    }
-    Ok(node.payload().as_join()?)
+    Ok(node.payload_for_tag(Group::new_tag())?.as_join()?)
 }
 
 // TYPED DISCRIMINANT

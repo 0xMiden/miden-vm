@@ -5,7 +5,6 @@
 //! and equality predicates.
 
 use alloc::sync::Arc;
-use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
@@ -33,7 +32,7 @@ impl Hash {
     pub const BYTES_PER_CHUNK: u32 = 32;
 
     pub fn id() -> Felt {
-        precompile_id(&Hash)
+        precompile_id(Self::NAME)
     }
 
     /// Tag for a preimage whose byte length determines its data chunk count.
@@ -52,7 +51,8 @@ impl Hash {
     }
 
     fn tag(args: [Felt; 3]) -> Tag {
-        Tag::new(Self::id(), args).expect("mock hash precompile id is not framework-reserved")
+        Tag::precompile(Self::id(), args)
+            .expect("mock hash precompile id is not framework-reserved")
     }
 
     /// Builds a preimage node from data chunks whose count must match `n_bytes`.
@@ -73,10 +73,7 @@ impl Hash {
 
     /// Extracts digest felts from a canonical digest value.
     pub fn digest_felts(node: &Node) -> Result<DataChunk, DeferredError> {
-        if node.tag() != Self::digest_tag() {
-            return Err(DeferredError::InvalidPayload);
-        }
-        Ok(*node.payload().as_value()?)
+        Ok(*node.payload_for_tag(Self::digest_tag())?.as_value()?)
     }
 
     /// Deterministic mock hash used by tests instead of real cryptography.
@@ -109,12 +106,12 @@ impl Precompile for Hash {
         match Discriminant::classify(args[0])? {
             Discriminant::Preimage => {
                 // `args[1]` carries n_bytes; the data chunk count is derived. A zero-byte preimage
-                // derives zero chunks, which `NonZeroU32::new` rejects via `?`.
+                // derives zero chunks, which `NodeType::data_chunks` rejects via `?`.
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
-                Some(NodeType::Data(NonZeroU32::new(Self::n_data_chunks(n_bytes))?))
+                NodeType::data_chunks(Self::n_data_chunks(n_bytes))
             },
             // Self-evaluating value (`Data(1)`) carrying the 8 raw felts of digest data.
-            Discriminant::Digest => Some(NodeType::Data(NonZeroU32::MIN)),
+            Discriminant::Digest => Some(NodeType::value()),
             // Binary predicate over two child digests.
             Discriminant::Eq => Some(NodeType::Join),
         }
@@ -135,9 +132,7 @@ impl Precompile for Hash {
             Discriminant::Digest => Ok(Node::value(Self::tag(args), *payload.as_value()?)?),
             Discriminant::Eq => {
                 let (h_lhs, h_rhs) = payload.as_join()?;
-                if context.resolve(h_lhs)? != context.resolve(h_rhs)? {
-                    return Err(PrecompileError::AssertionFailed);
-                }
+                context.ensure_equal(h_lhs, h_rhs)?;
                 Ok(Node::TRUE)
             },
         }

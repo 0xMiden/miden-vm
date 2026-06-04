@@ -72,11 +72,7 @@ const PRECOMPILE_ID_DOMSEP: &str = "miden-deferred-precompile/v1";
 /// The domain and length prefixes make the id stable, unambiguous, and disjoint from event ids.
 /// [`PrecompileRegistry::with_precompile`](crate::deferred::PrecompileRegistry::with_precompile)
 /// uses this to catch accidental id drift at setup time.
-pub fn precompile_id(p: &dyn Precompile) -> Felt {
-    derive(p.name())
-}
-
-fn derive(name: &str) -> Felt {
+pub fn precompile_id(name: &str) -> Felt {
     let domain_separated = format!("{PRECOMPILE_ID_DOMSEP}:{}:{name}", name.len());
     hash_string_to_word(domain_separated.as_str())[0]
 }
@@ -87,13 +83,13 @@ mod tests {
 
     #[test]
     fn id_derivation_is_stable_unique_and_domain_separated() {
-        assert_eq!(derive("foo"), derive("foo"));
-        assert_ne!(derive("foo"), derive("bar"));
+        assert_eq!(precompile_id("foo"), precompile_id("foo"));
+        assert_ne!(precompile_id("foo"), precompile_id("bar"));
 
         // Precompile ids and event ids share the hash_string_to_word helper but live in separate
         // namespaces: the precompile path domain-separates (domsep + length prefix), so the same
         // name must derive a different felt on each path.
         let name = "my_precompile";
-        assert_ne!(derive(name), crate::events::EventId::from_name(name).as_felt());
+        assert_ne!(precompile_id(name), crate::events::EventId::from_name(name).as_felt());
     }
 }

@@ -4,7 +4,6 @@
 //! contributes common constants through [`Precompile::init`] so registry bootstrapping is covered.
 
 use alloc::{vec, vec::Vec};
-use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
@@ -34,7 +33,7 @@ impl Uint {
 
     /// Stable precompile id derived from the fixture name.
     pub fn id() -> Felt {
-        precompile_id(&Uint)
+        precompile_id(Self::NAME)
     }
 
     /// Tag for a canonical uint value (`Data(1)`).
@@ -59,7 +58,7 @@ impl Uint {
     }
 
     fn tag(args: [Felt; 3]) -> Tag {
-        Tag::new(Self::id(), args).expect("uint precompile id is not framework-reserved")
+        Tag::precompile(Self::id(), args).expect("uint precompile id is not framework-reserved")
     }
 
     /// Builds a canonical uint value from little-endian limbs.
@@ -70,10 +69,7 @@ impl Uint {
 
     /// Extracts canonical little-endian limbs from a uint value.
     pub fn value_of(node: &Node) -> Result<[u32; 8], DeferredError> {
-        if node.tag() != Self::value_tag() {
-            return Err(DeferredError::InvalidPayload);
-        }
-        decode_limbs(node.payload().as_value()?)
+        decode_limbs(node.payload_for_tag(Self::value_tag())?.as_value()?)
     }
 
     /// Adds two little-endian uints modulo `2^256` for fixtures that share uint semantics.
@@ -135,7 +131,7 @@ impl Precompile for Uint {
         // A value is `Data(1)` (8 raw u32 limbs); op-nodes and the eq predicate are `Join` over two
         // child digests.
         Some(match Discriminant::classify(args[0])? {
-            Discriminant::Value => NodeType::Data(NonZeroU32::MIN),
+            Discriminant::Value => NodeType::value(),
             Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Join,
         })
     }
@@ -151,14 +147,13 @@ impl Precompile for Uint {
             // when used.
             UintNode::Value => Ok(Node::value(Self::tag(args), *payload.as_value()?)?),
             UintNode::BinaryOp { op, lhs, rhs } => {
-                let a = value_limbs(&context.resolve(lhs)?)?;
-                let b = value_limbs(&context.resolve(rhs)?)?;
+                let (lhs, rhs) = context.resolve_pair(lhs, rhs)?;
+                let a = Self::value_of(&lhs)?;
+                let b = Self::value_of(&rhs)?;
                 Ok(Self::value_node(op.apply(a, b)))
             },
             UintNode::Eq { lhs, rhs } => {
-                if context.resolve(lhs)? != context.resolve(rhs)? {
-                    return Err(PrecompileError::AssertionFailed);
-                }
+                context.ensure_equal(lhs, rhs)?;
                 Ok(Node::TRUE)
             },
         }
@@ -236,13 +231,6 @@ impl UintNode {
 
 // HELPERS
 // ================================================================================================
-
-fn value_limbs(node: &Node) -> Result<[u32; 8], DeferredError> {
-    if node.tag() != Uint::value_tag() {
-        return Err(DeferredError::InvalidPayload);
-    }
-    decode_limbs(node.payload().as_value()?)
-}
 
 fn decode_limbs(felts: &DataChunk) -> Result<[u32; 8], DeferredError> {
     let mut limbs = [0u32; 8];

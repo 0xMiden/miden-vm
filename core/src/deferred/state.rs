@@ -98,6 +98,11 @@ impl DeferredState {
         &self.registry
     }
 
+    /// Returns the current deferred root; [`super::TRUE_DIGEST`] means no statements are logged.
+    pub fn root(&self) -> Digest {
+        self.root
+    }
+
     pub fn node(&self, digest: &Digest) -> Option<&Node> {
         self.nodes.get(digest)
     }
@@ -119,13 +124,129 @@ impl DeferredState {
     }
 
     pub fn decode(&self, tag: Tag) -> Result<NodeType, PrecompileError> {
-        if tag == Tag::TRUE {
-            Ok(NodeType::True)
-        } else if tag == Tag::AND {
-            Ok(NodeType::Join)
-        } else {
-            self.registry.decode(tag)
+        self.registry.decode_node_type(tag)
+    }
+
+    /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
+    ///
+    /// Registration validates the node shape and child references, stores the original node under
+    /// its own digest, evaluates it under the current registry, stores the canonical result node,
+    /// preserves helper nodes registered during evaluation, and records the evaluation memo from
+    /// original digest to canonical digest. The returned digest is always the original node digest.
+    /// If evaluation fails, registration returns that error immediately. Re-registering an
+    /// identical successfully registered node is idempotent and budget-free.
+    pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
+        self.validate_node_for_insertion(&node)?;
+        let digest = self.insert_node(node)?;
+        self.evaluate(digest)?;
+        Ok(digest)
+    }
+
+    /// Logs a statement commitment after proving the current root and statement evaluate to TRUE.
+    ///
+    /// The statement digest must already be registered (present in `nodes`), unless it is the
+    /// implicit [`TRUE_DIGEST`]. On success, this inserts the framework AND node, advances the
+    /// deferred root, memoizes the new root as TRUE, and returns the new root.
+    pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
+        let prev_root = self.root;
+
+        self.require_true_eval(prev_root)?;
+        self.require_true_eval(statement_digest)?;
+
+        let and_node = Node::and(prev_root, statement_digest);
+        let new_root = and_node.digest();
+        self.insert_node(and_node)?;
+        self.root = new_root;
+        self.record_eval(new_root, Node::TRUE)?;
+        Ok(new_root)
+    }
+
+    /// Logs a statement and checks the resulting root against an externally computed root.
+    ///
+    /// This is the root-transition verification path for callers such as processor opcodes that
+    /// compute the deferred-root transition outside the framework and need to bind it to
+    /// `DeferredState`'s current root.
+    pub fn log_verified_statement(
+        &mut self,
+        statement_digest: Digest,
+        expected_new_root: Digest,
+    ) -> Result<Digest, PrecompileError> {
+        let actual_new_root = self.log_statement(statement_digest)?;
+        if actual_new_root != expected_new_root {
+            return Err(DeferredError::InvalidDeferredRootTransition {
+                expected: expected_new_root,
+                actual: actual_new_root,
+            }
+            .into());
         }
+
+        Ok(actual_new_root)
+    }
+
+    /// Evaluates a registered node addressed by digest.
+    ///
+    /// The memo is used only after the digest is proven present in `nodes`; memo entries alone do
+    /// not create durable DAG membership. Predicate success returns [`Node::TRUE`]; mismatch
+    /// returns [`PrecompileError::AssertionFailed`].
+    pub fn evaluate(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
+        let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?.clone();
+        if let Some(canonical_digest) = self.evals.get(&digest) {
+            return self.nodes.get(canonical_digest).cloned().ok_or(PrecompileError::MissingNode);
+        }
+
+        self.validate_node_for_insertion(&node)?;
+        let canonical = if node.tag() == Tag::TRUE {
+            Node::TRUE
+        } else if node.tag() == Tag::AND {
+            let (lhs, rhs) = node.payload().as_join()?;
+            for child in [lhs, rhs] {
+                self.require_true_eval(child)?;
+            }
+            Node::TRUE
+        } else {
+            let registry = Arc::clone(&self.registry);
+            let mut context = DeferredContext::new(self);
+            registry.evaluate(&node, &mut context)?
+        };
+
+        self.record_eval(digest, canonical.clone())?;
+        Ok(canonical)
+    }
+
+    /// Serializes the root-reachable DAG into compact canonical wire form.
+    ///
+    /// Only nodes reachable from `root` are emitted; registered or memoized orphans are dropped.
+    /// The installed `PrecompileRegistry` determines each node's shape, so graph edges are never
+    /// inferred from opaque payload bytes.
+    pub fn to_wire(&self) -> Result<DeferredStateWire, IntegrityError> {
+        DeferredStateWire::from_state(self)
+    }
+
+    /// Rebuilds and verifies a deferred state from untrusted wire data.
+    ///
+    /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
+    /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
+    /// evaluates the implicit root to TRUE under the installed precompiles. Callers that need
+    /// proof binding should compare the returned [`Self::root`] against the externally
+    /// committed root.
+    pub fn from_wire(
+        registry: Arc<PrecompileRegistry>,
+        wire: &DeferredStateWire,
+        max_elements: usize,
+    ) -> Result<Self, IntegrityError> {
+        wire.rehydrate(registry, max_elements)
+    }
+
+    fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
+        let node_type = self.registry.validate_node(node)?;
+        if let Some((lhs, rhs)) = node_type.children(node)? {
+            for child in [lhs, rhs] {
+                if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
+                    return Err(PrecompileError::MissingNode);
+                }
+            }
+        }
+        Ok(node_type)
     }
 
     fn insert_node(&mut self, node: Node) -> Result<Digest, PrecompileError> {
@@ -169,140 +290,11 @@ impl DeferredState {
         }
     }
 
-    /// Returns the current deferred root; [`super::TRUE_DIGEST`] means no statements are logged.
-    pub fn root(&self) -> Digest {
-        self.root
-    }
-
-    /// Logs a statement commitment after proving the current root and statement evaluate to TRUE.
-    ///
-    /// The statement digest must already be registered (present in `nodes`), unless it is the
-    /// implicit [`TRUE_DIGEST`]. On success, this inserts the framework AND node, advances the
-    /// deferred root, memoizes the new root as TRUE, and returns the new root.
-    pub fn log_statement(&mut self, statement_digest: Digest) -> Result<Digest, PrecompileError> {
-        let prev_root = self.root;
-
-        let current_root = self.evaluate(prev_root)?;
-        if !current_root.is_true_node() {
+    fn require_true_eval(&mut self, digest: Digest) -> Result<(), PrecompileError> {
+        if !self.evaluate(digest)?.is_true() {
             return Err(PrecompileError::AssertionFailed);
         }
-
-        let canonical = self.evaluate(statement_digest)?;
-        if !canonical.is_true_node() {
-            return Err(PrecompileError::AssertionFailed);
-        }
-
-        let and_node = Node::and(prev_root, statement_digest);
-        let new_root = and_node.digest();
-        self.insert_node(and_node)?;
-        self.root = new_root;
-        self.record_eval(new_root, Node::TRUE)?;
-        Ok(new_root)
-    }
-
-    /// Logs a statement and checks the resulting root against an externally computed root.
-    ///
-    /// This is the root-transition verification path for callers such as processor opcodes that
-    /// compute the deferred-root transition outside the framework and need to bind it to
-    /// `DeferredState`'s current root.
-    pub fn log_verified_statement(
-        &mut self,
-        statement_digest: Digest,
-        expected_new_root: Digest,
-    ) -> Result<Digest, PrecompileError> {
-        let actual_new_root = self.log_statement(statement_digest)?;
-        if actual_new_root != expected_new_root {
-            return Err(DeferredError::InvalidDeferredRootTransition {
-                expected: expected_new_root,
-                actual: actual_new_root,
-            }
-            .into());
-        }
-
-        Ok(actual_new_root)
-    }
-
-    /// Registers a `PrecompileRegistry`-valid node in the DAG and evaluates it immediately.
-    ///
-    /// Registration validates the node shape and child references, stores the original node under
-    /// its own digest, evaluates it under the current registry, stores the canonical result node,
-    /// preserves helper nodes registered during evaluation, and records the evaluation memo from
-    /// original digest to canonical digest. The returned digest is always the original node digest.
-    /// If evaluation fails, registration returns that error immediately. Re-registering an
-    /// identical successfully registered node is idempotent and budget-free.
-    pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
-        self.validate_node_for_insertion(&node)?;
-        let digest = self.insert_node(node)?;
-        self.evaluate(digest)?;
-        Ok(digest)
-    }
-
-    fn validate_node_for_insertion(&self, node: &Node) -> Result<NodeType, PrecompileError> {
-        let node_type = self.registry.validate_node(node)?;
-        if let Some((lhs, rhs)) = node_type.children(node.payload())? {
-            for child in [lhs, rhs] {
-                if child != TRUE_DIGEST && !self.nodes.contains_key(&child) {
-                    return Err(PrecompileError::MissingNode);
-                }
-            }
-        }
-        Ok(node_type)
-    }
-
-    /// Evaluates a registered node addressed by digest.
-    ///
-    /// The memo is used only after the digest is proven present in `nodes`; memo entries alone do
-    /// not create durable DAG membership. Predicate success returns [`Node::TRUE`]; mismatch
-    /// returns [`PrecompileError::AssertionFailed`].
-    pub fn evaluate(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
-        let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?.clone();
-        if let Some(canonical_digest) = self.evals.get(&digest) {
-            return self.nodes.get(canonical_digest).cloned().ok_or(PrecompileError::MissingNode);
-        }
-
-        self.validate_node_for_insertion(&node)?;
-        let canonical = if node.tag() == Tag::TRUE {
-            Node::TRUE
-        } else if node.tag() == Tag::AND {
-            let (lhs, rhs) = node.payload().as_join()?;
-            for child in [lhs, rhs] {
-                if !self.evaluate(child)?.is_true_node() {
-                    return Err(PrecompileError::AssertionFailed);
-                }
-            }
-            Node::TRUE
-        } else {
-            let registry = Arc::clone(&self.registry);
-            let mut context = DeferredContext::new(self);
-            registry.evaluate(&node, &mut context)?
-        };
-
-        self.record_eval(digest, canonical.clone())?;
-        Ok(canonical)
-    }
-
-    /// Serializes the root-reachable DAG into compact canonical wire form.
-    ///
-    /// Only nodes reachable from `root` are emitted; registered or memoized orphans are dropped.
-    /// The installed `PrecompileRegistry` determines each node's shape, so graph edges are never
-    /// inferred from opaque payload bytes.
-    pub fn to_wire(&self) -> Result<DeferredStateWire, IntegrityError> {
-        DeferredStateWire::from_state(self)
-    }
-
-    /// Rebuilds and verifies a deferred state from untrusted wire data.
-    ///
-    /// The wire root is implicit: empty wire opens [`TRUE_DIGEST`], otherwise the root is the
-    /// digest of the final entry. Rehydration rejects non-canonical or dangling wire, then
-    /// evaluates the implicit root to TRUE under the installed precompiles. Callers that need
-    /// proof binding should compare the returned [`Self::root`] against the externally
-    /// committed root.
-    pub fn from_wire(
-        registry: Arc<PrecompileRegistry>,
-        wire: &DeferredStateWire,
-        max_elements: usize,
-    ) -> Result<Self, IntegrityError> {
-        wire.rehydrate(registry, max_elements)
+        Ok(())
     }
 }
 
@@ -331,6 +323,24 @@ impl<'a> DeferredContext<'a> {
     /// rehydration; memo hits are used only after that membership is established.
     pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
         self.state.evaluate(digest)
+    }
+
+    /// Resolves two registered child digests to their canonical nodes.
+    pub fn resolve_pair(
+        &mut self,
+        lhs: Digest,
+        rhs: Digest,
+    ) -> Result<(Node, Node), PrecompileError> {
+        Ok((self.resolve(lhs)?, self.resolve(rhs)?))
+    }
+
+    /// Resolves two child digests and requires their canonical nodes to be equal.
+    pub fn ensure_equal(&mut self, lhs: Digest, rhs: Digest) -> Result<(), PrecompileError> {
+        let (lhs, rhs) = self.resolve_pair(lhs, rhs)?;
+        if lhs != rhs {
+            return Err(PrecompileError::AssertionFailed);
+        }
+        Ok(())
     }
 
     /// Registers a freshly minted helper node and returns its original digest.
@@ -584,7 +594,7 @@ mod tests {
     fn register_rejects_unknown_tags_and_missing_children() {
         let registry = hash_precompiles();
         let mut state = state_with(&registry, usize::MAX);
-        let unknown_tag = Tag::new(Hash::id(), [Felt::from_u32(99), ZERO, ZERO])
+        let unknown_tag = Tag::precompile(Hash::id(), [Felt::from_u32(99), ZERO, ZERO])
             .expect("hash precompile id is precompile-owned");
         let unknown = Node::value(unknown_tag, [ZERO; 8]).unwrap();
         assert!(state.register(unknown).is_err());

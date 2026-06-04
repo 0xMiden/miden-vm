@@ -4,7 +4,6 @@
 //! non-zero. The stub keeps tests focused on data predicate plumbing, not signature math.
 
 use alloc::sync::Arc;
-use core::num::NonZeroU32;
 
 use crate::{
     Felt, ZERO,
@@ -30,11 +29,11 @@ impl Sig {
     pub const SIG_CHUNKS: u32 = 3;
 
     pub fn id() -> Felt {
-        precompile_id(&Sig)
+        precompile_id(Self::NAME)
     }
 
     pub fn verify_tag() -> Tag {
-        Tag::new(Self::id(), [Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO])
+        Tag::precompile(Self::id(), [Felt::from_u32(Self::VERIFY_TAG_ID), ZERO, ZERO])
             .expect("mock signature precompile id is not framework-reserved")
     }
 
@@ -56,9 +55,7 @@ impl Precompile for Sig {
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
         match Discriminant::classify(args[0])? {
-            Discriminant::Verify => Some(NodeType::Data(
-                NonZeroU32::new(Self::SIG_CHUNKS).expect("SIG_CHUNKS is nonzero"),
-            )),
+            Discriminant::Verify => NodeType::data_chunks(Self::SIG_CHUNKS),
         }
     }
 
