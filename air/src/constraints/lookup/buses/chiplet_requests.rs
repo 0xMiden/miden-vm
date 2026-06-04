@@ -9,7 +9,8 @@
 use core::array;
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, deferred::Tag, field::PrimeCharacteristicRing, operations::opcodes,
+    FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes,
+    precompile::PRECOMPILE_TRANSCRIPT_DOMAIN,
 };
 
 use crate::{
@@ -595,7 +596,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
 
                     // --- LOGPRECOMPILE ---
                     //
-                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), Tag::AND]`.
+                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), domain]`.
                     // STMNT lives at stack[4..8] (rate1 lanes) so the bus's β⁶..β⁹ products
                     // share with HPERM's rate1 reads. Output is identity-mapped onto
                     // `stack_next[0..12]`, matching HPERM exactly.
@@ -610,7 +611,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                                 } else if i < 8 {
                                     stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
                                 } else {
-                                    LB::Expr::from(Tag::AND.as_word()[i - 8])
+                                    LB::Expr::from(PRECOMPILE_TRANSCRIPT_DOMAIN[i - 8])
                                 }
                             });
                             let logpre_out: [LB::Expr; 12] =

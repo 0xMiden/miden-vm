@@ -385,10 +385,9 @@ $$
 ## LOG_PRECOMPILE
 
 The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling commitment state shared by legacy precompile requests and deferred commitments. The fold is
-a framework-AND chain over Poseidon2:
-`STATE_NEW = Node::and(STATE_PREV, STMNT).digest()`, i.e. a permutation over
-`[STATE_PREV, STMNT, Tag::AND]` with capacity `[1, 0, 0, 0]`. Initialization and boundary
+rolling precompile transcript state. The fold is a domain-separated precompile transcript fold over
+Poseidon2 with fixed capacity word `[1, 0, 0, 0]`:
+`STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))`. Initialization and boundary
 enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md)
 for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
@@ -407,7 +406,7 @@ helper registers and is denoted `STATE_PREV`. The virtual-table bus links each r
 matching insertion, ensuring a single, consistent state sequence.
 
 The operation evaluates
-`[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, Tag::AND])`, with the following
+`[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, [1,0,0,0]])`, with the following
 stack transition:
 
 ```
@@ -440,16 +439,16 @@ $$
 \begin{aligned}
 \mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
 \mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-\mathsf{AND}_i                &= \mathrm{Tag::AND}_i &&\text{(constant capacity input }[1,0,0,0]\text{)}
+\mathsf{DOMAIN}_i              &= \bigl([1,0,0,0]\bigr)_i &&\text{(fixed capacity word)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
 The input message reduces the Poseidon2 state in the canonical order
-`[STATE_PREV, STMNT, Tag::AND]`:
+`[STATE_PREV, STMNT, [1,0,0,0]]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{AND}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{DOMAIN}_i.
 $$
 
 One controller row later, the `op_retstate` response provides the permuted state
@@ -525,6 +524,6 @@ $$
 v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{STATE\_FINAL}_j.
 $$
 
-Because the fold is the digest of a structural AND node (`Node::and(STATE_PREV, STMNT)`), the
-state is itself a complete digest at every step. The deferred commitment / legacy transcript digest
+Because the domain-separated precompile transcript fold outputs a digest word directly, the
+legacy precompile transcript state is itself the digest at every step. The final transcript digest
 is just the final state — no extra finalization step is required.

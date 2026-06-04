@@ -40,7 +40,8 @@ end
 #!
 #! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
 #! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
-#! `log_precompile` opcode fold it into the transcript state using framework AND capacity
+#! `log_precompile` opcode apply the domain-separated precompile transcript fold
+#! `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))` using the fixed capacity word
 #! `[1, 0, 0, 0]`. Pads stack[0..4] and stack[8..12] with zero words so the opcode's writes there
 #! don't clobber data deeper in the stack.
 #!

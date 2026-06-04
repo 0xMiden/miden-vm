@@ -6,9 +6,9 @@ sidebar_position: 2
 # Deferred state semantics and API contract
 
 `DeferredState` is the host-side witness for deferred DAG verification. The in-memory state is not
-serialized directly; proofs carry `DeferredStateWire`, and `DeferredState::from_wire` rebuilds a
-trusted state by decoding canonical wire and evaluating the wire's implicit root under the installed
-`PrecompileRegistry`.
+serialized directly; follow-up proof wiring carries `DeferredStateWire`, and
+`DeferredState::from_wire` rebuilds a trusted state by decoding canonical wire and evaluating the
+wire's implicit root under the installed `PrecompileRegistry`.
 
 The simplified state model is:
 
@@ -102,7 +102,7 @@ Node::AND(lhs, rhs) =>
 Precompile-owned nodes are evaluated by `PrecompileRegistry::evaluate`, which dispatches to the
 owning `Precompile` with a `DeferredContext` for resolving children and registering helper nodes.
 
-## Transcript and wire
+## Root and wire
 
 `root` starts at `TRUE_DIGEST`. `log_statement(stmt_digest)` evaluates the current root and
 statement, requires both to evaluate to `Node::TRUE`, then appends one framework `AND` node:
@@ -119,7 +119,7 @@ is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of
 `from_wire(wire, registry, max_elements)` decodes untrusted wire, rejects non-canonical or dangling
 wire by requiring `state.to_wire(registry) == wire`, then evaluates the implicit wire root to
 `Node::TRUE`. Evaluation repopulates `evals` and may insert canonical/helper nodes in addition to
-the wire nodes. Proof plumbing should compare the returned `state.root()` to the externally
+the wire nodes. Follow-up proof plumbing compares the returned `state.root()` to the externally
 committed root.
 
 ## Public API
@@ -142,6 +142,5 @@ they need the canonical form.
 
 ## Scope note
 
-This pass simplifies deferred state and budgeting while the legacy request-list precompile path
-remains in place. `log_precompile` folds statement words in the framework `AND` domain
-(`Tag::AND`, capacity `[1, 0, 0, 0]`).
+This pass simplifies deferred state and budgeting while the legacy precompile request path remains
+documented separately; proof wiring for deferred roots lands in a follow-up.

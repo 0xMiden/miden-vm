@@ -10,7 +10,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | ------- | ----------- |
 | `PrecompileRequest` | Minimal calldata for a precompile, recorded by the host when the event handler runs. It contains exactly the information needed to deterministically recompute the result and the commitment. Requests are included in the proof artifact. |
 | `PrecompileCommitment` | A word pair `(TAG, COMM)` computed by the MASM wrapper, and deterministically recomputable from the corresponding `PrecompileRequest`. `COMM` typically commits to inputs, and may also include outputs for long results; the three free elements in `TAG` carry metadata and/or simple results. Together `(TAG, COMM)` represent the full request (inputs + outputs). |
-| `PrecompileTranscript` | A framework-AND chain over Poseidon2 that produces a rolling digest of every precompile request: `state' = Node::and(state, STMNT).digest()`, hashing with capacity/tag `[1, 0, 0, 0]`. The state is itself a complete digest at every step — no separate finalization step is required. The verifier reconstructs the same transcript by re‑evaluating each request and recording its commitment. |
+| `PrecompileTranscript` | A domain-separated precompile transcript fold over Poseidon2 that produces a rolling digest of every precompile request: `state' = rate0(Poseidon2([state, STMNT, [1,0,0,0]]))`, using the fixed capacity word `[1, 0, 0, 0]`. The state is itself a complete digest at every step — no separate finalization step is required. The verifier reconstructs the same transcript by re‑evaluating each request and recording its commitment. |
 
 ## Lifecycle overview
 
@@ -19,7 +19,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 3. **Wrapper constructs commitment** – The wrapper pops result(s) from advice, computes `(TAG, COMM)` per the precompile’s convention, and prepares to log the operation.
 4. **`sys::log_precompile_request` folds the commitment into the transcript** – The wrapper calls the helper with `[COMM, TAG, ...]` on top of the stack. The helper:
    - Computes the per‑call statement word `STMNT = Poseidon2::merge(COMM, TAG)` via `hmerge`.
-   - Pads scratch words at `stack[0..4]` and `stack[8..12]`, leaving `STMNT` at `stack[4..8]`, then invokes the `log_precompile` opcode, which folds `STMNT` into the rolling transcript state via `STATE_NEW = Node::and(STATE_PREV, STMNT).digest()`. `STATE_PREV` is supplied non‑deterministically via helper registers.
+   - Pads scratch words at `stack[0..4]` and `stack[8..12]`, leaving `STMNT` at `stack[4..8]`, then invokes the `log_precompile` opcode, which folds `STMNT` into the rolling transcript state via `STATE_NEW = rate0(Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]))`. `STATE_PREV` is supplied non‑deterministically via helper registers.
    - Drops the three output words `[STATE_NEW, OUT_RATE1, OUT_CAP]` so they are not visible to the caller.
 5. **Transcript-state tracking via vtable** – The transcript state is tracked inside the VM via the chiplets’ virtual table; the host never tracks it. The table always stores the current state. On each `log_precompile`:
    - The previous state is removed from the table.
@@ -28,7 +28,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
    This enforces that updates can only occur by applying the permutation.
 6. **Trace output and proof** – The transcript state is used to construct the vtable auxiliary column, while the prover stores only the ordered `PrecompileRequest`s in the proof.
 7. **Verifier reconstruction** – The verifier replays each request via a `PrecompileVerifier` to recompute `(TAG, COMM)`, records them into a fresh transcript, and enforces the initial/final state via public inputs. To check correct linking, the verifier initializes the column with an initial insertion of the empty state and a removal of the final state; the final state is provided as a public input to the AIR.
-8. **No separate finalization step** – Because the fold is the digest of a structural framework AND node, the state is itself a complete digest at every step. The transcript digest is just the final state — no extra permutation is required.
+8. **No separate finalization step** – Because the domain-separated precompile transcript fold outputs a digest word directly, the state is itself the transcript digest at every step. The transcript digest is just the final state — no extra permutation is required.
 
 ## Responsibilities
 
@@ -51,10 +51,10 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - May also include outputs when results are long, so that `(TAG, COMM)` together represent the full request (inputs + outputs).
   - The exact composition is precompile‑specific and defined by its verifier specification.
 - `log_precompile` stack effect: `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
-  where `Poseidon2([STATE_PREV, STMNT, Tag::AND]) = [STATE_NEW, OUT_RATE1, OUT_CAP]`,
-  `Tag::AND = [1, 0, 0, 0]`, and `STATE_PREV` is supplied non‑deterministically via the user op
-  helper registers. `STMNT` lives at stack[4..8] so its bus message lanes share with HPERM's
-  rate1.
+  where `Poseidon2([STATE_PREV, STMNT, [1,0,0,0]]) = [STATE_NEW, OUT_RATE1, OUT_CAP]`,
+  the fixed capacity word is `[1, 0, 0, 0]`, and `STATE_PREV` is supplied non‑deterministically
+  via the user op helper registers. `STMNT` lives at stack[4..8] so its bus message lanes share
+  with HPERM's rate1.
 - `sys::log_precompile_request` stack effect: `[COMM, TAG, ...] -> [...]`. The helper computes
   `STMNT = Poseidon2::merge(COMM, TAG)` and folds it into the transcript via `log_precompile`.
 

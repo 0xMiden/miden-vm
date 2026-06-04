@@ -9,8 +9,9 @@ sidebar_position: 1
 non-native computation — a hash, a signature check, elliptic-curve or big-integer arithmetic — and
 emits, in its place, an auditable record of *what was claimed*. That record is a content-addressed
 DAG of nodes, committed by a single rolling digest (`DeferredState.root`, the **deferred
-commitment**). The DAG is verified **externally**: either alongside the Miden VM's STARK proof, or
-by a dedicated *Precompile VM* whose proof attests that every committed node evaluates correctly.
+commitment**). The DAG is designed to be verified **externally**: either alongside the Miden VM's
+STARK proof, or by a dedicated *Precompile VM* whose proof attests that every committed node
+evaluates correctly.
 
 The DAG can be read as a small **program**: each node is a term, and evaluating the commitment to
 `TRUE` proves every claim it transitively references. The framework (`miden_core::deferred`) owns
@@ -27,25 +28,20 @@ of the nodes.
 
 ## Motivation
 
-The deferred subsystem replaces an earlier, linear design. In that design a program deferred work to
-a future Precompile VM by committing to a **list of precompile requests** — each request a
-standalone assertion (a hash check, a signature) — folded one after another into a running sponge
-transcript. The structure was a sequence: commit a request, absorb it, repeat.
-
-That linearity becomes expensive the moment the Precompile VM must prove computation at a finer
-grain — a *single* curve or field operation. In the linear model every binary operation is its own
-assertion: hash its operands and result into a statement, then absorb that statement into the
-transcript. That is two hashes per operation, and a calculation like `(a + b) · c` cannot reference
-or share its sub-results — each step is an opaque, standalone request. For operation-heavy
-precompiles this at least doubles the VM's hashing.
+The deferred subsystem generalizes an earlier, linear request-list design. A linear list of
+standalone assertions (hash checks, signatures, and similar claims) is simple, but becomes expensive
+the moment the Precompile VM must prove computation at a finer grain — a *single* curve or field
+operation. In the linear model every binary operation is its own assertion: hash its operands and
+result into a statement. A calculation like `(a + b) · c` cannot reference or share its sub-results
+— each step is an opaque, standalone request. For operation-heavy precompiles this at least doubles
+the VM's hashing.
 
 The fix is to stop treating deferred work as a *sequence of requests* and treat it as a **graph of
 value/data/join nodes**. Once the deferred statements are modelled as a DAG, much falls into place:
 each node evaluates to a canonical node; an operation *references* its operands by their content
-address instead of re-hashing them; shared sub-computations are shared in the graph. The linear
-transcript does not disappear — it becomes a special case. The transcript is itself an assertion: a
-chain of AND nodes whose root is a statement that must evaluate to `TRUE`. "Commit to a list" and
-"commit to a deferred DAG" are the same mechanism.
+address instead of re-hashing them; shared sub-computations are shared in the graph. When the
+framework needs ordered accumulation, it represents it as a chain of semantic AND nodes whose root
+is a statement that must evaluate to `TRUE`.
 
 Crucially, the DAG is the language the Precompile VM already speaks. The way a precompile's
 operations and constraints are described in that VM is inherently a graph of value/data/join nodes —
@@ -64,8 +60,8 @@ content yields an identical digest, so equal subterms are shared automatically (
   to interpret (a discriminant, a data length, a small constant, …). The framework reserves ids `0`
   and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
   `Tag::AND = [1, 0, 0, 0]` tags semantic conjunction nodes. No precompile may claim either id.
-  The transcript is a restricted right-spined use of the same semantic `AND` constructor, not a
-  separate tag family.
+  Deferred statement accumulation uses the same semantic `AND` constructor as a restricted
+  right-spined chain.
 - A **payload** is the node's body, in one of three shapes:
   - **`True`** — the framework TRUE sentinel, carrying no data; it is the only zero-payload node;
   - **`Data(n)`** — `n ≥ 1` 8-felt data chunks, whose digest is the linear hash of the `8n` felts
@@ -141,9 +137,9 @@ fails.
 
 A system event is an unconstrained advice hook: the honest handler can compute a digest, but the
 AIR has no constraint tying an advice-supplied digest to the operand-stack payload or to memory at
-`ptr`. If the digest folded into the transcript came from advice, a prover could attest a node over
-data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the gap, and it
-composes with the verifier:
+`ptr`. If a digest folded into a deferred commitment came from advice, a prover could attest a node
+over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the gap,
+and it composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
 - once the deferred root is threaded into proof public inputs, the **deferred-commitment root
@@ -184,18 +180,17 @@ implicit root and evaluates that root directly. The digest is structural: even `
 under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, though it evaluates
 semantically to `TRUE`.
 
-> **Scope note.** `log_precompile` folds statements using the same framework `AND` domain as
-> deferred commitments (`Tag::AND`, capacity `[1, 0, 0, 0]`). The deferred DAG state is accumulated
-> host-side and verified through `DeferredStateWire`; the legacy precompile transcript path remains
-> documented separately.
+> **Scope note.** The legacy precompile request path remains documented separately; proof wiring
+> for deferred roots lands in a follow-up.
 
-The verifier's obligation collapses to a single fixed point: **evaluate the root to `TRUE`, and
-every logged statement holds.** There is no separate finalization step.
+Once proof wiring lands, the verifier's obligation collapses to a single fixed point: **evaluate
+the root to `TRUE`, and every logged statement holds.** There is no separate finalization step.
 
 ## Wire format and verification
 
-The intended proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`.
-`to_wire` lowers state to a passive, canonical, topologically ordered entry stream. Wire index `0`
+The intended follow-up proof/witness format is `DeferredStateWire`, not the in-memory
+`DeferredState`. `to_wire` lowers state to a passive, canonical, topologically ordered entry
+stream. Wire index `0`
 is the implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by
 index and may reference only `0` or earlier entries. Empty `entries` opens `TRUE_DIGEST`; a non-empty
 wire opens the digest of the last entry. `to_wire` emits a deterministic child-first DFS of the
@@ -203,7 +198,7 @@ root-reachable closure, so unreferenced orphans are dropped.
 
 `DeferredState::from_wire(wire, registry, max_elements)` is the only trusted path from wire bytes
 back to a validated state. It runs as a structural decode, a canonicality check, and a root
-evaluation. This validates the wire's own implicit root; proof plumbing must separately compare the
+evaluation. This validates the wire's own implicit root; follow-up proof plumbing compares the
 returned `state.root()` against the externally committed root.
 
 1. **structural** — seed index `0` as the implicit `TRUE_DIGEST`, reconstruct each explicit
@@ -228,10 +223,9 @@ This framework is an additive substrate. In its current form:
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
 - the deferred DAG root is **not** yet threaded into the STARK proof;
 - the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
-  wrapper) remains documented under [Precompiles](../stack/precompiles.md), with `log_precompile`
-  folded in the framework `AND` domain (`Tag::AND`, capacity `[1, 0, 0, 0]`).
+  wrapper) remains documented under [Precompiles](../stack/precompiles.md).
 
 The proof-model cutover — threading the deferred commitment into the proof, migrating the existing
-precompiles onto this model, and retiring the request-list transcript — lands in a follow-up. The
-external STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub
-discussion #3005.
+precompiles onto this model, and retiring the request-list path — lands in a follow-up. The external
+STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub discussion
+#3005.
