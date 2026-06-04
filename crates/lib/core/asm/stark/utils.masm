@@ -237,10 +237,15 @@ pub proc set_up_auxiliary_inputs_ace
     # Phase 3: f, s0, weight0, gamma -> Words 3-4
     # ==================================================================
 
-    # Compute s0 = offset^N
-    push.0.7
-    exec.constants::get_trace_length
-    exp.u32
+    # Compute s0 = offset^N, where the LDE coset offset is g^(2^(TWO_ADICITY - log_lde))
+    # (g = 7, the field generator). Since log_lde = log(trace_len) + log_blowup, we have
+    # s0 = g^(2^(TWO_ADICITY - log_blowup)) = 7^(2^(32 - 3)) = 7^(2^29), independent of the
+    # trace height. Computed by repeated squaring.
+    push.7
+    repeat.29
+        dup mul
+    end
+    push.0 swap
     # => [s0, 0, ...]
 
     # Compute f = h^N (chunk shift ratio between cosets)

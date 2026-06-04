@@ -243,6 +243,25 @@ pub proc init_seed
     add
     #=> [log(lde_size), trace_length, ...]
 
+    ## Compute the LDE coset offset = g^(2^(TWO_ADICITY - log_lde)), with g = 7 the field
+    ## generator and TWO_ADICITY = 32, by squaring g `32 - log_lde` times. Used (with its
+    ## inverse) for the DEEP/FRI query x-coordinates.
+    dup push.32 swap sub
+    #=> [32 - log_lde, log(lde_size), trace_length, ...]
+    push.7 swap
+    #=> [count, offset = 7, log(lde_size), trace_length, ...]
+    dup push.0 neq
+    while.true
+        swap dup mul swap
+        sub.1
+        dup push.0 neq
+    end
+    drop
+    #=> [offset, log(lde_size), trace_length, ...]
+    dup exec.constants::set_domain_offset
+    inv exec.constants::set_domain_offset_inv
+    #=> [log(lde_size), trace_length, ...]
+
     ## Compute size of LDE domain
     dup
     pow2
