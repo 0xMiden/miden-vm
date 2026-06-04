@@ -7,11 +7,12 @@ use super::{
 
 /// In-memory witness for deferred-DAG verification.
 ///
-/// The state keeps registered nodes, host-side evaluation memos, and the current transcript root.
+/// The state keeps registered nodes, host-side evaluation memos, and the current deferred root.
 /// Evaluation memos are valid only under the same [`PrecompileRegistry`] semantics used to populate
 /// them. The state is intentionally not serialized directly: proofs carry [`DeferredStateWire`],
 /// and [`Self::from_wire`] rebuilds this state only after registry checks, canonical wire checks,
-/// expected-root matching, and root evaluation.
+/// and root evaluation. Callers that need proof binding compare the returned root to the externally
+/// committed deferred root.
 #[derive(Debug, Clone)]
 pub struct DeferredState {
     registry: Arc<PrecompileRegistry>,
@@ -69,14 +70,14 @@ impl DeferredState {
         }
 
         for digest in init_digests {
-            self.evaluate(digest)?;
+            self.evaluate_digest(digest)?;
         }
 
         Ok(())
     }
 
-    /// Add deferred precompiles to this state without discarding existing nodes, evals, root, or
-    /// budget accounting.
+    /// Adds deferred precompiles to this state without discarding existing nodes, evaluation memos,
+    /// root, or budget accounting.
     ///
     /// Registration is additive only: duplicate precompile ids panic via
     /// [`PrecompileRegistry::merge`], matching setup-time registry construction behavior. The
@@ -103,20 +104,12 @@ impl DeferredState {
         self.root
     }
 
-    pub fn node(&self, digest: &Digest) -> Option<&Node> {
+    pub fn get_node(&self, digest: &Digest) -> Option<&Node> {
         self.nodes.get(digest)
     }
 
-    pub fn nodes(&self) -> impl Iterator<Item = (&Digest, &Node)> + '_ {
-        self.nodes.iter()
-    }
-
-    pub fn eval(&self, digest: &Digest) -> Option<Digest> {
-        self.evals.get(digest).copied()
-    }
-
-    pub fn evals(&self) -> impl Iterator<Item = (&Digest, &Digest)> + '_ {
-        self.evals.iter()
+    pub fn nodes(&self) -> &BTreeMap<Digest, Node> {
+        &self.nodes
     }
 
     pub fn remaining_elements(&self) -> usize {
@@ -138,7 +131,7 @@ impl DeferredState {
     pub fn register(&mut self, node: Node) -> Result<Digest, PrecompileError> {
         self.validate_node_for_insertion(&node)?;
         let digest = self.insert_node(node)?;
-        self.evaluate(digest)?;
+        self.evaluate_digest(digest)?;
         Ok(digest)
     }
 
@@ -161,37 +154,18 @@ impl DeferredState {
         Ok(new_root)
     }
 
-    /// Logs a statement and checks the resulting root against an externally computed root.
+    /// Evaluates a registered node addressed by digest and returns the canonical node digest.
     ///
-    /// This is the root-transition verification path for callers such as processor opcodes that
-    /// compute the deferred-root transition outside the framework and need to bind it to
-    /// `DeferredState`'s current root.
-    pub fn log_verified_statement(
-        &mut self,
-        statement_digest: Digest,
-        expected_new_root: Digest,
-    ) -> Result<Digest, PrecompileError> {
-        let actual_new_root = self.log_statement(statement_digest)?;
-        if actual_new_root != expected_new_root {
-            return Err(DeferredError::InvalidDeferredRootTransition {
-                expected: expected_new_root,
-                actual: actual_new_root,
-            }
-            .into());
-        }
-
-        Ok(actual_new_root)
-    }
-
-    /// Evaluates a registered node addressed by digest.
-    ///
-    /// The memo is used only after the digest is proven present in `nodes`; memo entries alone do
-    /// not create durable DAG membership. Predicate success returns [`Node::TRUE`]; mismatch
-    /// returns [`PrecompileError::AssertionFailed`].
-    pub fn evaluate(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
+    /// Evaluation memoization is an implementation detail: callers receive the canonical digest
+    /// whether the result was already known or computed by this call. Use [`Self::get_node`] with
+    /// the returned digest to inspect the canonical node contents.
+    pub fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
         let node = self.nodes.get(&digest).ok_or(PrecompileError::MissingNode)?.clone();
         if let Some(canonical_digest) = self.evals.get(&digest) {
-            return self.nodes.get(canonical_digest).cloned().ok_or(PrecompileError::MissingNode);
+            if self.nodes.contains_key(canonical_digest) {
+                return Ok(*canonical_digest);
+            }
+            return Err(PrecompileError::MissingNode);
         }
 
         self.validate_node_for_insertion(&node)?;
@@ -209,8 +183,8 @@ impl DeferredState {
             registry.evaluate(&node, &mut context)?
         };
 
-        self.record_eval(digest, canonical.clone())?;
-        Ok(canonical)
+        self.record_eval(digest, canonical)?;
+        self.evals.get(&digest).copied().ok_or(PrecompileError::MissingNode)
     }
 
     /// Serializes the root-reachable DAG into compact canonical wire form.
@@ -291,7 +265,7 @@ impl DeferredState {
     }
 
     fn require_true_eval(&mut self, digest: Digest) -> Result<(), PrecompileError> {
-        if !self.evaluate(digest)?.is_true() {
+        if self.evaluate_digest(digest)? != TRUE_DIGEST {
             return Err(PrecompileError::AssertionFailed);
         }
         Ok(())
@@ -303,7 +277,7 @@ impl DeferredState {
 
 /// Capability object passed to precompiles during recursive evaluation.
 ///
-/// Precompiles do not own the DAG; they receive this handle to resolve registered children and to
+/// Precompiles do not own the DAG; they receive this handle to evaluate registered children and to
 /// register helper nodes referenced by compound canonicals. The verifier reuses the same path
 /// during [`DeferredState::from_wire`], so prover and verifier agree on how witnesses are
 /// reconstructed.
@@ -317,26 +291,34 @@ impl<'a> DeferredContext<'a> {
         Self { state }
     }
 
-    /// Resolves a registered child digest by evaluating it to its canonical node.
+    /// Returns the registered node addressed by `digest`, if present.
     ///
-    /// The `nodes` membership check keeps local evaluation reproducible by `to_wire` and
-    /// rehydration; memo hits are used only after that membership is established.
-    pub fn resolve(&mut self, digest: Digest) -> Result<Node, PrecompileError> {
-        self.state.evaluate(digest)
+    /// This is a syntactic DAG lookup: it does not evaluate the node or canonicalize it.
+    pub fn get_node(&self, digest: &Digest) -> Option<&Node> {
+        self.state.get_node(digest)
     }
 
-    /// Resolves two registered child digests to their canonical nodes.
-    pub fn resolve_pair(
+    /// Evaluates a registered child digest and returns the canonical node digest.
+    ///
+    /// The `nodes` membership check keeps local evaluation reproducible by `to_wire` and
+    /// rehydration; memoization is transparent to precompile implementations. Use
+    /// [`Self::get_node`] with the returned digest to inspect the canonical node contents.
+    pub fn evaluate_digest(&mut self, digest: Digest) -> Result<Digest, PrecompileError> {
+        self.state.evaluate_digest(digest)
+    }
+
+    /// Evaluates two registered child digests to their canonical node digests.
+    pub fn evaluate_digest_pair(
         &mut self,
         lhs: Digest,
         rhs: Digest,
-    ) -> Result<(Node, Node), PrecompileError> {
-        Ok((self.resolve(lhs)?, self.resolve(rhs)?))
+    ) -> Result<(Digest, Digest), PrecompileError> {
+        Ok((self.evaluate_digest(lhs)?, self.evaluate_digest(rhs)?))
     }
 
-    /// Resolves two child digests and requires their canonical nodes to be equal.
+    /// Evaluates two child digests and requires their canonical nodes to be equal.
     pub fn ensure_equal(&mut self, lhs: Digest, rhs: Digest) -> Result<(), PrecompileError> {
-        let (lhs, rhs) = self.resolve_pair(lhs, rhs)?;
+        let (lhs, rhs) = self.evaluate_digest_pair(lhs, rhs)?;
         if lhs != rhs {
             return Err(PrecompileError::AssertionFailed);
         }
@@ -414,7 +396,7 @@ mod tests {
     }
 
     fn durable_storage_used(state: &DeferredState) -> usize {
-        state.nodes().map(|(_, node)| node.storage_felt_len()).sum()
+        state.nodes().values().map(Node::storage_felt_len).sum()
     }
 
     fn assert_budget_consistent(state: &DeferredState, max_elements: usize) {
@@ -456,9 +438,8 @@ mod tests {
         let remaining = state.remaining_elements();
 
         assert_eq!(state.root(), TRUE_DIGEST);
-        assert_eq!(state.node(&TRUE_DIGEST), Some(&Node::TRUE));
-        assert_eq!(state.eval(&TRUE_DIGEST), Some(TRUE_DIGEST));
-        assert_eq!(state.evaluate(TRUE_DIGEST).unwrap(), Node::TRUE);
+        assert_eq!(state.get_node(&TRUE_DIGEST), Some(&Node::TRUE));
+        assert_eq!(state.evaluate_digest(TRUE_DIGEST).unwrap(), TRUE_DIGEST);
         assert_eq!(state.remaining_elements(), remaining);
 
         assert_eq!(state.register(Node::TRUE).unwrap(), TRUE_DIGEST);
@@ -478,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn register_eagerly_stores_original_canonical_and_eval_memo() {
+    fn register_eagerly_stores_original_and_canonical_nodes() {
         let registry = hash_precompiles();
         let mut state = state_with(&registry, usize::MAX);
         let chunks = preimage_chunks();
@@ -488,10 +469,15 @@ mod tests {
         let digest = state.register(original.clone()).unwrap();
 
         assert_eq!(digest, original.digest(), "register returns original digest");
-        assert_eq!(state.node(&digest), Some(&original), "original node is durable");
-        assert_eq!(state.node(&canonical.digest()), Some(&canonical), "canonical node is durable");
-        assert_eq!(state.eval(&digest), Some(canonical.digest()), "eval memo is recorded");
-        assert_eq!(state.evaluate(digest).unwrap(), canonical, "evaluate hits the memo");
+        assert_eq!(state.get_node(&digest), Some(&original), "original node is durable");
+        assert_eq!(
+            state.get_node(&canonical.digest()),
+            Some(&canonical),
+            "canonical node is durable"
+        );
+        let canonical_digest = state.evaluate_digest(digest).unwrap();
+        assert_eq!(canonical_digest, canonical.digest());
+        assert_eq!(state.get_node(&canonical_digest), Some(&canonical));
     }
 
     #[test]
@@ -541,9 +527,13 @@ mod tests {
 
         assert_eq!(state.register(first.clone()).unwrap(), first_digest);
         assert_eq!(state.remaining_elements(), remaining);
-        assert_eq!(state.evaluate(first_digest).unwrap(), first);
+        let canonical = state.evaluate_digest(first_digest).unwrap();
+        assert_eq!(canonical, first.digest());
+        assert_eq!(state.get_node(&canonical), Some(&first));
         assert_eq!(state.remaining_elements(), remaining);
-        assert_eq!(state.evaluate(second_digest).unwrap(), second);
+        let canonical = state.evaluate_digest(second_digest).unwrap();
+        assert_eq!(canonical, second.digest());
+        assert_eq!(state.get_node(&canonical), Some(&second));
         assert_eq!(state.remaining_elements(), remaining);
         assert_budget_consistent(&state, max_elements);
     }
@@ -619,9 +609,9 @@ mod tests {
 
         assert_eq!(actual_root, expected_root);
         assert_eq!(state.root(), expected_root);
-        assert_eq!(state.node(&expected_root), Some(&expected_node));
-        assert_eq!(state.eval(&expected_root), Some(TRUE_DIGEST));
-        assert_eq!(state.evaluate(expected_root).unwrap(), Node::TRUE);
+        assert_eq!(state.get_node(&expected_root), Some(&expected_node));
+        assert_eq!(state.evaluate_digest(expected_root).unwrap(), TRUE_DIGEST);
+        assert_eq!(state.get_node(&TRUE_DIGEST), Some(&Node::TRUE));
     }
 
     #[test]
@@ -629,7 +619,7 @@ mod tests {
         type Case = fn(&Arc<PrecompileRegistry>) -> Result<Digest, PrecompileError>;
 
         let registry = hash_precompiles();
-        let cases: [(&str, Case); 4] = [
+        let cases: [(&str, Case); 3] = [
             ("missing statement", |registry| {
                 let mut state = state_with(registry, usize::MAX);
                 state.log_statement(dummy_digest(7))
@@ -643,11 +633,6 @@ mod tests {
                 let mut state = state_with(registry, usize::MAX);
                 state.root = state.register(digest_node(7))?;
                 state.log_statement(TRUE_DIGEST)
-            }),
-            ("expected-root mismatch", |registry| {
-                let mut state = state_with(registry, usize::MAX);
-                let statement = register_true_statement(&mut state, 7);
-                state.log_verified_statement(statement, dummy_digest(99))
             }),
         ];
 
@@ -667,16 +652,16 @@ mod tests {
         let uint_node = uint_value(7);
         let uint_digest = state.register(uint_node.clone()).unwrap();
         let root_before = state.root();
-        let eval_before = state.eval(&uint_digest);
+        let canonical_before = state.evaluate_digest(uint_digest).unwrap();
 
         state
             .extend_precompiles(PrecompileRegistry::default().with_precompile(Hash))
             .unwrap();
 
         assert_eq!(state.root(), root_before);
-        assert_eq!(state.node(&uint_digest), Some(&uint_node));
-        assert_eq!(state.eval(&uint_digest), eval_before);
-        assert_eq!(state.evaluate(uint_digest).unwrap(), uint_node);
+        assert_eq!(state.get_node(&uint_digest), Some(&uint_node));
+        assert_eq!(state.evaluate_digest(uint_digest).unwrap(), canonical_before);
+        assert_eq!(state.get_node(&canonical_before), Some(&uint_node));
         assert!(state.register(digest_node(11)).is_ok());
         assert_budget_consistent(&state, usize::MAX);
     }
@@ -720,9 +705,9 @@ mod tests {
         let rehydrated =
             DeferredState::from_wire(Arc::clone(&registry), &wire, usize::MAX).unwrap();
         assert_eq!(rehydrated.root(), root);
-        assert!(rehydrated.node(&orphan).is_none(), "unreachable orphan must be omitted");
-        assert!(rehydrated.node(&statement).is_some(), "statement remains root-reachable");
-        assert!(rehydrated.node(&root).is_some(), "framework AND root remains reachable");
+        assert!(rehydrated.get_node(&orphan).is_none(), "unreachable orphan must be omitted");
+        assert!(rehydrated.get_node(&statement).is_some(), "statement remains root-reachable");
+        assert!(rehydrated.get_node(&root).is_some(), "framework AND root remains reachable");
         assert_eq!(rehydrated.to_wire().unwrap(), wire);
     }
 

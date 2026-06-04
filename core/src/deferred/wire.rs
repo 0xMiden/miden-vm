@@ -105,8 +105,7 @@ impl DeferredStateWire {
             return Err(IntegrityError::InvalidStructure);
         }
 
-        let canonical = state.evaluate(root)?;
-        if !canonical.is_true() {
+        if state.evaluate_digest(root)? != TRUE_DIGEST {
             return Err(IntegrityError::RootNotTrue);
         }
 
@@ -287,7 +286,7 @@ impl WireEncoder {
             return Ok(());
         }
 
-        let node = state.node(&digest).ok_or(IntegrityError::InvalidStructure)?;
+        let node = state.get_node(&digest).ok_or(IntegrityError::InvalidStructure)?;
         let node_type = state
             .registry()
             .decode_node_type(node.tag())

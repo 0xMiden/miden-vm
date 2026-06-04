@@ -1,8 +1,8 @@
 //! Framework state effects exercised through the reference precompiles.
 //!
 //! These tests use the mock precompiles as fixtures to prove deferred *framework* behavior — eager
-//! registration, canonicalization, eval memos, minted helper nodes, and wire reconstruction — not
-//! the precompiles' own arithmetic/hash/signature semantics.
+//! registration, canonicalization, minted helper nodes, and wire reconstruction — not the
+//! precompiles' own arithmetic/hash/signature semantics.
 
 use std::sync::Arc;
 
@@ -49,12 +49,17 @@ fn register_group(state: &mut DeferredState, x: u64, y: u64) -> Digest {
     state.register(Group::new_node(h_x, h_y)).unwrap()
 }
 
-/// Asserts eager registration stored the original node, its canonical form, and the memo linking
-/// them.
-fn assert_eval_effect(state: &DeferredState, original: &Node, canonical: &Node) {
-    assert_eq!(state.node(&original.digest()), Some(original), "original node is durable");
-    assert_eq!(state.node(&canonical.digest()), Some(canonical), "canonical node is durable");
-    assert_eq!(state.eval(&original.digest()), Some(canonical.digest()), "eval memo links them");
+/// Asserts eager registration stored the original node and its canonical form.
+fn assert_eval_effect(state: &mut DeferredState, original: &Node, canonical: &Node) {
+    assert_eq!(state.get_node(&original.digest()), Some(original), "original node is durable");
+    assert_eq!(
+        state.get_node(&canonical.digest()),
+        Some(canonical),
+        "canonical node is durable"
+    );
+    let canonical_digest = state.evaluate_digest(original.digest()).unwrap();
+    assert_eq!(canonical_digest, canonical.digest());
+    assert_eq!(state.get_node(&canonical_digest), Some(canonical));
 }
 
 /// Round-trips the root-reachable closure through wire, checking root equality and canonical
@@ -82,9 +87,9 @@ fn log_and_assert_round_trips(
 // ================================================================================================
 
 #[test]
-fn registering_value_op_stores_original_canonical_and_eval_memo() {
-    // Registering an op node eagerly evaluates it: the original op, its canonical value, and the
-    // memo linking them are all durable immediately, without an explicit `evaluate` call.
+fn registering_value_op_stores_original_and_canonical_nodes() {
+    // Registering an op node eagerly evaluates it: the original op and its canonical value are
+    // durable immediately, without an explicit `evaluate` call.
     let (_registry, mut state) = state();
     let a = state.register(uint_value(3)).unwrap();
     let b = state.register(uint_value(4)).unwrap();
@@ -92,19 +97,19 @@ fn registering_value_op_stores_original_canonical_and_eval_memo() {
     let add_digest = state.register(add.clone()).unwrap();
 
     assert_eq!(add_digest, add.digest(), "register returns the original op digest");
-    assert_eval_effect(&state, &add, &uint_value(7));
+    assert_eval_effect(&mut state, &add, &uint_value(7));
 }
 
 #[test]
-fn registering_data_node_stores_original_canonical_and_eval_memo() {
-    // A multi-chunk data node evaluates to a single canonical value; the original data node, the
-    // canonical value, and the memo persist after registration.
+fn registering_data_node_stores_original_and_canonical_nodes() {
+    // A multi-chunk data node evaluates to a single canonical value; the original data node and
+    // canonical value persist after registration.
     let (_registry, mut state) = state();
     let chunks = hash_chunks(2);
     let preimage = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks.clone());
     state.register(preimage.clone()).unwrap();
 
-    assert_eval_effect(&state, &preimage, &Hash::digest_node(Hash::hash(&chunks)));
+    assert_eval_effect(&mut state, &preimage, &Hash::digest_node(Hash::hash(&chunks)));
 }
 
 #[test]
@@ -113,10 +118,10 @@ fn registering_predicate_is_eager_for_success_and_failure() {
     let (_registry, mut state) = state();
     let a = state.register(uint_value(7)).unwrap();
 
-    // A satisfied predicate memoizes to the seeded TRUE node.
+    // A satisfied predicate evaluates to the seeded TRUE node.
     let ok = state.register(Node::join(Uint::eq_tag(), a, a).unwrap()).unwrap();
-    assert_eq!(state.eval(&ok), Some(TRUE_DIGEST));
-    assert_eq!(state.node(&TRUE_DIGEST), Some(&Node::TRUE));
+    assert_eq!(state.evaluate_digest(ok).unwrap(), TRUE_DIGEST);
+    assert_eq!(state.get_node(&TRUE_DIGEST), Some(&Node::TRUE));
 
     // A violated predicate is rejected eagerly; post-failure state is not inspected.
     let b = state.register(uint_value(8)).unwrap();
@@ -136,14 +141,14 @@ fn compound_canonical_mints_helper_nodes() {
 
     let minted_x = uint_value(13);
     let minted_y = uint_value(24);
-    assert_eval_effect(&state, &add, &Group::new_node(minted_x.digest(), minted_y.digest()));
+    assert_eval_effect(&mut state, &add, &Group::new_node(minted_x.digest(), minted_y.digest()));
     assert_eq!(
-        state.node(&minted_x.digest()),
+        state.get_node(&minted_x.digest()),
         Some(&minted_x),
         "minted x coordinate is durable"
     );
     assert_eq!(
-        state.node(&minted_y.digest()),
+        state.get_node(&minted_y.digest()),
         Some(&minted_y),
         "minted y coordinate is durable"
     );

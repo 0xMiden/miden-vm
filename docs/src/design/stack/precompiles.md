@@ -4,6 +4,11 @@ Precompiles let Miden programs defer expensive computations to the host while st
 auditable evidence inside the STARK. This page describes how the VM, host, prover, and verifier
 coordinate to maintain a sequential commitment to every precompile invocation.
 
+> **Scope note.** This page documents the current request-list precompile transcript path. The
+> additive deferred-DAG framework is documented separately in
+> [Deferred computation](../deferred/index.md), and becomes the replacement path in the later
+> proof/precompile migration work.
+
 ## Core data
 
 | Concept | Description |

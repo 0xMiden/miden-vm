@@ -2,10 +2,12 @@
 //!
 //! Deferred events let programs commit opaque statements during execution and leave their
 //! semantic checks to installed [`Precompile`]s. The framework stores those commitments as a DAG
-//! of [`Node`]s and a transcript root that verifies by evaluating every logged statement to TRUE.
+//! of [`Node`]s and a deferred root commitment that verifies by evaluating every logged statement
+//! to TRUE.
 //!
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
-//! provides system-event plumbing. Reference precompiles live in `crate::testing::precompile`.
+//! provides system-event plumbing. Mock/test-support precompiles live in
+//! `crate::testing::precompile`.
 
 mod node;
 mod precompile;
@@ -24,7 +26,7 @@ pub use wire::{DeferredStateWire, IntegrityError, TRUE_INDEX, WireEntry};
 // ERROR
 // ================================================================================================
 
-/// Coarse deferred-framework failures shared by state and reference precompiles.
+/// Coarse deferred-framework failures shared by state and mock/test-support precompiles.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeferredError {
     #[error("invalid or unknown deferred tag")]
@@ -39,8 +41,6 @@ pub enum DeferredError {
     AssertionFailed,
     #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
     DeferredStateTooLarge { num_elements: usize, max: usize },
-    #[error("invalid deferred root transition: expected {expected}, computed {actual}")]
-    InvalidDeferredRootTransition { expected: Digest, actual: Digest },
     #[error("operation is not supported by this handler")]
     Unsupported,
 }

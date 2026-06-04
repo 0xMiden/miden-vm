@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
-    deferred::{DeferredError, PrecompileError},
+    deferred::PrecompileError,
     events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
@@ -36,21 +36,7 @@ pub enum SystemEventError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error(transparent)]
-    Deferred(PrecompileError),
-    #[error("deferred insertion requires {num_elements} elements but only {max} remain")]
-    DeferredStateTooLarge { num_elements: usize, max: usize },
-}
-
-impl From<PrecompileError> for SystemEventError {
-    fn from(err: PrecompileError) -> Self {
-        if let PrecompileError::Other(DeferredError::DeferredStateTooLarge { num_elements, max }) =
-            err.root()
-        {
-            Self::DeferredStateTooLarge { num_elements: *num_elements, max: *max }
-        } else {
-            Self::Deferred(err)
-        }
-    }
+    Deferred(#[from] PrecompileError),
 }
 
 // SYSTEM EVENT HANDLERS

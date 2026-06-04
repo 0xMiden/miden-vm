@@ -19,7 +19,7 @@ pub type Digest = Word;
 /// One Poseidon2 rate block, used as the unit of deferred data payloads.
 pub type DataChunk = [Felt; 8];
 
-/// Digest of [`Node::TRUE`], root for an empty transcript, and terminal of the AND-chain.
+/// Digest of [`Node::TRUE`], root for an empty deferred state, and terminal of the AND-chain.
 ///
 /// TRUE is an always-present framework node with digest zero. Wire encoding reserves index 0 for
 /// this digest instead of serializing TRUE as an explicit entry.
@@ -139,7 +139,7 @@ enum PayloadRepr {
 }
 
 impl Payload {
-    /// Creates a single-chunk data payload (`Data(1)`).
+    /// Creates a single-chunk data payload.
     fn value(chunk: DataChunk) -> Self {
         Self(PayloadRepr::Data(alloc::vec![chunk].into()))
     }
@@ -168,7 +168,7 @@ impl Payload {
         }
     }
 
-    /// Returns the single data chunk for value-like `Data(1)` payloads.
+    /// Returns the single data chunk for value-like payloads.
     pub fn as_value(&self) -> Result<&DataChunk, DeferredError> {
         match self.as_data()? {
             [chunk] => Ok(chunk),
@@ -210,7 +210,7 @@ impl Node {
         payload: Payload(PayloadRepr::True),
     };
 
-    /// Creates a value-like one-chunk data node (`Data(1)`).
+    /// Creates a value-like single-chunk data node.
     pub fn value(tag: Tag, chunk: DataChunk) -> Result<Self, DeferredError> {
         let tag = Self::require_precompile_tag(tag)?;
         Ok(Self { tag, payload: Payload::value(chunk) })
@@ -231,7 +231,7 @@ impl Node {
         Ok(Self { tag, payload: Payload::join(lhs, rhs) })
     }
 
-    /// Creates a structural transcript AND step from the previous root and statement digest.
+    /// Creates a structural deferred-root AND step from the previous root and statement digest.
     pub fn and(lhs: Digest, rhs: Digest) -> Self {
         Self {
             tag: Tag::AND,
@@ -374,7 +374,7 @@ pub enum NodeType {
 }
 
 impl NodeType {
-    /// Shape for a value-like single-chunk data node (`Data(1)`).
+    /// Shape for a value-like single-chunk data node.
     pub const fn value() -> Self {
         Self::Data(NonZeroU32::MIN)
     }
@@ -477,7 +477,7 @@ mod tests {
         let chunk = block(5);
         let node = Node::value(TAG_A, chunk).unwrap();
 
-        // A value is exactly Data(1): a single data chunk, not a separate framework shape.
+        // A value is a single data chunk, not a separate framework shape.
         assert_eq!(node.payload().as_data().unwrap().len(), 1);
         assert_eq!(node.payload().as_value().unwrap(), &chunk);
 
@@ -487,7 +487,7 @@ mod tests {
         expected.extend_from_slice(&chunk);
         assert_eq!(node.to_felts(), expected);
 
-        // Data(1) and the same single chunk wrapped as multi-chunk data digest identically.
+        // A single data chunk digests the same way whether constructed through value or data APIs.
         let multi = Node::try_data(TAG_A, alloc::vec![chunk]).unwrap();
         assert_eq!(node.digest(), multi.digest());
     }

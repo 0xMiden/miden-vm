@@ -36,7 +36,7 @@ impl Uint {
         precompile_id(Self::NAME)
     }
 
-    /// Tag for a canonical uint value (`Data(1)`).
+    /// Tag for a canonical uint value carried in one data chunk.
     pub fn value_tag() -> Tag {
         Self::tag([Felt::from_u32(Self::VALUE_TAG_ID), ZERO, ZERO])
     }
@@ -128,8 +128,8 @@ impl Precompile for Uint {
     }
 
     fn decode(&self, args: [Felt; 3]) -> Option<NodeType> {
-        // A value is `Data(1)` (8 raw u32 limbs); op-nodes and the eq predicate are `Join` over two
-        // child digests.
+        // A value carries 8 raw u32 limbs in one data chunk; op-nodes and the eq predicate are
+        // joins over two child digests.
         Some(match Discriminant::classify(args[0])? {
             Discriminant::Value => NodeType::value(),
             Discriminant::BinaryOp(_) | Discriminant::Eq => NodeType::Join,
@@ -147,9 +147,11 @@ impl Precompile for Uint {
             // when used.
             UintNode::Value => Ok(Node::value(Self::tag(args), *payload.as_value()?)?),
             UintNode::BinaryOp { op, lhs, rhs } => {
-                let (lhs, rhs) = context.resolve_pair(lhs, rhs)?;
-                let a = Self::value_of(&lhs)?;
-                let b = Self::value_of(&rhs)?;
+                let (lhs, rhs) = context.evaluate_digest_pair(lhs, rhs)?;
+                let lhs = context.get_node(&lhs).ok_or(PrecompileError::MissingNode)?;
+                let rhs = context.get_node(&rhs).ok_or(PrecompileError::MissingNode)?;
+                let a = Self::value_of(lhs)?;
+                let b = Self::value_of(rhs)?;
                 Ok(Self::value_node(op.apply(a, b)))
             },
             UintNode::Eq { lhs, rhs } => {

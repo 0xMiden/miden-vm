@@ -110,7 +110,7 @@ impl Precompile for Hash {
                 let n_bytes = u32::try_from(args[1].as_canonical_u64()).ok()?;
                 NodeType::data_chunks(Self::n_data_chunks(n_bytes))
             },
-            // Self-evaluating value (`Data(1)`) carrying the 8 raw felts of digest data.
+            // Self-evaluating value carrying one 8-felt chunk of digest data.
             Discriminant::Digest => Some(NodeType::value()),
             // Binary predicate over two child digests.
             Discriminant::Eq => Some(NodeType::Join),

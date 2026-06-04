@@ -9,21 +9,21 @@ sidebar_position: 1
 non-native computation — a hash, a signature check, elliptic-curve or big-integer arithmetic — and
 emits, in its place, an auditable record of *what was claimed*. That record is a content-addressed
 DAG of nodes, committed by a single rolling digest (`DeferredState.root`, the **deferred
-commitment**). The DAG is designed to be verified **externally**: either alongside the Miden VM's
-STARK proof, or by a dedicated *Precompile VM* whose proof attests that every committed node
+root commitment**). The DAG is designed to be verified **externally**: either alongside the Miden
+VM's STARK proof, or by a dedicated *Precompile VM* whose proof attests that every committed node
 evaluates correctly.
 
-The DAG can be read as a small **program**: each node is a term, and evaluating the commitment to
-`TRUE` proves every claim it transitively references. The framework (`miden_core::deferred`) owns
-the data model, the commitment, and the wire format; individual *precompiles* plug in the meaning
-of the nodes.
+The DAG can be read as a small **program**: each node is a term, and evaluating the deferred root
+to `TRUE` proves every claim it transitively references. The framework (`miden_core::deferred`)
+owns the data model, the root commitment, and the wire format; individual *precompiles* plug in the
+meaning of the nodes.
 
 > **Status.** This page describes the framework as an additive substrate: the VM accumulates the
 > DAG during execution and exposes it on the execution output, but it is not yet folded into the
 > STARK proof. The proof-model cutover — and the migration of the existing precompiles onto this
 > model — lands separately. See [Status and scope](#status-and-scope).
 >
-> For the precise `DeferredState`, `evals`, precompile, and public API contract, see
+> For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
 
 ## Motivation
@@ -37,17 +37,17 @@ result into a statement. A calculation like `(a + b) · c` cannot reference or s
 the VM's hashing.
 
 The fix is to stop treating deferred work as a *sequence of requests* and treat it as a **graph of
-value/data/join nodes**. Once the deferred statements are modelled as a DAG, much falls into place:
-each node evaluates to a canonical node; an operation *references* its operands by their content
-address instead of re-hashing them; shared sub-computations are shared in the graph. When the
-framework needs ordered accumulation, it represents it as a chain of semantic AND nodes whose root
-is a statement that must evaluate to `TRUE`.
+tagged payloads and joins**. Once the deferred statements are modelled as a DAG, much falls into
+place: each node evaluates to a canonical node; an operation *references* its operands by their
+content address instead of re-hashing them; shared sub-computations are shared in the graph. When
+the framework needs ordered accumulation, it represents it as a chain of semantic AND nodes whose
+root is a statement that must evaluate to `TRUE`.
 
 Crucially, the DAG is the language the Precompile VM already speaks. The way a precompile's
-operations and constraints are described in that VM is inherently a graph of value/data/join nodes —
-so by modelling deferred computation the same way, **a precompile's native (host) implementation
-comes to mirror its constraint implementation.** One structure drives both. This direction is
-developed in the draft specification in GitHub discussion #3005.
+operations and constraints are described in that VM is inherently a graph of canonical values,
+payloads, and joins — so by modelling deferred computation the same way, **a precompile's native
+(host) implementation comes to mirror its constraint implementation.** One structure drives both.
+This direction is developed in the draft specification in GitHub discussion #3005.
 
 ## The model
 
@@ -55,7 +55,7 @@ A **node** is a `(tag, payload)` pair, addressed by its 4-felt Poseidon2 **diges
 content yields an identical digest, so equal subterms are shared automatically (hash-consing).
 
 - A **tag** is a node's identity and constructor: externally, precompile tags are built with
-  `Tag::new(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
+  `Tag::precompile(id, args)`, while `Tag::from_word` is reserved for raw stack/wire decoding. The `id`
   selects the owning precompile; the three immediate felts (`args`) are entirely the precompile's
   to interpret (a discriminant, a data length, a small constant, …). The framework reserves ids `0`
   and `1` for itself: `Tag::TRUE = [0, 0, 0, 0]` tags the canonical `TRUE` node, and
@@ -63,12 +63,12 @@ content yields an identical digest, so equal subterms are shared automatically (
   Deferred statement accumulation uses the same semantic `AND` constructor as a restricted
   right-spined chain.
 - A **payload** is the node's body, in one of three shapes:
-  - **`True`** — the framework TRUE sentinel, carrying no data; it is the only zero-payload node;
-  - **`Data(n)`** — `n ≥ 1` 8-felt data chunks, whose digest is the linear hash of the `8n` felts
-    under the tag. A `Data(1)` is a single-block **value** (e.g. a digest or a field element);
-    `Data(n > 1)` is bulk data such as a hash preimage or message. An empty data body is forbidden;
-  - a **`Join`** — two child digests (`lhs`, `rhs`) for anything referential (an operation, a
-    predicate, an AND step).
+  - the framework `TRUE` sentinel, carrying no data; it is the only zero-payload node;
+  - a data payload: one or more 8-felt rate-sized chunks, linearly hashed under the tag. An empty
+    data payload is forbidden; precompiles decide whether a data payload represents a scalar,
+    digest, message, hash preimage, coordinate, or some other local value;
+  - a join payload: two child digests (`lhs`, `rhs`) for anything referential, such as an
+    operation, predicate, or AND step.
 
 The digest binds the tag in the Poseidon2 capacity, so a node's address commits to *both* its
 identity and its body.
@@ -78,22 +78,24 @@ identity and its body.
 A **precompile** is the framework's extension point: an implementation of the `Precompile` trait
 that claims one tag id and, within that slice of tag space, defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
-DAG — the reference precompiles cover hashes, signatures, elliptic-curve groups, and big-integer
-fields.
+DAG. In this framework branch, mock/test-support precompiles cover hashes, signatures,
+elliptic-curve groups, and big-integer fields to exercise the framework; the production precompile
+crate and wrappers land separately.
 
 A precompile supplies three things:
 
 - `decode(args) -> Option<NodeType>` — *type-checks* a tag: which constructor is this, and what
-  structural shape does it carry (`Data(n)` or `Join`)? Tag inspection only. For data tags, this is
-  also the precompile-owned size gate: returning `Data(n)` authorizes the host to read
-  exactly `n` data chunks, so oversized data tags should be rejected here. `NodeType::True` is
-  reserved for the framework TRUE sentinel; a precompile must not return it.
+  structural shape does it carry (`NodeType::Data(n)` or `NodeType::Join`)? Tag inspection only.
+  For data tags, this is also the precompile-owned size gate: returning `NodeType::Data(n)`
+  authorizes the host to read exactly `n` 8-felt chunks, so oversized data tags should be rejected
+  here. `NodeType::True` is reserved for the framework TRUE sentinel; a precompile must not return
+  it.
 - `evaluate(args, payload, …) -> Result<Node>` — computes a node's **canonical form**. The
-  common roles are: validate a value `Data(1)` (its canonical is itself), evaluate an operation
-  (evaluate the child canonicals, then combine), or check a predicate (evaluate operands, return the
-  `TRUE` node on success or fail otherwise). These roles are conventions, not a fixed taxonomy — a
-  precompile is free to define unary operations, multi-ary constructors, and so on over the data and
-  join shapes.
+  common roles are: validate a canonical value represented as data (its canonical is itself),
+  evaluate an operation (evaluate the child canonicals, then combine), or check a predicate
+  (evaluate operands, return the `TRUE` node on success or fail otherwise). These roles are
+  conventions, not a fixed taxonomy — a precompile is free to define unary operations, multi-ary
+  constructors, and so on over data and join payloads.
 - `init() -> Vec<Node>` — contributes any canonical constant values (e.g. `ZERO`, `ONE`, a curve
   generator) at registry-initialization time.
 
@@ -102,19 +104,21 @@ tag id to its owning precompile and is otherwise indifferent to how the precompi
 precompile's `id` is derived the same way event IDs are — the name hashed with Blake3 and folded
 into a single field element — but in its own domain-separated namespace, so a precompile and an
 event of the same name get different ids by construction. The registry rejects misconfigured or
-duplicate ids at construction. The default registry is empty and rejects every tag. Hosts install
-precompiles directly or by loading `HostLibrary` values that export a registry.
+duplicate ids at construction. The default registry is empty and rejects every precompile-owned
+tag. A `DeferredState` carries the registry it evaluates under; in this branch the processor keeps
+an empty production registry and exposes registry installation only for testing/experimental
+end-to-end coverage. Production registry installation and concrete precompile packages land in the
+follow-up precompile migration work.
 
 During evaluation the framework hands the precompile a `DeferredContext`, through which it can
-`resolve` a child digest by evaluating it to its canonical node or `register` a freshly-minted
-helper node into the DAG. Registered helper nodes are validated under the same registry and must
-satisfy the ordinary child-closure rules. The precompile never touches the data model or the
-commitment directly — it supplies only per-node meaning, and the framework drives the depth-first
-recursion.
+`get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
+`register` a freshly-minted helper node into the DAG. Registered helper nodes are validated under
+the same registry and must satisfy the ordinary child-closure rules. The precompile never touches
+the commitment directly — it supplies only per-node meaning, and the framework drives the
+depth-first recursion.
 
-The in-memory `DeferredState` keeps an evaluation cache (`evals`) alongside registered DAG nodes.
-Those cache entries are valid only under the same `PrecompileRegistry` semantics that populated
-them, and they are not serialized as trusted state.
+The in-memory `DeferredState` may memoize evaluation results internally. That memoization is
+transparent to precompile implementations and is not serialized as trusted state.
 
 ## Building the DAG from a program
 
@@ -125,9 +129,9 @@ precompile-owned wrapper.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
-| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers a one-block node — a `Data(1)` value or a join over the eight payload felts — then evaluates it immediately. Join-shaped nodes may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
-| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `n` from the tag, reads `8n` felts from memory at `ptr`, registers the `Data(n)` node, and evaluates it immediately. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
-| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload words in hash order). |
+| `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes the tag and registers an operand-stack node, then evaluates it immediately. The eight operand-stack payload felts are either one data chunk or two child digests for a join. Join payloads may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; a wrapper that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD, TAG]`. |
+| `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes the data chunk count from the tag, reads exactly that many 8-felt chunks from memory at `ptr`, registers the resulting data payload, and evaluates it immediately. No advice/stack output; a wrapper that needs `NODE_DIGEST` hashes the same memory range in-circuit with a Poseidon2 linear hash. |
+| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical's `tag || payload` felts onto the **advice stack** (`TAG` first, then payload felts). The output length depends on the canonical payload shape. |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure. They store the
 original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
@@ -137,13 +141,13 @@ fails.
 
 A system event is an unconstrained advice hook: the honest handler can compute a digest, but the
 AIR has no constraint tying an advice-supplied digest to the operand-stack payload or to memory at
-`ptr`. If a digest folded into a deferred commitment came from advice, a prover could attest a node
-over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the gap,
-and it composes with the verifier:
+`ptr`. If a digest folded into the deferred root commitment came from advice, a prover could attest
+a node over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the
+gap, and it composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
-- once the deferred root is threaded into proof public inputs, the **deferred-commitment root
-  match** will bind that digest to the wire the verifier rehydrates;
+- once the deferred root is threaded into proof public inputs, the **deferred-root match** will
+  bind that digest to the wire the verifier rehydrates;
 - `DeferredState::from_wire` then rehydrates the canonical wire opening and evaluates the expected
   root from wire data.
 
@@ -167,10 +171,11 @@ Predicates are **not** special-cased on evaluation: their canonical is the `TRUE
 4-felt tag, since `TRUE` has no payload. A failed predicate has already surfaced as an error before
 any felts are pushed.
 
-## The deferred commitment
+## The deferred root commitment
 
-The commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word (`TRUE_DIGEST`),
-which is also the digest of the always-present canonical `Node::TRUE`. To fold a verified
+The deferred root commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word
+(`TRUE_DIGEST`), which is also the digest of the always-present canonical `Node::TRUE`. To fold a
+verified
 **statement** — any registered digest that evaluates to `TRUE`, not necessarily a primitive
 predicate node — the framework registers an AND node
 `{ tag: Tag::AND, payload: prev_root || stmt_digest }` and advances the root to that node's digest.
@@ -181,7 +186,7 @@ under the distinct capacity `[1, 0, 0, 0]` and is not equal to `TRUE_DIGEST`, th
 semantically to `TRUE`.
 
 > **Scope note.** The legacy precompile request path remains documented separately; proof wiring
-> for deferred roots lands in a follow-up.
+> for the deferred root commitment lands in a follow-up.
 
 Once proof wiring lands, the verifier's obligation collapses to a single fixed point: **evaluate
 the root to `TRUE`, and every logged statement holds.** There is no separate finalization step.
@@ -196,7 +201,7 @@ index and may reference only `0` or earlier entries. Empty `entries` opens `TRUE
 wire opens the digest of the last entry. `to_wire` emits a deterministic child-first DFS of the
 root-reachable closure, so unreferenced orphans are dropped.
 
-`DeferredState::from_wire(wire, registry, max_elements)` is the only trusted path from wire bytes
+`DeferredState::from_wire(registry, wire, max_elements)` is the only trusted path from wire bytes
 back to a validated state. It runs as a structural decode, a canonicality check, and a root
 evaluation. This validates the wire's own implicit root; follow-up proof plumbing compares the
 returned `state.root()` against the externally committed root.
@@ -206,11 +211,11 @@ returned `state.root()` against the externally committed root.
    and payload shape match the declared `NodeType`, reject explicit `TRUE`, reject duplicate
    digests, and require join children to reference only earlier entries;
 2. **canonicality** — register decoded entries into a fresh state, set the implicit wire root as
-   `state.root`, and require `state.to_wire(registry) == wire`; this rejects dangling nodes,
+   `state.root`, and require `state.to_wire() == wire`; this rejects dangling nodes,
    non-root-last encodings, and equivalent-but-reordered topological wire;
 3. **semantic** — evaluate the implicit wire root under the installed precompiles and require it to
-   equal the canonical `TRUE` node. Evaluation repopulates `evals` and may insert
-   canonical/helper nodes in addition to the wire nodes.
+   equal the canonical `TRUE` node. Evaluation may insert canonical/helper nodes in addition to
+   the wire nodes.
 
 A wire that yields any integrity error is rejected; a faithful one reconstructs a state whose root is
 the wire's implicit root and whose canonical wire output is byte-for-byte identical to the input
@@ -225,7 +230,7 @@ This framework is an additive substrate. In its current form:
 - the legacy request-list precompile path (`core::precompile`, the `sys::log_precompile_request`
   wrapper) remains documented under [Precompiles](../stack/precompiles.md).
 
-The proof-model cutover — threading the deferred commitment into the proof, migrating the existing
-precompiles onto this model, and retiring the request-list path — lands in a follow-up. The external
-STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub discussion
-#3005.
+The proof-model cutover — threading the deferred root commitment into the proof, migrating the
+existing precompiles onto this model, and retiring the request-list path — lands in a follow-up. The
+external STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub
+discussion #3005.

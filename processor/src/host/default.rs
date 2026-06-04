@@ -51,12 +51,12 @@ where
         }
     }
 
-    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its event handlers.
+    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
-        let HostLibrary { mast_forest, handlers } = library.into();
-        self.store.insert(mast_forest);
+        let library = library.into();
+        self.store.insert(library.mast_forest);
 
-        for (event, handler) in handlers {
+        for (event, handler) in library.handlers {
             self.event_handlers.register(event, handler)?;
         }
         Ok(())

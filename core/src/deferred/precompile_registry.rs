@@ -307,9 +307,10 @@ mod tests {
         let registry = Arc::new(PrecompileRegistry::default().with_precompile(f));
         let node = Node::value(tag, [ZERO; 8]).unwrap();
         let mut state = DeferredState::new(Arc::clone(&registry), usize::MAX).unwrap();
-        // Use the framework's evaluate path so we exercise dispatch end-to-end.
+        // Use the framework's evaluation path so we exercise dispatch end-to-end.
         let digest = state.register(node.clone()).unwrap();
-        let canonical = state.evaluate(digest).unwrap();
-        assert_eq!(canonical, node);
+        let canonical = state.evaluate_digest(digest).unwrap();
+        assert_eq!(canonical, node.digest());
+        assert_eq!(state.get_node(&canonical), Some(&node));
     }
 }

@@ -5,11 +5,11 @@ use super::{EventId, EventName};
 // SYSTEM EVENTS
 // ================================================================================================
 
-/// Defines a set of actions which can be initiated from the VM to inject new data into the advice
-/// provider.
+/// Defines a set of host-side actions which can be initiated from the VM.
 ///
-/// These actions can affect all 3 components of the advice provider: Merkle store, advice stack,
-/// and advice map.
+/// Most actions update or query one of the three advice-provider components: Merkle store, advice
+/// stack, or advice map. Deferred-DAG actions update host-side deferred state, and evaluation may
+/// also push canonical node data to the advice stack.
 ///
 /// All actions, except for `MerkleNodeMerge`, `Ext2Inv` and `UpdateMerkleNode` can be invoked
 /// directly from Miden assembly via dedicated instructions.
@@ -295,12 +295,13 @@ pub enum SystemEvent {
 
     // DEFERRED-DAG SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
-    /// Registers an expression-bodied deferred node in the DAG.
+    /// Registers an operand-stack deferred node in the DAG.
     ///
-    /// Registration validates the tag/payload shape against the host-installed deferred
-    /// precompile registry and evaluates the node immediately. Predicate failures surface at
-    /// registration time. The MASM wrapper derives the original digest in-circuit from the
-    /// operand-stack payload so the commitment is bound to program data rather than advice.
+    /// Registration validates the tag and eight-felt operand-stack payload against the
+    /// host-installed deferred precompile registry, then evaluates the node immediately. The
+    /// payload is either one data chunk or two child digests for a join. Predicate failures surface
+    /// at registration time. The MASM wrapper derives the original digest in-circuit from the
+    /// operand-stack payload so the node is bound to program data rather than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]
@@ -327,13 +328,13 @@ pub enum SystemEvent {
     ///   Advice stack:  canonical `tag || payload` in felt-index order
     DeferredEvaluate,
 
-    /// Registers a memory-resident bulk-data deferred node in the DAG.
+    /// Registers a memory-backed data-payload deferred node in the DAG.
     ///
-    /// The host-installed deferred precompile registry decodes the tag's data chunk count, making
-    /// length part of the commitment. The handler performs a cheap budget pre-check before
-    /// allocating or reading data memory; registration then enforces the deferred-state budget and
-    /// semantic checks. The MASM wrapper hashes the same memory range in-circuit, so the registered
-    /// digest is bound to memory contents rather than advice.
+    /// The host-installed deferred precompile registry decodes the tag's data chunk count and the
+    /// handler reads exactly that many 8-felt chunks from memory. The handler performs a cheap
+    /// budget pre-check before allocating or reading data memory; registration then enforces the
+    /// deferred-state budget and semantic checks. The MASM wrapper hashes the same memory range
+    /// in-circuit, so the registered digest is bound to memory contents rather than advice.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, TAG, ptr, ...]

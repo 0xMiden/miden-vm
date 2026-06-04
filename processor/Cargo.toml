@@ -33,6 +33,10 @@ testing = ["miden-air/testing"]
 # so today this feature only compiles in the LookupAir shape-validation walker.
 bus-debugger = ["miden-air/std"]
 
+[[test]]
+name = "deferred_e2e"
+required-features = ["testing"]
+
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true

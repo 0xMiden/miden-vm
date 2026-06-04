@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use miden_core::deferred::PrecompileRegistry;
 use miden_core::{
     ZERO,
-    deferred::{DataChunk, Digest, Node, NodeType, PrecompileError, Tag},
+    deferred::{DataChunk, DeferredError, Digest, Node, NodeType, PrecompileError, Tag},
 };
 
 use super::SystemEventError;
@@ -19,7 +19,7 @@ use crate::{MemoryError, fast::FastProcessor};
 // ================================================================================================
 // `[event_id, PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` — Poseidon2 sponge layout so MASM can feed the
 // 12 felts directly into one `hperm` to compute the node's digest. The eight payload felts are a
-// single data chunk for a `Data(1)` value, or `lhs || rhs` child digests for a join.
+// single data chunk, or `lhs || rhs` child digests for a join.
 
 /// Stack offset of the payload's low half below the event id.
 const DEFERRED_PAYLOAD_LO_OFFSET: usize = 1;
@@ -31,8 +31,8 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler calls `DeferredState::evaluate` by digest and pushes the canonical's `Node::to_felts()`
-// onto the advice stack.
+// handler evaluates it to a canonical digest and pushes that node's `Node::to_felts()` onto the
+// advice stack.
 
 /// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -52,7 +52,7 @@ const TAG_NUM_ELEMENTS: usize = 4;
 /// Number of field elements in one deferred data chunk.
 const DATA_CHUNK_NUM_ELEMENTS: usize = 8;
 
-/// Returns the storage footprint of a `Data(n)` node: `tag || n data chunks`.
+/// Returns the storage footprint of a data-payload node: `tag || n data chunks`.
 fn data_node_num_elements(n_chunks: u32) -> usize {
     (n_chunks as usize)
         .checked_mul(DATA_CHUNK_NUM_ELEMENTS)
@@ -60,13 +60,13 @@ fn data_node_num_elements(n_chunks: u32) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// Stack-resident registration of a one-block deferred node.
+/// Stack-resident registration of an operand-stack deferred node.
 ///
-/// The tag decodes to either a `Data(1)` value or a join over the eight payload felts; TRUE and
-/// multi-chunk data tags are rejected (bulk data uses `adv.register_deferred_data`). Registration
-/// is eager: semantic failures, including false predicates, surface immediately. The MASM wrapper
-/// binds the original digest in-circuit, so the host cannot supply an unconstrained commitment
-/// through advice.
+/// The tag decodes to either a one-chunk data payload or a join over the eight payload felts; TRUE
+/// and multi-chunk data tags are rejected because memory-backed data uses
+/// `adv.register_deferred_data`. Registration is eager: semantic failures, including false
+/// predicates, surface immediately. The MASM wrapper binds the original digest in-circuit, so the
+/// host cannot supply an unconstrained commitment through advice.
 pub(super) fn handle_deferred_register(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
@@ -102,8 +102,12 @@ pub(super) fn handle_deferred_evaluate(
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
-    let canonical = processor.deferred_state_mut().evaluate(digest)?;
-    let felts = canonical.to_felts();
+    let canonical_digest = processor.deferred_state_mut().evaluate_digest(digest)?;
+    let felts = processor
+        .deferred_state()
+        .get_node(&canonical_digest)
+        .ok_or(PrecompileError::MissingNode)?
+        .to_felts();
 
     // Push felts in reverse so the front of the advice stack is `felts[0]` (TAG): successive
     // `adv_pushw` reads then yield TAG, then each payload chunk / child word in natural order.
@@ -113,12 +117,12 @@ pub(super) fn handle_deferred_evaluate(
     Ok(())
 }
 
-/// Handles memory-resident registration of a bulk-data deferred node.
+/// Handles memory-backed registration of a data-payload deferred node.
 ///
-/// The tag, not the stack, is the source of truth for the data chunk count. Only `Data(n)` tags are
-/// valid here; TRUE and joins are rejected. The same memory range is hashed by the MASM wrapper
+/// The tag, not the stack, is the source of truth for the data chunk count. Only data-payload tags
+/// are valid here; TRUE and joins are rejected. The same memory range is hashed by the MASM wrapper
 /// in-circuit, binding the commitment to memory contents while this handler enforces alignment,
-/// bounds, and bulk-data limits. Semantic evaluation and final budget checks are delegated to
+/// bounds, and data-size limits. Semantic evaluation and final budget checks are delegated to
 /// `DeferredState::register`, so registration failures surface during this event.
 pub(super) fn handle_deferred_register_data(
     processor: &mut FastProcessor,
@@ -141,10 +145,11 @@ pub(super) fn handle_deferred_register_data(
     let num_elements = data_node_num_elements(n);
     let max_deferred_elements = processor.options.max_deferred_elements();
     if num_elements > max_deferred_elements {
-        return Err(SystemEventError::DeferredStateTooLarge {
+        return Err(PrecompileError::from(DeferredError::DeferredStateTooLarge {
             num_elements,
             max: max_deferred_elements,
-        });
+        })
+        .into());
     }
 
     // Bounds + alignment validation.
@@ -200,10 +205,13 @@ mod tests {
         PrecompileRegistry::default().with_precompile(Hash)
     }
 
-    fn bind_precompiles(processor: &mut FastProcessor, precompiles: PrecompileRegistry) {
+    fn bind_precompiles(
+        processor: FastProcessor,
+        precompiles: PrecompileRegistry,
+    ) -> FastProcessor {
         processor
-            .register_deferred_precompiles(precompiles)
-            .expect("test precompile initialization should fit the configured deferred budget");
+            .with_deferred_precompiles(precompiles)
+            .expect("test precompile initialization should fit the configured deferred budget")
     }
 
     fn write_data_stack(processor: &mut FastProcessor, tag: Tag, ptr: u32) {
@@ -229,8 +237,7 @@ mod tests {
         let ptr = 0;
         let exact_budget = data_node_num_elements(chunks.len() as u32) + data_node_num_elements(1);
         let precompiles = test_precompiles();
-        let mut processor = processor_with_budget(exact_budget);
-        bind_precompiles(&mut processor, precompiles);
+        let mut processor = bind_precompiles(processor_with_budget(exact_budget), precompiles);
         write_data_memory(&mut processor, ptr, &chunks);
 
         write_data_stack(&mut processor, tag, ptr);
@@ -253,8 +260,7 @@ mod tests {
     #[test]
     fn register_past_budget_is_rejected() {
         // Budget = 12 elements = exactly one value node (4 tag + 8 payload).
-        let mut processor = processor_with_budget(12);
-        bind_precompiles(&mut processor, test_precompiles());
+        let mut processor = bind_precompiles(processor_with_budget(12), test_precompiles());
 
         // The first node fills the budget exactly.
         write_register_stack(&mut processor, Hash::digest_tag(), [Felt::from_u32(1); 8]);
@@ -265,7 +271,14 @@ mod tests {
         let err = handle_deferred_register(&mut processor).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::DeferredStateTooLarge { num_elements: 12, max: 0 }
+            SystemEventError::Deferred(ref err)
+                if matches!(
+                    err.root(),
+                    PrecompileError::Other(DeferredError::DeferredStateTooLarge {
+                        num_elements: 12,
+                        max: 0,
+                    })
+                )
         ));
     }
 
@@ -274,8 +287,7 @@ mod tests {
         // A near-`u32::MAX` byte count decodes to ~125M chunks. Without the pre-read budget check
         // the handler would attempt a multi-GB `Vec::with_capacity` before failing; the pre-check
         // rejects it on the projected element count alone, so this test stays cheap.
-        let mut processor = processor_with_budget(16);
-        bind_precompiles(&mut processor, test_precompiles());
+        let mut processor = bind_precompiles(processor_with_budget(16), test_precompiles());
         let n_bytes = 4_000_000_000u32;
         let expected = data_node_num_elements(Hash::n_data_chunks(n_bytes));
 
@@ -283,15 +295,21 @@ mod tests {
         let err = handle_deferred_register_data(&mut processor).unwrap_err();
         assert!(matches!(
             err,
-            SystemEventError::DeferredStateTooLarge { num_elements, max: 16 } if num_elements == expected
+            SystemEventError::Deferred(ref err)
+                if matches!(
+                    err.root(),
+                    PrecompileError::Other(DeferredError::DeferredStateTooLarge {
+                        num_elements,
+                        max: 16,
+                    }) if *num_elements == expected
+                )
         ));
     }
 
     #[test]
     fn register_data_rejects_unaligned_pointer() {
         // A non-word-aligned pointer is rejected as an alignment error before any memory read.
-        let mut processor = processor_with_budget(64);
-        bind_precompiles(&mut processor, test_precompiles());
+        let mut processor = bind_precompiles(processor_with_budget(64), test_precompiles());
 
         write_data_stack(&mut processor, Hash::preimage_tag(Hash::BYTES_PER_CHUNK), 1);
         let err = handle_deferred_register_data(&mut processor).unwrap_err();

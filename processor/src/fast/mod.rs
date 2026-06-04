@@ -306,26 +306,18 @@ impl FastProcessor {
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
 
-    /// Registers additional deferred precompiles on this processor.
+    /// Installs deferred precompiles for tests and experimental end-to-end coverage.
     ///
-    /// Existing deferred nodes, evaluation memos, transcript root, and budget accounting are
-    /// preserved. Registration is additive only; duplicate precompile ids panic with the same
-    /// setup-failure behavior as [`PrecompileRegistry::with_precompile`].
-    pub fn register_deferred_precompiles(
-        &mut self,
-        precompiles: PrecompileRegistry,
-    ) -> Result<(), ExecutionError> {
-        self.deferred_state
-            .extend_precompiles(precompiles)
-            .map_err(ExecutionError::deferred_error_no_context)
-    }
-
-    /// Registers additional deferred precompiles and returns `self` for builder-style setup.
+    /// This is intentionally gated behind `testing`. Production registry installation is not part
+    /// of this branch; the default processor uses an empty deferred registry.
+    #[cfg(any(test, feature = "testing"))]
     pub fn with_deferred_precompiles(
         mut self,
         precompiles: PrecompileRegistry,
     ) -> Result<Self, ExecutionError> {
-        self.register_deferred_precompiles(precompiles)?;
+        self.deferred_state
+            .extend_precompiles(precompiles)
+            .map_err(ExecutionError::deferred_error_no_context)?;
         Ok(self)
     }
 

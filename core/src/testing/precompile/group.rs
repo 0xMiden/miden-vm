@@ -98,11 +98,13 @@ impl Precompile for Group {
 
         match kind {
             Discriminant::New => {
-                // Validate that both committed coordinates resolve to uint values, but preserve
+                // Validate that both committed coordinates evaluate to uint values, but preserve
                 // their original commitments in the canonical group element.
-                let (x_value, y_value) = context.resolve_pair(h_lhs, h_rhs)?;
-                Uint::value_of(&x_value).map_err(PrecompileError::from)?;
-                Uint::value_of(&y_value).map_err(PrecompileError::from)?;
+                let (h_x_value, h_y_value) = context.evaluate_digest_pair(h_lhs, h_rhs)?;
+                let x_value = context.get_node(&h_x_value).ok_or(PrecompileError::MissingNode)?;
+                let y_value = context.get_node(&h_y_value).ok_or(PrecompileError::MissingNode)?;
+                Uint::value_of(x_value).map_err(PrecompileError::from)?;
+                Uint::value_of(y_value).map_err(PrecompileError::from)?;
                 Ok(Self::new_node(h_lhs, h_rhs))
             },
             Discriminant::Add | Discriminant::Sub => {
@@ -111,13 +113,27 @@ impl Precompile for Group {
                     Discriminant::Sub => BinaryOp::Sub,
                     _ => unreachable!(),
                 };
-                let (g1, g2) = context.resolve_pair(h_lhs, h_rhs)?;
-                let (h_x1, h_y1) = new_coords(&g1)?;
-                let (h_x2, h_y2) = new_coords(&g2)?;
-                let x1 = Uint::value_of(&context.resolve(h_x1)?).map_err(PrecompileError::from)?;
-                let y1 = Uint::value_of(&context.resolve(h_y1)?).map_err(PrecompileError::from)?;
-                let x2 = Uint::value_of(&context.resolve(h_x2)?).map_err(PrecompileError::from)?;
-                let y2 = Uint::value_of(&context.resolve(h_y2)?).map_err(PrecompileError::from)?;
+                let (h_g1, h_g2) = context.evaluate_digest_pair(h_lhs, h_rhs)?;
+                let g1 = context.get_node(&h_g1).ok_or(PrecompileError::MissingNode)?;
+                let (h_x1, h_y1) = new_coords(g1)?;
+                let g2 = context.get_node(&h_g2).ok_or(PrecompileError::MissingNode)?;
+                let (h_x2, h_y2) = new_coords(g2)?;
+                let h_x1 = context.evaluate_digest(h_x1)?;
+                let h_y1 = context.evaluate_digest(h_y1)?;
+                let h_x2 = context.evaluate_digest(h_x2)?;
+                let h_y2 = context.evaluate_digest(h_y2)?;
+                let x1 =
+                    Uint::value_of(context.get_node(&h_x1).ok_or(PrecompileError::MissingNode)?)
+                        .map_err(PrecompileError::from)?;
+                let y1 =
+                    Uint::value_of(context.get_node(&h_y1).ok_or(PrecompileError::MissingNode)?)
+                        .map_err(PrecompileError::from)?;
+                let x2 =
+                    Uint::value_of(context.get_node(&h_x2).ok_or(PrecompileError::MissingNode)?)
+                        .map_err(PrecompileError::from)?;
+                let y2 =
+                    Uint::value_of(context.get_node(&h_y2).ok_or(PrecompileError::MissingNode)?)
+                        .map_err(PrecompileError::from)?;
                 let (x3, y3) = match op {
                     BinaryOp::Add => (Uint::wrap_add(x1, x2), Uint::wrap_add(y1, y2)),
                     BinaryOp::Sub => (Uint::wrap_sub(x1, x2), Uint::wrap_sub(y1, y2)),
@@ -128,9 +144,11 @@ impl Precompile for Group {
                 Ok(Self::new_node(h_x3, h_y3))
             },
             Discriminant::Eq => {
-                let (g1, g2) = context.resolve_pair(h_lhs, h_rhs)?;
-                let (h_x1, h_y1) = new_coords(&g1)?;
-                let (h_x2, h_y2) = new_coords(&g2)?;
+                let (h_g1, h_g2) = context.evaluate_digest_pair(h_lhs, h_rhs)?;
+                let g1 = context.get_node(&h_g1).ok_or(PrecompileError::MissingNode)?;
+                let (h_x1, h_y1) = new_coords(g1)?;
+                let g2 = context.get_node(&h_g2).ok_or(PrecompileError::MissingNode)?;
+                let (h_x2, h_y2) = new_coords(g2)?;
 
                 context.ensure_equal(h_x1, h_x2)?;
                 context.ensure_equal(h_y1, h_y2)?;

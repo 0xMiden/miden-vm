@@ -1,7 +1,7 @@
-//! Reference precompiles used to exercise the deferred framework.
+//! Mock precompiles used to exercise the deferred framework.
 //!
-//! They cover values (`Data(1)`), join nodes, multi-chunk data, predicates, and compound canonicals
-//! without depending on production cryptographic implementations.
+//! They cover single-chunk values, join nodes, multi-chunk data payloads, predicates, and compound
+//! canonicals without depending on production cryptographic implementations.
 
 pub mod group;
 pub mod hash;
@@ -15,7 +15,7 @@ pub use uint::Uint;
 
 use crate::deferred::PrecompileRegistry;
 
-/// Builds a registry with every reference precompile installed.
+/// Builds a registry with every mock precompile installed.
 ///
 /// This is the default fixture registry for framework tests, which exercise the deferred framework
 /// rather than any single precompile. Tests that need an empty or narrow registry build one

@@ -191,7 +191,7 @@ Instructions for moving data between the stack and other sources like program co
 | `adv_loadw`  | `[0,0,0,0, ...]` | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                                     |
 | `adv_pipe`   | `[A,B,C,a,...]`  | `[A',B',C,a+8,...]` | 1      | Pops 2 words from advice stack, overwrites top 2 words (positions 0-7). C (positions 8-11) unchanged. Writes both words to memory at `a` and `a+4`. `a' = a+8`. Fails if advice stack has `< 8` values. |
 
-#### Injecting into Advice Provider (System Events - 3 cycles)
+#### Advice Provider and Deferred-State System Events (3 cycles)
 
 _Push to Advice Stack:_
 
@@ -201,14 +201,14 @@ _Push to Advice Stack:_
 | `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
 | `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
 | `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
-| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates the node, stores the canonical node, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload words). |
+| `adv.evaluate_deferred` | `[NODE_DIGEST, ...]` | `[NODE_DIGEST, ...]` | Evaluates the node, stores the canonical node, and pushes the canonical's `tag \|\| payload` felts to the advice stack (`TAG` first, then payload felts). The output length depends on the canonical payload shape. |
 
 _Deferred DAG (host-side registration; no advice output):_
 
 | Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
 | ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers a one-block deferred node — a `Data(1)` value or a join, decoded from `TAG` — in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
-| `adv.register_deferred_data` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a bulk-data node `Data(n)` (chunk count from `TAG`, data from memory at `ptr`) in the host-side deferred DAG. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
+| `adv.register_deferred` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` | Registers an operand-stack deferred node in the host-side DAG. The eight payload felts are either one data chunk or two child digests for a join, as decoded from `TAG`. Produces no advice output; wrappers that need the node digest derive it in-circuit with `hperm`. |
+| `adv.register_deferred_data` | `[TAG, ptr, ...]` | `[TAG, ptr, ...]` | Registers a memory-backed data payload in the host-side deferred DAG. The chunk count is decoded from `TAG`, and exactly that many 8-felt chunks are read from memory at `ptr`. Produces no advice output; wrappers that need the node digest derive it in-circuit by hashing the same memory range. |
 
 _Insert into Advice Map:_
 

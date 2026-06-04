@@ -182,10 +182,10 @@ end",
 
     // The framework state retains the original op, its canonical, and the minted coordinates.
     let ds = &output.deferred_state;
-    assert_eq!(ds.node(&add.digest()), Some(&add));
-    assert_eq!(ds.node(&canonical_add.digest()), Some(&canonical_add));
-    assert_eq!(ds.node(&minted_x.digest()), Some(&minted_x));
-    assert_eq!(ds.node(&minted_y.digest()), Some(&minted_y));
+    assert_eq!(ds.get_node(&add.digest()), Some(&add));
+    assert_eq!(ds.get_node(&canonical_add.digest()), Some(&canonical_add));
+    assert_eq!(ds.get_node(&minted_x.digest()), Some(&minted_x));
+    assert_eq!(ds.get_node(&minted_y.digest()), Some(&minted_y));
 }
 
 #[test]
@@ -230,11 +230,11 @@ end",
     // The digest-equality assertion canonicalizes to TRUE.
     assert_eq!(read_memory_felts(&output, 28, 4), Node::TRUE.to_felts());
 
-    let ds = &output.deferred_state;
-    assert_eq!(ds.node(&preimage.digest()), Some(&preimage));
-    assert_eq!(ds.node(&canonical.digest()), Some(&canonical));
-    assert_eq!(ds.eval(&preimage.digest()), Some(canonical.digest()));
-    assert_eq!(ds.eval(&eq.digest()), Some(TRUE_DIGEST));
+    let mut ds = output.deferred_state;
+    assert_eq!(ds.get_node(&preimage.digest()), Some(&preimage));
+    assert_eq!(ds.get_node(&canonical.digest()), Some(&canonical));
+    assert_eq!(ds.evaluate_digest(preimage.digest()).unwrap(), canonical.digest());
+    assert_eq!(ds.evaluate_digest(eq.digest()).unwrap(), TRUE_DIGEST);
 }
 
 #[test]
@@ -264,9 +264,9 @@ end",
 
     assert_eq!(read_memory_felts(&output, 24, 4), Node::TRUE.to_felts());
 
-    let ds = &output.deferred_state;
-    assert_eq!(ds.node(&sig.digest()), Some(&sig));
-    assert_eq!(ds.eval(&sig.digest()), Some(TRUE_DIGEST));
+    let mut ds = output.deferred_state;
+    assert_eq!(ds.get_node(&sig.digest()), Some(&sig));
+    assert_eq!(ds.evaluate_digest(sig.digest()).unwrap(), TRUE_DIGEST);
 }
 
 #[test]
