@@ -15,10 +15,7 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::{
-    air::{ReductionError, WindowAccess},
-    challenger::CanObserve,
-};
+use miden_crypto::stark::air::{ReductionError, WindowAccess};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
@@ -654,24 +651,6 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
         let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
         Ok(vec![aux_sum + core_correction + chiplets_correction])
-    }
-
-    /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
-    ///
-    /// The fixed-length public values are absorbed verbatim; the kernel-digest group
-    /// (the single variable-length public input) is absorbed via the shared helper,
-    /// padded to the sponge rate and reversed. This layout matches the MASM recursive
-    /// verifier's `process_public_inputs`. The protocol observes the instance count and
-    /// per-AIR log trace heights separately after this hook.
-    fn observe<C: CanObserve<Felt>>(
-        &self,
-        challenger: &mut C,
-        air_inputs: &[Felt],
-        aux_inputs: &[Felt],
-        _log_trace_heights: &[u8],
-    ) {
-        challenger.observe_slice(air_inputs);
-        config::observe_var_len_public_inputs(challenger, &[aux_inputs], &[WORD_SIZE]);
     }
 }
 

@@ -63,13 +63,12 @@ pub proc verify
     exec.public_inputs::process_public_inputs
     # => [...]
 
-    # Buffer the AIR instance shape (instance count + per-AIR log heights) into the
-    # transcript. No permutation yet; the main-trace commitment completes the block.
+    # Observe the AIR instance shape (instance count + per-AIR log heights), continuing the
+    # buffered duplex begun while absorbing the public inputs.
     exec.random_coin::observe_instance_shape
     # => [...]
 
-    # Load main trace commitment and buffer it onto the instance-shape elements, then
-    # permute once over the combined 7-element block.
+    # Load the main trace commitment, observe it onto the buffered stream, and flush.
     padw adv_loadw
     exec.constants::main_trace_com_ptr mem_storew_le
     # => [main_trace_commitment, ...]

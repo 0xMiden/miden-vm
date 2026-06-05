@@ -109,40 +109,6 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     challenger.observe(Felt::ZERO);
 }
 
-/// Absorbs variable-length public inputs into the challenger.
-///
-/// Each VLPI group is a flat slice of fixed-width messages. `message_widths[i]` gives the
-/// width of each message in group `i`. Every message is zero-padded to the next multiple
-/// of `SPONGE_RATE` and reversed before observation, matching the layout the MASM recursive
-/// verifier's `mem_stream` + `horner_eval_base` expects.
-pub fn observe_var_len_public_inputs<C: CanObserve<Felt>>(
-    challenger: &mut C,
-    var_len_public_inputs: &[&[Felt]],
-    message_widths: &[usize],
-) {
-    assert_eq!(
-        var_len_public_inputs.len(),
-        message_widths.len(),
-        "must provide one message width per VLPI group"
-    );
-    for (group, &msg_width) in var_len_public_inputs.iter().zip(message_widths) {
-        assert!(msg_width > 0, "VLPI message width must be positive");
-        let padded_width = msg_width.next_multiple_of(SPONGE_RATE);
-        for message in group.chunks(msg_width) {
-            assert_eq!(
-                message.len(),
-                msg_width,
-                "VLPI group has trailing elements that don't form a complete message"
-            );
-            let mut padded = vec![Felt::ZERO; padded_width];
-            for (i, &elem) in message.iter().enumerate() {
-                padded[padded_width - 1 - i] = elem;
-            }
-            challenger.observe_slice(&padded);
-        }
-    }
-}
-
 // ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
 // ================================================================================================
 

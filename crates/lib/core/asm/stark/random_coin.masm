@@ -6,8 +6,16 @@
 #!
 #! Sampling uses an output_len counter that tracks how many rate elements remain. Each
 #! permutation sets output_len=8; each sample_felt decrements it by 1 and reads
-#! rate[output_len - 1]. Absorption (reseed_direct, reseed_with_felt, etc.) writes directly
-#! to rate memory and permutes, bypassing any input buffer.
+#! rate[output_len - 1].
+#!
+#! Two absorption paths are provided:
+#!   - `observe_felt`/`flush_buffer`: a faithful buffered duplex matching p3's `DuplexChallenger`
+#!     (append to `rate[input_len]`, permute only once the rate fills, flush a partial buffer
+#!     lazily). Used for the public inputs, instance shape, and main-trace commitment, whose
+#!     element stream is not rate-aligned.
+#!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that write directly to
+#!     rate memory and permute immediately. Valid only when the input buffer is empty (the stream
+#!     is known to start and end on a rate boundary).
 
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
@@ -134,6 +142,62 @@ pub proc sample_bits
     u32and
     swap
     drop
+end
+
+#! Absorb a single base field element into the transcript via the buffered duplex.
+#!
+#! Mirrors p3's `DuplexChallenger::observe`: the element is appended to the rate input buffer at
+#! `rate[input_len]`, the output buffer is invalidated, and the sponge is permuted only once the
+#! buffer fills (`input_len == 8`). A partial buffer is flushed lazily by `flush_buffer` (or by the
+#! next permutation), so the permutation boundaries follow the absorbed-element count, not any
+#! per-section alignment.
+#!
+#! Input:  [felt, ...]
+#! Output: [...]
+pub proc observe_felt
+    # Observing invalidates any buffered sponge output.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+    # Write felt to rate[input_len] (rate elements 0..7 are addressed as r1_ptr + index).
+    exec.constants::random_coin_input_len_ptr mem_load
+    exec.constants::r1_ptr add
+    mem_store
+    # => [...]
+
+    # input_len += 1; permute and reset the buffer once the rate is full.
+    exec.constants::random_coin_input_len_ptr mem_load add.1
+    dup eq.8
+    if.true
+        drop
+        exec.load_random_coin_state
+        exec.poseidon2::permute
+        exec.store_random_coin_state
+        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.8 exec.constants::random_coin_output_len_ptr mem_store
+    else
+        exec.constants::random_coin_input_len_ptr mem_store
+    end
+end
+
+#! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
+#!
+#! When the input buffer is non-empty, permute the sponge: the buffered prefix already occupies
+#! `rate[0..input_len]` and `rate[input_len..8]` retains the previous permutation output, exactly
+#! as p3 overwrites only the first `input_len` rate elements before permuting. Exposes a fresh
+#! output (output_len=8) and empties the buffer. No-op when the buffer is already empty.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc flush_buffer
+    exec.constants::random_coin_input_len_ptr mem_load
+    push.0 neq
+    if.true
+        exec.load_random_coin_state
+        exec.poseidon2::permute
+        exec.store_random_coin_state
+        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.8 exec.constants::random_coin_output_len_ptr mem_store
+    end
 end
 
 #! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
@@ -299,77 +363,37 @@ pub proc init_seed
     drop drop
 end
 
-#! Buffer the multi-AIR instance shape into the Fiat-Shamir transcript.
+#! Observe the multi-AIR instance shape into the Fiat-Shamir transcript via the buffered duplex.
 #!
-#! Mirrors the framework's `observe_shape`, which observes the instance count followed
-#! by the per-AIR log trace heights in instance order (Core, then Chiplets):
-#!   rate[0] = 2          (instance count)
-#!   rate[1] = log(core trace height)
-#!   rate[2] = log(chiplets trace height)
+#! Mirrors the framework's `observe_shape`, which observes the instance count followed by the
+#! per-AIR log trace heights in instance order (Core, then Chiplets):
+#!   [ 2, log(core trace height), log(chiplets trace height) ].
 #!
-#! No permutation is performed here. The main-trace commitment is buffered onto these
-#! three elements by `reseed_main_after_shape`, and the combined 7-element block is
-#! permuted once — matching the DuplexChallenger's single duplex over the buffered
-#! input before the first post-commitment sample (auxiliary randomness).
+#! These continue the same buffered duplex begun by `process_public_inputs`, so no permutation is
+#! forced here; `reseed_main_after_shape` appends the main-trace commitment and flushes.
 #!
 #! Input: [...]
 #! Output: [...]
 pub proc observe_instance_shape
-    exec.constants::random_coin_input_len_ptr mem_load
-    # => [input_len, ...]
-    assertz.err="observe_instance_shape: input buffer must be empty"
-    # => [...]
-
-    # observing clears the output buffer.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    # => [...]
-
-    # rate[0] = instance count (2 AIRs).
-    push.2 exec.constants::r1_ptr mem_store
-    # rate[1] = log(core trace height).
-    exec.constants::get_core_trace_length_log exec.constants::r1_ptr add.1 mem_store
-    # rate[2] = log(chiplets trace height).
-    exec.constants::get_chiplets_trace_length_log exec.constants::r1_ptr add.2 mem_store
-    # => [...]
-
-    push.3 exec.constants::random_coin_input_len_ptr mem_store
-    # => [...]
+    push.2 exec.observe_felt
+    exec.constants::get_core_trace_length_log exec.observe_felt
+    exec.constants::get_chiplets_trace_length_log exec.observe_felt
 end
 
-#! Buffer the main-trace commitment onto the instance-shape elements and permute.
+#! Observe the main-trace commitment and flush the buffered duplex.
 #!
-#! Writes the commitment word to rate[3..7], completing the 7-element duplex input
-#! buffer `[2, log_core, log_chip, c0, c1, c2, c3]`; rate[7] retains the
-#! post-public-inputs state. Then permutes once and exposes a fresh output, matching
-#! the DuplexChallenger's duplex at the first post-commitment sample.
-#!
-#! SAFETY: requires input_len=3 (the instance-shape elements buffered by
-#! `observe_instance_shape`). On exit: input_len=0, output_len=8.
+#! Appends the commitment word `[c0, c1, c2, c3]` to the buffered transcript stream (continuing
+#! from the instance shape) and then flushes any partial buffer, matching the DuplexChallenger's
+#! duplex at the first post-commitment sample (auxiliary randomness). On exit: output_len=8.
 #!
 #! Input: [c0, c1, c2, c3, ...]
 #! Output: [...]
 pub proc reseed_main_after_shape
-    exec.constants::random_coin_input_len_ptr mem_load
-    push.3 assert_eq.err="reseed_main_after_shape: expected 3 buffered instance-shape elements"
-    # => [c0, c1, c2, c3, ...]
-
-    # Buffer the commitment word into rate[3..7] (rate[3] is r1_ptr+3; rate[4..7] are r2_ptr+0..2).
-    exec.constants::r1_ptr add.3 mem_store   # c0 -> rate[3]
-    exec.constants::r2_ptr mem_store          # c1 -> rate[4]
-    exec.constants::r2_ptr add.1 mem_store    # c2 -> rate[5]
-    exec.constants::r2_ptr add.2 mem_store    # c3 -> rate[6]
-    # => [...]
-
-    exec.load_random_coin_state
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
-    # => [R1', R2', C', ...]
-    exec.store_random_coin_state
-    # => [...]
-
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-    # => [...]
+    exec.observe_felt
+    exec.observe_felt
+    exec.observe_felt
+    exec.observe_felt
+    exec.flush_buffer
 end
 
 #! Reseed with a commitment word and absorb an additional single felt, then permute.
