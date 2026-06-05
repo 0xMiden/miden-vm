@@ -145,23 +145,23 @@ fn prove_execution_trace(
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::blake3_256_config(params);
-            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
-            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
-            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Poseidon2 => {
             let config = config::poseidon2_config(params);
-            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
         HashFunction::Rpx256 => {
             let config = config::rpx_config(params);
-            prove_stark(&config, &core_matrix, &chiplets_matrix, &public_values, &kernel_felts)
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
     }?;
 
@@ -179,8 +179,8 @@ fn prove_execution_trace(
 /// owned by the Chiplets AIR). Then delegates to the lifted multi-AIR prover.
 pub fn prove_stark<SC>(
     config: &SC,
-    core_trace: &RowMajorMatrix<Felt>,
-    chiplets_trace: &RowMajorMatrix<Felt>,
+    core_trace: RowMajorMatrix<Felt>,
+    chiplets_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
     kernel_felts: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
@@ -197,9 +197,8 @@ where
     let statement =
         Statement::new(MidenMultiAir::new(), public_values.to_vec(), kernel_felts.to_vec())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
-    let prover_statement =
-        ProverStatement::new(statement, vec![core_trace.clone(), chiplets_trace.clone()])
-            .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let prover_statement = ProverStatement::new(statement, vec![core_trace, chiplets_trace])
+        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
 
     let output: StarkOutput<Felt, QuadFelt, SC> =
         ProverInstance::new(config, &prover_statement, None)

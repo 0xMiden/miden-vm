@@ -308,8 +308,8 @@ mod fast_parallel {
         let blake3_config = config::blake3_256_config(config::pcs_params());
         let proof_bytes = prove_stark(
             &blake3_config,
-            &core_matrix,
-            &chiplets_matrix,
+            core_matrix,
+            chiplets_matrix,
             &public_values,
             &kernel_felts,
         )
