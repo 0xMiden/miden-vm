@@ -37,6 +37,8 @@ use crate::{
 
 type TestResult = Result<(), Report>;
 
+mod package;
+
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
 //
 // - For tests against expected values that can't be expressed as a string literal, we still use
