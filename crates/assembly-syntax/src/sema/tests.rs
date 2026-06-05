@@ -329,3 +329,17 @@ fn name_map_detects_conflict_via_define_api() {
         "expected SymbolConflict for duplicate name, got {result:?}"
     );
 }
+
+#[test]
+fn enum_variant_matching_enum_name_reports_symbol_conflict() {
+    let context = SyntaxTestContext::default();
+    let source = "\
+enum DUP : u8 {
+    DUP,
+}
+";
+    let error = context
+        .parse_module(source)
+        .expect_err("expected symbol conflict when enum variant matches enum name");
+    assert_symbol_conflict(&error, "DUP");
+}

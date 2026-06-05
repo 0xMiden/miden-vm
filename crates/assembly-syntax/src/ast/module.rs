@@ -305,6 +305,13 @@ impl Module {
             self.push_export(Export::Type(export.into()))?;
             return Ok(());
         }
+        // Check that no variant name conflicts with the enum type name itself
+        if let Some(conflict) = variants.iter().find(|v| v.name.as_str() == alias.name.as_str()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: conflict.name.span(),
+                prev_span: alias.span(),
+            });
+        }
 
         let mut values = SmallVec::<[Span<u64>; 8]>::new_const();
 
