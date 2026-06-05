@@ -52,7 +52,7 @@ impl ProjectSourceProvider for MasmSourceProvider {
 fn resolve_target_source_paths(
     context: &TargetAssemblyContext<'_>,
 ) -> Result<ProjectSourceProvenanceInputs, Report> {
-    let root_path = context.resolved_target_root;
+    let root_path = context.resolved_target_root.as_ref();
     let root_dir = root_path.parent().map(FsPath::to_path_buf).ok_or_else(|| {
         Report::msg(format!("target source '{}' has no parent directory", root_path.display()))
     })?;
@@ -162,7 +162,7 @@ fn excluded_target_roots(context: &TargetAssemblyContext<'_>) -> BTreeSet<PathBu
         if context.target != executable.inner() {
             let joined = context.project_root.join(path);
             if let Ok(joined) = joined.canonicalize()
-                && context.resolved_target_root != joined.as_path()
+                && context.resolved_target_root.as_ref() != joined.as_path()
             {
                 excluded.insert(joined);
             }

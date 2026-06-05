@@ -20,7 +20,7 @@ use miden_mast_package::{MastForest, Package, PackageExport, ProcedureExport, Ta
 use miden_project::Linkage;
 
 use crate::{
-    Assembler, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
+    Assembler, ModuleParser, PathBuf,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -539,12 +539,7 @@ fn simple_main_call() -> TestResult {
 
 #[test]
 fn call_without_path() -> TestResult {
-    let mut context = TestContext::default();
-
-    let project = miden_project::Package::new(
-        "call_without_path",
-        miden_project::Target::executable("main", "mod.masm".into()),
-    );
+    let context = TestContext::default();
 
     let account_code1_src = source_file!(
         &context,
@@ -610,15 +605,9 @@ end
         context.source_manager(),
     )?;
 
-    let mut project_assembler = context.project_assembler(project.into())?;
-    project_assembler.assemble_with_sources(
-        ProjectTargetSelector::Executable("main"),
-        "dev",
-        ProjectSourceInputs {
-            root: main,
-            support: vec![account_code1, account_code2],
-        },
-    )?;
+    let mut assembler = Assembler::new(context.source_manager());
+    assembler.compile_and_statically_link_all([account_code1, account_code2])?;
+    assembler.assemble_program("main", main)?;
 
     Ok(())
 }

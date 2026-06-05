@@ -218,26 +218,8 @@ where
 
     pub fn assemble(
         &mut self,
-        target: ProjectTargetSelector<'_>,
-        profile: &str,
-    ) -> Result<Arc<MastPackage>, Report> {
-        self.assemble_impl(target, profile, None)
-    }
-
-    pub fn assemble_with_sources(
-        &mut self,
-        target: ProjectTargetSelector<'_>,
-        profile: &str,
-        sources: ProjectSourceInputs,
-    ) -> Result<Arc<MastPackage>, Report> {
-        self.assemble_impl(target, profile, Some(sources))
-    }
-
-    fn assemble_impl(
-        &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
-        sources: Option<ProjectSourceInputs>,
     ) -> Result<Arc<MastPackage>, Report> {
         let target = target_selector.select_target(self.project.as_ref())?;
 
@@ -255,7 +237,6 @@ where
                 &library_target,
                 profile_name,
                 None,
-                None,
                 &mut cache,
             )?)
         } else {
@@ -268,7 +249,6 @@ where
             &target,
             profile_name,
             required_lib,
-            sources,
             &mut cache,
         )
         .map(|resolved| resolved.package)
@@ -281,13 +261,10 @@ where
         target: &Target,
         profile_name: &str,
         required_lib: Option<ResolvedPackage>,
-        sources: Option<ProjectSourceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
     ) -> Result<ResolvedPackage, Report> {
         let cache_key = project.target_package_name(target);
-        if sources.is_none()
-            && let Some(package) = cache.get(&cache_key).cloned()
-        {
+        if let Some(package) = cache.get(&cache_key).cloned() {
             assert_eq!(package.package.kind, target.ty);
             return Ok(package);
         }
@@ -337,11 +314,8 @@ where
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
-        let has_provided_sources = sources.is_some();
-        let sources = match sources {
-            Some(sources) => self.normalize_provided_sources(target, sources)?,
-            None => self.load_target_sources(project.as_ref(), target, profile)?,
-        };
+        let ProjectSourceInputs { root, support } =
+            self.load_target_sources(project.as_ref(), target, profile)?;
 
         // Collect specific well-known custom sections produced by the project assembler
         let mut sections = Vec::new();
@@ -369,7 +343,6 @@ where
             assembler.link_package(kernel_package, Linkage::Dynamic)?;
         }
 
-        let ProjectSourceInputs { root, support } = sources;
         let mut product = match target.ty {
             TargetType::Executable => {
                 assembler.assemble_executable_modules(package_id.clone(), root, support)?
@@ -404,9 +377,7 @@ where
             package,
             linked_kernel_package: runtime_dependencies.kernel,
         };
-        if !has_provided_sources {
-            cache.insert(package_id, resolved.clone());
-        }
+        cache.insert(package_id, resolved.clone());
 
         Ok(resolved)
     }
@@ -473,7 +444,6 @@ where
                             project,
                             &target,
                             profile_name,
-                            None,
                             None,
                             cache,
                         )?;
@@ -702,27 +672,6 @@ where
             .map_err(|error| Report::msg(error.to_string()))
     }
 
-    fn normalize_provided_sources(
-        &self,
-        target: &Target,
-        sources: ProjectSourceInputs,
-    ) -> Result<ProjectSourceInputs, Report> {
-        let mut root = sources.root;
-        root.set_kind(target_root_module_kind(target.ty));
-        root.set_path(target.namespace.inner().as_ref());
-
-        let support = sources
-            .support
-            .into_iter()
-            .map(|mut module| {
-                module.set_kind(ModuleKind::Library);
-                Ok(module)
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
-
-        Ok(ProjectSourceInputs { root, support })
-    }
-
     fn load_target_sources(
         &self,
         project: &ProjectPackage,
@@ -749,7 +698,30 @@ where
         let extension = extension.to_string_lossy();
 
         let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
-        provider.provide_sources(&context)
+        let inputs = provider.provide_sources(&context)?;
+        match target.ty {
+            TargetType::Executable if !inputs.root.kind().is_executable() => {
+                Err(Report::msg(format!(
+                    "requested target type is executable, but root module provided to assembler for '{}' is {}",
+                    project.name(),
+                    inputs.root.kind()
+                )))
+            },
+            TargetType::Kernel if !inputs.root.kind().is_kernel() => Err(Report::msg(format!(
+                "requested target type is kernel, but root module provided to assembler for '{}' is {}",
+                project.name(),
+                inputs.root.kind()
+            ))),
+            _ if inputs.root.path() != target.namespace.inner().as_ref() => {
+                Err(Report::msg(format!(
+                    "requested target namespace is '{}', but root module provided to assembler for '{}' is '{}'",
+                    &target.namespace,
+                    project.name(),
+                    inputs.root.path()
+                )))
+            },
+            _ => Ok(inputs),
+        }
     }
 }
 
