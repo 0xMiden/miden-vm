@@ -16,7 +16,7 @@ use miden_crypto::{
 use miden_mast_package::Package;
 use miden_precompiles::{PrecompilesLibrary, registry};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
+    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, StackInputs,
     advice::AdviceInputs,
 };
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
@@ -102,6 +102,30 @@ fn exports_dsa_paths() {
         assert!(
             package.get_procedure_root_by_path(path).is_some(),
             "signature procedure should be exported: {path}",
+        );
+    }
+}
+
+/// The U256 arithmetic wrappers are exported under `miden::precompiles::math::u256`.
+#[test]
+fn exports_u256_paths() {
+    let package = PrecompilesLibrary::default().package();
+    for path in [
+        "::miden::precompiles::math::u256::load",
+        "::miden::precompiles::math::u256::push_zero",
+        "::miden::precompiles::math::u256::push_one",
+        "::miden::precompiles::math::u256::push_max",
+        "::miden::precompiles::math::u256::add",
+        "::miden::precompiles::math::u256::sub",
+        "::miden::precompiles::math::u256::mul",
+        "::miden::precompiles::math::u256::div",
+        "::miden::precompiles::math::u256::is_eq",
+        "::miden::precompiles::math::u256::assert_eq",
+        "::miden::precompiles::math::u256::eval",
+    ] {
+        assert!(
+            package.get_procedure_root_by_path(path).is_some(),
+            "U256 procedure should be exported: {path}",
         );
     }
 }
@@ -244,6 +268,200 @@ fn read_digest(output: &ExecutionOutput, ptr: u32, n_felts: u32) -> Vec<Felt> {
                 .expect("digest element")
         })
         .collect()
+}
+
+// U256 PRECOMPILE
+// ================================================================================================
+
+/// End-to-end: U256 wrappers keep user-visible values as digests, evaluate an arithmetic
+/// expression, and return the canonical little-endian u32 limbs on the stack.
+#[test]
+fn u256_arithmetic_executes_end_to_end() {
+    assert_eq!(run_u256_binary("add", 35, 7).unwrap(), [42, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(run_u256_binary("sub", 35, 7).unwrap(), [28, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(run_u256_binary("mul", 6, 7).unwrap(), [42, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(run_u256_binary("div", 100, 7).unwrap(), [14, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+/// End-to-end: U256 is_eq returns a boolean instead of trapping on inequality.
+#[test]
+fn u256_is_eq_returns_bool_without_trapping_on_inequality() {
+    assert_eq!(run_u256_is_eq(2, 2).unwrap(), 1);
+    assert_eq!(run_u256_is_eq(2, 3).unwrap(), 0);
+}
+
+/// End-to-end: U256 assert_eq evaluates equality and traps only when callers opt into asserting.
+#[test]
+fn u256_assert_eq_executes_end_to_end() {
+    let library = PrecompilesLibrary::default();
+    let source = format!(
+        r#"
+            use miden::precompiles::math::u256
+            begin
+                {stores}
+                push.0 exec.u256::load
+                push.8 exec.u256::load
+                exec.u256::add
+                push.16 exec.u256::load
+                exec.u256::assert_eq
+            end
+        "#,
+        stores = [masm_store_u256(2, 0), masm_store_u256(3, 8), masm_store_u256(5, 16)].join(" "),
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .expect("failed to link miden-precompiles")
+        .assemble_program("u256_assert_eq", &source)
+        .expect("failed to assemble U256 assert_eq program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&library)
+        .expect("failed to load PrecompilesLibrary into the host");
+
+    FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
+    .execute_sync(&program, &mut host)
+    .expect("U256 assert_eq must succeed");
+}
+
+#[test]
+fn u256_eval_value_executes_end_to_end() {
+    assert_eq!(run_u256_eval_value(2).unwrap(), [2, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+fn run_u256_eval_value(value: u32) -> Result<[u32; 8], ExecutionError> {
+    let library = PrecompilesLibrary::default();
+    let stores = masm_store_u256(value, 0);
+    let source = format!(
+        r#"
+            use miden::precompiles::math::u256
+            begin
+                {stores}
+                push.0 exec.u256::load
+                exec.u256::eval
+            end
+        "#,
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .expect("failed to link miden-precompiles")
+        .assemble_program("u256_eval_value", &source)
+        .expect("failed to assemble U256 eval value program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&library)
+        .expect("failed to load PrecompilesLibrary into the host");
+
+    let output = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
+    .execute_sync(&program, &mut host)?;
+
+    Ok(core::array::from_fn(|i| {
+        output.stack.get_element(i).unwrap().as_canonical_u64() as u32
+    }))
+}
+
+fn run_u256_binary(op: &str, lhs: u32, rhs: u32) -> Result<[u32; 8], ExecutionError> {
+    let library = PrecompilesLibrary::default();
+    let stores = [masm_store_u256(lhs, 0), masm_store_u256(rhs, 8)].join(" ");
+    let source = format!(
+        r#"
+            use miden::precompiles::math::u256
+            begin
+                {stores}
+                push.0 exec.u256::load
+                push.8 exec.u256::load
+                exec.u256::{op}
+                exec.u256::eval
+            end
+        "#,
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .expect("failed to link miden-precompiles")
+        .assemble_program("u256", &source)
+        .expect("failed to assemble U256 program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&library)
+        .expect("failed to load PrecompilesLibrary into the host");
+
+    let output = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
+    .execute_sync(&program, &mut host)?;
+
+    Ok(core::array::from_fn(|i| {
+        output.stack.get_element(i).unwrap().as_canonical_u64() as u32
+    }))
+}
+
+fn run_u256_is_eq(lhs: u32, rhs: u32) -> Result<u64, ExecutionError> {
+    let library = PrecompilesLibrary::default();
+    let stores = [masm_store_u256(lhs, 0), masm_store_u256(rhs, 8)].join(" ");
+    let source = format!(
+        r#"
+            use miden::precompiles::math::u256
+            begin
+                {stores}
+                push.0 exec.u256::load
+                push.8 exec.u256::load
+                exec.u256::is_eq
+            end
+        "#,
+    );
+    let program = Assembler::default()
+        .with_package(library.package(), Linkage::Dynamic)
+        .expect("failed to link miden-precompiles")
+        .assemble_program("u256_is_eq", &source)
+        .expect("failed to assemble U256 is_eq program")
+        .unwrap_program();
+
+    let mut host = DefaultHost::default()
+        .with_library(&library)
+        .expect("failed to load PrecompilesLibrary into the host");
+
+    let output = FastProcessor::new_with_options(
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    )
+    .expect("processor construction")
+    .with_deferred_precompiles(registry())
+    .expect("failed to register miden-precompiles")
+    .execute_sync(&program, &mut host)?;
+
+    Ok(output.stack.get_element(0).unwrap().as_canonical_u64())
+}
+
+fn masm_store_u256(low: u32, base_addr: u32) -> String {
+    (0..8)
+        .map(|i| {
+            let limb = if i == 0 { low } else { 0 };
+            format!("push.{limb} push.{} mem_store", base_addr + i)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // SIGNATURE PRECOMPILES

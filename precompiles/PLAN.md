@@ -217,7 +217,10 @@ Out of scope:
 ### Later: #3176 (`al/ecdsa-k256-on-vm`)
 
 Use #3176 (`al/ecdsa-k256-on-vm`) as source material after the migrated production precompile
-stack is stable.
+stack is stable. That branch is valuable for more than native secp256k1 ECDSA: it is also a
+worked example of how to make advice-heavy arithmetic production-grade by combining a narrow public
+MASM interface, host hints, in-VM binding checks, generated arithmetic verifiers, and adversarial
+tests.
 
 Likely work:
 
@@ -226,6 +229,32 @@ Likely work:
 - Native secp256k1 ECDSA support.
 - Deciding which pieces belong as reusable MASM helpers versus concrete PVM-backed precompile
   logic.
+
+Interesting pieces to port or adapt:
+
+- **Hint-and-check arithmetic pattern.** The SZ modular multiplication verifier checks host-supplied
+  quotient/result/carry witnesses in the VM instead of trusting advice. U256 deferred wrappers use a
+  similar discipline at the DAG boundary: any wrapper that consumes advice should re-register the
+  advised value and log an equality predicate tying it to the original digest.
+- **Generated verifier code for repetitive arithmetic.** The `miden-sz-codegen` approach keeps
+  repetitive MASM verifier logic reproducible and pinned by structural tests. If U256 gains native
+  modular operations, division witnesses, or field-specific reductions, generate the checker MASM
+  rather than hand-maintaining long stack programs.
+- **Transcript pinning.** The SZ checker precomputes modulus-specific transcript state and then
+  absorbs only per-instance witnesses online. Deferred wrappers should follow the same principle:
+  tags, precompile ids, and fixed statement shape are pinned in MASM constants/tests; only dynamic
+  operands and witnesses are streamed.
+- **Advice trap suites.** The K1 branch tests mutated witness paths directly (bad decompression,
+  invalid carries, malformed modmul witnesses). Every advice-consuming precompile wrapper should
+  have negative tests that mutate each advice segment independently and assert execution traps or
+  deferred verification fails.
+- **Layered MASM API.** The K1 branch separates scalar, base-field, point, and signature helpers.
+  For U256 this argues for keeping digest-level arithmetic wrappers small and adding reusable lower
+  layers only when they serve multiple precompiles (for example modular U256, field-specific U256,
+  or group-coordinate wrappers).
+- **Codegen pin tests.** Generated or pinned MASM constants should be checked against Rust-derived
+  values. For U256 this includes precompile ids, tag discriminants, constant digests, and any future
+  generated verifier body hashes or fixture snapshots.
 
 ### Later: PVM Proof Work
 
@@ -250,9 +279,37 @@ Tests should match the branch layer.
 - `precompiles/proof-wire`: prove/verify tests using one concrete precompile, initially Keccak.
 - Later branches should add tests for their own concrete precompile only.
 
+For every precompile with MASM wrappers, use the following test ladder:
+
+1. **Pure Rust semantics.** Unit-test tag decoding, canonical payload validation, successful
+   evaluation, and error cases (bad tag args, malformed payload, missing children, failed
+   predicate, divide-by-zero, bad signature, etc.). These tests should not assemble MASM.
+2. **Pinned interface constants.** Assert MASM precompile ids, tag ids, constant digests, and any
+   generated verifier snapshots match the Rust source of truth. This catches silent drift in public
+   stack contracts.
+3. **Package exports and linking.** Assert each public wrapper path exists in the compiled package,
+   can be dynamically linked by the assembler, and can be loaded into `DefaultHost`.
+4. **Wrapper happy paths.** Execute small programs on `FastProcessor` with the real
+   `PrecompilesLibrary` and `registry()`. Check the user-visible stack/memory contract and inspect
+   deferred state when useful (registered original node, canonical node, logged equality root).
+5. **Advice binding and negative paths.** For wrappers that call `adv.evaluate_deferred`,
+   `adv.register_deferred_data`, or precompile-specific advice events, add tests that tamper with
+   each advice segment or registered memory region and assert that execution traps or deferred
+   verification rejects. This is the main lesson from the K1/SZ tests: every host hint needs an
+   independent in-VM binding check and a regression test proving the binding is live.
+6. **Proof-wire coverage.** Once proof-wire support is in place, keep at least one prove/verify test
+   per precompile family and one negative wire/statement test. Do not duplicate every vector from
+   Rust and wrapper layers at proof level.
+7. **Generated-code tests.** If a wrapper or verifier is generated, include structural tests for the
+   generator, checked-in snapshot/pin tests for generated MASM, and one end-to-end execution test
+   proving the generated procedure is callable.
+
 Avoid:
 
 - Exhaustive duplicate vector suites in every layer.
+- Wrapper tests that only prove the program does not trap while ignoring stack/memory/deferred-state
+  outputs.
+- Trusting advice in tests without a matching tamper case.
 - Vacuous error tests that only assert an obvious rejection round-trips.
 - Proof tests before the proof-wire branch.
 - Broad workspace churn in narrow precompile slices.

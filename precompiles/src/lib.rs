@@ -15,6 +15,7 @@ use miden_utils_sync::LazyLock;
 mod codec;
 mod dsa;
 mod hash;
+mod math;
 
 pub use dsa::{
     ecdsa_k256_keccak::EcdsaK256KeccakPrecompile, eddsa_ed25519::EddsaEd25519Precompile,
@@ -22,6 +23,7 @@ pub use dsa::{
 pub use hash::{
     HashFunction, HashPrecompile, keccak256::Keccak256Precompile, sha512::Sha512Precompile,
 };
+pub use math::U256Precompile;
 
 // PRECOMPILES LIBRARY
 // ================================================================================================
@@ -29,8 +31,9 @@ pub use hash::{
 /// The Miden precompiles library, wrapping the compiled `miden-precompiles` [`Package`].
 ///
 /// The package bundles the MASM procedures exported under the `miden::precompiles` namespace: the
-/// `keccak256` wrappers under `miden::precompiles::crypto::hashes::keccak256` and the deferred-DAG
-/// helper procedures under `miden::precompiles::sys`. When the package is dynamically linked during
+/// `keccak256` wrappers under `miden::precompiles::crypto::hashes::keccak256`, U256 wrappers
+/// under `miden::precompiles::math::u256`, and the deferred-DAG helper procedures under
+/// `miden::precompiles::sys`. When the package is dynamically linked during
 /// assembly, these procedures can be called from any Miden program and are serialized as 32 bytes.
 ///
 /// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`].
@@ -91,4 +94,5 @@ pub fn registry() -> PrecompileRegistry {
         .with_precompile(Sha512Precompile::default())
         .with_precompile(EcdsaK256KeccakPrecompile)
         .with_precompile(EddsaEd25519Precompile)
+        .with_precompile(U256Precompile)
 }

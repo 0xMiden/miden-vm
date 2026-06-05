@@ -1,0 +1,228 @@
+use miden::precompiles::sys
+
+# U256 DEFERRED PRECOMPILE WRAPPERS
+# ================================================================================================
+# User-facing values are deferred node digests. Canonical U256 values are one data chunk of eight
+# little-endian u32 limbs: VALUE_U32[8] = [v0, ..., v7], with v0 least significant.
+
+const PRECOMPILE_ID = 18322967668069342842
+const VALUE_TAG_ID = 0
+const ADD_TAG_ID = 1
+const SUB_TAG_ID = 2
+const MUL_TAG_ID = 3
+const DIV_TAG_ID = 4
+const EQ_TAG_ID = 5
+
+# Pinned digests for the init constants registered by U256Precompile.
+const ZERO_DIGEST_0 = 10724448165987459879
+const ZERO_DIGEST_1 = 15752467585108095215
+const ZERO_DIGEST_2 = 6995203027068244722
+const ZERO_DIGEST_3 = 1226324719889726328
+const ONE_DIGEST_0 = 2988819365406120859
+const ONE_DIGEST_1 = 8736278675771647327
+const ONE_DIGEST_2 = 7395949673646728179
+const ONE_DIGEST_3 = 2787606569907119446
+const MAX_DIGEST_0 = 518631264247917026
+const MAX_DIGEST_1 = 18413225323727624090
+const MAX_DIGEST_2 = 11653607987414381800
+const MAX_DIGEST_3 = 6413039480418189021
+
+#! Loads one U256 value from memory and returns its deferred digest.
+#! Input:  [ptr, ...]
+#! Output: [VALUE_DIGEST, ...]
+#!
+#! `ptr` must address eight consecutive u32-range felts and be double-word aligned for the
+#! `mem_stream` used by the deferred data registration helper.
+pub proc load
+    push.1 swap
+    push.0.0
+    push.VALUE_TAG_ID
+    push.PRECOMPILE_ID
+    exec.sys::register_data
+end
+
+#! Pushes the registered digest of the U256 constant 0.
+pub proc push_zero
+    push.ZERO_DIGEST_3.ZERO_DIGEST_2.ZERO_DIGEST_1.ZERO_DIGEST_0
+end
+
+#! Pushes the registered digest of the U256 constant 1.
+pub proc push_one
+    push.ONE_DIGEST_3.ONE_DIGEST_2.ONE_DIGEST_1.ONE_DIGEST_0
+end
+
+#! Pushes the registered digest of the maximum U256 value, 2^256 - 1.
+pub proc push_max
+    push.MAX_DIGEST_3.MAX_DIGEST_2.MAX_DIGEST_1.MAX_DIGEST_0
+end
+
+#! Registers `lhs + rhs (mod 2^256)` and returns the result expression digest.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [SUM_DIGEST, ...]
+pub proc add
+    push.0.0
+    push.ADD_TAG_ID
+    push.PRECOMPILE_ID
+    swapw.2
+    exec.sys::register_expr
+end
+
+#! Registers `lhs - rhs (mod 2^256)` and returns the result expression digest.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [DIFF_DIGEST, ...]
+pub proc sub
+    push.0.0
+    push.SUB_TAG_ID
+    push.PRECOMPILE_ID
+    swapw.2
+    exec.sys::register_expr
+end
+
+#! Registers `lhs * rhs (mod 2^256)` and returns the result expression digest.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [PRODUCT_DIGEST, ...]
+pub proc mul
+    push.0.0
+    push.MUL_TAG_ID
+    push.PRECOMPILE_ID
+    swapw.2
+    exec.sys::register_expr
+end
+
+#! Registers `lhs / rhs` as unsigned integer division and returns the result expression digest.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [QUOTIENT_DIGEST, ...]
+#!
+#! Division by zero is rejected when this node is evaluated by the installed U256 precompile.
+pub proc div
+    push.0.0
+    push.DIV_TAG_ID
+    push.PRECOMPILE_ID
+    swapw.2
+    exec.sys::register_expr
+end
+
+#! Evaluates two U256 expression digests and returns whether their canonical values match.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [is_equal, ...]
+#!
+#! This does not trap when the two values differ. Each digest is evaluated independently, and each
+#! advised canonical value is bound by logging an equality assertion against the expression that
+#! produced it. The returned bit is derived in MASM by comparing the two canonical U256 values.
+@locals(36)
+pub proc is_eq
+    # Preserve LHS because logging the RHS assertion uses the operand stack as scratch space.
+    dupw.1 loc_storew_le.20 dropw
+
+    # ---- Evaluate and bind RHS ----
+    dupw loc_storew_le.0 dropw
+    adv.evaluate_deferred
+    dropw
+
+    adv_pushw dropw
+    adv_pushw loc_storew_le.8 dropw
+    adv_pushw loc_storew_le.12 dropw
+
+    push.1
+    locaddr.8
+    push.0.0
+    push.VALUE_TAG_ID
+    push.PRECOMPILE_ID
+    exec.sys::register_data
+    loc_storew_le.16 dropw
+
+    push.0.0
+    push.EQ_TAG_ID
+    push.PRECOMPILE_ID
+    padw loc_loadw_le.16
+    padw loc_loadw_le.0
+    exec.sys::register_expr
+    exec.sys::log_node_digest
+    dropw
+
+    # ---- Evaluate and bind LHS ----
+    loc_loadw_le.20
+    adv.evaluate_deferred
+    dropw
+
+    adv_pushw dropw
+    adv_pushw loc_storew_le.24 dropw
+    adv_pushw loc_storew_le.28 dropw
+
+    push.1
+    locaddr.24
+    push.0.0
+    push.VALUE_TAG_ID
+    push.PRECOMPILE_ID
+    exec.sys::register_data
+    loc_storew_le.32 dropw
+
+    push.0.0
+    push.EQ_TAG_ID
+    push.PRECOMPILE_ID
+    padw loc_loadw_le.32
+    padw loc_loadw_le.20
+    exec.sys::register_expr
+    exec.sys::log_node_digest
+    dropw
+
+    # Return whether the two canonical U256 values match. Inequality itself does not trap.
+    loc_load.24 loc_load.8 eq
+    loc_load.25 loc_load.9 eq and
+    loc_load.26 loc_load.10 eq and
+    loc_load.27 loc_load.11 eq and
+    loc_load.28 loc_load.12 eq and
+    loc_load.29 loc_load.13 eq and
+    loc_load.30 loc_load.14 eq and
+    loc_load.31 loc_load.15 eq and
+    swap drop
+    # => [is_equal, ...]
+end
+
+#! Asserts two U256 expressions are equal by evaluating both sides and asserting the returned bool.
+#! Input:  [rhs_DIGEST, lhs_DIGEST, ...]
+#! Output: [...]
+pub proc assert_eq
+    exec.is_eq
+    assert
+end
+
+#! Evaluates a U256 expression digest and returns its eight little-endian u32 limbs on the stack.
+#! Input:  [EXPR_DIGEST, ...]
+#! Output: [VALUE_U32[8], ...]
+#!
+#! The host-supplied evaluation result is bound by registering the returned value as a VALUE node,
+#! building `eq(EXPR_DIGEST, VALUE_DIGEST)`, and folding that predicate into the deferred root.
+@locals(16)
+pub proc eval
+    dupw loc_storew_le.0 dropw
+    adv.evaluate_deferred
+    dropw
+
+    # Advice carries TAG || VALUE_U32[8]. Keep the value in locals and ignore the expected tag.
+    adv_pushw dropw
+    adv_pushw loc_storew_le.4 dropw
+    adv_pushw loc_storew_le.8 dropw
+
+    # Register the returned value from locals as a VALUE node.
+    push.1
+    locaddr.4
+    push.0.0
+    push.VALUE_TAG_ID
+    push.PRECOMPILE_ID
+    exec.sys::register_data
+    loc_storew_le.12 dropw
+
+    # Log eq(original expression, registered returned value).
+    push.0.0
+    push.EQ_TAG_ID
+    push.PRECOMPILE_ID
+    padw loc_loadw_le.12
+    padw loc_loadw_le.0
+    exec.sys::register_expr
+    exec.sys::log_node_digest
+
+    # Return VALUE_U32[8] with the least-significant limb on top.
+    loc_loadw_le.8
+    loc_loadw_le.4
+end
