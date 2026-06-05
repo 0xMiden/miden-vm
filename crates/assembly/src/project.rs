@@ -730,42 +730,23 @@ where
         profile: &Profile,
     ) -> Result<ProjectSourceInputs, Report> {
         let manifest_path = project.expect_manifest_path()?;
-        let project_root = manifest_path.parent().ok_or_else(|| {
-            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
-        })?;
-        let target_path = target.path.to_path().ok_or_else(|| {
-            Report::msg(format!(
-                "invalid target '{}': '{}' is not a valid file path",
-                target.name.inner(),
-                target.path
-            ))
-        })?;
-        let root_path = project_root.join(&target_path);
-        let root_path = root_path.canonicalize().map_err(|error| {
-            Report::msg(format!(
-                "failed to resolve target source '{}': {error}",
-                root_path.display()
-            ))
-        })?;
-        let extension = root_path.extension().ok_or_else(|| {
+        let mut context = TargetAssemblyContext::new(
+            project,
+            manifest_path,
+            target,
+            profile,
+            self.dependency_graph.as_ref(),
+            self.assembler.source_manager(),
+        )?;
+        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
+
+        let extension = context.resolved_target_root.extension().ok_or_else(|| {
             Report::msg(format!(
                 "invalid target 'path' {}: path must have an extension",
-                root_path.display()
+                context.resolved_target_root.display()
             ))
         })?;
         let extension = extension.to_string_lossy();
-
-        let context = TargetAssemblyContext {
-            package: project,
-            manifest_path,
-            project_root,
-            resolved_target_root: root_path.as_path(),
-            target,
-            profile,
-            dependency_graph: self.dependency_graph.as_ref(),
-            source_manager: self.assembler.source_manager(),
-            warnings_as_errors: self.assembler.warnings_as_errors(),
-        };
 
         let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
         provider.provide_sources(&context)

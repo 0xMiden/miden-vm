@@ -16,7 +16,7 @@ pub struct TargetAssemblyContext<'a> {
     /// The resolved/canonicalized path to the directory containing `manifest_path`
     pub project_root: &'a std::path::Path,
     /// The resolved/canonicalized path to the root source file of `target`
-    pub resolved_target_root: &'a std::path::Path,
+    pub resolved_target_root: Box<std::path::Path>,
     /// The target being assembled
     pub target: &'a Target,
     /// The build profile selected for this assembly session
@@ -27,6 +27,52 @@ pub struct TargetAssemblyContext<'a> {
     pub source_manager: Arc<dyn SourceManager>,
     /// The assembler-wide `warnings_as_errors` flag
     pub warnings_as_errors: bool,
+}
+
+impl<'a> TargetAssemblyContext<'a> {
+    pub fn new(
+        package: &'a ProjectPackage,
+        manifest_path: &'a std::path::Path,
+        target: &'a Target,
+        profile: &'a Profile,
+        dependency_graph: &'a ProjectDependencyGraph,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self, Report> {
+        let project_root = manifest_path.parent().ok_or_else(|| {
+            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
+        })?;
+        let target_path = target.path.to_path().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target '{}': '{}' is not a valid file path",
+                target.name.inner(),
+                target.path
+            ))
+        })?;
+        let root_path = project_root.join(&target_path);
+        let root_path = root_path.canonicalize().map_err(|error| {
+            Report::msg(format!(
+                "failed to resolve target source '{}': {error}",
+                root_path.display()
+            ))
+        })?;
+        Ok(TargetAssemblyContext {
+            package,
+            manifest_path,
+            project_root,
+            resolved_target_root: root_path.into_boxed_path(),
+            target,
+            profile,
+            dependency_graph,
+            source_manager,
+            warnings_as_errors: false,
+        })
+    }
+
+    #[inline]
+    pub fn with_warnings_as_errors(&mut self, yes: bool) -> &mut Self {
+        self.warnings_as_errors = yes;
+        self
+    }
 }
 
 /// This trait provides source file inputs for a Miden Assembly project, regardless of the source

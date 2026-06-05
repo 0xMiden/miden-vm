@@ -172,37 +172,14 @@ impl DependencyGraph {
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
                 let source_manager = self.source_manager.clone();
-                let project_root = manifest_path.parent().ok_or_else(|| {
-                    Report::msg(format!(
-                        "manifest '{}' has no parent directory",
-                        manifest_path.display()
-                    ))
-                })?;
-
-                let Some(target_path) = target.path.to_path() else {
-                    return Err(Report::msg(format!(
-                        "invalid target path '{}': not a valid file path",
-                        target.path
-                    )));
-                };
-                let root_path = project_root.join(&target_path);
-                let root_path = root_path.canonicalize().map_err(|error| {
-                    Report::msg(format!(
-                        "failed to resolve target source '{}': {error}",
-                        root_path.display()
-                    ))
-                })?;
-                let context = TargetAssemblyContext {
-                    package: project,
+                let context = TargetAssemblyContext::new(
+                    project,
                     manifest_path,
-                    project_root,
-                    resolved_target_root: root_path.as_path(),
                     target,
                     profile,
-                    dependency_graph: &self.dependency_graph,
+                    &self.dependency_graph,
                     source_manager,
-                    warnings_as_errors: false,
-                };
+                )?;
                 Ok(PackageBuildProvenance::Path {
                     source_hash: self.compute_path_source_hash(&context, source_provider)?,
                     dependency_hash,
