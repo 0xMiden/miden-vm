@@ -297,3 +297,35 @@ fn define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
         }
     }
 }
+
+#[test]
+fn name_map_stays_consistent_after_take_items() {
+    // Verify that take_items() clears the name index, so re-adding the same
+    // name after a take does not trigger a false conflict.
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("foo"))
+        .expect("first insertion should succeed");
+
+    let _items = module.take_items();
+
+    // After take_items(), name_map is cleared — same name should succeed again.
+    module
+        .define_constant(constant_with_name("foo"))
+        .expect("re-insertion after take_items should succeed");
+}
+
+#[test]
+fn name_map_detects_conflict_via_define_api() {
+    // Verify that duplicate names are detected through the define_* API.
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("dup"))
+        .expect("first insertion should succeed");
+
+    let result = module.define_constant(constant_with_name("dup"));
+    assert!(
+        matches!(result, Err(SemanticAnalysisError::SymbolConflict { .. })),
+        "expected SymbolConflict for duplicate name, got {result:?}"
+    );
+}
