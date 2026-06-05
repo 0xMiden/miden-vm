@@ -6,7 +6,7 @@ use miden_core::{
     mast::{MastForest, MastNodeId},
     program::{Kernel, MIN_STACK_DEPTH, Program, StackOutputs},
 };
-use miden_mast_package::debug_info::{DebugSourceCursor, DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 use tracing::instrument;
 
 use super::{
@@ -414,20 +414,18 @@ impl FastProcessor {
         program: &Program,
         package_debug_info: &PackageDebugInfo,
     ) -> Result<ContinuationStack<Arc<MastForest>>, ExecutionError> {
-        let Some(root_cursor) = DebugSourceCursor::from_unique_root_for_exec_node(
-            package_debug_info,
-            program.entrypoint(),
-        )
-        .map_err(|_| {
-            ExecutionError::Internal(
-                "package debug source graph has ambiguous or malformed entrypoint roots",
-            )
-        })?
+        let Some(source_node) = package_debug_info
+            .unique_source_root_for_exec_node(program.entrypoint())
+            .map_err(|_| {
+                ExecutionError::Internal(
+                    "package debug source graph has ambiguous or malformed entrypoint roots",
+                )
+            })?
         else {
             return Ok(ContinuationStack::new(program));
         };
 
-        Ok(ContinuationStack::new_with_source_node(program, root_cursor.source_node()))
+        Ok(ContinuationStack::new_with_source_node(program, source_node))
     }
 
     fn source_aware_resume_context(
