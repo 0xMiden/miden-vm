@@ -26,8 +26,9 @@ const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 #!
 #! This wrapper mirrors the materialization performed in `miden-crypto::eddsa_25519_sha512`: given
 #! a public key commitment and the original message, it reconstructs the calldata expected by the
-#! precompile (public key bytes, SHA512(R || PK || MSG), signature). The public key and signature
-#! are supplied via the advice stack, and can be obtained with the `eddsa_sign` function.
+#! advice-backed compatibility handler (public key bytes, SHA512(R || PK || MSG), signature). The
+#! public key and signature are supplied via the advice stack, and can be obtained with the
+#! `eddsa_sign` function.
 #!
 #! Inputs:
 #!   Operand stack: [PK_COMM, MSG, ...]
@@ -122,8 +123,8 @@ end
 #! This procedure is intended for manual signature verification where the caller
 #! has already computed the message digest.
 #!
-#! This procedure uses deferred verification via a precompile. The actual cryptographic
-#! verification is performed by the host, and the result is provided via the advice stack.
+#! This procedure uses an advice-only compatibility helper. The actual cryptographic verification is
+#! performed by the host, and the result is provided via the advice stack.
 #!
 #! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
 #! Output: `[result, ...]`

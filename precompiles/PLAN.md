@@ -1,7 +1,7 @@
 # Miden Precompiles Status
 
 This file was originally a branch-stack planning note for the deferred precompile migration. The
-planned stack has since been collapsed into the current `precompiles/deferred-proof-wire` branch.
+planned stack has since been collapsed into the current deferred precompile transition branch.
 
 Current state:
 

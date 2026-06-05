@@ -8,19 +8,20 @@ sidebar_position: 1
 *Deferred computation* is the mechanism by which a Miden program offloads an expensive or
 non-native computation — a hash, a signature check, elliptic-curve or big-integer arithmetic — and
 emits, in its place, an auditable record of *what was claimed*. That record is a content-addressed
-DAG of nodes, committed by a single rolling digest (`DeferredState.root`, the **deferred
-root commitment**). The DAG is designed to be verified **externally**: either alongside the Miden
+DAG of nodes, committed by a single rolling digest (`DeferredState.root`, the **deferred root**).
+The DAG is designed to be verified **externally**: either alongside the Miden
 VM's STARK proof, or by a dedicated *Precompile VM* whose proof attests that every committed node
 evaluates correctly.
 
 The DAG can be read as a small **program**: each node is a term, and evaluating the deferred root
 to `TRUE` proves every claim it transitively references. The framework (`miden_core::deferred`)
-owns the data model, the root commitment, and the wire format; individual *precompiles* plug in the
-meaning of the nodes.
+owns the data model, the deferred root, and the serialization format; individual *precompiles* plug
+in the meaning of the nodes.
 
 > **Status.** The VM now commits the final deferred root in its proof public inputs, and execution
-> proofs carry `DeferredStateWire` so verifiers can rehydrate and evaluate the committed DAG under
-> the installed precompile registry. See [Status and scope](#status-and-scope).
+> proofs carry `DeferredStateWire` so verifiers can rehydrate and evaluate the opened deferred state
+> under the installed precompile registry. See [Status and scope](#status-and-scope) and
+> [Deferred-state serialization](./serialization.md).
 >
 > For the precise `DeferredState`, precompile, and public API contract, see
 > [Deferred state semantics and API contract](./semantics.md).
@@ -77,9 +78,9 @@ identity and its body.
 A **precompile** is the framework's extension point: an implementation of the `Precompile` trait
 that claims one tag id and, within that slice of tag space, defines a *family of node types*
 plus the rules that give them meaning. Think of it as a small typed sub-language embedded in the
-DAG. In this framework branch, mock/test-support precompiles cover hashes, signatures,
-elliptic-curve groups, and big-integer fields to exercise the framework; the production precompile
-crate and wrappers land separately.
+DAG. The `miden-precompiles` crate provides production hash and signature wrappers today, while
+mock/test-support precompiles in `miden_core::testing::precompile` exercise framework-only cases
+such as elliptic-curve groups and big-integer fields.
 
 A precompile supplies three things:
 
@@ -112,7 +113,7 @@ During evaluation the framework hands the precompile a `DeferredContext`, throug
 `get_node` for a registered digest, `evaluate_digest` a child digest to its canonical digest, or
 `register` a freshly-minted helper node into the DAG. Registered helper nodes are validated under
 the same registry and must satisfy the ordinary child-closure rules. The precompile never touches
-the commitment directly — it supplies only per-node meaning, and the framework drives the
+the deferred root directly — it supplies only per-node meaning, and the framework drives the
 depth-first recursion.
 
 The in-memory `DeferredState` may memoize evaluation results internally. That memoization is
@@ -139,14 +140,14 @@ fails.
 
 A system event is an unconstrained advice hook: the honest handler can compute a digest, but the
 AIR has no constraint tying an advice-supplied digest to the operand-stack payload or to memory at
-`ptr`. If a digest folded into the deferred root commitment came from advice, a prover could attest
+`ptr`. If a digest folded into the deferred root came from advice, a prover could attest
 a node over data the circuit never held. Deriving it in-circuit (`hperm` / `mem_stream`) closes the
 gap, and it composes with the verifier:
 
 - the **in-circuit hash** binds the digest to the circuit's own operand stack / memory;
 - the **deferred-root match** binds that digest to the wire the verifier rehydrates;
-- `DeferredState::from_wire` then rehydrates the canonical wire opening and evaluates the expected
-  root from wire data.
+- `DeferredState::from_wire` then rehydrates the canonical deferred-state opening and evaluates the
+  expected root from serialized data.
 
 Together, these pieces bind the wire — and therefore every evaluation the verifier re-checks — to
 the data the circuit actually committed to.
@@ -169,9 +170,9 @@ Predicates are **not** special-cased on evaluation: their canonical is the `TRUE
 4-felt tag, since `TRUE` has no payload. A failed predicate has already surfaced as an error before
 any felts are pushed.
 
-## The deferred root commitment
+## The deferred root
 
-The deferred root commitment is a rolling AND-chain. `DeferredState.root` starts at the zero word
+The deferred root is a rolling AND-chain. `DeferredState.root` starts at the zero word
 (`TRUE_DIGEST`), which is also the digest of the always-present canonical `Node::TRUE`. To fold a
 verified
 **statement** — any registered digest that evaluates to `TRUE`, not necessarily a primitive
@@ -186,10 +187,10 @@ semantically to `TRUE`.
 The verifier's obligation collapses to a single fixed point: **evaluate the root to `TRUE`, and
 every logged statement holds.** There is no separate finalization step.
 
-## Wire format and verification
+## Deferred-state serialization and verification
 
-The proof/witness format is `DeferredStateWire`, not the in-memory `DeferredState`. `to_wire`
-lowers state to a passive, canonical, topologically ordered entry
+The proof serialization format is `DeferredStateWire`, not the in-memory `DeferredState`. `to_wire`
+lowers the root-reachable opened state to a passive, canonical, topologically ordered entry
 stream. Wire index `0`
 is the implicit `TRUE_DIGEST`; `entries[i]` has wire index `i + 1`; join entries encode children by
 index and may reference only `0` or earlier entries. Empty `entries` opens `TRUE_DIGEST`; a non-empty
@@ -221,10 +222,15 @@ wire.
 This framework is proof-bound in the VM. In its current form:
 
 - the VM accumulates the DAG host-side and exposes the `DeferredState` on the execution output;
-- execution proofs carry the deferred-state wire needed to reconstruct and verify the committed
-  deferred root;
+- `ExecutionProof` carries `DeferredStateWire`;
+- the verifier rehydrates that opened state under a `PrecompileRegistry`, evaluates the opened root,
+  and compares it to the deferred root committed by the VM proof public input;
 - legacy core-library crypto wrappers are advice-only compatibility helpers; proof-bound concrete
   precompile use lives in the `miden-precompiles` package.
+
+The target PVM flow can consume `ExecutionOutput.deferred_state` directly during same-process native
+proving. Serialization remains the boundary format for partial proofs, external proving handoff, and
+standalone verifier rehydration.
 
 The external STARK that verifies the committed DAG, the **Precompile VM**, is described in GitHub
 discussion #3005.

@@ -1,9 +1,8 @@
 //! Content-addressed deferred computation for precompile-backed VM hints.
 //!
 //! Deferred events let programs commit opaque statements during execution and leave their
-//! semantic checks to installed [`Precompile`]s. The framework stores those commitments as a DAG
-//! of [`Node`]s and a deferred root commitment that verifies by evaluating every logged statement
-//! to TRUE.
+//! semantic checks to installed [`Precompile`]s. The framework stores those claims as a DAG of
+//! [`Node`]s and a deferred root that verifies by evaluating every logged statement to TRUE.
 //!
 //! `miden-core` owns the data model, registry, state, and wire validation; the processor only
 //! provides system-event plumbing. Mock/test-support precompiles live in

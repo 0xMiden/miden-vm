@@ -593,8 +593,8 @@ pub enum Operation {
     /// of arithmetic gates, and the sum of the input and constant gates.
     EvalCircuit = opcodes::EVALCIRCUIT,
 
-    /// Advances the deferred root by folding a registered statement digest into the rolling
-    /// proof-bound deferred-state commitment.
+    /// Advances the deferred root by folding a registered statement digest into the proof-bound
+    /// rolling root.
     LogDeferred = opcodes::LOGDEFERRED,
 }
 

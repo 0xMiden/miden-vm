@@ -24,6 +24,10 @@ The module exposes the following procedures:
 
 Module `miden::core::crypto::dsa::ecdsa_k256_keccak` contains procedures for verifying ECDSA signatures on the secp256k1 curve. This is compatible with Ethereum's signature scheme and uses Keccak256 for message hashing.
 
+These core-library procedures are advice-backed compatibility helpers. They do not log deferred
+statements or create proof-bound claims. Programs that need deferred-root proof binding should use
+`miden::precompiles::crypto::dsa::ecdsa_k256_keccak::verify_prehash`.
+
 The module exposes the following procedures:
 
 | Procedure                | Description |
@@ -42,6 +46,10 @@ This module uses the following conventions for data representation:
 ## EdDSA Ed25519 SHA512
 
 Module `miden::core::crypto::dsa::eddsa_ed25519` contains procedures for verifying EdDSA signatures on the Ed25519 curve. This is compatible with the standard Ed25519 signature scheme using SHA512 for hashing.
+
+These core-library procedures are advice-backed compatibility helpers. They do not log deferred
+statements or create proof-bound claims. Programs that need deferred-root proof binding should use
+`miden::precompiles::crypto::dsa::eddsa_ed25519::verify_prehash`.
 
 The module exposes the following procedures:
 

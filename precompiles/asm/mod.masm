@@ -1,7 +1,7 @@
 #! Top-level module of the `miden::precompiles` namespace.
 #!
-#! Concrete deferred precompiles will be exported from here and its submodules. For now it carries a
-#! single smoke procedure so the package exports at least one procedure during scaffolding.
+#! Concrete deferred precompile wrappers are exported from submodules for hash and signature checks.
+#! This module also carries a smoke procedure used by package-loading tests.
 
 #! Smoke procedure used to verify that the `miden-precompiles` package assembles, links, and loads.
 #! It is a no-op with no operand-stack preconditions.

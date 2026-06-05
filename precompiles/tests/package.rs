@@ -254,7 +254,7 @@ const BUF_ADDR: u32 = 128;
 
 /// End-to-end: a valid ECDSA signature registered through `verify_prehash` executes successfully
 /// (the predicate evaluates to TRUE during `register_data`). Surfacing the logged statement through
-/// the deferred root belongs to the proof-wire layer.
+/// the deferred root is covered by deferred-root proof binding.
 #[test]
 fn ecdsa_verify_prehash_executes_end_to_end() {
     let sk = ecdsa_signing_key();

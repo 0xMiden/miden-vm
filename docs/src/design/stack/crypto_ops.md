@@ -522,4 +522,4 @@ v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \al
 $$
 
 Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
-itself the digest at every step. The proof-bound deferred commitment is the final root.
+itself the digest at every step. The final root is the proof-bound value.

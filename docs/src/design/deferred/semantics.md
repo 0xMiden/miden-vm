@@ -5,10 +5,10 @@ sidebar_position: 2
 
 # Deferred state semantics and API contract
 
-`DeferredState` is the host-side witness for deferred DAG verification and the deferred root
-commitment. The in-memory state is not serialized directly; execution proofs carry
-`DeferredStateWire`, and `DeferredState::from_wire` rebuilds a trusted state by decoding canonical
-wire and evaluating the wire's implicit root under the installed `PrecompileRegistry`.
+`DeferredState` is the host-side witness for deferred DAG verification and deferred-root tracking.
+The in-memory state is not serialized directly; execution proofs carry `DeferredStateWire`, and
+`DeferredState::from_wire` rebuilds a trusted state by decoding a canonical opened deferred state and
+evaluating the opened root under the installed `PrecompileRegistry`.
 
 The simplified state model is:
 
@@ -24,6 +24,18 @@ pub struct DeferredState {
 
 ## Vocabulary
 
+- **Opened deferred state** means the root's reachable opening: the nodes needed to prove that the
+  opened root evaluates to `Node::TRUE` under an installed `PrecompileRegistry`.
+- **Statement node** or **statement digest** means a logged assertion expected to evaluate to
+  `Node::TRUE`. Statements may be primitive predicate nodes or larger nodes whose transitive
+  evaluation proves a predicate.
+- **Value node** describes a semantic role: a node that represents a canonical value rather than a
+  predicate. Values are often represented as `Data(n)` nodes, but the role is defined by the owning
+  precompile.
+- **Evaluation** means a partial reduction `Digest -> Node` under the installed registry. It may
+  return a canonical value node, `Node::TRUE`, or an error.
+- **TRUE node** means `Node::TRUE`. Its digest is `TRUE_DIGEST`, and `TRUE_DIGEST` is currently the
+  zero word.
 - **Registered** means a digest has an entry in `DeferredState.nodes`. Registration can happen
   through `DeferredState::register`, evaluation storing canonical/helper nodes, `log_statement`
   storing framework `AND` nodes, or wire rehydration rebuilding entries.
@@ -33,6 +45,10 @@ pub struct DeferredState {
 - **Logged** or **root-reachable** means a registered digest contributes to `DeferredState.root`.
   Only the root-reachable closure is serialized by `to_wire`; registered/evaluated orphans are
   dropped.
+
+Helper and evaluation nodes are implementation details. Serialization includes the opened state
+needed to prove the root, not every cached helper node unless that node is reachable from the opened
+root.
 
 ## Registered nodes
 
@@ -115,8 +131,8 @@ statement, requires both to evaluate to `Node::TRUE`, then appends one framework
 next_root = digest(Node::and(previous_root, stmt_digest))
 ```
 
-`to_wire` serializes only the root-reachable closure in canonical child-first order. The wire root
-is implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the final entry.
+`to_wire` serializes only the opened deferred state in canonical child-first order. The wire root is
+implicit: empty wire opens `TRUE_DIGEST`, otherwise the root is the digest of the final entry.
 `from_wire(registry, wire, max_elements)` decodes untrusted wire, rejects non-canonical or dangling
 wire by requiring `state.to_wire() == wire`, then evaluates the implicit wire root to `Node::TRUE`.
 Evaluation may insert canonical/helper nodes in addition to the wire nodes. Verifier proof plumbing
@@ -147,6 +163,8 @@ of the public contract.
 ## Scope note
 
 The VM proof now binds the final deferred root to the execution proof's `DeferredStateWire`.
-Top-level VM prove/verify paths install the `miden-precompiles` registry, while lower-level
-registry-aware APIs allow callers to supply an explicit registry for custom proof-bound
-precompiles.
+Top-level VM prove/verify paths install the `miden-precompiles` registry. Lower-level prover and
+verifier APIs keep empty-registry defaults and expose registry-aware entry points for callers that
+need custom proof-bound precompile sets. The target PVM flow can consume
+`ExecutionOutput.deferred_state` directly; serialization remains the handoff format for partial
+proofs, external proving, persisted proofs, and verifier rehydration.

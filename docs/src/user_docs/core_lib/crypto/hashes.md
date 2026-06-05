@@ -26,7 +26,7 @@ All stack inputs and output digests are represented on the stack as `u32` arrays
 For example, a 256-bit digest is defined as `DIGEST_U32[8] = [d_0, ..., d_7]` and is placed on the stack as `[d_0, ..., d_7]` with `d_0` at the top.
 Memory inputs follow the same convention with the least significant `u32` value at the lowest address.
 
-Internally, the result of the computation is provided non-deterministically. The VM records this computation so that it can be verified externally, either by recursively verifying a STARK of these computations, or by natively re-computing the results when verifying the proof of this program.
+Internally, the result of the computation is provided non-deterministically by an advice-backed compatibility helper. These core-library wrappers do not log deferred statements or create proof-bound claims. Programs that need deferred-root proof binding should use the proof-bound hash wrappers under `miden::precompiles::crypto::hashes`.
 
 | Procedure   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 |-------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -48,7 +48,7 @@ Module `miden::core::crypto::hashes::sha512` contains procedures for computing h
 
 Data representation and u32/u8 packing conventions are the same as in Keccak256. The only difference is the digest size: SHA512 digests are 64 bytes, represented as `DIGEST_U32[16] = [d_0, ..., d_15]`.
 
-Internally, the result of the computation is provided non-deterministically via a precompile. The VM records this computation so that it can be verified externally.
+Internally, the result of the computation is provided non-deterministically by an advice-backed compatibility helper. These core-library wrappers do not log deferred statements or create proof-bound claims. Programs that need deferred-root proof binding should use the proof-bound hash wrappers under `miden::precompiles::crypto::hashes`.
 
 | Procedure   | Description |
 |-------------|-------------|

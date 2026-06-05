@@ -27,8 +27,9 @@ const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 #!
 #! This wrapper mirrors the materialization performed in `miden-crypto::ecdsa_k256_keccak`: given
 #! a public key commitment and the original message, it reconstructs the calldata expected by the
-#! precompile (public key bytes, Keccak256(message), signature). The public key and signature are
-#! supplied via the advice stack, and can be obtained with the `ecdsa_k256_keccak` function.
+#! advice-backed compatibility handler (public key bytes, Keccak256(message), signature). The public
+#! key and signature are supplied via the advice stack, and can be obtained with the
+#! `ecdsa_k256_keccak` function.
 #!
 #! Inputs:
 #!   Operand stack: [PK_COMM, MSG, ...]
@@ -86,7 +87,7 @@ pub proc verify
     adv_push loc_store.44
     # => [...]
 
-    # Invoke the deferred verification precompile with in-memory calldata
+    # Invoke the advice-only compatibility verifier with in-memory calldata.
     locaddr.28
     locaddr.20
     locaddr.0
@@ -98,13 +99,14 @@ pub proc verify
     assert.err="ECDSA signature verification failed"
 end
 
-#! Verifies an ECDSA signature with pre-hashed message using deferred execution.
+#! Verifies an ECDSA signature with a pre-hashed message through an advice-only compatibility
+#! helper.
 #!
 #! This procedure is intended for manual signature verification where the caller
 #! has already computed the message digest.
 #!
 #! The caller provides the public key, the pre-hashed message digest, and the signature data in
-#! memory. This routine forwards the request to the host precompile and returns the boolean result.
+#! memory. This routine emits a host event and reads the boolean result from the advice stack.
 #! In typical flows the digest is obtained from `keccak256::hash_bytes`, but any 32-byte prehash
 #! is accepted.
 #!
@@ -136,7 +138,7 @@ end
 #!
 #! This procedure mimics the `ecdsa_secp256k1::PublicKey::verify_prehash()` function from
 #! `miden-crypto`, which takes a pre-hashed message that the caller must provide
-#! (e.g. obtained using the keccak256 precompile).
+#! (e.g. obtained using the Keccak256 compatibility helper).
 #!
 #! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
 #! Output: `[result, ...]`

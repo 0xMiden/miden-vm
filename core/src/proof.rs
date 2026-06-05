@@ -23,7 +23,7 @@ use crate::{
 /// A proof of correct execution of Miden VM.
 ///
 /// The proof contains the STARK proof, the hash function used during proof generation, and the
-/// deferred-state wire opening needed to rehydrate the deferred DAG under a verifier-supplied
+/// deferred-state opening needed to rehydrate the deferred DAG under a verifier-supplied
 /// precompile registry. However, the proof does not contain public inputs needed to verify the
 /// STARK proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
-    /// and deferred-state wire opening.
+    /// and deferred-state opening.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
@@ -61,7 +61,7 @@ impl ExecutionProof {
         self.hash_fn
     }
 
-    /// Returns the deferred-state wire opening carried by this proof.
+    /// Returns the deferred-state opening carried by this proof.
     pub const fn deferred_state(&self) -> &DeferredStateWire {
         &self.deferred_state
     }
@@ -97,7 +97,7 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the hash function, proof bytes, and deferred-state wire opening.
+    /// Returns the hash function, proof bytes, and deferred-state opening.
     pub fn into_parts(self) -> (HashFunction, Vec<u8>, DeferredStateWire) {
         (self.hash_fn, self.proof, self.deferred_state)
     }

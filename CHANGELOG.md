@@ -17,15 +17,23 @@
 - [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
 - Removed the legacy LALRPOP parser backend
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
-- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with structured `Tag { id, args }`, wire format, the `Precompile` trait + `PrecompileRegistry`, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Deferred proof-model integration lands separately ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
-- Added the content-addressed deferred-DAG framework (`miden_core::deferred`): data model with a structured `Tag { id, args }`, wire format, the `Precompile` trait + `PrecompileRegistry`, the `adv.*_deferred` system events and MASM grammar, plus reference test precompiles. Purely additive substrate with no behavioral change; the precompile proof-model migrates onto it in a follow-up ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
-- Added the `miden-precompiles` crate as the home for concrete deferred precompile implementations, built on top of the deferred framework in `miden_core::deferred`.
-- Added the `keccak256` and `sha512` deferred precompiles to `miden-precompiles`, built on a shared `HashPrecompile<H>` base, with MASM wrappers under `miden::precompiles::crypto::hashes`.
+- [BREAKING] Added the content-addressed deferred-DAG framework (`miden_core::deferred`) and
+  connected it to VM proof verification: structured `Tag { id, args }`, `Precompile` and
+  `PrecompileRegistry`, `adv.*_deferred` system events and MASM grammar, deferred-root proof
+  binding, `DeferredStateWire` serialization in `ExecutionProof`, and verifier-side rehydration of
+  the opened deferred state ([#3170](https://github.com/0xMiden/miden-vm/pull/3170)).
+- Added the `miden-precompiles` crate and MASM package as the home for proof-bound concrete
+  precompiles, with `keccak256` and `sha512` hash wrappers and
+  `ecdsa_k256_keccak` and `eddsa_ed25519` signature wrappers under the `miden::precompiles`
+  namespace.
 
 #### Fixes
 
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
-- [BREAKING] Replaced the legacy request-list transcript with deferred-root tracking. The `log_deferred` opcode folds `STATEMENT` from stack offsets 4..8 with `Node::and(DEFERRED_ROOT_PREV, STATEMENT).digest()` and exposes the previous root through helper registers. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
+- [BREAKING] Replaced the legacy request-list proof machinery with deferred-root tracking. The
+  `log_deferred` opcode folds `STATEMENT` from stack offsets 4..8 with
+  `Node::and(DEFERRED_ROOT_PREV, STATEMENT).digest()` and exposes the previous root through helper
+  registers. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
 - Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects

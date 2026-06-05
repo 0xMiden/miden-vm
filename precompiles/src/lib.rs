@@ -28,10 +28,11 @@ pub use hash::{
 
 /// The Miden precompiles library, wrapping the compiled `miden-precompiles` [`Package`].
 ///
-/// The package bundles the MASM procedures exported under the `miden::precompiles` namespace: the
-/// `keccak256` wrappers under `miden::precompiles::crypto::hashes::keccak256` and the deferred-DAG
-/// helper procedures under `miden::precompiles::sys`. When the package is dynamically linked during
-/// assembly, these procedures can be called from any Miden program and are serialized as 32 bytes.
+/// The package bundles the MASM procedures exported under the `miden::precompiles` namespace: hash
+/// wrappers under `miden::precompiles::crypto::hashes`, signature wrappers under
+/// `miden::precompiles::crypto::dsa`, and deferred-DAG helper procedures under
+/// `miden::precompiles::sys`. When the package is dynamically linked during assembly, these
+/// procedures can be called from any Miden program and are serialized as 32 bytes.
 ///
 /// The crate's deferred [`PrecompileRegistry`] is exposed separately via [`registry`].
 ///

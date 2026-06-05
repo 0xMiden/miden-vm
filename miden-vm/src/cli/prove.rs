@@ -5,7 +5,7 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_precompiles::PrecompilesLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions};
-use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
+use miden_vm::{HashFunction, ProvingOptions, internal::InputFile, prove_sync};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -144,7 +144,7 @@ impl ProveCmd {
         let proving_options = self.get_proof_options()?;
 
         // execute program and generate proof
-        let (stack_outputs, proof) = miden_prover::prove_sync(
+        let (stack_outputs, proof) = prove_sync(
             &program,
             stack_inputs,
             advice_inputs,
