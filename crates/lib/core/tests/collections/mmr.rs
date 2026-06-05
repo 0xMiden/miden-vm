@@ -805,6 +805,154 @@ fn test_mmr_unpack_frontier_rejects_wrong_len() {
 }
 
 #[test]
+fn test_mmb_root_matches_crypto_belt_root() {
+    for num_leaves in [1usize, 2, 3, 7, 13, 1024] {
+        let mmb = TestMmb::from_len(num_leaves);
+        let mmb_ptr = 1000_u32;
+        let source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                {}
+                push.{mmb_ptr} exec.mmr::mmb_root
+                swapw dropw
+            end
+            ",
+            mmb_memory_source(mmb_ptr, &mmb),
+        );
+
+        build_test!(&source).expect_stack(&word_to_ints(&mmb.root()));
+    }
+}
+
+#[test]
+fn test_mmb_root_with_len_returns_authenticated_pair() {
+    let mmb = TestMmb::from_len(13);
+    let mmb_ptr = 1000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.{mmb_ptr} exec.mmr::mmb_root_with_len
+            dup.4 push.13 assert_eq
+            movup.4 drop
+            swapw dropw
+        end
+        ",
+        mmb_memory_source(mmb_ptr, &mmb),
+    );
+
+    build_test!(&source).expect_stack(&word_to_ints(&mmb.root()));
+}
+
+#[test]
+fn test_mmb_second_bagging_uses_plain_merkle_merge() {
+    let mmb = TestMmb::from_len(5);
+    let shape = shape_mountains(mmb.len);
+    let peaks = mmb.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+    let range_roots = shape_ranges(&shape)
+        .into_iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range]))
+        .collect::<Vec<_>>();
+    assert!(range_roots.len() > 1);
+
+    let expected = range_roots.iter().fold(EMPTY_WORD, |acc, root| Poseidon2::merge(&[acc, *root]));
+
+    assert_eq!(mmb.root(), expected);
+}
+
+#[test]
+fn test_mmb_range_bagging_uses_plain_merkle_merge() {
+    let mmb = TestMmb::from_len(9);
+    let shape = shape_mountains(mmb.len);
+    let peaks = mmb.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+    let first_range = shape_ranges(&shape).into_iter().next().unwrap();
+    assert!(first_range.len() > 1);
+
+    let expected = peaks[first_range.clone()]
+        .iter()
+        .fold(EMPTY_WORD, |acc, root| Poseidon2::merge(&[acc, *root]));
+
+    assert_eq!(bag_range(&shape[first_range.clone()], &peaks[first_range]), expected);
+}
+
+#[test]
+fn test_mmb_verify_leaf_accepts_all_positions() {
+    let mmb = TestMmb::from_len(17);
+    let root = mmb.root();
+
+    for position in 0..mmb.len {
+        let proof = mmb.open(position);
+        assert_eq!(proof_root(&proof), root);
+        let proof_ptr = 2000_u32;
+        let source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                {}
+                push.{}
+                {}
+                push.{proof_ptr}
+                exec.mmr::mmb_verify_leaf
+            end
+            ",
+            mmb_proof_memory_source(proof_ptr, &proof),
+            mmb.len,
+            push_word(&root),
+        );
+
+        build_test!(&source).expect_stack(&[]);
+    }
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_wrong_authenticated_len() {
+    let mmb = TestMmb::from_len(8);
+    let proof = mmb.open(7);
+    let proof_ptr = 2000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.7
+            {}
+            push.{proof_ptr}
+            exec.mmr::mmb_verify_leaf
+        end
+        ",
+        mmb_proof_memory_source(proof_ptr, &proof),
+        push_word(&mmb.root()),
+    );
+
+    build_test!(&source)
+        .execute()
+        .expect_err("tampered length must not authenticate the proof");
+}
+
+#[test]
+fn test_mmb_proof_length_tracks_recency() {
+    let mmb = TestMmb::from_len(65_536);
+
+    for recency in [1usize, 2, 4, 8, 16, 128, 1024, 16_384] {
+        let position = mmb.len - recency;
+        let proof = mmb.open(position);
+        let max_belt_len = 2 * floor_log2(recency) + 3;
+
+        assert!(
+            proof.siblings.len() <= max_belt_len,
+            "recency {recency} proof length {} exceeded {max_belt_len}",
+            proof.siblings.len()
+        );
+    }
+}
+
+#[test]
 fn test_mmr_add_single() {
     let mmr_ptr = 1000;
     let source = format!(
@@ -1096,6 +1244,349 @@ fn test_mmr_large_add_roundtrip() {
 
 // HELPER FUNCTIONS
 // ================================================================================================
+
+struct TestMmb {
+    len: usize,
+    mountains: Vec<TestMountain>,
+}
+
+struct TestMountain {
+    start: usize,
+    height: u8,
+    root: Word,
+    node: Box<TestMmbNode>,
+}
+
+enum TestMmbNode {
+    Leaf(Word),
+    Inner {
+        root: Word,
+        left: Box<TestMmbNode>,
+        right: Box<TestMmbNode>,
+    },
+}
+
+struct TestMmbProof {
+    position: usize,
+    leaf: Word,
+    siblings: Vec<TestMmbProofStep>,
+}
+
+struct TestMmbProofStep {
+    is_right: bool,
+    sibling: Word,
+}
+
+#[derive(Clone, Copy)]
+struct ShapeMountain {
+    height: usize,
+}
+
+enum FoldDomain {
+    Range,
+    Belt,
+}
+
+impl TestMmb {
+    fn from_len(len: usize) -> Self {
+        let mut mmb = Self { len: 0, mountains: Vec::new() };
+
+        for idx in 0..len {
+            mmb.append(word_from_u64(idx as u64 + 1));
+        }
+
+        mmb
+    }
+
+    fn append(&mut self, leaf: Word) {
+        self.mountains.push(TestMountain::leaf(self.len, leaf));
+        self.len += 1;
+
+        if let Some(right_idx) = self.rightmost_mergeable_pair() {
+            let right = self.mountains.remove(right_idx);
+            let left = self.mountains.remove(right_idx - 1);
+            self.mountains.insert(right_idx - 1, TestMountain::merge(left, right));
+        }
+    }
+
+    fn root(&self) -> Word {
+        let shape = shape_mountains(self.len);
+        let peaks = self.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+        bag_peaks(&shape, &peaks)
+    }
+
+    fn open(&self, position: usize) -> TestMmbProof {
+        assert!(position < self.len);
+
+        let (mountain_idx, mountain) = self
+            .mountains
+            .iter()
+            .enumerate()
+            .find(|(_, mountain)| {
+                let end = mountain.start + mountain.size();
+                (mountain.start..end).contains(&position)
+            })
+            .expect("position should be in one MMB mountain");
+
+        let mut siblings = Vec::new();
+        let leaf = mountain.open(position - mountain.start, &mut siblings);
+        let shape = shape_mountains(self.len);
+        let peaks = self.mountains.iter().map(|mountain| mountain.root).collect::<Vec<_>>();
+        siblings.extend(bagging_path_nodes(&shape, &peaks, mountain_idx));
+
+        TestMmbProof { position, leaf, siblings }
+    }
+
+    fn rightmost_mergeable_pair(&self) -> Option<usize> {
+        self.mountains
+            .windows(2)
+            .enumerate()
+            .rev()
+            .find_map(|(idx, pair)| (pair[0].height == pair[1].height).then_some(idx + 1))
+    }
+}
+
+impl TestMountain {
+    fn leaf(start: usize, leaf: Word) -> Self {
+        Self {
+            start,
+            height: 0,
+            root: leaf,
+            node: Box::new(TestMmbNode::Leaf(leaf)),
+        }
+    }
+
+    fn merge(left: Self, right: Self) -> Self {
+        assert_eq!(left.height, right.height);
+
+        let root = Poseidon2::merge(&[left.root, right.root]);
+        Self {
+            start: left.start,
+            height: left.height + 1,
+            root,
+            node: Box::new(TestMmbNode::Inner { root, left: left.node, right: right.node }),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1 << self.height
+    }
+
+    fn open(&self, local_pos: usize, siblings: &mut Vec<TestMmbProofStep>) -> Word {
+        self.node.open(self.height, local_pos, siblings)
+    }
+}
+
+impl TestMmbNode {
+    fn root(&self) -> Word {
+        match self {
+            Self::Leaf(root) | Self::Inner { root, .. } => *root,
+        }
+    }
+
+    fn open(&self, height: u8, local_pos: usize, siblings: &mut Vec<TestMmbProofStep>) -> Word {
+        match self {
+            Self::Leaf(leaf) => {
+                assert_eq!(height, 0);
+                assert_eq!(local_pos, 0);
+                *leaf
+            },
+            Self::Inner { left, right, .. } => {
+                let half = 1 << (height - 1);
+                if local_pos < half {
+                    let leaf = left.open(height - 1, local_pos, siblings);
+                    siblings.push(TestMmbProofStep::mountain(true, right.root()));
+                    leaf
+                } else {
+                    let leaf = right.open(height - 1, local_pos - half, siblings);
+                    siblings.push(TestMmbProofStep::mountain(false, left.root()));
+                    leaf
+                }
+            },
+        }
+    }
+}
+
+impl TestMmbProofStep {
+    fn mountain(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+
+    fn range(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+
+    fn belt(is_right: bool, sibling: Word) -> Self {
+        Self { is_right, sibling }
+    }
+}
+
+impl FoldDomain {
+    fn merge(&self, left: Word, right: Word) -> Word {
+        match self {
+            Self::Range => Poseidon2::merge(&[left, right]),
+            Self::Belt => Poseidon2::merge(&[left, right]),
+        }
+    }
+}
+
+fn shape_mountains(num_leaves: usize) -> Vec<ShapeMountain> {
+    if num_leaves == 0 {
+        return Vec::new();
+    }
+
+    let width = floor_log2(num_leaves + 1);
+    (0..width)
+        .rev()
+        .map(|pos| ShapeMountain {
+            height: pos + (((num_leaves + 1) >> pos) & 1),
+        })
+        .collect()
+}
+
+fn shape_ranges(mountains: &[ShapeMountain]) -> Vec<std::ops::Range<usize>> {
+    if mountains.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for idx in 0..mountains.len() - 1 {
+        if shape_range_split_after(mountains, idx) {
+            ranges.push(start..idx + 1);
+            start = idx + 1;
+        }
+    }
+    ranges.push(start..mountains.len());
+    ranges
+}
+
+fn shape_range_split_after(mountains: &[ShapeMountain], idx: usize) -> bool {
+    let left = mountains[idx].height;
+    let right = mountains[idx + 1].height;
+    left == right + 2 || (idx > 0 && mountains[idx - 1].height == left)
+}
+
+fn bag_peaks(shape: &[ShapeMountain], peaks: &[Word]) -> Word {
+    let range_roots = shape_ranges(shape)
+        .into_iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range]))
+        .collect::<Vec<_>>();
+    bag_belt(&range_roots)
+}
+
+fn bag_range(mountains: &[ShapeMountain], peaks: &[Word]) -> Word {
+    mountains.iter().zip(peaks).fold(EMPTY_WORD, |acc, (mountain, peak)| {
+        let _ = mountain;
+        FoldDomain::Range.merge(acc, *peak)
+    })
+}
+
+fn bag_belt(range_roots: &[Word]) -> Word {
+    range_roots
+        .iter()
+        .fold(EMPTY_WORD, |acc, root| FoldDomain::Belt.merge(acc, *root))
+}
+
+fn bagging_path_nodes(
+    shape: &[ShapeMountain],
+    peaks: &[Word],
+    mountain_idx: usize,
+) -> Vec<TestMmbProofStep> {
+    let ranges = shape_ranges(shape);
+    let range_idx = ranges
+        .iter()
+        .position(|range| range.contains(&mountain_idx))
+        .expect("mountain index should belong to a range");
+    let range = ranges[range_idx].clone();
+    let mut nodes = Vec::new();
+
+    let left_root = bag_range(&shape[range.start..mountain_idx], &peaks[range.start..mountain_idx]);
+    nodes.push(TestMmbProofStep::range(false, left_root));
+
+    for right_idx in mountain_idx + 1..range.end {
+        nodes.push(TestMmbProofStep::range(true, peaks[right_idx]));
+    }
+
+    let left_range_roots = ranges[..range_idx]
+        .iter()
+        .map(|range| bag_range(&shape[range.clone()], &peaks[range.clone()]))
+        .collect::<Vec<_>>();
+    nodes.push(TestMmbProofStep::belt(false, bag_belt(&left_range_roots)));
+
+    for range in &ranges[range_idx + 1..] {
+        nodes.push(TestMmbProofStep::belt(
+            true,
+            bag_range(&shape[range.clone()], &peaks[range.clone()]),
+        ));
+    }
+
+    nodes
+}
+
+fn mmb_memory_source(mmb_ptr: u32, mmb: &TestMmb) -> String {
+    let mut source = format!("push.{} push.{mmb_ptr} mem_store drop\n", mmb.len);
+
+    for (idx, mountain) in mmb.mountains.iter().enumerate() {
+        source.push_str(&format!(
+            "{} push.{} mem_storew_le dropw\n",
+            push_word(&mountain.root),
+            mmb_ptr + 4 + idx as u32 * 4,
+        ));
+    }
+
+    source
+}
+
+fn mmb_proof_memory_source(proof_ptr: u32, proof: &TestMmbProof) -> String {
+    let mut source = format!(
+        "
+        push.{} push.{proof_ptr} mem_store drop
+        push.{} push.{} mem_store drop
+        {} push.{} mem_storew_le dropw
+        ",
+        proof.siblings.len(),
+        proof.position,
+        proof_ptr + 1,
+        push_word(&proof.leaf),
+        proof_ptr + 4,
+    );
+
+    for (idx, step) in proof.siblings.iter().enumerate() {
+        let entry = proof_ptr + 8 + idx as u32 * 8;
+        source.push_str(&format!(
+            "
+            push.{} push.{entry} mem_store drop
+            {} push.{} mem_storew_le dropw
+            ",
+            u8::from(step.is_right),
+            push_word(&step.sibling),
+            entry + 4,
+        ));
+    }
+
+    source
+}
+
+fn proof_root(proof: &TestMmbProof) -> Word {
+    proof.siblings.iter().fold(proof.leaf, |acc, step| {
+        if step.is_right {
+            Poseidon2::merge(&[acc, step.sibling])
+        } else {
+            Poseidon2::merge(&[step.sibling, acc])
+        }
+    })
+}
+
+fn push_word(word: &Word) -> String {
+    let stack = word_to_ints(word);
+    format!("push.{}.{}.{}.{}", stack[3], stack[2], stack[1], stack[0])
+}
+
+fn floor_log2(value: usize) -> usize {
+    assert_ne!(value, 0);
+    usize::BITS as usize - 1 - value.leading_zeros() as usize
+}
 
 fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
     digests

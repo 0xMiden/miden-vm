@@ -247,6 +247,159 @@ pub proc root_with_len
   # => [ROOT, num_leaves, ...]
 end
 
+#! Computes the Merkle Mountain Belt prototype root.
+#!
+#! The MMB memory layout is `[num_leaves, 0, 0, 0] || peaks`, where the peaks are U-MMB
+#! mountains ordered from oldest to newest.
+#!
+#! The range and belt accumulators are kept on the operand stack as `[RANGE_ACC, BELT_ACC]`,
+#! so the fold avoids per-iteration memory traffic; only the small scalars (cursor, mountain
+#! counters, range-split history) live in locals.
+#!
+#! Input: [mmb_ptr, ...]
+#! Output: [ROOT, ...]
+@locals(9)
+pub proc mmb_root
+  loc_store.0
+
+  # loc.1 = num_leaves
+  loc_load.0 mem_load loc_store.1
+
+  loc_load.1 eq.0
+  if.true
+    padw
+  else
+    # loc.2 = mountain_count = floor(log2(num_leaves + 1)).
+    loc_load.1 add.1 ilog2 loc_store.2
+    # loc.3 = peak cursor.
+    loc_load.0 add.4 loc_store.3
+    # loc.4 = remaining mountains, loc.5 = current index.
+    loc_load.2 loc_store.4
+    push.0 loc_store.5
+
+    # Initialize the accumulators on the operand stack: [RANGE_ACC=ZERO, BELT_ACC=ZERO].
+    padw padw
+
+    loc_load.4 neq.0
+    while.true
+      # loc.8 = current mountain height.
+      loc_load.2 loc_load.5 sub sub.1
+      dup loc_load.1 add.1 swap u32shr is_odd add loc_store.8
+
+      # Split before this mountain when the crypto belt range rule says to start a new range:
+      # BELT_ACC' = merge(BELT_ACC, RANGE_ACC); RANGE_ACC' = ZERO.
+      loc_load.5 neq.0
+      if.true
+        loc_load.6 loc_load.8 add.2 eq
+        loc_load.5 u32gt.1
+        loc_load.7 loc_load.6 eq
+        and
+        or
+        if.true
+          swapw hmerge padw
+        end
+      end
+
+      # RANGE_ACC' = merge(RANGE_ACC, PEAK).
+      loc_load.3 padw movup.4 mem_loadw_le swapw hmerge
+
+      loc_load.3 add.4 loc_store.3
+      loc_load.6 loc_store.7
+      loc_load.8 loc_store.6
+      loc_load.5 add.1 loc_store.5
+      loc_load.4 sub.1 dup loc_store.4 neq.0
+    end
+
+    # Final merge: BELT_ACC = merge(BELT_ACC, RANGE_ACC).
+    swapw hmerge
+  end
+end
+
+#! Computes the authenticated `(num_leaves, MMB_ROOT)` pair.
+#!
+#! Input: [mmb_ptr, ...]
+#! Output: [ROOT, num_leaves, ...]
+pub proc mmb_root_with_len
+  dup mem_load
+  # => [num_leaves, mmb_ptr, ...]
+
+  swap exec.mmb_root
+  # => [ROOT, num_leaves, ...]
+end
+
+#! Verifies a Merkle Mountain Belt prototype leaf proof against authenticated `(num_leaves, ROOT)`.
+#!
+#! The proof is stored at `proof_ptr` using this memory layout:
+#! - `proof_ptr + 0`: proof length
+#! - `proof_ptr + 1`: opened position
+#! - `proof_ptr + 4`: opened leaf word
+#! - then one 8-element entry per sibling:
+#!   - `entry + 0`: direction, where 0 means sibling is left and 1 means sibling is right
+#!   - `entry + 4`: sibling word
+#!
+#! Input: [proof_ptr, ROOT, num_leaves, ...]
+#! Output: [...]
+@locals(2)
+pub proc mmb_verify_leaf
+  # loc.0 = proof_len
+  dup mem_load loc_store.0
+  # => [proof_ptr, ROOT, num_leaves, ...]
+
+  # Load and check position < num_leaves.
+  dup add.1 mem_load
+  # => [position, proof_ptr, ROOT, num_leaves, ...]
+  dup.6 u32assert2 u32lt assert.err="position is not an existing MMB leaf"
+  movup.5 drop
+  # => [proof_ptr, ROOT, ...]
+
+  # Load leaf word from proof_ptr + 4.
+  dup add.4 padw movup.4 mem_loadw_le
+  # => [ACC, proof_ptr, ROOT, ...]
+
+  # cursor = proof_ptr + 8
+  movup.4 add.8
+  # => [cursor, ACC, ROOT, ...]
+
+  loc_load.0 neq.0
+  while.true
+    # Load direction from cursor.
+    dup mem_load
+    # => [dir, cursor, ACC, ROOT, ...]
+
+    # Load sibling word from cursor + 4.
+    dup.1 add.4 padw movup.4 mem_loadw_le
+    # => [SIBLING, dir, cursor, ACC, ROOT, ...]
+
+    movup.5 loc_store.1
+    # => [SIBLING, dir, ACC, ROOT, ...]
+
+    movup.4
+    # => [dir, SIBLING, ACC, ROOT, ...]
+
+    if.true
+      # right sibling: ACC = merge(ACC, SIBLING).
+      swapw
+      hmerge
+    else
+      # left sibling: ACC = merge(SIBLING, ACC).
+      hmerge
+    end
+    # => [ACC, ROOT, ...]
+
+    # cursor += 8
+    loc_load.1 add.8
+    # => [cursor, ACC, ROOT, ...]
+
+    # remaining -= 1
+    loc_load.0 sub.1 dup loc_store.0 neq.0
+  end
+  # => [cursor, ACC, ROOT, ...]
+
+  # Computed root must match authenticated root.
+  drop
+  assert_eqw
+end
+
 #! Authenticates a rooted frontier `(num_leaves, ROOT)` and loads its peaks into memory.
 #!
 #! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
