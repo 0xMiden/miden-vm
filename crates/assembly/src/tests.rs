@@ -11,11 +11,8 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
-    },
-    operations::Operation,
+    mast::{MastNode, MastNodeExt, MastNodeId},
+    operations::{AssemblyOp, Operation},
     program::Program,
     serde::{Deserializable, Serializable},
 };
@@ -36,6 +33,23 @@ use crate::{
 };
 
 type TestResult = Result<(), Report>;
+
+fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
+    let mut reachable = BTreeSet::new();
+    let mut worklist = forest.procedure_roots().to_vec();
+
+    while let Some(node_id) = worklist.pop() {
+        if reachable.insert(node_id) {
+            forest[node_id].append_children_to(&mut worklist);
+        }
+    }
+
+    assert_eq!(
+        reachable.len(),
+        forest.num_nodes() as usize,
+        "finalized MAST forest contains nodes unreachable from any procedure root",
+    );
+}
 
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
 //
@@ -292,6 +306,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure foo2, bar2, and bar3 map to the same MastNode
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar2));
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar3));
+    assert_all_nodes_reachable_from_roots(lib2.mast_forest());
 
     // make sure there are 6 roots in the MAST (foo1, foo2, foo3, bar1, bar4, and bar5)
     assert_eq!(lib2.mast_forest().num_procedures(), 6);
@@ -1992,6 +2007,54 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let library_module = parse_module!(
+        &context,
+        "lib::a",
+        r#"
+        pub proc f1
+            assert.err="1"
+        end
+
+        pub proc f2
+            assert.err="2"
+        end
+        "#
+    );
+    let library =
+        Assembler::new(context.source_manager()).assemble_library("lib", [library_module])?;
+
+    let f1 = QualifiedProcedureName::from_str("lib::a::f1").unwrap();
+    let f2 = QualifiedProcedureName::from_str("lib::a::f2").unwrap();
+    assert_eq!(library.get_procedure_root_by_path(&f1), library.get_procedure_root_by_path(&f2));
+    assert_ne!(library.get_export_node_id(&f1), library.get_export_node_id(&f2));
+
+    let source = source_file!(
+        &context,
+        "\
+        use lib::a
+
+        begin
+            exec.a::f2
+        end
+        "
+    );
+    let err = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Dynamic)?
+        .assemble_program("program", source)
+        .expect_err("expected ambiguous dynamic link diagnostic");
+
+    assert_diagnostic!(&err, "ambiguous dynamic procedure link for MAST root");
+    assert_diagnostic!(
+        &err,
+        "dynamic reference cannot select one of the same-digest exported roots"
+    );
+
     Ok(())
 }
 
@@ -4082,12 +4145,16 @@ fn nested_blocks() -> Result<(), Report> {
     // contains the MAST nodes for the kernel after a call to
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
-        let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], vec![], vec![])
+        let kernel_foo_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(vec![Operation::Add], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(CallNodeBuilder::new_syscall(kernel_foo_node_id))
+            .ensure_call_node_ref(
+                kernel_foo_node_ref,
+                true,
+                AssemblyOp::new(None, "test".into(), 1, "syscall.foo".into()),
+            )
             .unwrap()
     };
 
@@ -4130,43 +4197,47 @@ fn nested_blocks() -> Result<(), Report> {
     let program = assembler.assemble_program("program", program).unwrap().unwrap_program();
 
     // basic block representing foo::bar.baz procedure
-    let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
+    let exec_foo_bar_baz_node_ref = expected_mast_forest_builder
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), vec![], vec![])
+        .ensure_block_ref(fmp_initialization_sequence(), vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_node(SplitNodeBuilder::new([r#true1, r#false1]))
+        .ensure_split_node_ref(
+            [r#true1, r#false1],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
+        )
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_node(SplitNodeBuilder::new([r#true3, r#false3]))
+        .ensure_split_node_ref(
+            [r#true3, r#false3],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
+        )
         .unwrap();
 
     let r#while = {
-        // The assembler desugars `while.true { body }` to `if.true { LOOP { body } } else { noop
-        // }`.
-        let body_node_id = expected_mast_forest_builder
-            .ensure_block(
+        let body_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(
                 vec![
                     Operation::Push(Felt::from_u32(17)),
                     Operation::Push(Felt::from_u32(19)),
@@ -4177,46 +4248,52 @@ fn nested_blocks() -> Result<(), Report> {
             )
             .unwrap();
 
-        let loop_node_id = expected_mast_forest_builder
-            .ensure_node(LoopNodeBuilder::new(body_node_id))
+        let asm_op = AssemblyOp::new(None, "test".into(), 1, "while.true".into());
+        let loop_node_ref = expected_mast_forest_builder
+            .ensure_loop_node_ref(body_node_ref, asm_op.clone())
             .unwrap();
-        let noop_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Noop], vec![], vec![])
+        let noop_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(vec![Operation::Noop], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(SplitNodeBuilder::new([loop_node_id, noop_node_id]))
+            .ensure_split_node_ref([loop_node_ref, noop_node_ref], asm_op)
             .unwrap()
     };
-    let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
+    let push_13_basic_block_ref = expected_mast_forest_builder
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_node(JoinNodeBuilder::new([push_13_basic_block_id, r#while]))
+        .join_node_refs(vec![push_13_basic_block_ref, r#while], None)
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_node(SplitNodeBuilder::new([r#true2, r#false2]))
+        .ensure_split_node_ref(
+            [r#true2, r#false2],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
+        )
         .unwrap();
 
-    let combined_node_id = expected_mast_forest_builder
-        .join_nodes(
+    let combined_node_ref = expected_mast_forest_builder
+        .join_node_refs(
             vec![
                 fmp_initialization,
                 before,
                 r#if1,
                 nested,
-                exec_foo_bar_baz_node_id,
+                exec_foo_bar_baz_node_ref,
                 syscall_foo_node_id,
             ],
             None,
         )
         .unwrap();
 
-    let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();
-    expected_mast_forest.make_root(node_remapping[&combined_node_id]);
+    expected_mast_forest_builder.record_procedure_root_ref(combined_node_ref);
+    let (mut expected_mast_forest, node_remapping) =
+        expected_mast_forest_builder.build().unwrap().into_parts();
+    expected_mast_forest.make_root(node_remapping[&combined_node_ref]);
     let expected_program =
-        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_id]);
+        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_ref]);
     assert_eq!(expected_program.hash(), program.hash());
 
     // also check that the program has the right number of procedures (which excludes the dummy
@@ -4544,7 +4621,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
     )?;
 
     let library = Assembler::new(context.source_manager()).assemble_library("lib", [module])?;
-    let mut forest = library.mast_forest().as_ref().clone();
+    let forest = library.mast_forest().as_ref().clone();
     assert!(
         forest
             .nodes()
@@ -4554,7 +4631,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         "test input must create at least one padded basic block"
     );
 
-    forest.clear_debug_info();
+    let forest = forest.without_debug_info();
     let stripped_size = forest.to_bytes().len();
     let stripped_without_debug_info_size = {
         let mut bytes = Vec::new();
@@ -4573,7 +4650,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
 
     assert!(
         compacted_size <= stripped_size,
-        "MastForest::compact increased serialized size after clear_debug_info(): \
+        "MastForest::compact increased serialized size after stripping debug info: \
          stripped={stripped_size}, compacted={compacted_size}, \
          stripped_without_debug_info={stripped_without_debug_info_size}, \
          compacted_without_debug_info={compacted_without_debug_info_size}, \
@@ -4623,13 +4700,35 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
     // This should act as identity (return the same forest) but doesn't
     let (merged_forest, _) = MastForest::merge([&*original_forest]).into_diagnostic()?;
 
-    // Assert that the merged forest reorders nodes and both have Join nodes at expected positions
-    let original_join = original_forest.nodes()[6].unwrap_join();
-    let merged_join = merged_forest.nodes()[5].unwrap_join();
+    // Assert that the merged forest still contains the same join structure even if finalization
+    // order changes where that join appears.
+    let original_join = original_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) => Some(join),
+            _ => None,
+        })
+        .expect("original forest must contain a join node");
+    let merged_join = merged_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) => Some(join),
+            _ => None,
+        })
+        .expect("merged forest must contain a join node");
 
-    // Check that they have the same structure (same first and second children, same digest)
-    assert_eq!(original_join.first(), merged_join.first());
-    assert_eq!(original_join.second(), merged_join.second());
+    // Check that they have the same structure. Finalization may remap node IDs, so compare the
+    // children by content commitment rather than by positional ID.
+    assert_eq!(
+        original_forest[original_join.first()].digest(),
+        merged_forest[merged_join.first()].digest(),
+    );
+    assert_eq!(
+        original_forest[original_join.second()].digest(),
+        merged_forest[merged_join.second()].digest(),
+    );
     assert_eq!(original_join.digest(), merged_join.digest());
 
     //Assert that merging is idempotent

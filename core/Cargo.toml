@@ -44,7 +44,7 @@ serde = [
     "miden-debug-types/serde",
     "miden-utils-indexing/serde",
 ]
-arbitrary = ["dep:proptest", "dep:proptest-derive"]
+arbitrary = ["dep:proptest"]
 testing = ["arbitrary"]
 fuzzing = []
 
@@ -61,7 +61,6 @@ miden-utils-sync.workspace = true
 derive_more.workspace = true
 log.workspace = true
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 
@@ -73,3 +72,4 @@ proptest.workspace = true
 rstest = { workspace = true }
 serde_json = { workspace = true }
 miden-utils-testing.workspace = true
+trybuild.workspace = true

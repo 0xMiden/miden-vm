@@ -4,6 +4,7 @@
 //! allowing debuggers to query variable information by node and operation.
 
 use alloc::{
+    collections::BTreeMap,
     string::{String, ToString},
     vec::Vec,
 };
@@ -499,22 +500,15 @@ impl OpToDebugVarIds {
     ///
     /// Nodes that are not in the remapping are considered removed and their debug var data
     /// is discarded.
-    pub fn remap_nodes(
-        &self,
-        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
-    ) -> Self {
-        if self.is_empty() {
+    pub fn remap_nodes(&self, remapping: &BTreeMap<MastNodeId, MastNodeId>) -> Self {
+        if self.is_empty() || remapping.is_empty() {
             return Self::new();
-        }
-        if remapping.is_empty() {
-            return self.clone();
         }
 
         let max_new_id = remapping.values().map(|id| id.to_usize()).max().unwrap_or(0);
         let num_new_nodes = max_new_id + 1;
 
-        let mut new_node_data: alloc::collections::BTreeMap<usize, Vec<(usize, DebugVarId)>> =
-            alloc::collections::BTreeMap::new();
+        let mut new_node_data: BTreeMap<usize, Vec<(usize, DebugVarId)>> = BTreeMap::new();
 
         for (old_id, new_id) in remapping {
             let vars = self.debug_vars_for_node(*old_id);
@@ -623,6 +617,16 @@ mod tests {
 
         // Out-of-range operation returns empty
         assert_eq!(storage.debug_var_ids_for_operation(test_node_id(0), 99).unwrap(), &[]);
+    }
+
+    #[test]
+    fn test_remap_nodes_empty_remapping_removes_all_debug_vars() {
+        let storage = create_test_storage();
+
+        let remapped = storage.remap_nodes(&BTreeMap::new());
+
+        assert!(remapped.is_empty());
+        assert_eq!(remapped.num_nodes(), 0);
     }
 
     #[test]

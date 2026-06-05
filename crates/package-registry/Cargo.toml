@@ -34,7 +34,7 @@ smallvec = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
-miden-core.workspace = true
+miden-core = { workspace = true, features = ["testing"] }
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

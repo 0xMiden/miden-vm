@@ -12,8 +12,8 @@
 //!
 //! # Usage
 //!
-//! Debuggers can use this information along with `DebugVar` decorators in the MAST
-//! to provide source-level variable inspection, stepping, and call stack visualization.
+//! Debuggers can use this information along with MAST debug metadata to provide source-level
+//! variable inspection, stepping, and call stack visualization.
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 

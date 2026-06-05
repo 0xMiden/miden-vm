@@ -293,9 +293,10 @@ fn generate_mast_forest_contributor_impl(
             fn fingerprint_for_node(
                 &self,
                 forest: &crate::mast::MastForest,
+                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::Word>,
             ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest)),*
+                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
                 }
             }
 

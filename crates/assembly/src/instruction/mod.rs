@@ -6,13 +6,12 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    mast::MastNodeId,
     operations::{AssemblyOp, Operation},
 };
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
-    push_value_ops,
+    mast_forest_builder::MastNodeRef, push_value_ops,
 };
 
 mod crypto_ops;
@@ -32,7 +31,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
-    ) -> Result<Option<MastNodeId>, Report> {
+    ) -> Result<Option<MastNodeRef>, Report> {
         // Determine whether this instruction can create a new node
         let can_create_node = matches!(
             instruction.inner(),
@@ -52,7 +51,7 @@ impl Assembler {
         let pending_node_asm_op = if can_create_node {
             // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
             // since the instruction creates exactly one node (call/syscall/dyn).
-            block_builder.set_instruction_cycle_count().map(|mut asm_op| {
+            block_builder.set_instruction_cycle_count()?.map(|mut asm_op| {
                 asm_op.set_num_cycles(1);
                 asm_op
             })
@@ -60,6 +59,7 @@ impl Assembler {
             None
         };
 
+        // Compile the instruction.
         let opt_new_node_id = self.compile_instruction_impl(
             instruction,
             block_builder,
@@ -69,7 +69,7 @@ impl Assembler {
 
         // If we didn't create a node, set the cycle count after compilation.
         if !can_create_node {
-            let _ = block_builder.set_instruction_cycle_count();
+            let _ = block_builder.set_instruction_cycle_count()?;
         }
 
         Ok(opt_new_node_id)
@@ -81,7 +81,7 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
         node_asm_op: Option<AssemblyOp>,
-    ) -> Result<Option<MastNodeId>, Report> {
+    ) -> Result<Option<MastNodeRef>, Report> {
         use Operation::*;
 
         let span = instruction.span();
