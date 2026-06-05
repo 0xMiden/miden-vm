@@ -333,17 +333,22 @@ fn register_debug_type(
                 Report::msg(format!("invalid enum type '{}': enum is too large", enum_ty.name()))
             })?;
             let variants = enum_ty
-                .variants()
-                .iter()
+                .variant_offsets()
                 .zip(enum_ty.discriminant_values())
-                .map(|(variant, discriminant)| {
+                .map(|((payload_offset, variant), discriminant)| {
                     let name_idx = debug_types_section.add_string(variant.name.clone());
                     let type_idx = variant
                         .value
                         .as_ref()
                         .map(|ty| register_debug_type(debug_types_section, None, None, ty))
                         .transpose()?;
-                    Ok(DebugVariantInfo { name_idx, type_idx, discriminant })
+                    let payload_offset = variant.value.as_ref().map(|_| payload_offset);
+                    Ok(DebugVariantInfo {
+                        name_idx,
+                        type_idx,
+                        payload_offset,
+                        discriminant,
+                    })
                 })
                 .collect::<Result<_, Report>>()?;
             debug_types_section.add_type(DebugTypeInfo::Enum {
@@ -437,9 +442,11 @@ mod tests {
         assert_eq!(variants.len(), 2);
         assert_eq!(section.get_string(variants[0].name_idx).as_deref(), Some("Ok"));
         assert_eq!(variants[0].type_idx, None);
+        assert_eq!(variants[0].payload_offset, None);
         assert_eq!(variants[0].discriminant, 200);
         assert_eq!(section.get_string(variants[1].name_idx).as_deref(), Some("NotFound"));
         assert_eq!(variants[1].type_idx, None);
+        assert_eq!(variants[1].payload_offset, None);
         assert_eq!(variants[1].discriminant, 404);
     }
 
@@ -469,6 +476,7 @@ mod tests {
             section.get_type(payload_type_idx),
             Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U32))
         );
+        assert_eq!(variants[1].payload_offset, Some(4));
         assert_eq!(variants[1].discriminant, 1);
     }
 }

@@ -333,6 +333,10 @@ impl Serializable for DebugVariantInfo {
         if let Some(type_idx) = self.type_idx {
             target.write_u32(type_idx.as_u32());
         }
+        target.write_bool(self.payload_offset.is_some());
+        if let Some(payload_offset) = self.payload_offset {
+            target.write_u32(payload_offset);
+        }
         target.write_u64((self.discriminant >> 64) as u64);
         target.write_u64(self.discriminant as u64);
     }
@@ -346,11 +350,17 @@ impl Deserializable for DebugVariantInfo {
         } else {
             None
         };
+        let payload_offset = if source.read_bool()? {
+            Some(source.read_u32()?)
+        } else {
+            None
+        };
         let hi = source.read_u64()? as u128;
         let lo = source.read_u64()? as u128;
         Ok(Self {
             name_idx,
             type_idx,
+            payload_offset,
             discriminant: (hi << 64) | lo,
         })
     }
@@ -683,11 +693,13 @@ mod tests {
                 DebugVariantInfo {
                     name_idx: ok_idx,
                     type_idx: None,
+                    payload_offset: None,
                     discriminant: 0,
                 },
                 DebugVariantInfo {
                     name_idx: err_idx,
                     type_idx: Some(felt_type_idx),
+                    payload_offset: Some(8),
                     discriminant: 1,
                 },
             ],

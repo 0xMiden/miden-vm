@@ -454,6 +454,8 @@ pub struct DebugVariantInfo {
     pub name_idx: u32,
     /// Payload type of this variant (index into type table), if present.
     pub type_idx: Option<DebugTypeIdx>,
+    /// Byte offset of the payload from the base of the enum value, if present.
+    pub payload_offset: Option<u32>,
     /// Discriminant value for this variant.
     pub discriminant: u128,
 }
