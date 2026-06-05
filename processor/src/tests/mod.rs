@@ -1216,8 +1216,8 @@ fn test_diagnostic_not_binary_value_loop_node() {
     // The entry-check error originates from the SPLIT that the assembler wraps around the LOOP
     // when desugaring `while.true`, so the message reads "if statement". The source pointer is
     // still the `while.true` token because the SPLIT carries that asm_op. The iteration-check
-    // (REPEAT/END) still produces a `NotBinaryValueLoop` error — see masm_errors_consistency
-    // case_2 for that path.
+    // (REPEAT/END) still produces a loop-context `NotBinaryValue` error — see
+    // masm_errors_consistency case_2 for that path.
     assert_diagnostic_lines!(
         err,
         "  x if statement expected a binary value on top of the stack, but got 2",

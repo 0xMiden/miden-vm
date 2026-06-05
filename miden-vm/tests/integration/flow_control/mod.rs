@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionError, Word, operation::OperationError};
+use miden_processor::{
+    ExecutionError, Word,
+    operation::{BinaryValueErrorContext, OperationError},
+};
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
@@ -69,7 +72,10 @@ fn faulty_condition_from_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue {
+                context: BinaryValueErrorContext::Loop,
+                value: _,
+            },
             ..
         }
     );

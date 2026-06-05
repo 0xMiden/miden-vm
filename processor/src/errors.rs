@@ -334,20 +334,36 @@ pub enum OperationError {
     MerklePathVerificationFailed {
         inner: Box<MerklePathVerificationFailedInner>,
     },
-    #[error("operation expected a binary value, but got {value}")]
-    NotBinaryValue { value: Felt },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
-    NotBinaryValueIf { value: Felt },
-    #[error(
-        "loop condition must be a binary value on entry and each subsequent iteration, but got {value}"
-    )]
-    NotBinaryValueLoop { value: Felt },
+    #[error("{message}, but got {value}", message = context.message())]
+    NotBinaryValue {
+        context: BinaryValueErrorContext,
+        value: Felt,
+    },
     #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values { values: Vec<Felt> },
     #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
     SyscallTargetNotInKernel { proc_root: Word },
     #[error("failed to execute the operation for internal reason: {0}")]
     Internal(&'static str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryValueErrorContext {
+    Operation,
+    If,
+    Loop,
+}
+
+impl BinaryValueErrorContext {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Operation => "operation expected a binary value",
+            Self::If => "if statement expected a binary value on top of the stack",
+            Self::Loop => {
+                "loop condition must be a binary value on entry and each subsequent iteration"
+            },
+        }
+    }
 }
 
 impl OperationError {

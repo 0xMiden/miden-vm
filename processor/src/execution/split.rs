@@ -5,7 +5,7 @@ use crate::{
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{ExecutableMastForest, MastNodeId, SplitNode},
-    operation::OperationError,
+    operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };
@@ -70,7 +70,10 @@ where
             source_node_id,
         );
     } else {
-        let err = OperationError::NotBinaryValueIf { value: condition };
+        let err = OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::If,
+            value: condition,
+        };
         return ControlFlow::Break(BreakReason::Err(
             state.operation_error_with_current_context(err),
         ));
@@ -123,7 +126,10 @@ where
         state.continuation_stack.push_finish_split(node_id);
         state.continuation_stack.push_start_node(split_node.on_false());
     } else {
-        let err = OperationError::NotBinaryValueIf { value: condition };
+        let err = OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::If,
+            value: condition,
+        };
         return ControlFlow::Break(BreakReason::Err(
             state.operation_error_with_current_context(err),
         ));
