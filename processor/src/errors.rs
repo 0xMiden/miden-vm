@@ -565,6 +565,19 @@ pub fn procedure_not_found_with_package_source_context(
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
 }
 
+/// Creates a `MalformedMastForestInHost` operation error with execution context.
+pub fn malformed_mast_forest_with_context(
+    root_digest: Word,
+    context: Option<PackageSourceDebugContext<'_>>,
+    host: &impl BaseHost,
+) -> ExecutionError {
+    let err = OperationError::MalformedMastForestInHost { root_digest };
+    match context {
+        Some(context) => err.with_package_source_context(context, host, None),
+        None => err.with_context(),
+    }
+}
+
 // CONSOLIDATED EXTENSION TRAITS (plafer's approach)
 // ================================================================================================
 //

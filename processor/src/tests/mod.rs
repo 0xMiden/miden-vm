@@ -9,12 +9,13 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
 };
-use miden_debug_types::SourceManager;
+use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    DefaultHost, FastProcessor, Kernel, ONE, ProcessorState, Program, StackInputs, Word, ZERO,
+    BaseHost, DefaultHost, FastProcessor, Kernel, LoadedMastForest, ONE, ProcessorState, Program,
+    StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName},
     operation::Operation,
@@ -88,6 +89,32 @@ macro_rules! build_test_by_mode {
     ($mode:expr, $source:expr, $($tail:tt)+) => {{
         miden_utils_testing::build_test_by_mode!($mode, $source, $($tail)+)
     }};
+}
+
+struct MalformedMastForestHost {
+    source_manager: Arc<DefaultSourceManager>,
+    mast_forest: Arc<MastForest>,
+}
+
+impl BaseHost for MalformedMastForestHost {
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
+    }
+}
+
+impl SyncHost for MalformedMastForestHost {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
+        Some(LoadedMastForest::new(self.mast_forest.clone()))
+    }
+
+    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
 }
 
 // AdviceMap inlined in the script
@@ -1107,6 +1134,49 @@ fn test_diagnostic_procedure_not_found_split() {
         " 10 | `->             end",
         " 11 |             end",
         "    `----"
+    );
+}
+
+#[test]
+fn test_diagnostic_malformed_mast_forest_in_host() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager.clone())
+        .assemble_program(
+            "program",
+            "
+            begin
+                dyncall
+            end",
+        )
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
+
+    let mut malformed_forest = MastForest::new();
+    let unexpected_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut malformed_forest)
+        .unwrap();
+    malformed_forest.make_root(unexpected_root);
+
+    let mut host = MalformedMastForestHost {
+        source_manager,
+        mast_forest: malformed_forest.into(),
+    };
+
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
+
+    assert_diagnostic_lines!(
+        err,
+        "  x MAST forest in host indexed by procedure root 0x0000000000000000000000000000000000000000000000000000000000000000 doesn't contain that root",
+        regex!(r#",-\[.*:3:17\]"#),
+        " 2 |             begin",
+        " 3 |                 dyncall",
+        "   :                 ^^^^^^^",
+        " 4 |             end",
+        "   `----"
     );
 }
 
