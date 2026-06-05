@@ -105,6 +105,17 @@ fn read_memory_felts(output: &ExecutionOutput, ptr: u32, len: usize) -> Vec<Felt
         .collect()
 }
 
+fn payload_felts(node: &Node) -> Vec<Felt> {
+    if node.is_true() {
+        return Vec::new();
+    }
+    if let Ok(chunks) = node.payload().as_data() {
+        return chunks.iter().flatten().copied().collect();
+    }
+    let (lhs, rhs) = node.payload().as_join().expect("non-TRUE/non-data nodes are joins");
+    lhs.as_elements().iter().chain(rhs.as_elements()).copied().collect()
+}
+
 // HAPPY-PATH WORKFLOWS
 // ================================================================================================
 
@@ -135,21 +146,20 @@ fn uint_and_group_happy_path_returns_child_digests_that_can_be_evaluated() {
     {reg_g2} adv.register_deferred dropw dropw dropw
     {reg_add} adv.register_deferred dropw dropw dropw
     push.{add_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.0 dropw
-    adv_pushw mem_storew_le.4 dropw
-    adv_pushw mem_storew_le.8 dropw
+    adv_pushw adv_pushw
+    mem_storew_le.0 dropw
+    mem_storew_le.4 dropw
     push.{minted_x_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.12 dropw
-    adv_pushw mem_storew_le.16 dropw
-    adv_pushw mem_storew_le.20 dropw
+    adv_pushw adv_pushw
+    mem_storew_le.8 dropw
+    mem_storew_le.12 dropw
     push.{minted_y_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.24 dropw
-    adv_pushw mem_storew_le.28 dropw
-    adv_pushw mem_storew_le.32 dropw
+    adv_pushw adv_pushw
+    mem_storew_le.16 dropw
+    mem_storew_le.20 dropw
     {reg_expected} adv.register_deferred dropw dropw dropw
     {reg_eq} adv.register_deferred dropw dropw dropw
     push.{eq_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.36 dropw
 end",
         reg_dx1 = push_node(&dx1),
         reg_dy1 = push_node(&dy1),
@@ -172,13 +182,13 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // Canonical sum is `new(minted_x, minted_y)`: tag + both minted coordinate child digests.
-    assert_eq!(read_memory_felts(&output, 0, 12), canonical_add.to_felts());
-    // Each returned child digest evaluates back to its uint value.
-    assert_eq!(read_memory_felts(&output, 12, 12), minted_x.to_felts());
-    assert_eq!(read_memory_felts(&output, 24, 12), minted_y.to_felts());
-    // The equality assertion canonicalizes to the 4-felt TRUE tag.
-    assert_eq!(read_memory_felts(&output, 36, 4), Node::TRUE.to_felts());
+    // Canonical sum is `new(minted_x, minted_y)`: both minted coordinate child digests, no tag.
+    assert_eq!(read_memory_felts(&output, 0, 8), payload_felts(&canonical_add));
+    // Each returned child digest evaluates back to its uint payload, no tag.
+    assert_eq!(read_memory_felts(&output, 8, 8), payload_felts(&minted_x));
+    assert_eq!(read_memory_felts(&output, 16, 8), payload_felts(&minted_y));
+    // The equality assertion canonicalizes to TRUE, whose payload is empty, so no advice remains.
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
 
     // The framework state retains the original op, its canonical, and the minted coordinates.
     let ds = &output.deferred_state;
@@ -203,13 +213,12 @@ fn hash_preimage_data_happy_path_checks_equality() {
     {store}
     push.0 push.{preimage_tag} adv.register_deferred_data dropw drop
     push.{preimage_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.16 dropw
-    adv_pushw mem_storew_le.20 dropw
-    adv_pushw mem_storew_le.24 dropw
+    adv_pushw adv_pushw
+    mem_storew_le.16 dropw
+    mem_storew_le.20 dropw
     {reg_canonical} adv.register_deferred dropw dropw dropw
     {reg_eq} adv.register_deferred dropw dropw dropw
     push.{eq_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.28 dropw
 end",
         store = store_chunks(0, &chunks),
         preimage_tag = felt_list(&preimage.tag().as_word()),
@@ -225,10 +234,10 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // The preimage evaluates to the hash digest of its memory contents (a `Hash::digest_node`).
-    assert_eq!(read_memory_felts(&output, 16, 12), canonical.to_felts());
-    // The digest-equality assertion canonicalizes to TRUE.
-    assert_eq!(read_memory_felts(&output, 28, 4), Node::TRUE.to_felts());
+    // The preimage evaluates to the hash digest payload of its memory contents (no tag).
+    assert_eq!(read_memory_felts(&output, 16, 8), payload_felts(&canonical));
+    // The digest-equality assertion canonicalizes to TRUE, whose payload is empty.
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
 
     let mut ds = output.deferred_state;
     assert_eq!(ds.get_node(&preimage.digest()), Some(&preimage));
@@ -249,7 +258,6 @@ fn sig_verify_data_predicate_happy_path_returns_true() {
     {store}
     push.0 push.{sig_tag} adv.register_deferred_data dropw drop
     push.{sig_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.24 dropw
 end",
         store = store_chunks(0, &chunks),
         sig_tag = felt_list(&sig.tag().as_word()),
@@ -262,7 +270,7 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    assert_eq!(read_memory_felts(&output, 24, 4), Node::TRUE.to_felts());
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
 
     let mut ds = output.deferred_state;
     assert_eq!(ds.get_node(&sig.digest()), Some(&sig));
@@ -270,14 +278,11 @@ end",
 }
 
 #[test]
-fn deferred_evaluate_true_digest_returns_exactly_true_tag() {
-    // Evaluating the implicit seeded TRUE node returns only its 4-felt tag (TRUE has no payload)
-    // and pushes exactly one advice word — a payload-less canonical the happy-path tests don't
-    // reach.
+fn deferred_evaluate_true_digest_emits_no_advice() {
+    // Evaluating the implicit seeded TRUE node emits no advice because TRUE has no payload.
     let src = format!(
         "begin
     push.{true_digest} adv.evaluate_deferred dropw
-    adv_pushw mem_storew_le.0 dropw
 end",
         true_digest = felt_list(TRUE_DIGEST.as_elements()),
     );
@@ -288,12 +293,7 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    assert_eq!(read_memory_felts(&output, 0, 4), Node::TRUE.to_felts());
-    assert_eq!(
-        output.advice.stack(),
-        Vec::<Felt>::new(),
-        "TRUE evaluation pushes exactly one word"
-    );
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
 }
 
 // FAILURE SMOKE

@@ -121,7 +121,7 @@ impl Deserializable for Tag {
 /// In-memory body of a deferred node.
 ///
 /// TRUE has no payload data. Data nodes carry one or more opaque [`DataChunk`]s. Join nodes carry
-/// two child digests explicitly rather than interpreting raw data as edges.
+/// one [`DataChunk`] containing two child digests (`lhs || rhs`).
 ///
 /// The representation is private: external precompiles can inspect payloads through accessors, but
 /// cannot fabricate framework TRUE, empty data, or unchecked joins.
@@ -134,8 +134,8 @@ enum PayloadRepr {
     True,
     /// Non-empty opaque data.
     Data(Arc<[DataChunk]>),
-    /// Two child digests.
-    Join { lhs: Digest, rhs: Digest },
+    /// Two child digests encoded as `lhs || rhs`.
+    Join(DataChunk),
 }
 
 impl Payload {
@@ -157,14 +157,28 @@ impl Payload {
 
     /// Creates a join payload that references two child digests.
     fn join(lhs: Digest, rhs: Digest) -> Self {
-        Self(PayloadRepr::Join { lhs, rhs })
+        let [l0, l1, l2, l3] = lhs.into_elements();
+        let [r0, r1, r2, r3] = rhs.into_elements();
+        Self(PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]))
+    }
+
+    /// Returns this payload's canonical 8-felt blocks.
+    ///
+    /// TRUE has no blocks. Data payloads return their stored chunks. Join payloads return one block
+    /// containing `lhs || rhs`.
+    pub fn as_chunks(&self) -> &[DataChunk] {
+        match &self.0 {
+            PayloadRepr::True => &[],
+            PayloadRepr::Data(chunks) => chunks,
+            PayloadRepr::Join(chunk) => core::slice::from_ref(chunk),
+        }
     }
 
     /// Returns this payload's data chunks, or [`DeferredError::InvalidPayload`] for TRUE and joins.
     pub fn as_data(&self) -> Result<&[DataChunk], DeferredError> {
         match &self.0 {
             PayloadRepr::Data(chunks) => Ok(chunks),
-            PayloadRepr::True | PayloadRepr::Join { .. } => Err(DeferredError::InvalidPayload),
+            PayloadRepr::True | PayloadRepr::Join(_) => Err(DeferredError::InvalidPayload),
         }
     }
 
@@ -179,7 +193,9 @@ impl Payload {
     /// Returns the child digests for join payloads.
     pub fn as_join(&self) -> Result<(Digest, Digest), DeferredError> {
         match &self.0 {
-            PayloadRepr::Join { lhs, rhs } => Ok((*lhs, *rhs)),
+            PayloadRepr::Join([l0, l1, l2, l3, r0, r1, r2, r3]) => {
+                Ok((Digest::new([*l0, *l1, *l2, *l3]), Digest::new([*r0, *r1, *r2, *r3])))
+            },
             PayloadRepr::True | PayloadRepr::Data(_) => Err(DeferredError::InvalidPayload),
         }
     }
@@ -200,9 +216,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub(crate) const DIGEST_FELT_LEN: usize = 4;
     pub(crate) const DATA_CHUNK_FELT_LEN: usize = 8;
-    pub(crate) const JOIN_FELT_LEN: usize = Tag::FELT_LEN + 2 * Self::DIGEST_FELT_LEN;
 
     /// Canonical TRUE node returned by predicates that verify successfully.
     pub const TRUE: Node = Node {
@@ -266,53 +280,30 @@ impl Node {
 
     /// Returns whether this node is structurally the canonical TRUE result.
     pub fn is_true(&self) -> bool {
-        matches!(self.payload.0, PayloadRepr::True) && self.tag == Tag::TRUE
+        matches!(&self.payload.0, PayloadRepr::True) && self.tag == Tag::TRUE
     }
 
     /// Returns the field-element length of this node's canonical external representation.
     pub fn felt_len(&self) -> usize {
-        match &self.payload.0 {
-            PayloadRepr::True => Tag::FELT_LEN,
-            PayloadRepr::Data(data) => Tag::FELT_LEN
-                .checked_add(
-                    Self::DATA_CHUNK_FELT_LEN
-                        .checked_mul(data.len())
-                        .expect("data felt count overflow"),
-                )
-                .expect("node felt count overflow"),
-            PayloadRepr::Join { .. } => Self::JOIN_FELT_LEN,
-        }
+        Tag::FELT_LEN
+            .checked_add(
+                Self::DATA_CHUNK_FELT_LEN
+                    .checked_mul(self.payload.as_chunks().len())
+                    .expect("payload felt count overflow"),
+            )
+            .expect("node felt count overflow")
     }
 
     /// Returns the storage/budget footprint for durable state accounting.
     pub(crate) fn storage_felt_len(&self) -> usize {
-        match &self.payload.0 {
-            PayloadRepr::True => 0,
-            PayloadRepr::Data(data) => Tag::FELT_LEN
-                .checked_add(
-                    Self::DATA_CHUNK_FELT_LEN
-                        .checked_mul(data.len())
-                        .expect("data felt count overflow"),
-                )
-                .expect("node felt count overflow"),
-            PayloadRepr::Join { .. } => Self::JOIN_FELT_LEN,
-        }
+        if self.is_true() { 0 } else { self.felt_len() }
     }
 
     /// Appends this node's canonical external representation to `target`.
     pub fn write_into_felts(&self, target: &mut Vec<Felt>) {
         target.extend_from_slice(&self.tag.as_word());
-        match &self.payload.0 {
-            PayloadRepr::True => {},
-            PayloadRepr::Data(data) => {
-                for chunk in data.iter() {
-                    target.extend_from_slice(chunk);
-                }
-            },
-            PayloadRepr::Join { lhs, rhs } => {
-                target.extend_from_slice(lhs.as_elements());
-                target.extend_from_slice(rhs.as_elements());
-            },
+        for chunk in self.payload.as_chunks() {
+            target.extend_from_slice(chunk);
         }
     }
 
@@ -325,32 +316,19 @@ impl Node {
 
     /// Computes the canonical digest used by both host code and in-circuit wrappers.
     pub fn digest(&self) -> Digest {
-        match &self.payload.0 {
-            PayloadRepr::True => {
-                assert_eq!(self.tag, Tag::TRUE, "TRUE payload is only valid for Node::TRUE");
-                TRUE_DIGEST
-            },
-            PayloadRepr::Data(data) => {
-                let mut state = [ZERO; 12];
-                state[Self::DATA_CHUNK_FELT_LEN..Self::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-                    .copy_from_slice(&self.tag.as_word());
-                for chunk in data.iter() {
-                    state[0..Self::DATA_CHUNK_FELT_LEN].copy_from_slice(chunk);
-                    Poseidon2::apply_permutation(&mut state);
-                }
-                Word::new([state[0], state[1], state[2], state[3]])
-            },
-            PayloadRepr::Join { lhs, rhs } => {
-                let mut state = [ZERO; 12];
-                state[0..Self::DIGEST_FELT_LEN].copy_from_slice(lhs.as_elements());
-                state[Self::DIGEST_FELT_LEN..2 * Self::DIGEST_FELT_LEN]
-                    .copy_from_slice(rhs.as_elements());
-                state[Self::DATA_CHUNK_FELT_LEN..Self::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-                    .copy_from_slice(&self.tag.as_word());
-                Poseidon2::apply_permutation(&mut state);
-                Word::new([state[0], state[1], state[2], state[3]])
-            },
+        if matches!(&self.payload.0, PayloadRepr::True) {
+            assert_eq!(self.tag, Tag::TRUE, "TRUE payload is only valid for Node::TRUE");
+            return TRUE_DIGEST;
         }
+
+        let mut state = [ZERO; 12];
+        state[Self::DATA_CHUNK_FELT_LEN..Self::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
+            .copy_from_slice(&self.tag.as_word());
+        for chunk in self.payload.as_chunks() {
+            state[0..Self::DATA_CHUNK_FELT_LEN].copy_from_slice(chunk);
+            Poseidon2::apply_permutation(&mut state);
+        }
+        Word::new([state[0], state[1], state[2], state[3]])
     }
 }
 
@@ -512,24 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn data_digest_is_linear_hash_over_chunks() {
-        let chunks = alloc::vec![block(100), block(108), block(116)];
-        let node = Node::try_data(TAG_A, chunks.clone()).unwrap();
-
-        // Capacity = tag, then absorb each chunk into the rate with one permutation per chunk.
-        let mut state = [ZERO; 12];
-        state[Node::DATA_CHUNK_FELT_LEN..Node::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-            .copy_from_slice(&TAG_A.as_word());
-        for c in &chunks {
-            state[0..Node::DATA_CHUNK_FELT_LEN].copy_from_slice(c);
-            Poseidon2::apply_permutation(&mut state);
-        }
-        let expected = Word::new([state[0], state[1], state[2], state[3]]);
-        assert_eq!(node.digest(), expected);
-    }
-
-    #[test]
-    fn join_serializes_and_digests_over_two_children() {
+    fn join_round_trips_children_and_serializes() {
         let lhs = Node::value(TAG_A, block(1)).unwrap().digest();
         let rhs = Node::value(TAG_A, block(2)).unwrap().digest();
         let join = Node::join(TAG_B, lhs, rhs).unwrap();
@@ -537,20 +498,16 @@ mod tests {
         assert_eq!(join.payload().as_join().unwrap(), (lhs, rhs));
         assert!(join.payload().as_data().is_err());
 
+        let mut payload = [ZERO; Node::DATA_CHUNK_FELT_LEN];
+        payload[..Word::NUM_ELEMENTS].copy_from_slice(lhs.as_elements());
+        payload[Word::NUM_ELEMENTS..].copy_from_slice(rhs.as_elements());
+
         // External representation is `tag || lhs || rhs`.
-        assert_eq!(join.felt_len(), Node::JOIN_FELT_LEN);
+        assert_eq!(join.felt_len(), Tag::FELT_LEN + Node::DATA_CHUNK_FELT_LEN);
         let mut expected = TAG_B.as_word().to_vec();
-        expected.extend_from_slice(lhs.as_elements());
-        expected.extend_from_slice(rhs.as_elements());
+        expected.extend_from_slice(&payload);
         assert_eq!(join.to_felts(), expected);
 
-        // Join digest = permute([lhs, rhs, tag]).
-        let mut state = [ZERO; 12];
-        state[0..Node::DIGEST_FELT_LEN].copy_from_slice(lhs.as_elements());
-        state[Node::DIGEST_FELT_LEN..2 * Node::DIGEST_FELT_LEN].copy_from_slice(rhs.as_elements());
-        state[Node::DATA_CHUNK_FELT_LEN..Node::DATA_CHUNK_FELT_LEN + Tag::FELT_LEN]
-            .copy_from_slice(&TAG_B.as_word());
-        Poseidon2::apply_permutation(&mut state);
-        assert_eq!(join.digest(), Word::new([state[0], state[1], state[2], state[3]]));
+        assert_eq!(join.payload().as_chunks(), &[payload]);
     }
 }

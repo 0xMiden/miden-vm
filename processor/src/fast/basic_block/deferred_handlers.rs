@@ -8,12 +8,12 @@ use alloc::vec::Vec;
 #[cfg(test)]
 use miden_core::deferred::PrecompileRegistry;
 use miden_core::{
-    ZERO,
+    Word, ZERO,
     deferred::{DataChunk, DeferredError, Digest, Node, NodeType, PrecompileError, Tag},
 };
 
 use super::SystemEventError;
-use crate::{MemoryError, fast::FastProcessor};
+use crate::{AdviceProvider, MemoryError, fast::FastProcessor};
 
 // STACK LAYOUT — `DeferredRegister`
 // ================================================================================================
@@ -32,9 +32,9 @@ const DEFERRED_TAG_OFFSET: usize = 9;
 // STACK LAYOUT — `DeferredEvaluate`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler evaluates it to a canonical digest and pushes that node's `Node::to_felts()` onto the
-// advice stack. The front of the advice stack is the canonical `TAG` word; following advice words
-// are the payload words in canonical order.
+// handler evaluates it to a canonical digest and pushes only that node's payload onto the advice
+// stack. Data chunks are arranged for `adv_pushw adv_pushw` ergonomics: the two pushes leave the
+// chunk's LOW word on top of the operand stack, with HIGH beneath it.
 
 /// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -95,31 +95,48 @@ pub(super) fn handle_deferred_register(
     Ok(())
 }
 
-/// Handles deferred-node evaluation and returns the canonical node as advice.
+/// Handles deferred-node evaluation and returns the canonical payload as advice.
 ///
 /// The digest must already be registered in
 /// [`miden_core::deferred::DeferredState`]. The handler evaluates it with
-/// [`miden_core::deferred::DeferredState::evaluate_digest`] and pushes [`Node::to_felts`]
-/// (`tag || payload`) so that successive `adv_pushw` reads return the canonical tag word first.
-/// Data payloads then return two words per 8-felt data chunk; join payloads return `lhs` followed
-/// by `rhs`; TRUE emits only its tag word. These advice values are intentionally unbound:
-/// proof-relevant callers must bind them to circuit-visible data before relying on them.
+/// [`miden_core::deferred::DeferredState::evaluate_digest`] and pushes only the canonical node's
+/// payload. The tag is omitted because callers already know which node shape they evaluated.
+///
+/// Data payloads emit two advice words per 8-felt chunk. Because both the advice stack and operand
+/// stack are LIFO, each chunk is placed on advice as HIGH then LOW (and chunks are processed in
+/// reverse before front-pushing) so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand
+/// stack for that chunk. Join payloads use the same convention for their two child digest words,
+/// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice. These advice values are
+/// intentionally unbound: proof-relevant callers must bind them to circuit-visible data before
+/// relying on them.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
 
     let canonical_digest = processor.deferred_state_mut().evaluate_digest(digest)?;
-    let felts = processor
-        .deferred_state()
-        .get_node(&canonical_digest)
-        .ok_or(PrecompileError::MissingNode)?
-        .to_felts();
 
-    // Push felts in reverse so the front of the advice stack is `felts[0]` (TAG): successive
-    // `adv_pushw` reads then yield TAG, then each payload chunk / child word in natural order.
-    for &felt in felts.iter().rev() {
-        processor.advice.push_stack(felt)?;
+    let deferred_state = &processor.deferred_state;
+    let advice = &mut processor.advice;
+    let canonical_node =
+        deferred_state.get_node(&canonical_digest).ok_or(PrecompileError::MissingNode)?;
+
+    push_evaluated_payload(advice, canonical_node)?;
+    Ok(())
+}
+
+/// Pushes `node`'s canonical payload onto the advice stack in `adv_pushw`-ergonomic order.
+fn push_evaluated_payload(
+    advice: &mut AdviceProvider,
+    node: &Node,
+) -> Result<(), SystemEventError> {
+    // `AdviceProvider::push_stack_word` front-pushes, while `adv_pushw` pushes each consumed word
+    // onto the operand stack. Push payload blocks from the back, preserving LOW/HIGH order within
+    // each block, so repeated `adv_pushw`s leave later blocks above earlier blocks.
+    for chunk in node.payload().as_chunks().iter().rev() {
+        let [lo0, lo1, lo2, lo3, hi0, hi1, hi2, hi3] = *chunk;
+        advice.push_stack_word(&Word::new([lo0, lo1, lo2, lo3]))?;
+        advice.push_stack_word(&Word::new([hi0, hi1, hi2, hi3]))?;
     }
     Ok(())
 }
@@ -214,7 +231,7 @@ mod tests {
     use miden_core::{Felt, deferred::TRUE_DIGEST, testing::precompile::Hash};
 
     use super::*;
-    use crate::{ExecutionOptions, StackInputs};
+    use crate::{ExecutionOptions, StackInputs, processor::Processor};
 
     /// A processor with the given deferred element budget.
     fn processor_with_budget(max_deferred_elements: usize) -> FastProcessor {
@@ -250,6 +267,55 @@ mod tests {
                 .write_element(processor.ctx, Felt::from_u32(ptr + i as u32), *felt)
                 .unwrap();
         }
+    }
+
+    fn chunk(seed: u32) -> DataChunk {
+        core::array::from_fn(|i| Felt::from_u32(seed + i as u32))
+    }
+
+    fn expected_evaluate_advice_stack(chunks: &[DataChunk]) -> Vec<Felt> {
+        let mut expected = Vec::new();
+        for chunk in chunks {
+            expected.extend_from_slice(&chunk[4..8]);
+            expected.extend_from_slice(&chunk[0..4]);
+        }
+        expected
+    }
+
+    #[test]
+    fn evaluated_payload_advice_omits_tag_and_orders_single_chunk_for_two_pushes() {
+        let mut processor = processor_with_budget(64);
+        let chunk = chunk(10);
+        let node = Hash::digest_node(chunk);
+
+        push_evaluated_payload(&mut processor.advice, &node).unwrap();
+
+        assert_eq!(processor.advice_provider().stack(), expected_evaluate_advice_stack(&[chunk]));
+        assert!(
+            !processor.advice_provider().stack().starts_with(&node.tag().as_word()),
+            "evaluate advice must not include the node tag"
+        );
+    }
+
+    #[test]
+    fn evaluated_payload_advice_preserves_multi_chunk_order_with_lifo_word_swaps() {
+        let mut processor = processor_with_budget(128);
+        let chunks = vec![chunk(1), chunk(20), chunk(40)];
+        let node = Node::try_data(Hash::preimage_tag(Hash::BYTES_PER_CHUNK * 3), chunks.clone())
+            .expect("test node is valid data");
+
+        push_evaluated_payload(&mut processor.advice, &node).unwrap();
+
+        assert_eq!(processor.advice_provider().stack(), expected_evaluate_advice_stack(&chunks));
+    }
+
+    #[test]
+    fn evaluated_true_payload_emits_no_advice() {
+        let mut processor = processor_with_budget(64);
+
+        push_evaluated_payload(&mut processor.advice, &Node::TRUE).unwrap();
+
+        assert_eq!(processor.advice_provider().stack(), Vec::<Felt>::new());
     }
 
     #[test]

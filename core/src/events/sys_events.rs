@@ -315,24 +315,26 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegister,
 
-    /// Evaluates a registered deferred node and pushes its canonical node as advice.
+    /// Evaluates a registered deferred node and pushes its canonical payload as advice.
     ///
     /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
     /// state. The handler evaluates it with [`crate::deferred::DeferredState::evaluate_digest`],
-    /// fetches the canonical node, and pushes [`crate::deferred::Node::to_felts`] to the advice
-    /// stack.
+    /// fetches the canonical node, and pushes only its payload to the advice stack. The tag is not
+    /// emitted.
     ///
-    /// Advice is pushed so that successive `adv_pushw` reads return `TAG` first, then the
-    /// canonical payload words. `TRUE` pushes only its tag word; data payloads push two words per
-    /// 8-felt data chunk; join payloads push `lhs` then `rhs`. These felts are an unbound host
-    /// hint, so proof-relevant code must bind them to circuit-visible data before relying on them.
+    /// Data payloads push two words per 8-felt chunk in advice order `HIGH, LOW` so that
+    /// `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack for that chunk. Chunks
+    /// are emitted in canonical chunk order. Join payloads use the same two-word LIFO convention,
+    /// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These felts are
+    /// an unbound host hint, so proof-relevant code must bind them to circuit-visible data
+    /// before relying on them.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
     ///
     /// Outputs:
     ///   Operand stack: unchanged
-    ///   Advice stack:  canonical `tag || payload` in felt-index order
+    ///   Advice stack:  canonical payload only, word-ordered for `adv_pushw` LIFO consumption
     DeferredEvaluate,
 
     /// Registers and eagerly evaluates a memory-backed deferred node.
