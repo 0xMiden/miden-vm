@@ -118,6 +118,7 @@ impl FastProcessor {
 
     /// Executes the given program synchronously with package-owned source/debug context and returns
     /// the bundled trace inputs required by [`crate::trace::build_trace`].
+    #[cfg(any(test, feature = "testing"))]
     #[instrument(name = "execute_trace_inputs_with_package_debug_info_sync", skip_all)]
     pub fn execute_trace_inputs_with_package_debug_info_sync(
         self,
@@ -155,6 +156,7 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_trace_inputs_with_package_debug_info_sync`].
+    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     #[instrument(name = "execute_trace_inputs_with_package_debug_info", skip_all)]
     pub async fn execute_trace_inputs_with_package_debug_info(
@@ -208,7 +210,7 @@ impl FastProcessor {
 
     /// Executes the given program with package-owned source/debug context and the provided tracer
     /// using an async host.
-    pub async fn execute_with_package_debug_info_and_tracer<T>(
+    async fn execute_with_package_debug_info_and_tracer<T>(
         mut self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
@@ -265,7 +267,7 @@ impl FastProcessor {
 
     /// Executes the given program with package-owned source/debug context and the provided tracer
     /// using a sync host.
-    pub fn execute_with_package_debug_info_and_tracer_sync<T>(
+    fn execute_with_package_debug_info_and_tracer_sync<T>(
         mut self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
@@ -317,6 +319,7 @@ impl FastProcessor {
     }
 
     /// Executes a single clock cycle synchronously with package-owned source/debug context.
+    #[cfg(any(test, feature = "testing"))]
     pub fn step_with_package_debug_info_sync(
         &mut self,
         host: &mut impl SyncHost,
@@ -369,6 +372,7 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::step_with_package_debug_info_sync`].
+    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     pub async fn step_with_package_debug_info(
         &mut self,
@@ -428,6 +432,7 @@ impl FastProcessor {
         Ok(ContinuationStack::new_with_source_node(program, source_node))
     }
 
+    #[cfg(any(test, feature = "testing"))]
     fn source_aware_resume_context(
         &mut self,
         program: &Program,
@@ -896,6 +901,7 @@ impl FastProcessor {
 
     /// Executes the given program synchronously one step at a time with package-owned source/debug
     /// context.
+    #[cfg(any(test, feature = "testing"))]
     pub fn execute_by_step_with_package_debug_info_sync(
         mut self,
         program: &Program,
@@ -940,6 +946,7 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_by_step_with_package_debug_info_sync`].
+    #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     pub async fn execute_by_step_with_package_debug_info(
         mut self,
