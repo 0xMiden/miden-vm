@@ -127,7 +127,7 @@ impl MastForestFinalizer {
                         source: MastForestError::TooManyNodes,
                     })
                 })?);
-            let node = builder.build_linked(final_node_id).map_err(|source| {
+            let node = builder.build_linked().map_err(|source| {
                 Report::new(MastForestBuilderError::BuildNode {
                     node_ref,
                     node_kind: pending_node.kind.name(),

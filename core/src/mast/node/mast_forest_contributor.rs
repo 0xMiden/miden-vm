@@ -107,7 +107,7 @@ impl MastNodeBuilder {
     /// This path is used by finalizers that materialize nodes in topological order before a
     /// complete [`MastForest`] exists. Control-node builders must carry their already-computed
     /// digest on this path.
-    pub fn build_linked(self, _node_id: MastNodeId) -> Result<MastNode, MastForestError> {
+    pub fn build_linked(self) -> Result<MastNode, MastForestError> {
         match self {
             MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
             MastNodeBuilder::Call(builder) => Ok(builder.build_linked()?.into()),

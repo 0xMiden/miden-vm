@@ -8,7 +8,7 @@ use crate::{
     Felt,
     chiplets::hasher,
     mast::{
-        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
+        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
@@ -138,7 +138,6 @@ impl<'a> ResolvedSerializedForest<'a> {
             self.layout.basic_block_len(),
         )?);
         let mut mast_forest = MastForest::new();
-        mast_forest.debug_info = debug_info;
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
@@ -160,11 +159,18 @@ impl<'a> ResolvedSerializedForest<'a> {
         for index in 0..self.procedure_root_count() {
             roots.push(self.procedure_root_at(index)?);
         }
-        mast_forest.roots = roots;
-        mast_forest.commitment = mast_forest.compute_nodes_commitment(&mast_forest.roots);
 
-        mast_forest.advice_map = advice_map;
-        Ok(mast_forest)
+        MastForest::from_trusted_deserialization_parts(MastForestParts {
+            nodes: mast_forest.nodes,
+            roots,
+            advice_map,
+            debug_info,
+        })
+        .map_err(|e| {
+            DeserializationError::InvalidValue(format!(
+                "failed to construct trusted deserialized MAST forest: {e}",
+            ))
+        })
     }
 
     pub(super) fn node_count(&self) -> usize {

@@ -1464,7 +1464,7 @@ mod tests {
         let inserted_node_id = nodes
             .push(
                 MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(vec![Operation::Add]))
-                    .build_linked(static_block_id)
+                    .build_linked()
                     .unwrap(),
             )
             .unwrap();

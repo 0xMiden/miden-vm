@@ -192,6 +192,30 @@ impl MastForest {
         forest.validate_node_hashes()?;
         Ok(forest)
     }
+
+    pub(in crate::mast) fn from_trusted_deserialization_parts(
+        parts: MastForestParts,
+    ) -> Result<Self, MastForestError> {
+        if parts.nodes.len() > Self::MAX_NODES {
+            return Err(MastForestError::TooManyNodes);
+        }
+
+        let node_count = parts.nodes.len();
+        for &root_id in &parts.roots {
+            if root_id.to_usize() >= node_count {
+                return Err(MastForestError::NodeIdOverflow(root_id, node_count));
+            }
+        }
+        parts.debug_info.validate().map_err(MastForestError::InvalidDebugInfo)?;
+
+        Ok(Self {
+            commitment: compute_nodes_commitment(&parts.nodes, &parts.roots),
+            nodes: parts.nodes,
+            roots: parts.roots,
+            advice_map: parts.advice_map,
+            debug_info: parts.debug_info,
+        })
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
