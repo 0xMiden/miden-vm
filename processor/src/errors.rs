@@ -221,6 +221,13 @@ pub enum MemoryError {
     UnalignedWordAccess { addr: u32, ctx: ContextId },
     #[error("failed to read from memory: {0}")]
     MemoryReadFailed(String),
+    #[error(
+        "writing to memory address {addr} in context {ctx} would exceed the maximum number of memory elements {max}"
+    )]
+    #[diagnostic(help(
+        "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
+    ))]
+    MemoryElementLimitExceeded { ctx: ContextId, addr: u32, max: usize },
 }
 
 // CRYPTO ERROR

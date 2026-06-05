@@ -230,6 +230,7 @@ impl FastProcessor {
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
     }
@@ -264,7 +265,7 @@ impl FastProcessor {
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
             caller_hash: EMPTY_WORD,
-            memory: Memory::new(),
+            memory: Memory::new(options.max_memory_elements()),
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
             options,

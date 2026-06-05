@@ -26,6 +26,9 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed on the operand stack in the active execution
     /// context.
     max_stack_depth: usize,
+    /// Maximum number of field elements allowed in the processor's memory at any point during
+    /// execution, rounded up to the nearest multiple of 4.
+    max_memory_elements: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -39,6 +42,7 @@ impl Default for ExecutionOptions {
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         }
     }
 }
@@ -76,6 +80,15 @@ impl ExecutionOptions {
     /// This preserves the effective stack depth ceiling imposed by the previous fixed
     /// `FastProcessor` stack buffer.
     pub const DEFAULT_MAX_STACK_DEPTH: usize = 6615;
+
+    /// Default maximum number of field elements allowed in the processor's memory.
+    ///
+    /// Memory is element-addressable, so this bounds the total number of elements live across all
+    /// contexts. Internally memory is stored at word granularity (4 elements per word), so the
+    /// effective limit is rounded up to a whole number of words. Set to 2^28, which lets programs
+    /// use a large amount of memory while still providing a finite host-memory backstop against
+    /// unbounded growth from writes to arbitrarily many unique addresses.
+    pub const DEFAULT_MAX_MEMORY_ELEMENTS: usize = 1 << 28;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -137,6 +150,7 @@ impl ExecutionOptions {
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         })
     }
 
@@ -227,6 +241,15 @@ impl ExecutionOptions {
         self.max_stack_depth
     }
 
+    /// Returns the configured maximum number of field elements allowed in the processor's memory.
+    ///
+    /// This is the raw value as set via [`Self::with_max_memory_elements`]; the effective cap is
+    /// rounded up to a whole number of words (a multiple of 4) when memory is initialized.
+    #[inline]
+    pub fn max_memory_elements(&self) -> usize {
+        self.max_memory_elements
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
@@ -247,6 +270,12 @@ impl ExecutionOptions {
         }
         self.max_stack_depth = max_stack_depth;
         Ok(self)
+    }
+
+    /// Sets the maximum number of field elements allowed in the processor's memory.
+    pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
+        self.max_memory_elements = max_memory_elements;
+        self
     }
 }
 
