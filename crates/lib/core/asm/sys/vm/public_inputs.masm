@@ -161,6 +161,12 @@ proc load_kernel_digests
     adv_push
     exec.constants::tmp3 mem_store
 
+    # Mirror Statement::new's `aux_inputs.len() <= max_aux_inputs()` bound: at most
+    # MAX_AUX_INPUTS / WORD_SIZE = 255 kernel digests. (u32assert also bounds the load loop below.)
+    exec.constants::tmp3 mem_load
+    u32assert.err="number of kernel procedure digests must fit in a u32"
+    u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
+
     # Set up dummy state words with the destination pointer at position 12 for adv_pipe.
     padw padw padw
     exec.constants::variable_length_public_inputs_address_ptr mem_load
