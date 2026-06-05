@@ -120,11 +120,9 @@ end
 
 #! Verifies an EdDSA (Ed25519) signature with a pre-computed nonce digest.
 #!
-#! This procedure is intended for manual signature verification where the caller
-#! has already computed the message digest.
-#!
-#! This procedure uses an advice-only compatibility helper. The actual cryptographic verification is
-#! performed by the host, and the result is provided via the advice stack.
+#! The caller provides the public key, the pre-computed challenge digest, and the signature data in
+#! memory. This routine emits an event to trigger the advice-only compatibility handler, which runs
+#! the host-side Ed25519 verification, and reads the boolean result from the advice stack.
 #!
 #! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
 #! Output: `[result, ...]`
@@ -138,7 +136,14 @@ end
 #! All data must be stored in memory as packed u32 field elements (little-endian), with unused limbs
 #! in the final word set to zero.
 pub proc verify_prehash
-    exec.verify_prehash_impl
+    emit.EDDSA_VERIFY_EVENT
+    # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
+
+    drop drop drop
+    # => [...]
+
+    # Read verification result from advice stack (provided by the host).
+    adv_push
     # => [result, ...]
 end
 
@@ -203,26 +208,4 @@ proc copy_two_words_from_memory
     # Advance the write pointer by two words (eight field elements).
     push.8 add
     # => [ptr_out + 8, ...]
-end
-
-#! Internal implementation of EdDSA verification via advice.
-#!
-#! Emits an event to trigger the compatibility handler and reads the verification result from the
-#! advice stack.
-#!
-#! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
-#! Output: `[result, ...]`
-#!
-#! Where:
-#! - `result`: host verification result (1 or 0)
-proc verify_prehash_impl
-    emit.EDDSA_VERIFY_EVENT
-    # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
-
-    drop drop drop
-    # => [...]
-
-    # Read verification result from advice stack (provided by the host).
-    adv_push
-    # => [result, ...]
 end

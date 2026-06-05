@@ -12,8 +12,11 @@ use miden_core::{
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_core_lib::{dsa::ecdsa_k256_keccak::sign as ecdsa_sign, handlers::ecdsa::EcdsaRequest};
-use miden_crypto::{dsa::ecdsa_k256_keccak::SigningKey as SecretKey, hash::poseidon2::Poseidon2};
+use miden_core_lib::dsa::ecdsa_k256_keccak::sign as ecdsa_sign;
+use miden_crypto::{
+    dsa::ecdsa_k256_keccak::{PublicKey, Signature, SigningKey as SecretKey},
+    hash::poseidon2::Poseidon2,
+};
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -29,6 +32,12 @@ use crate::helpers::masm_store_felts;
 const PK_ADDR: u32 = 128;
 const DIGEST_ADDR: u32 = 192;
 const SIG_ADDR: u32 = 256;
+
+struct EcdsaTestRequest {
+    pk: PublicKey,
+    digest: [u8; 32],
+    sig: Signature,
+}
 
 // TESTS PRECOMPILE
 // ================================================================================================
@@ -73,7 +82,7 @@ fn test_ecdsa_verify_cases() {
 }
 
 #[test]
-fn test_ecdsa_verify_impl_result() {
+fn test_ecdsa_verify_prehash_result() {
     // One valid and one invalid (wrong key) request
     let test_cases = vec![
         (generate_valid_signature(), true),
@@ -90,9 +99,9 @@ fn test_ecdsa_verify_impl_result() {
                     # Store test data in memory
                     {memory_stores}
 
-                    # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
+                    # Call verify_prehash: [ptr_pk, ptr_digest, ptr_sig]
                     push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                    exec.verify_prehash_impl
+                    exec.verify_prehash
                     # => [result, ...]
 
                     exec.sys::truncate_stack
@@ -112,7 +121,7 @@ fn test_ecdsa_verify_impl_result() {
         );
 
         let advice_stack = output.advice.stack();
-        assert!(advice_stack.is_empty(), "advice stack should be empty after verify_impl");
+        assert!(advice_stack.is_empty(), "advice stack should be empty after verify_prehash");
     }
 }
 
@@ -197,7 +206,7 @@ fn test_ecdsa_verify_bis_wrapper() {
 // ================================================================================================
 
 /// Generates a valid signature using deterministic seed
-fn generate_valid_signature() -> EcdsaRequest {
+fn generate_valid_signature() -> EcdsaTestRequest {
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
@@ -206,11 +215,11 @@ fn generate_valid_signature() -> EcdsaRequest {
     let digest = [1u8; 32];
     let sig = secret_key.sign_prehash(digest);
 
-    EcdsaRequest::new(pk, digest, sig)
+    EcdsaTestRequest { pk, digest, sig }
 }
 
 /// Generates an invalid signature by signing with a different key
-fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
+fn generate_invalid_signature_wrong_key() -> EcdsaTestRequest {
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key1 = SecretKey::with_rng(&mut rng);
     let pk = secret_key1.public_key();
@@ -222,7 +231,7 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
     let digest = [1u8; 32];
     let sig = secret_key2.sign_prehash(digest);
 
-    EcdsaRequest::new(pk, digest, sig)
+    EcdsaTestRequest { pk, digest, sig }
 }
 
 // MASM GENERATION HELPERS
@@ -234,10 +243,10 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 /// - Public key: PK_ADDR (33 bytes)
 /// - Digest: DIGEST_ADDR (32 bytes)
 /// - Signature: SIG_ADDR (66 bytes)
-fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
-    let pk_words = bytes_to_packed_u32_elements(&request.pk().to_bytes());
-    let digest_words = bytes_to_packed_u32_elements(request.digest());
-    let sig_words = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+fn generate_memory_store_masm(request: &EcdsaTestRequest) -> String {
+    let pk_words = bytes_to_packed_u32_elements(&request.pk.to_bytes());
+    let digest_words = bytes_to_packed_u32_elements(&request.digest);
+    let sig_words = bytes_to_packed_u32_elements(&request.sig.to_bytes());
 
     [
         masm_store_felts(&pk_words, PK_ADDR),

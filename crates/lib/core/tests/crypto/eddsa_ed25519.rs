@@ -14,9 +14,7 @@ use miden_core::{
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_core_lib::{
-    dsa::eddsa_ed25519::sign as eddsa_sign, handlers::eddsa_ed25519::EddsaRequest,
-};
+use miden_core_lib::dsa::eddsa_ed25519::sign as eddsa_sign;
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey as SecretKey},
     hash::{poseidon2::Poseidon2, sha2::Sha512},
@@ -94,7 +92,7 @@ fn test_eddsa_verify_prehash_cases() {
 }
 
 #[test]
-fn test_eddsa_verify_prehash_impl_result() {
+fn test_eddsa_verify_prehash_result() {
     let valid = generate_valid_data();
     let invalid = generate_invalid_signature_data();
 
@@ -112,7 +110,7 @@ fn test_eddsa_verify_prehash_impl_result() {
                     {memory_stores}
 
                     push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
-                    exec.verify_prehash_impl
+                    exec.verify_prehash
 
                     exec.sys::truncate_stack
                 ",
@@ -128,7 +126,7 @@ fn test_eddsa_verify_prehash_impl_result() {
 
         assert!(
             output.advice.stack().is_empty(),
-            "advice stack should be empty after verify_prehash_impl"
+            "advice stack should be empty after verify_prehash"
         );
     }
 }
@@ -257,9 +255,19 @@ struct EddsaTestData {
     sig: Signature,
 }
 
+struct EddsaTestRequest {
+    pk: PublicKey,
+    k_digest: [u8; 64],
+    sig: Signature,
+}
+
 impl EddsaTestData {
-    fn request(&self) -> EddsaRequest {
-        EddsaRequest::new(self.pk.clone(), self.digest(), self.sig.clone())
+    fn request(&self) -> EddsaTestRequest {
+        EddsaTestRequest {
+            pk: self.pk.clone(),
+            k_digest: self.digest(),
+            sig: self.sig.clone(),
+        }
     }
 
     fn digest(&self) -> [u8; 64] {
@@ -309,10 +317,10 @@ fn compute_k_digest_bytes(pk: &PublicKey, message: &[u8; 32], sig: &Signature) -
 // MASM GENERATION HELPERS
 // ================================================================================================
 
-fn generate_memory_store_masm(request: &EddsaRequest, message: &[u8; 32]) -> String {
-    let pk_felts = bytes_to_packed_u32_elements(&request.pk().to_bytes());
-    let k_digest_felts = bytes_to_packed_u32_elements(&request.k_digest().to_bytes());
-    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+fn generate_memory_store_masm(request: &EddsaTestRequest, message: &[u8; 32]) -> String {
+    let pk_felts = bytes_to_packed_u32_elements(&request.pk.to_bytes());
+    let k_digest_felts = bytes_to_packed_u32_elements(&request.k_digest);
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig.to_bytes());
     let msg_felts = bytes_to_packed_u32_elements(message);
 
     [

@@ -20,8 +20,8 @@ use miden_utils_sync::LazyLock;
 use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     debug::default_debug_handlers,
-    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
-    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
+    ecdsa::{ECDSA_VERIFY_EVENT_NAME, handle_ecdsa_verify},
+    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, handle_eddsa_verify},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
     sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
@@ -140,8 +140,8 @@ impl CoreLibrary {
         let mut handlers: Vec<(EventName, Arc<dyn EventHandler>)> = vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
-            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
-            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
+            (ECDSA_VERIFY_EVENT_NAME, Arc::new(handle_ecdsa_verify)),
+            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(handle_eddsa_verify)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),

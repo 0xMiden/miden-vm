@@ -70,7 +70,7 @@ macro_rules! expect_assert_error_message {
 }
 
 #[test]
-fn core_library_does_not_export_precompile_impl_helpers() {
+fn core_library_does_not_export_advice_impl_helpers() {
     use miden_core_lib::CoreLibrary;
 
     let core_lib = CoreLibrary::default();
@@ -98,7 +98,7 @@ fn core_library_does_not_export_precompile_impl_helpers() {
     for path in internal_paths {
         assert!(
             package.get_procedure_root_by_path(path).is_none(),
-            "internal precompile helper must not be exported: {path}",
+            "internal advice helper must not be exported: {path}",
         );
     }
 }
