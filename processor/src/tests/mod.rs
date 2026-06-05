@@ -154,8 +154,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle",
-        "x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
-        "help: previous values at key were '[0]'. Operation would have replaced them with '[1]'"
+        "x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'"
     );
 }
 
@@ -272,14 +271,13 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
-        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
+        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'",
         regex!(r#",-\[.*:3:20\]"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "help: previous values at key were '[0]'. Operation would have replaced them with '[1]'"
+        "   `----"
     );
 }
 
@@ -321,14 +319,13 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero",
+        "  x division by zero: divisor must be non-zero for division or modulo operations",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             div",
         "   :             ^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
+        "   `----"
     );
 }
 
@@ -343,14 +340,13 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero",
+        "  x division by zero: divisor must be non-zero for division or modulo operations",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32div",
         "   :             ^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
+        "   `----"
     );
 }
 
@@ -422,8 +418,7 @@ fn test_diagnostic_failed_assertion() {
         " 4 |             assertz",
         "   :             ^^^^^^^",
         " 5 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 
     // With error message
@@ -452,8 +447,7 @@ fn test_diagnostic_failed_assertion() {
         r#" 4 |             assertz.err="some error message""#,
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 5 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 
     // With error message as constant
@@ -475,8 +469,7 @@ fn test_diagnostic_failed_assertion() {
         " 5 |             assertz.err=ERR_MSG",
         "   :             ^^^^^^^^^^^^^^^^^^^",
         " 6 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 }
 
@@ -698,14 +691,13 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x attempted to calculate integer logarithm with zero argument",
+        "  x ilog2 requires a non-zero argument",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             ilog2",
         "   :             ^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ilog2 requires a non-zero argument"
+        "   `----"
     );
 }
 
@@ -726,14 +718,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word access at memory address 3 in context 0 is unaligned",
+        "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
         "   :                      ^^^^^^^^^^^^^^^",
         " 5 |         end",
-        "   `----",
-        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 
     // mem_loadw_be
@@ -747,14 +738,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word access at memory address 3 in context 0 is unaligned",
+        "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
         "   :             ^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 }
 
@@ -1379,8 +1369,7 @@ fn test_assert_message_without_debug_info_reports_error_code() {
         format!(
             "  x assertion failed with error code: {}",
             error_code_from_msg("Value is not zero")
-        ),
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        )
     );
 
     let diagnostic = format!(

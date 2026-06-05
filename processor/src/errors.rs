@@ -214,10 +214,9 @@ pub enum MemoryError {
         "memory range start address cannot exceed end address, but was ({start_addr}, {end_addr})"
     )]
     InvalidMemoryRange { start_addr: u64, end_addr: u64 },
-    #[error("word access at memory address {addr} in context {ctx} is unaligned")]
-    #[diagnostic(help(
-        "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
-    ))]
+    #[error(
+        "word access at memory address {addr} in context {ctx} is unaligned: word accesses require addresses that are multiples of 4"
+    )]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
     #[error("failed to read from memory: {0}")]
     MemoryReadFailed(String),
@@ -284,10 +283,7 @@ pub enum CryptoError {
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
-    #[error("division by zero")]
-    #[diagnostic(help(
-        "ensure the divisor (second stack element) is non-zero before division or modulo operations"
-    ))]
+    #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
     #[error(
         "assertion failed with error {}",
@@ -296,23 +292,17 @@ pub enum OperationError {
             None => format!("code: {err_code}"),
         }
     )]
-    #[diagnostic(help(
-        "assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
-    ))]
     FailedAssertion {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
     #[error(
-        "u32 assertion failed with error {}: invalid values: {invalid_values:?}",
+        "u32 assertion failed: u32assert2 requires both stack values to be valid 32-bit unsigned integers; error {}; invalid values: {invalid_values:?}",
         match err_msg {
             Some(msg) => format!("message: {msg}"),
             None => format!("code: {err_code}"),
         }
     )]
-    #[diagnostic(help(
-        "u32assert2 requires both stack values to be valid 32-bit unsigned integers"
-    ))]
     U32AssertionFailed {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
@@ -326,8 +316,7 @@ pub enum OperationError {
     InvalidMerklePathLength { path_len: usize, depth: Felt },
     #[error("when returning from a call, stack depth must be {MIN_STACK_DEPTH}, but was {depth}")]
     InvalidStackDepthOnReturn { depth: usize },
-    #[error("attempted to calculate integer logarithm with zero argument")]
-    #[diagnostic(help("ilog2 requires a non-zero argument"))]
+    #[error("ilog2 requires a non-zero argument")]
     LogArgumentZero,
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
@@ -349,10 +338,9 @@ pub enum OperationError {
     NotBinaryValue { value: Felt },
     #[error("if statement expected a binary value on top of the stack, but got {value}")]
     NotBinaryValueIf { value: Felt },
-    #[error("loop condition must be a binary value, but got {value}")]
-    #[diagnostic(help(
-        "this could happen either when first entering the loop, or any subsequent iteration"
-    ))]
+    #[error(
+        "loop condition must be a binary value on entry and each subsequent iteration, but got {value}"
+    )]
     NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values { values: Vec<Felt> },

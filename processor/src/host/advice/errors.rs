@@ -9,10 +9,10 @@ use crate::{Felt, Word, crypto::merkle::MerkleError};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {
-    #[error("value for key {} already present in the advice map", key.to_hex())]
-    #[diagnostic(help(
-        "previous values at key were '{prev_values:?}'. Operation would have replaced them with '{new_values:?}'",
-    ))]
+    #[error(
+        "value for key {} already present in the advice map: previous values were '{prev_values:?}', attempted replacement values were '{new_values:?}'",
+        key.to_hex()
+    )]
     MapKeyAlreadyPresent {
         key: Word,
         prev_values: Vec<Felt>,
