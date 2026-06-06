@@ -61,7 +61,12 @@ pub enum PackageStripError {
 /// Errors raised while decoding trusted package-owned debug information.
 #[derive(Debug, thiserror::Error)]
 pub enum PackageDebugInfoError {
-    #[error("package debug sections were preserved from an untrusted read and are not trusted")]
+    #[error("package debug sections are present but are not trusted")]
+    /// Package debug sections are present on a package that does not trust them.
+    ///
+    /// Normal untrusted deserialization discards package-owned debug sections before returning a
+    /// package. This error protects callers from manually constructed packages, or future
+    /// deserialization paths, that retain debug sections without marking them trusted.
     UntrustedSections,
     #[error("package contains multiple '{id}' debug sections")]
     DuplicateSection {
@@ -368,9 +373,13 @@ impl Package {
 
     /// Decodes trusted package-owned debug sections, if any are present.
     ///
-    /// This does not read legacy debug metadata from the embedded [`MastForest`]. During the
-    /// migration, forest debug info may still exist as compatibility data, but package-owned debug
-    /// consumers should use this section-backed API.
+    /// Package debug sections are trusted only for packages constructed in-process or read via the
+    /// trusted same-domain readers such as [`Self::read_from_trusted`],
+    /// [`Self::read_from_bytes_trusted`], [`Self::read_from_unchecked`], and
+    /// [`Self::read_from_bytes_unchecked`]. Normal untrusted readers discard debug sections before
+    /// returning the package.
+    ///
+    /// This does not read legacy debug metadata from the embedded [`MastForest`].
     pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
         if !self.debug_sections_trusted && self.sections.iter().any(|section| section.id.is_debug())
         {
@@ -1019,6 +1028,11 @@ impl Package {
     }
 
     #[cfg(feature = "std")]
+    /// Reads a trusted local package file.
+    ///
+    /// This preserves package-owned debug sections and should be used only for files/cache entries
+    /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
+    /// bytes received across a trust boundary.
     pub fn deserialize_from_file(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, DeserializationError> {
@@ -1488,6 +1502,47 @@ mod tests {
     }
 
     #[test]
+    fn untrusted_embedded_kernel_decode_discards_nested_debug_info() {
+        let kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        assert!(kernel.debug_info().unwrap().is_some());
+
+        let package = build_package(
+            "app",
+            TargetType::Executable,
+            "app::entry",
+            vec![kernel_dependency(&kernel)],
+            vec![Section::new(SectionId::KERNEL, kernel.to_bytes())],
+        );
+
+        let round_tripped = Package::read_from_bytes(&package.to_bytes())
+            .expect("untrusted package read should succeed");
+        let raw_kernel_bytes = round_tripped
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .expect("kernel section should remain available as opaque bytes")
+            .data
+            .as_ref();
+        let trusted_kernel = Package::read_from_bytes_trusted(raw_kernel_bytes)
+            .expect("trusted direct kernel read should succeed");
+        assert!(
+            trusted_kernel.debug_info().unwrap().is_some(),
+            "opaque kernel bytes may still contain trusted-cache debug metadata"
+        );
+
+        let untrusted_kernel = round_tripped
+            .try_embedded_kernel_package()
+            .expect("embedded kernel should decode")
+            .expect("kernel should be present");
+        assert!(
+            !untrusted_kernel.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted embedded-kernel decode should discard nested debug sections"
+        );
+        assert!(untrusted_kernel.debug_info().unwrap().is_none());
+    }
+
+    #[test]
     fn strip_debug_info_removes_package_and_embedded_kernel_debug() {
         let mut kernel =
             build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
@@ -1530,6 +1585,20 @@ mod tests {
                 .sections
                 .iter()
                 .any(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+        );
+
+        let raw_kernel_bytes = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .expect("kernel section should remain embedded")
+            .data
+            .as_ref();
+        let trusted_stripped_kernel = Package::read_from_bytes_trusted(raw_kernel_bytes)
+            .expect("trusted stripped kernel read should succeed");
+        assert!(
+            !trusted_stripped_kernel.sections.iter().any(|section| section.id.is_debug()),
+            "stripping should remove nested debug sections from raw kernel bytes"
         );
     }
 
