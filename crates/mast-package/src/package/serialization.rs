@@ -977,7 +977,7 @@ mod tests {
             .run(&any::<Package>(), move |package| {
                 let bytes = package.to_bytes();
                 let deserialized = Package::read_from_bytes(&bytes).unwrap();
-                let mut expected = package.clone();
+                let mut expected = package;
                 expected.sections.retain(|section| !section.id.is_debug());
                 prop_assert_eq!(expected.to_bytes(), deserialized.to_bytes());
                 Ok(())
