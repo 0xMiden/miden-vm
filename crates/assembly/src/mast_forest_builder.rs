@@ -125,7 +125,7 @@ impl MastForestBuilder {
     /// In all other cases, references to procedures not present in the main MastForest are assumed
     /// to be dynamically-linked, and are inserted as an external node. Dynamically-linked libraries
     /// must be provided separately to the processor at runtime.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new<'a>(
         static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
