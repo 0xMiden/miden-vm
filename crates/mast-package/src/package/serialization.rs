@@ -224,11 +224,12 @@ impl Package {
         let manifest = PackageManifest::read_from_safe(source, &mast)?;
 
         // Read custom sections
-        let sections = Vec::<Section>::read_from(source)?;
+        let mut sections = Vec::<Section>::read_from(source)?;
         if !debug_sections_trusted && sections.iter().any(|section| section.id.is_debug()) {
             log::warn!(
-                "Package read preserved debug sections from an untrusted artifact; Package::debug_info() will not expose them as trusted debug info"
+                "Package read ignored debug sections from an untrusted artifact; use Package::read_from_trusted for local cache/debug reads"
             );
+            sections.retain(|section| !section.id.is_debug());
         }
 
         let mut package = Self {
@@ -656,8 +657,8 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
-        ProcedureExport, SectionId, TargetType,
+        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
+        TargetType,
         debug_info::{
             DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
             DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
@@ -794,7 +795,9 @@ mod tests {
             .run(&any::<Package>(), move |package| {
                 let bytes = package.to_bytes();
                 let deserialized = Package::read_from_bytes(&bytes).unwrap();
-                prop_assert_eq!(bytes, deserialized.to_bytes());
+                let mut expected = package.clone();
+                expected.sections.retain(|section| !section.id.is_debug());
+                prop_assert_eq!(expected.to_bytes(), deserialized.to_bytes());
                 Ok(())
             })
             .unwrap_or_else(|err| {
@@ -803,11 +806,33 @@ mod tests {
     }
 
     #[test]
-    fn package_checked_deserialization_preserves_untrusted_debug_sections() {
+    fn package_checked_deserialization_discards_untrusted_debug_sections() {
         let package = build_package_with_debug_info();
         let bytes = package.to_bytes();
 
         let deserialized = Package::read_from_bytes(&bytes).unwrap();
+
+        assert!(
+            !deserialized.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted package reads should discard debug sections"
+        );
+        assert!(deserialized.debug_info().unwrap().is_none());
+        let debug_source_map_id = SectionId::DEBUG_SOURCE_MAP.as_str().as_bytes();
+        assert!(
+            !deserialized
+                .to_bytes()
+                .windows(debug_source_map_id.len())
+                .any(|window| window == debug_source_map_id),
+            "discarded debug sections should not be reserialized"
+        );
+    }
+
+    #[test]
+    fn package_trusted_deserialization_preserves_trusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes_trusted(&bytes).unwrap();
 
         assert!(
             deserialized
@@ -815,10 +840,7 @@ mod tests {
                 .iter()
                 .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
         );
-        assert!(matches!(
-            deserialized.debug_info(),
-            Err(PackageDebugInfoError::UntrustedSections)
-        ));
+        assert!(deserialized.debug_info().unwrap().is_some());
     }
 
     #[test]

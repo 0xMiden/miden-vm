@@ -130,8 +130,10 @@ pub struct Package {
     pub sections: Vec<Section>,
     /// Whether package-owned debug sections may be decoded as trusted debug info.
     ///
-    /// Checked package deserialization preserves section framing but marks debug sections
-    /// trusted. Specialized untrusted readers may set this to false.
+    /// Normal package deserialization validates the embedded MAST forest, warns on package debug
+    /// sections, and discards those sections as untrusted metadata. Trusted local/cache readers and
+    /// in-process package construction preserve package debug sections and expose them through
+    /// [`Package::debug_info`].
     debug_sections_trusted: bool,
 }
 
