@@ -241,7 +241,7 @@ The division operators in constant expressions have different semantics:
 
 | Operator | Semantics | Example |
 | -------- | --------- | ------- |
-| `/`      | Field division over the VM's base field. This evaluates as $a \cdot b^{-1} \mod p$, matching the [`div`](./field_operations.md#arithmetic-and-boolean-operations) instruction. | `3/2 = 9223372034707292162` |
+| `/`      | Field division over the VM's base field. This evaluates as $a \cdot b^{-1}$ modulo the VM base-field modulus, matching the [`div`](./field_operations.md#arithmetic-and-boolean-operations) instruction. | `3/2 = 9223372034707292162` |
 | `//`     | Integer floor division. This evaluates as the usual quotient with the remainder discarded. | `3//2 = 1` |
 
 Use `//` when the intended result is an integer quotient.
