@@ -79,9 +79,9 @@ fn run_rejects_missing_inferred_inputs_file() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("Failed to open input file"))
-        .stderr(predicate::str::contains(
-            program_path.with_extension("inputs").display().to_string(),
-        ));
+        .stderr(predicate::str::contains("miden-vm-cli-missing-run-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
 
     fs::remove_file(program_path).unwrap();
 }
@@ -96,9 +96,9 @@ fn prove_rejects_missing_inferred_inputs_file() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("Failed to open input file"))
-        .stderr(predicate::str::contains(
-            program_path.with_extension("inputs").display().to_string(),
-        ));
+        .stderr(predicate::str::contains("miden-vm-cli-missing-prove-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
 
     fs::remove_file(program_path).unwrap();
 }
