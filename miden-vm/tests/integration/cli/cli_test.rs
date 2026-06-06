@@ -74,7 +74,7 @@ fn cli_bundle_debug() {
         .debug_info()
         .expect("package debug info should decode")
         .and_then(|debug_info| debug_info.source_map)
-        .is_some_and(|source_map| !source_map.asm_ops.is_empty());
+        .is_some_and(|source_map| !source_map.asm_ops().is_empty());
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();
 }

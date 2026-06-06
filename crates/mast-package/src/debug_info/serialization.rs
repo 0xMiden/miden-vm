@@ -203,9 +203,9 @@ impl Deserializable for DebugSourceMastNode {
 
 impl Serializable for DebugSourceGraphSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version);
-        self.nodes.write_into(target);
-        self.roots.write_into(target);
+        target.write_u8(self.version());
+        self.nodes().write_into(target);
+        self.roots().write_into(target);
     }
 }
 
@@ -220,7 +220,7 @@ impl Deserializable for DebugSourceGraphSection {
 
         let nodes = Vec::<DebugSourceMastNode>::read_from(source)?;
         let roots = Vec::<DebugSourceMastNodeId>::read_from(source)?;
-        Ok(Self { version, nodes, roots })
+        Ok(Self::from_parts(nodes, roots))
     }
 }
 
@@ -285,9 +285,9 @@ impl Deserializable for DebugSourceVar {
 
 impl Serializable for DebugSourceMapSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.version);
-        self.asm_ops.write_into(target);
-        self.debug_vars.write_into(target);
+        target.write_u8(self.version());
+        self.asm_ops().write_into(target);
+        self.debug_vars().write_into(target);
     }
 }
 
@@ -302,7 +302,7 @@ impl Deserializable for DebugSourceMapSection {
 
         let asm_ops = Vec::<DebugSourceAsmOp>::read_from(source)?;
         let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
-        Ok(Self { version, asm_ops, debug_vars })
+        Ok(Self::from_parts(asm_ops, debug_vars))
     }
 }
 
@@ -903,9 +903,8 @@ mod tests {
 
     #[test]
     fn test_debug_source_graph_section_roundtrip() {
-        let section = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: alloc::vec![
+        let section = DebugSourceGraphSection::from_parts(
+            alloc::vec![
                 DebugSourceMastNode::new(MastNodeId::new_unchecked(0), alloc::vec![], 0, 1),
                 DebugSourceMastNode::new(
                     MastNodeId::new_unchecked(1),
@@ -914,8 +913,8 @@ mod tests {
                     3,
                 ),
             ],
-            roots: alloc::vec![DebugSourceMastNodeId::from(1)],
-        };
+            alloc::vec![DebugSourceMastNodeId::from(1)],
+        );
 
         roundtrip(&section);
     }
@@ -923,9 +922,8 @@ mod tests {
     #[test]
     fn test_debug_source_map_section_roundtrip() {
         let source_node = DebugSourceMastNodeId::from(0);
-        let section = DebugSourceMapSection {
-            version: DEBUG_SOURCE_MAP_VERSION,
-            asm_ops: alloc::vec![DebugSourceAsmOp::new(
+        let section = DebugSourceMapSection::from_parts(
+            alloc::vec![DebugSourceAsmOp::new(
                 source_node,
                 2,
                 None,
@@ -933,12 +931,12 @@ mod tests {
                 "add".into(),
                 1,
             )],
-            debug_vars: alloc::vec![DebugSourceVar::new(
+            alloc::vec![DebugSourceVar::new(
                 source_node,
                 2,
                 DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
             )],
-        };
+        );
 
         roundtrip(&section);
     }

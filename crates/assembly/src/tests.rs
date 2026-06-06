@@ -59,7 +59,7 @@ fn assert_package_has_source_asm_ops(package: &Package, message: &str) {
     let has_source_asm_ops = debug_info
         .source_map
         .as_ref()
-        .is_some_and(|source_map| !source_map.asm_ops.is_empty());
+        .is_some_and(|source_map| !source_map.asm_ops().is_empty());
     assert!(has_source_asm_ops, "{message}");
 }
 
