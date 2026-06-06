@@ -65,7 +65,7 @@ chacha20poly1305 = { default-features = false, version = "0.10" }
 curve25519-dalek = { default-features = false, version = "4" }
 der              = { default-features = false, version = "0.7" }
 ed25519-dalek    = { default-features = false, version = "2" }
-flume            = { default-features = false, version = "0.11.1" }
+flume            = { default-features = false, version = "0.12.0" }
 hex              = { default-features = false, version = "0.4" }
 hkdf             = { default-features = false, version = "0.12" }
 itertools        = "0.14"
@@ -95,7 +95,7 @@ rand               = { default-features = false, version = "0.10" }
 serde              = { default-features = false, features = ["alloc", "derive"], version = "1.0" }
 thiserror          = { default-features = false, version = "2.0" }
 tracing            = { default-features = false, features = ["attributes"], version = "0.1.37" }
-tracing-forest     = "0.1.6"
+tracing-forest     = "0.3.1"
 tracing-subscriber = { features = ["env-filter", "fmt", "std"], version = "0.3.17" }
 
 [workspace.lints.rust]

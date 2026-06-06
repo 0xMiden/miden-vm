@@ -39,9 +39,6 @@ multiple-versions = "deny"
 skip = [
   # Allow duplicate spin versions - transitively pulled by p3-dft and flume
   { name = "spin" },
-  # tracing-forest in miden-bench still depends on thiserror 1.x
-  { name = "thiserror" },
-  { name = "thiserror-impl" },
 ]
 skip-tree = [
   # Stable crypto crates still depend on rand_core 0.6 and chacha20 0.9.
