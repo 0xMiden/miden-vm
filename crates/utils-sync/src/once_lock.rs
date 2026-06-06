@@ -1,9 +1,9 @@
+use core::fmt;
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
+
 #[cfg(not(feature = "std"))]
 use once_cell::race::OnceBox;
-
-use core::fmt;
 
 /// A cache-invalidation wrapper with consistent semantics across std and no_std.
 ///
@@ -31,15 +31,11 @@ impl<T> OnceLockCompat<T> {
     pub const fn new() -> Self {
         #[cfg(feature = "std")]
         {
-            Self {
-                inner: OnceLock::new(),
-            }
+            Self { inner: OnceLock::new() }
         }
         #[cfg(not(feature = "std"))]
         {
-            Self {
-                inner: OnceBox::new(),
-            }
+            Self { inner: OnceBox::new() }
         }
     }
 
