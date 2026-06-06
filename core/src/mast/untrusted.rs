@@ -27,8 +27,7 @@ use crate::serde::{BudgetedReader, DeserializationError, SliceReader};
 /// This type exists to provide type-level safety for untrusted deserialization. The validation
 /// performed by [`validate()`](Self::validate) includes:
 ///
-/// 1. **Structural validation**: Checks that basic block batch invariants are satisfied and
-///    procedure names reference valid roots.
+/// 1. **Structural validation**: Checks that basic block batch invariants are satisfied.
 /// 2. **Topological ordering**: Verifies that all node references point to nodes that appear
 ///    earlier in the forest (no forward references).
 /// 3. **Hash recomputation**: Recomputes the digest for every node and verifies it matches the
@@ -84,7 +83,7 @@ impl UntrustedMastForest {
     /// 1. If wire node hashes are present, recomputes all non-external node hashes and requires
     ///    them to match the serialized digests.
     /// 2. If the payload is hashless, uses the digests rebuilt during materialization.
-    /// 3. Validates structural invariants, topological ordering, and procedure-name roots.
+    /// 3. Validates structural invariants and topological ordering.
     ///
     /// # Returns
     ///
@@ -96,8 +95,6 @@ impl UntrustedMastForest {
     /// Returns an error if:
     /// - Deferred materialization from serialized form fails ([`MastForestError::Deserialization`])
     /// - Any basic block has invalid batch structure ([`MastForestError::InvalidBatchPadding`])
-    /// - Any procedure name references a non-root digest
-    ///   ([`MastForestError::InvalidProcedureNameDigest`])
     /// - Any node references a child that appears later in the forest
     ///   ([`MastForestError::ForwardReference`])
     /// - Any non-external wire digest does not match the recomputed digest
