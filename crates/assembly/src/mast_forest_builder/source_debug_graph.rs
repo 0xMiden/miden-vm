@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use alloc::vec::Vec;
 
 use miden_assembly_syntax::debuginfo::{FileLineCol, Location};
@@ -123,6 +121,7 @@ impl SourceDebugGraph {
         &self.roots
     }
 
+    #[cfg(test)]
     pub(crate) fn source_nodes_for_exec_node(
         &self,
         exec_node: MastNodeId,

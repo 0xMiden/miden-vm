@@ -21,22 +21,19 @@ use crate::diagnostics::{Diagnostic, Report, miette};
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {
     mast_forest: MastForest,
-    #[allow(dead_code)]
     source_graph: SourceDebugGraph,
     /// Final node IDs for builder refs retained in the finalized forest.
     node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
     /// Final source occurrence IDs for builder refs retained in the source graph.
-    #[allow(dead_code)]
     source_id_by_ref: BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
 }
 
 impl BuiltMastForest {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn into_parts(self) -> (MastForest, BTreeMap<MastNodeRef, MastNodeId>) {
         (self.mast_forest, self.node_id_by_ref)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn into_parts_with_source_graph(
         self,
     ) -> (
