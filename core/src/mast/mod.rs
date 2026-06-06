@@ -63,17 +63,12 @@ pub use node::{
 };
 
 #[cfg(feature = "serde")]
-use crate::serde::SliceReader;
+use crate::serde::{Deserializable, Serializable, SliceReader};
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteWriter, DeserializationError},
     utils::{Idx, IndexVec, hash_string_to_word},
-};
-
-mod debuginfo;
-pub use debuginfo::{
-    AsmOpIndexError, DebugInfo, DebugInfoIndexError, DebugVarId, OpToAsmOpId, OpToDebugVarIds,
 };
 
 mod serialization;
@@ -991,71 +986,6 @@ impl Iterator for SubtreeIterator<'_> {
     }
 }
 
-// ASM OP ID
-// ================================================================================================
-
-/// Unique identifier for assembly operation metadata within a [`MastForest`].
-///
-/// AssemblyOps are metadata used only for error context and debugging tools.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
-)]
-pub struct AsmOpId(u32);
-
-impl AsmOpId {
-    /// Creates a new [`AsmOpId`] with the provided inner value.
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<u32> for AsmOpId {
-    fn from(value: u32) -> Self {
-        AsmOpId::new(value)
-    }
-}
-
-impl Idx for AsmOpId {}
-
-impl From<AsmOpId> for u32 {
-    fn from(id: AsmOpId) -> Self {
-        id.0
-    }
-}
-
-impl fmt::Display for AsmOpId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "AsmOpId({})", self.0)
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl Arbitrary for AsmOpId {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        any::<u32>().prop_map(Self::from).boxed()
-    }
-}
-
-impl Serializable for AsmOpId {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target)
-    }
-}
-
-impl Deserializable for AsmOpId {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let value = u32::read_from(source)?;
-        Ok(Self(value))
-    }
-}
-
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
@@ -1069,26 +999,18 @@ pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
 /// Represents the types of errors that can occur when dealing with MAST forest.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MastForestError {
-    #[error("MAST forest debug metadata count exceeds the maximum of {} entries", u32::MAX)]
-    TooManyDebugInfoEntries,
     #[error("MAST forest node count exceeds the maximum of {} nodes", MastForest::MAX_NODES)]
     TooManyNodes,
     #[error("node id {0} is greater than or equal to forest length {1}")]
     NodeIdOverflow(MastNodeId, usize),
-    #[error("invalid MAST forest debug info: {0}")]
-    InvalidDebugInfo(String),
     #[error("basic block cannot be created from an empty list of operations")]
     EmptyBasicBlock,
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
-    #[error("assembly op storage error: {0}")]
-    AssemblyOpError(AsmOpIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
-    #[error("procedure name references digest that is not a procedure root: {0:?}")]
-    InvalidProcedureNameDigest(Word),
     #[error(
         "node {0:?} references child {1:?} which comes after it in the forest (forward reference)"
     )]

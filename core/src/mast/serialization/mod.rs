@@ -63,14 +63,6 @@
 //! - Advice map (`AdviceMap`)
 //!
 //! (Legacy DebugInfo section - rejected if present; omitted by current writers)
-//! - Error codes map (`BTreeMap<u64, String>`)
-//! - Procedure names map (`BTreeMap<Word, String>`)
-//! - Assembly operation data (raw bytes for AssemblyOp payloads)
-//! - Assembly operation string table (deduplicated strings)
-//! - Assembly operation infos (`Vec<AsmOpInfo>`)
-//! - OpToAsmOpId CSR (operation-indexed AssemblyOp metadata)
-//! - Debug variables (`Vec<DebugVarInfo>`)
-//! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
 //! Current writers always omit the legacy `DebugInfo` section. Readers reject legacy wire debug
 //! payloads because package-owned debug sections are now the only supported debug serialization
@@ -113,8 +105,6 @@ use crate::{
     },
 };
 
-pub(crate) mod asm_op;
-
 mod info;
 pub use info::{MastNodeEntry, MastNodeInfo};
 
@@ -132,9 +122,6 @@ use resolved::{ResolvedSerializedForest, basic_block_offset_for_node_index};
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, basic_block_data_len};
 
-pub(crate) mod string_table;
-pub(crate) use string_table::StringTable;
-
 #[cfg(test)]
 mod seed_gen;
 
@@ -146,12 +133,6 @@ mod tests;
 
 /// Specifies an offset into the `node_data` section of an encoded [`MastForest`].
 type NodeDataOffset = u32;
-
-/// Specifies an offset into the `strings_data` section of an encoded [`MastForest`].
-type StringDataOffset = usize;
-
-/// Specifies an offset into the strings table of an encoded [`MastForest`].
-type StringIndex = usize;
 
 /// Default multiplier for the untrusted validation allocation budget.
 ///
@@ -440,7 +421,7 @@ impl<'a> MastForestWireView<'a> {
     /// that are enforced by [`crate::mast::UntrustedMastForest::validate`]. It does not:
     /// - verify that serialized non-external digests match the structure they describe
     /// - check topological ordering / forward-reference constraints
-    /// - validate basic-block batch invariants or procedure-name-root consistency
+    /// - validate basic-block batch invariants
     /// - materialize or expose package-owned debug sections
     ///
     /// For strict materialized validation, use
