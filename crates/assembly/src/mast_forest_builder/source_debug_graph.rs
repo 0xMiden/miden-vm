@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+#[cfg(feature = "std")]
 use miden_assembly_syntax::debuginfo::{FileLineCol, Location};
 use miden_core::{
     mast::MastNodeId,
@@ -80,6 +81,7 @@ impl SourceMastNode {
         &self.debug_vars
     }
 
+    #[cfg(feature = "std")]
     fn rewrite_source_locations(
         &mut self,
         rewrite_location: &mut impl FnMut(Location) -> Location,
@@ -149,6 +151,7 @@ impl SourceDebugGraph {
         roots.next().is_none().then_some(root)
     }
 
+    #[cfg(feature = "std")]
     pub(crate) fn with_rewritten_source_locations(
         mut self,
         mut rewrite_location: impl FnMut(Location) -> Location,
