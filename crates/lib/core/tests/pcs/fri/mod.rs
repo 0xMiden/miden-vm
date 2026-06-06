@@ -9,6 +9,25 @@ use miden_core::Word;
 pub use verifier_fri_e2f4::*;
 
 #[test]
+fn fri_verify_rejects_empty_query_region() {
+    let source = "
+        use miden::core::pcs::fri::frie2f4
+        use miden::core::stark::constants
+
+        begin
+            push.1 exec.constants::set_lde_domain_generator
+            push.64 exec.constants::set_remainder_poly_size
+            push.4294912800 exec.constants::set_remainder_poly_address
+            push.4294912800 exec.constants::set_fri_queries_address
+            exec.frie2f4::verify
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_message!(test, contains "fri query region must be non-empty");
+}
+
+#[test]
 fn fri_fold4_ext2_remainder64() {
     let source = "
         use miden::core::pcs::fri::frie2f4
