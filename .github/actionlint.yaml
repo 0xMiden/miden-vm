@@ -1,3 +1,4 @@
 self-hosted-runner:
   labels:
+    - codspeed-macro
     - warp-ubuntu-latest-x64-4x

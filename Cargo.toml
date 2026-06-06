@@ -1,6 +1,7 @@
 [workspace]
 exclude = ["miden-crypto-fuzz"]
 members = [
+  "benches/smt-codspeed",
   "miden-bench",
   "miden-crypto",
   "miden-crypto-derive",
@@ -101,6 +102,11 @@ tracing-subscriber = { features = ["env-filter", "fmt", "std"], version = "0.3.1
 [workspace.lints.rust]
 # Suppress warnings about `cfg(fuzzing)`, which is automatically set when using `cargo-fuzz`.
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+[profile.optimized]
+codegen-units = 1
+inherits      = "release"
+lto           = true
 
 [profile.test-release]
 debug            = 2
