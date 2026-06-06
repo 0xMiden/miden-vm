@@ -10,9 +10,9 @@ use miden_core::{
 use miden_mast_package::{
     PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
-        DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection,
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-        DebugSourceMastNodeId, DebugSourceVar, DebugSourcesSection, DebugTypesSection,
+        DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection,
+        DebugSourceMastNode, DebugSourceMastNodeId, DebugSourceVar, DebugSourcesSection,
+        DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -61,7 +61,7 @@ end
             .expect("dev package should contain debug info")
             .source_map
             .as_ref()
-            .is_some_and(|source_map| !source_map.asm_ops.is_empty())
+            .is_some_and(|source_map| !source_map.asm_ops().is_empty())
     );
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
@@ -272,15 +272,15 @@ end
     let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
     let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
         .expect("DEBUG_SOURCE_GRAPH should deserialize");
-    assert_eq!(debug_source_graph.version, 1);
-    assert!(!debug_source_graph.nodes.is_empty());
-    assert!(!debug_source_graph.roots.is_empty());
+    assert_eq!(debug_source_graph.version(), 1);
+    assert!(!debug_source_graph.nodes().is_empty());
+    assert!(!debug_source_graph.roots().is_empty());
 
     let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
     let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
         .expect("DEBUG_SOURCE_MAP should deserialize");
-    assert_eq!(debug_source_map.version, 1);
-    assert!(!debug_source_map.asm_ops.is_empty());
+    assert_eq!(debug_source_map.version(), 1);
+    assert!(!debug_source_map.asm_ops().is_empty());
 }
 
 #[test]
@@ -335,9 +335,9 @@ end
         .expect("DEBUG_SOURCE_MAP should deserialize");
 
     let mut source_nodes_by_exec = BTreeMap::new();
-    for row in &debug_source_map.asm_ops {
+    for row in debug_source_map.asm_ops() {
         let source_node = row.source_node.as_u32() as usize;
-        let exec_node = debug_source_graph.nodes[source_node].exec_node;
+        let exec_node = debug_source_graph.nodes()[source_node].exec_node;
         source_nodes_by_exec
             .entry(exec_node)
             .or_insert_with(std::collections::BTreeSet::<DebugSourceMastNodeId>::new)
@@ -399,12 +399,12 @@ end
         .expect("DEBUG_SOURCE_MAP should deserialize");
 
     let exec_with_split_ranges = debug_source_graph
-        .nodes
+        .nodes()
         .iter()
         .enumerate()
         .fold(BTreeMap::new(), |mut ranges_by_exec, (source_idx, source_node)| {
             let has_asm_op = debug_source_map
-                .asm_ops
+                .asm_ops()
                 .iter()
                 .any(|row| row.source_node.as_u32() as usize == source_idx);
             if has_asm_op {
@@ -469,14 +469,12 @@ fn debug_bearing_static_package(
         )));
     }
 
-    let source_graph = DebugSourceGraphSection {
-        version: DEBUG_SOURCE_GRAPH_VERSION,
-        nodes: vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
-        roots: vec![source_root],
-    };
-    let source_map = DebugSourceMapSection {
-        version: DEBUG_SOURCE_MAP_VERSION,
-        asm_ops: vec![DebugSourceAsmOp::new(
+    let source_graph = DebugSourceGraphSection::from_parts(
+        vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+        vec![source_root],
+    );
+    let source_map = DebugSourceMapSection::from_parts(
+        vec![DebugSourceAsmOp::new(
             source_root,
             0,
             None,
@@ -484,12 +482,12 @@ fn debug_bearing_static_package(
             "add".to_string(),
             1,
         )],
-        debug_vars: vec![DebugSourceVar::new(
+        vec![DebugSourceVar::new(
             source_root,
             0,
             DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
         )],
-    };
+    );
 
     let mut package = MastPackage::create(
         PackageId::from(name),
@@ -564,17 +562,12 @@ end
         .debug_info()
         .expect("package debug sections should decode")
         .expect("root package should contain debug info");
-    let source_graph = debug_info
-        .source_graph
-        .as_ref()
-        .expect("root package should contain source graph");
-
     let source_for_context = |context_name: &str| {
         debug_info
             .source_map
             .as_ref()
             .expect("root package should contain source map")
-            .asm_ops
+            .asm_ops()
             .iter()
             .find(|row| row.context_name == context_name)
             .map(|row| row.source_node)
@@ -584,19 +577,23 @@ end
     let depb_source = source_for_context("depb_ctx");
     assert_ne!(depa_source, depb_source, "static package source occurrences must stay distinct",);
 
-    let depa_exec = source_graph.source_node(depa_source).unwrap().exec_node;
-    let depb_exec = source_graph.source_node(depb_source).unwrap().exec_node;
+    let depa_exec = debug_info.source_node(depa_source).unwrap().exec_node;
+    let depb_exec = debug_info.source_node(depb_source).unwrap().exec_node;
     assert_eq!(
         depa_exec, depb_exec,
         "identical static dependency bodies should dedup to one execution node",
     );
 
-    let contexts_for_deduped_exec = debug_info
-        .source_nodes_for_exec_node(depa_exec)
-        .filter_map(|(source_node, _)| {
-            debug_info
-                .first_asm_op_for_source_node(source_node)
-                .map(|row| row.context_name.as_str())
+    let contexts_for_deduped_exec = [depa_source, depb_source]
+        .into_iter()
+        .filter_map(|source_node| {
+            (debug_info.source_node(source_node).unwrap().exec_node == depa_exec).then(|| {
+                debug_info
+                    .first_asm_op_for_source_node(source_node)
+                    .unwrap()
+                    .context_name
+                    .as_str()
+            })
         })
         .collect::<Vec<_>>();
     assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
@@ -675,9 +672,9 @@ end
         .expect("package should contain debug info")
         .source_map
         .expect("package should contain source map")
-        .asm_ops
-        .into_iter()
-        .find_map(|asm_op| asm_op.location.map(|location| location.uri.path().to_string()))
+        .asm_ops()
+        .iter()
+        .find_map(|asm_op| asm_op.location.as_ref().map(|location| location.uri.path().to_string()))
         .expect("assembled package should contain asm-op locations");
     assert!(
         !asm_op_path.contains(tempdir_prefix.as_str()),

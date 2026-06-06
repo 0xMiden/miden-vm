@@ -631,15 +631,15 @@ impl Package {
             return Ok(());
         };
 
-        for root in source_graph.roots.iter().copied() {
-            if source_graph.source_node(root).is_none() {
+        for root in source_graph.roots().iter().copied() {
+            if debug_info.source_node(root).is_none() {
                 return Err(PackageDebugInfoError::InvalidReference {
                     message: format!("debug source root {root:?} is not present in the graph"),
                 });
             }
         }
 
-        for (source_index, source_node) in source_graph.nodes.iter().enumerate() {
+        for (source_index, source_node) in source_graph.nodes().iter().enumerate() {
             let source_id = DebugSourceMastNodeId::from(source_index as u32);
             let Some(exec_node) = self.mast.get_node_by_id(source_node.exec_node) else {
                 return Err(PackageDebugInfoError::InvalidReference {
@@ -664,7 +664,7 @@ impl Package {
             }
 
             for (child_index, child_source_id) in source_node.children.iter().copied().enumerate() {
-                let Some(child_source_node) = source_graph.source_node(child_source_id) else {
+                let Some(child_source_node) = debug_info.source_node(child_source_id) else {
                     return Err(PackageDebugInfoError::InvalidReference {
                         message: format!(
                             "debug source node {source_id:?} references missing child source node {child_source_id:?}",
@@ -683,7 +683,7 @@ impl Package {
         }
 
         if let Some(source_map) = debug_info.source_map.as_ref() {
-            for row in &source_map.asm_ops {
+            for row in source_map.asm_ops() {
                 self.validate_source_map_row(
                     source_graph,
                     row.source_node,
@@ -691,7 +691,7 @@ impl Package {
                     "assembly op",
                 )?;
             }
-            for row in &source_map.debug_vars {
+            for row in source_map.debug_vars() {
                 self.validate_source_map_row(
                     source_graph,
                     row.source_node,
@@ -708,7 +708,7 @@ impl Package {
             let Some(source_node_id) = procedure.source_node else {
                 continue;
             };
-            let Some(source_node) = source_graph.source_node(source_node_id) else {
+            let Some(source_node) = debug_info.source_node(source_node_id) else {
                 return Err(PackageDebugInfoError::InvalidReference {
                     message: format!(
                         "procedure export '{}' references missing source node {source_node_id:?}",
@@ -746,7 +746,7 @@ impl Package {
         op_idx: u32,
         row_kind: &'static str,
     ) -> Result<(), PackageDebugInfoError> {
-        let Some(source_node) = source_graph.source_node(source_node_id) else {
+        let Some(source_node) = source_graph.nodes().get(source_node_id.as_u32() as usize) else {
             return Err(PackageDebugInfoError::InvalidReference {
                 message: format!(
                     "{row_kind} row references missing source node {source_node_id:?}"
@@ -1076,8 +1076,8 @@ mod tests {
     use crate::{
         Dependency, Version,
         debug_info::{
-            DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
-            DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+            DebugSourceMastNodeId,
         },
     };
 
@@ -1179,14 +1179,13 @@ mod tests {
             ));
         }
 
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: source_nodes,
-            roots: (0..exports.len())
+        let source_graph = DebugSourceGraphSection::from_parts(
+            source_nodes,
+            (0..exports.len())
                 .map(|source_idx| DebugSourceMastNodeId::from(source_idx as u32))
                 .collect(),
-        };
-        let source_map = DebugSourceMapSection { asm_ops, ..DebugSourceMapSection::new() };
+        );
+        let source_map = DebugSourceMapSection::from_parts(asm_ops, Vec::new());
         let sections = vec![
             Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
             Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
@@ -1259,13 +1258,12 @@ mod tests {
         let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
         let exec_node = package.get_export_node_id("app::entry");
         let source_node = DebugSourceMastNodeId::from(0);
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
-            roots: vec![source_node],
-        };
-        let source_map = DebugSourceMapSection {
-            asm_ops: vec![DebugSourceAsmOp::new(
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(
                 source_node,
                 0,
                 None,
@@ -1273,8 +1271,8 @@ mod tests {
                 "add".into(),
                 1,
             )],
-            ..DebugSourceMapSection::new()
-        };
+            Vec::new(),
+        );
         package.sections = vec![
             Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
             Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
@@ -1286,13 +1284,6 @@ mod tests {
             .expect("debug sections should be present");
 
         assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, exec_node);
-        assert_eq!(
-            debug_info
-                .source_nodes_for_exec_node(exec_node)
-                .map(|(id, _)| id)
-                .collect::<Vec<_>>(),
-            vec![source_node]
-        );
         assert_eq!(
             debug_info.asm_op_for_operation(source_node, 0).unwrap().context_name,
             "app::entry"
@@ -1344,15 +1335,14 @@ mod tests {
             None,
         )
         .unwrap();
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: vec![
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![
                 DebugSourceMastNode::new(root_id, vec![source_right, source_left], 0, 1),
                 DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
                 DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
             ],
-            roots: vec![source_root],
-        };
+            vec![source_root],
+        );
         package.sections =
             vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
 
@@ -1367,13 +1357,12 @@ mod tests {
         let exec_node = package.get_export_node_id("app::entry");
         let source_node = DebugSourceMastNodeId::from(0);
         let missing_source_node = DebugSourceMastNodeId::from(1);
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
-            roots: vec![source_node],
-        };
-        let source_map = DebugSourceMapSection {
-            asm_ops: vec![DebugSourceAsmOp::new(
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(
                 missing_source_node,
                 0,
                 None,
@@ -1381,8 +1370,8 @@ mod tests {
                 "add".into(),
                 1,
             )],
-            ..DebugSourceMapSection::new()
-        };
+            Vec::new(),
+        );
         package.sections = vec![
             Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
             Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
@@ -1411,15 +1400,14 @@ mod tests {
             None,
         )
         .unwrap();
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: vec![
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![
                 DebugSourceMastNode::new(root_id, vec![source_left, source_right], 0, 1),
                 DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
                 DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
             ],
-            roots: vec![source_root],
-        };
+            vec![source_root],
+        );
         package.sections =
             vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
 
@@ -1711,13 +1699,12 @@ mod tests {
         fn debug_info_for_root(root: MastNodeId, context: &str) -> PackageDebugInfo {
             let source_node = DebugSourceMastNodeId::from(0);
             PackageDebugInfo {
-                source_graph: Some(DebugSourceGraphSection {
-                    version: DEBUG_SOURCE_GRAPH_VERSION,
-                    nodes: vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
-                    roots: vec![source_node],
-                }),
-                source_map: Some(DebugSourceMapSection {
-                    asm_ops: vec![DebugSourceAsmOp::new(
+                source_graph: Some(DebugSourceGraphSection::from_parts(
+                    vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+                    vec![source_node],
+                )),
+                source_map: Some(DebugSourceMapSection::from_parts(
+                    vec![DebugSourceAsmOp::new(
                         source_node,
                         0,
                         None,
@@ -1725,8 +1712,8 @@ mod tests {
                         "add".into(),
                         1,
                     )],
-                    ..DebugSourceMapSection::new()
-                }),
+                    Vec::new(),
+                )),
                 ..PackageDebugInfo::default()
             }
         }
@@ -1759,11 +1746,11 @@ mod tests {
         )
         .unwrap();
         let source_graph = merged_debug.source_graph.as_ref().unwrap();
-        assert_eq!(source_graph.nodes.len(), 2);
-        assert!(source_graph.nodes.iter().all(|node| node.exec_node == merged_concrete));
+        assert_eq!(source_graph.nodes().len(), 2);
+        assert!(source_graph.nodes().iter().all(|node| node.exec_node == merged_concrete));
 
-        let placeholder_source = source_graph.roots[0];
-        let concrete_source = source_graph.roots[1];
+        let placeholder_source = source_graph.roots()[0];
+        let concrete_source = source_graph.roots()[1];
         assert_ne!(placeholder_source, concrete_source);
         assert_eq!(
             merged_debug

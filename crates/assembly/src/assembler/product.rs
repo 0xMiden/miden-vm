@@ -124,9 +124,8 @@ fn linked_kernel_package_section(package: &Package) -> Section {
 fn source_graph_section(
     source_graph: &SourceDebugGraph,
 ) -> Result<DebugSourceGraphSection, Report> {
-    Ok(DebugSourceGraphSection {
-        version: miden_mast_package::debug_info::DEBUG_SOURCE_GRAPH_VERSION,
-        nodes: source_graph
+    Ok(DebugSourceGraphSection::from_parts(
+        source_graph
             .nodes()
             .as_slice()
             .iter()
@@ -148,12 +147,12 @@ fn source_graph_section(
                 ))
             })
             .collect::<Result<_, Report>>()?,
-        roots: source_graph
+        source_graph
             .roots()
             .iter()
             .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
             .collect(),
-    })
+    ))
 }
 
 fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapSection, Report> {
@@ -185,9 +184,5 @@ fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapS
         }
     }
 
-    Ok(DebugSourceMapSection {
-        version: miden_mast_package::debug_info::DEBUG_SOURCE_MAP_VERSION,
-        asm_ops,
-        debug_vars,
-    })
+    Ok(DebugSourceMapSection::from_parts(asm_ops, debug_vars))
 }

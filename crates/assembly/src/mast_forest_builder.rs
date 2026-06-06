@@ -1093,9 +1093,8 @@ mod tests {
         operations::{DebugVarLocation, Operation},
     };
     use miden_mast_package::debug_info::{
-        DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugSourceAsmOp,
-        DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
-        DebugSourceVar, PackageDebugInfo,
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+        DebugSourceMastNodeId, DebugSourceVar, PackageDebugInfo,
     };
     use proptest::prelude::*;
 
@@ -1201,16 +1200,8 @@ mod tests {
         }
 
         PackageDebugInfo {
-            source_graph: Some(DebugSourceGraphSection {
-                version: DEBUG_SOURCE_GRAPH_VERSION,
-                nodes: source_nodes,
-                roots,
-            }),
-            source_map: Some(DebugSourceMapSection {
-                version: DEBUG_SOURCE_MAP_VERSION,
-                asm_ops,
-                debug_vars,
-            }),
+            source_graph: Some(DebugSourceGraphSection::from_parts(source_nodes, roots)),
+            source_map: Some(DebugSourceMapSection::from_parts(asm_ops, debug_vars)),
             ..PackageDebugInfo::default()
         }
     }
@@ -2102,12 +2093,17 @@ mod tests {
         let package_source_root = DebugSourceMastNodeId::from(u32::from(static_source_root));
         let package_source_graph = package_debug_info
             .source_graph
-            .as_mut()
+            .as_ref()
             .expect("source graph should be present");
-        package_source_graph.nodes[u32::from(package_source_root) as usize].op_start =
+        let mut package_source_nodes = package_source_graph.nodes().to_vec();
+        package_source_nodes[u32::from(package_source_root) as usize].op_start =
             expected_partial_start as u32;
-        package_source_graph.nodes[u32::from(package_source_root) as usize].op_end =
+        package_source_nodes[u32::from(package_source_root) as usize].op_end =
             expected_partial_start as u32 + 1;
+        package_debug_info.source_graph = Some(DebugSourceGraphSection::from_parts(
+            package_source_nodes,
+            package_source_graph.roots().to_vec(),
+        ));
 
         let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
             &static_forest,
@@ -2162,10 +2158,18 @@ mod tests {
         let package_source_root =
             DebugSourceMastNodeId::from(u32::from(static_source_graph.roots()[0]));
         let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
-        package_debug_info.source_graph.as_mut().unwrap().nodes
-            [u32::from(package_source_root) as usize]
+        let package_source_graph = package_debug_info
+            .source_graph
+            .as_ref()
+            .expect("source graph should be present");
+        let mut package_source_nodes = package_source_graph.nodes().to_vec();
+        package_source_nodes[u32::from(package_source_root) as usize]
             .children
             .swap(0, 1);
+        package_debug_info.source_graph = Some(DebugSourceGraphSection::from_parts(
+            package_source_nodes,
+            package_source_graph.roots().to_vec(),
+        ));
 
         let mut builder = MastForestBuilder::new_with_static_libraries([StaticLibrary::new(
             &static_forest,

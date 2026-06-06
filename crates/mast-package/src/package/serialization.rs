@@ -842,8 +842,8 @@ mod tests {
         Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
         PackageModule, PackageSubmodule, ProcedureExport, SectionId, TargetType,
         debug_info::{
-            DEBUG_SOURCE_GRAPH_VERSION, DebugSourceAsmOp, DebugSourceGraphSection,
-            DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+            DebugSourceMastNodeId,
         },
     };
 
@@ -912,22 +912,14 @@ mod tests {
             None,
         )
         .expect("test package should be valid");
-        let source_graph = DebugSourceGraphSection {
-            version: DEBUG_SOURCE_GRAPH_VERSION,
-            nodes: vec![DebugSourceMastNode::new(node_id, Vec::new(), 0, 1)],
-            roots: vec![source_node],
-        };
-        let source_map = DebugSourceMapSection {
-            asm_ops: vec![DebugSourceAsmOp::new(
-                source_node,
-                0,
-                None,
-                "trusted".into(),
-                "add".into(),
-                1,
-            )],
-            ..DebugSourceMapSection::new()
-        };
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceMastNode::new(node_id, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(source_node, 0, None, "trusted".into(), "add".into(), 1)],
+            Vec::new(),
+        );
         package
             .sections
             .push(Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()));
