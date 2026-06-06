@@ -40,14 +40,6 @@ pub enum DebugSourceGraphLookupError {
     /// Multiple source/debug roots point at the same executable MAST node.
     #[error("multiple source/debug roots point at executable MAST node {exec_node:?}")]
     AmbiguousRoot { exec_node: MastNodeId },
-    /// Multiple children of one source/debug occurrence point at the same executable MAST node.
-    #[error(
-        "multiple children of source/debug occurrence {parent:?} point at executable MAST node {exec_node:?}"
-    )]
-    AmbiguousChild {
-        parent: DebugSourceMastNodeId,
-        exec_node: MastNodeId,
-    },
 }
 
 // PACKAGE DEBUG INFO MERGE ERROR
@@ -532,22 +524,6 @@ impl PackageDebugInfo {
             .unwrap_or(Ok(None))
     }
 
-    /// Returns the unique child of `parent` that points at `exec_node`.
-    ///
-    /// Returns `Ok(None)` if no source graph is present, or if no child points at `exec_node`.
-    pub fn unique_child_source_node_for_exec_node(
-        &self,
-        parent: DebugSourceMastNodeId,
-        exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
-        self.source_graph
-            .as_ref()
-            .map(|source_graph| {
-                source_graph.unique_child_source_node_for_exec_node(parent, exec_node)
-            })
-            .unwrap_or(Ok(None))
-    }
-
     /// Returns `parent`'s source/debug child at `child_index`, if present.
     ///
     /// Returns `Ok(None)` if no source graph is present, or if `child_index` is out of range.
@@ -748,42 +724,6 @@ impl DebugSourceGraphSection {
         let first = roots.next();
         if roots.next().is_some() {
             return Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node });
-        }
-        Ok(first)
-    }
-
-    /// Returns children of `parent` that point at `exec_node`.
-    pub fn child_source_nodes_for_exec_node(
-        &self,
-        parent: DebugSourceMastNodeId,
-        exec_node: MastNodeId,
-    ) -> Result<
-        impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> + '_,
-        DebugSourceGraphLookupError,
-    > {
-        let parent_node = self
-            .source_node(parent)
-            .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: parent })?;
-
-        Ok(parent_node.children.iter().copied().filter_map(move |source_node_id| {
-            self.source_node(source_node_id)
-                .filter(|source_node| source_node.exec_node == exec_node)
-                .map(|source_node| (source_node_id, source_node))
-        }))
-    }
-
-    /// Returns the unique child of `parent` that points at `exec_node`.
-    pub fn unique_child_source_node_for_exec_node(
-        &self,
-        parent: DebugSourceMastNodeId,
-        exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
-        let mut children = self
-            .child_source_nodes_for_exec_node(parent, exec_node)?
-            .map(|(source_node_id, _)| source_node_id);
-        let first = children.next();
-        if children.next().is_some() {
-            return Err(DebugSourceGraphLookupError::AmbiguousChild { parent, exec_node });
         }
         Ok(first)
     }
@@ -1588,7 +1528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_source_graph_unique_navigation_reports_ambiguity() {
+    fn test_source_graph_navigation_uses_child_indices() {
         let root_exec = MastNodeId::new_unchecked(7);
         let child_exec = MastNodeId::new_unchecked(8);
         let other_exec = MastNodeId::new_unchecked(9);
@@ -1609,22 +1549,11 @@ mod tests {
 
         assert_eq!(graph.unique_source_root_for_exec_node(root_exec).unwrap(), Some(root));
         assert_eq!(graph.unique_source_root_for_exec_node(other_exec).unwrap(), None);
-        assert_eq!(graph.child_source_nodes_for_exec_node(root, child_exec).unwrap().count(), 2,);
         assert_eq!(graph.child_source_node(root, 0).unwrap().unwrap().0, child_a);
         assert_eq!(graph.child_source_node(root, 1).unwrap().unwrap().0, child_b);
         assert!(graph.child_source_node(root, 2).unwrap().is_none());
         assert_eq!(
-            graph.unique_child_source_node_for_exec_node(root, child_exec),
-            Err(DebugSourceGraphLookupError::AmbiguousChild {
-                parent: root,
-                exec_node: child_exec
-            }),
-        );
-        assert_eq!(
-            graph.unique_child_source_node_for_exec_node(
-                DebugSourceMastNodeId::from(99),
-                child_exec,
-            ),
+            graph.child_source_node(DebugSourceMastNodeId::from(99), 0),
             Err(DebugSourceGraphLookupError::MissingSourceNode {
                 source_node: DebugSourceMastNodeId::from(99),
             }),
