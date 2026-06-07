@@ -1122,8 +1122,10 @@ mod tests {
         exec_node: MastNodeId,
     ) -> Vec<&SourceMastNode> {
         source_graph
-            .source_nodes_for_exec_node(exec_node)
-            .map(|(_, source_node)| source_node)
+            .nodes()
+            .as_slice()
+            .iter()
+            .filter(|source_node| source_node.exec_node() == exec_node)
             .collect()
     }
 
@@ -1435,10 +1437,7 @@ mod tests {
         let (_, remapping, source_graph, _) =
             builder.build().unwrap().into_parts_with_source_graph();
         let final_merged_id = remapping[&merged_ref];
-        let source_nodes = source_graph
-            .source_nodes_for_exec_node(final_merged_id)
-            .map(|(_, source_node)| source_node)
-            .collect::<Vec<_>>();
+        let source_nodes = source_nodes_for_exec(&source_graph, final_merged_id);
 
         assert_eq!(
             source_graph.roots().len(),
@@ -1602,9 +1601,9 @@ mod tests {
         let (forest, remapping, source_graph, _) =
             builder.build().unwrap().into_parts_with_source_graph();
         let final_block = remapping[&block_a_ref];
-        let debug_var_names = source_graph
-            .source_nodes_for_exec_node(final_block)
-            .flat_map(|(_, source_node)| {
+        let debug_var_names = source_nodes_for_exec(&source_graph, final_block)
+            .into_iter()
+            .flat_map(|source_node| {
                 source_node
                     .debug_vars()
                     .iter()
@@ -1812,9 +1811,9 @@ mod tests {
         let (forest, remapping, source_graph, _) =
             builder.build().unwrap().into_parts_with_source_graph();
         let final_block = remapping[&block_a_ref];
-        let asm_contexts = source_graph
-            .source_nodes_for_exec_node(final_block)
-            .flat_map(|(_, source_node)| {
+        let asm_contexts = source_nodes_for_exec(&source_graph, final_block)
+            .into_iter()
+            .flat_map(|source_node| {
                 source_node
                     .asm_ops()
                     .iter()

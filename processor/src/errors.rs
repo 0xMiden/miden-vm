@@ -1232,8 +1232,8 @@ mod error_assertions {
             ByteIndex::new(35),
         );
         let debug_info = PackageDebugInfo {
-            source_map: Some(DebugSourceMapSection {
-                asm_ops: vec![
+            source_map: Some(DebugSourceMapSection::from_parts(
+                vec![
                     DebugSourceAsmOp::new(
                         source_a,
                         0,
@@ -1259,8 +1259,8 @@ mod error_assertions {
                         1,
                     ),
                 ],
-                ..DebugSourceMapSection::new()
-            }),
+                Vec::new(),
+            )),
             ..PackageDebugInfo::default()
         };
         let host = RecordingHost {
@@ -1287,8 +1287,8 @@ mod error_assertions {
     fn package_source_context_without_location_uses_unknown_span() {
         let source_node = DebugSourceMastNodeId::from(0);
         let debug_info = PackageDebugInfo {
-            source_map: Some(DebugSourceMapSection {
-                asm_ops: vec![DebugSourceAsmOp::new(
+            source_map: Some(DebugSourceMapSection::from_parts(
+                vec![DebugSourceAsmOp::new(
                     source_node,
                     0,
                     None,
@@ -1296,8 +1296,8 @@ mod error_assertions {
                     "add".into(),
                     1,
                 )],
-                ..DebugSourceMapSection::new()
-            }),
+                Vec::new(),
+            )),
             ..PackageDebugInfo::default()
         };
         let host = RecordingHost {
