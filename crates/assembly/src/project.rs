@@ -243,11 +243,9 @@ where
             assembler.link_package(kernel_package, Linkage::Dynamic)?;
         }
         let mut product = match target.ty {
-            TargetType::Executable => assembler.assemble_executable_modules(
-                package_id.clone(),
-                root,
-                support.into_iter().map(Box::new),
-            )?,
+            TargetType::Executable => {
+                assembler.assemble_executable_modules(package_id.clone(), root, support)?
+            },
             TargetType::Kernel => {
                 if !support.is_empty() {
                     assembler.compile_and_statically_link_all(support)?;
@@ -255,9 +253,9 @@ where
                 assembler.assemble_kernel_module(package_id.clone(), root)?
             },
             _ if target.ty.is_library() => {
-                let mut modules: Vec<Box<Module>> = Vec::with_capacity(support.len() + 1);
+                let mut modules = Vec::with_capacity(support.len() + 1);
                 modules.push(root);
-                modules.extend(support.into_iter().map(Box::new));
+                modules.extend(support);
                 assembler.assemble_library_modules(package_id.clone(), modules, target.ty)?
             },
             _ => unreachable!("non-exhaustive target type"),
@@ -604,8 +602,7 @@ where
         let support = sources
             .support
             .into_iter()
-            .map(|module| {
-                let mut module = *module;
+            .map(|mut module| {
                 module.set_kind(ModuleKind::Library);
                 Ok(module)
             })
@@ -637,7 +634,6 @@ where
                 })?;
                 let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
                 self.parse_module_file(path, ModuleKind::Library, module_path.as_ref())
-                    .map(|m| *m)
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
@@ -672,7 +668,11 @@ enum RegisteredSourcePackage {
 
 struct LoadedTargetSources {
     root: Box<Module>,
-    support: Vec<Module>,
+    #[expect(
+        clippy::vec_box,
+        reason = "support modules are parsed and consumed as boxed AST modules by assembler APIs"
+    )]
+    support: Vec<Box<Module>>,
 }
 
 #[derive(Debug)]
