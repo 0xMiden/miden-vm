@@ -66,6 +66,8 @@ enum CliError {
     InvalidSourceUri { path: String },
     #[error("failed to read source from stdin: {0}")]
     ReadStdin(#[source] io::Error),
+    #[error("failed to write formatted source to stdout: {0}")]
+    WriteStdout(#[source] io::Error),
     #[error("syntax errors were found in the provided inputs")]
     SyntaxErrors,
     #[error("the following inputs are not formatted:\n{0}")]
@@ -154,7 +156,8 @@ fn run() -> Result<(), CliError> {
 
     if cli.stdin {
         if let Some((_, formatted)) = formatted_inputs.into_iter().next() {
-            print!("{formatted}");
+            let mut stdout = io::stdout().lock();
+            write_formatted_stdout(&formatted, &mut stdout)?;
         }
         return Ok(());
     }
@@ -177,6 +180,19 @@ fn run() -> Result<(), CliError> {
 
 fn replace_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     replace_file_atomically_with(path, |file| file.write_all(contents))
+}
+
+fn write_formatted_stdout(formatted: &str, writer: &mut impl Write) -> Result<(), CliError> {
+    handle_stdout_result(writer.write_all(formatted.as_bytes()))?;
+    handle_stdout_result(writer.flush())
+}
+
+fn handle_stdout_result(result: io::Result<()>) -> Result<(), CliError> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(err) => Err(CliError::WriteStdout(err)),
+    }
 }
 
 fn replace_file_atomically_with(
@@ -385,6 +401,97 @@ mod tests {
 
         assert!(rendered.contains("snippet.masm"));
         assert!(rendered.contains("begin"));
+    }
+
+    struct FailingWriter {
+        kind: ErrorKind,
+    }
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(self.kind, "injected stdout failure"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FlushFailingWriter {
+        kind: ErrorKind,
+        output: Vec<u8>,
+    }
+
+    impl Write for FlushFailingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.output.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(self.kind, "injected stdout flush failure"))
+        }
+    }
+
+    #[test]
+    fn stdout_writer_accepts_broken_pipe() {
+        let mut writer = FailingWriter { kind: ErrorKind::BrokenPipe };
+
+        write_formatted_stdout("begin\nend\n", &mut writer)
+            .expect("broken pipe should be accepted for stdout");
+    }
+
+    #[test]
+    fn stdout_writer_reports_non_broken_pipe_errors() {
+        let mut writer = FailingWriter { kind: ErrorKind::WriteZero };
+
+        let err = write_formatted_stdout("begin\nend\n", &mut writer)
+            .expect_err("non-broken-pipe stdout errors should be reported");
+
+        assert!(matches!(
+            err,
+            CliError::WriteStdout(source) if source.kind() == ErrorKind::WriteZero
+        ));
+    }
+
+    #[test]
+    fn stdout_writer_accepts_broken_pipe_on_flush() {
+        let mut writer = FlushFailingWriter {
+            kind: ErrorKind::BrokenPipe,
+            output: Vec::new(),
+        };
+
+        write_formatted_stdout("begin\nend\n", &mut writer)
+            .expect("broken pipe should be accepted during stdout flush");
+
+        assert_eq!(writer.output, b"begin\nend\n");
+    }
+
+    #[test]
+    fn stdout_writer_reports_non_broken_pipe_flush_errors() {
+        let mut writer = FlushFailingWriter {
+            kind: ErrorKind::WriteZero,
+            output: Vec::new(),
+        };
+
+        let err = write_formatted_stdout("begin\nend\n", &mut writer)
+            .expect_err("non-broken-pipe stdout flush errors should be reported");
+
+        assert!(matches!(
+            err,
+            CliError::WriteStdout(source) if source.kind() == ErrorKind::WriteZero
+        ));
+        assert_eq!(writer.output, b"begin\nend\n");
+    }
+
+    #[test]
+    fn stdout_writer_writes_formatted_source() {
+        let mut output = Vec::new();
+
+        write_formatted_stdout("begin\nend\n", &mut output)
+            .expect("stdout writer should accept writable output");
+
+        assert_eq!(output, b"begin\nend\n");
     }
 
     #[test]
