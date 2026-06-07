@@ -229,17 +229,16 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     let source_true = DebugSourceMastNodeId::from(1);
     let source_false = DebugSourceMastNodeId::from(2);
     let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection {
-            nodes: vec![
+        source_graph: Some(DebugSourceGraphSection::from_parts(
+            vec![
                 DebugSourceMastNode::new(root_id, vec![source_true, source_false], 0, 1),
                 DebugSourceMastNode::new(block_id, vec![], 0, 1),
                 DebugSourceMastNode::new(block_id, vec![], 0, 1),
             ],
-            roots: vec![source_root],
-            ..DebugSourceGraphSection::new()
-        }),
-        source_map: Some(DebugSourceMapSection {
-            asm_ops: vec![
+            vec![source_root],
+        )),
+        source_map: Some(DebugSourceMapSection::from_parts(
+            vec![
                 DebugSourceAsmOp::new(
                     source_true,
                     0,
@@ -257,8 +256,8 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
                     2,
                 ),
             ],
-            ..DebugSourceMapSection::new()
-        }),
+            Vec::new(),
+        )),
         ..PackageDebugInfo::default()
     };
 
@@ -312,15 +311,14 @@ fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
     let source_callee_a = DebugSourceMastNodeId::from(1);
     let source_callee_b = DebugSourceMastNodeId::from(2);
     let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection {
-            nodes: vec![
+        source_graph: Some(DebugSourceGraphSection::from_parts(
+            vec![
                 DebugSourceMastNode::new(entrypoint, vec![], 0, 1),
                 DebugSourceMastNode::new(callee_root, vec![], 0, 1),
                 DebugSourceMastNode::new(callee_root, vec![], 0, 1),
             ],
-            roots: vec![source_entry, source_callee_a, source_callee_b],
-            ..DebugSourceGraphSection::new()
-        }),
+            vec![source_entry, source_callee_a, source_callee_b],
+        )),
         ..PackageDebugInfo::default()
     };
 
@@ -369,16 +367,15 @@ fn missing_external_package_source_debug_fixture() -> (
     let source_external = DebugSourceMastNodeId::from(1);
     let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
     let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection {
-            nodes: vec![
+        source_graph: Some(DebugSourceGraphSection::from_parts(
+            vec![
                 DebugSourceMastNode::new(root_id, vec![source_external], 0, 1),
                 DebugSourceMastNode::new(external_id, vec![], 0, 1),
             ],
-            roots: vec![source_root],
-            ..DebugSourceGraphSection::new()
-        }),
-        source_map: Some(DebugSourceMapSection {
-            asm_ops: vec![DebugSourceAsmOp::new(
+            vec![source_root],
+        )),
+        source_map: Some(DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(
                 source_external,
                 0,
                 Some(Location::new(uri, ByteIndex::new(10), ByteIndex::new(28))),
@@ -386,8 +383,8 @@ fn missing_external_package_source_debug_fixture() -> (
                 "call.missing::proc".into(),
                 2,
             )],
-            ..DebugSourceMapSection::new()
-        }),
+            Vec::new(),
+        )),
         ..PackageDebugInfo::default()
     };
 

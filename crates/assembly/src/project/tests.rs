@@ -618,14 +618,13 @@ end
 
     let contexts_for_deduped_exec = [depa_source, depb_source]
         .into_iter()
-        .filter_map(|source_node| {
-            (debug_info.source_node(source_node).unwrap().exec_node == depa_exec).then(|| {
-                debug_info
-                    .first_asm_op_for_source_node(source_node)
-                    .unwrap()
-                    .context_name
-                    .as_str()
-            })
+        .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
+        .map(|source_node| {
+            debug_info
+                .first_asm_op_for_source_node(source_node)
+                .unwrap()
+                .context_name
+                .as_str()
         })
         .collect::<Vec<_>>();
     assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));

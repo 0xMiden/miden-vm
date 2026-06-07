@@ -151,14 +151,13 @@ mod tests {
         let source_a = DebugSourceMastNodeId::from(0);
         let source_b = DebugSourceMastNodeId::from(1);
         let package_debug_info = PackageDebugInfo {
-            source_graph: Some(DebugSourceGraphSection {
-                nodes: vec![
+            source_graph: Some(DebugSourceGraphSection::from_parts(
+                vec![
                     DebugSourceMastNode::new(target_id, vec![], 0, 1),
                     DebugSourceMastNode::new(target_id, vec![], 0, 1),
                 ],
-                roots: vec![source_a, source_b],
-                ..DebugSourceGraphSection::new()
-            }),
+                vec![source_a, source_b],
+            )),
             ..PackageDebugInfo::default()
         };
 

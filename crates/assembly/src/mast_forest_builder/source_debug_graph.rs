@@ -123,21 +123,6 @@ impl SourceDebugGraph {
         &self.roots
     }
 
-    #[cfg(test)]
-    pub(crate) fn source_nodes_for_exec_node(
-        &self,
-        exec_node: MastNodeId,
-    ) -> impl Iterator<Item = (SourceMastNodeId, &SourceMastNode)> {
-        self.nodes
-            .as_slice()
-            .iter()
-            .enumerate()
-            .filter_map(move |(index, source_node)| {
-                (source_node.exec_node() == exec_node)
-                    .then_some((SourceMastNodeId::from(index as u32), source_node))
-            })
-    }
-
     pub(crate) fn unique_root_for_exec_node(
         &self,
         exec_node: MastNodeId,
