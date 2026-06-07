@@ -356,6 +356,73 @@ path = "lib.masm"
 }
 
 #[test]
+fn load_project_reference_rejects_standalone_package_name_mismatch() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    fs::create_dir_all(&dep_dir).unwrap();
+
+    fs::write(
+        dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "actual"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
+        .expect_err("package name mismatch should be rejected");
+
+    assert!(
+        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn load_project_reference_rejects_workspace_member_package_name_mismatch() {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    let dep_dir = root.join("dep");
+    fs::create_dir_all(&dep_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["dep"]
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "actual"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
+        .expect_err("workspace member package name mismatch should be rejected");
+
+    assert!(
+        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
+        "{err}"
+    );
+}
+
+#[test]
 fn workspace_rejects_duplicate_member_package_names() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");

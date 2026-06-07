@@ -213,6 +213,8 @@ impl Project {
                     break;
                 };
 
+                validate_package_name(name, &package)?;
+
                 return Ok(Self::WorkspacePackage { package, workspace: workspace.into() });
             } else if Some(ancestor) != initial_package_dir {
                 break;
@@ -221,7 +223,33 @@ impl Project {
 
         let source = source_manager.load_file(manifest_path).map_err(Report::msg)?;
         let package = Package::load(source)?;
+        validate_package_name(name, &package)?;
         Ok(Self::Package(package.into()))
+    }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn validate_package_name(expected_name: Option<&str>, package: &Package) -> Result<(), Report> {
+    let Some(expected_name) = expected_name else {
+        return Ok(());
+    };
+
+    let actual_name = package.name();
+    if &**actual_name.inner() == expected_name {
+        Ok(())
+    } else if let Some(location) = package.manifest_path() {
+        Err(Report::msg(format!(
+            "dependency '{}' resolved to package '{}' at '{}'",
+            expected_name,
+            actual_name.inner(),
+            location.display()
+        )))
+    } else {
+        Err(Report::msg(format!(
+            "dependency '{}' resolved to package '{}'",
+            expected_name,
+            actual_name.inner(),
+        )))
     }
 }
 
