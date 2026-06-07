@@ -404,8 +404,10 @@ impl Test {
             );
         }
 
-        // validate the stack states
-        self.expect_stack(final_stack);
+        // validate the stack state from the same execution as the memory assertions
+        let result = execution_output.stack.as_int_vec();
+        let expected = resize_to_min_stack_depth(final_stack);
+        assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
 
     /// Asserts that executing the test inside a proptest results in the expected final stack state.
@@ -775,7 +777,15 @@ impl Test {
 
 #[cfg(all(test, feature = "std", not(target_family = "wasm")))]
 mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use miden_processor::{advice::AdviceMutation, event::EventError};
 
     use super::*;
 
@@ -819,6 +829,33 @@ mod tests {
             miden_assembly::report!("the first line\nthe second line"),
             "the first line"
         );
+    }
+
+    #[test]
+    fn expect_stack_and_memory_executes_once() {
+        const EVENT_NAME: EventName = EventName::new("test::expect_stack_and_memory::once");
+
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let handler_invocations = invocations.clone();
+        let handler = move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
+            handler_invocations.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        };
+
+        let source = alloc::format!(
+            r#"
+            begin
+                emit.event("{EVENT_NAME}")
+                push.42.1000 mem_store
+            end
+            "#
+        );
+
+        Test::new("main", &source, false)
+            .with_event_handler(EVENT_NAME, handler)
+            .expect_stack_and_memory(&[], 1000, &[42]);
+
+        core::assert_eq!(1, invocations.load(Ordering::SeqCst));
     }
 }
 
