@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@50b4a718b59c718df4ef27a3b445f86cd57b9f00 # pin@v2.80.0
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # pin@v2.81.1
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@50b4a718b59c718df4ef27a3b445f86cd57b9f00 # pin@v2.80.0
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # pin@v2.81.1
         with:
           tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
