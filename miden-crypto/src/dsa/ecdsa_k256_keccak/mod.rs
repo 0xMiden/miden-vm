@@ -7,6 +7,7 @@ use k256::{
     ecdh::diffie_hellman,
     ecdsa,
     ecdsa::{RecoveryId, VerifyingKey, signature::hazmat::PrehashVerifier},
+    elliptic_curve::{Generate, scalar::IsHigh},
     pkcs8::DecodePublicKey,
 };
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
@@ -16,7 +17,6 @@ use thiserror::Error;
 use crate::{
     Felt, SequentialCommit, Word,
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
-    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_packed_u32_elements,
@@ -52,8 +52,7 @@ struct SecretKey {
 impl SecretKey {
     /// Generates a new secret key using the provided random number generator.
     fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        let signing_key = ecdsa::SigningKey::random(&mut compat_rng);
+        let signing_key = ecdsa::SigningKey::generate_from_rng(rng);
 
         Self { inner: signing_key }
     }
@@ -394,22 +393,21 @@ impl Signature {
 
         // Normalize signature into "low s" form.
         // See https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki.
-        let sig = if let Some(norm) = sig.normalize_s() {
+        let high_s = sig.s().is_high();
+        if bool::from(high_s) {
             // Replacing s with (n - s) corresponds to negating the ephemeral point R
             // (i.e. R -> -R), which flips the y-parity of R. A recoverable signature's
             // `v` encodes that y-parity in its LSB, so we must toggle only that bit to
             // preserve recoverability.
             recovery_id ^= 1;
-            norm
-        } else {
-            sig
-        };
+        }
+        let sig = sig.normalize_s();
 
         let (r, s) = sig.split_scalars();
 
         Ok(Signature {
-            r: r.to_bytes().into(),
-            s: s.to_bytes().into(),
+            r: <[u8; SCALARS_SIZE_BYTES]>::from(r.to_bytes()),
+            s: <[u8; SCALARS_SIZE_BYTES]>::from(s.to_bytes()),
             v: recovery_id,
         })
     }
@@ -443,7 +441,7 @@ impl Deserializable for SecretKey {
 impl Serializable for PublicKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Compressed format
-        let encoded = self.inner.to_encoded_point(true);
+        let encoded = self.inner.to_sec1_point(true);
 
         target.write_bytes(encoded.as_bytes());
     }

@@ -142,6 +142,7 @@ itertools      = { workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
+shake          = { workspace = true }
 tempfile       = { workspace = true }
 
 [build-dependencies]

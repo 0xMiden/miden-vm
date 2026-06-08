@@ -1,3 +1,6 @@
+use chacha20poly1305::aead::rand_core::{
+    CryptoRng as CryptoRng06, Error as RandError06, RngCore as RngCore06,
+};
 use rand::{CryptoRng, Rng};
 
 /// Adapts rand 0.10 RNGs for stable crypto crates that still use rand_core 0.6.
@@ -9,7 +12,7 @@ impl<'a, R: ?Sized> RandCore06<'a, R> {
     }
 }
 
-impl<R: Rng + ?Sized> k256::elliptic_curve::rand_core::RngCore for RandCore06<'_, R> {
+impl<R: Rng + ?Sized> RngCore06 for RandCore06<'_, R> {
     fn next_u32(&mut self) -> u32 {
         self.0.next_u32()
     }
@@ -22,13 +25,10 @@ impl<R: Rng + ?Sized> k256::elliptic_curve::rand_core::RngCore for RandCore06<'_
         self.0.fill_bytes(dest);
     }
 
-    fn try_fill_bytes(
-        &mut self,
-        dest: &mut [u8],
-    ) -> Result<(), k256::elliptic_curve::rand_core::Error> {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RandError06> {
         self.0.fill_bytes(dest);
         Ok(())
     }
 }
 
-impl<R: CryptoRng + ?Sized> k256::elliptic_curve::rand_core::CryptoRng for RandCore06<'_, R> {}
+impl<R: CryptoRng + ?Sized> CryptoRng06 for RandCore06<'_, R> {}
