@@ -433,6 +433,10 @@ where
             visitor.visit_block(else_blk)
         },
         Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_block(body),
+        Op::DoWhile { body, condition, .. } => {
+            visitor.visit_block(body)?;
+            visitor.visit_block(condition)
+        },
         Op::Inst(inst) => visitor.visit_inst(inst),
     }
 }
@@ -1004,6 +1008,10 @@ where
             visitor.visit_mut_block(else_blk)
         },
         Op::While { body, .. } => visitor.visit_mut_block(body),
+        Op::DoWhile { body, condition, .. } => {
+            visitor.visit_mut_block(body)?;
+            visitor.visit_mut_block(condition)
+        },
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
         Op::Repeat { count, body, .. } => {
             visitor.visit_mut_immediate_u32(count)?;
