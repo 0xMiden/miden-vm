@@ -34,7 +34,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustup toolchain install --profile minimal
+          toolchain="$(awk -F '"' '/^channel[[:space:]]*=/{ print $2; exit }' rust-toolchain.toml)"
+          rustup toolchain install --profile minimal "${toolchain}"
 
       - name: Install LLVM/Clang
         uses: ./.github/actions/install-llvm
