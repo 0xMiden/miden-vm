@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   contribution-quality:
+    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.user.login != 'app/dependabot') }}
     uses: 0xMiden/.github/.github/workflows/contribution-quality.yml@385c1c10c311dc0508c71d83abb0be749a2c12ca # pin@main
     with:
       pr_number: ${{ github.event.inputs.pr_number || '' }}
