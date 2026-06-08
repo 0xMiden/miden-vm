@@ -14,11 +14,15 @@ use miden_core::{
     },
     operations::Operation,
     program::StackInputs,
+    serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{ByteIndex, Location, SourceContent, SourceManager, SourceSpan, Uri};
-use miden_mast_package::debug_info::{
-    DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-    DebugSourceMastNodeId, PackageDebugInfo,
+use miden_mast_package::{
+    Package,
+    debug_info::{
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
+        DebugSourceMastNodeId, PackageDebugInfo,
+    },
 };
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
@@ -216,6 +220,42 @@ fn test_syscall_fail() {
             ..
         }
     );
+}
+
+#[test]
+fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager)
+        .assemble_program(
+            "program",
+            "
+        proc add_one
+            push.1 add
+        end
+
+        begin
+            dup.0 eq.3
+            if.true
+                call.add_one
+            else
+                push.2 mul
+            end
+        end
+        ",
+        )
+        .expect("program should assemble");
+
+    assert!(package.debug_info().unwrap().is_some());
+
+    let package = Package::read_from_bytes(&package.to_bytes()).unwrap();
+    assert!(package.debug_info().unwrap().is_none());
+
+    let program = package.unwrap_program();
+    let output = FastProcessor::new(StackInputs::try_from_ints([3_u64]).unwrap())
+        .execute_sync(&program, &mut DefaultHost::default())
+        .unwrap();
+
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(4)));
 }
 
 #[test]
