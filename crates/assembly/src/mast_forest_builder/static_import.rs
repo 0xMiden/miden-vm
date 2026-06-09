@@ -55,8 +55,6 @@ impl MastForestBuilder {
     /// linked forest, including indexed assembly ops and debug variable metadata.
     fn pending_draft_for_statically_linked_source(
         &mut self,
-        source_forest: &MastForest,
-        source_node_id: MastNodeId,
         source_node: MastNode,
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
@@ -65,19 +63,7 @@ impl MastForestBuilder {
         let kind = PendingMastNodeKind::from_node(source_node);
         let (asm_ops, debug_vars, op_range) = source_metadata
             .map(|metadata| (metadata.asm_ops, metadata.debug_vars, metadata.op_range))
-            .unwrap_or_else(|| {
-                (
-                    self.pending_asm_ops_for_statically_linked_source(
-                        source_forest,
-                        source_node_id,
-                    ),
-                    self.pending_debug_vars_for_statically_linked_source(
-                        source_forest,
-                        source_node_id,
-                    ),
-                    None,
-                )
-            });
+            .unwrap_or_else(|| (Vec::new(), Vec::new(), None));
 
         let asm_op_checkpoint = self.asm_op_by_ref.len();
         let debug_var_checkpoint = self.debug_vars.len();
@@ -109,8 +95,6 @@ impl MastForestBuilder {
     /// pending record when a new node is created.
     pub(super) fn ensure_node_from_statically_linked_source_ref(
         &mut self,
-        source_forest: &MastForest,
-        source_node_id: MastNodeId,
         source_node: MastNode,
         child_refs: Vec<MastNodeRef>,
         source_metadata: Option<StaticSourceMetadata>,
@@ -121,8 +105,6 @@ impl MastForestBuilder {
             asm_op_checkpoint,
             debug_var_checkpoint,
         } = self.pending_draft_for_statically_linked_source(
-            source_forest,
-            source_node_id,
             source_node,
             child_refs,
             source_metadata,
@@ -167,22 +149,6 @@ impl MastForestBuilder {
             draft.debug_vars.clone(),
             true,
         )
-    }
-
-    fn pending_asm_ops_for_statically_linked_source(
-        &self,
-        _source_forest: &MastForest,
-        _source_node_id: MastNodeId,
-    ) -> Vec<(usize, AssemblyOp)> {
-        Vec::new()
-    }
-
-    fn pending_debug_vars_for_statically_linked_source(
-        &self,
-        _source_forest: &MastForest,
-        _source_node_id: MastNodeId,
-    ) -> Vec<(usize, DebugVarInfo)> {
-        Vec::new()
     }
 
     fn unadjust_source_block_indices<T>(
@@ -375,13 +341,8 @@ impl MastForestBuilder {
             let node = self.statically_linked_mast[old_id].clone();
             let child_refs =
                 self.pending_refs_for_statically_linked_source(&node, &node_refs_by_source_id);
-            let new_ref = self.ensure_node_from_statically_linked_source_ref(
-                source_forest.as_ref(),
-                old_id,
-                node,
-                child_refs,
-                None,
-            )?;
+            let new_ref =
+                self.ensure_node_from_statically_linked_source_ref(node, child_refs, None)?;
             node_refs_by_source_id.insert(old_id, new_ref);
         }
         Ok(*node_refs_by_source_id
@@ -469,8 +430,6 @@ impl MastForestBuilder {
             source_exec_node_id,
         );
         let node_ref = self.ensure_node_from_statically_linked_source_ref(
-            source_forest,
-            source_exec_node_id,
             source_exec_node,
             child_refs,
             Some(metadata),

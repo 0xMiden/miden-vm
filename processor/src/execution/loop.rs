@@ -102,11 +102,7 @@ where
         );
 
         // Drop the condition from the stack.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-            current_forest,
-            current_node_id,
-            state.host,
-        ) {
+        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
             return ControlFlow::Break(BreakReason::Err(err));
         }
 
@@ -140,11 +136,7 @@ where
 
         // The END operation drops the condition from the stack; the loop body always leaves the
         // condition there.
-        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-            current_forest,
-            current_node_id,
-            state.host,
-        ) {
+        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
             return ControlFlow::Break(BreakReason::Err(err));
         }
 
@@ -159,10 +151,6 @@ where
         )
     } else {
         let err = OperationError::NotBinaryValueLoop { value: condition };
-        ControlFlow::Break(BreakReason::Err(err.with_context(
-            current_forest,
-            current_node_id,
-            state.host,
-        )))
+        ControlFlow::Break(BreakReason::Err(err.with_context()))
     }
 }

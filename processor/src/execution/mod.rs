@@ -138,7 +138,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation, source_node } => {
+///         InternalBreakReason::Emit { op_idx, continuation, source_node } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -146,7 +146,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///             // to complete the execution of the Emit operation.
 ///             finish_emit_op_execution(...);
 ///         },
-///         InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+///         InternalBreakReason::LoadMastForestFromDyn { callee_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
 ///    
@@ -307,9 +307,9 @@ where
 /// - *Function to call after handling*: [`finish_emit_op_execution`]
 ///
 /// The `Emit` variant is used to break execution when an `Emit` operation is encountered. The
-/// associated data includes the ID of the basic block node where the `Emit` operation was executed
-/// and the continuation that should be passed to [`finish_emit_op_execution`] to resume execution
-/// after the host has processed the emitted event.
+/// associated data includes the operation index, the source node, and the continuation that should
+/// be passed to [`finish_emit_op_execution`] to resume execution after the host has processed the
+/// emitted event.
 ///
 /// Handling an `Emit` operation typically involves invoking the host environment to process the
 /// emitted event. After the host has processed the event, the processor *must* call
@@ -322,7 +322,7 @@ where
 ///
 /// The `LoadMastForestFromDyn` variant is used to break execution when `DynNode` is encountered
 /// that requires loading a MAST forest containing a given procedure. The associated data includes
-/// the ID of the dynamic node and the hash of the callee procedure to be loaded.
+/// the hash of the callee procedure to be loaded.
 ///
 /// Handling this operation typically involves loading the MAST forest from the host environment.
 /// After the MAST forest has been loaded, the processor *must* call
@@ -344,13 +344,11 @@ where
 pub enum InternalBreakReason<F> {
     User(BreakReason<F>),
     Emit {
-        basic_block_node_id: MastNodeId,
         op_idx: usize,
         continuation: Continuation<F>,
         source_node: Option<DebugSourceMastNodeId>,
     },
     LoadMastForestFromDyn {
-        dyn_node_id: MastNodeId,
         callee_hash: Word,
         source_node: Option<DebugSourceMastNodeId>,
     },

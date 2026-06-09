@@ -269,7 +269,6 @@ where
                 // execution loop. When done, the processor *must* call
                 // `finish_emit_op_execution()` below for execution to proceed properly.
                 return ControlFlow::Break(InternalBreakReason::Emit {
-                    basic_block_node_id: node_id,
                     op_idx: op_idx_in_block,
                     continuation: get_continuation_after_executing_operation(
                         basic_block,
@@ -286,8 +285,6 @@ where
                     state.processor,
                     op,
                     op_idx_in_block,
-                    current_forest,
-                    node_id,
                     state.host,
                     state.tracer,
                     state.package_source_context(),

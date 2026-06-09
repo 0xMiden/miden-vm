@@ -38,11 +38,7 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-        current_forest,
-        node_id,
-        state.host,
-    ) {
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
         return ControlFlow::Break(BreakReason::Err(err));
     }
 
@@ -71,11 +67,7 @@ where
             .push_start_node_with_source(split_node.on_false(), source_node);
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
-        return ControlFlow::Break(BreakReason::Err(err.with_context(
-            current_forest,
-            node_id,
-            state.host,
-        )));
+        return ControlFlow::Break(BreakReason::Err(err.with_context()));
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.

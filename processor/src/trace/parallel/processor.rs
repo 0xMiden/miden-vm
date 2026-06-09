@@ -161,12 +161,7 @@ impl ReplayProcessor {
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit {
-                    basic_block_node_id: _,
-                    op_idx: _,
-                    continuation,
-                    source_node,
-                } => {
+                InternalBreakReason::Emit { op_idx: _, continuation, source_node } => {
                     // do nothing - in replay processor we don't need to emit anything
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
@@ -235,7 +230,6 @@ impl ReplayProcessor {
                         current_forest,
                         continuation_stack,
                         None,
-                        host,
                         tracer,
                     )?;
                 },

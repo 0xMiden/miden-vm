@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Felt, ZERO,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
+    mast::error_code_from_msg,
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
@@ -69,7 +69,7 @@ proptest! {
         ]).unwrap());
         let mut tracer = NoopTracer;
 
-        let _ = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap();
+        let _ = op_u32assert2(&mut processor, ZERO, &mut tracer).unwrap();
         let expected = build_expected(&[a as u64, b as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
@@ -86,8 +86,7 @@ fn test_op_u32assert2_both_invalid_with_err_code() {
     let mut tracer = NoopTracer;
     let err_code = Felt::from_u32(123u32);
 
-    let err =
-        op_u32assert2(&mut processor, err_code, &mut tracer, &MastForest::default()).unwrap_err();
+    let err = op_u32assert2(&mut processor, err_code, &mut tracer).unwrap_err();
     assert!(
         matches!(
             err,
@@ -111,7 +110,7 @@ fn test_op_u32assert2_both_invalid_no_err_code() {
     );
     let mut tracer = NoopTracer;
 
-    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer).unwrap_err();
     assert!(
         matches!(err, OperationError::NotU32Values { ref values } if values.len() == 2),
         "expected NotU32Values with 2 invalid values"
@@ -127,7 +126,7 @@ fn test_op_u32assert2_second_invalid() {
     );
     let mut tracer = NoopTracer;
 
-    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer).unwrap_err();
     assert!(
         matches!(err, OperationError::NotU32Values { .. }),
         "expected NotU32Values when err_code is zero"
@@ -143,7 +142,7 @@ fn test_op_u32assert2_first_invalid() {
     );
     let mut tracer = NoopTracer;
 
-    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer).unwrap_err();
     assert!(
         matches!(err, OperationError::NotU32Values { .. }),
         "expected NotU32Values when err_code is zero"
@@ -159,8 +158,7 @@ fn test_op_u32assert2_err_code_propagates_on_invalid() {
     let mut tracer = NoopTracer;
     let err_code = Felt::from_u32(42);
 
-    let err =
-        op_u32assert2(&mut processor, err_code, &mut tracer, &MastForest::default()).unwrap_err();
+    let err = op_u32assert2(&mut processor, err_code, &mut tracer).unwrap_err();
     assert!(
         matches!(
             err,
@@ -188,8 +186,7 @@ fn test_op_u32assert2_valid_inputs_succeed_with_nonzero_err_code() {
     );
     let mut tracer = NoopTracer;
 
-    let result =
-        op_u32assert2(&mut processor, Felt::from_u32(99), &mut tracer, &MastForest::default());
+    let result = op_u32assert2(&mut processor, Felt::from_u32(99), &mut tracer);
     assert!(result.is_ok(), "valid u32 inputs must succeed regardless of err_code");
 }
 
@@ -578,12 +575,8 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
         Assert(ZERO),
     ];
 
-    let mut forest = MastForest::new();
-    let node_id = BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut forest).unwrap();
-
     for (op_idx, op) in ops.iter().enumerate() {
-        let _ =
-            execute_op(&mut processor, op, op_idx, &forest, node_id, &mut host, &mut tracer, None)?;
+        let _ = execute_op(&mut processor, op, op_idx, &mut host, &mut tracer, None)?;
     }
 
     Ok(processor)

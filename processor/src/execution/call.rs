@@ -52,11 +52,7 @@ where
         // check if the callee is in the kernel
         if !state.kernel.contains_proc(callee_hash) {
             let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
-            return ControlFlow::Break(BreakReason::Err(err.with_context(
-                current_forest,
-                current_node_id,
-                state.host,
-            )));
+            return ControlFlow::Break(BreakReason::Err(err.with_context()));
         }
         state.tracer.record_kernel_proc_access(callee_hash);
 
@@ -74,7 +70,7 @@ where
             .processor
             .memory_mut()
             .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err(current_forest, current_node_id, state.host)
+            .map_exec_err()
         {
             return ControlFlow::Break(BreakReason::Err(err));
         }
@@ -133,18 +129,10 @@ where
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
     if let Err(e) = state.processor.stack_mut().restore_context() {
-        return ControlFlow::Break(BreakReason::Err(e.with_context(
-            current_forest,
-            node_id,
-            state.host,
-        )));
+        return ControlFlow::Break(BreakReason::Err(e.with_context()));
     }
     if let Err(e) = state.processor.system_mut().restore_call_state() {
-        return ControlFlow::Break(BreakReason::Err(e.with_context(
-            current_forest,
-            node_id,
-            state.host,
-        )));
+        return ControlFlow::Break(BreakReason::Err(e.with_context()));
     }
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

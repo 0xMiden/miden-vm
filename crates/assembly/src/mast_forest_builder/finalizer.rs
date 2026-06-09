@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     advice::AdviceMap,
@@ -173,7 +173,6 @@ impl MastForestFinalizer {
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
         advice_map: AdviceMap,
-        _error_codes: BTreeMap<u64, Arc<str>>,
     ) -> Result<BuiltMastForest, Report> {
         let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in procedure_root_refs {
