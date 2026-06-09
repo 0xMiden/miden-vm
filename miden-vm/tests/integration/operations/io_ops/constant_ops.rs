@@ -1,3 +1,4 @@
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 
 use super::build_op_test;
@@ -89,6 +90,7 @@ fn push_odd_hex_length_original_issue() {
     test.expect_stack(&[256]); // 0x100 = 256 (now works with padding)
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn proptest_push_all_hex_lengths(

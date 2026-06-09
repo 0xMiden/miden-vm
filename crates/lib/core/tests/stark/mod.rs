@@ -1,7 +1,7 @@
 use std::{array, sync::Arc};
 
 use miden_air::PublicInputs;
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Felt, WORD_SIZE,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -11,8 +11,9 @@ use miden_core::{
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
-    AdviceInputs, ProvingOptions, StackInputs, prove_sync,
+    AdviceInputs, ProvingOptions, prove_sync,
     recursive_verifier::{VerifierData, generate_advice_inputs},
+    stack_inputs_from_ints,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -78,22 +79,21 @@ pub fn generate_recursive_verifier_data(
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
 ) -> VerifierData {
+    let source_manager = Arc::new(DefaultSourceManager::default());
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
-                let context = miden_assembly::testing::TestContext::new();
-                let kernel_lib = Assembler::new(context.source_manager())
+                let kernel_lib = Assembler::new(source_manager.clone())
                     .assemble_kernel("kernel", kernel)
                     .map(Arc::<Package>::from)
                     .unwrap();
-                let assembler =
-                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
+                let assembler = Assembler::with_kernel(source_manager, kernel_lib.clone()).unwrap();
                 let program: Program =
                     assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
-                let program: Program = Assembler::default()
+                let program: Program = Assembler::new(source_manager)
                     .assemble_program("program", source)
                     .unwrap()
                     .unwrap_program();
@@ -101,7 +101,7 @@ pub fn generate_recursive_verifier_data(
             },
         }
     };
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
+    let stack_inputs = stack_inputs_from_ints(stack_inputs);
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();
     if let Some(ref kernel_lib) = kernel_lib {

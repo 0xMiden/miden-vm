@@ -1,4 +1,5 @@
 use miden_core::Felt;
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 
 // =================================================================================================
@@ -212,6 +213,7 @@ fn edge_case_stack_preservation() {
 // PROPERTY-BASED TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn overflowing_add(a in any::<u128>(), b in any::<u128>()) {
@@ -371,6 +373,7 @@ fn split_u128(value: u128) -> (u64, u64, u64, u64) {
 // COMPARISON TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn test_eq(a in any::<u128>(), b in any::<u128>()) {
@@ -495,6 +498,7 @@ proptest! {
 // BITWISE TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn test_and(a in any::<u128>(), b in any::<u128>()) {
@@ -572,6 +576,7 @@ proptest! {
 // SHIFT TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn test_shl(a in any::<u128>(), n in 0u32..128u32) {
@@ -642,6 +647,7 @@ proptest! {
 // MIN/MAX TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn test_min(a in any::<u128>(), b in any::<u128>()) {
@@ -684,6 +690,7 @@ proptest! {
 // BIT-COUNTING TESTS
 // =================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn test_clz(a in any::<u128>()) {
@@ -1328,6 +1335,7 @@ fn mod_simple() {
 
 /// Strategy that generates u128 values biased toward limb boundaries.
 /// Mixes uniform random with values near 0, u32::MAX, u64::MAX, u96::MAX, and u128::MAX.
+#[cfg(feature = "arbitrary")]
 fn u128_with_limb_boundaries() -> impl Strategy<Value = u128> {
     prop_oneof![
         3 => any::<u128>(),                                   // uniform random
@@ -1339,6 +1347,7 @@ fn u128_with_limb_boundaries() -> impl Strategy<Value = u128> {
     ]
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 

@@ -18,6 +18,7 @@ use miden_processor::{
     event::{EventError, EventHandler},
 };
 use miden_prover::ProvingOptions;
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
 
 #[test]
@@ -75,6 +76,7 @@ fn reduce_kernel_digests_upper_bound() {
     expect_assert_error_message!(test);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn truncate_stack_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH), n in 1_usize..100) {

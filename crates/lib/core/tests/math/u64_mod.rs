@@ -1,11 +1,13 @@
+#[cfg(feature = "arbitrary")]
 use core::cmp;
 
 use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::{ExecutionError, operation::OperationError};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value, stack,
+    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, rand::rand_value, stack,
 };
 
 #[test]
@@ -1410,6 +1412,7 @@ fn u32clz_nonzero_boundary_regression() {
     build_test!(source, &stack![1], &[32]).expect_stack(&[31]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn u32clz_matches_rust_leading_zeros(n in any::<u32>()) {
@@ -1499,6 +1502,7 @@ fn cto() {
 // RANDOMIZED TESTS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn unchecked_lt_proptest(a in any::<u64>(), b in any::<u64>()) {
@@ -1768,6 +1772,7 @@ proptest! {
 /// Strategy that mixes boundary u64 values with uniformly random ones. Each variant has equal
 /// probability of being sampled; the boundary cases stress 32-bit limb edges where carry handling
 /// is most likely to fail.
+#[cfg(feature = "arbitrary")]
 fn boundary_biased_u64() -> impl Strategy<Value = u64> {
     prop_oneof![
         Just(0u64),
@@ -1786,6 +1791,7 @@ fn boundary_biased_u64() -> impl Strategy<Value = u64> {
 
 /// Strategy for shift amounts in [0, 64) biased toward the values that exercise control-flow
 /// boundaries in shr/rotl/rotr (32-bit limb edge, the no-op case, and the maximum).
+#[cfg(feature = "arbitrary")]
 fn boundary_biased_shift() -> impl Strategy<Value = u32> {
     prop_oneof![
         Just(0u32),

@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
+use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionError, Word, operation::OperationError};
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
@@ -456,8 +456,11 @@ fn simple_dyn_exec() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let context = miden_assembly::testing::TestContext::new();
-    let program = context.assemble(program_source).unwrap();
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -550,8 +553,11 @@ fn simple_dyncall() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let context = miden_assembly::testing::TestContext::new();
-    let program = context.assemble(program_source).unwrap();
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -648,7 +654,7 @@ fn procref() -> Result<(), Report> {
 
     // obtain procedures' MAST roots by compiling them as module
     let mast_roots: Vec<Word> = {
-        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(DefaultSourceManager::default());
         let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, source_manager.clone())?;

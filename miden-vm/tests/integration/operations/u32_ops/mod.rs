@@ -1,5 +1,7 @@
 use miden_processor::{ExecutionError, operation::OperationError};
-use miden_utils_testing::{Felt, U32_BOUND, build_op_test, expect_exec_error_matches, prop_randw};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::prop_randw;
+use miden_utils_testing::{Felt, U32_BOUND, build_op_test, expect_exec_error_matches};
 
 mod arithmetic_ops;
 mod bitwise_ops;
