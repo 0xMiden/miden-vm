@@ -331,6 +331,46 @@ fn name_map_detects_conflict_via_define_api() {
 }
 
 #[test]
+fn name_map_rebuilds_after_mutable_item_rename() {
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("old"))
+        .expect("first insertion should succeed");
+
+    for item in module.items_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.name = ident_with_name("dup");
+    }
+
+    let result = module.define_type(type_alias_with_name("dup"));
+    assert!(
+        matches!(result, Err(SemanticAnalysisError::SymbolConflict { .. })),
+        "expected SymbolConflict after renaming through items_mut(), got {result:?}"
+    );
+}
+
+#[test]
+fn name_map_drops_old_name_after_mutable_item_rename() {
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("old"))
+        .expect("first insertion should succeed");
+
+    for item in module.items_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.name = ident_with_name("new");
+    }
+
+    module
+        .define_type(type_alias_with_name("old"))
+        .expect("old name should be available after the name map is rebuilt");
+}
+
+#[test]
 fn enum_variant_matching_enum_name_reports_symbol_conflict() {
     let context = SyntaxTestContext::default();
     let source = "\
