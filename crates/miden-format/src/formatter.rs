@@ -3,8 +3,8 @@ use std::mem;
 use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        BeginBlock, Block, IfOp, Import, Instruction, Procedure, RepeatOp, Signature, SourceFile,
-        TypeBody, TypeDecl, WhileOp,
+        BeginBlock, Block, DoWhileOp, IfOp, Import, Instruction, Procedure, RepeatOp, Signature,
+        SourceFile, TypeBody, TypeDecl, WhileOp,
     },
     rowan::{NodeOrToken, ast::AstNode},
 };
@@ -660,6 +660,14 @@ fn render_block(block: &Block, indent: usize, config: &Config) -> String {
                 }
                 extend_lines(&mut lines, &rendered);
             },
+            Operation::DoWhile(do_while_op) => {
+                flush_instruction_line(&mut lines, &mut current_instruction_line);
+                let mut rendered = render_do_while(&do_while_op, indent, config);
+                if let Some(comment) = entry.trailing_comment {
+                    append_inline_comment(&mut rendered, &comment);
+                }
+                extend_lines(&mut lines, &rendered);
+            },
             Operation::Repeat(repeat_op) => {
                 flush_instruction_line(&mut lines, &mut current_instruction_line);
                 let mut rendered = render_repeat(&repeat_op, indent, config);
@@ -785,6 +793,47 @@ fn render_while(while_op: &WhileOp, indent: usize, config: &Config) -> String {
 
     if let Some(body) = while_op.body() {
         let block = render_block(&body, indent + config.indent_size(), config);
+        if !block.is_empty() {
+            rendered.push('\n');
+            rendered.push_str(&block);
+        }
+    }
+
+    rendered.push('\n');
+    rendered.push_str(&format!("{}end", indent_string(indent)));
+    rendered
+}
+
+fn render_do_while(do_while_op: &DoWhileOp, indent: usize, config: &Config) -> String {
+    // Render the `do` keyword (everything before the first block).
+    let mut rendered = format!(
+        "{}{}",
+        indent_string(indent),
+        render_prefix_before_first_block(do_while_op.syntax())
+    );
+    if let Some(comment) = comment_before_child_of_kind(do_while_op.syntax(), SyntaxKind::Block, 0)
+    {
+        append_inline_comment(&mut rendered, &comment);
+    }
+
+    if let Some(body) = do_while_op.body() {
+        let block = render_block(&body, indent + config.indent_size(), config);
+        if !block.is_empty() {
+            rendered.push('\n');
+            rendered.push_str(&block);
+        }
+    }
+
+    // Render the `while` keyword that introduces the condition block.
+    rendered.push('\n');
+    rendered.push_str(&format!("{}while", indent_string(indent)));
+    if let Some(comment) = comment_before_child_of_kind(do_while_op.syntax(), SyntaxKind::Block, 1)
+    {
+        append_inline_comment(&mut rendered, &comment);
+    }
+
+    if let Some(condition) = do_while_op.condition() {
+        let block = render_block(&condition, indent + config.indent_size(), config);
         if !block.is_empty() {
             rendered.push('\n');
             rendered.push_str(&block);
@@ -1576,10 +1625,10 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
         Tombstone | Error | SourceFile | Doc | Import | Constant | TypeDecl | AdviceMap
         | BeginBlock | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp
-        | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
-        | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
-        | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow | Semicolon
-        | Slash | SlashSlash | Star => match previous_kind {
+        | DoWhileOp | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline
+        | Comment | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString
+        | At | Bang | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow
+        | Semicolon | Slash | SlashSlash | Star => match previous_kind {
             Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
             DotDot => false,
             Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
@@ -2144,6 +2193,42 @@ end
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn formats_do_while_loop() {
+        let source = "\
+begin
+do
+push.1 add
+while
+dup.0 neq.0
+end
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+begin
+    do
+        push.1 add
+    while
+        dup.0 neq.0
+    end
+end
+";
+
+        assert_eq!(formatted, expected);
+
+        // Formatting is idempotent.
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]

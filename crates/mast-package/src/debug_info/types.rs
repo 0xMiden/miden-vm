@@ -89,7 +89,7 @@ pub const DEBUG_TYPES_VERSION: u8 = 1;
 
 /// Debug types section containing type definitions for a MASP package.
 ///
-/// This section stores type information (primitives, structs, arrays, pointers,
+/// This section stores type information (primitives, structs, enums, arrays, pointers,
 /// function types) that enables debuggers to properly display values.
 ///
 /// String indices in sub-types (e.g., `name_idx` in `DebugFieldInfo`) are relative
@@ -319,6 +319,17 @@ pub enum DebugTypeInfo {
         /// Parameter types (indices into type table)
         param_type_indices: Vec<DebugTypeIdx>,
     },
+    /// An enum type.
+    Enum {
+        /// Name of the enum (index into string table).
+        name_idx: u32,
+        /// Size in bytes.
+        size: u32,
+        /// Type of the enum discriminant.
+        discriminant_type_idx: DebugTypeIdx,
+        /// Variants of the enum.
+        variants: Vec<DebugVariantInfo>,
+    },
     /// An unknown or opaque type
     Unknown,
 }
@@ -363,6 +374,8 @@ pub enum DebugPrimitiveType {
     Felt,
     /// Miden word (4 field elements)
     Word,
+    /// Unsigned 256-bit integer
+    U256,
 }
 
 impl DebugPrimitiveType {
@@ -375,7 +388,7 @@ impl DebugPrimitiveType {
             Self::I32 | Self::U32 | Self::F32 => 4,
             Self::I64 | Self::U64 | Self::F64 | Self::Felt => 8,
             Self::I128 | Self::U128 => 16,
-            Self::Word => 32,
+            Self::Word | Self::U256 => 32,
         }
     }
 
@@ -392,7 +405,7 @@ impl DebugPrimitiveType {
             | Self::U32
             | Self::Felt => 1,
             Self::I64 | Self::U64 | Self::F32 | Self::F64 => 2,
-            Self::I128 | Self::U128 | Self::Word => 4,
+            Self::I128 | Self::U128 | Self::Word | Self::U256 => 4,
         }
     }
 
@@ -415,6 +428,7 @@ impl DebugPrimitiveType {
             13 => Some(Self::F64),
             14 => Some(Self::Felt),
             15 => Some(Self::Word),
+            16 => Some(Self::U256),
             _ => None,
         }
     }
@@ -430,6 +444,20 @@ pub struct DebugFieldInfo {
     pub type_idx: DebugTypeIdx,
     /// Byte offset within the struct
     pub offset: u32,
+}
+
+/// Variant information within an enum type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugVariantInfo {
+    /// Name of the variant (index into string table).
+    pub name_idx: u32,
+    /// Payload type of this variant (index into type table), if present.
+    pub type_idx: Option<DebugTypeIdx>,
+    /// Byte offset of the payload from the base of the enum value, if present.
+    pub payload_offset: Option<u32>,
+    /// Discriminant value for this variant.
+    pub discriminant: u128,
 }
 
 // DEBUG FILE INFO
@@ -707,19 +735,21 @@ mod tests {
         assert_eq!(DebugPrimitiveType::I64.size_in_bytes(), 8);
         assert_eq!(DebugPrimitiveType::Felt.size_in_bytes(), 8);
         assert_eq!(DebugPrimitiveType::Word.size_in_bytes(), 32);
+        assert_eq!(DebugPrimitiveType::U256.size_in_bytes(), 32);
 
         assert_eq!(DebugPrimitiveType::Void.size_in_felts(), 0);
         assert_eq!(DebugPrimitiveType::I32.size_in_felts(), 1);
         assert_eq!(DebugPrimitiveType::I64.size_in_felts(), 2);
         assert_eq!(DebugPrimitiveType::Word.size_in_felts(), 4);
+        assert_eq!(DebugPrimitiveType::U256.size_in_felts(), 4);
     }
 
     #[test]
     fn test_primitive_type_roundtrip() {
-        for discriminant in 0..=15 {
+        for discriminant in 0..=16 {
             let ty = DebugPrimitiveType::from_discriminant(discriminant).unwrap();
             assert_eq!(ty as u8, discriminant);
         }
-        assert!(DebugPrimitiveType::from_discriminant(16).is_none());
+        assert!(DebugPrimitiveType::from_discriminant(17).is_none());
     }
 }
