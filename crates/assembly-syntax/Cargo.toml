@@ -22,7 +22,7 @@ std = [
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
-    "proptest/std",
+    "proptest?/std",
 ]
 serde = [
     "dep:serde",

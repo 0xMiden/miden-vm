@@ -1,6 +1,8 @@
 use core::cmp::Ordering;
 
-use miden_utils_testing::{build_op_test, proptest::prelude::*, rand::rand_value};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
+use miden_utils_testing::{build_op_test, rand::rand_value};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================
@@ -56,6 +58,7 @@ fn u32max() {
 // U32 OPERATIONS TESTS - RANDOMIZED - COMPARISON OPERATIONS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn u32lt_proptest(a in any::<u32>(), b in any::<u32>()) {

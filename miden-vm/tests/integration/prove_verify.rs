@@ -9,6 +9,7 @@ use miden_processor::ExecutionOptions;
 use miden_prover::{
     AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
 };
+use miden_utils_testing::stack_inputs_from_ints;
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 
@@ -23,7 +24,7 @@ fn assert_prove_verify(
         .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
-    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+    let stack_inputs = stack_inputs_from_ints([0, 1]);
     let advice_inputs = AdviceInputs::default();
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
@@ -287,7 +288,7 @@ mod fast_parallel {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         let trace_inputs =
@@ -338,7 +339,7 @@ mod fast_parallel {
             .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
-        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
         let advice_inputs = AdviceInputs::default();
         let mut host = default_source_manager_host();
         let trace_inputs =

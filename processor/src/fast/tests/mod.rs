@@ -9,7 +9,7 @@ use miden_core::{
     operations::Operation,
     program::StackInputs,
 };
-use miden_utils_testing::build_test;
+use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 
 use super::*;
@@ -60,7 +60,7 @@ fn stack_get_word_out_of_bounds_read() {
 
 #[test]
 fn stack_get_safe_boundary() {
-    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let inputs = stack_inputs_from_ints(1..=16_u64);
     let processor = FastProcessor::new(inputs);
 
     // idx == stack_top_idx: out of bounds, should return ZERO.
@@ -78,7 +78,7 @@ fn stack_get_safe_boundary() {
 
 #[test]
 fn stack_get_word_safe_partial_read() {
-    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let inputs = stack_inputs_from_ints(1..=16_u64);
     let processor = FastProcessor::new(inputs);
 
     // The stack has 16 elements (indices 0..=15). Reading a word at start_idx=15 means we want

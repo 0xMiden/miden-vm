@@ -1,7 +1,7 @@
 use miden_processor::{ExecutionError, Felt, operation::OperationError};
-use miden_utils_testing::{
-    U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
-};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
+use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches, rand::rand_value};
 
 use super::test_input_out_of_bounds;
 
@@ -585,6 +585,7 @@ fn u32cto() {
 // U32 OPERATIONS TESTS - RANDOMIZED - BITWISE OPERATIONS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn u32and_proptest(a in any::<u32>(), b in any::<u32>()) {
