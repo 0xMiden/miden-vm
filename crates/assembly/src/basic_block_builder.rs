@@ -13,11 +13,14 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt,
     events::SystemEvent,
-    mast::{DebugVarId, MastNodeId},
     operations::{AssemblyOp, DebugVarInfo, Operation},
 };
 
-use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
+use crate::{
+    ProcedureContext,
+    assembler::BodyWrapper,
+    mast_forest_builder::{AsmOpRef, DebugVarRef, MastForestBuilder, MastNodeRef},
+};
 
 // PENDING ASM OP
 // ================================================================================================
@@ -56,11 +59,11 @@ pub struct BasicBlockBuilder<'a> {
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
-    /// Finalized AssemblyOps with their operation indices (op_idx, AssemblyOp).
-    asm_ops: Vec<(usize, AssemblyOp)>,
+    /// Finalized AssemblyOps with their operation indices (op_idx, asm_op_ref).
+    asm_ops: Vec<(usize, AsmOpRef)>,
     /// Debug variables attached to operations in this block.
-    /// Each entry is (op_index, debug_var_id).
-    debug_vars: Vec<(usize, DebugVarId)>,
+    /// Each entry is (op_index, debug_var_ref).
+    debug_vars: Vec<(usize, DebugVarRef)>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -169,7 +172,7 @@ impl BasicBlockBuilder<'_> {
     /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a control
     /// node. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
     /// registration with the node's debug info.
-    pub fn set_instruction_cycle_count(&mut self) -> Option<AssemblyOp> {
+    pub fn set_instruction_cycle_count(&mut self) -> Result<Option<AssemblyOp>, Report> {
         let pending = self.pending_asm_op.take().expect("no pending asm op to finalize");
 
         // Compute the cycle count for the instruction
@@ -179,10 +182,11 @@ impl BasicBlockBuilder<'_> {
             AssemblyOp::new(pending.location, pending.context_name, cycle_count as u8, pending.op);
 
         match cycle_count {
-            0 => Some(asm_op),
+            0 => Ok(Some(asm_op)),
             _ => {
-                self.asm_ops.push((pending.op_start, asm_op));
-                None
+                let asm_op_ref = self.mast_forest_builder.add_asm_op_ref(asm_op)?;
+                self.asm_ops.push((pending.op_start, asm_op_ref));
+                Ok(None)
             },
         }
     }
@@ -193,8 +197,8 @@ impl BasicBlockBuilder<'_> {
     /// only accessed by the debugger. They track source-level variable locations at
     /// specific points in program execution.
     pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) -> Result<(), Report> {
-        let debug_var_id = self.mast_forest_builder.add_debug_var(debug_var)?;
-        self.debug_vars.push((self.ops.len(), debug_var_id));
+        let debug_var_ref = self.mast_forest_builder.add_debug_var_ref(debug_var)?;
+        self.debug_vars.push((self.ops.len(), debug_var_ref));
         Ok(())
     }
 }
@@ -207,16 +211,16 @@ impl BasicBlockBuilder<'_> {
     ///
     /// This consumes all operations in the builder, but does not touch the operations in the
     /// epilogue of the builder.
-    pub fn make_basic_block(&mut self) -> Result<Option<MastNodeId>, Report> {
+    pub(crate) fn make_basic_block(&mut self) -> Result<Option<MastNodeRef>, Report> {
         if !self.ops.is_empty() {
             let ops = self.ops.drain(..).collect();
             let asm_ops = core::mem::take(&mut self.asm_ops);
-            let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
+            let debug_vars = self.debug_vars.drain(..).collect();
 
-            let basic_block_node_id =
-                self.mast_forest_builder.ensure_block(ops, asm_ops, debug_vars)?;
+            let basic_block_node_ref =
+                self.mast_forest_builder.ensure_block_ref(ops, asm_ops, debug_vars)?;
 
-            Ok(Some(basic_block_node_id))
+            Ok(Some(basic_block_node_ref))
         } else {
             Ok(None)
         }
@@ -229,9 +233,8 @@ impl BasicBlockBuilder<'_> {
     /// - Operations contained in the epilogue of the builder are appended to the list of ops which
     ///   go into the new BASIC BLOCK node.
     /// - The builder is consumed in the process.
-    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeId>, Report> {
+    pub fn try_into_basic_block(mut self) -> Result<Option<MastNodeRef>, Report> {
         self.ops.append(&mut self.epilogue);
-
         self.make_basic_block()
     }
 }

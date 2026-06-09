@@ -1263,6 +1263,22 @@ fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
     );
 }
 
+#[test]
+fn test_materialized_deserialization_preserves_duplicate_roots() {
+    let mut forest = MastForest::new();
+    let root_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.roots = vec![root_id, root_id];
+    forest.commitment = forest.compute_nodes_commitment(&forest.roots);
+
+    let bytes = forest.to_bytes();
+    let restored = MastForest::read_from_bytes(&bytes).unwrap();
+
+    assert_eq!(restored.procedure_roots(), &[root_id, root_id]);
+    assert_eq!(restored.commitment(), forest.commitment());
+}
+
 /// Test that hashless without stripped is rejected.
 #[test]
 fn test_hashless_requires_stripped() {

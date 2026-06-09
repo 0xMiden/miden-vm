@@ -14,7 +14,7 @@ use crate::{
         MastNodeBuilder, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     operations::AssemblyOp,
-    utils::DenseIdMap,
+    utils::{DenseIdMap, IndexVec},
 };
 
 #[cfg(test)]
@@ -32,6 +32,7 @@ pub(crate) struct MastForestMerger {
     // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
     // `mast_forest` are also added to the indices.
     node_id_by_hash: BTreeMap<Word, MastNodeId>,
+    hash_by_node_id: IndexVec<MastNodeId, Word>,
     asm_op_id_by_value: BTreeMap<AssemblyOpKey, AsmOpId>,
     asm_op_value_by_id: BTreeMap<AsmOpId, AssemblyOpKey>,
     /// Mappings from previous `MastNodeId`s to their new ids.
@@ -69,6 +70,7 @@ impl MastForestMerger {
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
+            hash_by_node_id: IndexVec::new(),
             asm_op_id_by_value: BTreeMap::new(),
             asm_op_value_by_id: BTreeMap::new(),
             mast_forest: MastForest::new(),
@@ -212,7 +214,8 @@ impl MastForestMerger {
             &self.node_id_mappings[forest_idx],
         )?;
 
-        let node_fingerprint = remapped_builder.fingerprint_for_node(&self.mast_forest)?;
+        let node_fingerprint =
+            remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
 
         let mapped_node_id = match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -228,6 +231,14 @@ impl MastForestMerger {
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
+                let returned_id = self
+                    .hash_by_node_id
+                    .push(node_fingerprint)
+                    .map_err(|_| MastForestError::TooManyNodes)?;
+                debug_assert_eq!(
+                    returned_id, new_node_id,
+                    "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
+                );
                 new_node_id
             },
         };
@@ -246,7 +257,7 @@ impl MastForestMerger {
             // This takes O(n) where n is the number of roots in the merged forest every time to
             // check if the root already exists. As the number of roots is relatively low generally,
             // this should be okay.
-            self.mast_forest.make_root(new_root);
+            self.mast_forest.mark_root(new_root);
         }
     }
 

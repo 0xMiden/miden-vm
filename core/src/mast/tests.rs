@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 
 use miden_crypto::rand::test_utils::prng_array;
 use proptest::prelude::*;
@@ -10,7 +10,7 @@ use crate::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt,
     },
-    operations::{AssemblyOp, Operation},
+    operations::{AssemblyOp, DebugVarInfo, DebugVarLocation, Operation},
     program::{Kernel, ProgramInfo},
     serde::{Deserializable, Serializable},
 };
@@ -301,8 +301,8 @@ fn test_clear_debug_info_independent() {
 
     assert!(forest.debug_info.is_empty());
 
-    // Clear debug info only
-    forest.clear_debug_info();
+    // Strip debug info only
+    let forest = forest.without_debug_info();
 
     // Verify debug info is removed but structure remains
     assert!(forest.debug_info.is_empty());
@@ -379,20 +379,141 @@ fn test_commitment_caching() {
         "advice_map mutation should not invalidate commitment cache"
     );
 
-    // Test that clear_debug_info doesn't invalidate the cache
-    forest.clear_debug_info();
+    // Test that stripping debug info doesn't invalidate the cache
+    forest = forest.without_debug_info();
     let commitment6 = forest.commitment();
     assert_eq!(
         commitment3, commitment6,
-        "clear_debug_info should not invalidate commitment cache"
+        "stripping debug info should not invalidate commitment cache"
     );
 
     // Test that remove_nodes invalidates the cache
-    let nodes_to_remove = alloc::collections::BTreeSet::new();
+    let nodes_to_remove = BTreeSet::new();
     forest.remove_nodes(&nodes_to_remove); // Empty set, but still calls the method
     let commitment7 = forest.commitment();
     // Since we didn't actually remove anything, commitment should still be the same
     assert_eq!(commitment3, commitment7);
+}
+
+#[test]
+fn remove_nodes_remaps_debug_vars_for_retained_nodes() {
+    let mut forest = MastForest::new();
+    let removed = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let retained = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(retained);
+
+    let debug_var_id = forest
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(retained, vec![(0, debug_var_id)])
+        .unwrap();
+
+    let mut nodes_to_remove = BTreeSet::new();
+    nodes_to_remove.insert(removed);
+    let id_remappings = forest.remove_nodes(&nodes_to_remove);
+    let retained = id_remappings[&retained];
+
+    assert_eq!(forest.debug_vars_for_operation(retained, 0), &[debug_var_id]);
+    assert_eq!(forest.debug_info().debug_vars_for_node(retained), vec![(0, debug_var_id)]);
+}
+
+#[test]
+fn remove_nodes_skips_removed_procedure_roots() {
+    let mut forest = MastForest::new();
+    let removed_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let retained_root = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(removed_root);
+    forest.make_root(retained_root);
+
+    let mut nodes_to_remove = BTreeSet::new();
+    nodes_to_remove.insert(removed_root);
+    let id_remappings = forest.remove_nodes(&nodes_to_remove);
+    let retained_root = id_remappings[&retained_root];
+
+    assert_eq!(forest.procedure_roots(), &[retained_root]);
+}
+
+#[test]
+fn remove_nodes_prunes_removed_procedure_names() {
+    let mut forest = MastForest::new();
+    let removed_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let retained_root = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(removed_root);
+    forest.make_root(retained_root);
+
+    let removed_digest = forest[removed_root].digest();
+    let retained_digest = forest[retained_root].digest();
+    forest.insert_procedure_name(removed_digest, Arc::from("removed"));
+    forest.insert_procedure_name(retained_digest, Arc::from("retained"));
+
+    let mut nodes_to_remove = BTreeSet::new();
+    nodes_to_remove.insert(removed_root);
+    forest.remove_nodes(&nodes_to_remove);
+
+    assert_eq!(forest.procedure_name(&removed_digest), None);
+    assert_eq!(forest.procedure_name(&retained_digest), Some("retained"));
+}
+
+#[test]
+#[should_panic(expected = "cannot remove node")]
+fn remove_nodes_rejects_nodes_referenced_by_retained_parents() {
+    let mut forest = MastForest::new();
+    let child = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let parent = CallNodeBuilder::new(child).add_to_forest(&mut forest).unwrap();
+    forest.make_root(parent);
+
+    let mut nodes_to_remove = BTreeSet::new();
+    nodes_to_remove.insert(child);
+    forest.remove_nodes(&nodes_to_remove);
+}
+
+#[test]
+fn remove_nodes_clears_node_metadata_when_all_nodes_are_removed() {
+    let mut forest = MastForest::new();
+    let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(node);
+
+    let asm_op_id = forest
+        .debug_info_mut()
+        .add_asm_op(AssemblyOp::new(None, "test".into(), 1, "add".into()))
+        .unwrap();
+    let debug_var_id = forest
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    forest.debug_info_mut().register_asm_ops(node, 1, vec![(0, asm_op_id)]).unwrap();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(node, vec![(0, debug_var_id)])
+        .unwrap();
+
+    let mut nodes_to_remove = BTreeSet::new();
+    nodes_to_remove.insert(node);
+    forest.remove_nodes(&nodes_to_remove);
+
+    assert_eq!(forest.num_nodes(), 0);
+    assert!(forest.procedure_roots().is_empty());
+    assert!(forest.debug_info().asm_ops().is_empty());
+    assert!(forest.debug_info().debug_vars().is_empty());
+    assert!(forest.debug_info().asm_ops_for_node(node).is_empty());
+    assert!(forest.debug_vars_for_operation(node, 0).is_empty());
 }
 
 // HELPER FUNCTIONS

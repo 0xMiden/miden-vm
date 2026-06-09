@@ -8,7 +8,7 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -166,11 +166,12 @@ impl MastNodeExt for CallNode {
     type Builder = CallNodeBuilder;
 
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        if self.is_syscall {
+        let builder = if self.is_syscall {
             CallNodeBuilder::new_syscall(self.callee)
         } else {
             CallNodeBuilder::new(self.callee)
-        }
+        };
+        builder.with_digest(self.digest)
     }
 
     #[cfg(debug_assertions)]
@@ -258,6 +259,14 @@ impl CallNodeBuilder {
             digest,
         })
     }
+
+    pub(in crate::mast) fn build_linked(self) -> Result<CallNode, MastForestError> {
+        Ok(CallNode {
+            callee: self.callee,
+            is_syscall: self.is_syscall,
+            digest: self.digest.ok_or(MastForestError::DigestRequiredForDeserialization)?,
+        })
+    }
 }
 
 impl MastForestContributor for CallNodeBuilder {
@@ -297,8 +306,12 @@ impl MastForestContributor for CallNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
-        Ok(if let Some(forced_digest) = self.digest {
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
             let callee_digest = forest[self.callee].digest();
@@ -309,7 +322,9 @@ impl MastForestContributor for CallNodeBuilder {
             };
 
             hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
-        })
+        };
+
+        fingerprint_with_child_fingerprints(node_digest, &[self.callee], forest, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -366,12 +381,13 @@ impl CallNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for CallNodeBuilder {
-    type Parameters = ();
+    type Parameters = CallNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
+        let _ = params;
         (any::<MastNodeId>(), any::<bool>())
             .prop_map(|(callee, is_syscall)| {
                 if is_syscall {
@@ -383,3 +399,8 @@ impl proptest::prelude::Arbitrary for CallNodeBuilder {
             .boxed()
     }
 }
+
+/// Parameters for generating CallNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug, Default)]
+pub struct CallNodeBuilderParams {}

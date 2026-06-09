@@ -212,12 +212,8 @@ impl OpToAsmOpId {
     /// Nodes that are not in the remapping are considered removed and their asm_op data is
     /// discarded.
     pub fn remap_nodes(&self, remapping: &BTreeMap<MastNodeId, MastNodeId>) -> Self {
-        if self.is_empty() {
+        if self.is_empty() || remapping.is_empty() {
             return Self::new();
-        }
-        if remapping.is_empty() {
-            // No remapping means no nodes were removed/reordered, keep current storage
-            return self.clone();
         }
 
         // Find the max new node ID to determine the size of the new structure
@@ -499,6 +495,19 @@ mod tests {
         // Nodes 0 and 2 should have their ops
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(0), 0), Some(test_asm_op_id(0)));
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(2), 0), Some(test_asm_op_id(1)));
+    }
+
+    #[test]
+    fn test_remap_nodes_empty_remapping_removes_all_asm_ops() {
+        let mut storage = OpToAsmOpId::new();
+        storage
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
+            .unwrap();
+
+        let remapped = storage.remap_nodes(&BTreeMap::new());
+
+        assert!(remapped.is_empty());
+        assert_eq!(remapped.num_nodes(), 0);
     }
 
     // ============================================================================================

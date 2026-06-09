@@ -3,8 +3,9 @@ use alloc::{string::ToString, vec::Vec};
 use miden_assembly_syntax_cst::{
     SyntaxElement, SyntaxKind, SyntaxToken,
     ast::{
-        AstNode, Block as CstBlock, IfOp as CstIfOp, Instruction as CstInstruction,
-        Operation as CstOperation, RepeatOp as CstRepeatOp, WhileOp as CstWhileOp,
+        AstNode, Block as CstBlock, DoWhileOp as CstDoWhileOp, IfOp as CstIfOp,
+        Instruction as CstInstruction, Operation as CstOperation, RepeatOp as CstRepeatOp,
+        WhileOp as CstWhileOp,
     },
     rowan,
 };
@@ -63,6 +64,7 @@ fn lower_operation(
     match op {
         CstOperation::If(op) => Ok(vec![lower_if_op(context, op)?]),
         CstOperation::While(op) => Ok(vec![lower_while_op(context, op)?]),
+        CstOperation::DoWhile(op) => Ok(vec![lower_do_while_op(context, op)?]),
         CstOperation::Repeat(op) => Ok(vec![lower_repeat_op(context, op)?]),
         CstOperation::Instruction(op) => lower_instruction(context, op),
     }
@@ -131,6 +133,26 @@ fn lower_while_op(
     })?;
     let body = lower_required_block(context, &body, "expected a non-empty `while` block")?;
     Ok(ast::Op::While { span, body })
+}
+
+/// Lowers a `do`..`while`..`end` operation and enforces a non-empty body and condition.
+fn lower_do_while_op(
+    context: &mut LoweringContext<'_>,
+    op: &CstDoWhileOp,
+) -> Result<ast::Op, ParsingError> {
+    let span = context.parse().span_for_node(op.syntax());
+    let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a block body for `do`".to_string(),
+    })?;
+    let body = lower_required_block(context, &body, "expected a non-empty `do` block")?;
+    let condition = op.condition().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a condition block after `while`".to_string(),
+    })?;
+    let condition =
+        lower_required_block(context, &condition, "expected a non-empty `while` condition")?;
+    Ok(ast::Op::DoWhile { span, body, condition })
 }
 
 /// Lowers a `repeat.<count>` operation and validates the repeat-count immediate.

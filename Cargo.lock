@@ -1386,11 +1386,11 @@ dependencies = [
  "miden-utils-indexing",
  "miden-utils-sync",
  "proptest",
- "proptest-derive",
  "rstest",
  "serde",
  "serde_json",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]

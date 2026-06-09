@@ -18,6 +18,9 @@
 - Removed the legacy LALRPOP parser backend
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 - [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
+- Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).
+- [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
+- Added `do <block> while <cond> end` syntax ([#3232](https://github.com/0xMiden/miden-vm/pull/3232)).
 
 #### Fixes
 
@@ -30,6 +33,7 @@
 #### Enhancements
 
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
+- Added enum and `u256` records to `.debug_types` metadata so debuggers can preserve those type identities ([#3227](https://github.com/0xMiden/miden-vm/pull/3227)).
 - Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
 
 ## v0.23.3 (2026-05-26)
@@ -114,6 +118,9 @@
 - [BREAKING] Refined MAST forest read policies with trusted wire-backed views, options-based untrusted reads, and separate wire and validation budgets ([#3077](https://github.com/0xMiden/miden-vm/pull/3077)).
 - Documented sortedness precondition more prominently for sorted array operations ([#2832](https://github.com/0xMiden/miden-vm/pull/2832)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
+- Clarified `/` and `//` division semantics in constant expressions ([#3113](https://github.com/0xMiden/miden-vm/pull/3113)).
+- [BREAKING] Updated the Miden crypto stack to `miden-crypto` and `miden-lifted-stark` v0.24, and switched digest-ordering code to `Word`'s native lexicographic ordering ([#3039](https://github.com/0xMiden/miden-vm/pull/3039)).
+- Borrowed operation slices in basic-block batching helpers to avoid cloning in the fingerprinting path ([#2994](https://github.com/0xMiden/miden-vm/pull/2994)).
 - [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] `miden_processor::execute()` and `execute_sync()` now return `ExecutionOutput`; trace building remains explicit via `execute_trace_inputs*()` and `trace::build_trace()` ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Removed the deprecated `FastProcessor::execute_sync_mut()` alias; `execute_mut_sync()` is now the only sync mutable-execution entrypoint ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).

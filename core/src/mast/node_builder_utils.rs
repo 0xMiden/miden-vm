@@ -1,8 +1,7 @@
 use crate::{
     mast::{
-        BasicBlockNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, MastForest,
-        MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeId,
-        node::MastNodeExt,
+        BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, node::MastNodeExt,
     },
     utils::LookupByIdx,
 };
@@ -50,11 +49,7 @@ where
             MastNodeBuilder::BasicBlock(builder)
         },
         MastNode::Dyn(dyn_node) => {
-            let builder = if dyn_node.is_dyncall() {
-                DynNodeBuilder::new_dyncall()
-            } else {
-                DynNodeBuilder::new_dyn()
-            };
+            let builder = dyn_node.to_builder(source_forest);
             MastNodeBuilder::Dyn(builder)
         },
         MastNode::External(external_node) => {

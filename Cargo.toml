@@ -102,6 +102,7 @@ tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
+trybuild        = { version = "1.0" }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }

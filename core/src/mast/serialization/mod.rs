@@ -214,22 +214,29 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 /// version field itself, but should be considered invalid for now.
 ///
 /// Version history:
-/// - [0, 0, 0]: Initial format
+/// - [0, 0, 0]: Initial format.
 /// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
-///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
-///   serialization in CSR format (eliminates per-node decorator sections and round-trip
+///   indptr, padding, and group metadata for exact OpBatch reconstruction). Added asm-op metadata
+///   and debug-variable storage in CSR layout (eliminates per-node metadata sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
-/// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
-///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
-///   Removed `breakpoint` instruction (#2655).
+/// - [0, 0, 2]: AssemblyOps moved out of inline metadata into a dedicated DebugInfo section.
+///   Removed `should_break` field from AssemblyOp serialization (#2646). Removed `breakpoint`
+///   instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
-///   Dropped the serialized decorator-count field because it was not used by the wire layout or
-///   deserializers. Before any public release on this branch, the same unreleased wire version also
-///   grew explicit internal/external node counts in the header.
-/// - [0, 0, 4]: Removed debug and trace decorator variants from serialized decorators, then dropped
-///   the unreleased decorator wire slots entirely.
+///   Removed the unused metadata-count field from the wire header. Before any public release on
+///   this branch, the same unreleased wire version also grew explicit internal/external node counts
+///   in the header.
+/// - [0, 0, 4]: Removed the legacy inline metadata wire slots entirely. All assembly op metadata
+///   and debug variable metadata are now stored in the DebugInfo section as separate indexed
+///   records. MAST nodes are metadata-free identifiers.
+///
+/// Legacy wire versions (pre-#3192 decorator terminology):
+///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
+///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
+///   [0,0,3] removed the unused decorator-count wire field.
+///   [0,0,4] eliminated the decorator wire slots entirely.
 const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION

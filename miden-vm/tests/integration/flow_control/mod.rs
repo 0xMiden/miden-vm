@@ -76,6 +76,60 @@ fn faulty_condition_from_loop() {
 }
 
 #[test]
+fn tail_controlled_loop() {
+    // --- multiple iterations --------------------------------------------------------------------
+    // Count down from the top of the stack to 0; the body runs `n` times.
+    let source = "
+        begin
+            do
+                push.1 sub
+            while
+                dup neq.0
+            end
+        end";
+
+    let test = build_test!(source, &[3]);
+    test.expect_stack(&[0]);
+
+    // --- body always runs at least once ---------------------------------------------------------
+    // Unlike `while.true`, a `do`..`while` executes its body before evaluating the condition, so
+    // the `add` runs once even though the condition is immediately false.
+    let source = "
+        begin
+            do
+                add
+            while
+                push.0
+            end
+        end";
+
+    let test = build_test!(source, &[5, 3]);
+    test.expect_stack(&[8]);
+}
+
+#[test]
+fn faulty_condition_from_tail_controlled_loop() {
+    // A non-binary loop condition fails directly in the LOOP's tail check (no SPLIT wrapper).
+    let source = "
+        begin
+            do
+                push.100
+            while
+                push.2
+            end
+        end";
+
+    let test = build_test!(source, &[10]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::NotBinaryValueLoop { value: _ },
+            ..
+        }
+    );
+}
+
+#[test]
 fn counter_controlled_loop() {
     // --- entering the loop ----------------------------------------------------------------------
     // compute 2^10

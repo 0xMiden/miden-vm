@@ -33,6 +33,7 @@ pub use basic_block_node::arbitrary;
 pub use loop_node::{LoopNode, LoopNodeBuilder};
 
 mod mast_forest_contributor;
+pub(super) use mast_forest_contributor::fingerprint_with_child_fingerprints;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
 use crate::mast::{ExecutableMastForest, MastForest, MastNodeId};

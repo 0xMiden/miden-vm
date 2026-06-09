@@ -141,11 +141,12 @@ impl MastNodeExt for DynNode {
     type Builder = DynNodeBuilder;
 
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        if self.is_dyncall {
+        let builder = if self.is_dyncall {
             DynNodeBuilder::new_dyncall()
         } else {
             DynNodeBuilder::new_dyn()
-        }
+        };
+        builder.with_digest(self.digest)
     }
 
     #[cfg(debug_assertions)]
@@ -237,7 +238,11 @@ impl MastForestContributor for DynNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, _forest: &MastForest) -> Result<Word, MastForestError> {
+    fn fingerprint_for_node(
+        &self,
+        _forest: &MastForest,
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
         Ok(if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
