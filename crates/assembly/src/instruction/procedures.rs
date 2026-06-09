@@ -27,9 +27,7 @@ impl Assembler {
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
     ) -> Result<MastNodeRef, Report> {
-        let resolved = self
-            .resolve_target(kind, callee, caller.module, mast_forest_builder)?
-            .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
+        let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),

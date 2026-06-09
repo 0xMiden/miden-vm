@@ -184,6 +184,7 @@ fn type_alias_with_name(name: &str) -> TypeAlias {
 fn empty_enum_still_reports_type_name_conflicts() {
     let context = SyntaxTestContext::default();
     let source = "\
+namespace test
 type thing = felt
 enum thing: u8 {}
 ";

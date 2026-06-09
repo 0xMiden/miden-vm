@@ -746,36 +746,17 @@ impl Assembler {
                     None,
                     None,
                     mast_forest_builder,
-                )?
-                else {
-                    return Err(self.unresolved_alias_report("export", &symbol_path, alias));
-                };
+                )?;
 
-                let digest = mast_forest_builder
-                    .mast_root_for_ref(node)
-                    .expect("resolved alias export node must exist");
-                let pctx = ProcedureContext::new(
-                    gid,
-                    /* is_program_entrypoint= */ false,
-                    symbol_path.clone(),
-                    Visibility::Public,
-                    signature.clone(),
-                    module_kind.is_kernel(),
-                    self.source_manager.clone(),
-                );
-                let procedure = pctx.into_procedure(digest, node);
-                let body_node_ref = procedure.body_node_ref();
-                self.linker.register_procedure_root(gid, digest);
-                mast_forest_builder.insert_procedure(gid, procedure)?;
-                mast_forest_builder.make_root(node);
+                mast_forest_builder.record_procedure_root_ref(node_ref);
 
-                return Ok(PendingPackageExport::Procedure(PendingProcedureExport {
-                    digest,
+                Ok(PendingPackageExport::Procedure(PendingProcedureExport {
+                    digest: *root.inner(),
                     path: symbol_path,
-                    node_ref: body_node_ref,
-                    signature: signature.map(Arc::unwrap_or_clone),
+                    node_ref,
+                    signature: None,
                     attributes: Default::default(),
-                }));
+                }))
             },
             ast::AliasTarget::Path(_) => {
                 let context = SymbolResolutionContext {
@@ -1098,67 +1079,6 @@ impl Assembler {
                     // Cache the compiled procedure
                     drop(proc);
                     self.linker.register_procedure_root(procedure_gid, procedure.mast_root());
-                    mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
-                },
-                SymbolItem::Alias { alias, resolved } => {
-                    let path: Arc<Path> = module_path.join(alias.name().as_str()).into();
-                    let procedure_gid = match resolved.get() {
-                        Some(procedure_gid) => {
-                            match self.linker[procedure_gid].item() {
-                                SymbolItem::Procedure(_)
-                                | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {},
-                                SymbolItem::Constant(_)
-                                | SymbolItem::Type(_)
-                                | SymbolItem::Compiled(_) => {
-                                    continue;
-                                },
-                                // A resolved alias will always refer to a non-alias item, this is
-                                // because when aliases are resolved, they are resolved
-                                // recursively. Had the alias chain been cyclical, we would have
-                                // raised an error already.
-                                SymbolItem::Alias { .. } => unreachable!(),
-                            }
-                            procedure_gid
-                        },
-                        None => procedure_gid,
-                    };
-                    // A program entrypoint is never an alias
-                    let is_program_entrypoint = false;
-                    let mut pctx = ProcedureContext::new(
-                        procedure_gid,
-                        is_program_entrypoint,
-                        path,
-                        Visibility::Public,
-                        None,
-                        module_kind.is_kernel(),
-                        self.source_manager.clone(),
-                    )
-                    .with_span(alias.span());
-
-                    // We must resolve aliases at this point to their real definition, in order to
-                    // know whether we need to emit a MAST node for a foreign procedure item. If
-                    // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let ResolvedProcedure { node: proc_node_ref, signature } = self
-                        .resolve_target(
-                            InvokeKind::ProcRef,
-                            &alias.target().into(),
-                            procedure_gid.module,
-                            mast_forest_builder,
-                        )?
-                    else {
-                        continue;
-                    };
-
-                    pctx.set_signature(signature);
-
-                    let proc_mast_root = mast_forest_builder
-                        .mast_root_for_ref(proc_node_ref)
-                        .expect("resolved alias node must exist");
-
-                    let procedure = pctx.into_procedure(proc_mast_root, proc_node_ref);
-
-                    // Make the MAST root available to all dependents
-                    self.linker.register_procedure_root(procedure_gid, proc_mast_root);
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {

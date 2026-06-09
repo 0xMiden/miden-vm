@@ -2066,7 +2066,7 @@ fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
     let library = Assembler::new(context.source_manager()).assemble_library(
         "lib",
         library_module,
-        None::<Box<ast::Module>>,
+        None::<Box<Module>>,
     )?;
 
     let f1 = QualifiedProcedureName::from_str("lib::a::f1").unwrap();

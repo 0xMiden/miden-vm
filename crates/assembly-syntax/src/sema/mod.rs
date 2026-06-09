@@ -191,16 +191,20 @@ pub fn analyze(
         analyzer.error(SemanticAnalysisError::TrailingDocstring { span: unused.span() });
     }
 
-    // Verify that we have a concrete module name
-    if path.is_none() && module.namespace_decl.is_none() {
-        analyzer.error(SemanticAnalysisError::MissingNamespace);
-        // If we don't have a namespace, we shouldn't proceed any further
-        return Err(analyzer.into_result().unwrap_err());
-    }
-
     // By now we know the actual module kind, or can use the default library kind
     let actual_kind = actual_kind.or(kind).unwrap_or_default();
     module.set_kind(actual_kind);
+
+    // Verify that we have a concrete module name
+    if path.is_none() && module.namespace_decl.is_none() {
+        if actual_kind.is_executable() {
+            module.set_path(Path::EXEC);
+        } else {
+            analyzer.error(SemanticAnalysisError::MissingNamespace);
+            // If we don't have a namespace, we shouldn't proceed any further
+            return Err(analyzer.into_result().unwrap_err());
+        }
+    }
 
     // Check all forms that have kind-specific restrictions now that the kind is concrete
     if !actual_kind.is_library() {

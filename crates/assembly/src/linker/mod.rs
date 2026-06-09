@@ -749,6 +749,8 @@ impl Linker {
 
         library
             .module_infos()
+            .ok()?
+            .into_iter()
             .flat_map(|module| {
                 module
                     .procedures()
