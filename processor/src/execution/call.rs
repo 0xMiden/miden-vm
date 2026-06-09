@@ -52,7 +52,9 @@ where
         // check if the callee is in the kernel
         if !state.kernel.contains_proc(callee_hash) {
             let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
-            return ControlFlow::Break(BreakReason::Err(err.with_context()));
+            return ControlFlow::Break(BreakReason::Err(
+                state.operation_error_with_current_context(err),
+            ));
         }
         state.tracer.record_kernel_proc_access(callee_hash);
 
@@ -129,10 +131,10 @@ where
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
     if let Err(e) = state.processor.stack_mut().restore_context() {
-        return ControlFlow::Break(BreakReason::Err(e.with_context()));
+        return ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(e)));
     }
     if let Err(e) = state.processor.system_mut().restore_call_state() {
-        return ControlFlow::Break(BreakReason::Err(e.with_context()));
+        return ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(e)));
     }
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

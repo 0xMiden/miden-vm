@@ -204,10 +204,14 @@ where
     // For dyncall, restore the context.
     if dyn_node.is_dyncall() {
         if let Err(e) = state.processor.stack_mut().restore_context() {
-            return ControlFlow::Break(BreakReason::Err(e.with_context()));
+            return ControlFlow::Break(BreakReason::Err(
+                state.operation_error_with_current_context(e),
+            ));
         }
         if let Err(e) = state.processor.system_mut().restore_call_state() {
-            return ControlFlow::Break(BreakReason::Err(e.with_context()));
+            return ControlFlow::Break(BreakReason::Err(
+                state.operation_error_with_current_context(e),
+            ));
         }
     }
 

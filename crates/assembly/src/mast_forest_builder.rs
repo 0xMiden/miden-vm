@@ -88,6 +88,8 @@ pub struct MastForestBuilder {
     asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
     /// Builder-owned dense storage for debug variable refs.
     debug_vars: IndexVec<DebugVarRef, DebugVarInfo>,
+    /// Assertion error messages keyed by runtime error code.
+    error_messages: BTreeMap<u64, Arc<str>>,
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
@@ -142,9 +144,19 @@ impl MastForestBuilder {
             .iter()
             .map(|library| Arc::new(library.mast.clone()))
             .collect::<Vec<_>>();
+        let mut error_messages = BTreeMap::new();
         let statically_linked_package_debug_info = static_libraries
             .into_iter()
-            .map(|library| library.debug_info)
+            .map(|library| {
+                if let Some(debug_info) = library.debug_info.as_ref()
+                    && let Some(section) = debug_info.error_messages.as_ref()
+                {
+                    for row in section.messages() {
+                        error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
+                    }
+                }
+                library.debug_info
+            })
             .collect::<Vec<_>>();
         let mut statically_linked_forest_indices_by_commitment = BTreeMap::new();
         for (idx, forest) in forests.iter().enumerate() {
@@ -167,6 +179,7 @@ impl MastForestBuilder {
             statically_linked_package_debug_info,
             statically_linked_forest_indices_by_commitment,
             statically_linked_root_map,
+            error_messages,
             ..Self::default()
         })
     }
@@ -532,14 +545,18 @@ impl MastForestBuilder {
         let mut finalizer = MastForestFinalizer::new();
         finalizer.materialize_live_nodes(&layout.live_node_refs, &self.nodes)?;
 
-        finalizer.into_built_forest(
-            &layout.procedure_root_refs,
-            &procedure_source_root_refs,
-            &self.source_nodes,
-            &self.asm_op_by_ref,
-            &self.debug_vars,
-            self.advice_map,
-        )
+        let error_messages = core::mem::take(&mut self.error_messages);
+
+        finalizer
+            .into_built_forest(
+                &layout.procedure_root_refs,
+                &procedure_source_root_refs,
+                &self.source_nodes,
+                &self.asm_op_by_ref,
+                &self.debug_vars,
+                self.advice_map,
+            )
+            .map(|built| built.with_error_messages(error_messages))
     }
 }
 
@@ -1032,7 +1049,9 @@ impl MastForestBuilder {
     /// Registers an error message in the MAST Forest and returns the
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
-        error_code_from_msg(&msg)
+        let err_code = error_code_from_msg(&msg);
+        self.error_messages.entry(err_code.as_canonical_u64()).or_insert(msg);
+        err_code
     }
 }
 

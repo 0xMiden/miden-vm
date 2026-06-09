@@ -7,6 +7,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     errors::PackageSourceDebugContext,
     mast::{ExecutableMastForest, MastNode, MastNodeId},
+    operation::OperationError,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -75,10 +76,20 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
     }
 
     pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'a>> {
-        Some(PackageSourceDebugContext::new(
+        Some(PackageSourceDebugContext::new_optional(
             self.source_debug_info?,
-            self.current_source_node?,
+            self.current_source_node,
         ))
+    }
+
+    pub fn operation_error_with_current_context(&self, err: OperationError) -> ExecutionError
+    where
+        H: BaseHost,
+    {
+        match self.package_source_context() {
+            Some(context) => err.with_package_source_context(context, self.host, None),
+            None => err.with_context(),
+        }
     }
 }
 

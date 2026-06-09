@@ -151,6 +151,6 @@ where
         )
     } else {
         let err = OperationError::NotBinaryValueLoop { value: condition };
-        ControlFlow::Break(BreakReason::Err(err.with_context()))
+        ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(err)))
     }
 }

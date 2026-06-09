@@ -67,7 +67,9 @@ where
             .push_start_node_with_source(split_node.on_false(), source_node);
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
-        return ControlFlow::Break(BreakReason::Err(err.with_context()));
+        return ControlFlow::Break(BreakReason::Err(
+            state.operation_error_with_current_context(err),
+        ));
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.

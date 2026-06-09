@@ -44,6 +44,14 @@ impl BuiltMastForest {
     ) {
         (self.mast_forest, self.node_id_by_ref, self.source_graph, self.source_id_by_ref)
     }
+
+    pub(crate) fn with_error_messages(
+        mut self,
+        error_messages: BTreeMap<u64, alloc::sync::Arc<str>>,
+    ) -> Self {
+        self.source_graph = self.source_graph.with_error_messages(error_messages);
+        self
+    }
 }
 
 /// Errors raised while converting builder-owned records into a finalized [`MastForest`].

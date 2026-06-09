@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 #[cfg(feature = "std")]
 use miden_assembly_syntax::debuginfo::{FileLineCol, Location};
@@ -105,6 +105,7 @@ impl SourceMastNode {
 pub(crate) struct SourceDebugGraph {
     nodes: IndexVec<SourceMastNodeId, SourceMastNode>,
     roots: Vec<SourceMastNodeId>,
+    error_messages: BTreeMap<u64, Arc<str>>,
 }
 
 impl SourceDebugGraph {
@@ -112,7 +113,11 @@ impl SourceDebugGraph {
         nodes: IndexVec<SourceMastNodeId, SourceMastNode>,
         roots: Vec<SourceMastNodeId>,
     ) -> Self {
-        Self { nodes, roots }
+        Self {
+            nodes,
+            roots,
+            error_messages: BTreeMap::new(),
+        }
     }
 
     pub(crate) fn nodes(&self) -> &IndexVec<SourceMastNodeId, SourceMastNode> {
@@ -121,6 +126,15 @@ impl SourceDebugGraph {
 
     pub(crate) fn roots(&self) -> &[SourceMastNodeId] {
         &self.roots
+    }
+
+    pub(crate) fn error_messages(&self) -> &BTreeMap<u64, Arc<str>> {
+        &self.error_messages
+    }
+
+    pub(crate) fn with_error_messages(mut self, error_messages: BTreeMap<u64, Arc<str>>) -> Self {
+        self.error_messages = error_messages;
+        self
     }
 
     pub(crate) fn unique_root_for_exec_node(

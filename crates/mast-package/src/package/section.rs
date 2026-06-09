@@ -36,6 +36,8 @@ impl SectionId {
     pub const DEBUG_SOURCE_GRAPH: Self = Self(Cow::Borrowed("debug_source_graph"));
     /// The section containing source-keyed assembly operation and debug variable rows
     pub const DEBUG_SOURCE_MAP: Self = Self(Cow::Borrowed("debug_source_map"));
+    /// The section containing assertion error messages keyed by runtime error code
+    pub const DEBUG_ERROR_MESSAGES: Self = Self(Cow::Borrowed("debug_error_messages"));
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
@@ -78,6 +80,7 @@ impl SectionId {
                 | "debug_functions"
                 | "debug_source_graph"
                 | "debug_source_map"
+                | "debug_error_messages"
         )
     }
 }
@@ -103,6 +106,7 @@ impl FromStr for SectionId {
             "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
             "debug_source_graph" => Ok(Self::DEBUG_SOURCE_GRAPH),
             "debug_source_map" => Ok(Self::DEBUG_SOURCE_MAP),
+            "debug_error_messages" => Ok(Self::DEBUG_ERROR_MESSAGES),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             "project_source_provenance" => Ok(Self::PROJECT_SOURCE_PROVENANCE),
             "kernel" => Ok(Self::KERNEL),
@@ -195,6 +199,7 @@ impl Arbitrary for SectionId {
             Self::DEBUG_FUNCTIONS,
             Self::DEBUG_SOURCE_GRAPH,
             Self::DEBUG_SOURCE_MAP,
+            Self::DEBUG_ERROR_MESSAGES,
             Self::ACCOUNT_COMPONENT_METADATA,
             Self::PROJECT_SOURCE_PROVENANCE,
             Self::KERNEL,

@@ -384,7 +384,32 @@ impl OperationError {
     ) -> ExecutionError {
         let (label, source_file) =
             label_and_source_file_from_location(context.assembly_location(op_idx), host);
-        ExecutionError::OperationError { label, source_file, err: self }
+        ExecutionError::OperationError {
+            label,
+            source_file,
+            err: self.with_package_debug_info(context.debug_info()),
+        }
+    }
+
+    fn with_package_debug_info(self, debug_info: &PackageDebugInfo) -> Self {
+        match self {
+            Self::FailedAssertion { err_code, err_msg: None } => Self::FailedAssertion {
+                err_msg: debug_info.error_message(err_code.as_canonical_u64()),
+                err_code,
+            },
+            Self::U32AssertionFailed { err_code, err_msg: None, invalid_values } => {
+                Self::U32AssertionFailed {
+                    err_msg: debug_info.error_message(err_code.as_canonical_u64()),
+                    err_code,
+                    invalid_values,
+                }
+            },
+            Self::MerklePathVerificationFailed { mut inner } if inner.err_msg.is_none() => {
+                inner.err_msg = debug_info.error_message(inner.err_code.as_canonical_u64());
+                Self::MerklePathVerificationFailed { inner }
+            },
+            err => err,
+        }
     }
 }
 
@@ -410,29 +435,46 @@ pub struct MerklePathVerificationFailedInner {
 #[derive(Clone, Copy, Debug)]
 pub struct PackageSourceDebugContext<'a> {
     debug_info: &'a PackageDebugInfo,
-    source_node: DebugSourceMastNodeId,
+    source_node: Option<DebugSourceMastNodeId>,
 }
 
 impl<'a> PackageSourceDebugContext<'a> {
     /// Creates a source debug context for one package-owned source/debug MAST occurrence.
     pub fn new(debug_info: &'a PackageDebugInfo, source_node: DebugSourceMastNodeId) -> Self {
+        Self {
+            debug_info,
+            source_node: Some(source_node),
+        }
+    }
+
+    /// Creates a package debug context when source location metadata may be unavailable.
+    pub(crate) fn new_optional(
+        debug_info: &'a PackageDebugInfo,
+        source_node: Option<DebugSourceMastNodeId>,
+    ) -> Self {
         Self { debug_info, source_node }
     }
 
-    /// Returns the source/debug MAST occurrence associated with this context.
-    pub fn source_node(&self) -> DebugSourceMastNodeId {
+    /// Returns the source/debug MAST occurrence associated with this context, if known.
+    pub fn source_node(&self) -> Option<DebugSourceMastNodeId> {
         self.source_node
+    }
+
+    /// Returns the package debug info backing this context.
+    pub fn debug_info(&self) -> &'a PackageDebugInfo {
+        self.debug_info
     }
 
     /// Returns source location metadata for `op_idx`, if present.
     ///
     /// If `op_idx` is absent, this falls back to the first operation row for the source occurrence.
     pub fn assembly_location(&self, op_idx: Option<usize>) -> Option<&'a Location> {
+        let source_node = self.source_node?;
         let assembly_op = match op_idx {
             Some(op_idx) => u32::try_from(op_idx)
                 .ok()
-                .and_then(|op_idx| self.debug_info.asm_op_for_operation(self.source_node, op_idx)),
-            None => self.debug_info.first_asm_op_for_source_node(self.source_node),
+                .and_then(|op_idx| self.debug_info.asm_op_for_operation(source_node, op_idx)),
+            None => self.debug_info.first_asm_op_for_source_node(source_node),
         }?;
 
         assembly_op.location.as_ref()
@@ -908,8 +950,10 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
                     CryptoError::Advice(err) => {
                         ExecutionError::AdviceError { label, source_file, err }
                     },
-                    CryptoError::Operation(err) => {
-                        ExecutionError::OperationError { label, source_file, err }
+                    CryptoError::Operation(err) => ExecutionError::OperationError {
+                        label,
+                        source_file,
+                        err: err.with_package_debug_info(context.debug_info()),
                     },
                 })
             },
@@ -995,7 +1039,8 @@ mod error_assertions {
 
     use miden_debug_types::{ByteIndex, SourceId, Uri};
     use miden_mast_package::debug_info::{
-        DebugSourceAsmOp, DebugSourceMapSection, PackageDebugInfo,
+        DebugErrorMessage, DebugErrorMessagesSection, DebugSourceAsmOp, DebugSourceMapSection,
+        PackageDebugInfo,
     };
 
     use super::*;
@@ -1134,6 +1179,74 @@ mod error_assertions {
                 assert!(matches!(err, AdviceError::StackReadFailed));
             },
             err => panic!("expected advice error, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn package_debug_info_without_source_node_restores_error_message() {
+        let debug_info = PackageDebugInfo {
+            error_messages: Some(DebugErrorMessagesSection::from_parts(vec![
+                DebugErrorMessage::new(7, Arc::from("some error message")),
+            ])),
+            ..PackageDebugInfo::default()
+        };
+        let context = PackageSourceDebugContext::new_optional(&debug_info, None);
+        let err = Err::<(), _>(OperationError::FailedAssertion {
+            err_code: Felt::from_u32(7),
+            err_msg: None,
+        })
+        .map_exec_err_with_package_source_op_idx(
+            Some(context),
+            &RecordingHost {
+                expected_location: Location::new(
+                    Uri::new("file://unused.masm"),
+                    ByteIndex::new(0),
+                    ByteIndex::new(0),
+                ),
+                returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
+            },
+            0,
+        )
+        .unwrap_err();
+
+        match err {
+            ExecutionError::OperationError {
+                label,
+                source_file,
+                err: OperationError::FailedAssertion { err_msg, .. },
+            } => {
+                assert_eq!(label, SourceSpan::UNKNOWN);
+                assert!(source_file.is_none());
+                assert_eq!(err_msg.as_deref(), Some("some error message"));
+            },
+            err => panic!("expected failed assertion operation error, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn package_debug_info_restores_merkle_path_error_message() {
+        let debug_info = PackageDebugInfo {
+            error_messages: Some(DebugErrorMessagesSection::from_parts(vec![
+                DebugErrorMessage::new(7, Arc::from("some error message")),
+            ])),
+            ..PackageDebugInfo::default()
+        };
+        let err = OperationError::MerklePathVerificationFailed {
+            inner: Box::new(MerklePathVerificationFailedInner {
+                value: Word::default(),
+                index: Felt::from_u32(3),
+                root: Word::default(),
+                err_code: Felt::from_u32(7),
+                err_msg: None,
+            }),
+        }
+        .with_package_debug_info(&debug_info);
+
+        match err {
+            OperationError::MerklePathVerificationFailed { inner } => {
+                assert_eq!(inner.err_msg.as_deref(), Some("some error message"));
+            },
+            err => panic!("expected MerklePathVerificationFailed, got {err:?}"),
         }
     }
 }

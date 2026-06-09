@@ -1,8 +1,8 @@
 use miden_mast_package::{
     Dependency,
     debug_info::{
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-        DebugSourceMastNodeId, DebugSourceVar,
+        DebugErrorMessage, DebugErrorMessagesSection, DebugSourceAsmOp, DebugSourceGraphSection,
+        DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId, DebugSourceVar,
     },
 };
 
@@ -112,6 +112,12 @@ impl AssemblyProduct {
                 SectionId::DEBUG_SOURCE_MAP,
                 source_map_section(&source_graph)?.to_bytes(),
             ));
+            let error_messages = error_messages_section(&source_graph);
+            if !error_messages.is_empty() {
+                package
+                    .sections
+                    .push(Section::new(SectionId::DEBUG_ERROR_MESSAGES, error_messages.to_bytes()));
+            }
         }
         Ok(package)
     }
@@ -185,4 +191,14 @@ fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapS
     }
 
     Ok(DebugSourceMapSection::from_parts(asm_ops, debug_vars))
+}
+
+fn error_messages_section(source_graph: &SourceDebugGraph) -> DebugErrorMessagesSection {
+    DebugErrorMessagesSection::from_parts(
+        source_graph
+            .error_messages()
+            .iter()
+            .map(|(err_code, message)| DebugErrorMessage::new(*err_code, message.clone()))
+            .collect(),
+    )
 }
