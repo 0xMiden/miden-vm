@@ -4,7 +4,6 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
-    mast::ExecutableMastForest,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -301,15 +300,11 @@ where
 /// the high values are equal to 0; if they are, puts the original elements back onto the
 /// stack; if they are not, returns an error.
 #[inline(always)]
-pub(super) fn op_u32assert2<P: Processor, T: Tracer, F>(
+pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-    _program: &F,
-) -> Result<OperationHelperRegisters, OperationError>
-where
-    F: ExecutableMastForest + ?Sized,
-{
+) -> Result<OperationHelperRegisters, OperationError> {
     let first = processor.stack().get(0);
     let second = processor.stack().get(1);
 

@@ -51,24 +51,16 @@ where
     let clk = state.processor.system().clock();
     let mem_addr = state.processor.stack().get(0);
 
-    let callee_hash = match state
-        .processor
-        .memory_mut()
-        .read_word(read_ctx, mem_addr, clk)
-        .map_exec_err(current_forest, current_node_id, state.host)
-    {
-        Ok(w) => w,
-        Err(err) => {
-            return ControlFlow::Break(BreakReason::Err(err).into());
-        },
-    };
+    let callee_hash =
+        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
+            Ok(w) => w,
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(err).into());
+            },
+        };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
-        current_forest,
-        current_node_id,
-        state.host,
-    ) {
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
         return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
     }
 
@@ -90,7 +82,7 @@ where
             .processor
             .memory_mut()
             .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-            .map_exec_err(current_forest, current_node_id, state.host)
+            .map_exec_err()
         {
             return ControlFlow::Break(BreakReason::Err(err).into());
         }
@@ -127,7 +119,6 @@ where
             // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
             // to proceed properly.
             return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
-                dyn_node_id: current_node_id,
                 callee_hash,
                 source_node: state.current_source_node(),
             });
@@ -213,18 +204,10 @@ where
     // For dyncall, restore the context.
     if dyn_node.is_dyncall() {
         if let Err(e) = state.processor.stack_mut().restore_context() {
-            return ControlFlow::Break(BreakReason::Err(e.with_context(
-                current_forest,
-                node_id,
-                state.host,
-            )));
+            return ControlFlow::Break(BreakReason::Err(e.with_context()));
         }
         if let Err(e) = state.processor.system_mut().restore_call_state() {
-            return ControlFlow::Break(BreakReason::Err(e.with_context(
-                current_forest,
-                node_id,
-                state.host,
-            )));
+            return ControlFlow::Break(BreakReason::Err(e.with_context()));
         }
     }
 

@@ -88,8 +88,6 @@ pub struct MastForestBuilder {
     asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
     /// Builder-owned dense storage for debug variable refs.
     debug_vars: IndexVec<DebugVarRef, DebugVarInfo>,
-    /// Error codes registered while building this forest.
-    error_codes: BTreeMap<u64, Arc<str>>,
     /// A MastForest that contains the MAST of all statically-linked libraries, it's used to find
     /// precompiled procedures and copy their subtrees instead of inserting external nodes.
     statically_linked_mast: Arc<MastForest>,
@@ -541,7 +539,6 @@ impl MastForestBuilder {
             &self.asm_op_by_ref,
             &self.debug_vars,
             self.advice_map,
-            core::mem::take(&mut self.error_codes),
         )
     }
 }
@@ -1035,9 +1032,7 @@ impl MastForestBuilder {
     /// Registers an error message in the MAST Forest and returns the
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
-        let code = error_code_from_msg(&msg);
-        self.error_codes.insert(code.as_canonical_u64(), msg);
-        code
+        error_code_from_msg(&msg)
     }
 }
 
@@ -2272,13 +2267,7 @@ mod tests {
             let child_refs = exact_builder
                 .pending_refs_for_statically_linked_source(&node, &node_refs_by_source_id);
             exact_builder
-                .ensure_node_from_statically_linked_source_ref(
-                    source_forest.as_ref(),
-                    final_alias_b,
-                    node,
-                    child_refs,
-                    None,
-                )
+                .ensure_node_from_statically_linked_source_ref(node, child_refs, None)
                 .unwrap()
         };
         record_test_root(&mut exact_builder, exact_alias_b_ref);

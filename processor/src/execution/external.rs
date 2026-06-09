@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
 
 use crate::{
-    BaseHost, BreakReason,
+    BreakReason,
     continuation_stack::ContinuationStack,
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
@@ -58,7 +58,6 @@ pub fn finish_load_mast_forest_from_external<F, T>(
     current_forest: &mut F,
     continuation_stack: &mut ContinuationStack<F>,
     source_debug_info: Option<&PackageDebugInfo>,
-    host: &mut impl BaseHost,
     tracer: &mut T,
 ) -> ControlFlow<BreakReason<F>>
 where
@@ -79,11 +78,7 @@ where
     // node, we are about to enter into an infinite loop - so, return an error
     if resolved_node_new_forest.is_external() {
         return ControlFlow::Break(BreakReason::Err(
-            OperationError::CircularExternalNode(external_node_old_forest.digest()).with_context(
-                old_forest,
-                external_node_id_old_forest,
-                host,
-            ),
+            OperationError::CircularExternalNode(external_node_old_forest.digest()).with_context(),
         ));
     }
 
@@ -134,7 +129,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{Continuation, DefaultHost, fast::NoopTracer};
+    use crate::{Continuation, fast::NoopTracer};
 
     #[test]
     fn current_package_external_resolution_ignores_ambiguous_source_root() {
@@ -164,7 +159,6 @@ mod tests {
         let mut current_forest = Arc::new(forest);
         let new_mast_forest = current_forest.clone();
         let mut continuation_stack = ContinuationStack::default();
-        let mut host = DefaultHost::default();
         let mut tracer = NoopTracer;
 
         let result = finish_load_mast_forest_from_external(
@@ -174,7 +168,6 @@ mod tests {
             &mut current_forest,
             &mut continuation_stack,
             Some(&package_debug_info),
-            &mut host,
             &mut tracer,
         );
 

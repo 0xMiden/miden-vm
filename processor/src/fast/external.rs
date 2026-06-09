@@ -1,7 +1,5 @@
-use miden_core::mast::ExecutableMastForest;
-
 use crate::{
-    BaseHost, ExecutionError,
+    ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{OperationError, procedure_not_found_with_context},
 };
@@ -9,37 +7,16 @@ use crate::{
 // HELPERS
 // ---------------------------------------------------------------------------------------------
 
-/// If the given error is an error generated when trying to resolve an External node, and there is a
-/// caller context available in the continuation stack, use the caller node ID to build the error
-/// context.
+/// If the given error is generated when trying to resolve an External node, and there is a caller
+/// continuation available, rebuild the error in the legacy no-context form.
 ///
 /// In practice, `ExternalNode`s are executed via a `CallNode` or `DynNode`. Thus, if we fail to
-/// resolve an `ExternalNode`, we can look at the top of the continuation stack to find the caller
-/// node ID (that we expect to be a `CallNode` or `DynNode`), and build the diagnostic from that
-/// node.
-///
-/// For example, in MASM, the user would see an error like:
-/// ```masm
-/// x procedure with root digest <digest> could not be found
-///     ,-[::\$exec:5:13]
-///   4 |         begin
-///   5 |             call.bar::dummy_proc
-///     :             ^^^^^^^^^^^^^^^^^^^^
-///   6 |         end
-///     `----
-/// ```
-///
-/// The carets and line numbers point to the `call` instruction that triggered the error because of
-/// the remapping we do in this function.
+/// resolve an `ExternalNode`, we can look at the top of the continuation stack to confirm that the
+/// break came from a caller node that can lead to external node execution.
 pub(super) fn maybe_use_caller_error_context<F>(
     original_err: ExecutionError,
-    current_forest: &F,
     continuation_stack: &ContinuationStack<F>,
-    host: &mut impl BaseHost,
-) -> ExecutionError
-where
-    F: ExecutableMastForest,
-{
+) -> ExecutionError {
     // We only care about procedure-not-found errors or malformed MAST forest errors.
     let root_digest = match &original_err {
         ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,
@@ -55,25 +32,19 @@ where
         return original_err;
     };
 
-    // Extract parent node ID from all continuations that can lead to an external node execution.
-    let parent_node_id = match top_continuation {
-        Continuation::FinishCall(parent_node_id)
-        | Continuation::FinishJoin(parent_node_id)
-        | Continuation::FinishSplit(parent_node_id)
-        | Continuation::FinishLoop(parent_node_id) => parent_node_id,
+    // Accept all continuations that can lead to external node execution.
+    match top_continuation {
+        Continuation::FinishCall(_)
+        | Continuation::FinishJoin(_)
+        | Continuation::FinishSplit(_)
+        | Continuation::FinishLoop(_) => {},
         _ => return original_err,
-    };
+    }
 
-    // We were able to get the parent node ID, so rebuild the error with the caller's context.
-    // For ProcedureNotFound, we reconstruct with the parent's source location.
-    // For MalformedMastForestInHost, we wrap in OperationError with the parent's context.
+    // We found a caller continuation, so rebuild the error through the legacy no-context path.
     match &original_err {
-        ExecutionError::ProcedureNotFound { .. } => {
-            procedure_not_found_with_context(root_digest, current_forest, *parent_node_id, host)
-        },
-        ExecutionError::OperationError { err, .. } => {
-            err.clone().with_context(current_forest, *parent_node_id, host)
-        },
+        ExecutionError::ProcedureNotFound { .. } => procedure_not_found_with_context(root_digest),
+        ExecutionError::OperationError { err, .. } => err.clone().with_context(),
         _ => original_err,
     }
 }

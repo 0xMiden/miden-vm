@@ -225,7 +225,7 @@ const VERSION: [u8; 3] = [0, 0, 4];
 
 impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.write_into_with_options(target, false, false);
+        self.write_into_with_options(target, false);
     }
 }
 
@@ -233,12 +233,7 @@ impl MastForest {
     /// Internal serialization with options.
     ///
     /// Current writers always omit the legacy DebugInfo section and set the STRIPPED flag.
-    fn write_into_with_options<W: ByteWriter>(
-        &self,
-        target: &mut W,
-        _stripped: bool,
-        hashless: bool,
-    ) {
+    fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, hashless: bool) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
@@ -301,18 +296,18 @@ impl MastForest {
 }
 
 pub(super) fn write_stripped_into<W: ByteWriter>(forest: &MastForest, target: &mut W) {
-    forest.write_into_with_options(target, true, false);
+    forest.write_into_with_options(target, false);
 }
 
 pub(super) fn write_hashless_into<W: ByteWriter>(forest: &MastForest, target: &mut W) {
-    forest.write_into_with_options(target, true, true);
+    forest.write_into_with_options(target, true);
 }
 
 pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
-    serialized_size_hint(forest, true, false)
+    serialized_size_hint(forest, false)
 }
 
-fn serialized_size_hint(forest: &MastForest, _stripped: bool, hashless: bool) -> usize {
+fn serialized_size_hint(forest: &MastForest, hashless: bool) -> usize {
     let node_count = forest.nodes.len();
     let external_count = forest.nodes.iter().filter(|node| node.is_external()).count();
     let non_external_count = node_count - external_count;
