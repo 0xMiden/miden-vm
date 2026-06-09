@@ -524,7 +524,6 @@ fn falcon_prove_verify() {
     trace.check_constraints();
 }
 
-#[allow(clippy::type_complexity)]
 fn generate_test(
     sk: SecretKey,
     message: Word,

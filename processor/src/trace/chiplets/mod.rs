@@ -34,7 +34,6 @@ mod kernel_rom;
 use kernel_rom::KernelRom;
 
 #[cfg(test)]
-#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // TRACE

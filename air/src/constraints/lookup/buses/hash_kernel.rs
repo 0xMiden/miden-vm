@@ -61,7 +61,6 @@ use crate::{
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the hash-kernel virtual table bus.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,

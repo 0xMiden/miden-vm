@@ -50,8 +50,10 @@ where
 /// Overwrites the top four stack items with the value of the CALLER_HASH register, which is the
 /// hash of the procedure that initiated the most recent SYSCALL, or ZERO if not in a syscall
 /// context.
-// Uniform return type with sibling `op_*` handlers dispatched in `execute_op`.
-#[allow(clippy::unnecessary_wraps)]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "uniform return type with sibling op_* handlers dispatched in execute_op"
+)]
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(
     processor: &mut P,

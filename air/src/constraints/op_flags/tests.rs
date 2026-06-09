@@ -36,7 +36,6 @@ fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
     acc
 }
 
-#[allow(clippy::iter_skip_zero)]
 fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt; 8]) {
     let mut deg7 = [ZERO; 64];
     let mut deg6 = [ZERO; 8];
@@ -46,7 +45,6 @@ fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt;
     for (opcode, slot) in deg7
         .iter_mut()
         .enumerate()
-        .skip(DEGREE_7_OPCODE_STARTS)
         .take(DEGREE_7_OPCODE_ENDS - DEGREE_7_OPCODE_STARTS + 1)
     {
         *slot = naive_flag(&bits, opcode as u8);

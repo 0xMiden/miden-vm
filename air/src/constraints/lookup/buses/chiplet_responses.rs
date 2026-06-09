@@ -42,7 +42,6 @@ use crate::{
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
