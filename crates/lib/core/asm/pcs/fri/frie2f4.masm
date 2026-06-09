@@ -510,6 +510,7 @@ pub proc verify
     exec.constants::get_fri_queries_address
     # => [query_ptr, fri_layer_ptr, remainder_poly_ptr, g, ...]
 
+    dup dup.2 u32assert2 u32lt assert.err="fri query region must be non-empty"
 
     exec.constants::get_remainder_poly_size
     exec.helper::get_fri_remainder_poly_max_degree_plus_1_half
