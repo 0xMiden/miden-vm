@@ -3,8 +3,12 @@
 
 # General constants
 const ROOT_UNITY = 1753635133440165772
-const DOMAIN_OFFSET = 7
-const DOMAIN_OFFSET_INV = 2635249152773512046
+# The LDE coset offset is the canonical lifted-domain shift
+# `g^(2^(TWO_ADICITY - log_lde))` (g = 7, the field generator), so it depends on the
+# LDE domain size and is computed per proof in `random_coin::init_seed`. These pointers
+# hold the computed offset and its inverse.
+const DOMAIN_OFFSET_PTR = 3223322832
+const DOMAIN_OFFSET_INV_PTR = 3223322833
 
 # Number of random extension field coefficients related to the auxiliary trace (i.e. the alphas)
 const NUM_AUX_TRACE_COEFS = 2
@@ -250,11 +254,19 @@ pub proc get_root_unity
 end
 
 pub proc get_domain_offset
-    push.DOMAIN_OFFSET
+    push.DOMAIN_OFFSET_PTR mem_load
+end
+
+pub proc set_domain_offset
+    push.DOMAIN_OFFSET_PTR mem_store
 end
 
 pub proc get_domain_offset_inv
-    push.DOMAIN_OFFSET_INV
+    push.DOMAIN_OFFSET_INV_PTR mem_load
+end
+
+pub proc set_domain_offset_inv
+    push.DOMAIN_OFFSET_INV_PTR mem_store
 end
 
 pub proc get_num_aux_trace_coefs

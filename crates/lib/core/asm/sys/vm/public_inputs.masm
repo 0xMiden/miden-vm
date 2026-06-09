@@ -1,7 +1,6 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::stark::public_inputs
-use miden::core::crypto::hashes::poseidon2
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -40,6 +39,11 @@ const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 # The reduced kernel value occupies 1 word (4 base felts) in the ACE READ section.
 const NUM_VAR_LEN_PI_GROUPS = 1
 
+# Upper bound on the kernel-digest statement inputs (`MultiAir::max_aux_inputs`), in field
+# elements: `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. Absorbed into the transcript by
+# `MultiAir::observe`, so the MASM must observe the same value.
+const MAX_AUX_INPUTS = 1020
+
 
 # CONSTANTS GETTERS
 # =================================================================================================
@@ -57,27 +61,23 @@ end
 #!
 #! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
 #!    starting from the address pointed to by `public_inputs_address_ptr`.
-#! 2. Loading kernel procedure digests from the advice stack, reducing them, and storing the
-#!    reduced result at `variable_length_public_inputs_address_ptr` (in the ACE READ section).
-#! 3. Loading the auxiliary randomness from the advice stack so it can be checked later.
+#! 2. Loading kernel procedure digests from the advice stack into memory at
+#!    `variable_length_public_inputs_address_ptr`.
+#! 3. Absorbing the statement-owned public inputs into the Fiat-Shamir transcript, matching
+#!    `MultiAir::observe`: the element stream
+#!        [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ]
+#!    is fed through the buffered duplex (`random_coin::observe_felt`).
+#! 4. Loading the auxiliary randomness from the advice stack and reducing the kernel digests; the
+#!    reduced result overwrites the start of the kernel-digest region (in the ACE READ section).
 #!
-#! Note that the fixed length public inputs are stored as extension field elements.
-#! The kernel digests are temporarily stored in memory starting at
-#! `variable_length_public_inputs_address_ptr` during reduction. The final reduced value
-#! overwrites the start of this region and remains in the ACE READ section.
+#! Note that the fixed length public inputs are stored as extension field elements, while the
+#! kernel digests are stored as base field elements (each padded to 8 felts and reversed for the
+#! reduction). Absorption reads back the natural-order elements from memory so it is decoupled
+#! from those storage layouts.
 #!
-#! POSTCONDITION: random coin input_len=0 on return.
-#!
-#! The generic verifier (stark/verifier.masm) calls reseed_direct immediately after this
-#! procedure, which requires input_len=0. This postcondition holds because:
-#!   - FLPI (40 base felts) are absorbed in groups of 8 via direct sponge permutation
-#!     (5 iterations * 8 = 40), bypassing the buffer entirely.
-#!   - VLPI (kernel digests, each padded to 8 felts) are absorbed via adv_pipe + permute,
-#!     also bypassing the buffer.
-#!   - Both paths reset the buffer counters (input_len=0, output_len=8) after completion.
-#!
-#! If FLPI size changes from a multiple of 8, or VLPI digest padding changes from 8,
-#! this postcondition must be re-verified.
+#! POSTCONDITION: the transcript input buffer holds the unflushed tail of the absorbed stream;
+#! the generic verifier observes the instance shape and main-trace commitment next (continuing the
+#! same buffered duplex) and flushes before the first sample.
 #!
 #! Input:
 #!      - Operand stack: [...]
@@ -93,153 +93,165 @@ pub proc process_public_inputs
     exec.public_inputs::compute_and_store_public_inputs_address
     # => [...]
 
-    # 2) Load the fixed-length public inputs from the advice tape and observe them.
+    # 2) Load the fixed-length public inputs from the advice tape (stored as EF elements).
     exec.load_public_inputs
     # => [...]
 
-    # 3) Load kernel digests, auxiliary randomness, and reduce kernel digests.
-    exec.reduce_variable_length_public_inputs
+    # 3) Load kernel digests from the advice tape into memory (stored for reduction).
+    exec.load_kernel_digests
+    # => [...]
+
+    # 4) Absorb the statement public inputs into the transcript via the buffered duplex.
+    exec.absorb_public_inputs
+    # => [...]
+
+    # 5) Load auxiliary randomness and reduce the kernel digests.
+    exec.finalize_kernel_reduction
     # => [...]
 end
 
 # HELPER PROCEDURES
 # =================================================================================================
 
-#! Loads from the advice stack the public inputs and stores them in memory starting from address
-#! pointed to by `public_inputs_address_ptr`.
+#! Loads from the advice stack the fixed-length public inputs and stores them in memory as
+#! extension field elements, starting from the address pointed to by `public_inputs_address_ptr`.
 #!
-#! The public inputs are stored as extension field elements and absorbed into the random coin
-#! transcript via direct sponge permutation (bypassing the buffer-based observe API).
-#!
-#! Buffer hygiene: The random coin input/output buffers are flushed before loading the sponge
-#! state onto the stack. After the loop, the state is stored back and the buffer counters are
-#! reset (input_len=0, output_len=8) so subsequent random coin operations work correctly.
+#! No transcript absorption happens here; `absorb_public_inputs` later reads the stored elements
+#! back and feeds them through the buffered duplex in `MultiAir::observe` order.
 #!
 #! Inputs:  [...]
 #! Outputs: [...]
 proc load_public_inputs
-    # 1) Flush random coin buffers and load sponge state onto the stack.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    exec.random_coin::load_random_coin_state
-    # => [R0, R1, C, ...]
-
-    # 2) Place pi_ptr below the 3-word sponge state.
+    # Set up [Y, Y, C, pi_ptr] for load_base_store_extension_double_word. The Y/C words are dummy
+    # placeholders here (no permutation is performed); only the EF stores are kept.
     exec.constants::public_inputs_address_ptr mem_load
-    movdn.12
-    # => [R0, R1, C, pi_ptr, ...]
+    padw padw padw
+    # => [0, 0, C=0, pi_ptr, ...]   (three zero words above pi_ptr)
 
-    # 3) Load and store the fixed length public inputs.
-    #    Each iteration: load_base_store_extension_double_word loads 8 base elements from advice,
-    #    stores them as 4 EF elements in memory, and returns the original words in the rate
-    #    positions. The subsequent permute absorbs them into the sponge.
-    #    5 iterations * 8 = 40 = NUM_FIXED_LEN_PUBLIC_INPUTS.
+    # 5 iterations * 8 = 40 = NUM_FIXED_LEN_PUBLIC_INPUTS. Each call loads 8 base elements from
+    # advice and stores them as 8 EF elements in memory, returning the loaded words (discarded).
     repeat.5
         exec.public_inputs::load_base_store_extension_double_word
-        exec.poseidon2::permute
+        # => [A0, A1, C, pi_ptr + 16, ...]
+        dropw dropw
+        # => [C, pi_ptr + 16, ...]
+        padw padw
+        # => [Y, Y, C, pi_ptr + 16, ...]
     end
-    # => [R0', R1', C', pi_ptr + 80, ...]
+    # => [Y, Y, C, pi_ptr + 80, ...]
 
-    # 4) Store sponge state back to random coin and reset buffer counters.
-    exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-    # => [pi_ptr + 80, ...]
-
-    drop
+    dropw dropw dropw drop
 end
 
-#! Reduces the variable-length public inputs using the auxiliary randomness.
+#! Loads the kernel procedure digests from the advice stack into memory at
+#! `variable_length_public_inputs_address_ptr`, without absorbing them into the transcript
+#! (absorption happens in `absorb_public_inputs`).
 #!
-#! This procedure:
-#! 1. Reads `num_kernel_proc_digests` from the advice stack and stores it temporarily in `tmp3`.
-#! 2. Loads kernel procedure digests from the advice stack into memory at
-#!    `variable_length_public_inputs_address_ptr`, absorbing them into the Fiat-Shamir transcript
-#!    via the Poseidon2 sponge (one permutation per digest).
-#! 3. Loads the auxiliary randomness (alpha, beta) from the advice stack and stores it at
-#!    `aux_rand_nd_ptr` for later verification.
-#! 4. Reduces the kernel digests to a single extension field element using auxiliary randomness.
-#! 5. The reduced value is stored at `variable_length_public_inputs_address_ptr` (in the ACE READ
-#!    section) by `reduce_kernel_digests`.
+#! Reads `num_kernel_proc_digests` from advice into `tmp3`, then loads each digest as 8 base
+#! elements (2 words) via `adv_pipe`. Each digest is padded to 8 elements and reversed
+#! (`[0,0,0,0, d3,d2,d1,d0]`) so the downstream `reduce_kernel_digests` Horner pass — which reads
+#! 8-felt chunks — yields `d0 + d1*β + d2*β^2 + d3*β^3`.
 #!
 #! Input:
-#!      - Operand stack: [...]
-#!      - Advice stack: [num_kernel_proc_digests, kernel_digest_elements...,
-#!                       beta0, beta1, alpha0, alpha1, ...]
+#!      - Advice stack: [num_kernel_proc_digests, kernel_digest_elements..., ...]
 #! Output: [...]
-proc reduce_variable_length_public_inputs
-    # 1) Read num_kernel_proc_digests from advice and store for later use.
-    #    We use tmp3 because tmp1 and tmp2 are clobbered by reduce_kernel_digests.
+proc load_kernel_digests
+    # Read num_kernel_proc_digests and store for later use (tmp3 survives reduce_kernel_digests,
+    # which clobbers tmp1/tmp2).
     adv_push
     exec.constants::tmp3 mem_store
-    # => [...]
 
-    # 2) Load kernel digests from advice into memory, absorbing into the FS transcript.
-    #    Each digest is padded to 8 elements (2 words), loaded via adv_pipe.
-    #
-    #    The 4-felt zero-pad is a vestige of the old [label, d0..d3] 5-slot encoding: the
-    #    reversed 8-felt layout made `horner_eval_base` + `β*` produce `d0*β..d3*β^4` so the
-    #    label could sit at β^0. The new encoding is just `bus_prefix + d0..d3` at β^0..β^3
-    #    — the 4 leading zeros are now Horner no-ops. It's kept because adv_pipe / mem_stream
-    #    / Poseidon2 all operate on 8-felt chunks; a future refactor could pack digests
-    #    sequentially (4 felts each) and pair them per adv_pipe / permute iteration to halve
-    #    VLPI memory.
+    # Mirror Statement::new's `aux_inputs.len() <= max_aux_inputs()` bound: at most
+    # MAX_AUX_INPUTS / WORD_SIZE = 255 kernel digests. (u32assert also bounds the load loop below.)
+    exec.constants::tmp3 mem_load
+    u32assert.err="number of kernel procedure digests must fit in a u32"
+    u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
 
-    ## a) Flush random coin buffers and load sponge state onto the stack.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    exec.random_coin::load_random_coin_state
-    # => [R0, R1, C, ...]
-
-    ## b) Place the memory destination pointer at position 12 for adv_pipe.
+    # Set up dummy state words with the destination pointer at position 12 for adv_pipe.
+    padw padw padw
     exec.constants::variable_length_public_inputs_address_ptr mem_load
     movdn.12
-    # => [R0, R1, C, var_len_ptr, ...]
+    # => [Y, Y, Y, var_len_ptr, ...]
 
-    ## c) Get num_iterations (= num_kernel_proc_digests).
     exec.constants::tmp3 mem_load
-    # => [num_iter, R0, R1, C, var_len_ptr, ...]
+    # => [num_iter, Y, Y, Y, var_len_ptr, ...]
 
-    ## d) Loop: load 2 words (8 felts) per digest from advice to memory via adv_pipe,
-    ##    then absorb into the sponge via poseidon2::permute.
     dup push.0 neq
     while.true
         sub.1 movdn.13
-        # => [R0, R1, C, ptr, remaining, ...]
-
+        # => [Y, Y, Y, ptr, remaining, ...]
         adv_pipe
-        # => [W0, W1, C, ptr+8, remaining, ...]
-        exec.poseidon2::permute
-        # => [R0', R1', C', ptr+8, remaining, ...]
-
+        # => [W0, W1, Y, ptr+8, remaining, ...]
         movup.13
-        # => [remaining, R0', R1', C', ptr+8, ...]
+        # => [remaining, W0, W1, Y, ptr+8, ...]
         dup push.0 neq
     end
-    # => [0, R0', R1', C', ptr_final, ...]
+    # => [0, W0, W1, Y, ptr_final, ...]
+    drop dropw dropw dropw drop
+end
 
-    ## e) Store sponge state back to random coin and reset buffer counters.
-    drop
-    # => [R0', R1', C', ptr_final, ...]
-    exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
-    # => [ptr_final, ...]
-    drop
-    # => [...]
+#! Absorb the statement-owned public inputs into the Fiat-Shamir transcript via the buffered
+#! duplex, matching `MultiAir::observe`'s element stream:
+#!     [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ].
+#!
+#! The fixed-length public inputs are read back from their EF slots (first base coordinate of
+#! each) and the kernel digests from their reversed 8-felt memory layout (natural order
+#! `d0,d1,d2,d3` is at offsets +7,+6,+5,+4), so absorption is independent of the storage layouts.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc absorb_public_inputs
+    # len(FLPI)
+    push.NUM_FIXED_LEN_PUBLIC_INPUTS exec.random_coin::observe_felt
 
-    # 3) Load the auxiliary randomness (alpha and beta) from advice.
-    #    Stored as [beta0, beta1, alpha0, alpha1] since `horner_eval_ext` requires memory
-    #    word-alignment.
+    # FLPI: 40 base elements, stored as EF [v, 0]; observe the base coordinate of each in order.
+    exec.constants::public_inputs_address_ptr mem_load
+    repeat.40
+        dup mem_load
+        exec.random_coin::observe_felt
+        add.2
+    end
+    drop
+
+    # MAX_AUX_INPUTS, then len(kernel_felts) = 4 * num_kernel_proc_digests.
+    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
+    exec.constants::tmp3 mem_load mul.4 exec.random_coin::observe_felt
+
+    # kernel_felts: for each digest, observe d0,d1,d2,d3 (natural order) from offsets +7,+6,+5,+4.
+    exec.constants::variable_length_public_inputs_address_ptr mem_load
+    exec.constants::tmp3 mem_load
+    swap
+    # => [var_len_ptr, num_iter, ...]
+    dup.1 push.0 neq
+    while.true
+        dup add.7 mem_load exec.random_coin::observe_felt
+        dup add.6 mem_load exec.random_coin::observe_felt
+        dup add.5 mem_load exec.random_coin::observe_felt
+        dup add.4 mem_load exec.random_coin::observe_felt
+        add.8
+        swap sub.1 swap
+        # => [ptr + 8, remaining, ...]
+        dup.1 push.0 neq
+    end
+    drop drop
+end
+
+#! Loads the auxiliary randomness from the advice stack and reduces the kernel digests.
+#!
+#! Loads `[beta0, beta1, alpha0, alpha1]` (word-aligned for `horner_eval_ext`), precomputes
+#! `gamma = beta^16` for per-bus domain separation, then reduces the kernel digests; the reduced
+#! value overwrites the start of the kernel-digest region (in the ACE READ section).
+#!
+#! Input:
+#!      - Advice stack: [beta0, beta1, alpha0, alpha1, ...]
+#! Output: [...]
+proc finalize_kernel_reduction
+    # Load the auxiliary randomness (alpha and beta) from advice.
     padw adv_loadw
     exec.constants::aux_rand_nd_ptr mem_storew_le
     dropw
-    # => [...]
 
-    # 4) Compute gamma = beta^16 for per-bus domain separation.
-    #    gamma is needed by reduce_kernel_digests to build bus_prefix = alpha + gamma.
-    #    We compute it here (from the non-deterministic beta) because generate_aux_randomness
-    #    runs later in the protocol. The value is stored at BUS_GAMMA_PTR for reuse.
+    # Compute gamma = beta^16 for per-bus domain separation, stored at BUS_GAMMA_PTR.
     exec.constants::aux_rand_nd_ptr mem_load
     exec.constants::aux_rand_nd_ptr push.1 add mem_load
     # => [beta1, beta0, ...]
@@ -249,24 +261,14 @@ proc reduce_variable_length_public_inputs
     dup.1 dup.1 ext2mul   # beta^4
     dup.1 dup.1 ext2mul   # beta^8
     dup.1 dup.1 ext2mul   # beta^16 = gamma
-    # => [gamma0, gamma1, ...]
     push.0.0 movup.3 movup.3
-    # => [gamma0, gamma1, 0, 0, ...]
     exec.constants::bus_gamma_ptr mem_storew_le
     dropw
-    # => [...]
 
-    # 5) Get the pointer to the variable-length public inputs and reduce kernel digests.
-    #    The reduced value is stored by reduce_kernel_digests at var_len_ptr (in the ACE READ
-    #    section), where it remains accessible via variable_length_public_inputs_address_ptr.
+    # Reduce the kernel digests; the reduced value is stored at var_len_ptr.
     exec.constants::variable_length_public_inputs_address_ptr mem_load
-    # => [var_len_ptr, ...]
-
     exec.constants::tmp3 mem_load
-    # => [num_kernel_proc_digests, var_len_ptr, ...]
-
     exec.reduce_kernel_digests
-    # => [...]
 end
 
 #! Reduces the kernel procedures digests using auxiliary randomness.

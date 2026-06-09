@@ -6,7 +6,6 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
@@ -84,7 +83,7 @@ pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
 // ------------------------------------------------------------------------------------------------
 //
 // The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
+// and `ChipletsAir`'s `build_aux_trace`: 4 main-trace LogUp columns for Core and 3
 // chiplet-trace LogUp columns for Chiplets. See
 // [`crate::constraints::lookup::main_air::MainLookupAir`] and
 // [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
