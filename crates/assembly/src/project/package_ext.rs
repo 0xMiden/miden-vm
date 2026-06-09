@@ -207,7 +207,6 @@ impl ProjectPackageExt for ProjectPackage {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[allow(clippy::vec_box)]
 fn read_support_module_paths(
     root_dir: &FsPath,
     namespace: &MasmPath,

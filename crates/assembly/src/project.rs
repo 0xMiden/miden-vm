@@ -668,7 +668,10 @@ enum RegisteredSourcePackage {
 
 struct LoadedTargetSources {
     root: Box<Module>,
-    #[allow(clippy::vec_box)]
+    #[expect(
+        clippy::vec_box,
+        reason = "support modules are parsed and consumed as boxed AST modules by assembler APIs"
+    )]
     support: Vec<Box<Module>>,
 }
 
