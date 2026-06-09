@@ -25,8 +25,6 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 /// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
 /// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
 ///   merged column).
-///
-/// Both fractions therefore belong to `CoreAir::boundary_correction` post-split.
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let pv = boundary.public_values();
     let program_hash: [B::F; 4] = [
