@@ -25,6 +25,7 @@
 
 #### Fixes
 
+- Rejected empty query regions in the standalone FRI verifier ([#3237](https://github.com/0xMiden/miden-vm/pull/3237)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
 - Preserved `AssemblyOp` source mappings when merging `MastForest`s, preventing source-location loss after node deduplication ([#2958](https://github.com/0xMiden/miden-vm/pull/2958)).
@@ -32,6 +33,7 @@
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 
 #### Enhancements
+- Improved O(n²) to O(log n) name conflict checks in `Module::define_*` methods by introducing a `BTreeMap` name index; also narrowed `items_mut()` to return an iterator instead of `&mut Vec<Export>` to preserve the index invariant ([#3218](https://github.com/0xMiden/miden-vm/pull/3218)).
 
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
 - Added enum and `u256` records to `.debug_types` metadata so debuggers can preserve those type identities ([#3227](https://github.com/0xMiden/miden-vm/pull/3227)).
