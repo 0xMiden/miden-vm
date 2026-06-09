@@ -26,16 +26,10 @@ macro_rules! assert_diagnostic_lines {
             "{}",
             miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color(&$diagnostic)
         );
-        let actual_line = actual
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .expect("diagnostic should render at least one non-empty line");
 
-        let expected = [$(Pattern::from($expected)),*]
-            .into_iter()
-            .next()
-            .expect("at least one expected pattern is required");
-        expected.assert_match_with_context(actual_line, &actual);
+        $(
+            Pattern::from($expected).assert_match_with_context(&actual, &actual);
+        )+
     }};
 }
 
@@ -441,13 +435,24 @@ fn test_diagnostic_failed_assertion() {
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
+    let (_, _, debug_info) = build_test.compile().expect("test source should compile");
+    let debug_info = debug_info.expect("debug-mode assembly should emit package debug info");
+    assert_eq!(
+        debug_info
+            .error_message(error_code_from_msg("some error message").as_canonical_u64())
+            .as_deref(),
+        Some("some error message")
+    );
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        format!(
-            "  x assertion failed with error code: {}",
-            error_code_from_msg("some error message")
-        ),
+        "  x assertion failed with error message: some error message",
+        regex!(r#",-\[test[\d]+:4:13\]"#),
+        " 3 |             push.1.2",
+        r#" 4 |             assertz.err="some error message""#,
+        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 5 |             push.3.4",
+        "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 
@@ -464,10 +469,13 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        format!(
-            "  x assertion failed with error code: {}",
-            error_code_from_msg("some error message")
-        ),
+        "  x assertion failed with error message: some error message",
+        regex!(r#",-\[test[\d]+:5:13\]"#),
+        " 4 |             push.1.2",
+        " 5 |             assertz.err=ERR_MSG",
+        "   :             ^^^^^^^^^^^^^^^^^^^",
+        " 6 |             push.3.4",
+        "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 }
@@ -537,12 +545,48 @@ fn test_diagnostic_merkle_path_verification_failed() {
         leaves[index][3].as_canonical_u64(),
     ];
 
-    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
+    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store.clone());
+    let (_, _, debug_info) = build_test.compile().expect("test source should compile");
+    let debug_info = debug_info.expect("debug-mode assembly should emit package debug info");
+    assert_eq!(
+        debug_info
+            .error_message(error_code_from_msg("some error message").as_canonical_u64())
+            .as_deref(),
+        Some("some error message")
+    );
     let err = build_test.execute().expect_err("expected error");
-    // With LE sponge, the root hash changes and lookup fails at root level
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
+        " 2 |         begin",
+        " 3 |             mtree_verify.err=\"some error message\"",
+        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 4 |         end",
+        "   `----"
+    );
+
+    // With a node-first stack, the advice lookup succeeds and Merkle verification fails.
+    let stack_inputs = [
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
+        tree.depth() as u64,
+        // Intentionally choose the wrong index to trigger Merkle path verification failure.
+        (index + 1) as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
+    ];
+
+    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
+    let err = build_test.execute().expect_err("expected error");
+    assert_diagnostic_lines!(
+        err,
+        "merkle path verification failed",
+        "error message: some error message",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
@@ -871,19 +915,22 @@ fn test_diagnostic_procedure_not_found_call() {
         .assemble_library("lib", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -923,19 +970,22 @@ fn test_diagnostic_procedure_not_found_join() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -979,19 +1029,22 @@ fn test_diagnostic_procedure_not_found_loop() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -1036,19 +1089,22 @@ fn test_diagnostic_procedure_not_found_split() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -1267,14 +1323,22 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .unwrap();
 
     let program = {
-        let program = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
+        let package = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
             .unwrap()
             .assemble_program("program", program_source)
-            .unwrap()
-            .unwrap_program();
+            .unwrap();
+        let debug_info = package.debug_info().unwrap().unwrap();
+        let program = package.unwrap_program();
 
         // Note: we do not provide the kernel to trigger the error
-        Program::with_kernel(program.mast_forest().clone(), program.entrypoint(), Kernel::default())
+        (
+            Program::with_kernel(
+                program.mast_forest().clone(),
+                program.entrypoint(),
+                Kernel::default(),
+            ),
+            debug_info,
+        )
     };
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -1282,7 +1346,9 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program.0, &program.1, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
@@ -1295,10 +1361,9 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     );
 }
 
-// Tests that the original error message is reported to the user together with
-// the error code in case of assert failure.
+// Tests that assertion messages are not recovered without package debug info.
 #[test]
-fn test_assert_messages() {
+fn test_assert_message_without_debug_info_reports_error_code() {
     let source = "
         const NONZERO = \"Value is not zero\"
         begin
@@ -1306,7 +1371,7 @@ fn test_assert_messages() {
             assertz.err=NONZERO
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[1, 2]);
+    let build_test = build_test_by_mode!(false, source, &[1, 2]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
@@ -1316,5 +1381,14 @@ fn test_assert_messages() {
             error_code_from_msg("Value is not zero")
         ),
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+    );
+
+    let diagnostic = format!(
+        "{}",
+        miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color(&err)
+    );
+    assert!(
+        !diagnostic.contains("assertion failed with error message: Value is not zero"),
+        "non-debug execution should not recover package debug assertion messages:\n{diagnostic}"
     );
 }

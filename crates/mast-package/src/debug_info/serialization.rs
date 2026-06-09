@@ -10,8 +10,9 @@ use miden_core::{
 use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
 use super::{
-    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION, DEBUG_SOURCE_MAP_VERSION,
-    DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
+    DEBUG_ERROR_MESSAGES_VERSION, DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION,
+    DEBUG_SOURCE_MAP_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugErrorMessage,
+    DebugErrorMessagesSection, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
     DebugFunctionsSection, DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceAsmOp,
     DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
     DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
@@ -303,6 +304,50 @@ impl Deserializable for DebugSourceMapSection {
         let asm_ops = Vec::<DebugSourceAsmOp>::read_from(source)?;
         let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
         Ok(Self::from_parts(asm_ops, debug_vars))
+    }
+}
+
+// DEBUG ERROR MESSAGES SECTION SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugErrorMessage {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u64(self.err_code);
+        self.message.as_ref().write_into(target);
+    }
+}
+
+impl Deserializable for DebugErrorMessage {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self {
+            err_code: source.read_u64()?,
+            message: read_string(source)?,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        8 + 1
+    }
+}
+
+impl Serializable for DebugErrorMessagesSection {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.version());
+        self.messages().write_into(target);
+    }
+}
+
+impl Deserializable for DebugErrorMessagesSection {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = source.read_u8()?;
+        if version != DEBUG_ERROR_MESSAGES_VERSION {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "unsupported debug_error_messages version: {version}, expected {DEBUG_ERROR_MESSAGES_VERSION}"
+            )));
+        }
+
+        let messages = Vec::<DebugErrorMessage>::read_from(source)?;
+        Ok(Self::from_parts(messages))
     }
 }
 
@@ -942,12 +987,24 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_error_messages_section_roundtrip() {
+        let section = DebugErrorMessagesSection::from_parts(alloc::vec![DebugErrorMessage::new(
+            42,
+            Arc::from("assertion message"),
+        )]);
+
+        roundtrip(&section);
+        assert_eq!(section.message(42).as_deref(), Some("assertion message"));
+    }
+
+    #[test]
     fn test_empty_sections_roundtrip() {
         roundtrip(&DebugTypesSection::new());
         roundtrip(&DebugSourcesSection::new());
         roundtrip(&DebugFunctionsSection::new());
         roundtrip(&DebugSourceGraphSection::new());
         roundtrip(&DebugSourceMapSection::new());
+        roundtrip(&DebugErrorMessagesSection::new());
     }
 
     #[test]

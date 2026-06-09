@@ -392,6 +392,7 @@ impl Package {
             functions: self.read_debug_section(SectionId::DEBUG_FUNCTIONS)?,
             source_graph: self.read_debug_section(SectionId::DEBUG_SOURCE_GRAPH)?,
             source_map: self.read_debug_section(SectionId::DEBUG_SOURCE_MAP)?,
+            error_messages: self.read_debug_section(SectionId::DEBUG_ERROR_MESSAGES)?,
         };
 
         if debug_info.is_empty() {
@@ -1243,6 +1244,7 @@ mod tests {
             Section::new(SectionId::DEBUG_TYPES, vec![7, 8, 9]),
             Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![10, 11, 12]),
             Section::new(SectionId::DEBUG_SOURCE_MAP, vec![13, 14, 15]),
+            Section::new(SectionId::DEBUG_ERROR_MESSAGES, vec![16, 17, 18]),
         ]
     }
 

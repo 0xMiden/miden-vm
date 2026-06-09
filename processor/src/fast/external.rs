@@ -1,7 +1,12 @@
+use miden_mast_package::debug_info::PackageDebugInfo;
+
 use crate::{
-    ExecutionError,
+    BaseHost, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{OperationError, procedure_not_found_with_context},
+    errors::{
+        OperationError, PackageSourceDebugContext, procedure_not_found_with_context,
+        procedure_not_found_with_package_source_context,
+    },
 };
 
 // HELPERS
@@ -16,7 +21,13 @@ use crate::{
 pub(super) fn maybe_use_caller_error_context<F>(
     original_err: ExecutionError,
     continuation_stack: &ContinuationStack<F>,
+    package_debug_info: Option<&PackageDebugInfo>,
+    host: &impl BaseHost,
 ) -> ExecutionError {
+    if matches!(original_err, ExecutionError::ProcedureNotFound { source_file: Some(_), .. }) {
+        return original_err;
+    }
+
     // We only care about procedure-not-found errors or malformed MAST forest errors.
     let root_digest = match &original_err {
         ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,
@@ -28,7 +39,8 @@ pub(super) fn maybe_use_caller_error_context<F>(
     };
 
     // Look for caller context in the continuation stack
-    let Some(top_continuation) = continuation_stack.peek_continuation() else {
+    let Some((top_continuation, source_node)) = continuation_stack.peek_continuation_with_source()
+    else {
         return original_err;
     };
 
@@ -43,7 +55,16 @@ pub(super) fn maybe_use_caller_error_context<F>(
 
     // We found a caller continuation, so rebuild the error through the legacy no-context path.
     match &original_err {
-        ExecutionError::ProcedureNotFound { .. } => procedure_not_found_with_context(root_digest),
+        ExecutionError::ProcedureNotFound { .. } => match (package_debug_info, source_node) {
+            (Some(debug_info), Some(source_node)) => {
+                procedure_not_found_with_package_source_context(
+                    root_digest,
+                    PackageSourceDebugContext::new(debug_info, source_node),
+                    host,
+                )
+            },
+            _ => procedure_not_found_with_context(root_digest),
+        },
         ExecutionError::OperationError { err, .. } => err.clone().with_context(),
         _ => original_err,
     }

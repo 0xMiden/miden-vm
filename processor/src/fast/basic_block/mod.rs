@@ -156,5 +156,5 @@ fn package_source_context(
     package_debug_info: Option<&PackageDebugInfo>,
     source_node: Option<DebugSourceMastNodeId>,
 ) -> Option<PackageSourceDebugContext<'_>> {
-    Some(PackageSourceDebugContext::new(package_debug_info?, source_node?))
+    Some(PackageSourceDebugContext::new_optional(package_debug_info?, source_node))
 }

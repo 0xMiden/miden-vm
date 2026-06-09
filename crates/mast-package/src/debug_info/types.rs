@@ -274,6 +274,8 @@ pub const DEBUG_FUNCTIONS_VERSION: u8 = 1;
 pub const DEBUG_SOURCE_GRAPH_VERSION: u8 = 1;
 /// The version of the debug_source_map section format.
 pub const DEBUG_SOURCE_MAP_VERSION: u8 = 1;
+/// The version of the debug_error_messages section format.
+pub const DEBUG_ERROR_MESSAGES_VERSION: u8 = 1;
 
 /// Debug functions section containing function metadata, variables, and inlined calls.
 ///
@@ -346,6 +348,8 @@ pub struct PackageDebugInfo {
     pub source_graph: Option<DebugSourceGraphSection>,
     /// Source-keyed assembly operation and debug variable rows.
     pub source_map: Option<DebugSourceMapSection>,
+    /// Assertion error messages keyed by runtime error code.
+    pub error_messages: Option<DebugErrorMessagesSection>,
 }
 
 impl PackageDebugInfo {
@@ -356,6 +360,7 @@ impl PackageDebugInfo {
             && self.functions.is_none()
             && self.source_graph.is_none()
             && self.source_map.is_none()
+            && self.error_messages.is_none()
     }
 
     /// Merges package-owned source/debug metadata after a [`miden_core::mast::MastForest`] merge.
@@ -375,8 +380,10 @@ impl PackageDebugInfo {
         let mut roots = Vec::new();
         let mut asm_ops = Vec::new();
         let mut debug_vars = Vec::new();
+        let mut error_messages = BTreeMap::new();
         let mut saw_source_graph = false;
         let mut saw_source_map = false;
+        let mut saw_error_messages = false;
 
         for (forest_index, debug_info) in inputs {
             let source_graph = debug_info.source_graph.as_ref();
@@ -384,6 +391,13 @@ impl PackageDebugInfo {
             if source_graph.is_none() && source_map.is_some_and(|source_map| !source_map.is_empty())
             {
                 return Err(PackageDebugInfoMergeError::SourceMapWithoutGraph { forest_index });
+            }
+
+            if let Some(section) = debug_info.error_messages.as_ref() {
+                saw_error_messages = true;
+                for row in section.messages() {
+                    error_messages.entry(row.err_code).or_insert_with(|| row.message.clone());
+                }
             }
 
             let Some(source_graph) = source_graph else {
@@ -476,6 +490,12 @@ impl PackageDebugInfo {
                 .then_some(DebugSourceGraphSection::from_parts(nodes, roots)),
             source_map: saw_source_map
                 .then_some(DebugSourceMapSection::from_parts(asm_ops, debug_vars)),
+            error_messages: saw_error_messages.then_some(DebugErrorMessagesSection::from_parts(
+                error_messages
+                    .into_iter()
+                    .map(|(err_code, message)| DebugErrorMessage::new(err_code, message))
+                    .collect(),
+            )),
             ..Self::default()
         })
     }
@@ -559,6 +579,11 @@ impl PackageDebugInfo {
         self.source_map
             .iter()
             .flat_map(move |source_map| source_map.debug_vars_for_operation(source_node, op_idx))
+    }
+
+    /// Returns the assertion error message for `err_code`, if present.
+    pub fn error_message(&self, err_code: u64) -> Option<Arc<str>> {
+        self.error_messages.as_ref()?.message(err_code)
     }
 }
 
@@ -889,6 +914,77 @@ impl DebugSourceMapSection {
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.debug_vars_for_source_node(source_node)
             .filter(move |row| row.op_idx == op_idx)
+    }
+}
+
+// DEBUG ERROR MESSAGES SECTION
+// ================================================================================================
+
+/// Assertion error message keyed by its runtime error code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugErrorMessage {
+    /// Runtime error code emitted by the assembled assertion operation.
+    pub err_code: u64,
+    /// Human-readable assertion error message from source.
+    pub message: Arc<str>,
+}
+
+impl DebugErrorMessage {
+    /// Creates an assertion error message metadata row.
+    pub fn new(err_code: u64, message: Arc<str>) -> Self {
+        Self { err_code, message }
+    }
+}
+
+/// Package-owned assertion error messages.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugErrorMessagesSection {
+    /// Version of the debug error messages format.
+    version: u8,
+    /// Error messages keyed by runtime error code.
+    messages: Vec<DebugErrorMessage>,
+}
+
+impl DebugErrorMessagesSection {
+    /// Creates an empty assertion error message section.
+    pub fn new() -> Self {
+        Self {
+            version: DEBUG_ERROR_MESSAGES_VERSION,
+            messages: Vec::new(),
+        }
+    }
+
+    /// Creates an assertion error message section from rows.
+    pub fn from_parts(messages: Vec<DebugErrorMessage>) -> Self {
+        Self {
+            version: DEBUG_ERROR_MESSAGES_VERSION,
+            messages,
+        }
+    }
+
+    /// Returns the error message section format version.
+    pub fn version(&self) -> u8 {
+        self.version
+    }
+
+    /// Returns error message rows.
+    pub fn messages(&self) -> &[DebugErrorMessage] {
+        &self.messages
+    }
+
+    /// Returns true if the section contains no metadata rows.
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+
+    /// Returns the assertion error message for `err_code`, if present.
+    pub fn message(&self, err_code: u64) -> Option<Arc<str>> {
+        self.messages
+            .iter()
+            .find(|row| row.err_code == err_code)
+            .map(|row| row.message.clone())
     }
 }
 

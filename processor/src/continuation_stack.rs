@@ -300,6 +300,17 @@ impl<F> ContinuationStack<F> {
         self.stack.last()
     }
 
+    pub(crate) fn peek_continuation_with_source(
+        &self,
+    ) -> Option<(&Continuation<F>, Option<DebugSourceMastNodeId>)> {
+        let continuation = self.stack.last()?;
+        let source_node = self
+            .source_nodes
+            .as_ref()
+            .and_then(|source_nodes| source_nodes.last().copied().flatten());
+        Some((continuation, source_node))
+    }
+
     /// Returns an iterator over the continuations on the stack that will execute in the next clock
     /// cycle.
     ///
