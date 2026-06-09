@@ -147,7 +147,7 @@ pub fn analyze(
 
     // Simplify all constant declarations
     analyzer.simplify_constants();
-    for item in module.items_mut().iter_mut() {
+    for item in module.items_mut() {
         let Export::Constant(constant) = item else {
             continue;
         };
@@ -201,7 +201,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
             .map(|item| (item.name().as_str().to_string(), LocalInvokeTarget::from(item))),
     );
     let mut used_aliases = BTreeSet::default();
-    let mut items = VecDeque::from(core::mem::take(&mut module.items));
+    let mut items = VecDeque::from(module.take_items());
     while let Some(item) = items.pop_front() {
         match item {
             Export::Procedure(mut procedure) => {
