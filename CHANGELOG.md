@@ -31,6 +31,7 @@
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 
 #### Enhancements
+- Improved O(n²) to O(log n) name conflict checks in `Module::define_*` methods by introducing a `BTreeMap` name index; also narrowed `items_mut()` to return an iterator instead of `&mut Vec<Export>` to preserve the index invariant ([#3218](https://github.com/0xMiden/miden-vm/pull/3218)).
 
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
 - Added enum and `u256` records to `.debug_types` metadata so debuggers can preserve those type identities ([#3227](https://github.com/0xMiden/miden-vm/pull/3227)).
