@@ -383,20 +383,14 @@ impl LocalPackageRegistry {
 
         // Validate that the contents of the persisted index have not changed under us, by
         // recomputing the checksum of its contents and comparing to when we last loaded the index.
-        #[expect(
-            clippy::verbose_file_reads,
-            reason = "checksum validation must read from the already-locked file handle"
-        )]
-        {
-            let prev_contents = match fs::read(&self.index_path) {
-                Ok(contents) => contents,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
-                Err(error) => return Err(LocalRegistryError::IndexRead(error)),
-            };
-            let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
-            if &self.index_checksum != checksum.as_bytes() {
-                return Err(LocalRegistryError::WriteToStaleIndex);
-            }
+        let prev_contents = match fs::read(&self.index_path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(LocalRegistryError::IndexRead(error)),
+        };
+        let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
+        if &self.index_checksum != checksum.as_bytes() {
+            return Err(LocalRegistryError::WriteToStaleIndex);
         }
 
         operation()?;
