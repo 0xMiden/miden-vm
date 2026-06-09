@@ -29,12 +29,14 @@ const DEFERRED_PAYLOAD_HI_OFFSET: usize = 5;
 /// Stack offset of the deferred tag word.
 const DEFERRED_TAG_OFFSET: usize = 9;
 
-// STACK LAYOUT — `DeferredEvaluate`
+// STACK LAYOUT — `DeferredEvaluate*`
 // ================================================================================================
 // `[event_id, NODE_DIGEST, ...]` — the node must already be registered in `DeferredState`; the
-// handler evaluates it to a canonical digest and pushes only that node's payload onto the advice
-// stack. Data chunks are arranged for `adv_pushw adv_pushw` ergonomics: the two pushes leave the
-// chunk's LOW word on top of the operand stack, with HIGH beneath it.
+// handlers evaluate it to a canonical digest and push the requested canonical node component(s)
+// onto the advice stack. Payload chunks are arranged for `adv_pushw adv_pushw` ergonomics: the two
+// pushes leave the chunk's LOW word on top of the operand stack, with HIGH beneath it. The full
+// event emits the tag first in advice-pop order, so `adv_pushw adv_pushw adv_pushw` leaves
+// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` for a single 8-felt payload.
 
 /// Stack offset of the registered node digest.
 const DEFERRED_NODE_DIGEST_OFFSET: usize = 1;
@@ -95,33 +97,64 @@ pub(super) fn handle_deferred_register(
     Ok(())
 }
 
-/// Handles deferred-node evaluation and returns the canonical payload as advice.
+/// Handles deferred-node evaluation and returns the canonical tag and payload as advice.
 ///
 /// The digest must already be registered in
 /// [`miden_core::deferred::DeferredState`]. The handler evaluates it with
-/// [`miden_core::deferred::DeferredState::evaluate_digest`] and pushes only the canonical node's
-/// payload. The tag is omitted because callers already know which node shape they evaluated.
-///
-/// Data payloads emit two advice words per 8-felt chunk. Because both the advice stack and operand
-/// stack are LIFO, each chunk is placed on advice as HIGH then LOW (and chunks are processed in
-/// reverse before front-pushing) so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand
-/// stack for that chunk. Join payloads use the same convention for their two child digest words,
-/// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice. These advice values are
-/// intentionally unbound: proof-relevant callers must bind them to circuit-visible data before
-/// relying on them.
+/// [`miden_core::deferred::DeferredState::evaluate_digest`] and pushes the canonical node's tag and
+/// payload. The tag is first in advice-pop order, followed by the payload in the same word ordering
+/// used by [`handle_deferred_evaluate_payload`]. TRUE emits only `Tag::TRUE`.
 pub(super) fn handle_deferred_evaluate(
     processor: &mut FastProcessor,
 ) -> Result<(), SystemEventError> {
+    let canonical_node = evaluate_canonical_node(processor)?;
+    push_evaluated_payload(&mut processor.advice, &canonical_node)?;
+    push_evaluated_tag(&mut processor.advice, &canonical_node)?;
+    Ok(())
+}
+
+/// Handles deferred-node evaluation and returns only the canonical tag as advice.
+pub(super) fn handle_deferred_evaluate_tag(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let canonical_node = evaluate_canonical_node(processor)?;
+    push_evaluated_tag(&mut processor.advice, &canonical_node)?;
+    Ok(())
+}
+
+/// Handles deferred-node evaluation and returns only the canonical payload as advice.
+///
+/// This preserves the original payload-only behavior for payload-only consumers. Data payloads emit
+/// two advice words per 8-felt chunk. Because both the advice stack and operand stack
+/// are LIFO, each chunk is placed on advice as HIGH then LOW (and chunks are processed in reverse
+/// before front-pushing) so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack
+/// for that chunk. Join payloads use the same convention for their two child digest words, leaving
+/// `[lhs, rhs, ...]` after two `adv_pushw`s. TRUE emits no advice. These advice values are
+/// intentionally unbound: proof-relevant callers must bind them to circuit-visible data before
+/// relying on them.
+pub(super) fn handle_deferred_evaluate_payload(
+    processor: &mut FastProcessor,
+) -> Result<(), SystemEventError> {
+    let canonical_node = evaluate_canonical_node(processor)?;
+    push_evaluated_payload(&mut processor.advice, &canonical_node)?;
+    Ok(())
+}
+
+/// Evaluates the digest on the operand stack and returns the registered canonical node.
+fn evaluate_canonical_node(processor: &mut FastProcessor) -> Result<Node, SystemEventError> {
     let digest: Digest = processor.stack_get_word(DEFERRED_NODE_DIGEST_OFFSET);
-
     let canonical_digest = processor.deferred_state_mut().evaluate_digest(digest)?;
+    processor
+        .deferred_state()
+        .get_node(&canonical_digest)
+        .cloned()
+        .ok_or(PrecompileError::MissingNode.into())
+}
 
-    let deferred_state = &processor.deferred_state;
-    let advice = &mut processor.advice;
-    let canonical_node =
-        deferred_state.get_node(&canonical_digest).ok_or(PrecompileError::MissingNode)?;
-
-    push_evaluated_payload(advice, canonical_node)?;
+/// Pushes `node`'s canonical tag onto the advice stack.
+fn push_evaluated_tag(advice: &mut AdviceProvider, node: &Node) -> Result<(), SystemEventError> {
+    let tag = Word::from(node.tag().as_word());
+    advice.push_stack_word(&tag)?;
     Ok(())
 }
 
@@ -282,6 +315,26 @@ mod tests {
         expected
     }
 
+    fn expected_full_evaluate_advice_stack(node: &Node, chunks: &[DataChunk]) -> Vec<Felt> {
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&node.tag().as_word());
+        expected.extend_from_slice(&expected_evaluate_advice_stack(chunks));
+        expected
+    }
+
+    fn write_evaluate_stack(processor: &mut FastProcessor, digest: Digest) {
+        for (i, felt) in digest.as_elements().iter().enumerate() {
+            processor.stack_write(DEFERRED_NODE_DIGEST_OFFSET + i, *felt);
+        }
+    }
+
+    fn processor_with_registered_node(node: Node) -> FastProcessor {
+        let mut processor = bind_precompiles(processor_with_budget(128), test_precompiles());
+        processor.deferred_state_mut().register(node.clone()).unwrap();
+        write_evaluate_stack(&mut processor, node.digest());
+        processor
+    }
+
     #[test]
     fn evaluated_payload_advice_omits_tag_and_orders_single_chunk_for_two_pushes() {
         let mut processor = processor_with_budget(64);
@@ -310,12 +363,58 @@ mod tests {
     }
 
     #[test]
-    fn evaluated_true_payload_emits_no_advice() {
-        let mut processor = processor_with_budget(64);
+    fn payload_only_handler_preserves_existing_single_chunk_ordering() {
+        let chunk = chunk(10);
+        let node = Hash::digest_node(chunk);
+        let mut processor = processor_with_registered_node(node);
 
-        push_evaluated_payload(&mut processor.advice, &Node::TRUE).unwrap();
+        handle_deferred_evaluate_payload(&mut processor).unwrap();
 
-        assert_eq!(processor.advice_provider().stack(), Vec::<Felt>::new());
+        assert_eq!(processor.advice_provider().stack(), expected_evaluate_advice_stack(&[chunk]));
+    }
+
+    #[test]
+    fn tag_only_handler_emits_canonical_tag() {
+        let chunk = chunk(20);
+        let node = Hash::digest_node(chunk);
+        let expected = node.tag().as_word().to_vec();
+        let mut processor = processor_with_registered_node(node);
+
+        handle_deferred_evaluate_tag(&mut processor).unwrap();
+
+        assert_eq!(processor.advice_provider().stack(), expected);
+    }
+
+    #[test]
+    fn full_handler_emits_tag_then_payload_for_three_pushes() {
+        let chunk = chunk(30);
+        let node = Hash::digest_node(chunk);
+        let expected = expected_full_evaluate_advice_stack(&node, &[chunk]);
+        let mut processor = processor_with_registered_node(node);
+
+        handle_deferred_evaluate(&mut processor).unwrap();
+
+        assert_eq!(processor.advice_provider().stack(), expected);
+    }
+
+    #[test]
+    fn true_evaluation_behavior_matches_variant_semantics() {
+        let mut payload_processor = processor_with_budget(64);
+        write_evaluate_stack(&mut payload_processor, TRUE_DIGEST);
+        handle_deferred_evaluate_payload(&mut payload_processor).unwrap();
+        assert_eq!(payload_processor.advice_provider().stack(), Vec::<Felt>::new());
+
+        let expected_tag = Tag::TRUE.as_word().to_vec();
+
+        let mut tag_processor = processor_with_budget(64);
+        write_evaluate_stack(&mut tag_processor, TRUE_DIGEST);
+        handle_deferred_evaluate_tag(&mut tag_processor).unwrap();
+        assert_eq!(tag_processor.advice_provider().stack(), expected_tag);
+
+        let mut full_processor = processor_with_budget(64);
+        write_evaluate_stack(&mut full_processor, TRUE_DIGEST);
+        handle_deferred_evaluate(&mut full_processor).unwrap();
+        assert_eq!(full_processor.advice_provider().stack(), expected_tag);
     }
 
     #[test]

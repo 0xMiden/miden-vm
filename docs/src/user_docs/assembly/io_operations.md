@@ -84,12 +84,16 @@ stack-resident data chunk or a join payload (`lhs_digest || rhs_digest`) from
 join payloads. Data tags read the tag-decoded number of 8-felt chunks from word-aligned `ptr`;
 join tags read exactly 8 felts from `ptr` as `lhs_digest || rhs_digest`. Neither register
 instruction returns the node digest, so proof-relevant code that later uses it must compute the
-digest in-circuit from the same tag and payload/memory range. `adv.evaluate_deferred` pushes only
-canonical payload data as advice; the tag is not emitted. Per 8-felt data chunk, advice pop order is
-`HIGH` then `LOW`, so `adv_pushw adv_pushw` leaves `LOW` above `HIGH` on the operand stack, and
-chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving
-`lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. These advice values
-are host hints and must be bound to circuit-visible data before being used in proof-relevant claims.
+digest in-circuit from the same tag and payload/memory range. `adv.evaluate_deferred` pushes the
+canonical tag and payload as advice; the tag is first in advice-pop order, so for a single 8-felt
+payload `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand
+stack. `adv.evaluate_deferred_tag` pushes only the canonical tag. `adv.evaluate_deferred_payload`
+preserves the payload-only behavior: per 8-felt data chunk, advice pop order is `HIGH` then `LOW`,
+so `adv_pushw adv_pushw` leaves `LOW` above `HIGH` on the operand stack, and chunks preserve
+canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest`
+above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice for payload-only evaluation and
+emits `Tag::TRUE` for tag-only/full evaluation. These advice values are host hints and must be bound
+to circuit-visible data before being used in proof-relevant claims.
 
 | Instruction           | Stack_input        | Stack_output       | Notes                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------ | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,7 +104,9 @@ are host hints and must be bound to circuit-visible data before being used in pr
 | adv.push_mtnode                              | [d, i, R, ... ]    | [d, i, R, ... ]    | Pushes a node of a Merkle tree with root $R$ at depth $d$ and index $i$ from Merkle store onto the advice stack.                                                                                                                                                     |
 | adv.register_deferred                        | [PAYLOAD_LO, PAYLOAD_HI, TAG, ...] | [PAYLOAD_LO, PAYLOAD_HI, TAG, ...] | Registers and eagerly evaluates an operand-stack deferred node. Produces no advice output. |
 | adv.register_deferred_data                   | [TAG, ptr, ...]    | [TAG, ptr, ...]    | Registers and eagerly evaluates a memory-backed deferred node. Produces no advice output. |
-| adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical payload felts onto the advice stack. |
+| adv.evaluate_deferred                        | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes its canonical tag and payload felts onto the advice stack. |
+| adv.evaluate_deferred_tag                    | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical tag onto the advice stack. |
+| adv.evaluate_deferred_payload                | [NODE_DIGEST, ...] | [NODE_DIGEST, ...] | Evaluates a registered deferred node and pushes only its canonical payload felts onto the advice stack. |
 | adv.insert_mem                               | [K, a, b, ... ]    | [K, a, b, ... ]    | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$.                                                                                                                                                 |
 | adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=0)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. Note: to compute the same key in MASM, use `hmerge`.                                       |
 | adv.insert_hdword_d                          | [A, B, d, ... ]    | [A, B, d, ... ]    | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=d)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. $d$ is the domain value.                                                                   |

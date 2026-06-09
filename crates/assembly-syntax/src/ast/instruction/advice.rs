@@ -27,6 +27,8 @@ pub enum SystemEventNode {
     DeferredRegister,
     DeferredRegisterData,
     DeferredEvaluate,
+    DeferredEvaluateTag,
+    DeferredEvaluatePayload,
 }
 
 impl From<&SystemEventNode> for SystemEvent {
@@ -48,6 +50,8 @@ impl From<&SystemEventNode> for SystemEvent {
             DeferredRegister => Self::DeferredRegister,
             DeferredRegisterData => Self::DeferredRegisterData,
             DeferredEvaluate => Self::DeferredEvaluate,
+            DeferredEvaluateTag => Self::DeferredEvaluateTag,
+            DeferredEvaluatePayload => Self::DeferredEvaluatePayload,
         }
     }
 }
@@ -76,6 +80,8 @@ impl fmt::Display for SystemEventNode {
             Self::DeferredRegister => write!(f, "register_deferred"),
             Self::DeferredRegisterData => write!(f, "register_deferred_data"),
             Self::DeferredEvaluate => write!(f, "evaluate_deferred"),
+            Self::DeferredEvaluateTag => write!(f, "evaluate_deferred_tag"),
+            Self::DeferredEvaluatePayload => write!(f, "evaluate_deferred_payload"),
         }
     }
 }

@@ -122,16 +122,18 @@ transparent to precompile implementations and is not serialized as trusted state
 
 ## Building the DAG from a program
 
-A program grows the DAG through three system events. Each event mutates only the *host-side*
-`DeferredState`; no register event hands a digest back through advice. Code that later uses or logs
-that digest must derive it **in-circuit** from the same operand-stack or memory data in a
-precompile-specific assembly procedure.
+A program grows and evaluates the DAG through deferred system events. Each event mutates only the
+*host-side* `DeferredState`; no register event hands a digest back through advice. Code that later
+uses or logs that digest must derive it **in-circuit** from the same operand-stack or memory data in
+a precompile-specific assembly procedure.
 
 | Event (`adv.*`)            | Operand stack in                 | Effect |
 | -------------------------- | -------------------------------- | ------ |
 | `register_deferred`        | `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` | Decodes `TAG` and registers an operand-stack node, then evaluates it immediately. `TAG` is one 4-felt word. `PAYLOAD_LO || PAYLOAD_HI` is exactly 8 felts: either one data chunk or two 4-felt child digests for a join. Join payloads may reference only already-registered children, except for the implicit `TRUE_DIGEST`. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit with one `hperm` over `[PAYLOAD_LO, PAYLOAD_HI, TAG]`. |
 | `register_deferred_data`   | `[TAG, ptr, …]`                  | Decodes `TAG` and registers a memory-backed node, then evaluates it immediately. Data tags read the tag-declared number of 8-felt chunks from word-aligned memory at `ptr`; join tags read exactly 8 felts and interpret them as `lhs_digest || rhs_digest`; `TRUE` is rejected. No advice/stack output; code that needs `NODE_DIGEST` computes it in-circuit from the same `TAG` and memory range using the digest rule for the decoded payload shape. |
-| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. The tag is not emitted. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
+| `evaluate_deferred`        | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes the canonical tag plus canonical payload felts onto the **advice stack**. The tag is first in advice-pop order; for a single 8-felt payload, `adv_pushw adv_pushw adv_pushw` leaves `[PAYLOAD_LO, PAYLOAD_HI, TAG, …]` on the operand stack. `TRUE` emits only `Tag::TRUE`. |
+| `evaluate_deferred_tag`    | `[NODE_DIGEST, …]`               | Looks the node up, evaluates it to canonical form, and pushes only the canonical tag onto the **advice stack**. `TRUE` emits `Tag::TRUE`. |
+| `evaluate_deferred_payload` | `[NODE_DIGEST, …]`              | Payload-only compatibility event. Looks the node up, evaluates it to canonical form, and pushes only the canonical payload felts onto the **advice stack**. For each 8-felt data chunk, advice is arranged as `HIGH` then `LOW` so `adv_pushw adv_pushw` leaves `LOW` on top and `HIGH` beneath it; chunks preserve canonical chunk order. Join payloads use the same two-word LIFO convention, leaving `lhs_digest` above `rhs_digest` after two `adv_pushw`s. `TRUE` emits no advice. |
 
 `register_*` validate the tag's shape and, for join-shaped nodes, child closure. They store the
 original node under its digest, evaluate it immediately, and fail immediately if semantic evaluation
@@ -156,21 +158,21 @@ re-checks — to the data the circuit actually committed to.
 
 ### Why `evaluate_deferred` is a bare event
 
-`evaluate_deferred`'s output is a *deferred evaluation* the circuit cannot perform, so it must come
-through advice — but that makes it an **unbound host hint**. Using it soundly requires re-hashing
-the returned payload in-circuit and logging a predicate that `from_wire` re-checks; an in-circuit
-`eq`/`assert` over two raw evaluate results proves nothing. Because that obligation is
-precompile-specific (which predicate to log is the precompile's business), `evaluate_deferred` is
-intentionally *not* exposed as a generic safe `sys` procedure. A precompile-specific assembly
-procedure must bind the raw event output to the circuit data it cares about. The same ownership
-applies to registration: a precompile-specific procedure can make a raw register event safe by
-computing the node digest in-circuit from the operand stack or memory, so the worst a misuse can do
-is make the verifier reject.
+A deferred-evaluation event's output is a *deferred evaluation* the circuit cannot perform, so it
+must come through advice — but that makes it an **unbound host hint**. Using it soundly requires
+re-hashing the returned payload (and, for the full event, checking the returned tag) in-circuit and
+logging a predicate that `from_wire` re-checks; an in-circuit `eq`/`assert` over two raw evaluate
+results proves nothing. Because that obligation is precompile-specific (which predicate to log is
+the precompile's business), deferred evaluation is intentionally *not* exposed as a generic safe
+`sys` procedure. A precompile-specific assembly procedure must bind the raw event output to the
+circuit data it cares about. The same ownership applies to registration: a precompile-specific
+procedure can make a raw register event safe by computing the node digest in-circuit from the
+operand stack or memory, so the worst a misuse can do is make the verifier reject.
 
 Predicates are **not** special-cased on evaluation: their canonical is the `TRUE` node like any
-other successful predicate. Since `evaluate_deferred` emits only payload advice and `TRUE` has no
-payload, successful predicates emit no advice. A failed predicate has already surfaced as an error
-before any felts are pushed.
+other successful predicate. `evaluate_deferred_payload` emits no advice for `TRUE` because `TRUE`
+has no payload, while `evaluate_deferred_tag` and full `evaluate_deferred` emit `Tag::TRUE`. A
+failed predicate has already surfaced as an error before any felts are pushed.
 
 ## The deferred root commitment
 

@@ -315,19 +315,50 @@ pub enum SystemEvent {
     ///   Deferred state: node registered and semantically evaluated
     DeferredRegister,
 
-    /// Evaluates a registered deferred node and pushes its canonical payload as advice.
+    /// Evaluates a registered deferred node and pushes its canonical tag and payload as advice.
     ///
     /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
     /// state. The handler evaluates it with [`crate::deferred::DeferredState::evaluate_digest`],
-    /// fetches the canonical node, and pushes only its payload to the advice stack. The tag is not
-    /// emitted.
+    /// fetches the canonical node, and pushes its tag followed by its payload to the advice stack.
     ///
-    /// Data payloads push two words per 8-felt chunk in advice order `HIGH, LOW` so that
-    /// `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the operand stack for that chunk. Chunks
-    /// are emitted in canonical chunk order. Join payloads use the same two-word LIFO convention,
-    /// leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE` pushes no advice. These felts are
-    /// an unbound host hint, so proof-relevant code must bind them to circuit-visible data
-    /// before relying on them.
+    /// The tag is emitted first in advice-pop order so `adv_pushw adv_pushw adv_pushw` leaves
+    /// `[PAYLOAD_LO, PAYLOAD_HI, TAG, ...]` on the operand stack for a single 8-felt payload. Data
+    /// payloads push two words per 8-felt chunk in advice order `HIGH, LOW`, preserving canonical
+    /// chunk order. Join payloads use the same two-word LIFO convention, leaving `[lhs, rhs, TAG,
+    /// ...]` after the three pushes. `TRUE` pushes only `Tag::TRUE`. These felts are an unbound
+    /// host hint, so proof-relevant code must bind them to circuit-visible data before relying on
+    /// them.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical tag, then canonical payload words for `adv_pushw` LIFO
+    /// consumption
+    DeferredEvaluate,
+
+    /// Evaluates a registered deferred node and pushes only its canonical tag as advice.
+    ///
+    /// `NODE_DIGEST` is one word (4 field elements) and must already be registered in deferred
+    /// state. `TRUE` pushes `Tag::TRUE`.
+    ///
+    /// Inputs:
+    ///   Operand stack: [event_id, NODE_DIGEST, ...]
+    ///
+    /// Outputs:
+    ///   Operand stack: unchanged
+    ///   Advice stack:  canonical tag only
+    DeferredEvaluateTag,
+
+    /// Evaluates a registered deferred node and pushes only its canonical payload as advice.
+    ///
+    /// This is the payload-only compatibility event. Data payloads push two words per 8-felt chunk
+    /// in advice order `HIGH, LOW` so `adv_pushw adv_pushw` leaves `[LOW, HIGH, ...]` on the
+    /// operand stack for that chunk. Chunks are emitted in canonical chunk order. Join payloads use
+    /// the same two-word LIFO convention, leaving `[lhs, rhs, ...]` after two `adv_pushw`s. `TRUE`
+    /// pushes no advice. These felts are an unbound host hint, so proof-relevant code must bind
+    /// them to circuit-visible data before relying on them.
     ///
     /// Inputs:
     ///   Operand stack: [event_id, NODE_DIGEST, ...]
@@ -335,7 +366,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: unchanged
     ///   Advice stack:  canonical payload only, word-ordered for `adv_pushw` LIFO consumption
-    DeferredEvaluate,
+    DeferredEvaluatePayload,
 
     /// Registers and eagerly evaluates a memory-backed deferred node.
     ///
@@ -433,6 +464,8 @@ impl SystemEvent {
             Self::HpermToMap,
             Self::DeferredRegister,
             Self::DeferredEvaluate,
+            Self::DeferredEvaluateTag,
+            Self::DeferredEvaluatePayload,
             Self::DeferredRegisterData,
         ]
     }
@@ -475,7 +508,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 22;
+    pub const COUNT: usize = 24;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -588,6 +621,16 @@ impl SystemEvent {
             name: "sys::adv::evaluate_deferred",
         },
         SystemEventEntry {
+            id: EventId::from_u64(15463062559264590613),
+            event: SystemEvent::DeferredEvaluateTag,
+            name: "sys::adv::evaluate_deferred_tag",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(8091749904895009326),
+            event: SystemEvent::DeferredEvaluatePayload,
+            name: "sys::adv::evaluate_deferred_payload",
+        },
+        SystemEventEntry {
             id: EventId::from_u64(13021247594355482329),
             event: SystemEvent::DeferredRegisterData,
             name: "sys::adv::register_deferred_data",
@@ -642,16 +685,16 @@ mod test {
                 i, entry.event, i, event
             );
 
-            // Verify LOOKUP entry ID matches the computed ID
-            let computed_id = event.event_id();
+            // Verify LOOKUP entry ID matches enum lookup.
+            let looked_up_id = event.event_id();
             assert_eq!(
                 entry.id,
-                computed_id,
-                "LOOKUP[{}].id is EventId::from_u64({}), but {:?}.to_event_id() returns EventId::from_u64({})",
+                looked_up_id,
+                "LOOKUP[{}].id is EventId::from_u64({}), but {:?}.event_id() returns EventId::from_u64({})",
                 i,
                 entry.id.as_u64(),
                 event,
-                computed_id.as_u64()
+                looked_up_id.as_u64()
             );
 
             // Verify name has correct "sys::" prefix
@@ -702,6 +745,8 @@ mod test {
                 | SystemEvent::HpermToMap
                 | SystemEvent::DeferredRegister
                 | SystemEvent::DeferredEvaluate
+                | SystemEvent::DeferredEvaluateTag
+                | SystemEvent::DeferredEvaluatePayload
                 | SystemEvent::DeferredRegisterData => {},
             }
         }

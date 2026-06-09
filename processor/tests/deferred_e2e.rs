@@ -116,6 +116,10 @@ fn payload_felts(node: &Node) -> Vec<Felt> {
     lhs.as_elements().iter().chain(rhs.as_elements()).copied().collect()
 }
 
+fn tag_felts(node: &Node) -> Vec<Felt> {
+    node.tag().as_word().to_vec()
+}
+
 // HAPPY-PATH WORKFLOWS
 // ================================================================================================
 
@@ -145,21 +149,21 @@ fn uint_and_group_happy_path_returns_child_digests_that_can_be_evaluated() {
     {reg_g1} adv.register_deferred dropw dropw dropw
     {reg_g2} adv.register_deferred dropw dropw dropw
     {reg_add} adv.register_deferred dropw dropw dropw
-    push.{add_digest} adv.evaluate_deferred dropw
+    push.{add_digest} adv.evaluate_deferred_payload dropw
     adv_pushw adv_pushw
     mem_storew_le.0 dropw
     mem_storew_le.4 dropw
-    push.{minted_x_digest} adv.evaluate_deferred dropw
+    push.{minted_x_digest} adv.evaluate_deferred_payload dropw
     adv_pushw adv_pushw
     mem_storew_le.8 dropw
     mem_storew_le.12 dropw
-    push.{minted_y_digest} adv.evaluate_deferred dropw
+    push.{minted_y_digest} adv.evaluate_deferred_payload dropw
     adv_pushw adv_pushw
     mem_storew_le.16 dropw
     mem_storew_le.20 dropw
     {reg_expected} adv.register_deferred dropw dropw dropw
     {reg_eq} adv.register_deferred dropw dropw dropw
-    push.{eq_digest} adv.evaluate_deferred dropw
+    push.{eq_digest} adv.evaluate_deferred_payload dropw
 end",
         reg_dx1 = push_node(&dx1),
         reg_dy1 = push_node(&dy1),
@@ -182,9 +186,10 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // Canonical sum is `new(minted_x, minted_y)`: both minted coordinate child digests, no tag.
+    // Payload-only canonical sum is `new(minted_x, minted_y)`: both minted coordinate child
+    // digests.
     assert_eq!(read_memory_felts(&output, 0, 8), payload_felts(&canonical_add));
-    // Each returned child digest evaluates back to its uint payload, no tag.
+    // Each payload-only returned child digest evaluates back to its uint payload.
     assert_eq!(read_memory_felts(&output, 8, 8), payload_felts(&minted_x));
     assert_eq!(read_memory_felts(&output, 16, 8), payload_felts(&minted_y));
     // The equality assertion canonicalizes to TRUE, whose payload is empty, so no advice remains.
@@ -212,13 +217,13 @@ fn hash_preimage_data_happy_path_checks_equality() {
         "begin
     {store}
     push.0 push.{preimage_tag} adv.register_deferred_data dropw drop
-    push.{preimage_digest} adv.evaluate_deferred dropw
+    push.{preimage_digest} adv.evaluate_deferred_payload dropw
     adv_pushw adv_pushw
     mem_storew_le.16 dropw
     mem_storew_le.20 dropw
     {reg_canonical} adv.register_deferred dropw dropw dropw
     {reg_eq} adv.register_deferred dropw dropw dropw
-    push.{eq_digest} adv.evaluate_deferred dropw
+    push.{eq_digest} adv.evaluate_deferred_payload dropw
 end",
         store = store_chunks(0, &chunks),
         preimage_tag = felt_list(&preimage.tag().as_word()),
@@ -234,7 +239,7 @@ end",
         .execute_sync(&program, &mut host)
         .expect("execution must succeed");
 
-    // The preimage evaluates to the hash digest payload of its memory contents (no tag).
+    // The preimage payload-only evaluation returns the hash digest payload of its memory contents.
     assert_eq!(read_memory_felts(&output, 16, 8), payload_felts(&canonical));
     // The digest-equality assertion canonicalizes to TRUE, whose payload is empty.
     assert_eq!(output.advice.stack(), Vec::<Felt>::new());
@@ -244,6 +249,70 @@ end",
     assert_eq!(ds.get_node(&canonical.digest()), Some(&canonical));
     assert_eq!(ds.evaluate_digest(preimage.digest()).unwrap(), canonical.digest());
     assert_eq!(ds.evaluate_digest(eq.digest()).unwrap(), TRUE_DIGEST);
+}
+
+#[test]
+fn evaluate_deferred_full_returns_canonical_tag_and_payload() {
+    // A preimage node canonicalizes to a digest leaf. Full evaluation returns that canonical digest
+    // leaf's tag first in advice-pop order, then its payload in the existing payload word order.
+    let chunks = data_chunks(2);
+    let preimage = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks.clone());
+    let canonical = Hash::digest_node(Hash::hash(&chunks));
+
+    let src = format!(
+        "begin
+    {store}
+    push.0 push.{preimage_tag} adv.register_deferred_data dropw drop
+    push.{preimage_digest} adv.evaluate_deferred dropw
+    adv_pushw adv_pushw adv_pushw
+    mem_storew_le.16 dropw
+    mem_storew_le.20 dropw
+    mem_storew_le.24 dropw
+end",
+        store = store_chunks(0, &chunks),
+        preimage_tag = felt_list(&preimage.tag().as_word()),
+        preimage_digest = felt_list(preimage.digest().as_elements()),
+    );
+
+    let program = assemble_test_program(&src);
+    let mut host = DefaultHost::default();
+    let output = build_mock_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    assert_eq!(read_memory_felts(&output, 16, 8), payload_felts(&canonical));
+    assert_eq!(read_memory_felts(&output, 24, 4), tag_felts(&canonical));
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
+}
+
+#[test]
+fn evaluate_deferred_tag_returns_canonical_tag_only() {
+    // Tag-only evaluation returns the canonical digest leaf's tag and omits the payload entirely.
+    let chunks = data_chunks(2);
+    let preimage = Hash::preimage_node(2 * Hash::BYTES_PER_CHUNK, chunks.clone());
+    let canonical = Hash::digest_node(Hash::hash(&chunks));
+
+    let src = format!(
+        "begin
+    {store}
+    push.0 push.{preimage_tag} adv.register_deferred_data dropw drop
+    push.{preimage_digest} adv.evaluate_deferred_tag dropw
+    adv_pushw
+    mem_storew_le.16 dropw
+end",
+        store = store_chunks(0, &chunks),
+        preimage_tag = felt_list(&preimage.tag().as_word()),
+        preimage_digest = felt_list(preimage.digest().as_elements()),
+    );
+
+    let program = assemble_test_program(&src);
+    let mut host = DefaultHost::default();
+    let output = build_mock_processor()
+        .execute_sync(&program, &mut host)
+        .expect("execution must succeed");
+
+    assert_eq!(read_memory_felts(&output, 16, 4), tag_felts(&canonical));
+    assert_eq!(output.advice.stack(), Vec::<Felt>::new());
 }
 
 #[test]
@@ -257,7 +326,7 @@ fn sig_verify_data_predicate_happy_path_returns_true() {
         "begin
     {store}
     push.0 push.{sig_tag} adv.register_deferred_data dropw drop
-    push.{sig_digest} adv.evaluate_deferred dropw
+    push.{sig_digest} adv.evaluate_deferred_payload dropw
 end",
         store = store_chunks(0, &chunks),
         sig_tag = felt_list(&sig.tag().as_word()),
@@ -278,11 +347,12 @@ end",
 }
 
 #[test]
-fn deferred_evaluate_true_digest_emits_no_advice() {
-    // Evaluating the implicit seeded TRUE node emits no advice because TRUE has no payload.
+fn deferred_evaluate_payload_true_digest_emits_no_advice() {
+    // Payload-only evaluation of the implicit seeded TRUE node emits no advice because TRUE has no
+    // payload.
     let src = format!(
         "begin
-    push.{true_digest} adv.evaluate_deferred dropw
+    push.{true_digest} adv.evaluate_deferred_payload dropw
 end",
         true_digest = felt_list(TRUE_DIGEST.as_elements()),
     );
