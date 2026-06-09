@@ -72,8 +72,8 @@ mod export {
     pub use miden_crypto::stark::{
         StarkConfig,
         air::{
-            AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-            PermutationAirBuilder, ProverStatement, Statement,
+            AirBuilder, BaseAir, ConstraintDegrees, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
+            MultiAir, PermutationAirBuilder, ProverStatement, Statement,
         },
         debug,
     };
@@ -521,6 +521,11 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
             "build_logup_aux_trace returns one committed final per AIR (col 0's terminal sum)"
         );
         (aux_trace, committed)
+    }
+
+    fn constraint_degree(&self) -> ConstraintDegrees {
+        // All AIRs peak at degree 9 over base-field and extension-field constraints.
+        ConstraintDegrees { base: 9, ext: 9 }
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
