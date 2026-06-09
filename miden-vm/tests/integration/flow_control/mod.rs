@@ -129,7 +129,7 @@ fn faulty_condition_from_tail_controlled_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue { value: _, .. },
             ..
         }
     );
