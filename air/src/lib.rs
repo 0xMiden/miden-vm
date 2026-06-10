@@ -718,3 +718,24 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
         }
     }
 }
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use miden_core::field::QuadFelt;
+
+    use super::*;
+
+    /// Guards the static `constraint_degree` override: if an AIR change moves the symbolic
+    /// degree away from the declared value, the override must be updated.
+    #[test]
+    fn constraint_degree_override_matches_symbolic() {
+        for air in [MidenAir::CORE, MidenAir::CHIPLETS] {
+            let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+            let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
+            assert_eq!(declared, symbolic, "static constraint_degree override is stale");
+        }
+    }
+}
