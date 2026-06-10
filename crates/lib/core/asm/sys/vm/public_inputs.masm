@@ -169,37 +169,53 @@ proc load_kernel_digests
     u32assert.err="number of kernel procedure digests must fit in a u32"
     u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
 
-    # Set up dummy state words with the destination pointer at position 12 for adv_pipe.
+    # Set up dummy state words with the destination pointer at position 12 for adv_pipe,
+    # and the absorb-scratch cursor below it.
     padw padw padw
     exec.constants::variable_length_public_inputs_address_ptr mem_load
     movdn.12
-    # => [Y, Y, Y, var_len_ptr, ...]
+    exec.constants::absorb_scratch_ptr add.43
+    movdn.13
+    # => [Y, Y, Y, var_len_ptr, dst, ...]
 
     exec.constants::tmp3 mem_load
-    # => [num_iter, Y, Y, Y, var_len_ptr, ...]
+    # => [num_iter, Y, Y, Y, var_len_ptr, dst, ...]
 
     dup push.0 neq
     while.true
-        sub.1 movdn.13
-        # => [Y, Y, Y, ptr, remaining, ...]
+        sub.1 movdn.14
+        # => [Y, Y, Y, ptr, dst, remaining, ...]
         adv_pipe
-        # => [W0, W1, Y, ptr+8, remaining, ...]
-        movup.13
-        # => [remaining, W0, W1, Y, ptr+8, ...]
+        # => [ZERO_PAD, D, Y, ptr+8, dst, remaining, ...]
+        dropw
+        # => [d3, d2, d1, d0, Y, ptr+8, dst, remaining, ...]
+        # Write the digest in natural order to the absorb scratch: d_i at dst + i. Element
+        # stores, since the scratch stream offset (43 + 4d) is not word-aligned.
+        movup.9 dup add.4 movdn.10
+        # => [dst, d3, d2, d1, d0, Y, ptr+8, dst+4, remaining, ...]
+        swap dup.1 add.3 mem_store
+        swap dup.1 add.2 mem_store
+        swap dup.1 add.1 mem_store
+        mem_store
+        # => [Y, ptr+8, dst+4, remaining, ...]
+        padw padw
+        # => [P, P, Y, ptr+8, dst+4, remaining, ...]
+        movup.14
+        # => [remaining, P, P, Y, ptr+8, dst+4, ...]
         dup push.0 neq
     end
-    # => [0, W0, W1, Y, ptr_final, ...]
-    drop dropw dropw dropw drop
+    # => [0, P, P, Y, ptr_final, dst_final, ...]
+    drop dropw dropw dropw drop drop
 end
 
 #! Absorb the statement public inputs into the Fiat-Shamir transcript, matching
 #! `MultiAir::observe`'s element stream:
 #!     [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ].
 #!
-#! Gathers the stream into scratch in natural order (FLPI from their EF slots, kernel digests from
-#! their reversed 8-felt layout), then absorbs it in 8-element blocks with the sponge state on the
-#! stack, leaving the trailing partial block (< 8) buffered via `observe_felt` so the verifier
-#! continues the same stream with the instance shape and main-trace commitment.
+#! Completes the scratch copy of the stream (lengths and FLPI; the kernel-felt section was written
+#! by `load_kernel_digests`), then absorbs it in 8-element blocks via `mem_stream` with the sponge
+#! state on the stack, leaving the trailing partial block (< 8) buffered via `observe_felt` so the
+#! verifier continues the same stream with the instance shape and main-trace commitment.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -222,54 +238,32 @@ proc absorb_public_inputs
     drop drop
 
     # scratch[41] = MAX_AUX_INPUTS, scratch[42] = len(kernel_felts) = 4 * num_kernel_proc_digests.
+    # (scratch[43..43+4K] was already filled in natural order by `load_kernel_digests`.)
     push.MAX_AUX_INPUTS exec.constants::absorb_scratch_ptr add.41 mem_store
     exec.constants::tmp3 mem_load mul.4 exec.constants::absorb_scratch_ptr add.42 mem_store
 
-    # scratch[43 + 4d + e] = digest d element e (natural order d0..d3 from offsets +7,+6,+5,+4).
-    exec.constants::variable_length_public_inputs_address_ptr mem_load
-    exec.constants::absorb_scratch_ptr add.43
-    exec.constants::tmp3 mem_load
-    # => [num_iter, dst, vptr]
-    dup push.0 neq
-    while.true
-        dup.2 add.7 mem_load dup.2       mem_store
-        dup.2 add.6 mem_load dup.2 add.1 mem_store
-        dup.2 add.5 mem_load dup.2 add.2 mem_store
-        dup.2 add.4 mem_load dup.2 add.3 mem_store
-        swap add.4 swap
-        movup.2 add.8 movdn.2
-        sub.1
-        dup push.0 neq
-    end
-    drop drop drop
-
     # ---- Block-absorb scratch[0..L], L = 43 + 4 * num_kernel_proc_digests ----
 
-    # nfb = L / 8 full blocks (tmp4); scratch_end = scratch + L (tmp1).
+    # scratch_end = scratch + L (tmp1); nfb = L / 8 full blocks (kept on the stack).
     push.43 exec.constants::tmp3 mem_load mul.4 add
     # => [L]
-    dup u32divmod.8 drop exec.constants::tmp4 mem_store
-    # => [L]
-    exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
-    # => [...]
+    dup exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
+    u32divmod.8 drop
+    # => [nfb]
 
     # Load the sponge state once; it stays on the stack across every block permutation.
     exec.random_coin::load_random_coin_state
     exec.constants::absorb_scratch_ptr movdn.12
-    # => [R1, R2, C, ptr]
-    exec.constants::tmp4 mem_load push.0 neq
+    # => [R1, R2, C, ptr, nfb]
+    movup.13 dup push.0 neq
     while.true
-        # Rate <- scratch[ptr..ptr+8] (capacity kept), same element order as `get_rate_*`; permute.
-        dropw dropw
-        # => [C, ptr]
-        dup.4 add.4 padw movup.4 mem_loadw_le
-        # => [R2, C, ptr]
-        dup.8 padw movup.4 mem_loadw_le
-        # => [R1, R2, C, ptr]
+        sub.1 movdn.13
+        # => [R1, R2, C, ptr, nfb-1]
+        mem_stream
         exec.poseidon2::permute
-        movup.12 add.8 movdn.12
-        exec.constants::tmp4 mem_load sub.1 dup exec.constants::tmp4 mem_store push.0 neq
+        movup.13 dup push.0 neq
     end
+    drop
     # => [R1, R2, C, ptr_final]
 
     # Store the permuted state; stash ptr_final; reset input_len so the partial buffers from 0.
