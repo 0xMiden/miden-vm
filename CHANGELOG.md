@@ -22,6 +22,7 @@
 - Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).
 - [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
 - Added `do <block> while <cond> end` syntax ([#3232](https://github.com/0xMiden/miden-vm/pull/3232)).
+- Speed-up native verifier by skipping symbolic recomputation of constraint degree ([#3242](https://github.com/0xMiden/miden-vm/pull/3242)).
 
 #### Fixes
 
