@@ -4,16 +4,19 @@
 #! Event-based print debugging for MASM.
 #!
 #! Each procedure emits a well-known event which the host handles by printing the requested piece
-#! of VM state (operand stack, memory, advice stack, or advice map). Range-based procedures share
-#! events with their full-state variants when the full-state behavior can be represented as an
-#! unbounded range. These are ordinary `emit` events and carry no MAST/decorator cost, and they
-#! print whenever invoked.
+#! of VM state (operand stack, memory, advice stack, or advice map). A range-based procedure may
+#! share an event with its full-state variant when the full-state behavior can be represented as
+#! an unbounded range (e.g. the advice stack); memory uses a dedicated full-state event because
+#! `print_mem` enumerates its (capped) range while `print_mem_all` lists only initialized cells.
+#! These are ordinary `emit` events and carry no MAST/decorator cost, and they print whenever
+#! invoked.
 
 # CONSTANTS
 # ================================================================================================
 
 const PRINT_STACK_EVENT = event("miden::core::debug::print_stack")
 const PRINT_MEM_EVENT = event("miden::core::debug::print_mem")
+const PRINT_MEM_ALL_EVENT = event("miden::core::debug::print_mem_all")
 const PRINT_ADV_STACK_EVENT = event("miden::core::debug::print_adv_stack")
 const PRINT_ADV_MAP_EVENT = event("miden::core::debug::print_adv_map")
 const PRINT_ADV_MAP_ITEM_EVENT = event("miden::core::debug::print_adv_map_item")
@@ -42,8 +45,9 @@ end
 #! - start is the (inclusive) start address of the range to print.
 #! - end is the (exclusive) end address of the range to print.
 #!
-#! The range may span at most 1024 addresses; a wider range aborts execution. Use `print_mem_all`
-#! to print the entire memory of the current context.
+#! Every address in the range is printed, with uninitialized cells shown as `EMPTY`. The range may
+#! span at most 1024 addresses; a wider range aborts execution. Use `print_mem_all` to print the
+#! entire memory of the current context.
 #!
 #! Cycles: 5
 pub proc print_mem
@@ -61,6 +65,8 @@ end
 #! Where:
 #! - addr is the address of the memory cell to print.
 #!
+#! An uninitialized cell is shown as `EMPTY`.
+#!
 #! Cycles: 6
 pub proc print_mem_addr
     dup add.1 swap
@@ -74,12 +80,11 @@ end
 #! Inputs:  []
 #! Outputs: []
 #!
-#! Cycles: 7
+#! Only initialized memory cells are listed.
+#!
+#! Cycles: 3
 pub proc print_mem_all
-    push.4294967296 push.0
-    emit.PRINT_MEM_EVENT
-    # => [0, 4294967296, ...]
-    drop drop
+    emit.PRINT_MEM_ALL_EVENT
 end
 
 #! Prints the advice stack in the range `[start, end)`, consuming the two range arguments.
