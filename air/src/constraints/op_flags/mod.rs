@@ -946,7 +946,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         #[expect(dead_code)]
         evalcircuit => opcodes::EVALCIRCUIT,
         /// Operation Flag of LOG_PRECOMPILE operation.
-        #[expect(dead_code)]
         log_precompile => opcodes::LOGPRECOMPILE,
         /// Operation Flag of HORNERBASE operation.
         hornerbase => opcodes::HORNERBASE,
