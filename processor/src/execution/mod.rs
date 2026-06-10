@@ -192,6 +192,18 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
+    let Some(source_debug_info) = source_debug_info else {
+        return execute_impl_pure(
+            processor,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+        );
+    };
+
     let mut state = ExecutionState {
         processor,
         continuation_stack,
@@ -199,7 +211,7 @@ where
         host,
         tracer,
         stopper,
-        source_debug_info,
+        source_debug_info: Some(source_debug_info),
         current_source_node: None,
     };
 
@@ -296,6 +308,135 @@ where
             },
             Continuation::EnterForest(previous_forest) => {
                 // Restore the previous forest
+                *current_forest = previous_forest;
+            },
+        }
+    }
+
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+fn execute_impl_pure<P, S, T, F>(
+    processor: &mut P,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
+    kernel: &Kernel,
+    host: &mut impl BaseHost,
+    tracer: &mut T,
+    stopper: &S,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
+    let mut state = ExecutionState {
+        processor,
+        continuation_stack,
+        kernel,
+        host,
+        tracer,
+        stopper,
+        source_debug_info: None,
+        current_source_node: None,
+    };
+
+    while let Some(continuation) = state.continuation_stack.pop_continuation() {
+        match continuation {
+            Continuation::StartNode(node_id) => {
+                let node = current_forest.get_node_by_id(node_id).unwrap();
+
+                match node {
+                    MastNode::Block(basic_block_node) => {
+                        basic_block::execute_basic_block_node_from_start(
+                            &mut state,
+                            basic_block_node,
+                            node_id,
+                            current_forest,
+                        )?
+                    },
+                    MastNode::Join(join_node) => {
+                        join::start_join_node_pure(&mut state, join_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Split(split_node) => split::start_split_node_pure(
+                        &mut state,
+                        split_node,
+                        node_id,
+                        current_forest,
+                    )
+                    .map_break(InternalBreakReason::from)?,
+                    MastNode::Loop(loop_node) => {
+                        r#loop::start_loop_node_pure(&mut state, loop_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Call(call_node) => {
+                        call::start_call_node_pure(&mut state, call_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Dyn(_) => {
+                        r#dyn::start_dyn_node_pure(&mut state, node_id, current_forest)?
+                    },
+                    MastNode::External(_) => external::execute_external_node(
+                        node_id,
+                        None,
+                        current_forest,
+                        state.tracer,
+                    )?,
+                }
+            },
+            Continuation::FinishJoin(node_id) => {
+                join::finish_join_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishSplit(node_id) => {
+                split::finish_split_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishLoop(node_id) => {
+                r#loop::finish_loop_node_pure(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishCall(node_id) => {
+                call::finish_call_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishDyn(node_id) => {
+                r#dyn::finish_dyn_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                let basic_block_node =
+                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                basic_block::execute_basic_block_node_from_op_idx(
+                    &mut state,
+                    basic_block_node,
+                    node_id,
+                    batch_index,
+                    op_idx_in_batch,
+                    current_forest,
+                )?
+            },
+            Continuation::Respan { node_id, batch_index } => {
+                let basic_block_node =
+                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                basic_block::execute_basic_block_node_from_batch(
+                    &mut state,
+                    basic_block_node,
+                    node_id,
+                    batch_index,
+                    current_forest,
+                )?
+            },
+            Continuation::FinishBasicBlock(node_id) => {
+                basic_block::finish_basic_block(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::EnterForest(previous_forest) => {
                 *current_forest = previous_forest;
             },
         }

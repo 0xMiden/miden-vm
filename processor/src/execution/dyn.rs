@@ -136,6 +136,116 @@ where
     .map_break(InternalBreakReason::from)
 }
 
+/// Executes a Dyn node from the start without source debug metadata.
+#[inline(always)]
+pub(super) fn start_dyn_node_pure<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
+    current_node_id: MastNodeId,
+    current_forest: &mut F,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    H: BaseHost,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::StartNode(current_node_id),
+        state.continuation_stack,
+        current_forest,
+    );
+
+    let dyn_node = option_map_break_reason(
+        current_forest.get_node_by_id(current_node_id),
+        "dyn node not found in current forest",
+    )
+    .map_break(InternalBreakReason::from)?
+    .unwrap_dyn();
+
+    // Retrieve callee hash from memory, using stack top as the memory address.
+    let read_ctx = state.processor.system().ctx();
+    let clk = state.processor.system().clock();
+    let mem_addr = state.processor.stack().get(0);
+
+    let callee_hash =
+        match state.processor.memory_mut().read_word(read_ctx, mem_addr, clk).map_exec_err() {
+            Ok(w) => w,
+            Err(err) => {
+                return ControlFlow::Break(BreakReason::Err(err).into());
+            },
+        };
+
+    // Drop the memory address from the stack. This needs to be done before saving the context.
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err() {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    }
+
+    // For dyncall,
+    // - save the context and reset it,
+    // - initialize the frame pointer in memory for the new context.
+    if dyn_node.is_dyncall() {
+        let new_ctx: ContextId = get_next_ctx_id(state.processor);
+
+        // Save the current state, and update the system registers.
+        state.processor.stack_mut().start_context();
+        state.processor.system_mut().save_call_state();
+
+        state.processor.system_mut().set_ctx(new_ctx);
+        state.processor.system_mut().set_caller_hash(callee_hash);
+
+        // Initialize the frame pointer in memory for the new context.
+        if let Err(err) = state
+            .processor
+            .memory_mut()
+            .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+            .map_exec_err()
+        {
+            return ControlFlow::Break(BreakReason::Err(err).into());
+        }
+        state
+            .tracer
+            .record_dyncall_memory(callee_hash, mem_addr, read_ctx, new_ctx, clk);
+    } else {
+        state.tracer.record_memory_read_word(callee_hash, mem_addr, read_ctx, clk);
+    };
+
+    // Update continuation stack
+    // -----------------------------
+    state.continuation_stack.push_finish_dyn(current_node_id);
+
+    // if the callee is not in the program's MAST forest, then we need to break to allow the
+    // implementing processor to fetch it (possibly asynchronously in an external library in the
+    // host).
+    match current_forest.find_procedure_root(callee_hash) {
+        Some(callee_id) => {
+            state.continuation_stack.push_start_node(callee_id);
+        },
+        None => {
+            // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
+            // processors need this to be done asynchronously. Thus, we break here and make the
+            // implementing processor handle the loading in the outer execution loop. When done, the
+            // processor *must* call `finish_load_mast_forest_from_dyn_start()` below for execution
+            // to proceed properly.
+            return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
+                callee_hash,
+                source_node: None,
+            });
+        },
+    }
+
+    // Finalize the clock cycle corresponding to the DYN or DYNCALL operation.
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
+    .map_break(InternalBreakReason::from)
+}
+
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
 /// documentation of that enum variant for more details.
 pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
