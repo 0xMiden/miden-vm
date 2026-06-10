@@ -23,6 +23,7 @@
 - [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
 - Added `do <block> while <cond> end` syntax ([#3232](https://github.com/0xMiden/miden-vm/pull/3232)).
 - Optimize Public Inputs absorption in recursive verifier ([#3243](https://github.com/0xMiden/miden-vm/pull/3243)).
+- Speed-up native verifier by skipping symbolic recomputation of constraint degree ([#3242](https://github.com/0xMiden/miden-vm/pull/3242)).
 
 #### Fixes
 
