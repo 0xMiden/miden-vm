@@ -7,7 +7,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
+use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
 use p3_field::{ExtensionField, TwoAdicField};
 
 use crate::util::horner::horner_acc;
@@ -33,7 +33,7 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
     /// [`assert_multi_air_valid`](miden_lifted_air::debug::assert_multi_air_valid) for the
     /// debug-only check).
     pub fn new(column_evals: &[Vec<F>]) -> Self {
-        let dft = NaiveDft;
+        let dft = Radix2DFTSmallBatch::<F>::default();
         let mut polys = Vec::with_capacity(column_evals.len());
 
         for (i, column) in column_evals.iter().enumerate() {
