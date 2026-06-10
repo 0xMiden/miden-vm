@@ -42,6 +42,19 @@ pub fn word_to_hex(w: &Word) -> Result<String, fmt::Error> {
     Ok(s)
 }
 
+/// Writes `bytes` into the formatter as a `0x`-prefixed, lowercase hexadecimal string.
+///
+/// Useful for `Display` implementations that want compact, canonical hex output (e.g. in `tracing`
+/// logs) without allocating an intermediate `String`. This mirrors the format produced by
+/// [`bytes_to_hex_string`], which only accepts fixed-size arrays.
+pub fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+    write!(f, "0x")?;
+    for byte in bytes {
+        write!(f, "{byte:02x}")?;
+    }
+    Ok(())
+}
+
 pub use miden_field::utils::{HexParseError, bytes_to_hex_string, hex_to_bytes};
 
 // CONVERSIONS BETWEEN BYTES AND ELEMENTS

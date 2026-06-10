@@ -1,5 +1,5 @@
 use alloc::string::ToString;
-use core::ops::Deref;
+use core::{fmt, ops::Deref};
 
 use num::Zero;
 
@@ -136,6 +136,12 @@ impl Deserializable for Signature {
         let h = source.read()?;
 
         Ok(Self { header, nonce, s2, h })
+    }
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
     }
 }
 

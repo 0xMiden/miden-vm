@@ -1,5 +1,7 @@
 #![cfg(test)]
 mod signing_key {
+    use alloc::string::{String, ToString};
+
     use miden_field::Felt;
     #[cfg(feature = "std")]
     use miden_field::Word;
@@ -158,6 +160,37 @@ mod signing_key {
         // Verify Display impl also elides
         let display_output = format!("{secret_key}");
         assert_eq!(display_output, "<elided secret for SigningKey>");
+    }
+
+    #[test]
+    fn test_public_key_and_signature_display_hex() {
+        let mut rng = seeded_rng([6u8; 32]);
+        let secret_key = SigningKey::with_rng(&mut rng);
+        let public_key = secret_key.public_key();
+        let message = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let signature = secret_key.sign(message);
+
+        // `Display` must render the canonical serialized bytes as `0x`-prefixed lowercase hex.
+        assert_eq!(public_key.to_string(), canonical_hex(&public_key.to_bytes()));
+        assert_eq!(signature.to_string(), canonical_hex(&signature.to_bytes()));
+        assert!(public_key.to_string().starts_with("0x"));
+        assert!(signature.to_string().starts_with("0x"));
+    }
+
+    /// Renders `bytes` as a `0x`-prefixed lowercase hex string, mirroring the expected `Display`
+    /// output.
+    fn canonical_hex(bytes: &[u8]) -> String {
+        let mut s = String::from("0x");
+        for byte in bytes {
+            s.push_str(&format!("{byte:02x}"));
+        }
+        s
     }
 
     #[cfg(feature = "std")]
