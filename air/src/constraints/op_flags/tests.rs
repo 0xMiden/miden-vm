@@ -398,6 +398,33 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
+/// Tests composite flags for EVALCIRCUIT (ACE init reads positions 0..3 without changing the
+/// visible stack).
+#[test]
+fn composite_evalcircuit_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::EVALCIRCUIT.into());
+
+    for i in 0..16 {
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for EVALCIRCUIT");
+    }
+
+    for i in 0..16 {
+        assert_eq!(
+            op_flags.left_shift_at(i),
+            ZERO,
+            "left_shift_at({i}) should be ZERO for EVALCIRCUIT"
+        );
+        assert_eq!(
+            op_flags.right_shift_at(i),
+            ZERO,
+            "right_shift_at({i}) should be ZERO for EVALCIRCUIT"
+        );
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
 /// Tests composite flags for HPERM (no shift from position 12 onwards).
 #[test]
 fn composite_hperm_flags() {

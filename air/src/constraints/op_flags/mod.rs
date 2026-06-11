@@ -326,7 +326,7 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<11>(&[
+        let no_shift_depth0 = E::sum_array::<12>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
@@ -347,6 +347,8 @@ where
             op4(opcodes::HALT),
             // +CALL         — control flow: enters procedure
             op4(opcodes::CALL),
+            // +EVALCIRCUIT  — ACE init reads s0..s2, no stack change
+            op5(opcodes::EVALCIRCUIT),
             // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
             op4(opcodes::END) * (E::ONE - is_loop_end),
         ]);
