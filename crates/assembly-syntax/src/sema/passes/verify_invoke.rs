@@ -269,8 +269,22 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             // Mark all public aliases as used
             alias.uses += 1;
             assert!(alias.is_used());
+
+            if let AliasTarget::Path(target) = alias.target() {
+                if target.is_kernel_path() {
+                    self.analyzer
+                        .error(SemanticAnalysisError::ReexportedModule { span: target.span() });
+                } else if let Some(parent) = target.parent()
+                    && parent.is_kernel_path()
+                {
+                    self.analyzer.error(SemanticAnalysisError::ReexportedKernelProcedure {
+                        span: target.span(),
+                    });
+                }
+            }
         }
-        self.visit_mut_alias_target(alias.target_mut())
+
+        ControlFlow::Continue(())
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<()> {
         let result = visit::visit_mut_procedure(self, procedure);
@@ -351,23 +365,6 @@ impl VisitMut for VerifyInvokeTargets<'_> {
                 .error(SemanticAnalysisError::MissingImport { span: target.span() });
         }
         ControlFlow::Continue(())
-    }
-    fn visit_mut_alias_target(&mut self, target: &mut AliasTarget) -> ControlFlow<()> {
-        match target {
-            AliasTarget::MastRoot(_) => ControlFlow::Continue(()),
-            AliasTarget::Path(path) => {
-                if path.is_absolute() {
-                    return ControlFlow::Continue(());
-                }
-
-                let Some((ns, _)) = path.split_first() else {
-                    return ControlFlow::Continue(());
-                };
-
-                self.track_used_alias_name(ns);
-                ControlFlow::Continue(())
-            },
-        }
     }
     fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<()> {
         if let Immediate::Constant(name) = code {

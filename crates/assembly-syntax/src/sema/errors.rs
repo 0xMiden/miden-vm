@@ -163,6 +163,18 @@ pub enum SemanticAnalysisError {
         #[label("previously imported here")]
         prev_span: SourceSpan,
     },
+    #[error("invalid re-exported module: you may only re-export items")]
+    #[diagnostic()]
+    ReexportedModule {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("invalid re-export target: kernel procedures may not be re-exported")]
+    #[diagnostic()]
+    ReexportedKernelProcedure {
+        #[label]
+        span: SourceSpan,
+    },
     #[error(
         "invalid re-exported procedure: kernel modules may not re-export procedures from other modules"
     )]
