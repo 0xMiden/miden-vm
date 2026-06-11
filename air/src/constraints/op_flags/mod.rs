@@ -389,6 +389,8 @@ where
             = swapw2_or_swapw3
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
+            // +LOGPRECOMPILE — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
+            + op5(opcodes::LOGPRECOMPILE)
             // –SWAPW3        — SWAPW3 swaps s0..s3 with s12..s15, so s12+ still changes
             - op7(opcodes::SWAPW3);
 
