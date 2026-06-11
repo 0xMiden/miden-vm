@@ -418,7 +418,7 @@ impl FastProcessor {
         program: &Program,
         package_debug_info: &PackageDebugInfo,
     ) -> Result<ContinuationStack<Arc<MastForest>>, ExecutionError> {
-        let Some(source_node) = package_debug_info
+        let Some(source_node_id) = package_debug_info
             .unique_source_root_for_exec_node(program.entrypoint())
             .map_err(|_| {
                 ExecutionError::Internal(
@@ -429,7 +429,7 @@ impl FastProcessor {
             return Ok(ContinuationStack::new(program));
         };
 
-        Ok(ContinuationStack::new_with_source_node(program, source_node))
+        Ok(ContinuationStack::new_with_source_node_id(program, source_node_id))
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -462,8 +462,9 @@ impl FastProcessor {
             ControlFlow::Break(break_reason) => match break_reason {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(maybe_continuation) => {
-                    if let Some((continuation, source_node)) = maybe_continuation {
-                        continuation_stack.push_continuation_with_source(continuation, source_node);
+                    if let Some((continuation, source_node_id)) = maybe_continuation {
+                        continuation_stack
+                            .push_continuation_with_source_node_id(continuation, source_node_id);
                     }
 
                     Ok(Some(ResumeContext {
@@ -520,12 +521,12 @@ impl FastProcessor {
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { op_idx, continuation, source_node } => {
-                    self.op_emit_sync(host, op_idx, package_debug_info, source_node)?;
+                InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
+                    self.op_emit_sync(host, op_idx, package_debug_info, source_node_id)?;
 
                     finish_emit_op_execution(
                         continuation,
-                        source_node,
+                        source_node_id,
                         self,
                         continuation_stack,
                         current_forest,
@@ -533,12 +534,12 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node } => {
+                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
                     let (root_id, new_forest) = match self.load_mast_forest_sync(
                         callee_hash,
                         host,
                         package_debug_info,
-                        source_node,
+                        source_node_id,
                     ) {
                         Ok(result) => result,
                         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
@@ -557,13 +558,13 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash,
-                    source_node,
+                    source_node_id,
                 } => {
                     let (root_id, new_forest) = match self.load_mast_forest_sync(
                         procedure_hash,
                         host,
                         package_debug_info,
-                        source_node,
+                        source_node_id,
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -630,12 +631,12 @@ impl FastProcessor {
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { op_idx, continuation, source_node } => {
-                    self.op_emit(host, op_idx, package_debug_info, source_node).await?;
+                InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
+                    self.op_emit(host, op_idx, package_debug_info, source_node_id).await?;
 
                     finish_emit_op_execution(
                         continuation,
-                        source_node,
+                        source_node_id,
                         self,
                         continuation_stack,
                         current_forest,
@@ -643,9 +644,9 @@ impl FastProcessor {
                         stopper,
                     )?;
                 },
-                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node } => {
+                InternalBreakReason::LoadMastForestFromDyn { callee_hash, source_node_id } => {
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(callee_hash, host, package_debug_info, source_node)
+                        .load_mast_forest(callee_hash, host, package_debug_info, source_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -665,10 +666,10 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash,
-                    source_node,
+                    source_node_id,
                 } => {
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(procedure_hash, host, package_debug_info, source_node)
+                        .load_mast_forest(procedure_hash, host, package_debug_info, source_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -718,14 +719,14 @@ impl FastProcessor {
         node_digest: Word,
         host: &mut impl SyncHost,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            match (package_debug_info, source_node) {
-                (Some(debug_info), Some(source_node)) => {
+            match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => {
                     crate::errors::procedure_not_found_with_package_source_context(
                         node_digest,
-                        PackageSourceDebugContext::new(debug_info, source_node),
+                        PackageSourceDebugContext::new(debug_info, source_node_id),
                         host,
                     )
                 },
@@ -749,16 +750,16 @@ impl FastProcessor {
         node_digest: Word,
         host: &mut impl Host,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
             mast_forest
         } else {
-            return Err(match (package_debug_info, source_node) {
-                (Some(debug_info), Some(source_node)) => {
+            return Err(match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => {
                     crate::errors::procedure_not_found_with_package_source_context(
                         node_digest,
-                        PackageSourceDebugContext::new(debug_info, source_node),
+                        PackageSourceDebugContext::new(debug_info, source_node_id),
                         host,
                     )
                 },

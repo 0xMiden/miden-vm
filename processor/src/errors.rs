@@ -435,29 +435,29 @@ pub struct MerklePathVerificationFailedInner {
 #[derive(Clone, Copy, Debug)]
 pub struct PackageSourceDebugContext<'a> {
     debug_info: &'a PackageDebugInfo,
-    source_node: Option<DebugSourceNodeId>,
+    source_node_id: Option<DebugSourceNodeId>,
 }
 
 impl<'a> PackageSourceDebugContext<'a> {
     /// Creates a source debug context for one package-owned source/debug MAST occurrence.
-    pub fn new(debug_info: &'a PackageDebugInfo, source_node: DebugSourceNodeId) -> Self {
+    pub fn new(debug_info: &'a PackageDebugInfo, source_node_id: DebugSourceNodeId) -> Self {
         Self {
             debug_info,
-            source_node: Some(source_node),
+            source_node_id: Some(source_node_id),
         }
     }
 
     /// Creates a package debug context when source location metadata may be unavailable.
     pub(crate) fn new_optional(
         debug_info: &'a PackageDebugInfo,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> Self {
-        Self { debug_info, source_node }
+        Self { debug_info, source_node_id }
     }
 
     /// Returns the source/debug MAST occurrence associated with this context, if known.
-    pub fn source_node(&self) -> Option<DebugSourceNodeId> {
-        self.source_node
+    pub fn source_node_id(&self) -> Option<DebugSourceNodeId> {
+        self.source_node_id
     }
 
     /// Returns the package debug info backing this context.
@@ -469,12 +469,12 @@ impl<'a> PackageSourceDebugContext<'a> {
     ///
     /// If `op_idx` is absent, this falls back to the first operation row for the source occurrence.
     pub fn assembly_location(&self, op_idx: Option<usize>) -> Option<&'a Location> {
-        let source_node = self.source_node?;
+        let source_node_id = self.source_node_id?;
         let assembly_op = match op_idx {
             Some(op_idx) => u32::try_from(op_idx)
                 .ok()
-                .and_then(|op_idx| self.debug_info.asm_op_for_operation(source_node, op_idx)),
-            None => self.debug_info.first_asm_op_for_source_node(source_node),
+                .and_then(|op_idx| self.debug_info.asm_op_for_operation(source_node_id, op_idx)),
+            None => self.debug_info.first_asm_op_for_source_node(source_node_id),
         }?;
 
         assembly_op.location.as_ref()
@@ -1140,11 +1140,11 @@ mod error_assertions {
 
     #[test]
     fn package_source_context_without_location_uses_unknown_span() {
-        let source_node = DebugSourceNodeId::from(0);
+        let source_node_id = DebugSourceNodeId::from(0);
         let debug_info = PackageDebugInfo {
             source_map: Some(DebugSourceMapSection::from_parts(
                 vec![DebugSourceAsmOp::new(
-                    source_node,
+                    source_node_id,
                     0,
                     None,
                     "missing_location".into(),
@@ -1163,7 +1163,7 @@ mod error_assertions {
             ),
             returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
         };
-        let context = PackageSourceDebugContext::new(&debug_info, source_node);
+        let context = PackageSourceDebugContext::new(&debug_info, source_node_id);
 
         let err = advice_error_with_package_source_context(
             AdviceError::StackReadFailed,

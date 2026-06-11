@@ -34,24 +34,24 @@ where
         current_forest,
     );
 
-    let first_source_node = match state.child_source_node(0) {
-        Ok(source_node) => source_node,
+    let first_source_node_id = match state.child_source_node_id(0) {
+        Ok(source_node_id) => source_node_id,
         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
     };
-    let second_source_node = match state.child_source_node(1) {
-        Ok(source_node) => source_node,
+    let second_source_node_id = match state.child_source_node_id(1) {
+        Ok(source_node_id) => source_node_id,
         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
     };
 
     state
         .continuation_stack
-        .push_finish_join_with_source(node_id, state.current_source_node());
+        .push_finish_join_with_source_node_id(node_id, state.current_source_node_id());
     state
         .continuation_stack
-        .push_start_node_with_source(join_node.second(), second_source_node);
+        .push_start_node_with_source_node_id(join_node.second(), second_source_node_id);
     state
         .continuation_stack
-        .push_start_node_with_source(join_node.first(), first_source_node);
+        .push_start_node_with_source_node_id(join_node.first(), first_source_node_id);
 
     // Finalize the clock cycle corresponding to the JOIN operation.
     finalize_clock_cycle(

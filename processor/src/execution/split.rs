@@ -44,27 +44,27 @@ where
 
     // execute the appropriate branch
     if condition == ONE {
-        let source_node = match state.child_source_node(0) {
-            Ok(source_node) => source_node,
+        let source_node_id = match state.child_source_node_id(0) {
+            Ok(source_node_id) => source_node_id,
             Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
         };
         state
             .continuation_stack
-            .push_finish_split_with_source(node_id, state.current_source_node());
+            .push_finish_split_with_source_node_id(node_id, state.current_source_node_id());
         state
             .continuation_stack
-            .push_start_node_with_source(split_node.on_true(), source_node);
+            .push_start_node_with_source_node_id(split_node.on_true(), source_node_id);
     } else if condition == ZERO {
-        let source_node = match state.child_source_node(1) {
-            Ok(source_node) => source_node,
+        let source_node_id = match state.child_source_node_id(1) {
+            Ok(source_node_id) => source_node_id,
             Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
         };
         state
             .continuation_stack
-            .push_finish_split_with_source(node_id, state.current_source_node());
+            .push_finish_split_with_source_node_id(node_id, state.current_source_node_id());
         state
             .continuation_stack
-            .push_start_node_with_source(split_node.on_false(), source_node);
+            .push_start_node_with_source_node_id(split_node.on_false(), source_node_id);
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
         return ControlFlow::Break(BreakReason::Err(
