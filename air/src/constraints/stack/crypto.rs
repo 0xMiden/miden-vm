@@ -1,6 +1,6 @@
 //! Crypto operation constraints.
 //!
-//! This module enforces the non-bus stack constraints for crypto-related operations:
+//! This module enforces the non-bus stack constraints for four crypto-related operations:
 //!
 //! - **CRYPTOSTREAM**: Encrypts memory words via XOR (i.e. addition in the prime field) with the
 //!   Poseidon2 sponge rate. Constraints here enforce pointer advancement and state stability; the
@@ -47,7 +47,6 @@ pub fn enforce_main<AB>(
     AB: MidenAirBuilder,
 {
     enforce_cryptostream_constraints(builder, local, next, op_flags);
-    enforce_log_precompile_constraints(builder, local, next, op_flags);
     enforce_hornerbase_constraints(builder, local, next, op_flags);
     enforce_hornerext_constraints(builder, local, next, op_flags);
     enforce_frie2f4_constraints(builder, local, next, op_flags);
@@ -97,33 +96,6 @@ fn enforce_cryptostream_constraints<AB>(
     // Padding preserved.
     builder.assert_eq(s_next[14], s[14]);
     builder.assert_eq(s_next[15], s[15]);
-}
-
-/// LOGPRECOMPILE: absorbs two words into the precompile transcript.
-///
-/// The top 12 stack elements are constrained through the hasher bus:
-/// - s[0..8] provide the input rate `[COMM, TAG]`.
-/// - s'[0..12] receive the output state `[R0, R1, CAP_NEXT]`.
-///
-/// The remaining visible stack elements are not part of the hasher exchange and must be
-/// preserved by the stack transition.
-fn enforce_log_precompile_constraints<AB>(
-    builder: &mut AB,
-    local: &CoreCols<AB::Var>,
-    next: &CoreCols<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: MidenAirBuilder,
-{
-    let gate = builder.is_transition() * op_flags.log_precompile();
-    let builder = &mut builder.when(gate);
-
-    let s = &local.stack.top;
-    let s_next = &next.stack.top;
-
-    for i in 12..16 {
-        builder.assert_eq(s_next[i], s[i]);
-    }
 }
 
 /// HORNERBASE: degree-7 polynomial evaluation over the quadratic extension field.
@@ -491,174 +463,4 @@ fn enforce_frie2f4_constraints<AB>(
     let layer_ptr_next = s_next[10];
     builder.assert_eq(layer_ptr_next, layer_ptr + F_8);
     builder.assert_eq(folded_pos_next, folded_pos);
-}
-
-#[cfg(test)]
-mod tests {
-    use alloc::vec::Vec;
-
-    use miden_core::{
-        Felt,
-        field::{PrimeCharacteristicRing, QuadFelt},
-        operations::opcodes,
-    };
-    use miden_crypto::stark::{
-        air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow},
-        matrix::RowMajorMatrix,
-    };
-
-    use super::enforce_main;
-    use crate::{
-        constraints::{
-            columns::CoreCols,
-            op_flags::{OpFlags, generate_test_row},
-        },
-        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
-    };
-
-    struct ConstraintEvalBuilder {
-        main: RowMajorMatrix<Felt>,
-        aux: RowMajorMatrix<QuadFelt>,
-        randomness: Vec<QuadFelt>,
-        permutation_values: Vec<QuadFelt>,
-        periodic_values: Vec<Felt>,
-        preprocessed: RowWindow<'static, Felt>,
-        evaluations: Vec<QuadFelt>,
-    }
-
-    impl ConstraintEvalBuilder {
-        fn new() -> Self {
-            Self {
-                main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
-                aux: RowMajorMatrix::new(
-                    vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2],
-                    AUX_TRACE_WIDTH,
-                ),
-                randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
-                permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
-                periodic_values: Vec::new(),
-                preprocessed: RowWindow::from_two_rows(&[], &[]),
-                evaluations: Vec::new(),
-            }
-        }
-    }
-
-    impl AirBuilder for ConstraintEvalBuilder {
-        type F = Felt;
-        type Expr = Felt;
-        type Var = Felt;
-        type PreprocessedWindow = RowWindow<'static, Felt>;
-        type MainWindow = RowMajorMatrix<Felt>;
-        type PublicVar = Felt;
-
-        fn main(&self) -> Self::MainWindow {
-            self.main.clone()
-        }
-
-        fn preprocessed(&self) -> &Self::PreprocessedWindow {
-            &self.preprocessed
-        }
-
-        fn is_first_row(&self) -> Self::Expr {
-            Felt::ZERO
-        }
-
-        fn is_last_row(&self) -> Self::Expr {
-            Felt::ZERO
-        }
-
-        fn is_transition_window(&self, size: usize) -> Self::Expr {
-            assert_eq!(size, 2, "crypto stack constraints only use 2-row transitions");
-            Felt::ONE
-        }
-
-        fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-            self.evaluations.push(QuadFelt::from(x.into()));
-        }
-
-        fn public_values(&self) -> &[Self::PublicVar] {
-            &[]
-        }
-    }
-
-    impl ExtensionBuilder for ConstraintEvalBuilder {
-        type EF = QuadFelt;
-        type ExprEF = QuadFelt;
-        type VarEF = QuadFelt;
-
-        fn assert_zero_ext<I>(&mut self, x: I)
-        where
-            I: Into<Self::ExprEF>,
-        {
-            self.evaluations.push(x.into());
-        }
-    }
-
-    impl PermutationAirBuilder for ConstraintEvalBuilder {
-        type MP = RowMajorMatrix<QuadFelt>;
-        type RandomVar = QuadFelt;
-        type PermutationVar = QuadFelt;
-
-        fn permutation(&self) -> Self::MP {
-            self.aux.clone()
-        }
-
-        fn permutation_randomness(&self) -> &[Self::RandomVar] {
-            &self.randomness
-        }
-
-        fn permutation_values(&self) -> &[Self::PermutationVar] {
-            &self.permutation_values
-        }
-    }
-
-    impl PeriodicAirBuilder for ConstraintEvalBuilder {
-        type PeriodicVar = Felt;
-
-        fn periodic_values(&self) -> &[Self::PeriodicVar] {
-            &self.periodic_values
-        }
-    }
-
-    fn eval_stack_crypto(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
-        let mut builder = ConstraintEvalBuilder::new();
-        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-        enforce_main(&mut builder, local, next, &op_flags);
-        builder.evaluations
-    }
-
-    fn assert_constraints_accept(local: &CoreCols<Felt>, next: &CoreCols<Felt>, message: &str) {
-        let evaluations = eval_stack_crypto(local, next);
-        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO), "{message}");
-    }
-
-    fn assert_constraints_reject(local: &CoreCols<Felt>, next: &CoreCols<Felt>, message: &str) {
-        let evaluations = eval_stack_crypto(local, next);
-        assert!(evaluations.iter().any(|value| *value != QuadFelt::ZERO), "{message}");
-    }
-
-    #[test]
-    fn log_precompile_constraints_preserve_tail_stack_slots() {
-        let mut local = generate_test_row(opcodes::LOGPRECOMPILE as usize);
-        let mut next = generate_test_row(0);
-        for i in 12..16 {
-            let value = Felt::new_unchecked(100 + i as u64);
-            local.stack.top[i] = value;
-            next.stack.top[i] = value;
-        }
-
-        assert_constraints_accept(
-            &local,
-            &next,
-            "expected LOGPRECOMPILE constraints to accept preserved tail stack slots",
-        );
-
-        next.stack.top[14] = Felt::new_unchecked(999);
-
-        assert_constraints_reject(
-            &local,
-            &next,
-            "expected LOGPRECOMPILE constraints to reject forged tail stack slots",
-        );
-    }
 }
