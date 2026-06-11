@@ -337,13 +337,14 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let dependencies = seq
                     .next_element::<Vec<Dependency>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-                let entrypoint =
-                    seq.next_element::<PathBuf>().map(|p| p.map(Arc::<ast::Path>::from))?;
+                let entrypoint = seq
+                    .next_element::<Option<PathBuf>>()
+                    .map(|p| p.map(|p| p.map(Arc::<ast::Path>::from)))?;
                 PackageManifest::new(exports)
                     .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
                     .and_then(|manifest| {
-                        if let Some(entrypoint) = entrypoint {
+                        if let Some(Some(entrypoint)) = entrypoint {
                             manifest.with_entrypoint(entrypoint)
                         } else {
                             Ok(manifest)
@@ -384,8 +385,10 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                             if entrypoint.is_some() {
                                 return Err(serde::de::Error::duplicate_field("entrypoint"));
                             }
-                            entrypoint =
-                                Some(map.next_value::<PathBuf>().map(Arc::<ast::Path>::from)?);
+                            entrypoint = Some(
+                                map.next_value::<Option<PathBuf>>()
+                                    .map(|p| p.map(Arc::<ast::Path>::from))?,
+                            );
                         },
                     }
                 }
@@ -397,7 +400,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                     .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
                     .and_then(|manifest| {
-                        if let Some(entrypoint) = entrypoint {
+                        if let Some(Some(entrypoint)) = entrypoint {
                             manifest.with_entrypoint(entrypoint)
                         } else {
                             Ok(manifest)
