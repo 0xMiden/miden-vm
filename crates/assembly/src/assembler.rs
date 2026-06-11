@@ -847,6 +847,7 @@ impl Assembler {
         support_modules: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<AssemblyProduct, Report> {
         // Recompute graph with executable module, and start compiling
+        let namespace = Arc::<Path>::from(program.path());
         let module_index = self.linker.link([program], support_modules)?[0];
 
         // Find the executable entrypoint Note: it is safe to use `unwrap_ast()` here, since this is
@@ -882,7 +883,13 @@ impl Assembler {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
 
-        self.finish_program_product(name, mast_forest, entry_node_id, self.linker.kernel_package())
+        self.finish_program_product(
+            name,
+            namespace,
+            mast_forest,
+            entry_node_id,
+            self.linker.kernel_package(),
+        )
     }
 
     fn finish_library_product(
@@ -924,6 +931,7 @@ impl Assembler {
     fn finish_program_product(
         &self,
         name: PackageId,
+        namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
@@ -931,7 +939,7 @@ impl Assembler {
         let mast_forest = self.apply_debug_options(mast_forest);
 
         let mast = Arc::new(mast_forest);
-        let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
         let package = Box::new(
             Package::create(
