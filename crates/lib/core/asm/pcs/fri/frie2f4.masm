@@ -2,6 +2,10 @@ use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
+const MAX_FRI_QUERIES = 150
+const MAX_FRI_LAYERS = 32
+const MAX_FRI_REMAINDER_WORDS = 64
+
 #! Stores the layer commitments C followed by [d_size, t_depth, a0, a1] and [poe, p, e0, e1] where:
 #! 1) d_size is the domain size divided by 4 of the domain corresponding to C.
 #! 2) t_depth is the tree depth of the Merkle tree with commitment C.
@@ -15,6 +19,9 @@ use miden::core::pcs::fri::helper
 pub proc preprocess
     adv_push
     # => [num_queries, g, ...]
+    dup u32gt.0 assert.err="number of FRI queries must be nonzero"
+    dup u32lte.MAX_FRI_QUERIES assert.err="number of FRI queries exceeds FRI workspace"
+
     exec.constants::fri_com_ptr
     # => [layer_ptr, num_queries, g, ...]
     dup.1 mul.4 sub
@@ -45,26 +52,33 @@ pub proc preprocess
     #=> [X, layer_ptr, layer_ptr, g]
 
     adv_push
-    mul.2
-    sub.1
-    movdn.4
-    #=> [X, num_layers, layer_ptr, layer_ptr, g]
+    dup u32lte.MAX_FRI_LAYERS assert.err="number of FRI layers exceeds FRI workspace"
 
-    push.1
-    while.true
-        adv_loadw
-        dup.5
-        u32wrapping_add.4
-        swap.6
-        mem_storew_le
-        dup.4
+    dup push.0 neq
+    if.true
+        mul.2
         sub.1
-        swap.5
-        neq.0
-    end
-    #=> [X, x, remainder_poly_ptr, layer_ptr, g]
+        movdn.4
+        #=> [X, num_layers, layer_ptr, layer_ptr, g]
 
-    drop
+        push.1
+        while.true
+            adv_loadw
+            dup.5
+            u32wrapping_add.4
+            swap.6
+            mem_storew_le
+            dup.4
+            sub.1
+            swap.5
+            neq.0
+        end
+        #=> [X, x, remainder_poly_ptr, layer_ptr, g]
+
+        drop
+    else
+        drop
+    end
     #=> [X, remainder_poly_ptr, layer_ptr, g]
 
     dup.4
@@ -72,6 +86,9 @@ pub proc preprocess
     #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
 
     adv_push
+    dup u32gt.0 assert.err="FRI remainder polynomial must be nonzero"
+    dup u32lte.MAX_FRI_REMAINDER_WORDS assert.err="FRI remainder polynomial exceeds FRI workspace"
+
     dup mul.2 exec.constants::set_remainder_poly_size
 
     sub.1
