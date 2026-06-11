@@ -384,7 +384,7 @@ impl Assembler {
 // ------------------------------------------------------------------------------------------------
 /// Compilation/Assembly
 impl Assembler {
-    /// Assembles a set of modules into a library [`Package`].
+    /// Assembles a root module, and its supporting submodules into a library [`Package`].
     ///
     /// # Errors
     ///

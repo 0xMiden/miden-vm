@@ -65,6 +65,14 @@ impl ModuleParser {
     }
 
     /// Parse a [ast::Module] from `source`, and give it the provided `path`.
+    ///
+    /// If `path` is unset, then it must be derivable in one of two ways:
+    ///
+    /// 1. From a `namespace` declaration in the module source
+    /// 2. Inferred as `$exec` from the presence of a `begin .. end` block in the module source
+    ///
+    /// If neither is present, then an error will be raised. It can be fixed by simply providing
+    /// `path` explicitly.
     pub fn parse(
         &mut self,
         path: Option<&Path>,
