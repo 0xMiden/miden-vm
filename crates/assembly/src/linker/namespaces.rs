@@ -1,7 +1,3 @@
-// This module is being introduced ahead of the resolver rewrite. Some lookup APIs and definition
-// records are intentionally staged here before all link-time symbol queries are moved onto them.
-#![allow(dead_code)]
-
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     string::{String, ToString},
@@ -16,10 +12,9 @@ use miden_assembly_syntax::{
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     diagnostics::RelatedLabel,
-    module::ItemInfo,
 };
 
-use super::{Linker, LinkerError, ModuleSource, SymbolItem};
+use super::{Linker, LinkerError, ModuleSource};
 
 /// A graph of modules, concrete items, submodule declarations, and imports known to the linker.
 ///
@@ -56,17 +51,8 @@ pub struct ModuleEdge {
 #[derive(Debug, Clone)]
 pub struct ItemDef {
     id: GlobalItemIndex,
-    kind: ItemKind,
     visibility: Visibility,
     span: SourceSpan,
-}
-
-/// The kind of item stored in a namespace graph node.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ItemKind {
-    Procedure,
-    Constant,
-    Type,
 }
 
 /// An import declaration.
@@ -741,7 +727,6 @@ impl ModuleNode {
                 name,
                 ItemDef {
                     id: module.id() + ItemIndex::new(index),
-                    kind: ItemKind::from_symbol_item(symbol.item()),
                     visibility: symbol.visibility(),
                     span,
                 },
@@ -775,21 +760,6 @@ impl ModuleNode {
         self.items.contains_key(name)
             || self.imports.contains_key(name)
             || self.submodules.contains_key(name)
-    }
-
-    #[inline]
-    pub fn id(&self) -> ModuleIndex {
-        self.id
-    }
-
-    #[inline]
-    pub fn path(&self) -> &Arc<Path> {
-        &self.path
-    }
-
-    #[inline]
-    pub fn source(&self) -> ModuleSource {
-        self.source
     }
 
     #[inline]
@@ -837,11 +807,6 @@ impl ItemDef {
     }
 
     #[inline]
-    pub fn kind(&self) -> ItemKind {
-        self.kind
-    }
-
-    #[inline]
     pub fn visibility(&self) -> Visibility {
         self.visibility
     }
@@ -876,18 +841,6 @@ impl UseDecl {
     #[inline]
     pub fn span(&self) -> SourceSpan {
         self.span
-    }
-}
-
-impl ItemKind {
-    fn from_symbol_item(item: &SymbolItem) -> Self {
-        match item {
-            SymbolItem::Procedure(_) | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {
-                Self::Procedure
-            },
-            SymbolItem::Constant(_) | SymbolItem::Compiled(ItemInfo::Constant(_)) => Self::Constant,
-            SymbolItem::Type(_) | SymbolItem::Compiled(ItemInfo::Type(_)) => Self::Type,
-        }
     }
 }
 
