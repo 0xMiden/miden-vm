@@ -236,7 +236,7 @@ pub fn read_modules_from_root(
         source_manager,
         warnings_as_errors,
         |module| {
-            if seen.contains(module.path()) {
+            if !seen.insert(module.path().into()) {
                 Err(report!("duplicate module '{0}'", module.path()))
             } else {
                 modules.push(module);

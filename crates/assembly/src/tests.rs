@@ -1167,7 +1167,7 @@ fn constant_not_found() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "undefined constant 'CONSTANT'",
-        regex!(r#",-\[test[\d]+:4:16\]"#),
+        regex!(r#",-\[test[\d]+:2:16\]"#),
         "1 |",
         "2 |     begin push.CONSTANT end",
         "  :                ^^^^|^^^",
@@ -1320,7 +1320,7 @@ fn const_conversion_failed_to_u16() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:7:18\]"#),
+        regex!(r#",-\[test[\d]+:5:18\]"#),
         "4 |     proc test_constant_overflow",
         "5 |         loc_load.CONSTANT",
         "  :                  ^^^^^^^^",
@@ -1354,11 +1354,11 @@ fn const_conversion_failed_to_u32() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "invalid immediate: value is larger than expected range",
-        regex!(r#",-\[test[\d]+:6:18\]"#),
-        "4 |     begin",
-        "5 |         mem_load.CONSTANT",
+        regex!(r#",-\[test[\d]+:4:18\]"#),
+        "3 |     begin",
+        "4 |         mem_load.CONSTANT",
         "  :                  ^^^^^^^^",
-        "6 |     end",
+        "5 |     end",
         "  `----"
     );
 }
