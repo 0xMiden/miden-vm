@@ -127,6 +127,19 @@ fn test_keccak_prove_verify() {
 }
 
 #[test]
+fn test_eidos_prove_verify() {
+    let source = "
+        begin
+            repeat.149
+                swap dup.1 add
+            end
+        end
+    ";
+
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", true, false);
+}
+
+#[test]
 fn test_rpo_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "

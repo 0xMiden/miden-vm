@@ -157,6 +157,10 @@ fn verify_stark(
             let config = config::poseidon2_config(params);
             verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
         },
+        HashFunction::Eidos => {
+            let config = config::eidos_config(params);
+            verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)
+        },
         HashFunction::Keccak => {
             let config = config::keccak_config(params);
             verify_stark_proof(&config, &public_values, &kernel_felts, &proof_bytes)

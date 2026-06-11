@@ -151,6 +151,10 @@ fn prove_execution_trace(
             let config = config::keccak_config(params);
             prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
         },
+        HashFunction::Eidos => {
+            let config = config::eidos_config(params);
+            prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)
+        },
         HashFunction::Rpo256 => {
             let config = config::rpo_config(params);
             prove_stark(&config, core_matrix, chiplets_matrix, &public_values, &kernel_felts)

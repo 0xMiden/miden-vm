@@ -124,6 +124,8 @@ pub enum HashFunction {
     Poseidon2 = 0x04,
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
+    /// Eidos hash function with 252-bit packed output.
+    Eidos = 0x06,
 }
 
 impl HashFunction {
@@ -135,6 +137,7 @@ impl HashFunction {
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
+            HashFunction::Eidos => 126,
         }
     }
 }
@@ -149,6 +152,7 @@ impl TryFrom<u8> for HashFunction {
             0x03 => Ok(Self::Rpx256),
             0x04 => Ok(Self::Poseidon2),
             0x05 => Ok(Self::Keccak),
+            0x06 => Ok(Self::Eidos),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -166,6 +170,7 @@ impl TryFrom<&str> for HashFunction {
             "rpx" => Ok(Self::Rpx256),
             "poseidon2" => Ok(Self::Poseidon2),
             "keccak" => Ok(Self::Keccak),
+            "eidos" => Ok(Self::Eidos),
             _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
         }
     }
@@ -178,12 +183,13 @@ impl Arbitrary for HashFunction {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         any::<u8>()
-            .prop_map(|tag| match tag % 5 {
+            .prop_map(|tag| match tag % 6 {
                 0 => Self::Blake3_256,
                 1 => Self::Rpo256,
                 2 => Self::Rpx256,
                 3 => Self::Poseidon2,
-                _ => Self::Keccak,
+                4 => Self::Keccak,
+                _ => Self::Eidos,
             })
             .boxed()
     }
@@ -233,7 +239,7 @@ impl Deserializable for ExecutionProof {
 /// Error type for invalid hash function strings.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
+    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak, eidos"
 )]
 pub struct InvalidHashFunctionError {
     pub hash_function: String,

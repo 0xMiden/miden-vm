@@ -10,6 +10,7 @@ use miden_crypto::{
     field::Field,
     hash::{
         blake::Blake3Hasher,
+        eidos::{Eidos, EidosLmcs, MidenEidosChallenger, lmcs_config},
         keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
         poseidon2::Poseidon2Permutation256,
         rpo::RpoPermutation256,
@@ -208,6 +209,20 @@ pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, Blake
     );
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
     challenger.observe_slice(&RELATION_DIGEST);
+    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+// EIDOS
+// ================================================================================================
+
+/// Miden VM STARK transcript domain for the Eidos challenger.
+const EIDOS_VM_STARK_TRANSCRIPT_V1: u32 = (2 << 8) | 1;
+
+/// Creates an Eidos-based STARK configuration.
+pub fn eidos_config(params: PcsParams) -> MidenStarkConfig<EidosLmcs, MidenEidosChallenger> {
+    let lmcs = lmcs_config();
+    let transcript_init_cv = Eidos::transcript_init_cv(EIDOS_VM_STARK_TRANSCRIPT_V1);
+    let challenger = MidenEidosChallenger::new(transcript_init_cv, RELATION_DIGEST.into());
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
 }
 
