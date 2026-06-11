@@ -1,11 +1,15 @@
+#[cfg(feature = "testing")]
 use miden_assembly::testing::regex;
 use miden_core::field::Field;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
-    Felt, ONE, PrimeField64, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
-    build_op_test, build_test, expect_exec_error_matches, prop_randw, proptest::prelude::*,
+    Felt, ONE, PrimeField64, ZERO, build_op_test, build_test, expect_exec_error_matches,
     rand::rand_value,
 };
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::{WORD_SIZE, prop_randw, proptest::prelude::*};
+#[cfg(feature = "testing")]
+use miden_utils_testing::{assert_assembler_diagnostic, assert_diagnostic_lines};
 
 // FIELD OPS ARITHMETIC - MANUAL TESTS
 // ================================================================================================
@@ -183,17 +187,20 @@ fn div_b() {
     let test = build_op_test!(build_asm_op(1), &[77]);
     test.expect_stack(&[77]);
 
-    let test = build_op_test!(build_asm_op(0), &[14]);
+    #[cfg(feature = "testing")]
+    {
+        let test = build_op_test!(build_asm_op(0), &[14]);
 
-    assert_assembler_diagnostic!(
-        test,
-        "invalid constant expression: division by zero",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "12 |",
-        "13 | begin div.0 exec.truncate_stack end",
-        "   :           ^",
-        "   `----"
-    );
+        assert_assembler_diagnostic!(
+            test,
+            "invalid constant expression: division by zero",
+            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+            "12 |",
+            "13 | begin div.0 exec.truncate_stack end",
+            "   :           ^",
+            "   `----"
+        );
+    }
 
     let test = build_op_test!(build_asm_op(2), &[4]);
     test.expect_stack(&[2]);
@@ -243,6 +250,7 @@ fn neg() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn neg_fail() {
     let asm_op = "neg.1";
 
@@ -279,6 +287,7 @@ fn inv() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn inv_fail() {
     let asm_op = "inv";
 
@@ -360,23 +369,25 @@ fn exp_bits_length_fail() {
         if err_code == ZERO && err_msg.is_none()
     );
 
-    //---------------------- exp containing more than 64 bits -------------------------------------
+    #[cfg(feature = "testing")]
+    {
+        //---------------------- exp containing more than 64 bits -------------------------------------
 
-    let base = 9;
-    let pow = 1021; // pow is a 10 bit number
+        let base = 9;
+        let pow = 1021; // pow is a 10 bit number
+        let test = build_op_test!(build_asm_op(65), &[pow, base]);
 
-    let test = build_op_test!(build_asm_op(65), &[pow, base]);
-
-    assert_assembler_diagnostic!(
-        test,
-        "invalid literal: expected value to be a valid bit size, e.g. 0..63",
-        regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "12 |",
-        "13 | begin exp.u65 exec.truncate_stack end",
-        "   :            ^^",
-        "   `----",
-        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
-    );
+        assert_assembler_diagnostic!(
+            test,
+            "invalid literal: expected value to be a valid bit size, e.g. 0..63",
+            regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
+            "12 |",
+            "13 | begin exp.u65 exec.truncate_stack end",
+            "   :            ^^",
+            "   `----",
+            r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        );
+    }
 }
 
 #[test]
@@ -739,6 +750,7 @@ fn gte() {
 // FIELD OPS ARITHMETIC - RANDOMIZED TESTS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
@@ -891,6 +903,7 @@ proptest! {
 // FIELD OPS COMPARISON - RANDOMIZED TESTS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn eq_proptest(a in any::<u64>(), b in any::<u64>()) {

@@ -287,7 +287,8 @@ impl Linker {
 
         let module_index = self.next_module_id();
         let symbols = {
-            core::mem::take(module.items_mut())
+            module
+                .take_items()
                 .into_iter()
                 .enumerate()
                 .map(|(idx, item)| {

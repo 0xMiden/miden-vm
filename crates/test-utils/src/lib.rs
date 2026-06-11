@@ -49,7 +49,7 @@ pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
 
@@ -71,7 +71,7 @@ pub mod recursive_verifier;
 
 mod test_builders;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
 // CONSTANTS
 // ================================================================================================
@@ -270,7 +270,7 @@ impl Test {
     /// Sets the stack inputs for this test using stack-ordered values.
     #[track_caller]
     pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
-        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self.stack_inputs = stack_inputs_from_ints(stack_inputs.as_ref().iter().copied());
         self
     }
 
@@ -334,7 +334,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack(&self, final_stack: &[u64]) {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -386,12 +386,12 @@ impl Test {
     /// Asserts that executing the test inside a proptest results in the expected final stack state.
     /// The proptest will return a test failure instead of panicking if the assertion condition
     /// fails.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
     pub fn prop_expect_stack(
         &self,
         final_stack: &[u64],
     ) -> Result<(), proptest::prelude::TestCaseError> {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         proptest::prop_assert_eq!(resize_to_min_stack_depth(final_stack), result);
 
         Ok(())
@@ -412,7 +412,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        let result = trace.last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -512,7 +512,7 @@ impl Test {
         &self,
         stack_inputs: &[u64],
     ) -> Result<ExecutionTrace, ExecutionError> {
-        let stack_inputs = StackInputs::try_from_ints(stack_inputs.to_vec()).unwrap();
+        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
 
@@ -578,8 +578,8 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
-        let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = prove_sync(
+        let stack_inputs = stack_inputs_from_ints(pub_inputs);
+        let (stack_outputs, proof) = prove_sync(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
@@ -591,7 +591,11 @@ impl Test {
 
         let program_info = ProgramInfo::from(program);
         if test_fail {
-            stack_outputs.as_mut()[0] += ONE;
+            let mut elements = [ZERO; MIN_STACK_DEPTH];
+            elements.copy_from_slice(&*stack_outputs);
+            elements[0] += ONE;
+            let stack_outputs =
+                StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
         } else {
             let result = verify(program_info, stack_inputs, stack_outputs, proof);
@@ -766,6 +770,20 @@ pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
     values.iter().map(|e| (*e).as_canonical_u64()).collect()
 }
 
+#[doc(hidden)]
+#[track_caller]
+pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInputs {
+    let values = values
+        .into_iter()
+        .map(|value| Felt::new(value).expect("stack input should be a valid field element"))
+        .collect::<Vec<_>>();
+    StackInputs::new(&values).expect("stack inputs should fit the VM stack")
+}
+
+fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
+    outputs.iter().map(Felt::as_canonical_u64).collect()
+}
+
 pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
     let mut result: Vec<u64> = values.to_vec();
     result.resize(MIN_STACK_DEPTH, 0);
@@ -773,7 +791,7 @@ pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
 }
 
 /// A proptest strategy for generating a random word with 4 values of type T.
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     use proptest::prelude::{any, prop};
     prop::collection::vec(any::<T>(), 4)

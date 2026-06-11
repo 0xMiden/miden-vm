@@ -19,17 +19,17 @@ mod workspace;
 
 use alloc::{sync::Arc, vec::Vec};
 
-#[cfg(feature = "serde")]
 use miden_assembly_syntax::{
     Report,
-    debuginfo::{SourceFile, SourceId},
-    diagnostics::{Label, RelatedError, RelatedLabel},
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{Diagnostic, miette},
 };
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
+#[cfg(feature = "serde")]
 use miden_assembly_syntax::{
-    debuginfo::{SourceSpan, Span},
-    diagnostics::{Diagnostic, miette},
+    debuginfo::{SourceFile, SourceId},
+    diagnostics::{Label, RelatedError, RelatedLabel},
 };
 pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]

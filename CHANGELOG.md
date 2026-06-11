@@ -18,12 +18,18 @@
 - Removed the legacy LALRPOP parser backend
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 - [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
+- Moved `proptest` test support behind optional features so `rand` 0.9 is not in the default dependency tree ([#3241](https://github.com/0xMiden/miden-vm/pull/3241)).
 - Bounded `FastProcessor` memory growth with a configurable `ExecutionOptions::max_memory_elements` limit, rejecting writes to arbitrarily many unique addresses that could otherwise exhaust host memory ([#3226](https://github.com/0xMiden/miden-vm/pull/3226)).
 - [BREAKING] Simplified `MastForestBuilder` around builder-local refs and immutable finalized `MastForest`s ([#3139](https://github.com/0xMiden/miden-vm/pull/3139)).
 - Added `do <block> while <cond> end` syntax ([#3232](https://github.com/0xMiden/miden-vm/pull/3232)).
+- Speed-up native verifier by skipping symbolic recomputation of constraint degree ([#3242](https://github.com/0xMiden/miden-vm/pull/3242)).
+- [BREAKING] Targets specified in `miden-project.toml` must now always provide a `path` key, though it may refer to files with extensions other than `.masm`, such as the case in Rust projects ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
+- [BREAKING] `ProjectAssembler::assemble_with_sources` has been removed - projects require assembly from the filesystem going forward ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 
 #### Fixes
 
+- Rejected empty query regions in the standalone FRI verifier ([#3237](https://github.com/0xMiden/miden-vm/pull/3237)).
+- Pinned the initial AIR system context and function hash to zero, preventing forged caller hashes at row 0 ([#3240](https://github.com/0xMiden/miden-vm/pull/3240)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Made `miden-vm run` and `miden-vm prove` fail when the inferred `.inputs` file is missing ([#3236](https://github.com/0xMiden/miden-vm/pull/3236)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
@@ -32,9 +38,11 @@
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 
 #### Enhancements
+- Improved O(n²) to O(log n) name conflict checks in `Module::define_*` methods by introducing a `BTreeMap` name index; also narrowed `items_mut()` to return an iterator instead of `&mut Vec<Export>` to preserve the index invariant ([#3218](https://github.com/0xMiden/miden-vm/pull/3218)).
 
 - Added a `RELEASE_PROCEDURE` file ([#3199](https://github.com/0xMiden/miden-vm/pull/3199)).
 - Added enum and `u256` records to `.debug_types` metadata so debuggers can preserve those type identities ([#3227](https://github.com/0xMiden/miden-vm/pull/3227)).
+- Project assembly can now be extended with support for source languages other than MASM via `ProjectSourceProvider` implementations. ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
 
 ## v0.23.3 (2026-05-26)

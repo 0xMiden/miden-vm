@@ -49,7 +49,7 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "dep:proptest"]
+arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
@@ -64,6 +64,7 @@ std = [
     "serde?/std",
     "serde_json?/std",
 ]
+testing = ["arbitrary"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde", "std"]
 
@@ -95,6 +96,5 @@ miden-processor = { workspace = true, features = ["testing"] }
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
-proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 walkdir.workspace = true

@@ -72,8 +72,8 @@ mod export {
     pub use miden_crypto::stark::{
         StarkConfig,
         air::{
-            AirBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder, MultiAir,
-            PermutationAirBuilder, ProverStatement, Statement,
+            AirBuilder, BaseAir, ConstraintDegrees, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
+            MultiAir, PermutationAirBuilder, ProverStatement, Statement,
         },
         debug,
     };
@@ -523,6 +523,11 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         (aux_trace, committed)
     }
 
+    fn constraint_degree(&self) -> ConstraintDegrees {
+        // All AIRs peak at degree 9 over base-field and extension-field constraints.
+        ConstraintDegrees { base: 9, ext: 9 }
+    }
+
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         match self {
             Self::Core(a) => a.eval(builder),
@@ -710,6 +715,27 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
             None => {
                 self.error = Some("LogUp boundary denominator was zero".into());
             },
+        }
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use miden_core::field::QuadFelt;
+
+    use super::*;
+
+    /// Guards the static `constraint_degree` override: if an AIR change moves the symbolic
+    /// degree away from the declared value, the override must be updated.
+    #[test]
+    fn constraint_degree_override_matches_symbolic() {
+        for air in [MidenAir::CORE, MidenAir::CHIPLETS] {
+            let symbolic = ConstraintDegrees::from_air::<Felt, QuadFelt, _>(&air);
+            let declared = <MidenAir as LiftedAir<Felt, QuadFelt>>::constraint_degree(&air);
+            assert_eq!(declared, symbolic, "static constraint_degree override is stale");
         }
     }
 }

@@ -1,5 +1,6 @@
 use core::ops::{BitAnd, BitOr, BitXor, Not};
 
+#[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 
 // MULTIPLICATION
@@ -645,6 +646,7 @@ fn shift_panics_on_non_u32_amount() {
     }
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn wrapping_mul_proptest(
@@ -1504,6 +1506,7 @@ fn regression_pairs() -> Vec<(U256, U256)> {
 /// Strategy that mixes 32-bit boundary values with uniformly random ones. Each variant has equal
 /// probability of being sampled; the boundary cases stress carry/borrow handling and the sign-bit
 /// position within a limb.
+#[cfg(feature = "arbitrary")]
 fn boundary_biased_u32() -> impl Strategy<Value = u32> {
     prop_oneof![
         Just(0u32),
@@ -1577,6 +1580,7 @@ fn assert_divmod(a: U256, b: U256) {
     build_test!(&source, &operands).execute().unwrap();
 }
 
+#[cfg(feature = "arbitrary")]
 fn assert_div(a: U256, b: U256) {
     let (q, _) = a.divmod(b);
     let q_limbs = q.to_le_limbs();
@@ -1593,6 +1597,7 @@ fn assert_div(a: U256, b: U256) {
     build_test!(&source, &operands).execute().unwrap();
 }
 
+#[cfg(feature = "arbitrary")]
 fn assert_mod(a: U256, b: U256) {
     let (_, r) = a.divmod(b);
     let r_limbs = r.to_le_limbs();
