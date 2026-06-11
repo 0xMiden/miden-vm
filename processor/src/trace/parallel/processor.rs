@@ -10,7 +10,7 @@ use miden_core::{
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
 };
-use miden_mast_package::debug_info::DebugSourceMastNodeId;
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use super::super::trace_state::{
     AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
@@ -501,7 +501,7 @@ impl Stopper for ReplayStopper {
         _continuation_stack: &ContinuationStack<Arc<SparseMastForest>>,
         continuation_after_stop: impl FnOnce() -> Option<(
             Continuation<Arc<SparseMastForest>>,
-            Option<DebugSourceMastNodeId>,
+            Option<DebugSourceNodeId>,
         )>,
     ) -> ControlFlow<BreakReason<Arc<SparseMastForest>>> {
         if processor.system().clock() >= processor.maximum_clock {

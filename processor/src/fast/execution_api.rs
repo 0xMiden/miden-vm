@@ -6,7 +6,7 @@ use miden_core::{
     mast::{MastForest, MastNodeId},
     program::{Kernel, MIN_STACK_DEPTH, Program, StackOutputs},
 };
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 use tracing::instrument;
 
 use super::{
@@ -718,7 +718,7 @@ impl FastProcessor {
         node_digest: Word,
         host: &mut impl SyncHost,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
             match (package_debug_info, source_node) {
@@ -749,7 +749,7 @@ impl FastProcessor {
         node_digest: Word,
         host: &mut impl Host,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
             mast_forest

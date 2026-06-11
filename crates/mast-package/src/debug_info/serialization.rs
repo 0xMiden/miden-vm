@@ -14,7 +14,7 @@ use super::{
     DEBUG_SOURCE_MAP_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugErrorMessage,
     DebugErrorMessagesSection, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
     DebugFunctionsSection, DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceAsmOp,
-    DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId,
+    DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
     DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
     DebugVariableInfo, DebugVariantInfo,
 };
@@ -178,7 +178,7 @@ impl Deserializable for DebugFunctionsSection {
 // DEBUG SOURCE GRAPH SECTION SERIALIZATION
 // ================================================================================================
 
-impl Serializable for DebugSourceMastNode {
+impl Serializable for DebugSourceNode {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.exec_node.into());
         self.children.write_into(target);
@@ -187,18 +187,18 @@ impl Serializable for DebugSourceMastNode {
     }
 }
 
-impl Deserializable for DebugSourceMastNode {
+impl Deserializable for DebugSourceNode {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
             exec_node: MastNodeId::new_unchecked(source.read_u32()?),
-            children: Vec::<DebugSourceMastNodeId>::read_from(source)?,
+            children: Vec::<DebugSourceNodeId>::read_from(source)?,
             op_start: source.read_u32()?,
             op_end: source.read_u32()?,
         })
     }
 
     fn min_serialized_size() -> usize {
-        12 + Vec::<DebugSourceMastNodeId>::min_serialized_size()
+        12 + Vec::<DebugSourceNodeId>::min_serialized_size()
     }
 }
 
@@ -219,8 +219,8 @@ impl Deserializable for DebugSourceGraphSection {
             )));
         }
 
-        let nodes = Vec::<DebugSourceMastNode>::read_from(source)?;
-        let roots = Vec::<DebugSourceMastNodeId>::read_from(source)?;
+        let nodes = Vec::<DebugSourceNode>::read_from(source)?;
+        let roots = Vec::<DebugSourceNodeId>::read_from(source)?;
         Ok(Self::from_parts(nodes, roots))
     }
 }
@@ -241,7 +241,7 @@ impl Serializable for DebugSourceAsmOp {
 
 impl Deserializable for DebugSourceAsmOp {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let source_node = DebugSourceMastNodeId::read_from(source)?;
+        let source_node = DebugSourceNodeId::read_from(source)?;
         let op_idx = source.read_u32()?;
         let location = read_location(source)?;
         let context_name = String::read_from(source)?;
@@ -258,7 +258,7 @@ impl Deserializable for DebugSourceAsmOp {
     }
 
     fn min_serialized_size() -> usize {
-        DebugSourceMastNodeId::min_serialized_size() + 4 + 1 + 1 + 1 + 1
+        DebugSourceNodeId::min_serialized_size() + 4 + 1 + 1 + 1 + 1
     }
 }
 
@@ -273,14 +273,14 @@ impl Serializable for DebugSourceVar {
 impl Deserializable for DebugSourceVar {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
-            source_node: DebugSourceMastNodeId::read_from(source)?,
+            source_node: DebugSourceNodeId::read_from(source)?,
             op_idx: source.read_u32()?,
             var: Deserializable::read_from(source)?,
         })
     }
 
     fn min_serialized_size() -> usize {
-        DebugSourceMastNodeId::min_serialized_size() + 4
+        DebugSourceNodeId::min_serialized_size() + 4
     }
 }
 
@@ -950,15 +950,15 @@ mod tests {
     fn test_debug_source_graph_section_roundtrip() {
         let section = DebugSourceGraphSection::from_parts(
             alloc::vec![
-                DebugSourceMastNode::new(MastNodeId::new_unchecked(0), alloc::vec![], 0, 1),
-                DebugSourceMastNode::new(
+                DebugSourceNode::new(MastNodeId::new_unchecked(0), alloc::vec![], 0, 1),
+                DebugSourceNode::new(
                     MastNodeId::new_unchecked(1),
-                    alloc::vec![DebugSourceMastNodeId::from(0)],
+                    alloc::vec![DebugSourceNodeId::from(0)],
                     1,
                     3,
                 ),
             ],
-            alloc::vec![DebugSourceMastNodeId::from(1)],
+            alloc::vec![DebugSourceNodeId::from(1)],
         );
 
         roundtrip(&section);
@@ -966,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_debug_source_map_section_roundtrip() {
-        let source_node = DebugSourceMastNodeId::from(0);
+        let source_node = DebugSourceNodeId::from(0);
         let section = DebugSourceMapSection::from_parts(
             alloc::vec![DebugSourceAsmOp::new(
                 source_node,

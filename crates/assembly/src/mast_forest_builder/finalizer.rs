@@ -12,8 +12,8 @@ use miden_core::{
 };
 
 use super::{
-    AsmOpRef, DebugVarRef, MastNodeRef, PendingMastNode, PendingMastNodeKind,
-    PendingSourceMastNode, SourceDebugGraph, SourceMastNode, SourceMastNodeId, SourceMastNodeRef,
+    AsmOpRef, DebugVarRef, MastNodeRef, PendingMastNode, PendingMastNodeKind, PendingSourceNode,
+    SourceDebugGraph, SourceNode, SourceNodeId, SourceNodeRef,
     compute_operations_and_adjust_mappings,
 };
 use crate::diagnostics::{Diagnostic, Report, miette};
@@ -25,7 +25,7 @@ pub(crate) struct BuiltMastForest {
     /// Final node IDs for builder refs retained in the finalized forest.
     node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
     /// Final source occurrence IDs for builder refs retained in the source graph.
-    source_id_by_ref: BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
+    source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
 }
 
 impl BuiltMastForest {
@@ -40,7 +40,7 @@ impl BuiltMastForest {
         MastForest,
         BTreeMap<MastNodeRef, MastNodeId>,
         SourceDebugGraph,
-        BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
+        BTreeMap<SourceNodeRef, SourceNodeId>,
     ) {
         (self.mast_forest, self.node_id_by_ref, self.source_graph, self.source_id_by_ref)
     }
@@ -91,19 +91,19 @@ pub(super) enum MastForestBuilderError {
         "source occurrence {source_ref} references child {child_ref} before the child was finalized"
     )]
     MissingFinalSourceChild {
-        source_ref: SourceMastNodeRef,
-        child_ref: SourceMastNodeRef,
+        source_ref: SourceNodeRef,
+        child_ref: SourceNodeRef,
     },
     #[error(
         "source occurrence {source_ref} references execution node {exec_ref} before it was finalized"
     )]
     MissingFinalSourceExec {
-        source_ref: SourceMastNodeRef,
+        source_ref: SourceNodeRef,
         exec_ref: MastNodeRef,
     },
     #[error("failed to add source occurrence {source_ref}: {source}")]
     AddSourceNode {
-        source_ref: SourceMastNodeRef,
+        source_ref: SourceNodeRef,
         #[source]
         source: MastForestError,
     },
@@ -176,8 +176,8 @@ impl MastForestFinalizer {
     pub(super) fn into_built_forest(
         self,
         procedure_root_refs: &[MastNodeRef],
-        procedure_source_root_refs: &[SourceMastNodeRef],
-        source_nodes: &IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
+        procedure_source_root_refs: &[SourceNodeRef],
+        source_nodes: &IndexVec<SourceNodeRef, PendingSourceNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
         advice_map: AdviceMap,
@@ -209,11 +209,11 @@ impl MastForestFinalizer {
 
     fn finalize_source_graph(
         &self,
-        procedure_source_root_refs: &[SourceMastNodeRef],
-        source_nodes: &IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
+        procedure_source_root_refs: &[SourceNodeRef],
+        source_nodes: &IndexVec<SourceNodeRef, PendingSourceNode>,
         asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
         debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
-    ) -> Result<(SourceDebugGraph, BTreeMap<SourceMastNodeRef, SourceMastNodeId>), Report> {
+    ) -> Result<(SourceDebugGraph, BTreeMap<SourceNodeRef, SourceNodeId>), Report> {
         let live_source_refs = source_nodes
             .as_slice()
             .iter()
@@ -221,14 +221,13 @@ impl MastForestFinalizer {
             .filter_map(|(index, source_node)| {
                 self.node_id_by_ref
                     .contains_key(&source_node.exec_ref)
-                    .then_some(SourceMastNodeRef::from(index as u32))
+                    .then_some(SourceNodeRef::from(index as u32))
             })
             .collect::<Vec<_>>();
 
         let mut source_id_by_ref = BTreeMap::new();
         for &source_ref in &live_source_refs {
-            source_id_by_ref
-                .insert(source_ref, SourceMastNodeId::from(source_id_by_ref.len() as u32));
+            source_id_by_ref.insert(source_ref, SourceNodeId::from(source_id_by_ref.len() as u32));
         }
 
         let mut finalized_nodes = IndexVec::new();
@@ -274,9 +273,7 @@ impl MastForestFinalizer {
                 pending_source_node.op_end,
             );
             let inserted_id = finalized_nodes
-                .push(SourceMastNode::new(
-                    exec_node, children, op_start, op_end, asm_ops, debug_vars,
-                ))
+                .push(SourceNode::new(exec_node, children, op_start, op_end, asm_ops, debug_vars))
                 .map_err(|_| {
                     Report::new(MastForestBuilderError::AddSourceNode {
                         source_ref,

@@ -63,7 +63,7 @@ use miden_core::{
 use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
 use crate::{
     Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
-    debug_info::DebugSourceMastNodeId,
+    debug_info::DebugSourceNodeId,
 };
 
 // CONSTANTS
@@ -558,7 +558,7 @@ impl ProcedureExport {
             None
         };
         let source_node = if source.read_bool()? {
-            Some(DebugSourceMastNodeId::read_from(source)?)
+            Some(DebugSourceNodeId::read_from(source)?)
         } else {
             None
         };
@@ -598,7 +598,7 @@ impl Deserializable for ProcedureExport {
             None
         };
         let source_node = if source.read_bool()? {
-            Some(DebugSourceMastNodeId::read_from(source)?)
+            Some(DebugSourceNodeId::read_from(source)?)
         } else {
             None
         };
@@ -686,8 +686,8 @@ mod tests {
         Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
         TargetType,
         debug_info::{
-            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-            DebugSourceMastNodeId,
+            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
+            DebugSourceNodeId,
         },
     };
 
@@ -736,7 +736,7 @@ mod tests {
             .expect("failed to build basic block");
         let digest = node.digest();
         let node_id = nodes.push(node.into()).expect("failed to add basic block");
-        let source_node = DebugSourceMastNodeId::from(0);
+        let source_node = DebugSourceNodeId::from(0);
 
         let mast = Arc::new(
             MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default())
@@ -757,7 +757,7 @@ mod tests {
         )
         .expect("test package should be valid");
         let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceMastNode::new(node_id, Vec::new(), 0, 1)],
+            vec![DebugSourceNode::new(node_id, Vec::new(), 0, 1)],
             vec![source_node],
         );
         let source_map = DebugSourceMapSection::from_parts(

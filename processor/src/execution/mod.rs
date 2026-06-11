@@ -1,6 +1,6 @@
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, ExecutionError, Kernel, Stopper, Word,
@@ -46,18 +46,18 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub tracer: &'a mut T,
     pub stopper: &'a S,
     pub source_debug_info: Option<&'a PackageDebugInfo>,
-    pub current_source_node: Option<DebugSourceMastNodeId>,
+    pub current_source_node: Option<DebugSourceNodeId>,
 }
 
 impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
-    pub fn current_source_node(&self) -> Option<DebugSourceMastNodeId> {
+    pub fn current_source_node(&self) -> Option<DebugSourceNodeId> {
         self.current_source_node
     }
 
     pub fn child_source_node(
         &self,
         child_index: usize,
-    ) -> Result<Option<DebugSourceMastNodeId>, ExecutionError> {
+    ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
         let Some(source_debug_info) = self.source_debug_info else {
             return Ok(None);
         };
@@ -498,16 +498,16 @@ pub enum InternalBreakReason<F> {
     Emit {
         op_idx: usize,
         continuation: Continuation<F>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromDyn {
         callee_hash: Word,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromExternal {
         external_node_id: MastNodeId,
         procedure_hash: Word,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     },
 }
 
@@ -558,7 +558,7 @@ fn finalize_clock_cycle_with_continuation<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     continuation_stack: &ContinuationStack<F>,
-    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceNodeId>)>,
     current_forest: &F,
 ) -> ControlFlow<BreakReason<F>>
 where
@@ -603,7 +603,7 @@ fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T, F>(
     tracer: &mut T,
     stopper: &S,
     continuation_stack: &ContinuationStack<F>,
-    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceNodeId>)>,
     op_helper_registers: OperationHelperRegisters,
     current_forest: &F,
 ) -> ControlFlow<BreakReason<F>>

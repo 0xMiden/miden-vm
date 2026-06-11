@@ -17,8 +17,8 @@ use miden_debug_types::{ByteIndex, Location, SourceContent, SourceManager, Sourc
 use miden_mast_package::{
     Package,
     debug_info::{
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-        DebugSourceMastNodeId, PackageDebugInfo,
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
+        DebugSourceNodeId, PackageDebugInfo,
     },
 };
 use miden_utils_testing::{build_test, stack_inputs_from_ints};
@@ -240,7 +240,7 @@ fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() 
     assert!(package.debug_info().unwrap().is_none());
 
     let program = package.unwrap_program();
-    let output = FastProcessor::new(StackInputs::try_from_ints([3_u64]).unwrap())
+    let output = FastProcessor::new(StackInputs::new(&[Felt::new_unchecked(3)]).unwrap())
         .execute_sync(&program, &mut DefaultHost::default())
         .unwrap();
 
@@ -265,15 +265,15 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     );
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let source_root = DebugSourceMastNodeId::from(0);
-    let source_true = DebugSourceMastNodeId::from(1);
-    let source_false = DebugSourceMastNodeId::from(2);
+    let source_root = DebugSourceNodeId::from(0);
+    let source_true = DebugSourceNodeId::from(1);
+    let source_false = DebugSourceNodeId::from(2);
     let package_debug_info = PackageDebugInfo {
         source_graph: Some(DebugSourceGraphSection::from_parts(
             vec![
-                DebugSourceMastNode::new(root_id, vec![source_true, source_false], 0, 1),
-                DebugSourceMastNode::new(block_id, vec![], 0, 1),
-                DebugSourceMastNode::new(block_id, vec![], 0, 1),
+                DebugSourceNode::new(root_id, vec![source_true, source_false], 0, 1),
+                DebugSourceNode::new(block_id, vec![], 0, 1),
+                DebugSourceNode::new(block_id, vec![], 0, 1),
             ],
             vec![source_root],
         )),
@@ -319,7 +319,7 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 }
 
 #[test]
-fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
+fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
@@ -347,15 +347,15 @@ fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
         .find(|&root| root != entrypoint)
         .expect("program should contain a callee procedure root");
 
-    let source_entry = DebugSourceMastNodeId::from(0);
-    let source_callee_a = DebugSourceMastNodeId::from(1);
-    let source_callee_b = DebugSourceMastNodeId::from(2);
+    let source_entry = DebugSourceNodeId::from(0);
+    let source_callee_a = DebugSourceNodeId::from(1);
+    let source_callee_b = DebugSourceNodeId::from(2);
     let package_debug_info = PackageDebugInfo {
         source_graph: Some(DebugSourceGraphSection::from_parts(
             vec![
-                DebugSourceMastNode::new(entrypoint, vec![], 0, 1),
-                DebugSourceMastNode::new(callee_root, vec![], 0, 1),
-                DebugSourceMastNode::new(callee_root, vec![], 0, 1),
+                DebugSourceNode::new(entrypoint, vec![], 0, 1),
+                DebugSourceNode::new(callee_root, vec![], 0, 1),
+                DebugSourceNode::new(callee_root, vec![], 0, 1),
             ],
             vec![source_entry, source_callee_a, source_callee_b],
         )),
@@ -373,11 +373,8 @@ fn package_source_debug_execution_ignores_ambiguous_local_dyn_root() {
 
     assert_matches!(
         err,
-        ExecutionError::OperationError {
-            label,
-            source_file: None,
-            err: OperationError::FailedAssertion { err_code, .. },
-        } if label == SourceSpan::UNKNOWN && err_code == Felt::ZERO
+        ExecutionError::Internal(msg)
+            if msg.contains("ambiguous or malformed dynamic call root")
     );
 }
 
@@ -403,14 +400,14 @@ fn missing_external_package_source_debug_fixture() -> (
     );
     let host = DefaultHost::default().with_source_manager(source_manager);
 
-    let source_root = DebugSourceMastNodeId::from(0);
-    let source_external = DebugSourceMastNodeId::from(1);
+    let source_root = DebugSourceNodeId::from(0);
+    let source_external = DebugSourceNodeId::from(1);
     let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
     let package_debug_info = PackageDebugInfo {
         source_graph: Some(DebugSourceGraphSection::from_parts(
             vec![
-                DebugSourceMastNode::new(root_id, vec![source_external], 0, 1),
-                DebugSourceMastNode::new(external_id, vec![], 0, 1),
+                DebugSourceNode::new(root_id, vec![source_external], 0, 1),
+                DebugSourceNode::new(external_id, vec![], 0, 1),
             ],
             vec![source_root],
         )),

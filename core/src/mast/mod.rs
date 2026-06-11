@@ -217,6 +217,8 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
+    // Kept private so callers cannot mutate roots arbitrarily, but shared with the merger so it
+    // can rebuild the root set while remapping nodes into the merged forest.
     fn mark_root(&mut self, new_root_id: MastNodeId) {
         assert!(new_root_id.to_usize() < self.nodes.len());
 

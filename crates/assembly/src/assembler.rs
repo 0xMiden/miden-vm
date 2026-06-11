@@ -24,7 +24,7 @@ use miden_core::{
 };
 use miden_mast_package::{
     ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, ProcedureExport,
-    Section, SectionId, TypeExport, debug_info::DebugSourceMastNodeId,
+    Section, SectionId, TypeExport, debug_info::DebugSourceNodeId,
 };
 use miden_project::{Linkage, TargetType};
 
@@ -36,7 +36,7 @@ use crate::{
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
     mast_forest_builder::{
-        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceMastNodeId, SourceMastNodeRef,
+        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
         StaticLibrary,
     },
 };
@@ -57,7 +57,7 @@ enum PendingPackageExport {
 #[derive(Debug)]
 struct PendingProcedureExport {
     node_ref: MastNodeRef,
-    source_ref: Option<SourceMastNodeRef>,
+    source_ref: Option<SourceNodeRef>,
     digest: Word,
     path: Arc<Path>,
     signature: Option<FunctionType>,
@@ -68,7 +68,7 @@ impl PendingPackageExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
     ) -> Result<PackageExport, Report> {
         match self {
             Self::Procedure(export) => export.into_package_export(node_id_by_ref, source_id_by_ref),
@@ -82,7 +82,7 @@ impl PendingProcedureExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
-        source_id_by_ref: &BTreeMap<SourceMastNodeRef, SourceMastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
     ) -> Result<PackageExport, Report> {
         let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
             Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
@@ -90,7 +90,7 @@ impl PendingProcedureExport {
         let source_node = self
             .source_ref
             .and_then(|source_ref| source_id_by_ref.get(&source_ref).copied())
-            .map(|source_id| DebugSourceMastNodeId::from(u32::from(source_id)));
+            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         Ok(PackageExport::Procedure(ProcedureExport {
             digest: self.digest,
             path: self.path,
@@ -650,7 +650,7 @@ impl Assembler {
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
-                            item.source_debug_root_id().map(DebugSourceMastNodeId::from),
+                            item.source_debug_root_id().map(DebugSourceNodeId::from),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -870,8 +870,6 @@ impl Assembler {
         exports: BTreeMap<Arc<Path>, PackageExport>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let mast_forest = self.apply_debug_options(mast_forest);
-
         let mast = Arc::new(mast_forest);
         let package = Box::new(
             Package::create(
@@ -928,14 +926,12 @@ impl Assembler {
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
-        let mast_forest = self.apply_debug_options(mast_forest);
-
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
         let entry_source_node = source_graph
             .unique_root_for_exec_node(entrypoint)
-            .map(|source_id| DebugSourceMastNodeId::from(u32::from(source_id)));
+            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(
                 name,
@@ -964,13 +960,6 @@ impl Assembler {
             self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
 
         Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
-    }
-
-    fn apply_debug_options(
-        &self,
-        mast_forest: miden_core::mast::MastForest,
-    ) -> miden_core::mast::MastForest {
-        mast_forest
     }
 
     fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
@@ -1504,7 +1493,7 @@ impl Assembler {
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
-                                p.source_debug_root_id().map(DebugSourceMastNodeId::from),
+                                p.source_debug_root_id().map(DebugSourceNodeId::from),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1538,7 +1527,7 @@ impl Assembler {
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
-        source_debug_root_id: Option<DebugSourceMastNodeId>,
+        source_debug_root_id: Option<DebugSourceNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeRef, Report> {
         // Get the procedure from the assembler
