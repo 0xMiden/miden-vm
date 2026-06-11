@@ -85,12 +85,6 @@ impl Default for InputFile {
 impl InputFile {
     #[instrument(name = "read_input_file", skip_all)]
     pub fn read(inputs_path: &Option<PathBuf>, program_path: &Path) -> Result<Self, Report> {
-        // if file not specified explicitly and corresponding file with same name as program_path
-        // with '.inputs' extension does't exist, set operand_stack to empty vector
-        if !inputs_path.is_some() && !program_path.with_extension("inputs").exists() {
-            return Ok(Self::default());
-        }
-
         // If inputs_path has been provided then use this as path. Alternatively we will
         // replace the program_path extension with .inputs and use this as a default.
         let path = match inputs_path {
@@ -314,7 +308,20 @@ impl InputFile {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     use super::*;
+
+    fn test_file_path(name: &str) -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("miden-vm-{name}-{id}"))
+    }
 
     #[test]
     fn test_merkle_data_parsing() {
@@ -485,5 +492,43 @@ mod tests {
         };
         let result = inputs.parse_advice_inputs();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn input_file_read_rejects_missing_inferred_inputs_file() {
+        let program_path = test_file_path("missing-inferred").with_extension("masm");
+
+        let err =
+            InputFile::read(&None, &program_path).expect_err("missing input file should fail");
+
+        assert!(err.to_string().contains("Failed to open input file"));
+        assert!(
+            err.to_string()
+                .contains(&program_path.with_extension("inputs").display().to_string())
+        );
+    }
+
+    #[test]
+    fn input_file_read_rejects_missing_explicit_inputs_file() {
+        let program_path = test_file_path("program").with_extension("masm");
+        let inputs_path = test_file_path("missing-explicit").with_extension("inputs");
+
+        let err = InputFile::read(&Some(inputs_path.clone()), &program_path)
+            .expect_err("missing explicit input file should fail");
+
+        assert!(err.to_string().contains("Failed to open input file"));
+        assert!(err.to_string().contains(&inputs_path.display().to_string()));
+    }
+
+    #[test]
+    fn input_file_read_loads_inferred_inputs_file() {
+        let program_path = test_file_path("inferred-present").with_extension("masm");
+        let inputs_path = program_path.with_extension("inputs");
+        fs::write(&inputs_path, r#"{"operand_stack":["7"]}"#).expect("write input file");
+
+        let inputs = InputFile::read(&None, &program_path).expect("input file should load");
+
+        assert_eq!(inputs.operand_stack, ["7"]);
+        fs::remove_file(inputs_path).expect("remove input file");
     }
 }
