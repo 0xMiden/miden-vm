@@ -181,7 +181,7 @@ macro_rules! expect_exec_error_matches {
 #[macro_export]
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected:expr),+) => {{
-        use miden_assembly::testing::Pattern;
+        use $crate::DiagnosticPattern as Pattern;
         let actual = format!("{}", miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
         let expected = [$(Pattern::from($expected)),*];
         let actual_line_count = actual.lines().filter(|line| !line.trim().is_empty()).count();
@@ -405,7 +405,7 @@ impl Test {
         }
 
         // validate the stack state from the same execution as the memory assertions
-        let result = execution_output.stack.as_int_vec();
+        let result = stack_outputs_as_int_vec(&execution_output.stack);
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -876,6 +876,9 @@ impl SourceCacheKey {
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
     target.extend(word.iter().map(Felt::as_canonical_u64));
 }
+
+#[doc(hidden)]
+pub use miden_assembly_syntax::testing::Pattern as DiagnosticPattern;
 
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
