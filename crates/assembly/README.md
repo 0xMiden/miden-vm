@@ -35,7 +35,7 @@ let assembler = Assembler::new(source_manager.clone());
 
 // Emit an executable package, named `prg` which pushes values 3 and 5 onto the
 // stack and adds them
-let _ = assembler.assemble_program("prg", "namespace $exec\n\nbegin push.3 push.5 add end")
+let _ = assembler.assemble_program("prg", "begin push.3 push.5 add end")
     .unwrap();
 
 // Note: assemble_program() consumes the assembler, so create a new one for the
@@ -121,8 +121,6 @@ let assembler = Assembler::new(Arc::clone(&source_manager))
 The resulting assembler can now compile code that invokes any of the core library procedures by importing them from the module path exported by the library, as shown next:
 
 ```masm
-namespace $exec
-
 use miden::core::math::u64
 
 begin
@@ -198,8 +196,6 @@ Programs compiled by this assembler will be able to make calls to the
 let _program = Assembler::with_kernel(source_manager, kernel_lib.into())
     .unwrap()
     .assemble_program("prg", "
-namespace $exec
-
 begin
     syscall.foo
 end
@@ -249,8 +245,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Assemble our program
     let _program = assembler.assemble_program("prg", "
-namespace $exec
-
 begin
     push.1.2
     syscall.foo

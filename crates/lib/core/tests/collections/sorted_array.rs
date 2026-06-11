@@ -563,7 +563,6 @@ fn test_find_partial_key_value_rejects_oob_pointer_below_start() {
 /// Builds a test with the core library and no event handlers.
 fn build_lib_test(source: &str, op_stack: &[u64]) -> miden_utils_testing::Test {
     let core_lib = CoreLibrary::default();
-    let source = crate::exec_source(source);
     miden_utils_testing::build_test_by_mode!(false, source, op_stack)
         .with_library(core_lib.package())
 }

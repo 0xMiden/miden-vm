@@ -49,7 +49,7 @@ thiserror.workspace = true
 criterion.workspace = true
 miden-ace-codegen.workspace = true
 miden-air.workspace = true
-miden-assembly.workspace = true
+miden-assembly = { workspace = true, features = ["testing"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true

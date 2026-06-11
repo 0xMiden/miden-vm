@@ -82,6 +82,25 @@ impl TestContext {
         }
     }
 
+    #[cfg(feature = "std")]
+    pub fn with_warnings_as_errors(self, yes: bool) -> Self {
+        let Self { source_manager, assembler, registry } = self;
+        Self {
+            source_manager,
+            assembler: assembler.with_warnings_as_errors(yes),
+            registry,
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub fn with_warnings_as_errors(self, yes: bool) -> Self {
+        let Self { source_manager, assembler } = self;
+        Self {
+            source_manager,
+            assembler: assembler.with_warnings_as_errors(yes),
+        }
+    }
+
     #[inline]
     fn assembler(&self) -> Assembler {
         self.assembler.clone()

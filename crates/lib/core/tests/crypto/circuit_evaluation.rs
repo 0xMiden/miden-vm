@@ -11,7 +11,7 @@ fn circuit_evaluation_prove_verify() {
     let num_repetitions = 20;
     let pointer = 1 << 16;
 
-    let source = crate::exec_source(format!(
+    let source = format!(
         "
     const NUM_READ_ROWS = 4
     const NUM_EVAL_ROWS = 4
@@ -38,7 +38,7 @@ fn circuit_evaluation_prove_verify() {
        end
     end
     "
-    ));
+    );
 
     // the circuit
     let input_0 = rand_quad_felt();
@@ -122,7 +122,7 @@ fn multi_air_eval_circuit_masm() {
     let pointer = 1 << 16;
     let num_vars = encoded.num_vars();
     let num_eval = encoded.num_eval_rows();
-    let source = crate::exec_source(format!(
+    let source = format!(
         "
     const NUM_ADV_PIPE = {num_adv_pipe}
     const NUM_VARS = {num_vars}
@@ -144,7 +144,7 @@ fn multi_air_eval_circuit_masm() {
         drop
     end
     "
-    ));
+    );
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);

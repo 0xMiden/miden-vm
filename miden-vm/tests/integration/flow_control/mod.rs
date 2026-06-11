@@ -457,9 +457,7 @@ fn simple_dyn_exec() {
 
     // Compute the hash of foo by assembling the program
     let context = miden_assembly::testing::TestContext::new();
-    let program = context
-        .assemble(miden_utils_testing::executable_source(program_source))
-        .unwrap();
+    let program = context.assemble(program_source).unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -555,9 +553,7 @@ fn simple_dyncall() {
 
     // Compute the hash of foo by assembling the program
     let context = miden_assembly::testing::TestContext::new();
-    let program = context
-        .assemble(miden_utils_testing::executable_source(program_source))
-        .unwrap();
+    let program = context.assemble(program_source).unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 

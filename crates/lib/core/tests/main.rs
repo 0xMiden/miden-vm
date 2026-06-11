@@ -5,8 +5,8 @@ extern crate alloc;
 macro_rules! build_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        let source = $crate::exec_source($source);
-        miden_utils_testing::build_test_by_mode!(false, &source $(, $tail)*)
+        let source = $source;
+        miden_utils_testing::build_test_by_mode!(false, source $(, $tail)*)
             .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}
@@ -17,15 +17,11 @@ macro_rules! build_test {
 macro_rules! build_debug_test {
     ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        let source = $crate::exec_source($source);
-        miden_utils_testing::build_test_by_mode!(true, &source $(, $tail)*)
+        let source = $source;
+        miden_utils_testing::build_test_by_mode!(true, source $(, $tail)*)
             .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}
-}
-
-fn exec_source(source: impl AsRef<str>) -> String {
-    format!("namespace $exec\n\n{}", source.as_ref())
 }
 
 /// Asserts that executing the test fails with a FailedAssertion containing the expected message.

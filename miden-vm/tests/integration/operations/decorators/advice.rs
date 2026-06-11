@@ -4,10 +4,6 @@ use miden_processor::{ExecutionOptions, StackInputs, advice::AdviceInputs};
 use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    miden_utils_testing::executable_source(source)
-}
-
 // ADVICE INJECTION
 // ================================================================================================
 
@@ -487,7 +483,7 @@ fn run_insert_mem_with_max_size(
     );
 
     let program = Assembler::default()
-        .assemble_program("program", exec_source(&source))
+        .assemble_program("program", &source)
         .unwrap()
         .unwrap_program();
     let mut host = super::TestHost::default();

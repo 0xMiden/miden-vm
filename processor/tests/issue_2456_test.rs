@@ -29,8 +29,6 @@ fn test_issue_2456_statically_linked_library_call() {
 
     // This program calls a procedure from a statically linked library.
     let source = "
-        namespace $exec
-
         use test::module_1
 
         begin

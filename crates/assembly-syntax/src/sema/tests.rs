@@ -425,6 +425,8 @@ fn name_map_drops_old_name_after_mutable_item_rename() {
 fn enum_variant_matching_enum_name_reports_symbol_conflict() {
     let context = SyntaxTestContext::default();
     let source = "\
+namespace test
+
 enum DUP : u8 {
     DUP,
 }

@@ -79,7 +79,6 @@ pub fn generate_recursive_verifier_data(
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
 ) -> VerifierData {
-    let source = crate::exec_source(source);
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
@@ -91,15 +90,13 @@ pub fn generate_recursive_verifier_data(
                     .unwrap();
                 let assembler =
                     Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
-                let program: Program = assembler
-                    .assemble_program("program", source.as_str())
-                    .unwrap()
-                    .unwrap_program();
+                let program: Program =
+                    assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
                 let program: Program = Assembler::default()
-                    .assemble_program("program", source.as_str())
+                    .assemble_program("program", source)
                     .unwrap()
                     .unwrap_program();
                 (program, None)

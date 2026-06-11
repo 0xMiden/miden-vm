@@ -13,10 +13,6 @@ use miden_utils_testing::stack_inputs_from_ints;
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    miden_utils_testing::executable_source(source)
-}
-
 fn assert_prove_verify(
     source: &str,
     hash_fn: HashFunction,
@@ -25,7 +21,7 @@ fn assert_prove_verify(
     verify_recursively: bool,
 ) {
     let program = Assembler::default()
-        .assemble_program("program", exec_source(source))
+        .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
     let stack_inputs = stack_inputs_from_ints([0, 1]);
@@ -289,7 +285,7 @@ mod fast_parallel {
         ";
 
         let program = Assembler::default()
-            .assemble_program("program", super::exec_source(source))
+            .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
         let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
@@ -340,7 +336,7 @@ mod fast_parallel {
         ";
 
         let program = Assembler::default()
-            .assemble_program("program", super::exec_source(source))
+            .assemble_program("program", source)
             .unwrap()
             .unwrap_program();
         let stack_inputs = miden_utils_testing::stack_inputs_from_ints([0, 1]);
@@ -432,7 +428,7 @@ mod fast_parallel {
         let program = Assembler::default()
             .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .expect("failed to load core library")
-            .assemble_program("program", super::exec_source(source))
+            .assemble_program("program", source)
             .expect("failed to assemble log_precompile fixture")
             .unwrap_program();
         let stack_inputs = StackInputs::default();

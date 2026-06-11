@@ -245,7 +245,7 @@ fn test_masm_consistency(
                     .unwrap();
                 let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
                     .unwrap()
-                    .assemble_program("program", exec_source(program_source))
+                    .assemble_program("program", program_source)
                     .unwrap()
                     .unwrap_program();
 
@@ -253,7 +253,7 @@ fn test_masm_consistency(
             },
             None => {
                 let program = Assembler::new(source_manager)
-                    .assemble_program("program", exec_source(program_source))
+                    .assemble_program("program", program_source)
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -331,7 +331,7 @@ fn test_masm_errors_consistency(
                     .unwrap();
                 let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
                     .unwrap()
-                    .assemble_program("program", exec_source(program_source))
+                    .assemble_program("program", program_source)
                     .unwrap()
                     .unwrap_program();
 
@@ -339,7 +339,7 @@ fn test_masm_errors_consistency(
             },
             None => {
                 let program = Assembler::new(source_manager)
-                    .assemble_program("program", exec_source(program_source))
+                    .assemble_program("program", program_source)
                     .unwrap()
                     .unwrap_program();
                 (program, None)
@@ -398,7 +398,7 @@ fn test_log_precompile_correctness() {
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
         Assembler::new(source_manager)
-            .assemble_program("program", exec_source(program_source))
+            .assemble_program("program", program_source)
             .unwrap()
             .unwrap_program()
     };

@@ -134,7 +134,7 @@ pub fn render(snippet: &Snippet, iters: u64) -> String {
 
 /// Wrap a snippet fragment into a complete executable program.
 pub fn wrap_program(body: &str) -> String {
-    format!("namespace $exec\n\nbegin\n{body}end\n")
+    format!("begin\n{body}end\n")
 }
 
 // COUNTER SAFETY

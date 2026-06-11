@@ -152,7 +152,7 @@ fn test_advice_provider() {
             .unwrap();
         let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
             .unwrap()
-            .assemble_program("program", exec_source(program_source))
+            .assemble_program("program", program_source)
             .unwrap()
             .unwrap_program();
 

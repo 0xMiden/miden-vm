@@ -9,10 +9,6 @@ use miden_processor::{
 };
 use miden_vm::DefaultHost;
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    miden_utils_testing::executable_source(source)
-}
-
 #[test]
 fn advice_map_loaded_before_execution() {
     let source = "\
@@ -24,7 +20,7 @@ fn advice_map_loaded_before_execution() {
 
     // compile and execute program
     let program_without_advice_map: Program = Assembler::default()
-        .assemble_program("program", exec_source(source))
+        .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
 

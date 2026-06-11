@@ -1,4 +1,4 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
@@ -18,10 +18,6 @@ use crate::{
     fast::{FastProcessor, NoopTracer},
     operation::{Operation, OperationError},
 };
-
-fn exec_source(source: &str) -> String {
-    miden_utils_testing::executable_source(source)
-}
 
 // CASTING OPERATIONS
 // --------------------------------------------------------------------------------------------
@@ -213,9 +209,7 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            exec_source(
-                r#"begin push.4294967296 push.1 u32assert2.err="value exceeded u32 range" end"#,
-            ),
+            r#"begin push.4294967296 push.1 u32assert2.err="value exceeded u32 range" end"#,
         )
         .expect("program should assemble")
         .unwrap_program();
@@ -256,7 +250,7 @@ fn test_u32assert_err_wrapper_assembled() {
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            exec_source(r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#),
+            r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#,
         )
         .expect("program should assemble")
         .unwrap_program();
@@ -293,9 +287,7 @@ fn test_u32assertw_err_wrapper_assembled() {
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            exec_source(
                 r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
-            ),
         )
         .expect("program should assemble")
         .unwrap_program();

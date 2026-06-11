@@ -74,17 +74,6 @@ mod test_builders;
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
 
-pub fn executable_source(source: impl AsRef<str>) -> String {
-    let source = source.as_ref();
-    if source.trim_start().starts_with("namespace ") {
-        source.to_string()
-    } else if source.starts_with('\n') {
-        format!("namespace $exec{source}")
-    } else {
-        format!("namespace $exec\n{source}")
-    }
-}
-
 pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
     let source = source.to_string();
     if source.trim_start().starts_with("namespace ") {

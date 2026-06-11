@@ -157,18 +157,16 @@ mod tests {
     fn measures_trivial_program() {
         // `measure_program()` already cross-checks our derived totals against the processor's
         // authoritative values; this test just smoke-checks basic measurement.
-        let shape = measure_program("namespace $exec\n\nbegin push.1 drop end").expect("measure");
+        let shape = measure_program("begin push.1 drop end").expect("measure");
         assert!(shape.totals.core_rows > 0, "main trace should include framing rows");
         assert!(shape.totals.padded_total().is_power_of_two());
     }
 
     #[test]
     fn hperm_adds_rows_beyond_baseline() {
-        let baseline =
-            measure_program("namespace $exec\n\nbegin push.1 drop end").expect("baseline");
+        let baseline = measure_program("begin push.1 drop end").expect("baseline");
         let with_hperm =
-            measure_program("namespace $exec\n\nbegin padw padw padw hperm dropw dropw dropw end")
-                .expect("hperm");
+            measure_program("begin padw padw padw hperm dropw dropw dropw end").expect("hperm");
         assert!(
             with_hperm.breakdown.hasher_rows > baseline.breakdown.hasher_rows,
             "hperm should add hasher rows above the baseline ({} vs {})",

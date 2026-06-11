@@ -49,30 +49,17 @@ impl Host for YieldingAsyncHost {
     }
 }
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    let source = source.as_ref();
-    if source.trim_start().starts_with("namespace ") {
-        source.to_string()
-    } else if source.starts_with('\n') {
-        format!("namespace $exec{source}")
-    } else {
-        format!("namespace $exec\n{source}")
-    }
-}
-
 fn simple_program() -> miden_processor::Program {
     Assembler::default()
         .assemble_program(
             "program",
-            exec_source(
-                r#"
+            r#"
             begin
                 repeat.64
                     swap dup.1 add
                 end
             end
             "#,
-            ),
         )
         .expect("program should compile")
         .unwrap_program()
@@ -120,7 +107,7 @@ async fn prove_async_supports_async_only_host_events() {
     let event_name = EventName::new("test::async::prove");
     let event_id = event_name.to_event_id().as_u64();
     let program = Assembler::default()
-        .assemble_program("program", exec_source(format!("begin push.{event_id} emit drop end")))
+        .assemble_program("program", format!("begin push.{event_id} emit drop end"))
         .expect("program should compile")
         .unwrap_program();
 

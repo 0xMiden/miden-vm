@@ -65,7 +65,7 @@ let assembler = Assembler::default();
 // compile Miden assembly source code into a program
 let program = assembler.assemble_program(
     "prg",
-    "namespace $exec\n\nbegin push.3 push.5 add swap drop end",
+    "begin push.3 push.5 add swap drop end",
 ).unwrap();
 
 // use an empty list as initial stack
@@ -120,7 +120,7 @@ let assembler = Assembler::default();
 // this is our program, we compile it from assembly code
 let program = assembler.assemble_program(
     "prg",
-    "namespace $exec\n\nbegin push.3 push.5 add swap drop end",
+    "begin push.3 push.5 add swap drop end",
 ).unwrap();
 
 // let's execute it and generate a STARK proof
@@ -208,8 +208,6 @@ let n = 50;
 // instantiate the default assembler and compile the program
 let source = format!(
     "
-    namespace $exec
-
     begin
         repeat.{}
             swap dup.1 add

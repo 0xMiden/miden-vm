@@ -1,8 +1,4 @@
-use alloc::{
-    string::{String, ToString},
-    sync::Arc,
-    vec,
-};
+use alloc::{string::ToString, sync::Arc, vec};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
@@ -39,10 +35,6 @@ fn parse_kernel_source(
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
 }
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    miden_utils_testing::executable_source(source)
-}
-
 #[test]
 fn stack_get_word_out_of_bounds_read() {
     // This event reads a word whose last felt is at index 16, which we will set to be out of bounds
@@ -66,7 +58,7 @@ fn stack_get_word_out_of_bounds_read() {
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
-        .assemble_program("program", exec_source(&program_source))
+        .assemble_program("program", &program_source)
         .expect("program should assemble")
         .unwrap_program();
 
@@ -134,7 +126,7 @@ fn test_reset_stack_in_buffer_from_drop() {
     let initial_stack: [u64; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let final_stack: Vec<u64> = initial_stack.to_vec();
 
-    let test = build_test!(exec_source(&asm), &initial_stack);
+    let test = build_test!(asm, &initial_stack);
     test.expect_stack(&final_stack);
 }
 
@@ -180,7 +172,7 @@ fn test_reset_stack_in_buffer_from_restore_context() {
     let initial_stack: [u64; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let final_stack: Vec<u64> = initial_stack.to_vec();
 
-    let test = build_test!(exec_source(&asm), &initial_stack);
+    let test = build_test!(asm, &initial_stack);
     test.expect_stack(&final_stack);
 }
 

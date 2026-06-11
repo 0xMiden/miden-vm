@@ -1,9 +1,4 @@
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, Path, PathBuf,
@@ -64,25 +59,21 @@ fn parse_kernel_module(source_manager: Arc<dyn SourceManager>, source: &str) -> 
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
 }
 
-fn exec_source(source: impl AsRef<str>) -> String {
-    miden_utils_testing::executable_source(source)
-}
-
 macro_rules! build_test {
     ($source:expr) => {{
-        miden_utils_testing::build_test!(&exec_source($source))
+        miden_utils_testing::build_test!($source)
     }};
     ($source:expr, $($tail:tt)+) => {{
-        miden_utils_testing::build_test!(exec_source($source), $($tail)+)
+        miden_utils_testing::build_test!($source, $($tail)+)
     }};
 }
 
 macro_rules! build_test_by_mode {
     ($mode:expr, $source:expr) => {{
-        miden_utils_testing::build_test_by_mode!($mode, &exec_source($source))
+        miden_utils_testing::build_test_by_mode!($mode, $source)
     }};
     ($mode:expr, $source:expr, $($tail:tt)+) => {{
-        miden_utils_testing::build_test_by_mode!($mode, exec_source($source), $($tail)+)
+        miden_utils_testing::build_test_by_mode!($mode, $source, $($tail)+)
     }};
 }
 
@@ -214,7 +205,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
         end"
     );
     let program = Assembler::new(source_manager.clone())
-        .assemble_program("program", exec_source(source))
+        .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -249,7 +240,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
         end"
     );
     let program = Assembler::new(source_manager.clone())
-        .assemble_program("program", exec_source(source))
+        .assemble_program("program", source)
         .unwrap()
         .unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -864,7 +855,7 @@ fn test_diagnostic_procedure_not_found_call() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", exec_source(program_source))
+        .assemble_program("program", program_source)
         .unwrap()
         .unwrap_program();
 
@@ -916,7 +907,7 @@ fn test_diagnostic_procedure_not_found_join() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", exec_source(program_source))
+        .assemble_program("program", program_source)
         .unwrap()
         .unwrap_program();
 
@@ -972,7 +963,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", exec_source(program_source))
+        .assemble_program("program", program_source)
         .unwrap()
         .unwrap_program();
 
@@ -1029,7 +1020,7 @@ fn test_diagnostic_procedure_not_found_split() {
     let program = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
-        .assemble_program("program", exec_source(program_source))
+        .assemble_program("program", program_source)
         .unwrap()
         .unwrap_program();
 
@@ -1259,7 +1250,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let program = {
         let program = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
             .unwrap()
-            .assemble_program("program", exec_source(program_source))
+            .assemble_program("program", program_source)
             .unwrap()
             .unwrap_program();
 
