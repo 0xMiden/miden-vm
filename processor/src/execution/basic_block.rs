@@ -41,7 +41,7 @@ where
     );
 
     // Finalize the clock cycle corresponding to the SPAN operation.
-    let source_node = state.current_source_node();
+    let source_node_id = state.current_source_node_id();
     finalize_clock_cycle_with_continuation(
         state.processor,
         state.tracer,
@@ -54,7 +54,7 @@ where
                     batch_index: 0,
                     op_idx_in_batch: 0,
                 },
-                source_node,
+                source_node_id,
             ))
         },
         current_forest,
@@ -160,7 +160,7 @@ where
             // what happens *after* the clock is incremented. For example, if we were to put a
             // `Continuation::Respan` here instead, and execution was stopped after this RESPAN,
             // then the next call to `Processor::execute_impl()` would re-execute the RESPAN.
-            let source_node = state.current_source_node();
+            let source_node_id = state.current_source_node_id();
             finalize_clock_cycle_with_continuation(
                 state.processor,
                 state.tracer,
@@ -169,7 +169,7 @@ where
                 || {
                     Some((
                         Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch: 0 },
-                        source_node,
+                        source_node_id,
                     ))
                 },
                 current_forest,
@@ -276,7 +276,7 @@ where
                         batch_index,
                         op_idx_in_batch,
                     ),
-                    source_node: state.current_source_node(),
+                    source_node_id: state.current_source_node_id(),
                 });
             },
             _ => {
@@ -298,7 +298,7 @@ where
         };
 
         // Finalize the clock cycle corresponding to the operation.
-        let source_node = state.current_source_node();
+        let source_node_id = state.current_source_node_id();
         finalize_clock_cycle_with_continuation_and_op_helpers(
             state.processor,
             state.tracer,
@@ -312,7 +312,7 @@ where
                         batch_index,
                         op_idx_in_batch,
                     ),
-                    source_node,
+                    source_node_id,
                 ))
             },
             operation_helpers,
@@ -366,7 +366,7 @@ fn get_continuation_after_executing_operation<F>(
 /// that enum variant for more details.
 pub fn finish_emit_op_execution<P, S, T, F>(
     post_emit_continuation: Continuation<F>,
-    source_node: Option<DebugSourceNodeId>,
+    source_node_id: Option<DebugSourceNodeId>,
     processor: &mut P,
     continuation_stack: &mut ContinuationStack<F>,
     current_forest: &F,
@@ -399,12 +399,13 @@ where
         continuation_stack,
         {
             let post_emit_continuation = post_emit_continuation.clone();
-            || Some((post_emit_continuation, source_node))
+            || Some((post_emit_continuation, source_node_id))
         },
         current_forest,
     )?;
 
-    continuation_stack.push_continuation_with_source(post_emit_continuation, source_node);
+    continuation_stack
+        .push_continuation_with_source_node_id(post_emit_continuation, source_node_id);
 
     ControlFlow::Continue(())
 }

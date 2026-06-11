@@ -97,17 +97,17 @@ where
     // -----------------------------
     state
         .continuation_stack
-        .push_finish_dyn_with_source(current_node_id, state.current_source_node());
+        .push_finish_dyn_with_source_node_id(current_node_id, state.current_source_node_id());
 
     // if the callee is not in the program's MAST forest, then we need to break to allow the
     // implementing processor to fetch it (possibly asynchronously in an external library in the
     // host).
     match current_forest.find_procedure_root(callee_hash) {
         Some(callee_id) => {
-            let source_node = match state.source_debug_info {
+            let source_node_id = match state.source_debug_info {
                 Some(source_debug_info) => {
                     match source_debug_info.unique_source_root_for_exec_node(callee_id) {
-                        Ok(source_node) => source_node,
+                        Ok(source_node_id) => source_node_id,
                         Err(_) => {
                             return ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
                             "package debug source graph has ambiguous or malformed dynamic call root",
@@ -118,7 +118,9 @@ where
                 },
                 None => None,
             };
-            state.continuation_stack.push_start_node_with_source(callee_id, source_node);
+            state
+                .continuation_stack
+                .push_start_node_with_source_node_id(callee_id, source_node_id);
         },
         None => {
             // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
@@ -128,7 +130,7 @@ where
             // to proceed properly.
             return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
                 callee_hash,
-                source_node: state.current_source_node(),
+                source_node_id: state.current_source_node_id(),
             });
         },
     }
@@ -238,7 +240,7 @@ where
             // to proceed properly.
             return ControlFlow::Break(InternalBreakReason::LoadMastForestFromDyn {
                 callee_hash,
-                source_node: None,
+                source_node_id: None,
             });
         },
     }

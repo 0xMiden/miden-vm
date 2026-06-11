@@ -161,13 +161,13 @@ impl ReplayProcessor {
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { op_idx: _, continuation, source_node } => {
+                InternalBreakReason::Emit { op_idx: _, continuation, source_node_id } => {
                     // do nothing - in replay processor we don't need to emit anything
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
                     finish_emit_op_execution(
                         continuation,
-                        source_node,
+                        source_node_id,
                         self,
                         continuation_stack,
                         current_forest,
@@ -205,7 +205,7 @@ impl ReplayProcessor {
                 InternalBreakReason::LoadMastForestFromExternal {
                     external_node_id,
                     procedure_hash: _,
-                    source_node: _,
+                    source_node_id: _,
                 } => {
                     // load mast forest from replay
                     let (root_id, new_forest_id) =

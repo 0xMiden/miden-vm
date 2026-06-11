@@ -46,39 +46,39 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub tracer: &'a mut T,
     pub stopper: &'a S,
     pub source_debug_info: Option<&'a PackageDebugInfo>,
-    pub current_source_node: Option<DebugSourceNodeId>,
+    pub current_source_node_id: Option<DebugSourceNodeId>,
 }
 
 impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
-    pub fn current_source_node(&self) -> Option<DebugSourceNodeId> {
-        self.current_source_node
+    pub fn current_source_node_id(&self) -> Option<DebugSourceNodeId> {
+        self.current_source_node_id
     }
 
-    pub fn child_source_node(
+    pub fn child_source_node_id(
         &self,
         child_index: usize,
     ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
         let Some(source_debug_info) = self.source_debug_info else {
             return Ok(None);
         };
-        let Some(current_source_node) = self.current_source_node else {
+        let Some(current_source_node_id) = self.current_source_node_id else {
             return Ok(None);
         };
 
         Ok(source_debug_info
-            .child_source_node(current_source_node, child_index)
+            .child_source_node(current_source_node_id, child_index)
             .map_err(|_| {
                 ExecutionError::Internal(
                     "package debug source graph has malformed child references",
                 )
             })?
-            .map(|(source_node, _)| source_node))
+            .map(|(source_node_id, _)| source_node_id))
     }
 
     pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'a>> {
         Some(PackageSourceDebugContext::new_optional(
             self.source_debug_info?,
-            self.current_source_node,
+            self.current_source_node_id,
         ))
     }
 
@@ -149,7 +149,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { op_idx, continuation, source_node } => {
+///         InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -212,13 +212,13 @@ where
         tracer,
         stopper,
         source_debug_info: Some(source_debug_info),
-        current_source_node: None,
+        current_source_node_id: None,
     };
 
-    while let Some((continuation, source_node)) =
-        state.continuation_stack.pop_continuation_with_source()
+    while let Some((continuation, source_node_id)) =
+        state.continuation_stack.pop_continuation_with_source_node_id()
     {
-        state.current_source_node = source_node;
+        state.current_source_node_id = source_node_id;
         match continuation {
             Continuation::StartNode(node_id) => {
                 let node = current_forest.get_node_by_id(node_id).unwrap();
@@ -251,7 +251,7 @@ where
                     MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
                     MastNode::External(_) => external::execute_external_node(
                         node_id,
-                        state.current_source_node(),
+                        state.current_source_node_id(),
                         current_forest,
                         state.tracer,
                     )?,
@@ -340,7 +340,7 @@ where
         tracer,
         stopper,
         source_debug_info: None,
-        current_source_node: None,
+        current_source_node_id: None,
     };
 
     while let Some(continuation) = state.continuation_stack.pop_continuation() {
@@ -498,16 +498,16 @@ pub enum InternalBreakReason<F> {
     Emit {
         op_idx: usize,
         continuation: Continuation<F>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromDyn {
         callee_hash: Word,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromExternal {
         external_node_id: MastNodeId,
         procedure_hash: Word,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     },
 }
 

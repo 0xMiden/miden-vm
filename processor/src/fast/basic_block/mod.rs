@@ -28,9 +28,9 @@ impl FastProcessor {
         host: &impl BaseHost,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
-        let context = package_source_context(package_debug_info, source_node);
+        let context = package_source_context(package_debug_info, source_node_id);
         match handle_system_event(self, system_event)
             .map_exec_err_with_package_source_op_idx(context, host, op_idx)
         {
@@ -47,13 +47,13 @@ impl FastProcessor {
         event_id: EventId,
         mutations: Result<Vec<AdviceMutation>, EventError>,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let mutations = match mutations {
             Ok(mutations) => mutations,
             Err(err) => {
                 let event_name = host.resolve_event(event_id).cloned();
-                let context = package_source_context(package_debug_info, source_node);
+                let context = package_source_context(package_debug_info, source_node_id);
                 if let Some(context) = context {
                     return ControlFlow::Break(BreakReason::Err(
                         event_error_with_package_source_context(
@@ -75,7 +75,7 @@ impl FastProcessor {
         match self.advice.apply_mutations(mutations) {
             Ok(()) => ControlFlow::Continue(()),
             Err(err) => {
-                let context = package_source_context(package_debug_info, source_node);
+                let context = package_source_context(package_debug_info, source_node_id);
                 let err = if let Some(context) = context {
                     advice_error_with_package_source_context(err, context, host, Some(op_idx))
                 } else {
@@ -92,7 +92,7 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
@@ -103,7 +103,7 @@ impl FastProcessor {
                 host,
                 op_idx,
                 package_debug_info,
-                source_node,
+                source_node_id,
             );
         }
 
@@ -115,7 +115,7 @@ impl FastProcessor {
             event_id,
             mutations,
             package_debug_info,
-            source_node,
+            source_node_id,
         )
     }
 
@@ -125,7 +125,7 @@ impl FastProcessor {
         host: &mut impl Host,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceNodeId>,
+        source_node_id: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
@@ -135,7 +135,7 @@ impl FastProcessor {
                 host,
                 op_idx,
                 package_debug_info,
-                source_node,
+                source_node_id,
             );
         }
 
@@ -147,14 +147,14 @@ impl FastProcessor {
             event_id,
             mutations,
             package_debug_info,
-            source_node,
+            source_node_id,
         )
     }
 }
 
 fn package_source_context(
     package_debug_info: Option<&PackageDebugInfo>,
-    source_node: Option<DebugSourceNodeId>,
+    source_node_id: Option<DebugSourceNodeId>,
 ) -> Option<PackageSourceDebugContext<'_>> {
-    Some(PackageSourceDebugContext::new_optional(package_debug_info?, source_node))
+    Some(PackageSourceDebugContext::new_optional(package_debug_info?, source_node_id))
 }

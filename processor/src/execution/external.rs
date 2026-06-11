@@ -19,7 +19,7 @@ use crate::{
 #[inline(always)]
 pub(super) fn execute_external_node<T, F>(
     external_node_id: MastNodeId,
-    source_node: Option<DebugSourceNodeId>,
+    source_node_id: Option<DebugSourceNodeId>,
     current_forest: &mut F,
     tracer: &mut T,
 ) -> ControlFlow<InternalBreakReason<F>>
@@ -45,7 +45,7 @@ where
     ControlFlow::Break(InternalBreakReason::LoadMastForestFromExternal {
         external_node_id,
         procedure_hash: external_node.digest(),
-        source_node,
+        source_node_id,
     })
 }
 
@@ -84,7 +84,7 @@ where
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
-    let source_node =
+    let source_node_id =
         match (source_debug_info, old_forest.get_node_by_id(resolved_node_id_new_forest)) {
             // `source_debug_info` belongs to the caller/current package.
             // `resolved_node_id_new_forest` belongs to the loaded forest, so only use
@@ -98,7 +98,7 @@ where
                 match source_debug_info
                     .unique_source_root_for_exec_node(resolved_node_id_new_forest)
                 {
-                    Ok(source_node) => source_node,
+                    Ok(source_node_id) => source_node_id,
                     Err(_) => {
                         return ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
                             "package debug source graph has ambiguous or malformed external root",
@@ -113,7 +113,8 @@ where
     continuation_stack.push_enter_forest(old_forest.clone());
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    continuation_stack.push_start_node_with_source(resolved_node_id_new_forest, source_node);
+    continuation_stack
+        .push_start_node_with_source_node_id(resolved_node_id_new_forest, source_node_id);
 
     // Update the current forest to the new MAST forest.
     *current_forest = new_mast_forest;
@@ -233,7 +234,7 @@ mod tests {
 
         assert_matches!(result, ControlFlow::Continue(()));
         assert_matches!(
-            continuation_stack.pop_continuation_with_source(),
+            continuation_stack.pop_continuation_with_source_node_id(),
             Some((Continuation::StartNode(node_id), None)) if node_id == target_id
         );
     }
