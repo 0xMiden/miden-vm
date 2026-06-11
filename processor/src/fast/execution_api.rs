@@ -584,7 +584,6 @@ impl FastProcessor {
                         external_node_id,
                         current_forest,
                         continuation_stack,
-                        package_debug_info,
                         tracer,
                     )?;
                 },
@@ -690,7 +689,6 @@ impl FastProcessor {
                         external_node_id,
                         current_forest,
                         continuation_stack,
-                        package_debug_info,
                         tracer,
                     )?;
                 },

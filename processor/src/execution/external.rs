@@ -1,9 +1,9 @@
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
-    BreakReason, ExecutionError,
+    BreakReason,
     continuation_stack::ContinuationStack,
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
@@ -57,7 +57,6 @@ pub fn finish_load_mast_forest_from_external<F, T>(
     external_node_id_old_forest: MastNodeId,
     current_forest: &mut F,
     continuation_stack: &mut ContinuationStack<F>,
-    source_debug_info: Option<&PackageDebugInfo>,
     tracer: &mut T,
 ) -> ControlFlow<BreakReason<F>>
 where
@@ -84,37 +83,14 @@ where
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
-    let source_node_id =
-        match (source_debug_info, old_forest.get_node_by_id(resolved_node_id_new_forest)) {
-            // `source_debug_info` belongs to the caller/current package.
-            // `resolved_node_id_new_forest` belongs to the loaded forest, so only use
-            // caller debug info when the same ID also names a matching non-external
-            // node in the caller forest. Otherwise the loaded forest needs its own
-            // debug info, which this continuation does not receive.
-            (Some(source_debug_info), Some(resolved_node_old_forest))
-                if !resolved_node_old_forest.is_external()
-                    && resolved_node_old_forest.digest() == external_node_old_forest.digest() =>
-            {
-                match source_debug_info
-                    .unique_source_root_for_exec_node(resolved_node_id_new_forest)
-                {
-                    Ok(source_node_id) => source_node_id,
-                    Err(_) => {
-                        return ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
-                            "package debug source graph has ambiguous or malformed external root",
-                        )));
-                    },
-                }
-            },
-            _ => None,
-        };
-
     // Push current forest to the continuation stack so that we can return to it
     continuation_stack.push_enter_forest(old_forest.clone());
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    continuation_stack
-        .push_start_node_with_source_node_id(resolved_node_id_new_forest, source_node_id);
+    //
+    // Caller package debug info describes the forest that contained the `External` node, not the
+    // loaded forest. The loaded root therefore starts without a source sidecar here.
+    continuation_stack.push_start_node_with_source_node_id(resolved_node_id_new_forest, None);
 
     // Update the current forest to the new MAST forest.
     *current_forest = new_mast_forest;
@@ -131,68 +107,17 @@ mod tests {
 
     use miden_core::{
         Felt, assert_matches,
-        mast::{
-            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
-            MastNodeExt,
-        },
+        mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor},
         operations::Operation,
+        program::Program,
     };
-    use miden_mast_package::debug_info::{
-        DebugSourceGraphSection, DebugSourceNode, DebugSourceNodeId, PackageDebugInfo,
-    };
+    use miden_mast_package::debug_info::DebugSourceNodeId;
 
     use super::*;
     use crate::{Continuation, fast::NoopTracer};
 
     #[test]
-    fn current_package_external_resolution_rejects_ambiguous_source_root() {
-        let mut forest = MastForest::new();
-        let target_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(7))])
-            .add_to_forest(&mut forest)
-            .unwrap();
-        let target_digest = forest[target_id].digest();
-        let external_id =
-            ExternalNodeBuilder::new(target_digest).add_to_forest(&mut forest).unwrap();
-        forest.make_root(target_id);
-        forest.make_root(external_id);
-
-        let source_a = DebugSourceNodeId::from(0);
-        let source_b = DebugSourceNodeId::from(1);
-        let package_debug_info = PackageDebugInfo {
-            source_graph: Some(DebugSourceGraphSection::from_parts(
-                vec![
-                    DebugSourceNode::new(target_id, vec![], 0, 1),
-                    DebugSourceNode::new(target_id, vec![], 0, 1),
-                ],
-                vec![source_a, source_b],
-            )),
-            ..PackageDebugInfo::default()
-        };
-
-        let mut current_forest = Arc::new(forest);
-        let new_mast_forest = current_forest.clone();
-        let mut continuation_stack = ContinuationStack::default();
-        let mut tracer = NoopTracer;
-
-        let result = finish_load_mast_forest_from_external(
-            target_id,
-            new_mast_forest,
-            external_id,
-            &mut current_forest,
-            &mut continuation_stack,
-            Some(&package_debug_info),
-            &mut tracer,
-        );
-
-        assert_matches!(
-            result,
-            ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(msg)))
-                if msg.contains("ambiguous or malformed external root")
-        );
-    }
-
-    #[test]
-    fn loaded_external_forest_does_not_use_caller_source_roots() {
+    fn loaded_external_forest_starts_without_source_sidecar() {
         let mut current_forest = MastForest::new();
         let mut loaded_forest = MastForest::new();
         let target_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(7))])
@@ -204,22 +129,12 @@ mod tests {
             .unwrap();
         current_forest.make_root(external_id);
 
-        let source_a = DebugSourceNodeId::from(0);
-        let source_b = DebugSourceNodeId::from(1);
-        let package_debug_info = PackageDebugInfo {
-            source_graph: Some(DebugSourceGraphSection::from_parts(
-                vec![
-                    DebugSourceNode::new(target_id, vec![], 0, 1),
-                    DebugSourceNode::new(target_id, vec![], 0, 1),
-                ],
-                vec![source_a, source_b],
-            )),
-            ..PackageDebugInfo::default()
-        };
-
+        let caller_source_node_id = DebugSourceNodeId::from(0);
         let mut current_forest = Arc::new(current_forest);
+        let program = Program::new(current_forest.clone(), external_id);
         let new_mast_forest = Arc::new(loaded_forest);
-        let mut continuation_stack = ContinuationStack::default();
+        let mut continuation_stack =
+            ContinuationStack::new_with_source_node_id(&program, caller_source_node_id);
         let mut tracer = NoopTracer;
 
         let result = finish_load_mast_forest_from_external(
@@ -228,7 +143,6 @@ mod tests {
             external_id,
             &mut current_forest,
             &mut continuation_stack,
-            Some(&package_debug_info),
             &mut tracer,
         );
 
@@ -236,6 +150,15 @@ mod tests {
         assert_matches!(
             continuation_stack.pop_continuation_with_source_node_id(),
             Some((Continuation::StartNode(node_id), None)) if node_id == target_id
+        );
+        assert_matches!(
+            continuation_stack.pop_continuation_with_source_node_id(),
+            Some((Continuation::EnterForest(_), None))
+        );
+        assert_matches!(
+            continuation_stack.pop_continuation_with_source_node_id(),
+            Some((Continuation::StartNode(node_id), Some(source_node_id)))
+                if node_id == external_id && source_node_id == caller_source_node_id
         );
     }
 }
