@@ -19,7 +19,7 @@ use proptest::prelude::{Strategy, any};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Dependency, PackageId, debug_info::DebugSourceMastNodeId};
+use crate::{Dependency, PackageId, debug_info::DebugSourceNodeId};
 
 // PACKAGE MANIFEST
 // ================================================================================================
@@ -545,7 +545,7 @@ pub struct ProcedureExport {
     /// distinct source/debug metadata in the package-owned source occurrence graph.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
-    pub source_node: Option<DebugSourceMastNodeId>,
+    pub source_node: Option<DebugSourceNodeId>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Word::default()"))]
     pub digest: Word,
@@ -576,7 +576,7 @@ impl ProcedureExport {
         }
     }
 
-    pub fn with_source_node(mut self, source_node: Option<DebugSourceMastNodeId>) -> Self {
+    pub fn with_source_node(mut self, source_node: Option<DebugSourceNodeId>) -> Self {
         self.source_node = source_node;
         self
     }

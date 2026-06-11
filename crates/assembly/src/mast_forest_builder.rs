@@ -25,12 +25,12 @@ use finalizer::{BuiltMastForest, MastForestFinalizer};
 mod node_identity_policy;
 use node_identity_policy::FinalForestLayout;
 mod pending_record;
-pub(crate) use pending_record::{AsmOpRef, DebugVarRef, MastNodeRef, SourceMastNodeRef};
+pub(crate) use pending_record::{AsmOpRef, DebugVarRef, MastNodeRef, SourceNodeRef};
 use pending_record::{
-    MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind, PendingSourceMastNode,
+    MastNodeKey, PendingMastNode, PendingMastNodeDraft, PendingMastNodeKind, PendingSourceNode,
 };
 mod source_debug_graph;
-pub(crate) use source_debug_graph::{SourceDebugGraph, SourceMastNode, SourceMastNodeId};
+pub(crate) use source_debug_graph::{SourceDebugGraph, SourceNode, SourceNodeId};
 mod static_import;
 
 // CONSTANTS
@@ -71,7 +71,7 @@ pub struct MastForestBuilder {
     /// Procedure roots recorded by builder-local node ref until finalization.
     procedure_root_refs: Vec<MastNodeRef>,
     /// Procedure roots recorded by builder-local source/debug occurrence ref until finalization.
-    procedure_source_root_refs: Vec<SourceMastNodeRef>,
+    procedure_source_root_refs: Vec<SourceNodeRef>,
     /// Number of source/debug occurrences already selected as procedure roots per execution ref.
     procedure_source_root_count_by_node_ref: BTreeMap<MastNodeRef, usize>,
     /// A map of MAST node interning keys to their corresponding builder-local node refs.
@@ -79,11 +79,11 @@ pub struct MastForestBuilder {
     /// Builder-owned dense storage for node refs.
     nodes: IndexVec<MastNodeRef, PendingMastNode>,
     /// Builder-owned dense storage for source/debug occurrences.
-    source_nodes: IndexVec<SourceMastNodeRef, PendingSourceMastNode>,
+    source_nodes: IndexVec<SourceNodeRef, PendingSourceNode>,
     /// Most recent source occurrence for each execution node ref.
-    latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceMastNodeRef>,
+    latest_source_ref_by_node_ref: BTreeMap<MastNodeRef, SourceNodeRef>,
     /// Source occurrences recorded for each execution node ref, in creation order.
-    source_refs_by_node_ref: BTreeMap<MastNodeRef, Vec<SourceMastNodeRef>>,
+    source_refs_by_node_ref: BTreeMap<MastNodeRef, Vec<SourceNodeRef>>,
     /// Builder-owned dense storage for assembly op refs.
     asm_op_by_ref: IndexVec<AsmOpRef, AssemblyOp>,
     /// Builder-owned dense storage for debug variable refs.
@@ -427,10 +427,7 @@ impl MastForestBuilder {
         Ok(node_ref)
     }
 
-    fn source_child_refs_for_node_refs(
-        &self,
-        child_refs: &[MastNodeRef],
-    ) -> Vec<SourceMastNodeRef> {
+    fn source_child_refs_for_node_refs(&self, child_refs: &[MastNodeRef]) -> Vec<SourceNodeRef> {
         let mut child_counts = BTreeMap::<MastNodeRef, usize>::new();
         for child_ref in child_refs {
             *child_counts.entry(*child_ref).or_default() += 1;
@@ -460,9 +457,9 @@ impl MastForestBuilder {
     fn record_source_occurrence(
         &mut self,
         exec_ref: MastNodeRef,
-        child_refs: Vec<SourceMastNodeRef>,
+        child_refs: Vec<SourceNodeRef>,
         draft: &PendingMastNodeDraft,
-    ) -> Result<SourceMastNodeRef, Report> {
+    ) -> Result<SourceNodeRef, Report> {
         let (op_start, op_end) = self.source_op_range_for_draft(draft);
         self.push_source_occurrence(
             exec_ref,
@@ -494,16 +491,16 @@ impl MastForestBuilder {
     fn push_source_occurrence(
         &mut self,
         exec_ref: MastNodeRef,
-        child_refs: Vec<SourceMastNodeRef>,
+        child_refs: Vec<SourceNodeRef>,
         op_start: usize,
         op_end: usize,
         asm_ops: Vec<(usize, AsmOpRef)>,
         debug_vars: Vec<(usize, DebugVarRef)>,
         update_latest: bool,
-    ) -> Result<SourceMastNodeRef, Report> {
+    ) -> Result<SourceNodeRef, Report> {
         let source_ref = self
             .source_nodes
-            .push(PendingSourceMastNode {
+            .push(PendingSourceNode {
                 exec_ref,
                 child_refs,
                 op_start,
@@ -635,7 +632,7 @@ impl MastForestBuilder {
     pub(crate) fn latest_source_ref_for_node_ref(
         &self,
         node_ref: MastNodeRef,
-    ) -> Option<SourceMastNodeRef> {
+    ) -> Option<SourceNodeRef> {
         self.latest_source_ref_by_node_ref.get(&node_ref).copied()
     }
 
@@ -890,7 +887,7 @@ impl MastForestBuilder {
     fn record_merged_source_occurrences(
         &mut self,
         merged_ref: MastNodeRef,
-        merged_source_occurrences: &[(SourceMastNodeRef, usize)],
+        merged_source_occurrences: &[(SourceNodeRef, usize)],
     ) -> Result<(), Report> {
         for &(source_ref, new_start) in merged_source_occurrences {
             let source_node = self.source_nodes[source_ref].clone();
@@ -938,7 +935,7 @@ impl MastForestBuilder {
         // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpRef)> = Vec::new();
         let mut merged_debug_vars: Vec<(usize, DebugVarRef)> = Vec::new();
-        let mut merged_source_occurrences: Vec<(SourceMastNodeRef, usize)> = Vec::new();
+        let mut merged_source_occurrences: Vec<(SourceNodeRef, usize)> = Vec::new();
 
         let mut merged_basic_block_refs: Vec<MastNodeRef> = Vec::new();
 
@@ -1107,8 +1104,8 @@ mod tests {
         operations::{DebugVarLocation, Operation},
     };
     use miden_mast_package::debug_info::{
-        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-        DebugSourceMastNodeId, DebugSourceVar, PackageDebugInfo,
+        DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
+        DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
     };
     use proptest::prelude::*;
 
@@ -1134,7 +1131,7 @@ mod tests {
     fn source_nodes_for_exec(
         source_graph: &SourceDebugGraph,
         exec_node: MastNodeId,
-    ) -> Vec<&SourceMastNode> {
+    ) -> Vec<&SourceNode> {
         source_graph
             .nodes()
             .as_slice()
@@ -1178,12 +1175,12 @@ mod tests {
             .as_slice()
             .iter()
             .map(|source_node| {
-                DebugSourceMastNode::new(
+                DebugSourceNode::new(
                     source_node.exec_node(),
                     source_node
                         .children()
                         .iter()
-                        .map(|child| DebugSourceMastNodeId::from(u32::from(*child)))
+                        .map(|child| DebugSourceNodeId::from(u32::from(*child)))
                         .collect(),
                     source_node.op_start() as u32,
                     source_node.op_end() as u32,
@@ -1193,13 +1190,13 @@ mod tests {
         let roots = source_graph
             .roots()
             .iter()
-            .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
+            .map(|root| DebugSourceNodeId::from(u32::from(*root)))
             .collect();
 
         let mut asm_ops = Vec::new();
         let mut debug_vars = Vec::new();
         for (source_idx, source_node) in source_graph.nodes().as_slice().iter().enumerate() {
-            let source_node_id = DebugSourceMastNodeId::from(source_idx as u32);
+            let source_node_id = DebugSourceNodeId::from(source_idx as u32);
             asm_ops.extend(source_node.asm_ops().iter().map(|(op_idx, asm_op)| {
                 DebugSourceAsmOp::new(
                     source_node_id,
@@ -2051,7 +2048,7 @@ mod tests {
                 static_forest[final_static_block].digest(),
                 Some(static_forest.commitment()),
                 Some(final_static_block),
-                Some(DebugSourceMastNodeId::from(u32::from(static_source_root))),
+                Some(DebugSourceNodeId::from(u32::from(static_source_root))),
             )
             .unwrap();
         let local_asm_op_ref = add_test_asm_op(&mut builder, asm_op);
@@ -2103,7 +2100,7 @@ mod tests {
         let static_source_root = static_source_graph.roots()[0];
         let expected_partial_start = static_source_graph.nodes()[static_source_root].asm_ops()[0].0;
         let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
-        let package_source_root = DebugSourceMastNodeId::from(u32::from(static_source_root));
+        let package_source_root = DebugSourceNodeId::from(u32::from(static_source_root));
         let package_source_graph = package_debug_info
             .source_graph
             .as_ref()
@@ -2169,7 +2166,7 @@ mod tests {
             source_builder.build().unwrap().into_parts_with_source_graph();
         let final_split = source_remapping[&split_ref];
         let package_source_root =
-            DebugSourceMastNodeId::from(u32::from(static_source_graph.roots()[0]));
+            DebugSourceNodeId::from(u32::from(static_source_graph.roots()[0]));
         let mut package_debug_info = package_debug_info_from_source_graph(&static_source_graph);
         let package_source_graph = package_debug_info
             .source_graph
@@ -2464,7 +2461,7 @@ mod tests {
                 static_forest[final_alias_b].digest(),
                 Some(static_forest.commitment()),
                 Some(final_alias_b),
-                Some(DebugSourceMastNodeId::from(u32::from(alias_b_source_root))),
+                Some(DebugSourceNodeId::from(u32::from(alias_b_source_root))),
             )
             .unwrap();
         record_test_root(&mut provenance_builder, linked_alias_b_ref);

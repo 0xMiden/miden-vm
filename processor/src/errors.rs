@@ -5,7 +5,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::program::MIN_STACK_DEPTH;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
@@ -430,17 +430,17 @@ pub struct MerklePathVerificationFailedInner {
 
 /// Source-occurrence debug context decoded from package debug sections.
 ///
-/// This keeps diagnostic lookup keyed by [`DebugSourceMastNodeId`] so two source occurrences that
+/// This keeps diagnostic lookup keyed by [`DebugSourceNodeId`] so two source occurrences that
 /// reduce to the same executable MAST node can still report distinct source locations.
 #[derive(Clone, Copy, Debug)]
 pub struct PackageSourceDebugContext<'a> {
     debug_info: &'a PackageDebugInfo,
-    source_node: Option<DebugSourceMastNodeId>,
+    source_node: Option<DebugSourceNodeId>,
 }
 
 impl<'a> PackageSourceDebugContext<'a> {
     /// Creates a source debug context for one package-owned source/debug MAST occurrence.
-    pub fn new(debug_info: &'a PackageDebugInfo, source_node: DebugSourceMastNodeId) -> Self {
+    pub fn new(debug_info: &'a PackageDebugInfo, source_node: DebugSourceNodeId) -> Self {
         Self {
             debug_info,
             source_node: Some(source_node),
@@ -450,13 +450,13 @@ impl<'a> PackageSourceDebugContext<'a> {
     /// Creates a package debug context when source location metadata may be unavailable.
     pub(crate) fn new_optional(
         debug_info: &'a PackageDebugInfo,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> Self {
         Self { debug_info, source_node }
     }
 
     /// Returns the source/debug MAST occurrence associated with this context, if known.
-    pub fn source_node(&self) -> Option<DebugSourceMastNodeId> {
+    pub fn source_node(&self) -> Option<DebugSourceNodeId> {
         self.source_node
     }
 
@@ -1069,8 +1069,8 @@ mod error_assertions {
 
     #[test]
     fn package_source_context_resolves_by_source_occurrence() {
-        let source_a = DebugSourceMastNodeId::from(0);
-        let source_b = DebugSourceMastNodeId::from(1);
+        let source_a = DebugSourceNodeId::from(0);
+        let source_b = DebugSourceNodeId::from(1);
         let location_a = Location::new(
             Uri::new("file://pkg/first.masm"),
             ByteIndex::new(10),
@@ -1140,7 +1140,7 @@ mod error_assertions {
 
     #[test]
     fn package_source_context_without_location_uses_unknown_span() {
-        let source_node = DebugSourceMastNodeId::from(0);
+        let source_node = DebugSourceNodeId::from(0);
         let debug_info = PackageDebugInfo {
             source_map: Some(DebugSourceMapSection::from_parts(
                 vec![DebugSourceAsmOp::new(

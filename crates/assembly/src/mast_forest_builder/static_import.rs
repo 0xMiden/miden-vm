@@ -5,10 +5,10 @@ use miden_core::{
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, SubtreeIterator},
     operations::{AssemblyOp, DebugVarInfo},
 };
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use super::{
-    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceMastNodeRef,
+    MastForestBuilder, MastNodeRef, PendingMastNodeDraft, PendingMastNodeKind, SourceNodeRef,
     truncate_index_vec,
 };
 use crate::diagnostics::Report;
@@ -17,7 +17,7 @@ use crate::diagnostics::Report;
 struct StaticSourceRoot {
     forest_idx: usize,
     source_root_id: MastNodeId,
-    source_debug_root_id: Option<DebugSourceMastNodeId>,
+    source_debug_root_id: Option<DebugSourceNodeId>,
 }
 
 struct StaticLinkedRoot {
@@ -134,10 +134,10 @@ impl MastForestBuilder {
     fn record_static_source_occurrence(
         &mut self,
         exec_ref: MastNodeRef,
-        child_refs: Vec<SourceMastNodeRef>,
+        child_refs: Vec<SourceNodeRef>,
         draft: &PendingMastNodeDraft,
         source_op_range: Option<(usize, usize)>,
-    ) -> Result<SourceMastNodeRef, Report> {
+    ) -> Result<SourceNodeRef, Report> {
         let (op_start, op_end) =
             source_op_range.unwrap_or_else(|| self.source_op_range_for_draft(draft));
         self.push_source_occurrence(
@@ -195,7 +195,7 @@ impl MastForestBuilder {
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
-        source_debug_root_id: Option<DebugSourceMastNodeId>,
+        source_debug_root_id: Option<DebugSourceNodeId>,
     ) -> Result<MastNodeRef, Report> {
         if let Some(linked_root) = self.find_statically_linked_root(
             source_library_commitment,
@@ -217,7 +217,7 @@ impl MastForestBuilder {
         &self,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
-        source_debug_root_id: Option<DebugSourceMastNodeId>,
+        source_debug_root_id: Option<DebugSourceNodeId>,
         mast_root: Word,
     ) -> Option<StaticLinkedRoot> {
         if let (Some(source_library_commitment), Some(source_root_id)) =
@@ -248,7 +248,7 @@ impl MastForestBuilder {
         &self,
         source_library_commitment: Word,
         source_root_id: MastNodeId,
-        source_debug_root_id: Option<DebugSourceMastNodeId>,
+        source_debug_root_id: Option<DebugSourceNodeId>,
         mast_root: Word,
     ) -> StaticRootLookup {
         let Some(forest_indices) = self
@@ -354,7 +354,7 @@ impl MastForestBuilder {
         &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
-        source_root_id: DebugSourceMastNodeId,
+        source_root_id: DebugSourceNodeId,
     ) -> Result<MastNodeRef, Report> {
         let mut node_refs_by_source_id = BTreeMap::new();
         self.copy_package_debug_source_node_ref(
@@ -369,8 +369,8 @@ impl MastForestBuilder {
         &mut self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
-        source_node_id: DebugSourceMastNodeId,
-        node_refs_by_source_id: &mut BTreeMap<DebugSourceMastNodeId, MastNodeRef>,
+        source_node_id: DebugSourceNodeId,
+        node_refs_by_source_id: &mut BTreeMap<DebugSourceNodeId, MastNodeRef>,
     ) -> Result<MastNodeRef, Report> {
         if let Some(node_ref) = node_refs_by_source_id.get(&source_node_id).copied() {
             return Ok(node_ref);
@@ -442,7 +442,7 @@ impl MastForestBuilder {
         &self,
         source_forest: &MastForest,
         package_debug_info: &PackageDebugInfo,
-        source_node_id: DebugSourceMastNodeId,
+        source_node_id: DebugSourceNodeId,
         source_exec_node_id: MastNodeId,
     ) -> StaticSourceMetadata {
         let asm_ops = package_debug_info

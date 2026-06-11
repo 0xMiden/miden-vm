@@ -2,7 +2,7 @@ use miden_mast_package::{
     Dependency,
     debug_info::{
         DebugErrorMessage, DebugErrorMessagesSection, DebugSourceAsmOp, DebugSourceGraphSection,
-        DebugSourceMapSection, DebugSourceMastNode, DebugSourceMastNodeId, DebugSourceVar,
+        DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
     },
 };
 
@@ -136,12 +136,12 @@ fn source_graph_section(
             .as_slice()
             .iter()
             .map(|source_node| {
-                Ok(DebugSourceMastNode::new(
+                Ok(DebugSourceNode::new(
                     source_node.exec_node(),
                     source_node
                         .children()
                         .iter()
-                        .map(|child| DebugSourceMastNodeId::from(u32::from(*child)))
+                        .map(|child| DebugSourceNodeId::from(u32::from(*child)))
                         .collect(),
                     source_node.op_start().try_into().map_err(|_| {
                         Report::msg("source node start operation index exceeds u32")
@@ -156,7 +156,7 @@ fn source_graph_section(
         source_graph
             .roots()
             .iter()
-            .map(|root| DebugSourceMastNodeId::from(u32::from(*root)))
+            .map(|root| DebugSourceNodeId::from(u32::from(*root)))
             .collect(),
     ))
 }
@@ -166,7 +166,7 @@ fn source_map_section(source_graph: &SourceDebugGraph) -> Result<DebugSourceMapS
     let mut debug_vars = Vec::new();
 
     for (source_index, source_node) in source_graph.nodes().as_slice().iter().enumerate() {
-        let source_node_id = DebugSourceMastNodeId::from(source_index as u32);
+        let source_node_id = DebugSourceNodeId::from(source_index as u32);
         for (op_idx, asm_op) in source_node.asm_ops() {
             asm_ops.push(DebugSourceAsmOp::new(
                 source_node_id,

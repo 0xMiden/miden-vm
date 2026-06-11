@@ -5,43 +5,33 @@ use miden_assembly_syntax::debuginfo::{FileLineCol, Location};
 use miden_core::{
     mast::MastNodeId,
     operations::{AssemblyOp, DebugVarInfo},
-    utils::{Idx, IndexVec},
+    utils::{IndexVec, newtype_id},
 };
 
-/// Final dense ID for a source/debug occurrence of a MAST node.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-#[repr(transparent)]
-pub(crate) struct SourceMastNodeId(u32);
-
-impl From<u32> for SourceMastNodeId {
-    fn from(value: u32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<SourceMastNodeId> for u32 {
-    fn from(value: SourceMastNodeId) -> Self {
-        value.0
-    }
-}
-
-impl Idx for SourceMastNodeId {}
+// Final dense ID for a source/debug occurrence of a MAST node.
+newtype_id!(SourceNodeId);
 
 /// Finalized source/debug occurrence for a reduced execution node.
 #[derive(Clone, Debug)]
-pub(crate) struct SourceMastNode {
+pub(crate) struct SourceNode {
+    /// Final execution MAST node represented by this source occurrence.
     exec_node: MastNodeId,
-    children: Vec<SourceMastNodeId>,
+    /// Source/debug children in the same order as the execution node children they describe.
+    children: Vec<SourceNodeId>,
+    /// Inclusive operation start within the final execution node.
     op_start: usize,
+    /// Exclusive operation end within the final execution node.
     op_end: usize,
+    /// Assembly operation metadata attached to operation offsets in this occurrence.
     asm_ops: Vec<(usize, AssemblyOp)>,
+    /// Debug variable metadata attached to operation offsets in this occurrence.
     debug_vars: Vec<(usize, DebugVarInfo)>,
 }
 
-impl SourceMastNode {
+impl SourceNode {
     pub(super) fn new(
         exec_node: MastNodeId,
-        children: Vec<SourceMastNodeId>,
+        children: Vec<SourceNodeId>,
         op_start: usize,
         op_end: usize,
         asm_ops: Vec<(usize, AssemblyOp)>,
@@ -61,7 +51,7 @@ impl SourceMastNode {
         self.exec_node
     }
 
-    pub(crate) fn children(&self) -> &[SourceMastNodeId] {
+    pub(crate) fn children(&self) -> &[SourceNodeId] {
         &self.children
     }
 
@@ -103,16 +93,16 @@ impl SourceMastNode {
 /// Source/debug occurrence graph produced alongside a reduced execution MAST forest.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SourceDebugGraph {
-    nodes: IndexVec<SourceMastNodeId, SourceMastNode>,
-    roots: Vec<SourceMastNodeId>,
+    /// Dense source/debug occurrence nodes keyed by [`SourceNodeId`].
+    nodes: IndexVec<SourceNodeId, SourceNode>,
+    /// Source/debug roots corresponding to procedure roots in the finalized MAST forest.
+    roots: Vec<SourceNodeId>,
+    /// Error-code messages collected while assembling this source graph.
     error_messages: BTreeMap<u64, Arc<str>>,
 }
 
 impl SourceDebugGraph {
-    pub(super) fn new(
-        nodes: IndexVec<SourceMastNodeId, SourceMastNode>,
-        roots: Vec<SourceMastNodeId>,
-    ) -> Self {
+    pub(super) fn new(nodes: IndexVec<SourceNodeId, SourceNode>, roots: Vec<SourceNodeId>) -> Self {
         Self {
             nodes,
             roots,
@@ -120,11 +110,11 @@ impl SourceDebugGraph {
         }
     }
 
-    pub(crate) fn nodes(&self) -> &IndexVec<SourceMastNodeId, SourceMastNode> {
+    pub(crate) fn nodes(&self) -> &IndexVec<SourceNodeId, SourceNode> {
         &self.nodes
     }
 
-    pub(crate) fn roots(&self) -> &[SourceMastNodeId] {
+    pub(crate) fn roots(&self) -> &[SourceNodeId] {
         &self.roots
     }
 
@@ -137,10 +127,7 @@ impl SourceDebugGraph {
         self
     }
 
-    pub(crate) fn unique_root_for_exec_node(
-        &self,
-        exec_node: MastNodeId,
-    ) -> Option<SourceMastNodeId> {
+    pub(crate) fn unique_root_for_exec_node(&self, exec_node: MastNodeId) -> Option<SourceNodeId> {
         let mut roots = self
             .roots
             .iter()

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{mast::MastNodeId, program::Program};
-use miden_mast_package::debug_info::DebugSourceMastNodeId;
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -99,7 +99,7 @@ impl<F> Continuation<F> {
 #[derive(Debug, Clone)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
-    source_nodes: Option<Vec<Option<DebugSourceMastNodeId>>>,
+    source_nodes: Option<Vec<Option<DebugSourceNodeId>>>,
 }
 
 impl<F> Default for ContinuationStack<F> {
@@ -120,10 +120,7 @@ impl<F> ContinuationStack<F> {
         Self { stack, source_nodes: None }
     }
 
-    pub(crate) fn new_with_source_node(
-        program: &Program,
-        source_node: DebugSourceMastNodeId,
-    ) -> Self {
+    pub(crate) fn new_with_source_node(program: &Program, source_node: DebugSourceNodeId) -> Self {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
@@ -145,7 +142,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_continuation_with_source(
         &mut self,
         continuation: Continuation<F>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(continuation);
         self.push_source_node(source_node);
@@ -169,7 +166,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_finish_join_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::FinishJoin(node_id));
         self.push_source_node(source_node);
@@ -184,7 +181,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_finish_split_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::FinishSplit(node_id));
         self.push_source_node(source_node);
@@ -199,7 +196,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_finish_loop_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::FinishLoop(node_id));
         self.push_source_node(source_node);
@@ -214,7 +211,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_finish_call_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::FinishCall(node_id));
         self.push_source_node(source_node);
@@ -229,7 +226,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_finish_dyn_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::FinishDyn(node_id));
         self.push_source_node(source_node);
@@ -247,7 +244,7 @@ impl<F> ContinuationStack<F> {
     pub(crate) fn push_start_node_with_source(
         &mut self,
         node_id: MastNodeId,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) {
         self.stack.push(Continuation::StartNode(node_id));
         self.push_source_node(source_node);
@@ -265,7 +262,7 @@ impl<F> ContinuationStack<F> {
 
     pub(crate) fn pop_continuation_with_source(
         &mut self,
-    ) -> Option<(Continuation<F>, Option<DebugSourceMastNodeId>)> {
+    ) -> Option<(Continuation<F>, Option<DebugSourceNodeId>)> {
         let continuation = self.stack.pop()?;
         let source_node = self.source_nodes.as_mut().and_then(Vec::pop).flatten();
         Some((continuation, source_node))
@@ -277,7 +274,7 @@ impl<F> ContinuationStack<F> {
         self.stack
     }
 
-    fn push_source_node(&mut self, source_node: Option<DebugSourceMastNodeId>) {
+    fn push_source_node(&mut self, source_node: Option<DebugSourceNodeId>) {
         if let Some(source_nodes) = &mut self.source_nodes {
             source_nodes.push(source_node);
         }
@@ -302,7 +299,7 @@ impl<F> ContinuationStack<F> {
 
     pub(crate) fn peek_continuation_with_source(
         &self,
-    ) -> Option<(&Continuation<F>, Option<DebugSourceMastNodeId>)> {
+    ) -> Option<(&Continuation<F>, Option<DebugSourceNodeId>)> {
         let continuation = self.stack.last()?;
         let source_node = self
             .source_nodes

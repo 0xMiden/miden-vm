@@ -47,27 +47,27 @@ impl Idx for MastNodeRef {}
 /// execution content but distinct source metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
-pub(crate) struct SourceMastNodeRef(u32);
+pub(crate) struct SourceNodeRef(u32);
 
-impl From<u32> for SourceMastNodeRef {
+impl From<u32> for SourceNodeRef {
     fn from(value: u32) -> Self {
         Self(value)
     }
 }
 
-impl From<SourceMastNodeRef> for u32 {
-    fn from(value: SourceMastNodeRef) -> Self {
+impl From<SourceNodeRef> for u32 {
+    fn from(value: SourceNodeRef) -> Self {
         value.0
     }
 }
 
-impl fmt::Display for SourceMastNodeRef {
+impl fmt::Display for SourceNodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SourceMastNodeRef({})", self.0)
+        write!(f, "SourceNodeRef({})", self.0)
     }
 }
 
-impl Idx for SourceMastNodeRef {}
+impl Idx for SourceNodeRef {}
 
 /// Stable assembly-time reference to assembly operation metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -123,9 +123,9 @@ pub(super) struct PendingMastNode {
 
 /// Builder-owned source/debug occurrence record used before final source IDs exist.
 #[derive(Clone, Debug)]
-pub(super) struct PendingSourceMastNode {
+pub(super) struct PendingSourceNode {
     pub(super) exec_ref: MastNodeRef,
-    pub(super) child_refs: Vec<SourceMastNodeRef>,
+    pub(super) child_refs: Vec<SourceNodeRef>,
     pub(super) op_start: usize,
     pub(super) op_end: usize,
     pub(super) asm_ops: Vec<(usize, AsmOpRef)>,

@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 pub enum DebugSourceGraphLookupError {
     /// The requested parent source/debug occurrence is not present.
     #[error("source/debug occurrence {source_node:?} is not present")]
-    MissingSourceNode { source_node: DebugSourceMastNodeId },
+    MissingSourceNode { source_node: DebugSourceNodeId },
     /// Multiple source/debug roots point at the same executable MAST node.
     #[error("multiple source/debug roots point at executable MAST node {exec_node:?}")]
     AmbiguousRoot { exec_node: MastNodeId },
@@ -67,7 +67,7 @@ pub enum PackageDebugInfoMergeError {
     )]
     MissingSourceNodeMapping {
         forest_index: usize,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     },
 }
 
@@ -408,8 +408,8 @@ impl PackageDebugInfo {
             let mut source_id_map = BTreeMap::new();
             for old_source_idx in 0..source_graph.nodes().len() {
                 source_id_map.insert(
-                    DebugSourceMastNodeId::from(old_source_idx as u32),
-                    DebugSourceMastNodeId::from(nodes.len() as u32 + old_source_idx as u32),
+                    DebugSourceNodeId::from(old_source_idx as u32),
+                    DebugSourceNodeId::from(nodes.len() as u32 + old_source_idx as u32),
                 );
             }
 
@@ -432,14 +432,14 @@ impl PackageDebugInfo {
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                nodes.push(DebugSourceMastNode::new(
+                nodes.push(DebugSourceNode::new(
                     exec_node,
                     children,
                     source_node.op_start,
                     source_node.op_end,
                 ));
                 debug_assert_eq!(
-                    source_id_map[&DebugSourceMastNodeId::from(old_source_idx as u32)].as_u32()
+                    source_id_map[&DebugSourceNodeId::from(old_source_idx as u32)].as_u32()
                         as usize,
                     nodes.len() - 1,
                 );
@@ -501,7 +501,7 @@ impl PackageDebugInfo {
     }
 
     /// Returns a source/debug occurrence by ID.
-    pub fn source_node(&self, source_node: DebugSourceMastNodeId) -> Option<&DebugSourceMastNode> {
+    pub fn source_node(&self, source_node: DebugSourceNodeId) -> Option<&DebugSourceNode> {
         self.source_graph.as_ref()?.source_node(source_node)
     }
 
@@ -511,7 +511,7 @@ impl PackageDebugInfo {
     pub fn unique_source_root_for_exec_node(
         &self,
         exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+    ) -> Result<Option<DebugSourceNodeId>, DebugSourceGraphLookupError> {
         self.source_graph
             .as_ref()
             .map(|source_graph| source_graph.unique_source_root_for_exec_node(exec_node))
@@ -523,10 +523,9 @@ impl PackageDebugInfo {
     /// Returns `Ok(None)` if no source graph is present, or if `child_index` is out of range.
     pub fn child_source_node(
         &self,
-        parent: DebugSourceMastNodeId,
+        parent: DebugSourceNodeId,
         child_index: usize,
-    ) -> Result<Option<(DebugSourceMastNodeId, &DebugSourceMastNode)>, DebugSourceGraphLookupError>
-    {
+    ) -> Result<Option<(DebugSourceNodeId, &DebugSourceNode)>, DebugSourceGraphLookupError> {
         self.source_graph
             .as_ref()
             .map(|source_graph| source_graph.child_source_node(parent, child_index))
@@ -536,7 +535,7 @@ impl PackageDebugInfo {
     /// Returns assembly operation rows for a source/debug occurrence.
     pub fn asm_ops_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> impl Iterator<Item = &DebugSourceAsmOp> {
         self.source_map
             .iter()
@@ -546,7 +545,7 @@ impl PackageDebugInfo {
     /// Returns the first assembly operation row for `source_node`, if present.
     pub fn first_asm_op_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> Option<&DebugSourceAsmOp> {
         self.source_map.as_ref()?.first_asm_op_for_source_node(source_node)
     }
@@ -554,7 +553,7 @@ impl PackageDebugInfo {
     /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     pub fn asm_op_for_operation(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
         op_idx: u32,
     ) -> Option<&DebugSourceAsmOp> {
         self.source_map.as_ref()?.asm_op_for_operation(source_node, op_idx)
@@ -563,7 +562,7 @@ impl PackageDebugInfo {
     /// Returns debug variable rows for a source/debug occurrence.
     pub fn debug_vars_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.source_map
             .iter()
@@ -573,7 +572,7 @@ impl PackageDebugInfo {
     /// Returns debug variable rows for `source_node` at `op_idx`.
     pub fn debug_vars_for_operation(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.source_map
@@ -594,34 +593,34 @@ impl PackageDebugInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-pub struct DebugSourceMastNodeId(u32);
+pub struct DebugSourceNodeId(u32);
 
-impl DebugSourceMastNodeId {
+impl DebugSourceNodeId {
     /// Returns the inner value as a `u32`.
     pub fn as_u32(self) -> u32 {
         self.0
     }
 }
 
-impl From<u32> for DebugSourceMastNodeId {
+impl From<u32> for DebugSourceNodeId {
     fn from(value: u32) -> Self {
         Self(value)
     }
 }
 
-impl From<DebugSourceMastNodeId> for u32 {
-    fn from(value: DebugSourceMastNodeId) -> Self {
+impl From<DebugSourceNodeId> for u32 {
+    fn from(value: DebugSourceNodeId) -> Self {
         value.0
     }
 }
 
-impl Serializable for DebugSourceMastNodeId {
+impl Serializable for DebugSourceNodeId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.0);
     }
 }
 
-impl Deserializable for DebugSourceMastNodeId {
+impl Deserializable for DebugSourceNodeId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self(source.read_u32()?))
     }
@@ -634,22 +633,22 @@ impl Deserializable for DebugSourceMastNodeId {
 /// A source/debug MAST occurrence that points at a reduced execution node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DebugSourceMastNode {
+pub struct DebugSourceNode {
     /// The reduced execution MAST node represented by this source occurrence.
     pub exec_node: MastNodeId,
     /// Child source occurrences.
-    pub children: Vec<DebugSourceMastNodeId>,
+    pub children: Vec<DebugSourceNodeId>,
     /// Inclusive start operation index in the reduced execution node.
     pub op_start: u32,
     /// Exclusive end operation index in the reduced execution node.
     pub op_end: u32,
 }
 
-impl DebugSourceMastNode {
+impl DebugSourceNode {
     /// Creates a source/debug occurrence record.
     pub fn new(
         exec_node: MastNodeId,
-        children: Vec<DebugSourceMastNodeId>,
+        children: Vec<DebugSourceNodeId>,
         op_start: u32,
         op_end: u32,
     ) -> Self {
@@ -664,9 +663,9 @@ pub struct DebugSourceGraphSection {
     /// Version of the debug source graph format.
     version: u8,
     /// Source/debug occurrence nodes.
-    nodes: Vec<DebugSourceMastNode>,
+    nodes: Vec<DebugSourceNode>,
     /// Source/debug occurrence roots.
-    roots: Vec<DebugSourceMastNodeId>,
+    roots: Vec<DebugSourceNodeId>,
 }
 
 impl DebugSourceGraphSection {
@@ -680,7 +679,7 @@ impl DebugSourceGraphSection {
     }
 
     /// Creates a source/debug occurrence graph section from validated parts.
-    pub fn from_parts(nodes: Vec<DebugSourceMastNode>, roots: Vec<DebugSourceMastNodeId>) -> Self {
+    pub fn from_parts(nodes: Vec<DebugSourceNode>, roots: Vec<DebugSourceNodeId>) -> Self {
         Self {
             version: DEBUG_SOURCE_GRAPH_VERSION,
             nodes,
@@ -694,12 +693,12 @@ impl DebugSourceGraphSection {
     }
 
     /// Returns source/debug occurrence nodes.
-    pub fn nodes(&self) -> &[DebugSourceMastNode] {
+    pub fn nodes(&self) -> &[DebugSourceNode] {
         &self.nodes
     }
 
     /// Returns source/debug occurrence roots.
-    pub fn roots(&self) -> &[DebugSourceMastNodeId] {
+    pub fn roots(&self) -> &[DebugSourceNodeId] {
         &self.roots
     }
 
@@ -709,7 +708,7 @@ impl DebugSourceGraphSection {
     }
 
     /// Returns a source/debug occurrence by ID.
-    fn source_node(&self, source_node: DebugSourceMastNodeId) -> Option<&DebugSourceMastNode> {
+    fn source_node(&self, source_node: DebugSourceNodeId) -> Option<&DebugSourceNode> {
         self.nodes.get(source_node.as_u32() as usize)
     }
 
@@ -717,7 +716,7 @@ impl DebugSourceGraphSection {
     fn source_roots_for_exec_node(
         &self,
         exec_node: MastNodeId,
-    ) -> impl Iterator<Item = (DebugSourceMastNodeId, &DebugSourceMastNode)> {
+    ) -> impl Iterator<Item = (DebugSourceNodeId, &DebugSourceNode)> {
         self.roots.iter().copied().filter_map(move |source_node_id| {
             self.source_node(source_node_id)
                 .filter(|source_node| source_node.exec_node == exec_node)
@@ -729,7 +728,7 @@ impl DebugSourceGraphSection {
     fn unique_source_root_for_exec_node(
         &self,
         exec_node: MastNodeId,
-    ) -> Result<Option<DebugSourceMastNodeId>, DebugSourceGraphLookupError> {
+    ) -> Result<Option<DebugSourceNodeId>, DebugSourceGraphLookupError> {
         let mut roots = self
             .source_roots_for_exec_node(exec_node)
             .map(|(source_node_id, _)| source_node_id);
@@ -743,10 +742,9 @@ impl DebugSourceGraphSection {
     /// Returns `parent`'s source/debug child at `child_index`, if present.
     fn child_source_node(
         &self,
-        parent: DebugSourceMastNodeId,
+        parent: DebugSourceNodeId,
         child_index: usize,
-    ) -> Result<Option<(DebugSourceMastNodeId, &DebugSourceMastNode)>, DebugSourceGraphLookupError>
-    {
+    ) -> Result<Option<(DebugSourceNodeId, &DebugSourceNode)>, DebugSourceGraphLookupError> {
         let parent_node = self
             .source_node(parent)
             .ok_or(DebugSourceGraphLookupError::MissingSourceNode { source_node: parent })?;
@@ -766,7 +764,7 @@ impl DebugSourceGraphSection {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceAsmOp {
     /// Source/debug occurrence that owns this operation row.
-    pub source_node: DebugSourceMastNodeId,
+    pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Optional source location for the assembly operation.
@@ -783,7 +781,7 @@ pub struct DebugSourceAsmOp {
 impl DebugSourceAsmOp {
     /// Creates a source-keyed assembly operation metadata row.
     pub fn new(
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
         op_idx: u32,
         location: Option<Location>,
         context_name: String,
@@ -806,7 +804,7 @@ impl DebugSourceAsmOp {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceVar {
     /// Source/debug occurrence that owns this variable row.
-    pub source_node: DebugSourceMastNodeId,
+    pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Debug variable metadata.
@@ -815,7 +813,7 @@ pub struct DebugSourceVar {
 
 impl DebugSourceVar {
     /// Creates a source-keyed debug variable metadata row.
-    pub fn new(source_node: DebugSourceMastNodeId, op_idx: u32, var: DebugVarInfo) -> Self {
+    pub fn new(source_node: DebugSourceNodeId, op_idx: u32, var: DebugVarInfo) -> Self {
         Self { source_node, op_idx, var }
     }
 }
@@ -874,7 +872,7 @@ impl DebugSourceMapSection {
     /// Returns assembly operation rows for a source/debug occurrence.
     fn asm_ops_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> impl Iterator<Item = &DebugSourceAsmOp> {
         self.asm_ops.iter().filter(move |row| row.source_node == source_node)
     }
@@ -882,7 +880,7 @@ impl DebugSourceMapSection {
     /// Returns the first assembly operation row for `source_node`, if present.
     fn first_asm_op_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> Option<&DebugSourceAsmOp> {
         self.asm_ops_for_source_node(source_node).min_by_key(|row| row.op_idx)
     }
@@ -890,7 +888,7 @@ impl DebugSourceMapSection {
     /// Returns the assembly operation row for `source_node` at or before `op_idx`, if present.
     fn asm_op_for_operation(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
         op_idx: u32,
     ) -> Option<&DebugSourceAsmOp> {
         self.asm_ops_for_source_node(source_node)
@@ -901,7 +899,7 @@ impl DebugSourceMapSection {
     /// Returns debug variable rows for a source/debug occurrence.
     fn debug_vars_for_source_node(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.debug_vars.iter().filter(move |row| row.source_node == source_node)
     }
@@ -909,7 +907,7 @@ impl DebugSourceMapSection {
     /// Returns debug variable rows for `source_node` at `op_idx`.
     fn debug_vars_for_operation(
         &self,
-        source_node: DebugSourceMastNodeId,
+        source_node: DebugSourceNodeId,
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.debug_vars_for_source_node(source_node)
@@ -1458,11 +1456,11 @@ mod tests {
             context: &str,
             var_name: &str,
         ) -> PackageDebugInfo {
-            let source_node = DebugSourceMastNodeId::from(0);
+            let source_node = DebugSourceNodeId::from(0);
             PackageDebugInfo {
                 source_graph: Some(DebugSourceGraphSection {
                     version: DEBUG_SOURCE_GRAPH_VERSION,
-                    nodes: alloc::vec![DebugSourceMastNode::new(block, alloc::vec![], 0, 1,)],
+                    nodes: alloc::vec![DebugSourceNode::new(block, alloc::vec![], 0, 1,)],
                     roots: alloc::vec![source_node],
                 }),
                 source_map: Some(DebugSourceMapSection {
@@ -1544,14 +1542,14 @@ mod tests {
         let call = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
         forest.make_root(call);
 
-        let root_source = DebugSourceMastNodeId::from(0);
-        let child_source = DebugSourceMastNodeId::from(1);
+        let root_source = DebugSourceNodeId::from(0);
+        let child_source = DebugSourceNodeId::from(1);
         let debug_info = PackageDebugInfo {
             source_graph: Some(DebugSourceGraphSection {
                 version: DEBUG_SOURCE_GRAPH_VERSION,
                 nodes: alloc::vec![
-                    DebugSourceMastNode::new(call, alloc::vec![child_source], 0, 1),
-                    DebugSourceMastNode::new(callee, alloc::vec![], 0, 1),
+                    DebugSourceNode::new(call, alloc::vec![child_source], 0, 1),
+                    DebugSourceNode::new(callee, alloc::vec![], 0, 1),
                 ],
                 roots: alloc::vec![root_source],
             }),
@@ -1589,13 +1587,13 @@ mod tests {
         use miden_core::operations::{DebugVarInfo, DebugVarLocation};
 
         let exec_node = MastNodeId::new_unchecked(7);
-        let source_a = DebugSourceMastNodeId::from(0);
-        let source_b = DebugSourceMastNodeId::from(1);
+        let source_a = DebugSourceNodeId::from(0);
+        let source_b = DebugSourceNodeId::from(1);
         let graph = DebugSourceGraphSection {
             version: DEBUG_SOURCE_GRAPH_VERSION,
             nodes: alloc::vec![
-                DebugSourceMastNode::new(exec_node, alloc::vec![], 0, 1),
-                DebugSourceMastNode::new(exec_node, alloc::vec![], 0, 1),
+                DebugSourceNode::new(exec_node, alloc::vec![], 0, 1),
+                DebugSourceNode::new(exec_node, alloc::vec![], 0, 1),
             ],
             roots: alloc::vec![source_a, source_b],
         };
@@ -1639,17 +1637,17 @@ mod tests {
         let root_exec = MastNodeId::new_unchecked(7);
         let child_exec = MastNodeId::new_unchecked(8);
         let other_exec = MastNodeId::new_unchecked(9);
-        let root = DebugSourceMastNodeId::from(0);
-        let child_a = DebugSourceMastNodeId::from(1);
-        let child_b = DebugSourceMastNodeId::from(2);
-        let other_root = DebugSourceMastNodeId::from(3);
+        let root = DebugSourceNodeId::from(0);
+        let child_a = DebugSourceNodeId::from(1);
+        let child_b = DebugSourceNodeId::from(2);
+        let other_root = DebugSourceNodeId::from(3);
         let graph = DebugSourceGraphSection {
             version: DEBUG_SOURCE_GRAPH_VERSION,
             nodes: alloc::vec![
-                DebugSourceMastNode::new(root_exec, alloc::vec![child_a, child_b], 0, 1),
-                DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
-                DebugSourceMastNode::new(child_exec, alloc::vec![], 0, 1),
-                DebugSourceMastNode::new(root_exec, alloc::vec![], 0, 1),
+                DebugSourceNode::new(root_exec, alloc::vec![child_a, child_b], 0, 1),
+                DebugSourceNode::new(child_exec, alloc::vec![], 0, 1),
+                DebugSourceNode::new(child_exec, alloc::vec![], 0, 1),
+                DebugSourceNode::new(root_exec, alloc::vec![], 0, 1),
             ],
             roots: alloc::vec![root],
         };
@@ -1660,9 +1658,9 @@ mod tests {
         assert_eq!(graph.child_source_node(root, 1).unwrap().unwrap().0, child_b);
         assert!(graph.child_source_node(root, 2).unwrap().is_none());
         assert_eq!(
-            graph.child_source_node(DebugSourceMastNodeId::from(99), 0),
+            graph.child_source_node(DebugSourceNodeId::from(99), 0),
             Err(DebugSourceGraphLookupError::MissingSourceNode {
-                source_node: DebugSourceMastNodeId::from(99),
+                source_node: DebugSourceNodeId::from(99),
             }),
         );
 

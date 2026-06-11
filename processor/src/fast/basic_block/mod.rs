@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
 use miden_core::events::{EventId, SystemEvent};
-use miden_mast_package::debug_info::{DebugSourceMastNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, Host, SyncHost,
@@ -28,7 +28,7 @@ impl FastProcessor {
         host: &impl BaseHost,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let context = package_source_context(package_debug_info, source_node);
         match handle_system_event(self, system_event)
@@ -47,7 +47,7 @@ impl FastProcessor {
         event_id: EventId,
         mutations: Result<Vec<AdviceMutation>, EventError>,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let mutations = match mutations {
             Ok(mutations) => mutations,
@@ -92,7 +92,7 @@ impl FastProcessor {
         host: &mut impl SyncHost,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
@@ -125,7 +125,7 @@ impl FastProcessor {
         host: &mut impl Host,
         op_idx: usize,
         package_debug_info: Option<&PackageDebugInfo>,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> ControlFlow<BreakReason<F>> {
         let event_id = EventId::from_felt(self.stack_get(0));
 
@@ -154,7 +154,7 @@ impl FastProcessor {
 
 fn package_source_context(
     package_debug_info: Option<&PackageDebugInfo>,
-    source_node: Option<DebugSourceMastNodeId>,
+    source_node: Option<DebugSourceNodeId>,
 ) -> Option<PackageSourceDebugContext<'_>> {
     Some(PackageSourceDebugContext::new_optional(package_debug_info?, source_node))
 }

@@ -1,6 +1,6 @@
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::DebugSourceMastNodeId;
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
     BaseHost, BreakReason, Stopper,
@@ -366,7 +366,7 @@ fn get_continuation_after_executing_operation<F>(
 /// that enum variant for more details.
 pub fn finish_emit_op_execution<P, S, T, F>(
     post_emit_continuation: Continuation<F>,
-    source_node: Option<DebugSourceMastNodeId>,
+    source_node: Option<DebugSourceNodeId>,
     processor: &mut P,
     continuation_stack: &mut ContinuationStack<F>,
     current_forest: &F,

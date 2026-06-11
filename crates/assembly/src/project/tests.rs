@@ -11,8 +11,7 @@ use miden_mast_package::{
     PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
         DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection,
-        DebugSourceMastNode, DebugSourceMastNodeId, DebugSourceVar, DebugSourcesSection,
-        DebugTypesSection,
+        DebugSourceNode, DebugSourceNodeId, DebugSourceVar, DebugSourcesSection, DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -340,7 +339,7 @@ end
         let exec_node = debug_source_graph.nodes()[source_node].exec_node;
         source_nodes_by_exec
             .entry(exec_node)
-            .or_insert_with(std::collections::BTreeSet::<DebugSourceMastNodeId>::new)
+            .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
             .insert(row.source_node);
     }
 
@@ -446,7 +445,7 @@ fn debug_bearing_static_package(
         miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
-    let source_root = DebugSourceMastNodeId::from(0);
+    let source_root = DebugSourceNodeId::from(0);
     let export = ProcedureExport::new(export_path, Some(root), digest, None)
         .with_source_node(Some(source_root));
     exports.push(PackageExport::Procedure(export));
@@ -470,7 +469,7 @@ fn debug_bearing_static_package(
     }
 
     let source_graph = DebugSourceGraphSection::from_parts(
-        vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+        vec![DebugSourceNode::new(root, vec![], 0, 1)],
         vec![source_root],
     );
     let source_map = DebugSourceMapSection::from_parts(

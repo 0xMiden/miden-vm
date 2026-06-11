@@ -45,7 +45,7 @@ pub use self::{
 };
 use crate::{
     Dependency, Version,
-    debug_info::{DebugSourceMastNodeId, PackageDebugInfo},
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
 };
 
 /// Errors raised while stripping package-owned debug information.
@@ -641,7 +641,7 @@ impl Package {
         }
 
         for (source_index, source_node) in source_graph.nodes().iter().enumerate() {
-            let source_id = DebugSourceMastNodeId::from(source_index as u32);
+            let source_id = DebugSourceNodeId::from(source_index as u32);
             let Some(exec_node) = self.mast.get_node_by_id(source_node.exec_node) else {
                 return Err(PackageDebugInfoError::InvalidReference {
                     message: format!(
@@ -743,7 +743,7 @@ impl Package {
     fn validate_source_map_row(
         &self,
         source_graph: &crate::debug_info::DebugSourceGraphSection,
-        source_node_id: DebugSourceMastNodeId,
+        source_node_id: DebugSourceNodeId,
         op_idx: u32,
         row_kind: &'static str,
     ) -> Result<(), PackageDebugInfoError> {
@@ -1077,8 +1077,8 @@ mod tests {
     use crate::{
         Dependency, Version,
         debug_info::{
-            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceMastNode,
-            DebugSourceMastNodeId,
+            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
+            DebugSourceNodeId,
         },
     };
 
@@ -1128,7 +1128,7 @@ mod tests {
 
     fn build_split_package_exports(
         export: &str,
-        source_node: Option<DebugSourceMastNodeId>,
+        source_node: Option<DebugSourceNodeId>,
     ) -> (Arc<MastForest>, Vec<PackageExport>, MastNodeId, MastNodeId, MastNodeId) {
         let (forest, root_id, left_id, right_id) = build_split_forest();
         let root = forest[root_id].digest();
@@ -1161,8 +1161,8 @@ mod tests {
             let num_ops = node.num_operations() as usize;
             let digest = node.digest();
             let node_id = nodes.push(node.into()).expect("failed to add basic block");
-            let source_node = DebugSourceMastNodeId::from(source_idx as u32);
-            source_nodes.push(DebugSourceMastNode::new(node_id, Vec::new(), 0, num_ops as u32));
+            let source_node = DebugSourceNodeId::from(source_idx as u32);
+            source_nodes.push(DebugSourceNode::new(node_id, Vec::new(), 0, num_ops as u32));
             asm_ops.push(DebugSourceAsmOp::new(
                 source_node,
                 0,
@@ -1183,7 +1183,7 @@ mod tests {
         let source_graph = DebugSourceGraphSection::from_parts(
             source_nodes,
             (0..exports.len())
-                .map(|source_idx| DebugSourceMastNodeId::from(source_idx as u32))
+                .map(|source_idx| DebugSourceNodeId::from(source_idx as u32))
                 .collect(),
         );
         let source_map = DebugSourceMapSection::from_parts(asm_ops, Vec::new());
@@ -1259,9 +1259,9 @@ mod tests {
     fn package_debug_info_decodes_source_graph_and_map() {
         let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
         let exec_node = package.get_export_node_id("app::entry");
-        let source_node = DebugSourceMastNodeId::from(0);
+        let source_node = DebugSourceNodeId::from(0);
         let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![DebugSourceNode::new(exec_node, Vec::new(), 0, 1)],
             vec![source_node],
         );
         let source_map = DebugSourceMapSection::from_parts(
@@ -1323,9 +1323,9 @@ mod tests {
 
     #[test]
     fn package_debug_info_rejects_source_graph_child_exec_mismatch() {
-        let source_root = DebugSourceMastNodeId::from(0);
-        let source_left = DebugSourceMastNodeId::from(1);
-        let source_right = DebugSourceMastNodeId::from(2);
+        let source_root = DebugSourceNodeId::from(0);
+        let source_left = DebugSourceNodeId::from(1);
+        let source_right = DebugSourceNodeId::from(2);
         let (mast, exports, root_id, left_id, right_id) =
             build_split_package_exports("app::entry", Some(source_root));
         let mut package = Package::create(
@@ -1339,9 +1339,9 @@ mod tests {
         .unwrap();
         let source_graph = DebugSourceGraphSection::from_parts(
             vec![
-                DebugSourceMastNode::new(root_id, vec![source_right, source_left], 0, 1),
-                DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
-                DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(root_id, vec![source_right, source_left], 0, 1),
+                DebugSourceNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(right_id, Vec::new(), 0, 1),
             ],
             vec![source_root],
         );
@@ -1357,10 +1357,10 @@ mod tests {
     fn package_debug_info_rejects_source_map_missing_source_node() {
         let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
         let exec_node = package.get_export_node_id("app::entry");
-        let source_node = DebugSourceMastNodeId::from(0);
-        let missing_source_node = DebugSourceMastNodeId::from(1);
+        let source_node = DebugSourceNodeId::from(0);
+        let missing_source_node = DebugSourceNodeId::from(1);
         let source_graph = DebugSourceGraphSection::from_parts(
-            vec![DebugSourceMastNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![DebugSourceNode::new(exec_node, Vec::new(), 0, 1)],
             vec![source_node],
         );
         let source_map = DebugSourceMapSection::from_parts(
@@ -1388,9 +1388,9 @@ mod tests {
 
     #[test]
     fn package_debug_info_rejects_export_source_node_exec_mismatch() {
-        let source_root = DebugSourceMastNodeId::from(0);
-        let source_left = DebugSourceMastNodeId::from(1);
-        let source_right = DebugSourceMastNodeId::from(2);
+        let source_root = DebugSourceNodeId::from(0);
+        let source_left = DebugSourceNodeId::from(1);
+        let source_right = DebugSourceNodeId::from(2);
         let (mast, exports, root_id, left_id, right_id) =
             build_split_package_exports("app::entry", Some(source_left));
         let mut package = Package::create(
@@ -1404,9 +1404,9 @@ mod tests {
         .unwrap();
         let source_graph = DebugSourceGraphSection::from_parts(
             vec![
-                DebugSourceMastNode::new(root_id, vec![source_left, source_right], 0, 1),
-                DebugSourceMastNode::new(left_id, Vec::new(), 0, 1),
-                DebugSourceMastNode::new(right_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(root_id, vec![source_left, source_right], 0, 1),
+                DebugSourceNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(right_id, Vec::new(), 0, 1),
             ],
             vec![source_root],
         );
@@ -1699,10 +1699,10 @@ mod tests {
     #[test]
     fn merge_source_debug_keeps_concrete_metadata_distinct_from_external_placeholder() {
         fn debug_info_for_root(root: MastNodeId, context: &str) -> PackageDebugInfo {
-            let source_node = DebugSourceMastNodeId::from(0);
+            let source_node = DebugSourceNodeId::from(0);
             PackageDebugInfo {
                 source_graph: Some(DebugSourceGraphSection::from_parts(
-                    vec![DebugSourceMastNode::new(root, vec![], 0, 1)],
+                    vec![DebugSourceNode::new(root, vec![], 0, 1)],
                     vec![source_node],
                 )),
                 source_map: Some(DebugSourceMapSection::from_parts(

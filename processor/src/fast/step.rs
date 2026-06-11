@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::Kernel};
-use miden_mast_package::debug_info::DebugSourceMastNodeId;
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
     ExecutionError, FastProcessor, Stopper,
@@ -58,7 +58,7 @@ impl Stopper for NeverStopper {
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _continuation_after_stop: impl FnOnce() -> Option<(
             Continuation<Arc<MastForest>>,
-            Option<DebugSourceMastNodeId>,
+            Option<DebugSourceNodeId>,
         )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
@@ -81,7 +81,7 @@ impl Stopper for StepStopper {
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
         continuation_after_stop: impl FnOnce() -> Option<(
             Continuation<Arc<MastForest>>,
-            Option<DebugSourceMastNodeId>,
+            Option<DebugSourceNodeId>,
         )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
@@ -136,5 +136,5 @@ pub enum BreakReason<F> {
     ///
     /// If yes, then `None` should be returned. If not, then the continuation that runs the next
     /// step in `FastProcessor::execute_impl()` should be returned.
-    Stopped(Option<(Continuation<F>, Option<DebugSourceMastNodeId>)>),
+    Stopped(Option<(Continuation<F>, Option<DebugSourceNodeId>)>),
 }

@@ -62,12 +62,6 @@ pub trait MastNodeExt {
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
 
-    /// Verifies that this node is internally consistent with the forest in debug builds.
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized;
-
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;
 

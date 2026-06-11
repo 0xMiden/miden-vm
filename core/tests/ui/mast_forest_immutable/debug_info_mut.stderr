@@ -1,5 +1,0 @@
-error[E0599]: no method named `debug_info_mut` found for struct `MastForest` in the current scope
- --> tests/ui/mast_forest_immutable/debug_info_mut.rs:5:30
-  |
-5 |     let _debug_info = forest.debug_info_mut();
-  |                              ^^^^^^^^^^^^^^ method not found in `MastForest`

@@ -504,14 +504,6 @@ impl MastNodeExt for BasicBlockNode {
         // Use from_op_batches to avoid re-batching existing operation batches.
         BasicBlockNodeBuilder::from_op_batches(self.op_batches, self.digest)
     }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
-        let _ = forest;
-    }
 }
 
 impl PrettyPrint for BasicBlockNode {
