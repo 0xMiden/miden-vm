@@ -4,11 +4,7 @@ use std::{
     path::{Path as FsPath, PathBuf},
 };
 
-use miden_assembly_syntax::{
-    ModuleParser,
-    ast::{ModuleKind, Path as MasmPath},
-    diagnostics::Report,
-};
+use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
 use miden_core::serde::Deserializable;
 use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
@@ -761,41 +757,6 @@ impl PackageBuildSettings {
 
 // HELPER FUNCTIONS
 // ================================================================================================
-
-fn target_root_module_kind(ty: TargetType) -> ModuleKind {
-    match ty {
-        TargetType::Executable => ModuleKind::Executable,
-        TargetType::Kernel => ModuleKind::Kernel,
-        _ => ModuleKind::Library,
-    }
-}
-
-fn module_path_from_relative(
-    namespace: &MasmPath,
-    relative: &FsPath,
-) -> Result<Arc<MasmPath>, Report> {
-    let mut module_path = namespace.to_path_buf();
-    let stem = relative.with_extension("");
-    let mut components = stem
-        .iter()
-        .map(|component| {
-            component.to_str().ok_or_else(|| {
-                Report::msg(format!("module path '{}' contains invalid UTF-8", relative.display()))
-            })
-        })
-        .collect::<Result<Vec<_>, Report>>()?;
-
-    if components.last().is_some_and(|component| *component == Module::ROOT) {
-        components.pop();
-    }
-
-    for component in components {
-        MasmPath::validate(component).map_err(|error| Report::msg(error.to_string()))?;
-        module_path.push(component);
-    }
-
-    Ok(module_path.into())
-}
 
 fn load_selected_preassembled_package(
     path: &FsPath,

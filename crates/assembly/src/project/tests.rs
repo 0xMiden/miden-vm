@@ -1841,7 +1841,7 @@ description = "metadata-only update"
 ticket = "ignored"
 
 [lib]
-path = "src/lib.masm"
+path = "lib.masm"
 
 [[bin]]
 name = "unused"

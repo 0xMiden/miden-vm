@@ -267,7 +267,17 @@ pub trait SourceManagerExt: SourceManager {
     /// Load the content of `path` into this [SourceManager]
     fn load_file(&self, path: &std::path::Path) -> Result<Arc<SourceFile>, SourceManagerError> {
         let uri = Uri::from(path);
-        if let Some(existing) = self.get_by_uri(&uri) {
+        let content = std::fs::read_to_string(path).map_err(|source| {
+            SourceManagerError::custom_with_source(
+                alloc::format!("failed to load file at `{}`", path.display()),
+                source,
+            )
+        })?;
+
+        // Return the already-allocated file if it has already been loaded and with change since
+        if let Some(existing) = self.get_by_uri(&uri)
+            && existing.as_str() == content.as_str()
+        {
             return Ok(existing);
         }
 
