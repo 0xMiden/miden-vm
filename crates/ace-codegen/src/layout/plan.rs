@@ -100,19 +100,40 @@ pub(crate) struct StarkVarIndices {
     /// `s0 = offset^N` (first chunk shift).
     pub s0: usize,
 
-    // -- Multi-AIR additions (only present when `AceConfig::is_multi_air`) --
-    /// β coefficient for Core in `combined = mab_core · core_acc + mab_chip · chip_acc`.
-    /// The verifier sets `(mab_core, mab_chip) = (β, 1)` or `(1, β)` per proof_order.
-    pub multi_air_beta_core: Option<usize>,
-    pub multi_air_beta_chip: Option<usize>,
-    /// Per-AIR lifted selectors for Core (at `z^{r_core}`).
-    pub is_first_core: Option<usize>,
-    pub is_last_core: Option<usize>,
-    pub is_transition_core: Option<usize>,
-    /// Per-AIR lifted selectors for Chiplets (at `z^{r_chip}`).
-    pub is_first_chip: Option<usize>,
-    pub is_last_chip: Option<usize>,
-    pub is_transition_chip: Option<usize>,
+    // -- Multi-AIR additions (only present when the layout was built with `num_airs >= 2`) --
+    /// Slot block for the per-AIR β coefficients and lifted selectors.
+    pub multi_air: Option<MultiAirVarIndices>,
+}
+
+/// Indexes of the per-AIR stark-vars slots inside a multi-AIR layout.
+///
+/// The block occupies `4 * num_airs` consecutive EF slots starting at `base`:
+/// first one β coefficient per AIR (instance order), then one
+/// `(is_first, is_last, is_transition)` lifted-selector triple per AIR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MultiAirVarIndices {
+    /// First slot of the block (the β coefficient for AIR 0).
+    pub base: usize,
+    /// Number of AIRs the layout was built for.
+    pub num_airs: usize,
+}
+
+impl MultiAirVarIndices {
+    /// Slot of the β coefficient for the AIR at instance index `air`.
+    pub fn beta(&self, air: usize) -> Option<usize> {
+        (air < self.num_airs).then(|| self.base + air)
+    }
+
+    /// Slot of the lifted selector `sel` (0 = is_first, 1 = is_last, 2 = is_transition)
+    /// for the AIR at instance index `air`.
+    pub fn selector(&self, air: usize, sel: usize) -> Option<usize> {
+        (air < self.num_airs && sel < 3).then(|| self.base + self.num_airs + 3 * air + sel)
+    }
+
+    /// Total number of slots in the block.
+    pub fn width(&self) -> usize {
+        4 * self.num_airs
+    }
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -203,29 +224,9 @@ impl InputLayout {
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);
         check("s0", self.stark.s0);
-        if let Some(idx) = self.stark.multi_air_beta_core {
-            check("multi_air_beta_core", idx);
-        }
-        if let Some(idx) = self.stark.multi_air_beta_chip {
-            check("multi_air_beta_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_first_core {
-            check("is_first_core", idx);
-        }
-        if let Some(idx) = self.stark.is_last_core {
-            check("is_last_core", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_core {
-            check("is_transition_core", idx);
-        }
-        if let Some(idx) = self.stark.is_first_chip {
-            check("is_first_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_last_chip {
-            check("is_last_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_chip {
-            check("is_transition_chip", idx);
+        if let Some(multi_air) = &self.stark.multi_air {
+            check("multi_air block start", multi_air.base);
+            check("multi_air block end", multi_air.base + multi_air.width() - 1);
         }
 
         let rand_start = self.regions.randomness.offset;

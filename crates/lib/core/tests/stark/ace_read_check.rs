@@ -102,7 +102,7 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
-        is_multi_air: true,
+        num_airs: 2,
     };
 
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ace circuit");

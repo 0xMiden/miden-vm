@@ -1,4 +1,6 @@
-use super::{InputCounts, InputLayout, InputRegion, LayoutRegions, StarkVarIndices};
+use super::{
+    InputCounts, InputLayout, InputRegion, LayoutRegions, StarkVarIndices, plan::MultiAirVarIndices,
+};
 use crate::{EXT_DEGREE, randomness};
 
 #[derive(Clone, Copy)]
@@ -79,32 +81,36 @@ impl LayoutBuilder {
 impl InputLayout {
     /// Build a native layout (no alignment/padding).
     pub fn new(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), false)
+        Self::build_with_policy(counts, LayoutPolicy::native(), 1)
     }
 
     /// Build a MASM-compatible layout (alignment/padding enforced).
     pub fn new_masm(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), false)
+        Self::build_with_policy(counts, LayoutPolicy::masm(), 1)
     }
 
-    /// Build a native layout with the multi-AIR flag set.
-    pub fn new_multi_air(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::native(), true)
+    /// Build a native multi-AIR layout for a combined circuit over `num_airs` traces.
+    pub fn new_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::native(), num_airs)
     }
 
     /// Build a MASM-compatible multi-AIR layout (alignment/padding enforced; reserves
-    /// extra stark-vars slots for the multi-AIR β coefficients and per-AIR selectors).
-    pub fn new_masm_multi_air(counts: InputCounts) -> Self {
-        Self::build_with_policy(counts, LayoutPolicy::masm(), true)
+    /// extra stark-vars slots for the per-AIR β coefficients and lifted selectors).
+    pub fn new_masm_multi_air(counts: InputCounts, num_airs: usize) -> Self {
+        Self::build_with_policy(counts, LayoutPolicy::masm(), num_airs)
     }
 
-    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, is_multi_air: bool) -> Self {
+    fn build_with_policy(counts: InputCounts, policy: LayoutPolicy, num_airs: usize) -> Self {
+        assert!(num_airs >= 1, "layout requires at least one AIR");
+
         // Number of EF slots in the stark-vars block. Every ACE input slot is an
         // extension-field element (QuadFelt). Some stark vars are base-field values
         // embedded as (val, 0); see the slot table below for which is which.
-        // Multi-AIR appends 8 more: 2 β coefficients + 6 per-AIR selectors (3 per AIR).
+        // A multi-AIR layout (num_airs >= 2) appends 4 more per AIR: one β coefficient
+        // and a (is_first, is_last, is_transition) lifted-selector triple.
         const NUM_STARK_VARS_BASE: usize = 10;
-        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 8 } else { 0 };
+        let is_multi_air = num_airs >= 2;
+        let num_stark_vars = NUM_STARK_VARS_BASE + if is_multi_air { 4 * num_airs } else { 0 };
 
         let mut builder = LayoutBuilder::new();
 
@@ -138,7 +144,7 @@ impl InputLayout {
         //   3    is_first            EF      Precomputed: (z^N - 1) / (z - 1)
         //   4    is_last             EF      Precomputed: (z^N - 1) / (z - g^{-1})
         //   5    is_transition       EF      Precomputed: z - g^{-1}
-        //   6    gamma               EF      Batching challenge
+        //   6    gamma               EF      Reserved (zero)
         //   7    weight0             base    First barycentric weight
         //   8    f                   base    Chunk shift ratio h^N
         //   9    s0                  base    First coset shift offset^N
@@ -153,14 +159,10 @@ impl InputLayout {
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
-        let multi_air_beta_core = is_multi_air.then_some(b + 10);
-        let multi_air_beta_chip = is_multi_air.then_some(b + 11);
-        let is_first_core = is_multi_air.then_some(b + 12);
-        let is_last_core = is_multi_air.then_some(b + 13);
-        let is_transition_core = is_multi_air.then_some(b + 14);
-        let is_first_chip = is_multi_air.then_some(b + 15);
-        let is_last_chip = is_multi_air.then_some(b + 16);
-        let is_transition_chip = is_multi_air.then_some(b + 17);
+        // Multi-AIR block: β coefficients at b+10..b+10+num_airs, then one selector
+        // triple per AIR. For num_airs = 2 this is slots 10-11 (betas) and 12-17
+        // (selectors), matching `set_up_auxiliary_inputs_ace` in MASM.
+        let multi_air = is_multi_air.then_some(MultiAirVarIndices { base: b + 10, num_airs });
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -194,14 +196,7 @@ impl InputLayout {
                 weight0,
                 f,
                 s0,
-                multi_air_beta_core,
-                multi_air_beta_chip,
-                is_first_core,
-                is_last_core,
-                is_transition_core,
-                is_first_chip,
-                is_last_chip,
-                is_transition_chip,
+                multi_air,
             },
             total_inputs: builder.offset,
             counts,
@@ -236,6 +231,37 @@ mod tests {
             Some(vlpi_base + 2),
             "MASM VLPI groups should advance by a word-aligned stride"
         );
+    }
+
+    #[test]
+    fn multi_air_layout_generalizes_over_num_airs() {
+        let counts = InputCounts {
+            width: 1,
+            aux_width: 1,
+            num_aux_boundary: 3,
+            num_public: 8,
+            num_vlpi: 2,
+            num_randomness: 2,
+            num_periodic: 0,
+            num_quotient_chunks: 1,
+        };
+
+        // 3-AIR layout: betas first (instance order), then one selector triple per AIR.
+        let layout = InputLayout::new_multi_air(counts, 3);
+        let base = layout.index(InputKey::MultiAirBeta(0)).unwrap();
+        assert_eq!(layout.index(InputKey::MultiAirBeta(2)), Some(base + 2));
+        assert_eq!(layout.index(InputKey::IsFirstAir(0)), Some(base + 3));
+        assert_eq!(layout.index(InputKey::IsTransitionAir(2)), Some(base + 3 + 3 * 2 + 2));
+        assert_eq!(layout.index(InputKey::MultiAirBeta(3)), None, "AIR index out of range");
+        assert_eq!(layout.index(InputKey::IsFirstAir(3)), None, "AIR index out of range");
+
+        // 2-AIR layout keeps the slot positions the MASM verifier writes:
+        // betas at base..base+1, selector triples at base+2..base+7.
+        let layout2 = InputLayout::new_multi_air(counts, 2);
+        let base2 = layout2.index(InputKey::MultiAirBeta(0)).unwrap();
+        assert_eq!(layout2.index(InputKey::MultiAirBeta(1)), Some(base2 + 1));
+        assert_eq!(layout2.index(InputKey::IsFirstAir(0)), Some(base2 + 2));
+        assert_eq!(layout2.index(InputKey::IsTransitionAir(1)), Some(base2 + 7));
     }
 
     #[test]

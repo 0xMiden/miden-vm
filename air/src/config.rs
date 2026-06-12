@@ -278,7 +278,7 @@ mod tests {
             num_quotient_chunks: 8,
             num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
-            is_multi_air: true,
+            num_airs: 2,
         };
         let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
         let encoded = circuit.to_ace().unwrap();

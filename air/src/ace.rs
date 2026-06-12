@@ -47,8 +47,8 @@ use crate::MidenAir;
 /// 2. Re-emit each sub-DAG's nodes into a fresh `DagBuilder` configured for the *combined* layout.
 ///    The chiplets sub-DAG's input keys are rewritten so its main/aux/bus-boundary slot indices
 ///    land in the chiplets-half of the combined layout. The core sub-DAG passes through unchanged.
-/// 3. β-fold: `combined = MultiAirBetaCore · core_acc + MultiAirBetaChip · chip_acc - q·v`, where
-///    the verifier sets one coefficient to β and the other to 1 based on proof_order.
+/// 3. β-fold: `combined = MultiAirBeta(0) · core_acc + MultiAirBeta(1) · chip_acc - q·v`, where the
+///    verifier sets one coefficient to β and the other to 1 based on proof_order.
 ///
 /// Returns the combined `AceCircuit` ready for emission to the MASM ACE chip.
 pub fn build_multi_air_ace_circuit<EF>(config: AceConfig) -> Result<AceCircuit<EF>, AceError>
@@ -57,8 +57,8 @@ where
     SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
 {
     assert!(
-        config.is_multi_air,
-        "build_multi_air_ace_circuit requires AceConfig::is_multi_air = true"
+        config.num_airs == 2,
+        "build_multi_air_ace_circuit is the (Core, Chiplets) builder; AceConfig::num_airs must be 2"
     );
 
     use miden_ace_codegen::{InputCounts, InputLayout};
@@ -68,7 +68,7 @@ where
 
     // Step 1: per-AIR sub-DAGs. Each is built with its OWN single-AIR layout (no
     // multi-air slot) so the symbolic eval references plain `InputKey` variants.
-    let sub_config = AceConfig { is_multi_air: false, ..config };
+    let sub_config = AceConfig { num_airs: 1, ..config };
     let core_artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&core_air, sub_config)?;
     let chip_artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(&chip_air, sub_config)?;
 
@@ -124,8 +124,12 @@ where
     // Build combined layout via the multi-air constructors so the stark-vars region
     // includes the multi-AIR β coefficients and per-AIR selector slots.
     let combined_layout = match config.layout {
-        miden_ace_codegen::LayoutKind::Native => InputLayout::new_multi_air(combined_counts),
-        miden_ace_codegen::LayoutKind::Masm => InputLayout::new_masm_multi_air(combined_counts),
+        miden_ace_codegen::LayoutKind::Native => {
+            InputLayout::new_multi_air(combined_counts, config.num_airs)
+        },
+        miden_ace_codegen::LayoutKind::Masm => {
+            InputLayout::new_masm_multi_air(combined_counts, config.num_airs)
+        },
     };
 
     // Step 3: re-emit the core sub-DAG into a fresh builder. Core's input keys map
@@ -139,9 +143,9 @@ where
         &mut builder,
         &core_dag,
         |key| match key {
-            InputKey::IsFirst => InputKey::IsFirstCore,
-            InputKey::IsLast => InputKey::IsLastCore,
-            InputKey::IsTransition => InputKey::IsTransitionCore,
+            InputKey::IsFirst => InputKey::IsFirstAir(0),
+            InputKey::IsLast => InputKey::IsLastAir(0),
+            InputKey::IsTransition => InputKey::IsTransitionAir(0),
             other => other,
         },
         true, // skip core's `Sub(acc, q*v)` root — combined formula uses a shared q*v
@@ -174,9 +178,9 @@ where
                 coord,
             },
             InputKey::AuxBusBoundary(slot) => InputKey::AuxBusBoundary(slot + core_aux_n),
-            InputKey::IsFirst => InputKey::IsFirstChip,
-            InputKey::IsLast => InputKey::IsLastChip,
-            InputKey::IsTransition => InputKey::IsTransitionChip,
+            InputKey::IsFirst => InputKey::IsFirstAir(1),
+            InputKey::IsLast => InputKey::IsLastAir(1),
+            InputKey::IsTransition => InputKey::IsTransitionAir(1),
             other => other,
         },
         true, // skip chiplets's `Sub(acc, q*v)` root — combined formula uses a shared q*v
@@ -203,8 +207,8 @@ where
         });
     }
 
-    let mab_core = builder.input(InputKey::MultiAirBetaCore);
-    let mab_chip = builder.input(InputKey::MultiAirBetaChip);
+    let mab_core = builder.input(InputKey::MultiAirBeta(0));
+    let mab_chip = builder.input(InputKey::MultiAirBeta(1));
     let core_term = builder.mul(mab_core, core_acc);
     let chip_term = builder.mul(mab_chip, chip_acc);
     let combined_acc = builder.add(core_term, chip_term);

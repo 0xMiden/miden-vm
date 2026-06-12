@@ -18,7 +18,7 @@ const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
     num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
-    is_multi_air: true,
+    num_airs: 2,
 };
 pub const RELATION_DIGEST_PATHS: (&str, &str) =
     ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");
@@ -32,11 +32,11 @@ const RELATION_DIGEST_PATH: &str = RELATION_DIGEST_PATHS.0;
 ///
 /// The production circuit is the combined CoreAir + ChipletsAir circuit produced by
 /// [`build_multi_air_ace_circuit`](miden_air::ace::build_multi_air_ace_circuit).
-/// The `config.is_multi_air` flag must be `true`.
+/// `config.num_airs` must be `2`.
 pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
     assert!(
-        config.is_multi_air,
-        "production circuit is multi-AIR; pass AceConfig with is_multi_air = true"
+        config.num_airs == 2,
+        "production circuit is the (Core, Chiplets) multi-AIR; pass AceConfig with num_airs = 2"
     );
     miden_air::ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap()
 }
