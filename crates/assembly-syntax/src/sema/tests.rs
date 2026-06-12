@@ -1,6 +1,7 @@
 use alloc::{
     string::{String, ToString},
     sync::Arc,
+    vec::Vec,
 };
 
 use miden_debug_types::{Span, Spanned};
@@ -8,10 +9,11 @@ use miden_debug_types::{Span, Spanned};
 use crate::{
     MAX_REPEAT_COUNT, Path,
     ast::{
-        Constant, ConstantExpr, Item, Module, ModuleKind, TypeAlias, TypeExpr, Visibility, types,
+        Constant, ConstantExpr, ImportKind, Item, Module, ModuleKind, SymbolResolutionError,
+        TypeAlias, TypeExpr, Visibility, constants::ConstEvalError, types,
     },
     diagnostics::reporting::PrintDiagnostic,
-    sema::SemanticAnalysisError,
+    sema::{SemanticAnalysisError, SyntaxError},
     testing::SyntaxTestContext,
 };
 
@@ -28,9 +30,7 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
 }
 
 fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str) {
-    let syntax_error = error
-        .downcast_ref::<crate::sema::SyntaxError>()
-        .expect("expected SyntaxError report");
+    let syntax_error = syntax_error(error);
 
     let (span, prev_span) = syntax_error
         .errors
@@ -67,9 +67,57 @@ fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str)
     );
 }
 
+fn syntax_error(error: &miden_utils_diagnostics::Report) -> &SyntaxError {
+    error.downcast_ref::<SyntaxError>().expect("expected SyntaxError report")
+}
+
+fn assert_undefined_symbol(error: &miden_utils_diagnostics::Report) {
+    let syntax_error = syntax_error(error);
+    assert!(
+        syntax_error.errors.iter().any(|err| matches!(
+            err,
+            SemanticAnalysisError::SymbolResolutionError(inner)
+                if matches!(**inner, SymbolResolutionError::UndefinedSymbol { .. })
+        ) || matches!(
+            err,
+            SemanticAnalysisError::ConstEvalError(ConstEvalError::UndefinedSymbol { .. })
+        )),
+        "expected at least one undefined-symbol error, got: {:?}",
+        syntax_error.errors
+    );
+}
+
+fn unused_import_slices(error: &miden_utils_diagnostics::Report) -> Vec<String> {
+    let syntax_error = syntax_error(error);
+    syntax_error
+        .errors
+        .iter()
+        .filter_map(|err| match err {
+            SemanticAnalysisError::UnusedImport { span } => Some(
+                syntax_error
+                    .source_file
+                    .source_slice(*span)
+                    .expect("unused import span should be valid")
+                    .to_string(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_import(module: &Module, name: &str, kind: ImportKind, used: bool) {
+    let import = module
+        .imports()
+        .find(|import| import.local_name().as_str() == name)
+        .unwrap_or_else(|| panic!("expected import named {name}"));
+    assert_eq!(import.kind(), kind);
+    assert_eq!(import.is_used(), used);
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DefinitionKind {
-    Alias,
+    ModuleImport,
+    ItemImport,
     Procedure,
     Constant,
     Type,
@@ -78,7 +126,8 @@ enum DefinitionKind {
 impl DefinitionKind {
     fn declaration(self, symbol: &str) -> String {
         match self {
-            Self::Alias => format!("use ::dep::{}", quote_ident_if_needed(symbol)),
+            Self::ModuleImport => format!("use ::dep::{}", quote_ident_if_needed(symbol)),
+            Self::ItemImport => format!("use {{{}}} from ::dep", quote_ident_if_needed(symbol)),
             Self::Procedure => {
                 format!("proc {}\n    nop\nend", quote_ident_if_needed(symbol))
             },
@@ -117,7 +166,7 @@ fn assert_cross_kind_conflict(first: DefinitionKind, second: DefinitionKind) {
     let message = format!("expected symbol conflict during analysis ({first:?} then {second:?})");
     let error = context.parse_module(&source).expect_err(&message);
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
-    if error.downcast_ref::<crate::sema::SyntaxError>().is_none() {
+    if error.downcast_ref::<SyntaxError>().is_none() {
         panic!("expected SyntaxError ({first:?} then {second:?}), got: {rendered}");
     }
     assert_symbol_conflict(&error, symbol);
@@ -332,9 +381,10 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 }
 
 #[test]
-fn define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
+fn sema_import_define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
     let kinds = [
-        DefinitionKind::Alias,
+        DefinitionKind::ModuleImport,
+        DefinitionKind::ItemImport,
         DefinitionKind::Procedure,
         DefinitionKind::Constant,
         DefinitionKind::Type,
@@ -346,6 +396,388 @@ fn define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
             }
             assert_cross_kind_conflict(first, second);
         }
+    }
+}
+
+#[test]
+fn sema_import_single_segment_module_import_resolves_qualified_invocation() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use foo
+begin
+    exec.foo::procedure
+end
+",
+        )
+        .expect("expected single-segment module import to resolve qualified invocation");
+
+    assert_import(&module, "foo", ImportKind::Module, true);
+}
+
+#[test]
+fn sema_import_multi_segment_module_import_resolves_via_last_segment() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use some::module
+begin
+    exec.module::procedure
+end
+",
+        )
+        .expect("expected multi-segment module import to bind final path segment");
+
+    assert_import(&module, "module", ImportKind::Module, true);
+}
+
+#[test]
+fn sema_import_module_alias_resolves_qualified_invocation() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use some::module as sm
+begin
+    exec.sm::procedure
+end
+",
+        )
+        .expect("expected module import alias to resolve qualified invocation");
+
+    assert_import(&module, "sm", ImportKind::Module, true);
+}
+
+#[test]
+fn sema_import_module_import_rejects_unqualified_proc_reference() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_program(
+            "
+use foo
+begin
+    exec.foo
+end
+",
+        )
+        .expect_err("module imports must not resolve unqualified procedure references");
+
+    assert_undefined_symbol(&error);
+}
+
+#[test]
+fn sema_import_module_import_rejects_unqualified_const_reference() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_program(
+            "
+use FOO
+begin
+    push.FOO
+end
+",
+        )
+        .expect_err("module imports must not resolve unqualified constant references");
+
+    assert_undefined_symbol(&error);
+}
+
+#[test]
+fn sema_import_module_import_rejects_unqualified_type_reference() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_program(
+            "
+use foo
+type T = foo
+begin
+    nop
+end
+",
+        )
+        .expect_err("module imports must not resolve unqualified type references");
+
+    assert_undefined_symbol(&error);
+}
+
+#[test]
+fn sema_import_item_proc_resolves_unqualified_invocation() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {procedure} from some::module
+begin
+    exec.procedure
+end
+",
+        )
+        .expect("expected item import to resolve unqualified procedure invocation");
+
+    assert_import(&module, "procedure", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_item_const_resolves_constant_reference() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {VALUE} from some::module
+begin
+    push.VALUE
+end
+",
+        )
+        .expect("expected item import to resolve unqualified constant reference");
+
+    assert_import(&module, "VALUE", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_item_type_resolves_type_reference() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {ForeignType} from some::module
+type LocalType = ForeignType
+begin
+    nop
+end
+",
+        )
+        .expect("expected item import to resolve unqualified type reference");
+
+    assert_import(&module, "ForeignType", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_renamed_proc_resolves_local_name() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {procedure as local_procedure} from some::module
+begin
+    exec.local_procedure
+end
+",
+        )
+        .expect("expected renamed procedure item import to resolve by local name");
+
+    assert_import(&module, "local_procedure", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_renamed_const_resolves_local_name() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {VALUE as LOCAL_VALUE} from some::module
+begin
+    push.LOCAL_VALUE
+end
+",
+        )
+        .expect("expected renamed constant item import to resolve by local name");
+
+    assert_import(&module, "LOCAL_VALUE", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_renamed_type_resolves_local_name() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_program(
+            "
+use {ForeignType as LocalImportType} from some::module
+type LocalType = LocalImportType
+begin
+    nop
+end
+",
+        )
+        .expect("expected renamed type item import to resolve by local name");
+
+    assert_import(&module, "LocalImportType", ImportKind::Item, true);
+}
+
+#[test]
+fn sema_import_duplicate_local_names_in_item_group_conflict() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+namespace test
+use {foo, bar as foo} from some::module
+",
+        )
+        .expect_err("duplicate local item import names should conflict");
+
+    assert_symbol_conflict(&error, "foo");
+}
+
+#[test]
+fn sema_import_item_import_conflicts_with_proc_const_type_and_submodule() {
+    let context = SyntaxTestContext::default();
+    for source in [
+        "namespace test\nuse {foo} from dep\nproc foo\n    nop\nend\n",
+        "namespace test\nproc foo\n    nop\nend\nuse {foo} from dep\n",
+        "namespace test\nuse {VALUE} from dep\nconst VALUE = 1\n",
+        "namespace test\nconst VALUE = 1\nuse {VALUE} from dep\n",
+        "namespace test\nuse {Thing} from dep\ntype Thing = felt\n",
+        "namespace test\ntype Thing = felt\nuse {Thing} from dep\n",
+        "namespace test\nuse {foo} from dep\nmod foo\n",
+        "namespace test\nmod foo\nuse {foo} from dep\n",
+    ] {
+        let error = context
+            .parse_module(source)
+            .expect_err("item import should conflict with local namespace declaration");
+        let expected = if source.contains("VALUE") {
+            "VALUE"
+        } else if source.contains("Thing") {
+            "Thing"
+        } else {
+            "foo"
+        };
+        assert_symbol_conflict(&error, expected);
+    }
+}
+
+#[test]
+fn sema_import_item_import_conflicts_with_module_import_alias() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+namespace test
+use dep
+use {foo as dep} from other
+",
+        )
+        .expect_err("item import should conflict with existing module import alias");
+
+    assert_symbol_conflict(&error, "dep");
+}
+
+#[test]
+fn sema_import_module_import_alias_conflicts_with_item_import() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            "
+namespace test
+use {foo as dep} from other
+use dep
+",
+        )
+        .expect_err("module import alias should conflict with existing item import");
+
+    assert_symbol_conflict(&error, "dep");
+}
+
+#[test]
+fn sema_import_unused_module_import_warns_on_local_name_span() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_module(
+            "
+namespace test
+use some::module as sm
+",
+        )
+        .expect_err("unused module import should warn on local name span");
+
+    assert_eq!(unused_import_slices(&error), vec!["sm"]);
+}
+
+#[test]
+fn sema_import_unused_grouped_items_warn_on_each_item_local_name_span() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_module(
+            "
+namespace test
+use {foo, bar as baz} from some::module
+",
+        )
+        .expect_err("unused grouped item imports should warn on each local name span");
+
+    assert_eq!(unused_import_slices(&error), vec!["foo", "baz"]);
+}
+
+#[test]
+fn sema_import_used_grouped_item_suppresses_only_that_item_warning() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    let error = context
+        .parse_module(
+            "
+namespace test
+use {foo, bar as baz} from some::module
+proc local
+    exec.foo
+end
+",
+        )
+        .expect_err("only unused grouped item imports should warn");
+
+    assert_eq!(unused_import_slices(&error), vec!["baz"]);
+}
+
+#[test]
+fn docs_import_docstrings_before_imports_and_reexports_warn_and_do_not_attach() {
+    let context = SyntaxTestContext::new().with_warnings_as_errors(true);
+    for source in [
+        "
+namespace test
+#! import docs
+use dep
+",
+        "
+namespace test
+#! import docs
+use {foo} from dep
+",
+        "
+namespace test
+#! re-export docs
+pub use {foo} from dep
+",
+    ] {
+        let error = context
+            .parse_module(source)
+            .expect_err("doc comments before imports and re-exports should warn");
+        let syntax_error = syntax_error(&error);
+        assert!(
+            syntax_error
+                .errors
+                .iter()
+                .any(|err| matches!(err, SemanticAnalysisError::ImportDocstring { .. })),
+            "expected ImportDocstring warning, got: {:?}",
+            syntax_error.errors
+        );
+
+        let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+        assert!(rendered.contains("imports and re-exports cannot have docstrings"), "{rendered}");
+    }
+}
+
+#[test]
+fn sema_import_old_no_brace_item_import_not_usable_as_proc_const_or_type() {
+    let context = SyntaxTestContext::default();
+    for source in [
+        "use dep::foo\nbegin\n    exec.foo\nend\n",
+        "use dep::FOO\nbegin\n    push.FOO\nend\n",
+        "use dep::Foo\ntype T = Foo\nbegin\n    nop\nend\n",
+    ] {
+        let error = context
+            .parse_program(source)
+            .expect_err("old no-brace item import syntax should behave as a module import");
+        assert_undefined_symbol(&error);
     }
 }
 

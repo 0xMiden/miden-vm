@@ -11,11 +11,12 @@ pub use self::{
         LocalSymbol, LocalSymbolResolver, SymbolResolution, SymbolResolutionError, SymbolTable,
     },
 };
-use super::{Ident, Visibility};
+use super::{Ident, Import, Visibility};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Declaration<'a> {
     Item(&'a Item),
+    Import(&'a Import),
     Submodule(&'a SubmoduleDecl),
 }
 
@@ -23,6 +24,7 @@ impl Spanned for Declaration<'_> {
     fn span(&self) -> miden_debug_types::SourceSpan {
         match self {
             Self::Item(item) => item.span(),
+            Self::Import(import) => import.local_name().span(),
             Self::Submodule(decl) => decl.name.span(),
         }
     }

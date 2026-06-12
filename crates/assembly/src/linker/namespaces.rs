@@ -7,9 +7,7 @@ use alloc::{
 
 use miden_assembly_syntax::{
     Path, PathBuf,
-    ast::{
-        AliasTarget, GlobalItemIndex, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility,
-    },
+    ast::{GlobalItemIndex, ImportKind, ItemIndex, ModuleIndex, SymbolResolutionError, Visibility},
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     diagnostics::RelatedLabel,
 };
@@ -60,8 +58,9 @@ pub struct ItemDef {
 pub struct UseDecl {
     owner: ModuleIndex,
     alias: String,
+    kind: ImportKind,
     visibility: Visibility,
-    target: AliasTarget,
+    target: Span<Arc<Path>>,
     span: SourceSpan,
 }
 
@@ -149,34 +148,146 @@ impl NamespaceGraph {
     /// Resolve all path imports without consulting any imports from the importing module.
     pub fn resolve_imports(&self, linker: &Linker) -> Result<ResolvedImports, LinkerError> {
         let mut imports = ResolvedImports::default();
+        let mut pending = self
+            .modules
+            .iter()
+            .flat_map(|module| module.imports.values())
+            .collect::<Vec<_>>();
 
-        for module in self.modules.iter() {
-            for import in module.imports.values() {
-                let AliasTarget::Path(path) = import.target() else {
-                    continue;
-                };
-                let resolved = self.resolve_import_target(
-                    import.owner(),
-                    import.alias(),
-                    path.as_deref(),
-                    linker,
-                )?;
+        while !pending.is_empty() {
+            let mut next = Vec::new();
+            let mut progress = false;
 
-                if import.visibility().is_public()
-                    && let ResolvedUse::Module(id) = resolved
-                {
+            for import in pending {
+                if matches!(import.kind(), ImportKind::Module) && import.visibility().is_public() {
                     return Err(LinkerError::ModuleReExport {
                         span: import.span(),
                         source_file: source_file(linker.source_manager.as_ref(), import.span()),
-                        path: self.module(id).path.clone(),
+                        path: import.target().inner().clone(),
                     });
                 }
 
+                let resolved = match self.resolve_import_decl(import, &imports, linker) {
+                    Ok(resolved) => resolved,
+                    Err(err @ LinkerError::UndefinedSymbol { .. }) => {
+                        next.push(import);
+                        let _ = err;
+                        continue;
+                    },
+                    Err(err) => return Err(err),
+                };
+
+                self.validate_resolved_import(import, resolved, linker)?;
+
                 imports.imports.insert((import.owner(), import.alias().to_string()), resolved);
+                progress = true;
             }
+
+            if next.is_empty() {
+                break;
+            }
+
+            if !progress {
+                if let Some(import) = next.iter().copied().find(|import| {
+                    self.public_import_dependency(import).is_some_and(|dependency| {
+                        next.iter().any(|candidate| candidate.key() == dependency)
+                    })
+                }) {
+                    return Err(LinkerError::ImportReExportCycle {
+                        span: import.span(),
+                        source_file: source_file(linker.source_manager.as_ref(), import.span()),
+                        path: import.target().inner().clone(),
+                    });
+                }
+
+                let import = next[0];
+                return self.resolve_import_decl(import, &imports, linker).map(|_| imports);
+            }
+
+            pending = next;
         }
 
         Ok(imports)
+    }
+
+    fn resolve_import_decl(
+        &self,
+        import: &UseDecl,
+        imports: &ResolvedImports,
+        linker: &Linker,
+    ) -> Result<ResolvedUse, LinkerError> {
+        self.resolve_import_target(
+            import.owner(),
+            import.alias(),
+            import.target().as_deref(),
+            imports,
+            linker,
+        )
+    }
+
+    fn validate_resolved_import(
+        &self,
+        import: &UseDecl,
+        resolved: ResolvedUse,
+        linker: &Linker,
+    ) -> Result<(), LinkerError> {
+        match (import.kind(), resolved) {
+            (ImportKind::Module, ResolvedUse::Module(_)) => Ok(()),
+            (ImportKind::Module, ResolvedUse::Item(item)) => {
+                Err(LinkerError::InvalidModuleImportTarget {
+                    span: import.span(),
+                    source_file: source_file(linker.source_manager.as_ref(), import.span()),
+                    path: item_path(linker, item),
+                })
+            },
+            (ImportKind::Item, ResolvedUse::Item(_)) => Ok(()),
+            (ImportKind::Item, ResolvedUse::Module(id)) => {
+                Err(LinkerError::InvalidItemImportTarget {
+                    span: import.span(),
+                    source_file: source_file(linker.source_manager.as_ref(), import.span()),
+                    path: self.module(id).path.clone(),
+                })
+            },
+        }
+    }
+
+    fn public_import_dependency(&self, import: &UseDecl) -> Option<(ModuleIndex, String)> {
+        let path = import.target().as_deref();
+        let (name, parent_path) = path.split_last()?;
+        let parent = self.find_import_target_parent(import.owner(), parent_path)?;
+        let dependency = self.module(parent).import(name)?;
+        dependency.visibility().is_public().then(|| dependency.key())
+    }
+
+    fn find_import_target_parent(&self, owner: ModuleIndex, path: &Path) -> Option<ModuleIndex> {
+        let (first, rest) = path.split_first()?;
+
+        if first == "self" {
+            return if rest.is_empty() {
+                Some(owner)
+            } else {
+                self.find_self_relative_module_index(owner, rest)
+            };
+        }
+
+        self.find_global_module_index(path)
+    }
+
+    fn find_self_relative_module_index(
+        &self,
+        owner: ModuleIndex,
+        path: &Path,
+    ) -> Option<ModuleIndex> {
+        let mut current = owner;
+        let mut remaining = path;
+
+        while let Some((component, rest)) = remaining.split_first() {
+            let edge = self.module(current).submodule(component)?;
+            current = edge.child();
+            remaining = rest;
+        }
+
+        Some(current)
     }
 
     fn resolve_import_target(
@@ -184,6 +295,7 @@ impl NamespaceGraph {
         owner: ModuleIndex,
         current_alias: &str,
         path: Span<&Path>,
+        imports: &ResolvedImports,
         linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
         let Some((first, rest)) = path.split_first() else {
@@ -194,7 +306,8 @@ impl NamespaceGraph {
             if rest.is_empty() {
                 return Err(undefined_symbol(linker, path));
             }
-            let resolved = self.resolve_self_relative_path(owner, rest, path.span(), linker)?;
+            let resolved =
+                self.resolve_self_relative_path(owner, rest, path.span(), imports, linker)?;
             return self.validate_import_target_module(owner, resolved, path, linker);
         }
 
@@ -211,7 +324,8 @@ impl NamespaceGraph {
             });
         }
 
-        match self.resolve_global_path(owner, path.into_inner(), path.span(), None, linker) {
+        match self.resolve_global_path(owner, path.into_inner(), path.span(), Some(imports), linker)
+        {
             Ok(resolved) => self.validate_import_target_module(owner, resolved, path, linker),
             Err(LinkerError::UndefinedSymbol { .. }) => Err(undefined_symbol(linker, path)),
             Err(err) => Err(err),
@@ -277,7 +391,7 @@ impl NamespaceGraph {
             if rest.is_empty() {
                 return Err(undefined_symbol(linker, path));
             }
-            return self.resolve_self_relative_path(owner, rest, path.span(), linker);
+            return self.resolve_self_relative_path(owner, rest, path.span(), imports, linker);
         }
 
         let owner_module = self.module(owner);
@@ -353,49 +467,10 @@ impl NamespaceGraph {
         owner: ModuleIndex,
         path: &Path,
         span: SourceSpan,
+        imports: &ResolvedImports,
         linker: &Linker,
     ) -> Result<ResolvedUse, LinkerError> {
-        let mut current = owner;
-        let mut remaining = path;
-
-        loop {
-            let Some((component, rest)) = remaining.split_first() else {
-                return Err(undefined_symbol_from_path(linker, span, path));
-            };
-            let module = self.module(current);
-
-            if rest.is_empty() {
-                if let Some(edge) = module.submodule(component) {
-                    self.ensure_submodule_visible(owner, current, edge, span, linker)?;
-                    return Ok(ResolvedUse::Module(edge.child()));
-                }
-
-                if let Some(item) = module.item(component) {
-                    self.ensure_item_visible(owner, item, span, linker)?;
-                    return Ok(ResolvedUse::Item(item.id()));
-                }
-
-                return Err(undefined_symbol_from_path(linker, span, path));
-            }
-
-            if let Some(edge) = module.submodule(component) {
-                self.ensure_submodule_visible(owner, current, edge, span, linker)?;
-                current = edge.child();
-                remaining = rest;
-                continue;
-            }
-
-            if let Some(item) = module.item(component) {
-                return Err(SymbolResolutionError::invalid_sub_path(
-                    span,
-                    item.span(),
-                    linker.source_manager.as_ref(),
-                )
-                .into());
-            }
-
-            return Err(undefined_symbol_from_path(linker, span, path));
-        }
+        self.resolve_path_from_module(owner, owner, path, span, imports, linker)
     }
 
     fn resolve_path_from_module(
@@ -734,9 +809,8 @@ impl ModuleNode {
         }
 
         for import in module.imports() {
-            let alias = import.alias();
-            let name = alias.name().as_str().to_string();
-            let span = alias.name().span();
+            let name = import.local_name().as_str().to_string();
+            let span = import.local_name().span();
             if node.contains_member(&name) {
                 return Err(name_conflict(linker, module, &name, span, "import"));
             }
@@ -746,9 +820,10 @@ impl ModuleNode {
                 UseDecl {
                     owner: module.id(),
                     alias: name,
-                    visibility: alias.visibility(),
-                    target: alias.target().clone(),
-                    span: alias.span(),
+                    kind: import.kind(),
+                    visibility: import.visibility(),
+                    target: import.target_path(),
+                    span: import.span(),
                 },
             );
         }
@@ -819,6 +894,11 @@ impl ItemDef {
 
 impl UseDecl {
     #[inline]
+    pub fn key(&self) -> (ModuleIndex, String) {
+        (self.owner, self.alias.clone())
+    }
+
+    #[inline]
     pub fn owner(&self) -> ModuleIndex {
         self.owner
     }
@@ -834,7 +914,12 @@ impl UseDecl {
     }
 
     #[inline]
-    pub fn target(&self) -> &AliasTarget {
+    pub fn kind(&self) -> ImportKind {
+        self.kind
+    }
+
+    #[inline]
+    pub fn target(&self) -> &Span<Arc<Path>> {
         &self.target
     }
 
@@ -870,6 +955,10 @@ fn undefined_symbol_from_path(linker: &Linker, span: SourceSpan, path: &Path) ->
         source_file: source_file(linker.source_manager.as_ref(), span),
         path: path.to_path_buf().into_boxed_path().into(),
     }
+}
+
+fn item_path(linker: &Linker, item: GlobalItemIndex) -> Arc<Path> {
+    linker[item.module].path().join(linker[item.module][item.index].name()).into()
 }
 
 fn source_file(
@@ -912,7 +1001,7 @@ mod tests {
 
                 pub mod child
 
-                use external::module->external
+                use external::module as external
 
                 pub proc entry
                     push.1
@@ -1010,7 +1099,7 @@ mod tests {
                 namespace app
 
                 use lib::mod
-                use lib::mod::VALUE
+                use {VALUE} from lib::mod
             "#,
         );
 
@@ -1092,7 +1181,7 @@ mod tests {
             r#"
                 namespace app
 
-                use real::mod->lib
+                use real::mod as lib
             "#,
         );
 
@@ -1133,7 +1222,7 @@ mod tests {
             r#"
                 namespace root
 
-                pub use dep::VALUE->ALIAS
+                pub use {VALUE as ALIAS} from dep
             "#,
         );
 
@@ -1219,7 +1308,7 @@ mod tests {
             r#"
                 namespace app
 
-                pub use root::child
+                pub use {child} from root
             "#,
         );
 
@@ -1230,7 +1319,7 @@ mod tests {
 
         let graph = NamespaceGraph::build(&linker).expect("namespace graph should build");
         let err = graph.resolve_imports(&linker).expect_err("module re-export should fail");
-        assert!(matches!(err, LinkerError::ModuleReExport { .. }));
+        assert!(matches!(err, LinkerError::InvalidItemImportTarget { .. }));
     }
 
     #[test]
@@ -1261,7 +1350,7 @@ mod tests {
                 namespace app
 
                 use root::child
-                use child::VALUE
+                use {VALUE} from child
             "#,
         );
 

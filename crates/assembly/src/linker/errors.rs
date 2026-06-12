@@ -113,6 +113,35 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         path: Arc<Path>,
     },
+    #[error("module import target '{path}' resolved to an item")]
+    #[diagnostic(help(
+        "module-form imports must target modules; use `use {{item}} from module` for items"
+    ))]
+    InvalidModuleImportTarget {
+        #[label("this import expects a module target")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
+    #[error("item import target '{path}' resolved to a module")]
+    #[diagnostic(help("item-form imports may only import procedures, constants, or types"))]
+    InvalidItemImportTarget {
+        #[label("this import expects an item target")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
+    #[error("import re-export cycle involving '{path}'")]
+    #[diagnostic(help("public item re-exports must not form cycles"))]
+    ImportReExportCycle {
+        #[label("this import participates in a re-export cycle")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
     #[error("import target '{path}' cannot be resolved through import '{alias}'")]
     #[diagnostic(help(
         "imports are resolved independently; use the original global path instead of another import alias"

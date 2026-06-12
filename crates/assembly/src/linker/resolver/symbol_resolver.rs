@@ -1,10 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
-    ast::{
-        Alias, AliasTarget, InvocationTarget, InvokeKind, Path, SymbolResolution,
-        SymbolResolutionError,
-    },
+    ast::{InvocationTarget, InvokeKind, Path, SymbolResolution},
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::ItemInfo,
 };
@@ -396,44 +393,11 @@ impl<'a> SymbolResolver<'a> {
         Ok(())
     }
 
-    /// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using
-    /// `context` as the context.
-    pub fn resolve_alias_target(
-        &self,
-        context: &SymbolResolutionContext,
-        alias: &Alias,
-    ) -> Result<SymbolResolution, LinkerError> {
-        if let Some(resolved) = self.resolved_import(context.module, alias.name().as_str()) {
-            return Ok(self.to_symbol_resolution(alias.target().span(), resolved));
-        }
-
-        match alias.target() {
-            target @ AliasTarget::MastRoot(mast_root) => {
-                log::debug!(target: "name-resolver::alias", "resolving alias target {target}");
-                match self.graph.get_procedure_index_by_digest(mast_root) {
-                    None => Ok(SymbolResolution::MastRoot(*mast_root)),
-                    Some(gid) => Ok(SymbolResolution::Exact {
-                        gid,
-                        path: Span::new(mast_root.span(), self.item_path(gid)),
-                    }),
-                }
-            },
-            AliasTarget::Path(path) => {
-                log::debug!(target: "name-resolver::alias", "resolving alias target '{path}'");
-                self.resolve_path(context, path.as_deref())
-            },
-        }
-    }
-
     pub fn resolve_path(
         &self,
         context: &SymbolResolutionContext,
         path: Span<&Path>,
     ) -> Result<SymbolResolution, LinkerError> {
-        if let Some(resolution) = self.resolve_mast_root_import_path(context.module, path)? {
-            return Ok(resolution);
-        }
-
         match (self.namespaces, self.imports) {
             (Some(namespaces), Some(imports)) => {
                 self.resolve_path_with_namespaces(namespaces, imports, context, path)
@@ -455,45 +419,6 @@ impl<'a> SymbolResolver<'a> {
     ) -> Result<SymbolResolution, LinkerError> {
         let resolved = namespaces.resolve_code_path(context.module, path, imports, self.graph)?;
         Ok(self.to_symbol_resolution(path.span(), resolved))
-    }
-
-    fn resolve_mast_root_import_path(
-        &self,
-        module: ModuleIndex,
-        path: Span<&Path>,
-    ) -> Result<Option<SymbolResolution>, LinkerError> {
-        if path.is_absolute() {
-            return Ok(None);
-        }
-
-        let Some((first, rest)) = path.split_first() else {
-            return Ok(None);
-        };
-        let Some(import) = self.graph[module].get_import(first) else {
-            return Ok(None);
-        };
-        let alias = import.alias();
-        let AliasTarget::MastRoot(mast_root) = alias.target() else {
-            return Ok(None);
-        };
-
-        if !rest.is_empty() {
-            return Err(SymbolResolutionError::invalid_sub_path(
-                path.span(),
-                mast_root.span(),
-                self.source_manager(),
-            )
-            .into());
-        }
-
-        let resolution = match self.graph.get_procedure_index_by_digest(mast_root) {
-            None => SymbolResolution::MastRoot(*mast_root),
-            Some(gid) => SymbolResolution::Exact {
-                gid,
-                path: Span::new(mast_root.span(), self.item_path(gid)),
-            },
-        };
-        Ok(Some(resolution))
     }
 
     pub fn resolve_local(

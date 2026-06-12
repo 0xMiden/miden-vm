@@ -544,13 +544,12 @@ impl Assembler {
                 }
 
                 for import in imports.iter() {
-                    let alias = import.alias();
-                    if !alias.visibility().is_public() {
+                    if !import.visibility().is_public() {
                         continue;
                     }
 
                     let path: Arc<Path> = module_path
-                        .join(alias.name())
+                        .join(import.local_name())
                         .canonicalize()
                         .into_diagnostic()?
                         .into_boxed_path()
@@ -732,67 +731,25 @@ impl Assembler {
         import: &Import,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<PendingPackageExport, Report> {
-        let alias = import.alias();
         if let Some(resolved) = import.resolved() {
             return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
         }
 
-        match alias.target() {
-            ast::AliasTarget::MastRoot(root) => {
-                let node_ref = self.ensure_valid_procedure_mast_root(
-                    InvokeKind::ProcRef,
-                    root.span(),
-                    *root.inner(),
-                    None,
-                    None,
-                    mast_forest_builder,
-                )?;
-
-                mast_forest_builder.record_procedure_root_ref(node_ref);
-
-                Ok(PendingPackageExport::Procedure(PendingProcedureExport {
-                    digest: *root.inner(),
-                    path: symbol_path,
-                    node_ref,
-                    signature: None,
-                    attributes: Default::default(),
-                }))
+        let target = import.target_path();
+        let context = SymbolResolutionContext {
+            span: target.span(),
+            module,
+            kind: Some(InvokeKind::ProcRef),
+        };
+        match self.linker.resolve_path(&context, target.inner())? {
+            SymbolResolution::Exact { gid, .. } => {
+                self.export_symbol(gid, module_kind, symbol_path, mast_forest_builder)
             },
-            ast::AliasTarget::Path(_) => {
-                let context = SymbolResolutionContext {
-                    span: alias.target().span(),
-                    module,
-                    kind: Some(InvokeKind::ProcRef),
-                };
-                match self.linker.resolve_alias_target(&context, alias)? {
-                    SymbolResolution::Exact { gid, .. } => {
-                        self.export_symbol(gid, module_kind, symbol_path, mast_forest_builder)
-                    },
-                    SymbolResolution::MastRoot(root) => {
-                        let node_ref = self.ensure_valid_procedure_mast_root(
-                            InvokeKind::ProcRef,
-                            root.span(),
-                            *root.inner(),
-                            None,
-                            None,
-                            mast_forest_builder,
-                        )?;
-                        mast_forest_builder.record_procedure_root_ref(node_ref);
-                        Ok(PendingPackageExport::Procedure(PendingProcedureExport {
-                            digest: *root.inner(),
-                            path: symbol_path,
-                            node_ref,
-                            signature: None,
-                            attributes: Default::default(),
-                        }))
-                    },
-                    SymbolResolution::Module { .. } => {
-                        Err(self.unresolved_alias_report("export", &symbol_path, alias))
-                    },
-                    SymbolResolution::Local(_) | SymbolResolution::External(_) => {
-                        unreachable!("namespace resolver should not return local/external")
-                    },
-                }
+            SymbolResolution::Module { .. }
+            | SymbolResolution::MastRoot(_)
+            | SymbolResolution::Local(_)
+            | SymbolResolution::External(_) => {
+                Err(self.unresolved_import_report("export", &symbol_path, import))
             },
         }
     }
@@ -1098,26 +1055,21 @@ impl Assembler {
         Ok(())
     }
 
-    fn unresolved_alias_report(
+    fn unresolved_import_report(
         &self,
         action: &'static str,
         symbol_path: &Path,
-        alias: &ast::Alias,
+        import: &Import,
     ) -> Report {
-        let span = alias.target().span();
-        let reason = match alias.target() {
-            ast::AliasTarget::MastRoot(_) => {
-                "this digest target does not resolve to a known procedure"
-            },
-            ast::AliasTarget::Path(_) => "this alias target does not resolve to a concrete item",
-        };
+        let target = import.target_path();
+        let span = target.span();
 
         RelatedLabel::error(format!(
-            "unable to {action} alias '{symbol_path}' targeting '{}'",
-            alias.target()
+            "unable to {action} import '{symbol_path}' targeting '{}'",
+            target.inner()
         ))
-        .with_labeled_span(span, reason)
-        .with_help("aliases must resolve to a concrete item before they can be used")
+        .with_labeled_span(span, "this import target does not resolve to a concrete item")
+        .with_help("imports must resolve to a concrete item before they can be used")
         .with_source_file(self.source_manager.get(span.source_id()).ok())
         .into()
     }

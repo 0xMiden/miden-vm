@@ -255,17 +255,23 @@ macro_rules! import {
     ($name:literal) => {{
         let path = $name.parse::<PathBuf>().expect("invalid import path");
         let name = Ident::new(path.last().unwrap()).unwrap();
-        Form::Alias(Alias::new(
+        Form::Import(ImportDecl::Module(ModuleImport::new(
+            SourceSpan::UNKNOWN,
             Visibility::Private,
+            Span::unknown(path.into()),
             name,
-            AliasTarget::Path(Span::unknown(path.into())),
-        ))
+        )))
     }};
 
     ($name:literal -> $alias:literal) => {
         let path = $name.parse::<PathBuf>().expect("invalid import path").into();
         let name = $alias.parse().expect("invalid import alias");
-        Form::Alias(Alias::new(Visibility::Private, name, AliasTarget::Path(Span::unknown(path))))
+        Form::Import(ImportDecl::Module(ModuleImport::new(
+            SourceSpan::UNKNOWN,
+            Visibility::Private,
+            Span::unknown(path),
+            name,
+        )))
     };
 }
 
@@ -911,17 +917,8 @@ fn test_use_in_proc_body() {
     end"#
     );
 
-    assert_parse_diagnostic_lines!(
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:5:9\]"#),
-        "4 |         loc_load.0",
-        "5 |         use",
-        " :         ^|^",
-        "  :          `-- expected `end` to close procedure before top-level item",
-        "6 |     end",
-        "`----"
-    );
+    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
+    assert_parse_diagnostic!(source, "expected an import path");
 }
 
 #[test]

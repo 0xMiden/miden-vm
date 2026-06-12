@@ -4,8 +4,8 @@ use core::{cell::Cell, ops::Index};
 use miden_assembly_syntax::{
     Path,
     ast::{
-        AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
-        SubmoduleDecl, SymbolResolution, SymbolResolutionError, SymbolTable,
+        ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
+        SymbolResolution, SymbolResolutionError, SymbolTable,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
@@ -210,7 +210,7 @@ impl LinkModule {
     /// Find the [Import] named `name` in this module.
     pub fn get_import(&self, name: impl AsRef<str>) -> Option<&Import> {
         let name = name.as_ref();
-        self.imports.iter().find(|import| import.alias().name().as_str() == name)
+        self.imports.iter().find(|import| import.local_name().as_str() == name)
     }
 
     /// Resolve `name` relative to this module, using `resolver` for externally-defined symbols.
@@ -276,8 +276,8 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
             .collect::<Vec<_>>();
 
         symbols.extend(self.module.imports.iter().map(|import| {
-            let alias = import.alias();
-            let name = alias.name().clone();
+            let local_name = import.local_name().clone();
+            let name = local_name.clone();
             let name = Span::new(name.span(), name.into_inner());
             if let Some(resolved) = import.resolved() {
                 let path = self.resolver.item_path(resolved);
@@ -290,7 +290,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                     }),
                 }
             } else if let Some(resolved) =
-                self.resolver.resolved_import(self.module.id(), alias.name().as_str())
+                self.resolver.resolved_import(self.module.id(), local_name.as_str())
             {
                 let span = name.span();
                 let resolution = match resolved {
@@ -305,16 +305,8 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                 };
                 LocalSymbol::Import { name, resolution: Ok(resolution) }
             } else {
-                match alias.target() {
-                    AliasTarget::MastRoot(root) => LocalSymbol::Import {
-                        name,
-                        resolution: Ok(SymbolResolution::MastRoot(*root)),
-                    },
-                    AliasTarget::Path(path) => {
-                        let resolution = Ok(SymbolResolution::External(path.clone()));
-                        LocalSymbol::Import { name, resolution }
-                    },
-                }
+                let resolution = Ok(SymbolResolution::External(import.target_path()));
+                LocalSymbol::Import { name, resolution }
             }
         }));
 

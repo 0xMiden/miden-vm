@@ -18,7 +18,7 @@ use proptest::prelude::*;
 use smallvec::SmallVec;
 
 use super::{
-    Alias, Constant, Declaration, DocString, EnumType, FunctionType, Item, ItemIndex, Path,
+    Constant, Declaration, DocString, EnumType, FunctionType, Import, Item, ItemIndex, Path,
     Procedure, ProcedureName, QualifiedProcedureName, SubmoduleDecl, TypeAlias, TypeDecl, Variant,
     Visibility,
 };
@@ -174,6 +174,8 @@ pub struct Module {
     ///
     /// If specified, it is expected that a module with the given
     pub(crate) submodules: Vec<SubmoduleDecl>,
+    /// The imports declared by this module.
+    pub(crate) imports: Vec<Import>,
     /// The items (defined or re-exported) in the module body.
     pub(crate) items: Vec<Item>,
     /// Maps export name to its position in `items`, for O(log n) conflict checks.
@@ -211,6 +213,7 @@ impl Module {
             namespace_decl: None,
             extern_packages: Default::default(),
             submodules: Default::default(),
+            imports: Default::default(),
             items: Default::default(),
             name_map: BTreeMap::new(),
             name_map_dirty: false,
@@ -311,6 +314,7 @@ impl Module {
     ) -> Option<Declaration<'module>> {
         self.get_item(name)
             .map(Declaration::Item)
+            .or_else(|| self.get_import(name).map(Declaration::Import))
             .or_else(|| self.get_submodule_declaration(name).map(Declaration::Submodule))
     }
 
@@ -322,6 +326,14 @@ impl Module {
     #[inline]
     pub(crate) fn get_submodule_declaration(&self, name: &str) -> Option<&SubmoduleDecl> {
         self.submodules.iter().find(|decl| decl.name.as_str() == name)
+    }
+
+    fn ensure_import_capacity(&self, span: SourceSpan) -> Result<(), SemanticAnalysisError> {
+        if self.imports.len() + self.items.len() >= ItemIndex::MAX_ITEMS {
+            return Err(SemanticAnalysisError::LimitExceeded { span, kind: LimitKind::Imports });
+        }
+
+        Ok(())
     }
 
     /// Declares that this module has a submodule named `name`, with the specified `visibility`.
@@ -487,24 +499,21 @@ impl Module {
         self.push_export(Item::Procedure(procedure))
     }
 
-    /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
-    /// previous definition
-    pub fn define_alias(
-        &mut self,
-        item: Alias,
-        _source_manager: Arc<dyn SourceManager>,
-    ) -> Result<(), SemanticAnalysisError> {
+    /// Defines an import, raising an error if the import conflicts with a previous declaration.
+    pub fn define_import(&mut self, import: Import) -> Result<(), SemanticAnalysisError> {
         self.ensure_name_map_current();
-        if self.is_kernel() && item.visibility().is_public() {
-            return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
+        self.ensure_import_capacity(import.span())?;
+        if self.is_kernel() && import.visibility().is_public() {
+            return Err(SemanticAnalysisError::ReexportFromKernel { span: import.span() });
         }
-        if let Some(prev) = self.get_declaration(item.name().as_str()) {
+        if let Some(prev) = self.get_declaration(import.local_name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
-                span: item.name().span(),
+                span: import.local_name().span(),
                 prev_span: prev.span(),
             });
         }
-        self.push_export(Item::Alias(item))
+        self.imports.push(import);
+        Ok(())
     }
 }
 
@@ -667,21 +676,29 @@ impl Module {
         })
     }
 
-    /// Get an iterator over the item aliases in this module.
-    pub fn aliases(&self) -> impl Iterator<Item = &Alias> + '_ {
-        self.items.iter().filter_map(|item| match item {
-            Item::Alias(item) => Some(item),
-            _ => None,
-        })
+    /// Resolves `name` to an [Import] within the context of this module.
+    pub fn get_import(&self, name: &str) -> Option<&Import> {
+        self.imports.iter().find(|import| import.local_name().as_str() == name)
     }
 
-    /// Same as [Module::aliases], but returns mutable references.
-    pub fn aliases_mut(&mut self) -> impl Iterator<Item = &mut Alias> + '_ {
-        self.name_map_dirty = true;
-        self.items.iter_mut().filter_map(|item| match item {
-            Item::Alias(item) => Some(item),
-            _ => None,
-        })
+    /// Same as [Module::get_import], but returns a mutable reference to the [Import].
+    pub fn get_import_mut(&mut self, name: &str) -> Option<&mut Import> {
+        self.imports.iter_mut().find(|import| import.local_name().as_str() == name)
+    }
+
+    /// Get an iterator over imports in this module.
+    pub fn imports(&self) -> impl Iterator<Item = &Import> + '_ {
+        self.imports.iter()
+    }
+
+    /// Same as [Module::imports], but returns mutable references.
+    pub fn imports_mut(&mut self) -> impl Iterator<Item = &mut Import> + '_ {
+        self.imports.iter_mut()
+    }
+
+    /// Takes all imports from this module.
+    pub fn take_imports(&mut self) -> Vec<Import> {
+        core::mem::take(&mut self.imports)
     }
 
     /// Get a reference to the set of package identifiers that this module declares a dependency on
@@ -756,23 +773,6 @@ impl Module {
     pub fn index_of_name(&self, name: &Ident) -> Option<ItemIndex> {
         self.index_of(|item| item.name() == name && item.visibility().is_public())
     }
-
-    /// Resolves `module_name` to an [Alias] within the context of this module
-    pub fn get_import(&self, module_name: &str) -> Option<&Alias> {
-        self.items.iter().find_map(|item| match item {
-            Item::Alias(item) if item.name().as_str() == module_name => Some(item),
-            _ => None,
-        })
-    }
-
-    /// Same as [Module::get_import], but returns a mutable reference to the [Alias]
-    pub fn get_import_mut(&mut self, module_name: &str) -> Option<&mut Alias> {
-        self.name_map_dirty = true;
-        self.items.iter_mut().find_map(|item| match item {
-            Item::Alias(item) if item.name().as_str() == module_name => Some(item),
-            _ => None,
-        })
-    }
 }
 
 impl core::ops::Index<ItemIndex> for Module {
@@ -805,6 +805,7 @@ impl PartialEq for Module {
         self.kind == other.kind
             && self.path == other.path
             && self.docs == other.docs
+            && self.imports == other.imports
             && self.items == other.items
     }
 }
@@ -819,6 +820,7 @@ impl fmt::Debug for Module {
             .field("kind", &self.kind)
             .field("extern_packages", &self.extern_packages)
             .field("submodules", &self.submodules)
+            .field("imports", &self.imports)
             .field("items", &self.items)
             .finish()
     }
@@ -891,6 +893,17 @@ impl crate::prettier::PrettyPrint for Module {
         }
 
         if !self.submodules.is_empty() {
+            doc += nl();
+        }
+
+        for (import_index, import) in self.imports.iter().enumerate() {
+            if import_index > 0 {
+                doc += nl();
+            }
+            doc += import.render();
+        }
+
+        if !self.imports.is_empty() {
             doc += nl();
         }
 

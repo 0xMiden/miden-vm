@@ -641,7 +641,7 @@ fn procref() -> Result<(), Report> {
     let module_source = "
     namespace test::foo
 
-    pub use miden::core::math::u64::overflowing_add
+    pub use {overflowing_add} from miden::core::math::u64
 
     @locals(4)
     pub proc foo

@@ -7,13 +7,13 @@ mod tests;
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet, VecDeque},
-    string::ToString,
+    string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
 
 use miden_core::{Word, crypto::hash::Poseidon2};
-use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use smallvec::SmallVec;
 
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
@@ -152,9 +152,12 @@ pub fn analyze(
                 namespace_allowed = false;
                 analyzer.define_constant(&mut module, constant.with_docs(docs.take()));
             },
-            Form::Alias(item) => {
+            Form::Import(import) => {
                 namespace_allowed = false;
-                define_alias(item.with_docs(docs.take()), &mut module, &mut analyzer)?
+                if let Some(unused) = docs.take() {
+                    analyzer.error(SemanticAnalysisError::ImportDocstring { span: unused.span() });
+                }
+                define_import(import, &mut module, &mut analyzer)?;
             },
             Form::Procedure(export) => {
                 namespace_allowed = false;
@@ -217,11 +220,24 @@ pub fn analyze(
                 {
                     analyzer.error(SemanticAnalysisError::UnexpectedExport { span: item.span() });
                 },
-                Item::Alias(alias)
-                    if item.visibility().is_public() && actual_kind == ModuleKind::Kernel =>
+                _ => (),
+            }
+        }
+        for import in module.imports() {
+            match import {
+                Import::Module(import) if import.visibility().is_public() => {
+                    analyzer.error(SemanticAnalysisError::ReexportedModule { span: import.span() });
+                },
+                import
+                    if import.visibility().is_public() && actual_kind == ModuleKind::Executable =>
+                {
+                    analyzer.error(SemanticAnalysisError::UnexpectedExport { span: import.span() });
+                },
+                Import::Item(import)
+                    if import.visibility().is_public() && actual_kind == ModuleKind::Kernel =>
                 {
                     analyzer
-                        .error(SemanticAnalysisError::ReexportFromKernel { span: alias.span() });
+                        .error(SemanticAnalysisError::ReexportFromKernel { span: import.span() });
                 },
                 _ => (),
             }
@@ -261,9 +277,9 @@ pub fn analyze(
     visit_items(&mut module, &mut analyzer);
 
     // Check unused imports
-    for import in module.aliases() {
+    for import in module.imports() {
         if !import.is_used() {
-            analyzer.error(SemanticAnalysisError::UnusedImport { span: import.span() });
+            analyzer.error(SemanticAnalysisError::UnusedImport { span: import.unused_span() });
         }
     }
 
@@ -284,11 +300,16 @@ fn normalize_namespace_path(path: &Path) -> Result<Arc<Path>, PathError> {
 /// of a module graph and global program analysis to perform any remaining transformations.
 fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
     let is_kernel = module.is_kernel();
-    let locals = BTreeMap::from_iter(
+    let mut locals = BTreeMap::from_iter(
         module
             .items()
             .iter()
             .map(|item| (item.name().as_str().to_string(), LocalInvokeTarget::from(item))),
+    );
+    locals.extend(
+        module.imports().map(|import| {
+            (import.local_name().as_str().to_string(), LocalInvokeTarget::from(import))
+        }),
     );
     let mut used_aliases = BTreeSet::default();
     let mut items = VecDeque::from(module.take_items());
@@ -340,22 +361,6 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
                     analyzer.error(err);
                 }
             },
-            Item::Alias(mut alias) => {
-                log::debug!(target: "verify-invoke", "visiting alias {}", alias.target());
-                {
-                    let mut visitor = VerifyInvokeTargets::new(
-                        analyzer,
-                        module,
-                        &locals,
-                        &mut used_aliases,
-                        None,
-                    );
-                    let _ = visitor.visit_mut_alias(&mut alias);
-                }
-                if let Err(err) = module.push_export(Item::Alias(alias)) {
-                    analyzer.error(err);
-                }
-            },
             Item::Constant(mut constant) => {
                 log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
                 {
@@ -391,34 +396,99 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) {
         }
     }
 
-    for alias in module.aliases_mut() {
-        if alias.uses == 0 && used_aliases.contains(alias.name().as_str()) {
-            alias.uses = 1;
+    for import in module.imports_mut() {
+        if import.is_used() || !used_aliases.contains(import.local_name().as_str()) {
+            continue;
+        }
+        match import {
+            Import::Module(import) => import.uses = 1,
+            Import::Item(import) => import.uses = 1,
         }
     }
 }
 
-fn define_alias(
-    item: Alias,
+fn define_import(
+    import: ImportDecl,
     module: &mut Module,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
-    let name = item.name().clone();
-    if let Err(err) = module.define_alias(item, context.source_manager()) {
-        match err {
-            SemanticAnalysisError::SymbolConflict { .. } => {
-                // Proceed anyway, to try and capture more errors
-                context.error(err);
-            },
-            err => {
-                // We can't proceed without producing a bunch of errors
-                context.error(err);
+    match import {
+        ImportDecl::Module(import) => {
+            if import.visibility().is_public() {
+                context.error(SemanticAnalysisError::ReexportedModule { span: import.span() });
                 context.has_failed()?;
-            },
+            }
+            if let Err(err) = module.define_import(Import::Module(import)) {
+                match err {
+                    SemanticAnalysisError::SymbolConflict { .. } => context.error(err),
+                    err => {
+                        context.error(err);
+                        context.has_failed()?;
+                    },
+                }
+            }
+        },
+        ImportDecl::Items(group) => {
+            preflight_item_import_group(&group, module, context)?;
+            let visibility = group.visibility();
+            let group_module_path = group.module_path();
+            let module_path: Span<Arc<Path>> =
+                Span::new(group_module_path.span(), Arc::from(*group_module_path));
+            for spec in group.specs() {
+                let name = spec.local_name().clone();
+                let import = Import::Item(ItemImport::new(
+                    spec.local_name().span(),
+                    visibility,
+                    module_path.clone(),
+                    spec.source_name().clone(),
+                    name.clone(),
+                ));
+                if let Err(err) = module.define_import(import) {
+                    match err {
+                        SemanticAnalysisError::SymbolConflict { .. } => context.error(err),
+                        err => {
+                            context.error(err);
+                            context.has_failed()?;
+                        },
+                    }
+                }
+                context.register_imported_name(name);
+            }
+        },
+    }
+
+    Ok(())
+}
+
+fn preflight_item_import_group(
+    group: &ItemImportGroup,
+    module: &Module,
+    context: &mut AnalysisContext,
+) -> Result<(), SyntaxError> {
+    let mut seen = BTreeMap::<String, SourceSpan>::new();
+    let mut failed = false;
+    for spec in group.specs() {
+        let local_name = spec.local_name();
+        if let Some(prev_span) = seen.insert(local_name.to_string(), local_name.span()) {
+            failed = true;
+            context.error(SemanticAnalysisError::SymbolConflict {
+                span: local_name.span(),
+                prev_span,
+            });
+            continue;
+        }
+        if let Some(prev) = module.get_declaration(local_name.as_str()) {
+            failed = true;
+            context.error(SemanticAnalysisError::SymbolConflict {
+                span: local_name.span(),
+                prev_span: prev.span(),
+            });
         }
     }
 
-    context.register_imported_name(name);
+    if failed {
+        context.has_failed()?;
+    }
 
     Ok(())
 }

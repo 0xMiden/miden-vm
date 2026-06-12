@@ -247,7 +247,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error(
-        "re-exporting a procedure identified by digest requires giving it a name, e.g. `pub use DIGEST->foo`"
+        "source-level digest re-exports are not supported; re-export a named item with `pub use {{item}} from module`"
     )]
     UnnamedReexportOfMastRoot {
         #[label]

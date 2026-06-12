@@ -54,8 +54,8 @@ use core::{
 use miden_assembly_syntax::{
     Report,
     ast::{
-        self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module,
-        ModuleIndex, Path, SymbolResolution, Visibility, types,
+        self, AttributeSet, GlobalItemIndex, InvocationTarget, ItemIndex, Module, ModuleIndex,
+        Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     module::{ItemInfo, ModuleInfo},
@@ -298,10 +298,9 @@ impl Linker {
         let module_index = self.next_module_id();
         let submodules = module.submodules().to_vec();
         let mut symbols = Vec::new();
-        let mut imports = Vec::new();
+        let imports = module.take_imports().into_iter().map(Import::new).collect::<Vec<_>>();
         for item in module.take_items() {
             match item {
-                ast::Item::Alias(alias) => imports.push(Import::new(alias)),
                 ast::Item::Type(item) => {
                     let gid = module_index + ItemIndex::new(symbols.len());
                     self.callgraph.get_or_insert_node(gid);
@@ -614,23 +613,10 @@ impl Linker {
                 let module_index = ModuleIndex::new(module_index);
 
                 for import in module.imports() {
-                    let alias = import.alias();
-                    let context = SymbolResolutionContext {
-                        span: alias.target().span(),
-                        module: module_index,
-                        kind: None,
-                    };
-                    match resolver.resolve_alias_target(&context, alias)? {
-                        SymbolResolution::Exact { gid, .. } => import.set_resolved(gid),
-                        SymbolResolution::MastRoot(root) => {
-                            if let Some(gid) = self.get_procedure_index_by_digest(&root) {
-                                import.set_resolved(gid);
-                            }
-                        },
-                        SymbolResolution::Module { .. } => {},
-                        SymbolResolution::Local(_) | SymbolResolution::External(_) => {
-                            unreachable!("namespace resolver should not return local/external")
-                        },
+                    if let Some(namespaces::ResolvedUse::Item(gid)) =
+                        imports.get(module_index, import.local_name().as_str())
+                    {
+                        import.set_resolved(gid);
                     }
                 }
 
@@ -772,18 +758,6 @@ impl Linker {
         let imports = namespaces.resolve_imports(self)?;
         let resolver = SymbolResolver::with_namespaces(self, &namespaces, &imports);
         resolver.resolve_invoke_target(caller, target)
-    }
-
-    /// Resolves `target` from the perspective of `caller`.
-    pub fn resolve_alias_target(
-        &self,
-        caller: &SymbolResolutionContext,
-        target: &Alias,
-    ) -> Result<SymbolResolution, LinkerError> {
-        let namespaces = NamespaceGraph::build(self)?;
-        let imports = namespaces.resolve_imports(self)?;
-        let resolver = SymbolResolver::with_namespaces(self, &namespaces, &imports);
-        resolver.resolve_alias_target(caller, target)
     }
 
     /// Resolves `path` from the perspective of `caller`.

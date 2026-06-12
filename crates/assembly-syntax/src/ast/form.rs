@@ -3,8 +3,8 @@ use alloc::{string::String, sync::Arc};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{
-    AdviceMapEntry, Alias, Block, Constant, EnumType, Ident, Item, Path, Procedure, SubmoduleDecl,
-    TypeAlias, TypeDecl,
+    AdviceMapEntry, Block, Constant, EnumType, Ident, ImportDecl, Item, Path, Procedure,
+    SubmoduleDecl, TypeAlias, TypeDecl,
 };
 
 /// This type represents the top-level forms of a Miden Assembly module
@@ -34,8 +34,8 @@ pub enum Form {
     Begin(Block),
     /// A procedure
     Procedure(Procedure),
-    /// A foreign item alias
-    Alias(Alias),
+    /// A source-level import declaration.
+    Import(ImportDecl),
     /// An entry into the Advice Map
     AdviceMapEntry(AdviceMapEntry),
 }
@@ -70,9 +70,9 @@ impl From<Constant> for Form {
     }
 }
 
-impl From<Alias> for Form {
-    fn from(alias: Alias) -> Self {
-        Self::Alias(alias)
+impl From<ImportDecl> for Form {
+    fn from(import: ImportDecl) -> Self {
+        Self::Import(import)
     }
 }
 
@@ -85,7 +85,6 @@ impl From<Block> for Form {
 impl From<Item> for Form {
     fn from(item: Item) -> Self {
         match item {
-            Item::Alias(item) => Self::Alias(item),
             Item::Constant(item) => Self::Constant(item),
             Item::Type(TypeDecl::Alias(item)) => Self::Type(item),
             Item::Type(TypeDecl::Enum(item)) => Self::Enum(item),
@@ -107,7 +106,7 @@ impl Spanned for Form {
             | Self::AdviceMapEntry(AdviceMapEntry { span, .. }) => *span,
             Self::Begin(spanned) => spanned.span(),
             Self::Procedure(spanned) => spanned.span(),
-            Self::Alias(spanned) => spanned.span(),
+            Self::Import(spanned) => spanned.span(),
         }
     }
 }

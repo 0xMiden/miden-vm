@@ -299,9 +299,9 @@ fn library_exports() -> Result<(), Report> {
 
         pub mod foo
 
-        pub use lib1::baz::baz1->bar1
+        pub use {baz1 as bar1} from lib1::baz
 
-        pub use self::foo::foo2->bar2
+        pub use {foo2 as bar2} from self::foo
 
         pub proc bar3
             exec.foo::foo2
@@ -385,7 +385,7 @@ fn library_procedure_collision() -> Result<(), Report> {
     let bar = r#"
         namespace lib2::bar
 
-        pub use lib1::foo::foo1->bar1
+        pub use {foo1 as bar1} from lib1::foo
 
         pub proc bar2
             push.1
@@ -640,7 +640,7 @@ fn procref_call() -> TestResult {
         namespace module::path::two
 
         use module::path::one
-        pub use module::path::one::foo
+        pub use {foo} from module::path::one
 
         pub proc bar
             procref.one::aaa
@@ -1010,8 +1010,7 @@ fn constant_err_div_by_zero_link_time() -> TestResult {
     let source = source_file!(
         &context,
         "\
-    use module_a::NUMERATOR
-    use module_a::DENOMINATOR
+    use {NUMERATOR, DENOMINATOR} from module_a
 
     const BAD_DIV = NUMERATOR / DENOMINATOR
 
@@ -1611,7 +1610,7 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
         &context,
         "\
         use lib::a
-        use lib::a::FOO
+        use {FOO} from lib::a
         begin
             push.FOO
             exec.a::f
@@ -1647,7 +1646,7 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     let source = source_file!(
         &context,
         "\
-        use lib::a::FOO
+        use {FOO} from lib::a
         begin
             push.FOO
             exec.lib::a::f
@@ -1662,9 +1661,9 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
     assert_diagnostic_lines!(
         error,
         "undefined item 'lib::a::FOO'",
-        regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use lib::a::FOO",
-        "  :     ^^^^^^^^^^^",
+        regex!(r#",-\[test[\d]+:1:6\]"#),
+        "1 | use {FOO} from lib::a",
+        "  :      ^^^",
         "2 |         begin",
         "  `----",
         "help: you might be missing an import, or the containing library has not been linked"
@@ -1691,7 +1690,7 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
     let source = source_file!(
         &context,
         "\
-    use lib::a::f
+    use {f} from lib::a
     begin
         push.f
     end"
@@ -2384,39 +2383,17 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        #! checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
-        pub use dummy1::math::u64::checked_eqz # re-export
+        # checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
+        pub use {checked_eqz} from dummy1::math::u64 # re-export
 
-        #! unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
-        pub use dummy1::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
+        # unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
+        pub use {unchecked_eqz as notchecked_eqz} from dummy1::math::u64 # re-export with alias
     "#;
 
     let mut context = TestContext::new();
     let ast = context
         .parse_module(source_file!(&context, format!("namespace {MODULE}\n{MODULE_BODY}")))
         .unwrap();
-
-    // check docs
-    let docs_checked_eqz = ast
-        .aliases()
-        .find(|p| p.name().as_str() == "checked_eqz")
-        .unwrap()
-        .docs()
-        .unwrap();
-    assert_eq!(
-        docs_checked_eqz,
-        "checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise\n"
-    );
-    let docs_unchecked_eqz = ast
-        .aliases()
-        .find(|p| p.name().as_str() == "notchecked_eqz")
-        .unwrap()
-        .docs()
-        .unwrap();
-    assert_eq!(
-        docs_unchecked_eqz,
-        "unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise\n"
-    );
 
     let ref_ast = context
         .parse_module(source_file!(&context, format!("namespace {REF_MODULE}\n{REF_MODULE_BODY}")))
@@ -2467,11 +2444,11 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        #! checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
-        pub use dummy1::math::u64::checked_eqz # re-export
+        # checked_eqz checks if the value is u32 and zero and returns 1 if it is, 0 otherwise
+        pub use {checked_eqz} from dummy1::math::u64 # re-export
 
-        #! unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
-        pub use dummy1::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
+        # unchecked_eqz checks if the value is zero and returns 1 if it is, 0 otherwise
+        pub use {unchecked_eqz as notchecked_eqz} from dummy1::math::u64 # re-export with alias
     "#;
 
     let mut context = TestContext::new();
@@ -2493,7 +2470,7 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
         &context,
         format!(
             r#"
-        use {MODULE}->myu256
+        use {MODULE} as myu256
         begin
             push.4 push.3
             exec.myu256::checked_eqz
@@ -2528,8 +2505,8 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
 
     const MODULE: &str = "dummy1::math::u256";
     const MODULE_BODY: &str = r#"
-        pub use dummy2::math::u64::checked_eqz # re-export
-        pub use dummy2::math::u64::unchecked_eqz->notchecked_eqz # re-export with alias
+        pub use {checked_eqz} from dummy2::math::u64 # re-export
+        pub use {unchecked_eqz as notchecked_eqz} from dummy2::math::u64 # re-export with alias
     "#;
 
     let mut context = TestContext::default();
@@ -2630,7 +2607,7 @@ fn module_alias() -> TestResult {
     let source = source_file!(
         &context,
         "
-        use dummy::math::u64->bigint
+        use dummy::math::u64 as bigint
 
         begin
             push.1.0
@@ -2645,21 +2622,20 @@ fn module_alias() -> TestResult {
     // --- invalid module alias -----------------------------------------------
     let source = source_file!(
         &context,
-        "
-        use dummy::math::u64->bigint->invalidname
+        r#"
+        use dummy::math::u64 as "bad name"
 
         begin
             push.1.0
             push.2.0
-            exec.bigint->invalidname::checked_add
-        end"
+            exec."bad name"::checked_add
+        end"#
     );
     let err = context
         .assemble(source)
-        .expect_err("expected chained module alias to be rejected");
-    assert_diagnostic!(&err, "Multiple syntax errors were identified");
-    assert_diagnostic!(&err, "use dummy::math::u64->bigint->invalidname");
-    assert_diagnostic!(&err, "unexpected top-level token");
+        .expect_err("expected invalid quoted module alias to be rejected");
+    assert_diagnostic!(&err, "expected an alias name after `as`");
+    assert_diagnostic!(&err, "bad name");
 
     Ok(())
 }
@@ -2698,7 +2674,7 @@ fn module_alias_unused_import() -> TestResult {
         &context,
         "
         use dummy::math::u64
-        use dummy::math::u64->bigint
+        use dummy::math::u64 as bigint
 
         begin
             push.1.0
@@ -2713,7 +2689,7 @@ fn module_alias_unused_import() -> TestResult {
     assert_diagnostic!(&err, "unused import");
     assert_diagnostic!(&err, "this import is never used and can be safely removed");
     assert_diagnostic!(&err, "use dummy::math::u64");
-    assert_diagnostic!(&err, "use dummy::math::u64->bigint");
+    assert_diagnostic!(&err, "use dummy::math::u64 as bigint");
 
     // --- duplicate module imports with different aliases --------------------
     // TODO: Do we actually want this to be a warning/error? If the imports
@@ -2724,8 +2700,8 @@ fn module_alias_unused_import() -> TestResult {
     let source = source_file!(
     &context,
         "
-        use dummy::math::u64->bigint
-        use dummy::math::u64->bigint2
+        use dummy::math::u64 as bigint
+        use dummy::math::u64 as bigint2
 
         begin
             push.1.0
@@ -4373,7 +4349,7 @@ fn re_exports() -> Result<(), Report> {
     const BAZ: &str = r#"
         namespace foo::baz
 
-        pub use foo::bar::baz
+        pub use {baz} from foo::bar
 
         pub proc qux
             push.1 push.2 add
@@ -4442,7 +4418,7 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
     const KERNEL: &str = r#"
         namespace $kernel
 
-        use kernellib::helpers->h
+        use kernellib::helpers as h
         pub proc foo
             exec.h::get_caller
         end"#;
@@ -4727,7 +4703,7 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
         r#"
         namespace root
 
-        pub use dep::foo->bar
+        pub use {foo as bar} from dep
         "#
     ))?;
     let dep = context.parse_module(source_file!(
@@ -4746,6 +4722,291 @@ fn public_item_import_exports_without_alias_symbol() -> TestResult {
 
     assert_eq!(exports.len(), 1);
     assert!(exports.contains(&Arc::from(Path::new("::root::bar"))));
+
+    Ok(())
+}
+
+#[test]
+fn link_import_module_and_item_forms_resolve() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace lib::math
+
+        pub const VALUE = 7
+        pub type WordType = felt
+
+        pub proc procedure
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use lib::math
+        use lib::math as m
+        use {procedure as imported_proc, VALUE, WordType} from lib::math
+
+        pub const LOCAL = VALUE + 1
+
+        pub proc entry(value: WordType)
+            exec.imported_proc
+            exec.math::procedure
+            exec.m::procedure
+            push.LOCAL
+            drop
+        end
+        "#
+    ))?;
+
+    let package =
+        Assembler::new(context.source_manager()).assemble_library("app", consumer, [dep])?;
+    let exports = package.manifest.exports().map(PackageExport::path).collect::<BTreeSet<_>>();
+
+    assert!(exports.contains(&Arc::from(Path::new("::app::entry"))));
+
+    Ok(())
+}
+
+#[test]
+fn link_import_single_segment_module_import_resolves() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace foo
+
+        pub proc procedure
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use foo
+
+        pub proc entry
+            exec.foo::procedure
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("app", consumer, [dep])?;
+
+    Ok(())
+}
+
+#[test]
+fn link_import_item_form_rejects_submodule_target() -> TestResult {
+    let context = TestContext::new().with_warnings_as_errors(false);
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace dep
+
+        pub mod child
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace dep::child
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use {child} from dep
+
+        pub proc entry
+            nop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("app", consumer, [dep, child])
+        .expect_err("item import of a submodule should be rejected");
+
+    assert_diagnostic!(&err, "item import target '::dep::child' resolved to a module");
+
+    Ok(())
+}
+
+#[test]
+fn link_import_public_item_reexport_chain_resolves_order_independently() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace dep
+
+        pub const VALUE = 1
+        "#
+    ))?;
+    let mid = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace mid
+
+        pub use {VALUE as MID_VALUE} from dep
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use {MID_VALUE as VALUE} from mid
+
+        pub proc entry
+            push.VALUE
+            drop
+        end
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("app", consumer, [mid, dep])?;
+
+    Ok(())
+}
+
+#[test]
+fn link_import_self_relative_public_item_reexport_resolves() -> TestResult {
+    let context = TestContext::new();
+    let dep = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace dep
+
+        pub proc helper
+            nop
+        end
+        "#
+    ))?;
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        pub mod child
+
+        use {ALIAS as imported} from self::child
+
+        pub proc entry
+            exec.imported
+            exec.self::child::ALIAS
+        end
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app::child
+
+        pub use {helper as ALIAS} from dep
+        "#
+    ))?;
+
+    Assembler::new(context.source_manager()).assemble_library("app", root, [child, dep])?;
+
+    Ok(())
+}
+
+#[test]
+fn link_import_public_item_reexport_cycle_is_rejected() -> TestResult {
+    let context = TestContext::new();
+    let a = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace a
+
+        pub use {B as A} from b
+        "#
+    ))?;
+    let b = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace b
+
+        pub use {A as B} from a
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use {A} from a
+
+        pub proc entry
+            push.A
+            drop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("app", consumer, [a, b])
+        .expect_err("public item re-export cycle should be rejected");
+
+    assert_diagnostic!(&err, "import re-export cycle");
+
+    Ok(())
+}
+
+#[test]
+fn link_import_public_item_reexport_cycle_with_self_relative_target_is_rejected() -> TestResult {
+    let context = TestContext::new();
+    let root = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root
+
+        pub mod child
+        pub use {B as A} from self::child
+        "#
+    ))?;
+    let child = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace root::child
+
+        pub use {A as B} from root
+        "#
+    ))?;
+    let consumer = context.parse_module(source_file!(
+        &context,
+        r#"
+        namespace app
+
+        use {A} from root
+
+        pub proc entry
+            push.A
+            drop
+        end
+        "#
+    ))?;
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("app", consumer, [root, child])
+        .expect_err("public item re-export cycle should be rejected");
+
+    assert_diagnostic!(&err, "import re-export cycle");
 
     Ok(())
 }
@@ -5105,8 +5366,8 @@ fn private_submodule_is_visible_to_descendants_of_its_parent() -> TestResult {
         r#"
         namespace diag::root::api
 
-        use diag::root::internal::VALUE
-        use diag::root::internal->internal_api
+        use {VALUE} from diag::root::internal
+        use diag::root::internal as internal_api
 
         pub proc entry
             push.VALUE
@@ -5157,7 +5418,7 @@ fn private_nested_submodule_is_not_visible_to_sibling_of_parent() -> TestResult 
         r#"
         namespace diag::root::sibling
 
-        use diag::root::parent::hidden::VALUE
+        use {VALUE} from diag::root::parent::hidden
 
         pub proc entry
             push.VALUE
@@ -5205,7 +5466,7 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         r#"
         namespace diag::consumer
 
-        pub use diag::root::child->child
+        pub use {child} from diag::root
 
         pub proc entry
             nop
@@ -5217,8 +5478,8 @@ fn link_diagnostic_for_module_reexport() -> TestResult {
         .assemble_library("diag", consumer, [root, child])
         .expect_err("module re-export should be rejected");
 
-    assert_diagnostic!(&err, "modules cannot be re-exported with `pub use`");
-    assert_diagnostic!(&err, "declare the module with `pub mod`");
+    assert_diagnostic!(&err, "item import target '::diag::root::child' resolved to a module");
+    assert_diagnostic!(&err, "item-form imports may only import procedures, constants, or types");
 
     Ok(())
 }
@@ -5255,7 +5516,7 @@ fn link_diagnostic_for_import_target_through_import_alias() -> TestResult {
         namespace diag::consumer
 
         use diag::root::child
-        use child::VALUE
+        use {VALUE} from child
 
         pub proc entry
             push.VALUE
@@ -5305,7 +5566,7 @@ fn pub_use_through_import_alias_is_rejected_even_when_global_path_exists() -> Te
         namespace diag::consumer
 
         use diag::dep::child
-        pub use child::p->alias
+        pub use {p as alias} from child
 
         pub proc entry
             nop
@@ -5370,7 +5631,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_alias() -> TestResult
         namespace diag::root
 
         pub mod child
-        use diag::root::child->child_api
+        use diag::root::child as child_api
 
         pub proc entry
             exec.child_api::child_entry
@@ -5407,7 +5668,7 @@ fn link_diagnostic_for_importing_same_scope_submodule_with_self_alias() -> TestR
         namespace diag::root
 
         pub mod child
-        use self::child->child_api
+        use self::child as child_api
 
         pub proc entry
             exec.child_api::child_entry
@@ -5568,7 +5829,7 @@ fn code_paths_can_reference_imported_module_subpaths() -> TestResult {
         r#"
         namespace diag::consumer
 
-        use diag::dep->dep
+        use diag::dep as dep
 
         pub proc entry
             exec.dep::child::child_entry
@@ -5591,7 +5852,7 @@ fn self_relative_import_walks_public_submodules() -> TestResult {
 
         pub mod child
 
-        use self::child::child_entry->child_entry
+        use {child_entry} from self::child
 
         pub proc entry
             exec.child_entry
@@ -5624,7 +5885,7 @@ fn self_relative_import_rejects_private_descendant() -> TestResult {
 
         pub mod child
 
-        use self::child::hidden->hidden
+        use self::child::hidden
 
         pub proc entry
             exec.hidden::hidden_entry
@@ -5678,10 +5939,10 @@ fn link_diagnostic_for_subpath_through_non_module_item() -> TestResult {
         r#"
         namespace diag::consumer
 
-        use diag::dep::VALUE::nested->NESTED
+        use {nested as NESTED} from diag::dep::VALUE
 
         pub proc entry
-            push.NESTED
+            exec.NESTED
         end
         "#
     ))?;
@@ -5721,7 +5982,7 @@ pub const ERR2 = ERR1
 
     // Executable module imports `ERR2` and uses it as an assertion error message.
     let module_a_src = r#"
-use b::ERR2
+use {ERR2} from b
 
 begin
     assert.err=ERR2
@@ -5859,7 +6120,7 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
         r#"
             namespace cycle::module_b
 
-            use cycle::module_a::A_VAL
+            use {A_VAL} from cycle::module_a
             pub proc b_proc
                 push.A_VAL
             end
@@ -5894,7 +6155,7 @@ fn importing_private_constant_from_another_module_is_rejected() -> TestResult {
         r#"
             namespace cycle::module_b
 
-            use cycle::module_a::A_VAL
+            use {A_VAL} from cycle::module_a
             pub proc b_proc
                 push.A_VAL
             end
@@ -5931,7 +6192,7 @@ fn importing_private_constant_from_another_module_by_absolute_path_is_rejected()
         r#"
             namespace cycle::module_b
 
-            use ::cycle::module_a::A_VAL
+            use {A_VAL} from ::cycle::module_a
             pub proc b_proc
                 push.A_VAL
             end
@@ -5968,7 +6229,7 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
         r#"
             namespace cycle::module_b
 
-            use cycle::module_a::PrivateType
+            use {PrivateType} from cycle::module_a
             pub proc b_proc(value: PrivateType)
                 nop
             end
@@ -6090,7 +6351,7 @@ fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
         r#"
             namespace wallet::account
 
-            use wallet::memory::ACCOUNT_ID_SUFFIX_OFFSET
+            use {ACCOUNT_ID_SUFFIX_OFFSET} from wallet::memory
 
             pub proc use_suffix
                 push.ACCOUNT_ID_SUFFIX_OFFSET
@@ -6110,7 +6371,7 @@ fn imported_main_alias_self_call_is_structured_error() {
 
     let context = TestContext::new();
     let program = r#"
-        use ::$exec::"$main"->alias_main
+        use {"$main" as alias_main} from ::$exec
 
         begin
             call.alias_main
@@ -6125,8 +6386,8 @@ fn imported_main_alias_self_call_is_structured_error() {
     let err = assembled
         .unwrap()
         .expect_err("expected self-referential alias call to be rejected");
-    assert_diagnostic!(&err, "invalid recursive procedure call");
-    assert_diagnostic!(&err, "this call is self-recursive");
+    assert_diagnostic!(&err, "found a cycle in the call graph");
+    assert_diagnostic!(&err, "::$exec::$main");
 }
 
 #[test]
@@ -6283,70 +6544,59 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
 }
 
 #[test]
-fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
+fn asm_import_source_digest_reexport_is_rejected_without_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
-    let digest = Word::default();
-    let module = context
-        .parse_module(source_file!(
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        context.parse_module(source_file!(
             &context,
-            "namespace m::n\n\npub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo\n"
+            "namespace m::n\n\npub use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000\n"
         ))
-        .expect("module parsing must succeed");
-
-    let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("m", module, None::<Box<Module>>)
     }));
 
-    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
-    let library = assembled
+    assert!(parsed.is_ok(), "parser panicked, expected a structured error");
+    let err = parsed
         .unwrap()
-        .expect("expected digest alias export to assemble successfully");
-    assert_eq!(library.get_procedure_root_by_path("m::n::foo"), Some(digest));
+        .expect_err("expected source-level digest re-export to be rejected");
+    assert_diagnostic!(&err, "digest imports are not supported in source `use` declarations");
 }
 
 #[test]
-fn path_alias_chain_to_digest_is_rejected_without_panicking() {
+fn asm_import_source_digest_alias_chain_is_rejected_without_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let context = TestContext::new();
-    let module = context
-        .parse_module(source_file!(
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        context.parse_module(source_file!(
             &context,
             r#"
                     namespace m::n
 
-                    pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
-                    pub use m::n::foo->bar
+                    pub use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000
+                    pub use {foo as bar} from m::n
 
                     pub proc calls_bar
                         call.bar
                     end
                 "#
         ))
-        .expect("module parsing must succeed");
-
-    let assembled = catch_unwind(AssertUnwindSafe(|| {
-        Assembler::new(context.source_manager()).assemble_library("m", module, None::<Box<Module>>)
     }));
 
-    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
-    let err = assembled
+    assert!(parsed.is_ok(), "parser panicked, expected a structured error");
+    let err = parsed
         .unwrap()
-        .expect_err("expected import chaining through a digest alias to be rejected");
-    assert_diagnostic!(&err, "undefined item 'm::n::foo'");
+        .expect_err("expected source-level digest alias chain to be rejected");
+    assert_diagnostic!(&err, "digest imports are not supported in source `use` declarations");
 }
 
 #[test]
-fn imported_digest_alias_invoke_assembles_without_panicking() {
+fn asm_import_direct_digest_invoke_assembles_without_source_import() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let program = r#"
-        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
-
         begin
-            exec.foo
+            exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
         end
     "#;
 
@@ -6356,25 +6606,23 @@ fn imported_digest_alias_invoke_assembles_without_panicking() {
 
     assert!(
         assembled.is_ok(),
-        "assembly panicked, expected opaque digest invoke to be allowed"
+        "assembly panicked, expected direct opaque digest invoke to be allowed"
     );
     assembled
         .unwrap()
-        .expect("expected digest-backed invoke alias to assemble successfully");
+        .expect("expected direct digest invocation to assemble successfully");
 }
 
 #[test]
-fn imported_digest_alias_invoke_is_not_reported_unused_when_warnings_are_errors() {
+fn asm_import_direct_digest_invoke_parses_with_warnings_as_errors() {
     use std::sync::Arc;
 
     use crate::DefaultSourceManager;
 
     let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
     let program = r#"
-        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
-
         begin
-            exec.foo
+            exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
         end
     "#;
 
@@ -6383,11 +6631,11 @@ fn imported_digest_alias_invoke_is_not_reported_unused_when_warnings_are_errors(
 
     parser
         .parse_str(None, program, source_manager)
-        .expect("expected digest-backed invoke alias to count as used");
+        .expect("expected direct digest invocation to parse without import warnings");
 }
 
 #[test]
-fn imported_digest_alias_forward_decl_is_not_reported_unused_when_warnings_are_errors() {
+fn asm_import_direct_digest_forward_decl_assembles_without_source_import() {
     use std::sync::Arc;
 
     use crate::DefaultSourceManager;
@@ -6395,22 +6643,17 @@ fn imported_digest_alias_forward_decl_is_not_reported_unused_when_warnings_are_e
     let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
     let program = r#"
         proc helper
-            exec.foo
+            exec.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
         end
-
-        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
 
         begin
             call.helper
         end
     "#;
 
-    let mut parser = Module::parser(None);
-    parser.set_warnings_as_errors(true);
-
-    parser
-        .parse_str(None, program, source_manager)
-        .expect("expected forward-declared digest alias to count as used");
+    Assembler::new(source_manager)
+        .assemble_program("program", program)
+        .expect("expected direct digest invocation in helper proc to assemble");
 }
 
 #[test]
@@ -6424,7 +6667,7 @@ fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings
         namespace m
 
         type Local = foo::Type
-        use external::module -> foo
+        use external::module as foo
     "#;
 
     let mut parser = Module::parser(None);
@@ -6449,7 +6692,7 @@ fn forward_declared_import_used_by_proc_signature_is_not_reported_unused_when_wa
         pub proc check(value: foo::Type) -> foo::Type
             nop
         end
-        use external::module -> foo
+        use external::module as foo
     "#;
 
     let mut parser = Module::parser(None);
@@ -6469,7 +6712,7 @@ fn kernel_import_used_by_proc_signature_is_not_reported_unused_when_warnings_are
             r#"
             namespace $kernel
 
-            use external::module -> foo
+            use external::module as foo
 
             pub proc check(value: foo::Type) -> foo::Type
                 nop
@@ -6490,7 +6733,7 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
         namespace m
 
         const LOCAL = foo::BAR
-        use external::module -> foo
+        use external::module as foo
     "#;
 
     let mut parser = Module::parser(None);
@@ -6502,14 +6745,14 @@ fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warn
 }
 
 #[test]
-fn imported_digest_alias_subpath_is_rejected_without_panicking() {
+fn asm_import_source_digest_import_is_rejected_without_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let program = r#"
-        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+        use {foo} from 0x0000000000000000000000000000000000000000000000000000000000000000
 
         begin
-            exec.foo::bar
+            exec.foo
         end
     "#;
 
@@ -6520,8 +6763,8 @@ fn imported_digest_alias_subpath_is_rejected_without_panicking() {
     assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
     let err = assembled
         .unwrap()
-        .expect_err("expected digest-backed invoke subpath to be rejected");
-    assert_diagnostic!(&err, "invalid procedure path: not an item");
+        .expect_err("expected source-level digest import to be rejected");
+    assert_diagnostic!(&err, "digest imports are not supported in source `use` declarations");
 }
 
 #[test]
@@ -6619,7 +6862,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
             namespace cycle::module::b
 
             # Checks that import resolution with quoted path components works
-            use cycle::"module::a"->a
+            use cycle::"module::a" as a
 
             # Checks that link-time cross-module resolution with quoted path components works
             pub proc b_proc
@@ -6876,7 +7119,7 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
     let source = source_file!(
         &context,
         r#"
-        use userspace::bar
+        use {bar} from userspace
 
         proc foo
             push.0
@@ -7158,7 +7401,7 @@ fn test_linking_recursive_expansion() -> TestResult {
         r#"
         namespace a
 
-        pub use b::a
+        pub use {a} from b
         pub proc x
             push.1
         end
@@ -7170,7 +7413,7 @@ fn test_linking_recursive_expansion() -> TestResult {
         r#"
         namespace b
 
-        pub use a::a
+        pub use {a} from a
         pub proc foo
             exec.a::x
         end
@@ -7193,7 +7436,7 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         r#"
         namespace a::a
 
-        pub use b::a2
+        pub use {a2} from b
         pub proc x
             push.1
         end
@@ -7205,7 +7448,7 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
         r#"
         namespace b
 
-        pub use a::a->a2
+        pub use {a as a2} from a
         pub proc foo
             exec.a2::x
         end

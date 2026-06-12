@@ -1,8 +1,10 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, sync::Arc};
 use core::cell::{Cell, RefCell};
 
 use miden_assembly_syntax::{
-    ast::{self, GlobalItemIndex, Ident, Visibility},
+    Path,
+    ast::{self, GlobalItemIndex, Ident, ImportKind, Visibility},
+    debuginfo::{SourceSpan, Span, Spanned},
     module::ItemInfo,
 };
 
@@ -24,8 +26,8 @@ pub struct Symbol {
 /// An import declared by a module.
 #[derive(Debug, Clone)]
 pub struct Import {
-    /// The original alias/import declaration.
-    alias: ast::Alias,
+    /// The original import declaration.
+    decl: ast::Import,
     /// Once this import has been resolved to a concrete item, cache the target id.
     resolved: Cell<Option<GlobalItemIndex>>,
 }
@@ -47,14 +49,55 @@ pub enum SymbolItem {
 impl Import {
     /// Create a new [Import].
     #[inline]
-    pub fn new(alias: ast::Alias) -> Self {
-        Self { alias, resolved: Cell::new(None) }
+    pub fn new(decl: ast::Import) -> Self {
+        Self { decl, resolved: Cell::new(None) }
     }
 
     /// Get the import declaration.
     #[inline(always)]
-    pub fn alias(&self) -> &ast::Alias {
-        &self.alias
+    pub fn decl(&self) -> &ast::Import {
+        &self.decl
+    }
+
+    /// Get the import kind.
+    #[inline(always)]
+    pub fn kind(&self) -> ImportKind {
+        self.decl.kind()
+    }
+
+    /// Get the local name bound by this import.
+    #[inline(always)]
+    pub fn local_name(&self) -> &Ident {
+        self.decl.local_name()
+    }
+
+    /// Get the import visibility.
+    #[inline(always)]
+    pub fn visibility(&self) -> Visibility {
+        self.decl.visibility()
+    }
+
+    /// Get the source span covering this import.
+    #[inline(always)]
+    pub fn span(&self) -> SourceSpan {
+        self.decl.span()
+    }
+
+    /// Get the target module path for this import.
+    #[inline(always)]
+    pub fn module_path(&self) -> Span<&Path> {
+        self.decl.module_path()
+    }
+
+    /// Get the full target path for this import.
+    pub fn target_path(&self) -> Span<Arc<Path>> {
+        match &self.decl {
+            ast::Import::Module(import) => {
+                let path = import.module_path();
+                Span::new(path.span(), Arc::from(*path))
+            },
+            ast::Import::Item(import) => import.target_path(),
+        }
     }
 
     /// Get the cached resolved concrete item, if known.

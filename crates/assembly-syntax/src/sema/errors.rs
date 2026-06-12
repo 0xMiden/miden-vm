@@ -254,7 +254,7 @@ pub enum SemanticAnalysisError {
     #[diagnostic(
         severity(Warning),
         help(
-            "module imports cannot have docstrings, you should use line comment syntax here instead"
+            "imports and re-exports cannot have docstrings, you should use line comment syntax here instead"
         )
     )]
     ImportDocstring {

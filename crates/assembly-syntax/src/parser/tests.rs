@@ -284,50 +284,114 @@ end
 }
 
 #[test]
-fn parse_path_import_forms() {
+fn parse_import_module_decl_single_segment() {
+    let source = test_source_file("use foo\n");
+
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Module(import))] = forms.as_slice() else {
+        panic!("expected one module import, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Private);
+    assert_eq!(import.module_path().inner().to_string(), "foo");
+    assert_eq!(import.local_name().as_str(), "foo");
+}
+
+#[test]
+fn parse_import_module_decl_alias() {
     let source = test_source_file(
         "\
 use std::math::u64
-pub use ::std::math::u64->math_u64
-use foo::\"miden::base/account@0.1.0\"->account
+use foo::\"miden::base/account@0.1.0\" as account
 ",
     );
 
-    assert_parses(source);
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [
+        Form::Import(ast::ImportDecl::Module(first)),
+        Form::Import(ast::ImportDecl::Module(second)),
+    ] = forms.as_slice()
+    else {
+        panic!("expected two module imports, got {forms:?}");
+    };
+    assert_eq!(first.module_path().inner().to_string(), "std::math::u64");
+    assert_eq!(first.local_name().as_str(), "u64");
+    assert_eq!(second.module_path().inner().to_string(), "foo::\"miden::base/account@0.1.0\"");
+    assert_eq!(second.local_name().as_str(), "account");
 }
 
 #[test]
-fn parse_digest_import_forms() {
+fn parse_import_item_group_decl() {
     let source = test_source_file(
         "\
-use 0x0000000000000000000000000000000000000000000000000000000000000000->entry
-pub use 0x0000000000000000000000000000000000000000000000000000000000000000->public_entry
+use {foo, bar as baz} from some::module
 ",
     );
 
-    assert_parses(source);
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Items(import))] = forms.as_slice() else {
+        panic!("expected one item import group, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Private);
+    assert_eq!(import.module_path().inner().to_string(), "some::module");
+    let specs = import.specs();
+    assert_eq!(specs.len(), 2);
+    assert_eq!(specs[0].source_name().as_str(), "foo");
+    assert_eq!(specs[0].local_name().as_str(), "foo");
+    assert_eq!(specs[1].source_name().as_str(), "bar");
+    assert_eq!(specs[1].local_name().as_str(), "baz");
 }
 
 #[test]
-fn parser_reports_unnamed_digest_imports() {
+fn parse_import_public_item_reexport_decl() {
     let source = test_source_file(
         "\
-use 0x0000000000000000000000000000000000000000000000000000000000000000
+pub use {alpha} from core
 ",
     );
 
-    let err = parse_forms(source).expect_err("expected unnamed reexport error");
-
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("re-exporting a procedure identified by digest requires giving it a name"));
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Items(import))] = forms.as_slice() else {
+        panic!("expected one item import group, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Public);
+    assert_eq!(import.module_path().inner().to_string(), "core");
+    assert_eq!(import.specs()[0].source_name().as_str(), "alpha");
 }
 
 #[test]
-fn parser_reports_invalid_digest_imports() {
+fn parse_import_rejects_pub_module_import() {
+    let source = test_source_file("pub use some::module\n");
+
+    let err = parse_forms(source).expect_err("expected public module import error");
+
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("`pub use` is only supported for braced item imports"));
+}
+
+#[test]
+fn parse_import_rejects_source_digest_import_but_allows_direct_digest_target() {
     let source = test_source_file("use 0x1234->entry\n");
 
-    let err = parse_forms(source).expect_err("expected invalid digest error");
+    let err = parse_forms(source).expect_err("expected digest import error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid MAST root literal"));
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("digest imports are not supported"));
+
+    let source = test_source_file(
+        "\
+begin
+    exec.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+",
+    );
+    parse_forms(source).expect("direct digest invocation targets should still lower");
+}
+
+#[test]
+fn parse_import_old_arrow_syntax_rejected() {
+    let source = test_source_file("use foo->bar\n");
+
+    let err = parse_forms(source).expect_err("expected old arrow syntax error");
+
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("import aliases use `as`; `->` is no longer supported"));
 }
 
 #[test]
@@ -714,12 +778,16 @@ fn parser_accepts_checked_in_masm_corpus() {
 }
 
 #[test]
-fn parser_reports_unqualified_imports() {
+fn parse_import_accepts_unqualified_module_imports() {
     let source = test_source_file("use foo\n");
 
-    let err = parse_forms(source).expect_err("parser should reject unqualified imports");
+    let forms = parse_forms(source).expect("parser should accept single-segment module imports");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("expected a fully-qualified module path"));
+    let [Form::Import(ast::ImportDecl::Module(import))] = forms.as_slice() else {
+        panic!("expected one module import, got {forms:?}");
+    };
+    assert_eq!(import.module_path().inner().to_string(), "foo");
+    assert_eq!(import.local_name().as_str(), "foo");
 }
 
 #[test]
