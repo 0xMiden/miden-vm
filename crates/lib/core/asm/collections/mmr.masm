@@ -337,20 +337,83 @@ end
 #!   - `entry + 0`: direction, where 0 means sibling is left and 1 means sibling is right
 #!   - `entry + 4`: sibling word
 #!
+#! The proof is bound to the opened position: the MMB shape is fully determined by the
+#! authenticated `num_leaves`, so the mountain containing `position`, its height, and the
+#! range/belt fold counts are derived here in closed form (no loop over the mountains) and the
+#! proof length and every stored direction are asserted equal to that canonical path. A proof
+#! for one position therefore cannot be relabeled to authenticate another.
+#!
+#! With `bits = num_leaves + 1` (the shape bit pattern `mmb_root` folds over) and
+#! `g = num_leaves - position`, the closed forms are:
+#! - mountain bit position: `pos = m - 1 + (bits mod 2^m + 2^m <= g)` where `m = ilog2(g)`;
+#! - mountain height: `pos + ((bits >> pos) & 1)`; mountain start: `((bits >> (pos+1)) - 1)
+#!   shifted left by `pos+1`, so the in-mountain position is `position - start`;
+#! - range splits sit at the set bits of `split_mask = bits & !((bits << 1) & (bits >> 1))`
+#!   (a split between the mountains at bit positions `k` and `k-1` for each set bit `k`), so
+#!   with `low = split_mask & (2^(pos+1) - 2)`: the ranges right of the leaf's range are
+#!   `popcount(low)` and the peaks right of its mountain in its range are `pos - ilog2(low | 1)`.
+#!
 #! Input: [proof_ptr, ROOT, num_leaves, ...]
 #! Output: [...]
-@locals(2)
+@locals(9)
 pub proc mmb_verify_leaf
-  # loc.0 = proof_len
-  dup mem_load loc_store.0
+  # loc.1 = stored proof length.
+  dup mem_load loc_store.1
   # => [proof_ptr, ROOT, num_leaves, ...]
 
-  # Load and check position < num_leaves.
-  dup add.1 mem_load
+  # loc.2 = claimed position; check position < num_leaves.
+  dup add.1 mem_load dup loc_store.2
   # => [position, proof_ptr, ROOT, num_leaves, ...]
   dup.6 u32assert2 u32lt assert.err="position is not an existing MMB leaf"
-  movup.5 drop
+  # => [proof_ptr, ROOT, num_leaves, ...]
+
+  # loc.3 = bits = num_leaves + 1.
+  movup.5 add.1 loc_store.3
   # => [proof_ptr, ROOT, ...]
+
+  # loc.4 = pos = m - 1 + (bits mod 2^m + 2^m <= g), with g = num_leaves - position.
+  loc_load.3 sub.1 loc_load.2 sub
+  # => [g, proof_ptr, ROOT, ...]
+  dup ilog2
+  # => [m, g, ...]
+  dup pow2
+  # => [2^m, m, g, ...]
+  dup sub.1 loc_load.3 swap u32and
+  # => [bits mod 2^m, 2^m, m, g, ...]
+  add movup.2 u32lte
+  # => [in_higher_mountain, m, ...]
+  add sub.1 loc_store.4
+  # => [proof_ptr, ROOT, ...]
+
+  # loc.5 = mountain height = pos + ((bits >> pos) & 1).
+  loc_load.3 loc_load.4 u32shr
+  # => [s, ...]
+  dup is_odd loc_load.4 add loc_store.5
+  # => [s, ...]
+
+  # loc.6 = in-mountain position = position - ((s >> 1) - 1) * 2^(pos+1).
+  loc_load.4 add.1 pow2
+  # => [2^(pos+1), s, ...]
+  swap u32shr.1 sub.1 dup.1 mul
+  # => [mountain_start, 2^(pos+1), ...]
+  loc_load.2 swap sub loc_store.6
+  # => [2^(pos+1), proof_ptr, ROOT, ...]
+
+  # Range splits below the mountain: low = split_mask & (2^(pos+1) - 2).
+  loc_load.3 u32shl.1 loc_load.3 u32shr.1 u32and u32not loc_load.3 u32and
+  # => [split_mask, 2^(pos+1), ...]
+  swap sub.2 u32and
+  # => [low, ...]
+
+  # loc.8 = ranges right of the leaf's range; loc.7 = peaks right of its mountain in its range.
+  dup u32popcnt loc_store.8
+  u32or.1 ilog2 loc_load.4 swap sub loc_store.7
+  # => [proof_ptr, ROOT, ...]
+
+  # The canonical proof folds the mountain path, one left sibling per fold phase (range and
+  # belt), plus the right siblings for the peaks and ranges past the leaf.
+  loc_load.5 add.2 loc_load.7 add loc_load.8 add
+  loc_load.1 assert_eq.err="proof length does not match the opened position"
 
   # Load leaf word from proof_ptr + 4.
   dup add.4 padw movup.4 mem_loadw_le
@@ -360,38 +423,73 @@ pub proc mmb_verify_leaf
   movup.4 add.8
   # => [cursor, ACC, ROOT, ...]
 
-  loc_load.0 neq.0
+  # Phase 1: climb the leaf's mountain; the sibling is right exactly when the local position
+  # bit is unset, and the stored direction must agree. Each phase loops until the cursor
+  # reaches its bound (loc.0), which is cheaper per iteration than a count-down counter.
+  dup loc_load.5 mul.8 add loc_store.0
+  dup loc_load.0 neq
   while.true
-    # Load direction from cursor.
-    dup mem_load
+    loc_load.6 dup u32shr.1 loc_store.6 is_odd not
     # => [dir, cursor, ACC, ROOT, ...]
-
-    # Load sibling word from cursor + 4.
+    dup dup.2 mem_load assert_eq.err="proof direction does not match the opened position"
+    # => [dir, cursor, ACC, ROOT, ...]
     dup.1 add.4 padw movup.4 mem_loadw_le
     # => [SIBLING, dir, cursor, ACC, ROOT, ...]
-
-    movup.5 loc_store.1
-    # => [SIBLING, dir, ACC, ROOT, ...]
-
+    movup.5 add.8 movdn.9
+    # => [SIBLING, dir, ACC, cursor+8, ROOT, ...]
     movup.4
-    # => [dir, SIBLING, ACC, ROOT, ...]
-
+    # => [dir, SIBLING, ACC, cursor+8, ROOT, ...]
     if.true
       # right sibling: ACC = merge(ACC, SIBLING).
-      swapw
-      hmerge
+      swapw hmerge
     else
       # left sibling: ACC = merge(SIBLING, ACC).
       hmerge
     end
-    # => [ACC, ROOT, ...]
-
-    # cursor += 8
-    loc_load.1 add.8
+    movup.4
     # => [cursor, ACC, ROOT, ...]
+    dup loc_load.0 neq
+  end
 
-    # remaining -= 1
-    loc_load.0 sub.1 dup loc_store.0 neq.0
+  # Phase 2: enter the range fold; the peaks left of the mountain are bagged as a left sibling.
+  dup mem_load assertz.err="proof direction does not match the opened position"
+  dup add.4 padw movup.4 mem_loadw_le
+  movup.4 add.8 movdn.8
+  # => [SIBLING, ACC, cursor+8, ROOT, ...]
+  hmerge movup.4
+  # => [cursor, ACC, ROOT, ...]
+
+  # Phase 3: fold the peaks right of the mountain into the range (right siblings only, so the
+  # merge needs no branch).
+  dup loc_load.7 mul.8 add loc_store.0
+  dup loc_load.0 neq
+  while.true
+    dup mem_load assert.err="proof direction does not match the opened position"
+    dup add.4 padw movup.4 mem_loadw_le
+    movup.4 add.8 movdn.8
+    # => [SIBLING, ACC, cursor+8, ROOT, ...]
+    swapw hmerge movup.4
+    # => [cursor, ACC, ROOT, ...]
+    dup loc_load.0 neq
+  end
+
+  # Phase 4: enter the belt fold; the ranges left of the leaf's range are bagged as a left
+  # sibling.
+  dup mem_load assertz.err="proof direction does not match the opened position"
+  dup add.4 padw movup.4 mem_loadw_le
+  movup.4 add.8 movdn.8
+  hmerge movup.4
+  # => [cursor, ACC, ROOT, ...]
+
+  # Phase 5: fold the ranges right of the leaf's range into the belt (right siblings only).
+  dup loc_load.8 mul.8 add loc_store.0
+  dup loc_load.0 neq
+  while.true
+    dup mem_load assert.err="proof direction does not match the opened position"
+    dup add.4 padw movup.4 mem_loadw_le
+    movup.4 add.8 movdn.8
+    swapw hmerge movup.4
+    dup loc_load.0 neq
   end
   # => [cursor, ACC, ROOT, ...]
 

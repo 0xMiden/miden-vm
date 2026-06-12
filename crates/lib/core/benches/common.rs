@@ -1,18 +1,20 @@
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, Linkage};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, FastProcessor, Felt, Program, StackInputs, Word, ZERO};
 
 pub fn compile(core_lib: &CoreLibrary, source: &str) -> Program {
     Assembler::default()
-        .with_static_library(core_lib.library())
+        .with_package(core_lib.package(), Linkage::Dynamic)
         .expect("link core library")
-        .assemble_program(source)
+        .assemble_program("benchmark", source)
         .expect("assemble benchmark program")
+        .unwrap_program()
 }
 
 pub fn processor_inputs(core_lib: &CoreLibrary) -> (DefaultHost, FastProcessor) {
-    let mut host = DefaultHost::default();
-    host.load_library(core_lib).expect("load core library host data");
+    let host = DefaultHost::default()
+        .with_library(core_lib)
+        .expect("load core library host data");
     (host, FastProcessor::new(StackInputs::default()))
 }
 

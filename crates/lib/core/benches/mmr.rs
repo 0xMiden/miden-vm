@@ -181,8 +181,9 @@ fn processor_inputs_with_advice(
     core_lib: &CoreLibrary,
     advice_map: Vec<(Word, Vec<Felt>)>,
 ) -> (DefaultHost, FastProcessor) {
-    let mut host = DefaultHost::default();
-    host.load_library(core_lib).expect("load core library host data");
+    let host = DefaultHost::default()
+        .with_library(core_lib)
+        .expect("load core library host data");
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default().with_map(advice_map),
@@ -599,8 +600,8 @@ fn bagging_path_nodes(
     let left_root = bag_range(&shape[range.start..mountain_idx], &peaks[range.start..mountain_idx]);
     nodes.push(TestMmbProofStep::range(false, left_root));
 
-    for right_idx in mountain_idx + 1..range.end {
-        nodes.push(TestMmbProofStep::range(true, peaks[right_idx]));
+    for &peak in &peaks[mountain_idx + 1..range.end] {
+        nodes.push(TestMmbProofStep::range(true, peak));
     }
 
     let left_range_roots = ranges[..range_idx]

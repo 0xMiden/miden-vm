@@ -881,31 +881,33 @@ fn test_mmb_range_bagging_uses_plain_merkle_merge() {
 
 #[test]
 fn test_mmb_verify_leaf_accepts_all_positions() {
-    let mmb = TestMmb::from_len(17);
-    let root = mmb.root();
+    for num_leaves in [1usize, 2, 3, 5, 8, 13, 17, 33, 64] {
+        let mmb = TestMmb::from_len(num_leaves);
+        let root = mmb.root();
 
-    for position in 0..mmb.len {
-        let proof = mmb.open(position);
-        assert_eq!(proof_root(&proof), root);
-        let proof_ptr = 2000_u32;
-        let source = format!(
-            "
-            use miden::core::collections::mmr
+        for position in 0..mmb.len {
+            let proof = mmb.open(position);
+            assert_eq!(proof_root(&proof), root);
+            let proof_ptr = 2000_u32;
+            let source = format!(
+                "
+                use miden::core::collections::mmr
 
-            begin
-                {}
-                push.{}
-                {}
-                push.{proof_ptr}
-                exec.mmr::mmb_verify_leaf
-            end
-            ",
-            mmb_proof_memory_source(proof_ptr, &proof),
-            mmb.len,
-            push_word(&root),
-        );
+                begin
+                    {}
+                    push.{}
+                    {}
+                    push.{proof_ptr}
+                    exec.mmr::mmb_verify_leaf
+                end
+                ",
+                mmb_proof_memory_source(proof_ptr, &proof),
+                mmb.len,
+                push_word(&root),
+            );
 
-        build_test!(&source).expect_stack(&[]);
+            build_test!(&source).expect_stack(&[]);
+        }
     }
 }
 
@@ -933,6 +935,172 @@ fn test_mmb_verify_leaf_rejects_wrong_authenticated_len() {
     build_test!(&source)
         .execute()
         .expect_err("tampered length must not authenticate the proof");
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_tampered_position() {
+    let mmb = TestMmb::from_len(17);
+    let root = mmb.root();
+
+    // A valid proof for position 0, relabeled to: a position in the same mountain (1), a
+    // position in a mountain of a different height (8), and a position in another range (16).
+    // All must fail to authenticate.
+    for tampered_position in [1usize, 8, 16] {
+        let mut proof = mmb.open(0);
+        proof.position = tampered_position;
+        let proof_ptr = 2000_u32;
+        let source = format!(
+            "
+            use miden::core::collections::mmr
+
+            begin
+                {}
+                push.{}
+                {}
+                push.{proof_ptr}
+                exec.mmr::mmb_verify_leaf
+            end
+            ",
+            mmb_proof_memory_source(proof_ptr, &proof),
+            mmb.len,
+            push_word(&root),
+        );
+
+        build_test!(&source)
+            .execute()
+            .expect_err("tampered position must not authenticate the proof");
+    }
+}
+
+#[test]
+fn test_mmb_verify_leaf_rejects_tampered_direction() {
+    let mmb = TestMmb::from_len(17);
+    let root = mmb.root();
+
+    let mut proof = mmb.open(5);
+    proof.siblings[0].is_right = !proof.siblings[0].is_right;
+    let proof_ptr = 2000_u32;
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        begin
+            {}
+            push.{}
+            {}
+            push.{proof_ptr}
+            exec.mmr::mmb_verify_leaf
+        end
+        ",
+        mmb_proof_memory_source(proof_ptr, &proof),
+        mmb.len,
+        push_word(&root),
+    );
+
+    build_test!(&source)
+        .execute()
+        .expect_err("tampered direction must not authenticate the proof");
+}
+
+/// Validates the closed-form shape lemmas `mmb_verify_leaf` uses to derive the canonical proof
+/// path from `(position, num_leaves)` against a walk over the shape, for every position of every
+/// MMB shape up to 2048 leaves.
+#[test]
+fn test_mmb_closed_form_shape_matches_walk() {
+    for n in 1usize..=2048 {
+        let bits = n + 1;
+        let shape = shape_mountains(n);
+        let ranges = shape_ranges(&shape);
+        let mut starts = Vec::new();
+        let mut acc = 0;
+        for mountain in &shape {
+            starts.push(acc);
+            acc += 1usize << mountain.height;
+        }
+
+        for p in 0..n {
+            let midx = (0..shape.len())
+                .find(|&i| p >= starts[i] && p < starts[i] + (1usize << shape[i].height))
+                .unwrap();
+            let h_true = shape[midx].height;
+            let local_true = p - starts[midx];
+            let ridx = ranges.iter().position(|r| r.contains(&midx)).unwrap();
+            let rir_true = ranges[ridx].end - 1 - midx;
+            let ra_true = ranges.len() - 1 - ridx;
+
+            // closed forms
+            let g = n - p;
+            let m = floor_log2(g);
+            let pm = 1usize << m;
+            let pos = if (bits & (pm - 1)) <= g - pm { m } else { m - 1 };
+            let s = bits >> pos;
+            let h = pos + (s & 1);
+            let start = ((s >> 1) - 1) << (pos + 1);
+            let local = p - start;
+            let split_mask = bits & !((bits << 1) & (bits >> 1));
+            let low = split_mask & ((1usize << (pos + 1)) - 2);
+            let ra = low.count_ones() as usize;
+            let kstar = floor_log2(low | 1);
+            let rir = pos - kstar;
+
+            assert_eq!(
+                (h, local, rir, ra),
+                (h_true, local_true, rir_true, ra_true),
+                "n={n} p={p} pos={pos} midx={midx}"
+            );
+        }
+    }
+}
+
+/// Prints the trace-segment breakdown of `mmb_verify_leaf` per (num_leaves, recency); the padded
+/// length is the proving-cost driver. Diagnostic only.
+#[test]
+#[ignore = "trace-cost diagnostic; run with --ignored --nocapture"]
+fn print_mmb_verify_trace_costs() {
+    for num_leaves in [1024usize, 65_536] {
+        let mmb = TestMmb::from_len(num_leaves);
+        let root = mmb.root();
+        for recency in [1usize, 16, 256, 16_384] {
+            if recency > num_leaves {
+                continue;
+            }
+            let position = mmb.len - recency;
+            let proof = mmb.open(position);
+            let proof_ptr = 2000_u32;
+            let source = format!(
+                "
+                use miden::core::collections::mmr
+
+                begin
+                    {}
+                    push.{}
+                    {}
+                    push.{proof_ptr}
+                    exec.mmr::mmb_verify_leaf
+                end
+                ",
+                mmb_proof_memory_source(proof_ptr, &proof),
+                mmb.len,
+                push_word(&root),
+            );
+
+            let trace = build_test!(&source).execute().unwrap();
+            let s = trace.trace_len_summary();
+            let c = s.chiplets_trace_len();
+            println!(
+                "num_leaves={num_leaves:>6} recency={recency:>6} proof_len={:>3} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
+                proof.siblings.len(),
+                s.core_trace_len(),
+                s.range_trace_len(),
+                c.trace_len(),
+                c.hash_chiplet_len(),
+                c.bitwise_chiplet_len(),
+                c.memory_chiplet_len(),
+                s.trace_len(),
+                s.padded_trace_len(),
+            );
+        }
+    }
 }
 
 #[test]
@@ -1504,8 +1672,8 @@ fn bagging_path_nodes(
     let left_root = bag_range(&shape[range.start..mountain_idx], &peaks[range.start..mountain_idx]);
     nodes.push(TestMmbProofStep::range(false, left_root));
 
-    for right_idx in mountain_idx + 1..range.end {
-        nodes.push(TestMmbProofStep::range(true, peaks[right_idx]));
+    for &peak in &peaks[mountain_idx + 1..range.end] {
+        nodes.push(TestMmbProofStep::range(true, peak));
     }
 
     let left_range_roots = ranges[..range_idx]
