@@ -13,8 +13,7 @@ pub struct LibTarget {
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub namespace: Option<Span<Arc<str>>>,
     /// The relative path from the project manifest to the root source file for this target
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub path: Option<Span<Uri>>,
+    pub path: Span<Uri>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,8 +28,7 @@ pub struct BinTarget {
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub name: Option<Span<Arc<str>>>,
     /// The relative path from the project manifest to the root source file for this target
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub path: Option<Span<Uri>>,
+    pub path: Span<Uri>,
 }
 
 impl SetSourceId for LibTarget {
@@ -43,9 +41,7 @@ impl SetSourceId for LibTarget {
             ns.set_source_id(source_id);
         }
 
-        if let Some(path) = self.path.as_mut() {
-            path.set_source_id(source_id);
-        }
+        self.path.set_source_id(source_id);
     }
 }
 
@@ -55,8 +51,6 @@ impl SetSourceId for BinTarget {
             ns.set_source_id(source_id);
         }
 
-        if let Some(path) = self.path.as_mut() {
-            path.set_source_id(source_id);
-        }
+        self.path.set_source_id(source_id);
     }
 }

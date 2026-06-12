@@ -95,11 +95,10 @@ end
     );
     write_file(
         &tempdir.path().join("main.masm"),
-        r#"use $exec::lib
-use $exec::shared
+        r#"use app::shared
 
 begin
-    exec.lib::helper
+    exec.app::helper
     exec.shared::helper
 end
 "#,
@@ -120,53 +119,6 @@ end
     assert_eq!(&package.name, "app:primary");
     assert_eq!(package.kind, TargetType::Executable);
     assert!(package.is_program());
-}
-
-#[test]
-fn omitted_path_targets_require_explicit_sources() {
-    let tempdir = TempDir::new().unwrap();
-    let manifest_path = tempdir.path().join("miden-project.toml");
-    write_file(
-        &manifest_path,
-        r#"[package]
-name = "generated"
-version = "1.0.0"
-
-[lib]
-"#,
-    );
-
-    let mut context = TestContext::new();
-    let error = context
-        .assemble_library_package(&manifest_path, None)
-        .expect_err("assembly without sources should fail");
-    assert!(error.to_string().contains("assemble_with_sources"));
-
-    let root = Module::parse(
-        "generated::temp",
-        ModuleKind::Library,
-        source_file!(
-            context,
-            r#"pub proc helper
-    push.1
-end
-"#
-        ),
-        context.source_manager(),
-    )
-    .unwrap();
-
-    let mut project_assembler = context.project_assembler_for_path(&manifest_path).unwrap();
-    let package = project_assembler
-        .assemble_with_sources(
-            ProjectTargetSelector::Library,
-            "dev",
-            ProjectSourceInputs { root, support: Default::default() },
-        )
-        .expect("assembly with sources should succeed");
-    assert_eq!(&package.name, "generated");
-    assert_eq!(package.kind, TargetType::Library);
-    assert!(PackageBuildProvenance::from_package(&package).unwrap().is_none());
 }
 
 #[test]
@@ -1987,72 +1939,6 @@ end
         .assemble_library_package(&root_manifest, None)
         .expect_err("new git revision should require a semver bump");
     assert!(error.to_string().contains("bump the semantic version"));
-}
-
-#[test]
-fn omitted_path_dependency_requires_canonical_registry_entry() {
-    let tempdir = TempDir::new().unwrap();
-    let dep_dir = tempdir.path().join("dep");
-    write_file(
-        &dep_dir.join("miden-project.toml"),
-        r#"[package]
-name = "dep"
-version = "1.0.0"
-
-[lib]
-"#,
-    );
-
-    let root_dir = tempdir.path().join("root");
-    let root_manifest = root_dir.join("miden-project.toml");
-    write_file(
-        &root_manifest,
-        r#"[package]
-name = "root"
-version = "1.0.0"
-
-[lib]
-path = "lib.masm"
-
-[dependencies]
-dep = { path = "../dep" }
-"#,
-    );
-    write_file(
-        &root_dir.join("lib.masm"),
-        r#"pub proc entry
-    exec.::dep::foo
-end
-"#,
-    );
-
-    let mut context = TestContext::new();
-    let missing = context
-        .assemble_library_package(&root_manifest, None)
-        .expect_err("omitted-path dependency should require a canonical registry entry");
-    assert!(missing.to_string().contains("was not found in the package registry"));
-
-    let dep = Arc::<MastPackage>::from(context.assemble_library_package_with_export(
-        "dep",
-        "1.0.0",
-        "dep::foo",
-        [],
-    ));
-    let dep_digest = dep.digest();
-    context.registry_mut().add_package(dep);
-    context.registry().clear_loaded_packages();
-
-    let package = context
-        .assemble_library_package(&root_manifest, None)
-        .expect("canonical registry entry should satisfy omitted-path dependency");
-    assert_eq!(
-        package
-            .manifest
-            .dependencies()
-            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
-            .collect::<Vec<_>>(),
-        vec![format!("dep@1.0.0#{dep_digest}")]
-    );
 }
 
 #[test]
