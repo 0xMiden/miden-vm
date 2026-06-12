@@ -97,6 +97,19 @@ pub proc store_random_coin_state
     exec.set_capacity
 end
 
+#! Add the absorbed-length tag to the first capacity element (sponge state element 8).
+#!
+#! Mirrors p3's `DuplexChallenger::duplexing`, which makes every absorb prefix-free by
+#! binding the number of absorbed elements into the capacity before permuting. Squeeze-only
+#! permutations (empty input buffer) carry no tag.
+#!
+#! Input:  [n, ...]
+#! Output: [...]
+pub proc add_absorb_length_tag
+    exec.constants::c_ptr mem_load add
+    exec.constants::c_ptr mem_store
+end
+
 #! Sample a single base field element from the transcript.
 #!
 #! SAFETY: Requires output_len > 0. All call sites in the recursive verifier guarantee this
@@ -174,6 +187,7 @@ pub proc observe_felt
     dup eq.8
     if.true
         drop
+        push.8 exec.add_absorb_length_tag
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state
@@ -187,21 +201,35 @@ end
 #! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
 #!
 #! When the input buffer is non-empty, permute the sponge: the buffered prefix already occupies
-#! `rate[0..input_len]` and `rate[input_len..8]` retains the previous permutation output, exactly
-#! as p3 overwrites only the first `input_len` rate elements before permuting. Exposes a fresh
+#! `rate[0..input_len]`; `rate[input_len..8]` is zeroed and the absorbed length is bound into
+#! the capacity, exactly as p3's prefix-free absorb does before permuting. Exposes a fresh
 #! output (output_len=8) and empties the buffer. No-op when the buffer is already empty.
 #!
 #! Input:  [...]
 #! Output: [...]
 pub proc flush_buffer
     exec.constants::random_coin_input_len_ptr mem_load
-    push.0 neq
+    dup push.0 neq
     if.true
+        # Zero the rate slots the buffered inputs did not overwrite: rate[input_len..8].
+        dup
+        dup push.8 neq
+        while.true
+            push.0 dup.1 exec.constants::r1_ptr add mem_store
+            add.1
+            dup push.8 neq
+        end
+        drop
+        # => [input_len, ...]
+
+        exec.add_absorb_length_tag
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state
         push.0 exec.constants::random_coin_input_len_ptr mem_store
         push.8 exec.constants::random_coin_output_len_ptr mem_store
+    else
+        drop
     end
 end
 
@@ -276,6 +304,9 @@ pub proc init_seed
     swapw
     #=> [nq, query_pow, deep_pow, folding_pow, log_blowup, log_final_deg, fold_arity, 0, rd0, rd1, rd2, rd3, ...]
     #    ^-- R1                                ^-- R2                                     ^-- C
+
+    # Bind the absorbed length (8 PCS parameters) into the first capacity element.
+    movup.8 add.8 movdn.8
 
     # Permute and store the transcript state after absorbing protocol parameters.
     exec.poseidon2::permute
@@ -403,9 +434,9 @@ end
 
 #! Reseed with a commitment word and absorb an additional single felt, then permute.
 #!
-#! Writes the commitment word to rate[0..3] and the felt to rate[4], leaving rate[5..7]
-#! unchanged from the previous permutation, then permutes. Used in the FRI layer loop
-#! where each round absorbs a layer commitment plus a PoW nonce felt.
+#! Writes the commitment word to rate[0..3] and the felt to rate[4], zeroes rate[5..7],
+#! binds the absorbed length (5) into the capacity, then permutes. Used in the FRI layer
+#! loop where each round absorbs a layer commitment plus a PoW nonce felt.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -422,6 +453,13 @@ pub proc reseed_with_felt
     # element of R2 and need the rest from memory.
     exec.constants::r2_ptr mem_store
     # => [w0, w1, w2, w3, ...]
+
+    # Zero the unabsorbed rate slots rate[5..7] and bind the absorbed length (5)
+    # into the capacity.
+    push.0 exec.constants::r2_ptr add.1 mem_store
+    push.0 exec.constants::r2_ptr add.2 mem_store
+    push.0 exec.constants::r2_ptr add.3 mem_store
+    push.5 exec.add_absorb_length_tag
 
     # Build sponge state [R1, R2, C] on the stack directly.
     # R1 = commitment word (already on the stack).
@@ -441,9 +479,9 @@ end
 
 #! Reseed by writing a word directly to rate[0..3] and permuting.
 #!
-#! Overwrites rate[0..3] with the given word, leaves rate[4..7] unchanged from the
-#! previous permutation, then permutes. This is the standard overwrite-and-permute
-#! absorption pattern for a single word.
+#! Overwrites rate[0..3] with the given word, zeroes rate[4..7], binds the absorbed
+#! length (4) into the capacity, then permutes. This is the standard absorb-and-permute
+#! pattern for a single word.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -460,7 +498,12 @@ pub proc reseed_direct
     # Write the word to rate[0..3] and consume it from the stack.
     exec.set_rate_1
 
-    # Permute (rate[4..7] and capacity from memory are unchanged).
+    # Zero the unabsorbed rate slots rate[4..7] and bind the absorbed length (4)
+    # into the capacity.
+    padw exec.set_rate_2
+    push.4 exec.add_absorb_length_tag
+
+    # Permute.
     exec.load_random_coin_state
     exec.poseidon2::permute
     exec.store_random_coin_state
@@ -802,8 +845,9 @@ end
 
 #! Verify a proof-of-work witness given pow_bits on the stack.
 #!
-#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], permutes,
-#! and checks that the low pow_bits of the output are zero.
+#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], zeroes
+#! rate[1..7], binds the absorbed length (1) into the capacity, permutes, and checks
+#! that the low pow_bits of the output are zero.
 #! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
 #!
 #! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
@@ -823,6 +867,15 @@ proc check_pow
         exec.constants::random_coin_input_len_ptr mem_load
         assertz.err="check_pow: input buffer must be empty"
         exec.constants::r1_ptr mem_store
+
+        # Zero the unabsorbed rate slots rate[1..7] and bind the absorbed length (1)
+        # into the capacity.
+        push.0 exec.constants::r1_ptr add.1 mem_store
+        push.0 exec.constants::r1_ptr add.2 mem_store
+        push.0 exec.constants::r1_ptr add.3 mem_store
+        padw exec.set_rate_2
+        push.1 exec.add_absorb_length_tag
+
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state

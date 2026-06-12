@@ -480,16 +480,16 @@ impl BaseAir<Felt> for MidenAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
-}
 
-impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         match self {
             Self::Core(a) => a.periodic_columns(),
             Self::Chiplets(a) => a.periodic_columns(),
         }
     }
+}
 
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn num_randomness(&self) -> usize {
         // Instance-level: every AIR shares the same LogUp challenge set.
         trace::AUX_TRACE_RAND_CHALLENGES

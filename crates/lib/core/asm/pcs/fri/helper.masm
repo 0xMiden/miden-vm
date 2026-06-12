@@ -32,16 +32,20 @@ end
 # =================================================================================================
 
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
+#!
+#! Each iteration binds the absorbed length (8) into the capacity before permuting.
 proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
-        adv_pipe exec.poseidon2::permute
+        adv_pipe movup.8 add.8 movdn.8 exec.poseidon2::permute
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
+#!
+#! Each iteration binds the absorbed length (8) into the capacity before permuting.
 proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
-        adv_pipe exec.poseidon2::permute
+        adv_pipe movup.8 add.8 movdn.8 exec.poseidon2::permute
     end
 end
 
