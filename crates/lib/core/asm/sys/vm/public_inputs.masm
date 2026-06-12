@@ -1,6 +1,7 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::stark::public_inputs
+use miden::core::crypto::hashes::poseidon2
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -66,7 +67,8 @@ end
 #! 3. Absorbing the statement-owned public inputs into the Fiat-Shamir transcript, matching
 #!    `MultiAir::observe`: the element stream
 #!        [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ]
-#!    is fed through the buffered duplex (`random_coin::observe_felt`).
+#!    is absorbed in 8-element blocks, with the trailing partial block buffered via
+#!    `random_coin::observe_felt`.
 #! 4. Loading the auxiliary randomness from the advice stack and reducing the kernel digests; the
 #!    reduced result overwrites the start of the kernel-digest region (in the ACE READ section).
 #!
@@ -101,7 +103,7 @@ pub proc process_public_inputs
     exec.load_kernel_digests
     # => [...]
 
-    # 4) Absorb the statement public inputs into the transcript via the buffered duplex.
+    # 4) Absorb the statement public inputs into the transcript.
     exec.absorb_public_inputs
     # => [...]
 
@@ -167,71 +169,118 @@ proc load_kernel_digests
     u32assert.err="number of kernel procedure digests must fit in a u32"
     u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
 
-    # Set up dummy state words with the destination pointer at position 12 for adv_pipe.
+    # Set up dummy state words with the destination pointer at position 12 for adv_pipe,
+    # and the absorb-scratch cursor below it.
     padw padw padw
     exec.constants::variable_length_public_inputs_address_ptr mem_load
     movdn.12
-    # => [Y, Y, Y, var_len_ptr, ...]
+    exec.constants::absorb_scratch_ptr add.43
+    movdn.13
+    # => [Y, Y, Y, var_len_ptr, dst, ...]
 
     exec.constants::tmp3 mem_load
-    # => [num_iter, Y, Y, Y, var_len_ptr, ...]
+    # => [num_iter, Y, Y, Y, var_len_ptr, dst, ...]
 
     dup push.0 neq
     while.true
-        sub.1 movdn.13
-        # => [Y, Y, Y, ptr, remaining, ...]
+        sub.1 movdn.14
+        # => [Y, Y, Y, ptr, dst, remaining, ...]
         adv_pipe
-        # => [W0, W1, Y, ptr+8, remaining, ...]
-        movup.13
-        # => [remaining, W0, W1, Y, ptr+8, ...]
+        # => [ZERO_PAD, D, Y, ptr+8, dst, remaining, ...]
+        dropw
+        # => [d3, d2, d1, d0, Y, ptr+8, dst, remaining, ...]
+        # Write the digest in natural order to the absorb scratch: d_i at dst + i. Element
+        # stores, since the scratch stream offset (43 + 4d) is not word-aligned.
+        movup.9 dup add.4 movdn.10
+        # => [dst, d3, d2, d1, d0, Y, ptr+8, dst+4, remaining, ...]
+        swap dup.1 add.3 mem_store
+        swap dup.1 add.2 mem_store
+        swap dup.1 add.1 mem_store
+        mem_store
+        # => [Y, ptr+8, dst+4, remaining, ...]
+        padw padw
+        # => [P, P, Y, ptr+8, dst+4, remaining, ...]
+        movup.14
+        # => [remaining, P, P, Y, ptr+8, dst+4, ...]
         dup push.0 neq
     end
-    # => [0, W0, W1, Y, ptr_final, ...]
-    drop dropw dropw dropw drop
+    # => [0, P, P, Y, ptr_final, dst_final, ...]
+    drop dropw dropw dropw drop drop
 end
 
-#! Absorb the statement-owned public inputs into the Fiat-Shamir transcript via the buffered
-#! duplex, matching `MultiAir::observe`'s element stream:
+#! Absorb the statement public inputs into the Fiat-Shamir transcript, matching
+#! `MultiAir::observe`'s element stream:
 #!     [ len(FLPI), FLPI..., MAX_AUX_INPUTS, len(kernel_felts), kernel_felts... ].
 #!
-#! The fixed-length public inputs are read back from their EF slots (first base coordinate of
-#! each) and the kernel digests from their reversed 8-felt memory layout (natural order
-#! `d0,d1,d2,d3` is at offsets +7,+6,+5,+4), so absorption is independent of the storage layouts.
+#! Completes the scratch copy of the stream (lengths and FLPI; the kernel-felt section was written
+#! by `load_kernel_digests`), then absorbs it in 8-element blocks via `mem_stream` with the sponge
+#! state on the stack, leaving the trailing partial block (< 8) buffered via `observe_felt` so the
+#! verifier continues the same stream with the instance shape and main-trace commitment.
 #!
 #! Input:  [...]
 #! Output: [...]
 proc absorb_public_inputs
-    # len(FLPI)
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS exec.random_coin::observe_felt
+    # ---- Gather the observe stream contiguously into scratch ----
 
-    # FLPI: 40 base elements, stored as EF [v, 0]; observe the base coordinate of each in order.
+    # scratch[0] = len(FLPI).
+    push.NUM_FIXED_LEN_PUBLIC_INPUTS exec.constants::absorb_scratch_ptr mem_store
+
+    # scratch[1..41] = FLPI (base coordinate of each EF slot, stride 2).
     exec.constants::public_inputs_address_ptr mem_load
+    exec.constants::absorb_scratch_ptr add.1
+    # => [dst, pi_ptr]
     repeat.40
-        dup mem_load
-        exec.random_coin::observe_felt
-        add.2
+        dup.1 mem_load
+        dup.1 mem_store
+        add.1
+        swap add.2 swap
+    end
+    drop drop
+
+    # scratch[41] = MAX_AUX_INPUTS, scratch[42] = len(kernel_felts) = 4 * num_kernel_proc_digests.
+    # (scratch[43..43+4K] was already filled in natural order by `load_kernel_digests`.)
+    push.MAX_AUX_INPUTS exec.constants::absorb_scratch_ptr add.41 mem_store
+    exec.constants::tmp3 mem_load mul.4 exec.constants::absorb_scratch_ptr add.42 mem_store
+
+    # ---- Block-absorb scratch[0..L], L = 43 + 4 * num_kernel_proc_digests ----
+
+    # scratch_end = scratch + L (tmp1); nfb = L / 8 full blocks (kept on the stack).
+    push.43 exec.constants::tmp3 mem_load mul.4 add
+    # => [L]
+    dup exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
+    u32divmod.8 drop
+    # => [nfb]
+
+    # Load the sponge state once; it stays on the stack across every block permutation.
+    exec.random_coin::load_random_coin_state
+    exec.constants::absorb_scratch_ptr movdn.12
+    # => [R1, R2, C, ptr, nfb]
+    movup.13 dup push.0 neq
+    while.true
+        sub.1 movdn.13
+        # => [R1, R2, C, ptr, nfb-1]
+        mem_stream
+        exec.poseidon2::permute
+        movup.13 dup push.0 neq
     end
     drop
+    # => [R1, R2, C, ptr_final]
 
-    # MAX_AUX_INPUTS, then len(kernel_felts) = 4 * num_kernel_proc_digests.
-    push.MAX_AUX_INPUTS exec.random_coin::observe_felt
-    exec.constants::tmp3 mem_load mul.4 exec.random_coin::observe_felt
+    # Store the permuted state; stash ptr_final; reset input_len so the partial buffers from 0.
+    movup.12 exec.constants::tmp4 mem_store
+    exec.random_coin::store_random_coin_state
+    push.0 exec.constants::random_coin_input_len_ptr mem_store
 
-    # kernel_felts: for each digest, observe d0,d1,d2,d3 (natural order) from offsets +7,+6,+5,+4.
-    exec.constants::variable_length_public_inputs_address_ptr mem_load
-    exec.constants::tmp3 mem_load
+    # ---- Absorb the trailing partial block (< 8 elements) via the buffered duplex ----
+    exec.constants::tmp4 mem_load
+    exec.constants::tmp1 mem_load
     swap
-    # => [var_len_ptr, num_iter, ...]
-    dup.1 push.0 neq
+    # => [src, scratch_end]
+    dup.1 dup.1 neq
     while.true
-        dup add.7 mem_load exec.random_coin::observe_felt
-        dup add.6 mem_load exec.random_coin::observe_felt
-        dup add.5 mem_load exec.random_coin::observe_felt
-        dup add.4 mem_load exec.random_coin::observe_felt
-        add.8
-        swap sub.1 swap
-        # => [ptr + 8, remaining, ...]
-        dup.1 push.0 neq
+        dup mem_load exec.random_coin::observe_felt
+        add.1
+        dup.1 dup.1 neq
     end
     drop drop
 end
