@@ -1111,4 +1111,6 @@ pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
 }
 
 #[cfg(test)]
+mod stack_route_tests;
+#[cfg(test)]
 mod tests;
