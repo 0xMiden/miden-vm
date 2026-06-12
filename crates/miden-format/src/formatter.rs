@@ -268,6 +268,18 @@ fn render_item_import_lines(
     indent: usize,
     config: &Config,
 ) -> Vec<String> {
+    if let Some(import_list) = import.import_list()
+        && has_comment_token(import_list.syntax())
+    {
+        return render_commented_item_import_lines(
+            import_list.syntax(),
+            header,
+            path,
+            indent,
+            config,
+        );
+    }
+
     let specs = import.item_specs().map(render_import_specifier).collect::<Vec<_>>().join(", ");
     let items = format!("{{{specs}}}");
     let from = format!("from {path}");
@@ -281,6 +293,39 @@ fn render_item_import_lines(
             format!("{}{}", indent_string(indent + config.indent_size()), from),
         ]
     }
+}
+
+fn render_commented_item_import_lines(
+    import_list: &SyntaxNode,
+    header: String,
+    path: String,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    let mut list_lines = render_token_stream_with_comments(
+        &all_tokens(import_list),
+        indent,
+        SpacingStyle::Default,
+        config,
+    );
+    let Some(first_line) = list_lines.first_mut() else {
+        return vec![format!("{header} {{}} from {path}")];
+    };
+    *first_line = format!("{header} {}", first_line.trim_start());
+
+    let from = format!("from {path}");
+    match list_lines.last_mut() {
+        Some(last_line)
+            if last_line.trim_start().starts_with('}')
+                && line_length(last_line) + 1 + line_length(&from) <= config.max_line_length() =>
+        {
+            last_line.push(' ');
+            last_line.push_str(&from);
+        },
+        _ => list_lines.push(format!("{}{}", indent_string(indent + config.indent_size()), from)),
+    }
+
+    list_lines
 }
 
 fn render_import_specifier(spec: ImportSpecifier) -> String {
@@ -2139,6 +2184,74 @@ use some::module as sm
 use foo
 use {foo, bar as baz, \"as\" as \"from\"} from some::module # items
 pub use {alpha} from core
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn format_import_preserves_comments_inside_item_list() {
+        let source = "\
+use   {
+foo, # first import
+# exported under baz
+bar   as   baz,
+\"as\" as \"from\" # contextual
+}   from   some::module # import
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use {
+    foo, # first import
+    # exported under baz
+    bar as baz,
+    \"as\" as \"from\" # contextual
+} from some::module # import
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn format_import_wraps_commented_item_import_from_clause() {
+        let source = "\
+pub use {
+foo, # first import
+bar as baz
+} from ::miden::core::collections::sorted_array
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config {
+            max_line_length: Some(40),
+            ..Config::default()
+        };
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub use {
+    foo, # first import
+    bar as baz
+}
+    from ::miden::core::collections::sorted_array
 ";
 
         assert_eq!(formatted, expected);
