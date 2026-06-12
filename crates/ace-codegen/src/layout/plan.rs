@@ -26,10 +26,6 @@ pub struct InputCounts {
     pub num_aux_boundary: usize,
     /// Number of public inputs.
     pub num_public: usize,
-    /// Number of variable-length public input (VLPI) reduction slots (in EF elements).
-    /// This is derived from `AceConfig::num_vlpi_groups` by the layout policy:
-    /// MASM expands each group to 2 EF slots (word-aligned); Native uses 1 per group.
-    pub num_vlpi: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
     /// Number of periodic columns.
@@ -43,8 +39,6 @@ pub struct InputCounts {
 pub(crate) struct LayoutRegions {
     /// Region containing fixed-length public values.
     pub public_values: InputRegion,
-    /// Region containing variable-length public input reductions.
-    pub vlpi_reductions: InputRegion,
     /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
     /// Main trace OOD values at `zeta`.
@@ -148,8 +142,6 @@ pub struct InputLayout {
     pub(crate) aux_rand_alpha: usize,
     /// Input index for aux randomness beta.
     pub(crate) aux_rand_beta: usize,
-    /// Stride between logical VLPI groups (2 for MASM word-aligned, 1 for native).
-    pub(crate) vlpi_stride: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
     /// Total number of inputs (length of the READ section).
@@ -173,7 +165,6 @@ impl InputLayout {
         let mut max_end = 0usize;
         for region in [
             self.regions.public_values,
-            self.regions.vlpi_reductions,
             self.regions.randomness,
             self.regions.main_curr,
             self.regions.aux_curr,

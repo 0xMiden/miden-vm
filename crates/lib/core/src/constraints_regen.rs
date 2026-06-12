@@ -16,7 +16,6 @@ pub enum Mode {
 
 const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
-    num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
     num_airs: 2,
 };

@@ -100,7 +100,6 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
 pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
         num_airs: 2,
     };

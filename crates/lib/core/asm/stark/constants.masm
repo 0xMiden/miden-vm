@@ -86,8 +86,9 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
-### Address storing a pointer to variable length public inputs
-const VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR = 3223322670
+### Address storing a pointer to the caller-facing reduced-inputs block
+### [kernel_H | zero_pad | program_digest | transcript_state] (16 felts, just below FLPI).
+const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
@@ -105,11 +106,11 @@ const TMP4 = 3223322696
 
 ### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
 ### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
-### Computed once in generate_aux_randomness, read by reduce_kernel_digests.
+### Computed once in `process_public_inputs` from the non-deterministic aux randomness.
 const BUS_GAMMA_PTR = 3223322700
 
 ### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
-### Computed by `compute_boundary_correction` in `sys/vm/public_inputs.masm` from the
+### Accumulated during `process_public_inputs` in `sys/vm/public_inputs.masm` from the
 ### non-deterministically supplied aux randomness; `observe_aux_trace` asserts
 ### `c_total + aux_sum == 0` after that randomness is verified against the FS samples.
 const C_TOTAL_PTR = 3223322704
@@ -155,41 +156,53 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 ### smaller AIR's main block during the swap.
 const SWAP_SCRATCH_PTR = 3223322764
 
-### Scratch buffer for gathering the Fiat-Shamir public-input stream before block absorption.
-### Sized for the max stream length (43 + MAX_AUX_INPUTS = 1063 felts); only live during
-### `process_public_inputs`, in the free span between this region and the ACE READ section.
-const ABSORB_SCRATCH_PTR = 3223324000
-
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
 ##
-## In the backward direction, the size is determined by the fixed-length public inputs (FLPI)
-## and the variable-length public input reductions (VLPI). These regions are laid out by
-## `compute_and_store_public_inputs_address` in `stark/public_inputs.masm`.
+## In the backward direction, the size is determined by the fixed-length public inputs (FLPI,
+## the 32 stack-i/o felts) and a small caller-facing block holding the reduced variable-length
+## public inputs. These regions are laid out by `compute_and_store_public_inputs_address` in
+## `stark/public_inputs.masm`.
 ##
 ## In the forward direction, the size is determined by the OOD evaluations, aux bus boundary
 ## values, stark variables, and circuit constants.
 ##
-## ACE READ section layout (low address -> high address):
+## Caller-facing public-input layout (low address -> high address):
 ##
-##   pi_ptr -->  [  FLPI (m EF)                    ]  fixed-length public inputs
-##               [  VLPI reductions (k words)      ]  k groups, word-aligned (per-instance)
-##   anchor -->  [  aux_rand (1 word)              ]  AUX_RAND_ELEM_PTR (this address)
-##               [  OOD evaluations                ]  OOD_EVALUATIONS_PTR
-##               [  aux bus boundary               ]  AUX_BUS_BOUNDARY_PTR
-##               [  stark vars                     ]  AUXILIARY_ACE_INPUTS_PTR
-##               [  constants                      ]  ACE_CIRCUIT_STREAM_PTR
-##                                                    ... EVAL section follows ...
+##   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]  Poseidon2 hash of all kernel digests
+##                           [ zero word         (4 felts) ]  pad for rate-aligned FS observation
+##                           [ program_digest    (4 felts) ]  natural order
+##                           [ transcript_state  (4 felts) ]  natural order
 ##
-## The FLPI and VLPI pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR and
-## VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR). All other pointers are fixed constants.
+##   pi_ptr             -->  [ FLPI (m EF)               ]  fixed-length public inputs (stack i/o)
 ##
-## Relationship to ACE codegen: Each VLPI group occupies 1 word (4 base felts = 2 EF
-## slots) due to word-alignment, so `k` groups map to `k * 2` EF slots in AceConfig.
+##   anchor             -->  [ aux_rand (1 word)         ]  AUX_RAND_ELEM_PTR (this address)
+##                           [ codegen alignment pad     ]  AUX_RAND_ELEM_PTR + 4 (1 word)
+##                           [ OOD evaluations           ]  OOD_EVALUATIONS_PTR
+##                           [ aux bus boundary          ]  AUX_BUS_BOUNDARY_PTR
+##                           [ stark vars                ]  AUXILIARY_ACE_INPUTS_PTR
+##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
+##                                                          ... EVAL section follows ...
+##
+## After `verify_proof` returns, the 16 felts at `reduced_inputs_ptr` together with the FLPI
+## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
+## commitment the caller can bind against.
+##
+## The FLPI and reduced-inputs pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR and
+## REDUCED_INPUTS_ADDRESS_PTR). All other pointers are fixed constants. The reduced-inputs
+## block is NOT part of the ACE READ section — it sits just below `pi_ptr` purely as a
+## caller-facing payload (the circuit references only the stack-i/o public values).
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
+
+### Reserved 1-word padding (4 base felts) between aux_rand and OOD_EVALUATIONS_PTR. The ACE
+### codegen layout (`crates/ace-codegen/src/layout/policy.rs::masm`) double-word-aligns the
+### `main_curr` region; with the 32-EF public region plus the 2-EF randomness slot the next
+### double-word boundary falls one word past the randomness word. The padding slots are
+### unreferenced by the circuit (fresh memory reads as zero).
+### Range: AUX_RAND_ELEM_PTR + 4 .. AUX_RAND_ELEM_PTR + 7  (= 3225419780 .. 3225419783).
 
 ### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
 ### (alignment = 8 for Poseidon2). Per row in EF slots:
@@ -198,11 +211,11 @@ const AUX_RAND_ELEM_PTR = 3225419776
 ###   quot = 16                                         = 16 EFs
 ###   total per row                                     = 112 EFs = 224 felts
 ### Two rows (curr + next) × 224 = 448 felts.
-const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
+const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 4 (rand word) + 4 (codegen pad)
 
 ### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
 ### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
-const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
+const AUX_BUS_BOUNDARY_PTR = 3225420232       # OOD_EVALUATIONS_PTR + 448
 
 ### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma (reserved, zero),
@@ -210,13 +223,13 @@ const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
 ###   slots 10-11: multi_air_beta_{core,chip}
 ###   slots 12-14: is_{first,last,transition}_core
 ###   slots 15-17: is_{first,last,transition}_chip
-const AUXILIARY_ACE_INPUTS_PTR = 3225420232   # AUX_BUS_BOUNDARY_PTR + 4
+const AUXILIARY_ACE_INPUTS_PTR = 3225420236   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420268     # AUXILIARY_ACE_INPUTS_PTR + 36
+const ACE_CIRCUIT_STREAM_PTR = 3225420272     # AUXILIARY_ACE_INPUTS_PTR + 36
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420864            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225420868            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
 
 ## FRI
 ##
@@ -471,8 +484,8 @@ pub proc get_trace_domain_generator
     push.TRACE_DOMAIN_GENERATOR_PTR mem_load
 end
 
-pub proc variable_length_public_inputs_address_ptr
-    push.VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+pub proc reduced_inputs_address_ptr
+    push.REDUCED_INPUTS_ADDRESS_PTR
 end
 
 pub proc public_inputs_address_ptr
@@ -512,10 +525,6 @@ end
 
 pub proc swap_scratch_ptr
     push.SWAP_SCRATCH_PTR
-end
-
-pub proc absorb_scratch_ptr
-    push.ABSORB_SCRATCH_PTR
 end
 
 pub proc random_coin_input_buf_ptr

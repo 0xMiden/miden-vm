@@ -122,7 +122,6 @@ fn test_verifier_dag_matches_manual_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };
@@ -165,7 +164,6 @@ fn test_emitted_circuit_matches_dag_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };
@@ -184,7 +182,6 @@ fn test_encoded_circuit_structure() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };

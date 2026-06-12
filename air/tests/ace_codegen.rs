@@ -18,7 +18,6 @@ fn core_air_dag_matches_manual_eval() {
     let air = MidenAir::CORE;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };
@@ -64,13 +63,11 @@ fn core_air_dag_rejects_mismatched_layout() {
     let air = MidenAir::CORE;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
         num_airs: 1,
     };
@@ -92,7 +89,6 @@ fn chiplets_air_ace_rows() {
     let air = MidenAir::CHIPLETS;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
         num_airs: 1,
     };
@@ -118,7 +114,6 @@ fn chiplets_air_ace_rows() {
 fn synthetic_ood_adjusts_quotient_to_zero() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
         num_airs: 1,
     };
@@ -149,7 +144,6 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 fn quotient_next_inputs_do_not_affect_eval() {
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
         num_airs: 1,
     };
@@ -195,7 +189,6 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
         num_airs: 2,
     };
@@ -245,7 +238,6 @@ fn multi_air_ace_circuit_emits_consistently() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
         num_airs: 2,
     };
@@ -265,7 +257,6 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
 
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
         num_airs: 2,
     };

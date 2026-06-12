@@ -24,12 +24,6 @@ pub enum InputKey {
     },
     /// Aux bus boundary value at the given index.
     AuxBusBoundary(usize),
-    /// Variable-length public input reduction at the given group index.
-    ///
-    /// The slot is reserved in the layout (MASM stores the kernel-ROM LogUp reduction
-    /// there) but is not referenced by the production circuit: the LogUp boundary
-    /// identity is asserted directly by the MASM verifier outside the circuit.
-    VlpiReduction(usize),
     /// Auxiliary batching challenge. The stark-vars slot is reserved (e.g. for future
     /// multi-root folding) but is not referenced by the production circuit.
     Gamma,
@@ -102,10 +96,6 @@ impl InputKeyMapper<'_> {
                 }
             },
             InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::VlpiReduction(i) => {
-                let local = i * layout.vlpi_stride;
-                layout.regions.vlpi_reductions.index(local)
-            },
             // Extension-field stark vars.
             InputKey::Alpha => Some(layout.stark.alpha),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),

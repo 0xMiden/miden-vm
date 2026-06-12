@@ -15,7 +15,14 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::air::{ReductionError, WindowAccess};
+use miden_crypto::{
+    hash::poseidon2::Poseidon2Permutation256,
+    stark::{
+        air::{ReductionError, WindowAccess},
+        challenger::CanObserve,
+        symmetric::Permutation,
+    },
+};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 
@@ -632,6 +639,45 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         Kernel::MAX_NUM_PROCEDURES * WORD_SIZE
     }
 
+    /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
+    ///
+    /// Replaces the default length-prefixed stream with the rate-aligned schedule
+    /// the MASM recursive verifier mirrors (six 8-felt blocks, 48 felts total):
+    ///
+    /// ```text
+    /// [ kernel_H (4) | 0,0,0,0 ]      Poseidon2 summary of the kernel digests
+    /// [ program_hash (4) | transcript_state (4) ]
+    /// [ stack_inputs (16) ]           two blocks
+    /// [ stack_outputs (16) ]          two blocks
+    /// ```
+    ///
+    /// The kernel digests enter the transcript only through `kernel_H`
+    /// (see [`hash_kernel_digests`]), giving callers of the recursive verifier a
+    /// fixed-size commitment to the kernel instead of the unbounded digest list.
+    fn observe<C: CanObserve<Felt>>(
+        &self,
+        challenger: &mut C,
+        air_inputs: &[Felt],
+        aux_inputs: &[Felt],
+        _log_trace_heights: &[u8],
+    ) {
+        assert_eq!(air_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
+
+        let kernel_h = hash_kernel_digests(aux_inputs);
+        for v in kernel_h {
+            challenger.observe(v);
+        }
+        for _ in 0..WORD_SIZE {
+            challenger.observe(Felt::ZERO);
+        }
+        let program_hash = &air_inputs[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE];
+        let transcript_state = &air_inputs[PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE];
+        let stack_io = &air_inputs[PV_PROGRAM_HASH + WORD_SIZE..PV_TRANSCRIPT_STATE];
+        for &v in program_hash.iter().chain(transcript_state).chain(stack_io) {
+            challenger.observe(v);
+        }
+    }
+
     /// Cross-AIR LogUp closure: the sum of every committed aux final plus the
     /// per-trace boundary corrections must vanish. `aux_inputs` carries the
     /// kernel digests (the Chiplets var-len public input group).
@@ -657,6 +703,35 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
         Ok(vec![aux_sum + core_correction + chiplets_correction])
     }
+}
+
+// KERNEL DIGEST SUMMARY HASH
+// ================================================================================================
+
+/// Computes `kernel_H`, the fixed-size Poseidon2 commitment to the kernel-procedure digests.
+///
+/// Plain 12-wide Poseidon2 sponge with zero initial state: each 4-felt digest is absorbed as
+/// one rate block `[d0, d1, d2, d3, 0, 0, 0, 0]` (one permutation per digest, capacity
+/// carried between blocks); the result is the first rate word of the final state. The empty
+/// digest list yields the zero word (no permutation is applied).
+///
+/// The MASM recursive verifier computes the same value on the fly while streaming the
+/// digests from the advice tape (`sys/vm/public_inputs.masm`); both sides absorb `kernel_H`
+/// into the Fiat-Shamir transcript in place of the unbounded digest list, and callers of the
+/// recursive verifier read it back as the kernel commitment of the verified statement.
+pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
+    assert!(
+        kernel_felts.len().is_multiple_of(WORD_SIZE),
+        "kernel digest felts must be whole words"
+    );
+
+    let mut state = [Felt::ZERO; 12];
+    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
+        state[0..WORD_SIZE].copy_from_slice(digest);
+        state[WORD_SIZE..2 * WORD_SIZE].fill(Felt::ZERO);
+        state = Poseidon2Permutation256.permute(state);
+    }
+    [state[0], state[1], state[2], state[3]]
 }
 
 // REDUCED-AUX BOUNDARY BUILDER

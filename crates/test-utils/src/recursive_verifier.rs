@@ -171,19 +171,9 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Fixed-length public inputs.
-    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
-    advice_stack.extend_from_slice(&fixed_len_inputs);
-
-    // 2. Number of kernel procedure digests.
-    let num_kernel_proc_digests = kernel_digests.len();
-    advice_stack.push(num_kernel_proc_digests as u64);
-
-    // 3. Kernel procedure digest elements (each digest padded to 8 elements, reversed).
-    let kernel_advice = build_kernel_digest_advice(kernel_digests);
-    advice_stack.extend_from_slice(&kernel_advice);
-
-    // 4. Auxiliary randomness [beta0, beta1, alpha0, alpha1].
+    // 1. Auxiliary randomness [beta0, beta1, alpha0, alpha1] — consumed first by
+    //    `process_public_inputs` so the kernel-digest stream can be folded into the outer-LogUp
+    //    correction on the fly.
     assert!(
         stark.randomness.len() >= 2,
         "expected at least 2 randomness challenges (alpha, beta), got {}",
@@ -199,6 +189,19 @@ fn build_advice(
         alpha_coeffs[0].as_canonical_u64(),
         alpha_coeffs[1].as_canonical_u64(),
     ]);
+
+    // 2. Number of kernel procedure digests.
+    let num_kernel_proc_digests = kernel_digests.len();
+    advice_stack.push(num_kernel_proc_digests as u64);
+
+    // 3. Kernel procedure digest elements (4 canonical felts per digest).
+    let kernel_advice = build_kernel_digest_advice(kernel_digests);
+    advice_stack.extend_from_slice(&kernel_advice);
+
+    // 4. Variable-length window messages and fixed-length public inputs, in the order
+    //    `process_public_inputs` consumes them: program digest, transcript state, stack i/o.
+    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
+    advice_stack.extend_from_slice(&fixed_len_inputs);
 
     // 5. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
@@ -372,35 +375,26 @@ where
     Ok((vec![tree], advice_entries))
 }
 
-/// Build kernel digest advice data.
-///
-/// Each digest (4 elements) is padded to 8 elements with zeros, then reversed. This matches
-/// the format used by the MASM `reduce_kernel_digests` procedure which uses `mem_stream` +
-/// `horner_eval_base` to process digests in 8-element chunks.
+/// Build kernel digest advice data: 4 canonical felts per digest, in order. The MASM
+/// `stream_kernel_digests` procedure reads each digest with a single `adv_loadw` and pads
+/// the sponge rate with zeros itself.
 fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
-    let mut result = Vec::with_capacity(kernel_digests.len() * 8);
+    let mut result = Vec::with_capacity(kernel_digests.len() * 4);
     for digest in kernel_digests {
-        let mut padded: Vec<u64> =
-            digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
-        padded.resize(8, 0);
-        padded.reverse();
-        result.extend_from_slice(&padded);
+        result.extend(digest.as_elements().iter().map(Felt::as_canonical_u64));
     }
     result
 }
 
-/// Build the fixed-length public inputs in the order the MASM random coin observes them.
-///
-/// Must stay in sync with `PublicInputs::to_air_inputs()`.
+/// Build the public-input advice tail in the order `process_public_inputs` consumes it:
+/// program digest (4), transcript state (4), stack inputs (16), stack outputs (16).
 fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     let mut felts = Vec::<Felt>::new();
     felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
+    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
-    let mut fixed_len: Vec<u64> = felts.iter().map(Felt::as_canonical_u64).collect();
-    fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
-    fixed_len
+    felts.iter().map(Felt::as_canonical_u64).collect()
 }
 
 fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {

@@ -107,18 +107,36 @@ where
     //   the wire byte order exactly. Padding slots within each AIR's subregion are unreferenced by
     //   the constraints (see eval bodies of CoreAir and ChipletsAir, which only address columns up
     //   to the original width).
+    // - `num_public` covers only the circuit-referenced window of the statement's public values:
+    //   the 32 stack-i/o felts at `pv[4..36]`. The program hash and transcript state are consumed
+    //   by the MASM-side outer-LogUp boundary check and the FS transcript, not by the circuit, so
+    //   they are kept out of the ACE READ section; `Public` keys are shifted by `-PV_WINDOW_START`
+    //   during re-emit below.
     // - `num_aux_boundary` sums each AIR's boundary slot count.
     // - `num_periodic` is taken from chiplets (the only AIR with periodic columns today; the
     //   wrapper exposes them once via the combined `LiftedAir` impl).
+    const PV_WINDOW_START: usize = 4;
+    const PV_WINDOW_LEN: usize = 32;
     let combined_counts = InputCounts {
         width: combined_main_w,
         aux_width: combined_aux_w,
         num_aux_boundary: core_aux_n + chip_aux_n,
-        num_public: core_artifacts.layout.counts.num_public,
-        num_vlpi: core_artifacts.layout.counts.num_vlpi,
+        num_public: PV_WINDOW_LEN,
         num_randomness: 2,
         num_periodic: chip_artifacts.layout.counts.num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,
+    };
+
+    // Shift a `Public` key into the circuit-referenced window, failing loudly if a
+    // constraint ever references a public value outside the stack-i/o range.
+    let remap_public = |index: usize| -> InputKey {
+        assert!(
+            (PV_WINDOW_START..PV_WINDOW_START + PV_WINDOW_LEN).contains(&index),
+            "constraint references public value {index} outside the stack-i/o window; \
+             the ACE READ section only carries pv[{PV_WINDOW_START}..{}]",
+            PV_WINDOW_START + PV_WINDOW_LEN,
+        );
+        InputKey::Public(index - PV_WINDOW_START)
     };
 
     // Build combined layout via the multi-air constructors so the stark-vars region
@@ -146,6 +164,7 @@ where
             InputKey::IsFirst => InputKey::IsFirstAir(0),
             InputKey::IsLast => InputKey::IsLastAir(0),
             InputKey::IsTransition => InputKey::IsTransitionAir(0),
+            InputKey::Public(i) => remap_public(i),
             other => other,
         },
         true, // skip core's `Sub(acc, q*v)` root — combined formula uses a shared q*v
@@ -181,6 +200,7 @@ where
             InputKey::IsFirst => InputKey::IsFirstAir(1),
             InputKey::IsLast => InputKey::IsLastAir(1),
             InputKey::IsTransition => InputKey::IsTransitionAir(1),
+            InputKey::Public(i) => remap_public(i),
             other => other,
         },
         true, // skip chiplets's `Sub(acc, q*v)` root — combined formula uses a shared q*v
