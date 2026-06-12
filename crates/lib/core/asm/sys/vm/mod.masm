@@ -25,12 +25,19 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # Each circuit commitment covers one order-specific encoded ACE circuit. The digest
 # input is:
 #   [PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...]
-const RELATION_DIGEST_0 = 8068690199881128576
-const RELATION_DIGEST_1 = 15752653923667764930
-const RELATION_DIGEST_2 = 4618337672943346065
-const RELATION_DIGEST_3 = 9135763419457635012
+const RELATION_DIGEST_0 = 15794697767175421542
+const RELATION_DIGEST_1 = 12015852685764691680
+const RELATION_DIGEST_2 = 3313672886670830370
+const RELATION_DIGEST_3 = 20246485947112053
 
-const SHAPE_RESERVED = 0
+# Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
+# This is trusted verifier setup, not proof data or advice.
+const AND8_PREPROCESSED_TRACE_COM_0 = 4797261585136045022
+const AND8_PREPROCESSED_TRACE_COM_1 = 818188170594688894
+const AND8_PREPROCESSED_TRACE_COM_2 = 3033843902608274537
+const AND8_PREPROCESSED_TRACE_COM_3 = 12330571946036665054
+
+const AND8_LOOKUP_LOG_HEIGHT = 16
 
 # MIN matches `MIN_TRACE_LEN = 2^6 = 64` in `air/src/trace/mod.rs`.
 # MAX matches `MAX_TRACE_LEN = 1 << 29` in `processor/src/trace/parallel/mod.rs`.
@@ -72,17 +79,22 @@ proc assert_acceptable_options
     push.ACCEPTABLE_FOLDING_POW_BITS assert_eq.err="folding_pow_bits does not match acceptable security policy"
 end
 
-#! Loads, validates, and caches the Miden AIR shape from advice.
+#! Loads, validates, and caches the Miden AIR shape.
 #!
 #! The shape is part of the VM-specific recursive verifier wrapper, not the
-#! generic STARK verifier. It is supplied in fixed instance order:
+#! generic STARK verifier. Advice supplies the dynamic AIR heights in fixed instance order:
 #!
-#!   [log_core, log_chiplets, log_poseidon2, reserved=0]
+#!   [log_core, log_chiplets, log_poseidon2]
+#!
+#! The And8Lookup height is fixed verifier setup and is stored from `AND8_LOOKUP_LOG_HEIGHT`.
 #!
 #! Soundness contract:
 #! - RELATION_DIGEST is a compile-time MASM constant; advice never supplies it.
-#! - Heights are advice-supplied, but the Fiat-Shamir replay observes them after
-#!   public inputs in instance order. Wrong heights diverge from the prover transcript.
+#! - The preprocessed trace commitment is a compile-time MASM constant for the
+#!   canonical AND8 table; advice never supplies it.
+#! - Dynamic heights are advice-supplied, but the Fiat-Shamir replay observes the full
+#!   four-AIR shape after public inputs in instance order. Wrong heights diverge from
+#!   the prover transcript.
 #! - Shape checks reject malformed advice before transcript work starts.
 #!
 #! Writes:
@@ -90,35 +102,49 @@ end
 #!   CORE_TRACE_LENGTH_LOG_PTR
 #!   CHIPLETS_TRACE_LENGTH_LOG_PTR
 #!   POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR
+#!   AND8_LOOKUP_TRACE_LENGTH_LOG_PTR
 #!   TRACE_LENGTH_LOG_PTR
 #!   ORDER_TAG_PTR
 #!   RELATION_DIGEST_PTR
+#!   PREPROCESSED_TRACE_COM_PTR
 #!
 #! Stack-neutral.
 pub proc init_miden_air_shape_state
-    exec.load_miden_air_shape_from_advice
-    exec.validate_miden_air_shape
+    exec.load_miden_air_shape_word_from_advice
+    exec.validate_miden_air_shape_word
     exec.derive_miden_air_cached_state
     exec.store_relation_digest
+    exec.store_and8_preprocessed_trace_commitment
 end
 
-proc load_miden_air_shape_from_advice
-    padw
-    adv_loadw
-    # => [log_core, log_chiplets, log_poseidon2, reserved, ...]
+#! Loads the Miden AIR shape into memory and leaves the shape word on the stack.
+#!
+#! Output: [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+proc load_miden_air_shape_word_from_advice
+    adv_push
+    adv_push
+    adv_push
+    push.AND8_LOOKUP_LOG_HEIGHT
+    # => [log_and8_lookup, log_poseidon2, log_chiplets, log_core, ...]
+    reversew
+    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
     exec.constants::air_shape_ptr mem_storew_le
-    # => [log_core, log_chiplets, log_poseidon2, reserved, ...]
-    dropw
-    # => [...]
+    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
 end
 
-proc validate_miden_air_shape
-    padw
-    exec.constants::air_shape_ptr mem_loadw_le
+#! Validates the shape word left by `load_miden_air_shape_word_from_advice`.
+#!
+#! Input:  [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+#! Output: [...]
+proc validate_miden_air_shape_word
+    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
     exec.assert_shape_log
     exec.assert_shape_log
     exec.assert_shape_log
-    push.SHAPE_RESERVED assert_eq.err="nonzero Miden AIR shape reserved field"
+    # => [log_and8_lookup, ...]
+    dup push.AND8_LOOKUP_LOG_HEIGHT assert_eq.err="invalid And8Lookup log height"
+    exec.assert_shape_log
+    # => [...]
 end
 
 proc assert_shape_log
@@ -140,6 +166,11 @@ proc derive_miden_air_cached_state
     dup
     exec.constants::set_poseidon2_permutation_trace_length_log
 
+    exec.constants::air_shape_ptr add.3 mem_load
+    dup
+    exec.constants::set_and8_lookup_trace_length_log
+
+    u32max
     u32max
     u32max
     exec.constants::set_trace_length_log
@@ -150,50 +181,100 @@ end
 
 #! Derives the proof-order tag from the Miden AIR log heights cached in memory.
 #!
-#! Tags are Lehmer ranks over instance order `[Core, Chiplets, Poseidon2Permutation]`:
-#!   0: Core, Chiplets, Poseidon2Permutation
-#!   1: Core, Poseidon2Permutation, Chiplets
-#!   2: Chiplets, Core, Poseidon2Permutation
-#!   3: Chiplets, Poseidon2Permutation, Core
-#!   4: Poseidon2Permutation, Core, Chiplets
-#!   5: Poseidon2Permutation, Chiplets, Core
+#! Tags are Lehmer ranks over instance order `[Core, Chiplets, Poseidon2Permutation, And8Lookup]`.
 proc derive_order_tag
+    # Compute each AIR's sorted position under `(log_height, instance_index)`.
+    #
+    # For instance ids i < j, `i` precedes `j` iff `height_i <= height_j`.
+    # The position of id i is the number of other ids that precede it.
+
+    # pos(core) = !core<=chiplets + !core<=poseidon2 + !core<=and8
+    exec.core_le_chiplets push.0 eq
+    exec.core_le_poseidon2_permutation push.0 eq add
+    exec.core_le_and8_lookup push.0 eq add
+    dup exec.constants::tmp2 add push.0 swap mem_store
+    drop
+
+    # pos(chiplets) = core<=chiplets + !chiplets<=poseidon2 + !chiplets<=and8
+    exec.core_le_chiplets
+    exec.chiplets_le_poseidon2_permutation push.0 eq add
+    exec.chiplets_le_and8_lookup push.0 eq add
+    dup exec.constants::tmp2 add push.1 swap mem_store
+    drop
+
+    # pos(poseidon2) = core<=poseidon2 + chiplets<=poseidon2 + !poseidon2<=and8
+    exec.core_le_poseidon2_permutation
+    exec.chiplets_le_poseidon2_permutation add
+    exec.poseidon2_permutation_le_and8_lookup push.0 eq add
+    dup exec.constants::tmp2 add push.2 swap mem_store
+    drop
+
+    # pos(and8) = core<=and8 + chiplets<=and8 + poseidon2<=and8
+    exec.core_le_and8_lookup
+    exec.chiplets_le_and8_lookup add
+    exec.poseidon2_permutation_le_and8_lookup add
+    dup exec.constants::tmp2 add push.3 swap mem_store
+    drop
+
+    # Let pi_k = tmp2[k], the instance id at proof-order position k. Compute:
+    #   rank = 6*pi0 + 2*([pi2 < pi1] + [pi3 < pi1]) + [pi3 < pi2].
+    exec.constants::tmp2 mem_load
+    push.6 mul
+    exec.constants::tmp3 mem_store
+
+    exec.constants::tmp2 add.2 mem_load
+    exec.constants::tmp2 add.1 mem_load
+    u32lt
+    exec.constants::tmp2 add.3 mem_load
+    exec.constants::tmp2 add.1 mem_load
+    u32lt
+    add
+    mul.2
+    exec.constants::tmp3 mem_load
+    add
+    exec.constants::tmp3 mem_store
+
+    exec.constants::tmp2 add.3 mem_load
+    exec.constants::tmp2 add.2 mem_load
+    u32lt
+    exec.constants::tmp3 mem_load
+    add
+end
+
+proc core_le_chiplets
     exec.constants::get_core_trace_length_log
     exec.constants::get_chiplets_trace_length_log
     u32lte
-    if.true
-        exec.constants::get_chiplets_trace_length_log
-        exec.constants::get_poseidon2_permutation_trace_length_log
-        u32lte
-        if.true
-            push.0
-        else
-            exec.constants::get_core_trace_length_log
-            exec.constants::get_poseidon2_permutation_trace_length_log
-            u32lte
-            if.true
-                push.1
-            else
-                push.4
-            end
-        end
-    else
-        exec.constants::get_core_trace_length_log
-        exec.constants::get_poseidon2_permutation_trace_length_log
-        u32lte
-        if.true
-            push.2
-        else
-            exec.constants::get_chiplets_trace_length_log
-            exec.constants::get_poseidon2_permutation_trace_length_log
-            u32lte
-            if.true
-                push.3
-            else
-                push.5
-            end
-        end
-    end
+end
+
+proc core_le_poseidon2_permutation
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    u32lte
+end
+
+proc core_le_and8_lookup
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_and8_lookup_trace_length_log
+    u32lte
+end
+
+proc chiplets_le_poseidon2_permutation
+    exec.constants::get_chiplets_trace_length_log
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    u32lte
+end
+
+proc chiplets_le_and8_lookup
+    exec.constants::get_chiplets_trace_length_log
+    exec.constants::get_and8_lookup_trace_length_log
+    u32lte
+end
+
+proc poseidon2_permutation_le_and8_lookup
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.constants::get_and8_lookup_trace_length_log
+    u32lte
 end
 
 proc store_relation_digest
@@ -202,17 +283,23 @@ proc store_relation_digest
     dropw
 end
 
+proc store_and8_preprocessed_trace_commitment
+    push.AND8_PREPROCESSED_TRACE_COM_3.AND8_PREPROCESSED_TRACE_COM_2.AND8_PREPROCESSED_TRACE_COM_1.AND8_PREPROCESSED_TRACE_COM_0
+    exec.constants::preprocessed_trace_com_ptr mem_storew_le
+    dropw
+end
+
 #! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and
 #! stored in memory for use by the generic verifier.
-#! The Miden AIR shape is also loaded from advice, validated, and cached
-#! before the generic verifier runs.
+#! The dynamic Miden AIR heights are also loaded from advice, validated, and cached with the
+#! fixed And8Lookup height before the generic verifier runs.
 #!
 #! - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
 #!   well as the program and the kernel procedures digests.
-#! - The proof uses three AIRs: Core, Chiplets, and Poseidon2Permutation. Main and auxiliary
+#! - The proof uses four AIRs: Core, Chiplets, Poseidon2Permutation, and And8Lookup. Main and auxiliary
 #!   leaves are concatenated in proof order after LMCS alignment.
 #!
 #! Inputs:  []

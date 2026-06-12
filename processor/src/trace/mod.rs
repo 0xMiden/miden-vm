@@ -320,7 +320,7 @@ impl ExecutionTrace {
     ///
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
-        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix) =
+        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix) =
             self.main_trace.to_air_matrices();
         let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
@@ -329,7 +329,7 @@ impl ExecutionTrace {
                 .expect("statement construction failed");
         let prover_statement = ProverStatement::new(
             statement,
-            vec![core_matrix, chiplets_matrix, poseidon2_permutation_matrix],
+            vec![core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix],
         )
         .expect("prover statement construction failed");
 
@@ -340,14 +340,24 @@ impl ExecutionTrace {
     /// Splits the trace into the per-AIR matrices consumed by the multi-AIR prover.
     pub fn to_air_matrices(
         &self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         self.main_trace.to_air_matrices()
     }
 
     /// Consuming variant for the proving hot path: moves the row-major buffers.
     pub fn into_air_matrices(
         self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         self.main_trace.into_air_matrices()
     }
 

@@ -1,5 +1,13 @@
 use miden::core::stark::constants
 
+const CORE_SELECTOR_OFFSET = 24
+const CHIPLETS_SELECTOR_OFFSET = 30
+const POSEIDON2_SELECTOR_OFFSET = 36
+const AND8_SELECTOR_OFFSET = 42
+
+const CORE_CHIPLETS_TRACE_LENGTHS_OFFSET = 48
+const POSEIDON2_AND8_TRACE_LENGTHS_OFFSET = 52
+
 #! Sets up the Miden VM stark-vars region of the recursive-verifier ACE circuit input layout.
 #!
 #! The stark-vars block is 10 EF slots (5 words) laid out as:
@@ -10,10 +18,11 @@ use miden::core::stark::constants
 #!   Word 3 (slots 6-7): gamma, weight0
 #!   Word 4 (slots 8-9): f, s0
 #!
-#! Multi-AIR appends 11 more EF slots, padded to 12 (6 words):
+#! Multi-AIR appends 18 more EF slots:
 #!   slot 10:      beta_multi
 #!   slot 11:      reserved
-#!   slots 12-20: lifted selectors for Core, Chiplets, and Poseidon2Permutation
+#!   slots 12-23: lifted selectors for Core, Chiplets, Poseidon2Permutation, and And8Lookup
+#!   slots 24-27: trace lengths for Core, Chiplets, Poseidon2Permutation, and And8Lookup
 #!
 #! Input:  [max_cycle_len_log, ...]
 #! Output: [...]
@@ -146,16 +155,44 @@ pub proc set_up_auxiliary_inputs_ace
 
     # Phase 4: per-AIR lifted selectors at z^{2^(log_max - log_air)}.
     exec.constants::get_core_trace_length_log
-    push.24
+    push.CORE_SELECTOR_OFFSET
     exec.compute_per_air_selectors
 
     exec.constants::get_chiplets_trace_length_log
-    push.30
+    push.CHIPLETS_SELECTOR_OFFSET
     exec.compute_per_air_selectors
 
     exec.constants::get_poseidon2_permutation_trace_length_log
-    push.36
+    push.POSEIDON2_SELECTOR_OFFSET
     exec.compute_per_air_selectors
+
+    exec.constants::get_and8_lookup_trace_length_log
+    push.AND8_SELECTOR_OFFSET
+    exec.compute_per_air_selectors
+
+    # Phase 5: per-AIR trace lengths. Wrapped-centered lookup AIRs use these
+    # values to convert committed centered sums back to raw LogUp sums.
+    push.0
+    exec.constants::get_chiplets_trace_length_log
+    pow2
+    push.0
+    exec.constants::get_core_trace_length_log
+    pow2
+    # => [core_len, 0, chiplets_len, 0, ...]
+    exec.constants::auxiliary_ace_inputs_ptr add.CORE_CHIPLETS_TRACE_LENGTHS_OFFSET
+    mem_storew_le
+    dropw
+
+    push.0
+    exec.constants::get_and8_lookup_trace_length_log
+    pow2
+    push.0
+    exec.constants::get_poseidon2_permutation_trace_length_log
+    pow2
+    # => [poseidon2_len, 0, and8_len, 0, ...]
+    exec.constants::auxiliary_ace_inputs_ptr add.POSEIDON2_AND8_TRACE_LENGTHS_OFFSET
+    mem_storew_le
+    dropw
 end
 
 #! Load the quad field element stored at `[addr, addr+1]`.

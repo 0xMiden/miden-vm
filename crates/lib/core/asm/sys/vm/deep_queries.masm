@@ -6,6 +6,10 @@ use miden::core::stark::deep_queries
 # =================================================================================================
 
 const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value from the Merkle tree"
+const PREPROCESSED_LEAF_VALUE_MISMATCH = "preprocessed query leaf hash mismatch"
+
+# 2^(AND8_LOOKUP_LOG_HEIGHT + BLOWUP_FACTOR_LOG) - 1 = 2^(16 + 3) - 1.
+const AND8_LDE_INDEX_MASK = 524287
 
 # MAIN PROCEDURE
 # =================================================================================================
@@ -30,7 +34,7 @@ const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value fr
 #! 3. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in
 #!    storing the computed FRI queries,
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
-#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
+#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI query computations.
 pub proc compute_deep_composition_polynomial_queries
 
     # Iterate over all FRI query indices and compute their corresponding DEEP query.
@@ -79,6 +83,10 @@ end
 #! where:
 #! - Y is a "garbage" word.
 proc load_query_row
+    # Process the preprocessed segment of the query
+    exec.process_preprocessed_segment
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
     # Process the main segment of the execution trace portion of the query
     exec.process_main_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -92,6 +100,70 @@ proc load_query_row
     #=> [Y, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, index, query_ptr]
 end
 
+# PREPROCESSED TRACE SEGMENT PROCESSING
+# =================================================================================================
+
+#! Handles the logic for processing the preprocessed trace segment.
+#!
+#! Inputs: [Y, query_ptr]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+proc process_preprocessed_segment
+    # Load the query index.
+    dup.4 mem_loadw_le
+    #=> [index, depth, y, y, query_ptr]
+
+    # Get commitment to the preprocessed trace group.
+    movdn.3 movdn.2
+    push.0.0
+    exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    #=> [PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+
+    # The setup-fixed AND8 table LDE can be shorter than the query domain. LMCS
+    # proofs fold query index `i` to the committed tree leaf
+    # `i mod 2^(log_and8_height + log_blowup)` and authenticate against the
+    # preprocessed tree depth. The original `(depth, index)` stays on the stack
+    # for the DEEP evaluation of the lifted polynomial.
+    dup.5
+    push.AND8_LDE_INDEX_MASK
+    u32and
+    exec.constants::get_and8_lookup_trace_length_log
+    exec.constants::get_blowup_factor_log
+    add
+    #=> [preprocessed_depth, masked_index, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+    mtree_get
+    exec.constants::tmp3 mem_storew_le
+    adv.push_mapval
+    #=> [LEAF_VALUE, PREPROCESSED_TRACE_TREE_ROOT, depth, index, query_ptr]
+
+    exec.constants::tmp2 mem_loadw_le
+    swapw
+    #=> [LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    # Load the aligned preprocessed leaf. The AND8 table contributes one
+    # 3-column preprocessed matrix, padded to 8 base felts by LMCS.
+    padw swapw padw
+    #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
+
+    exec.load_preprocessed_segment
+    #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+
+    swapw
+    exec.constants::tmp3 mem_loadw_le
+    assert_eqw.err=PREPROCESSED_LEAF_VALUE_MISMATCH
+end
+
+#! Loads the portion of the query associated to the preprocessed trace segment.
+#!
+#! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
+#! Outputs: [Y, D, C, ptr]
+proc load_preprocessed_segment
+    repeat.1
+        adv_pipe
+        horner_eval_base
+        exec.poseidon2::permute
+    end
+end
+
 # MAIN TRACE SEGMENT PROCESSING
 # =================================================================================================
 
@@ -100,36 +172,23 @@ end
 #! Inputs: [Y, query_ptr]
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_main_segment_execution_trace
-    # Load the query index
-    dup.4 mem_loadw_le
-    #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
-
-    # Get commitment to main segment of the execution trace
-    movdn.3 movdn.2
-    push.0.0
+    # Load main trace commitment and get leaf.
     exec.constants::main_trace_com_ptr mem_loadw_le
-    #=>[MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    # Use the commitment to get the leaf and save it
-    dup.5 dup.5
+    dup.9 dup.9
     mtree_get
     exec.constants::tmp3 mem_storew_le
     adv.push_mapval
-    #=>[LEAF_VALUE, MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
+    #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw_le
-    swapw
-    #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+    # Load the values of the main segment of the execution trace at the current query.
 
-    # Load the values of the main segment of the execution trace at the current query. We also
-    # compute their hash and the value of their random linear combination using powers of a
-    # single random value alpha.
-
-    # Load the multi-AIR aligned main columns. Per-leaf width is the sum of
-    # LMCS-aligned per-AIR widths:
-    #   ceil(51/8)*8 + ceil(21/8)*8 + ceil(16/8)*8 = 56 + 24 + 16 = 96 felts.
-    padw swapw padw
-    #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
+    # Load the multi-AIR aligned main columns:
+    #   ceil(51/8)*8 + ceil(22/8)*8 + ceil(16/8)*8 + ceil(1/8)*8
+    #   = 56 + 24 + 16 + 8 = 104 felts.
+    exec.constants::zero_word_ptr mem_loadw_le
+    swapw padw
+    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     exec.load_main_segment_execution_trace
     #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
@@ -145,7 +204,7 @@ end
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
 proc load_main_segment_execution_trace
-    repeat.12
+    repeat.13
         adv_pipe
         horner_eval_base
         exec.poseidon2::permute
@@ -178,7 +237,7 @@ proc process_aux_segment_execution_trace
     swapw padw
     #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned aux leaf: 8 + 8 + 8 = 24 base felts.
+    # Load the aligned aux leaf: 8 + 8 + 8 + 8 = 32 base felts.
     exec.load_aux_segment_execution_trace
     #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -194,7 +253,7 @@ end
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
 proc load_aux_segment_execution_trace
-    repeat.3
+    repeat.4
         adv_pipe
         horner_eval_base
         exec.poseidon2::permute

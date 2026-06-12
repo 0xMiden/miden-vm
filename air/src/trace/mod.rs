@@ -77,6 +77,12 @@ pub mod poseidon2_permutation {
     pub use crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS;
 }
 
+pub mod and8_lookup {
+    pub use crate::constraints::and8_lookup::columns::{
+        AND8_TABLE_HEIGHT, LOG_AND8_TABLE_HEIGHT, NUM_AND8_LOOKUP_COLS,
+    };
+}
+
 pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
     + DECODER_TRACE_WIDTH
     + STACK_TRACE_WIDTH
@@ -86,12 +92,8 @@ pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
 //
-// The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
-// chiplet-trace LogUp columns for Chiplets. See
-// [`crate::constraints::lookup::main_air::MainLookupAir`] and
-// [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the
-// per-column contents.
+// The auxiliary trace is the LogUp lookup-argument segment built per AIR:
+// Core(4) + Chiplets(3) + Poseidon2Permutation(1) + AND8(1).
 
 /// Auxiliary trace segment width — see the LogUp aux trace layout above.
 pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;

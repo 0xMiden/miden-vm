@@ -11,6 +11,7 @@ use miden_core::{
 
 use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
+    and8_lookup::NUM_AND8_LOOKUP_COLS,
     chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
     decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS},
     poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
@@ -71,6 +72,8 @@ struct TraceStorage {
     chiplets_rm: RowMajorMatrix<Felt>,
     /// Poseidon2 permutation matrix, at its own per-AIR height.
     poseidon2_permutation_rm: RowMajorMatrix<Felt>,
+    /// Byte-AND lookup multiplicity matrix, at table height.
+    and8_lookup_rm: RowMajorMatrix<Felt>,
 }
 
 #[derive(Debug)]
@@ -88,6 +91,7 @@ impl MainTrace {
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
         poseidon2_permutation_rm: Vec<Felt>,
+        and8_lookup_rm: Vec<Felt>,
         last_program_row: RowIndex,
     ) -> Self {
         assert_eq!(
@@ -105,15 +109,22 @@ impl MainTrace {
             0,
             "Poseidon2 buffer not a multiple of NUM_POSEIDON2_PERMUTATION_COLS"
         );
+        assert_eq!(
+            and8_lookup_rm.len() % NUM_AND8_LOOKUP_COLS,
+            0,
+            "AND8 lookup buffer not a multiple of NUM_AND8_LOOKUP_COLS"
+        );
         let core_rows = core_rm.len() / CORE_STORAGE_WIDTH;
         let chiplets_rows = chiplets_rm.len() / CHIPLETS_WIDTH;
         let poseidon2_rows = poseidon2_permutation_rm.len() / NUM_POSEIDON2_PERMUTATION_COLS;
+        let and8_rows = and8_lookup_rm.len() / NUM_AND8_LOOKUP_COLS;
         assert!(core_rows.is_power_of_two(), "core height must be a power of two");
         assert!(chiplets_rows.is_power_of_two(), "chiplets height must be a power of two");
         assert!(
             poseidon2_rows.is_power_of_two(),
             "Poseidon2 permutation height must be a power of two"
         );
+        assert!(and8_rows.is_power_of_two(), "AND8 lookup height must be a power of two");
         Self {
             storage: TraceStorage {
                 core_rm: RowMajorMatrix::new(core_rm, CORE_STORAGE_WIDTH),
@@ -122,6 +133,7 @@ impl MainTrace {
                     poseidon2_permutation_rm,
                     NUM_POSEIDON2_PERMUTATION_COLS,
                 ),
+                and8_lookup_rm: RowMajorMatrix::new(and8_lookup_rm, NUM_AND8_LOOKUP_COLS),
             },
             last_program_row,
         }
@@ -159,23 +171,34 @@ impl MainTrace {
     /// proving path.
     pub fn to_air_matrices(
         &self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        // Each buffer is already stored at exactly its per-AIR height.
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         (
             self.storage.core_rm.clone(),
             self.storage.chiplets_rm.clone(),
             self.storage.poseidon2_permutation_rm.clone(),
+            self.storage.and8_lookup_rm.clone(),
         )
     }
 
     /// Like [`Self::to_air_matrices`], but consumes the trace and moves buffers.
     pub fn into_air_matrices(
         self,
-    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+    ) -> (
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+        RowMajorMatrix<Felt>,
+    ) {
         (
             self.storage.core_rm,
             self.storage.chiplets_rm,
             self.storage.poseidon2_permutation_rm,
+            self.storage.and8_lookup_rm,
         )
     }
 
@@ -184,6 +207,7 @@ impl MainTrace {
         self.core_height()
             .max(self.chiplets_height())
             .max(self.poseidon2_permutation_height())
+            .max(self.and8_lookup_height())
     }
 
     /// Returns the Core-AIR trace height.
@@ -202,6 +226,12 @@ impl MainTrace {
     #[inline]
     pub fn poseidon2_permutation_height(&self) -> usize {
         self.storage.poseidon2_permutation_rm.height()
+    }
+
+    /// Returns the byte-AND lookup AIR trace height.
+    #[inline]
+    pub fn and8_lookup_height(&self) -> usize {
+        self.storage.and8_lookup_rm.height()
     }
 
     pub fn last_program_row(&self) -> RowIndex {
@@ -852,6 +882,7 @@ mod tests {
         let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
         let mut poseidon2_rm = Vec::with_capacity(num_rows * NUM_POSEIDON2_PERMUTATION_COLS);
+        let mut and8_rm = Vec::with_capacity(num_rows * NUM_AND8_LOOKUP_COLS);
 
         for row in 0..num_rows {
             for col in 0..CORE_STORAGE_WIDTH {
@@ -864,23 +895,29 @@ mod tests {
             for c in 0..NUM_POSEIDON2_PERMUTATION_COLS {
                 poseidon2_rm.push(Felt::from_u32(c as u32));
             }
+            for c in 0..NUM_AND8_LOOKUP_COLS {
+                and8_rm.push(Felt::from_u32(c as u32));
+            }
         }
 
-        MainTrace::from_parts(core_rm, chiplets_rm, poseidon2_rm, RowIndex::from(0))
+        MainTrace::from_parts(core_rm, chiplets_rm, poseidon2_rm, and8_rm, RowIndex::from(0))
     }
 
     #[test]
     fn into_split_matches_borrowed_split() {
         const NUM_ROWS: usize = 8;
-        let (ref_core, ref_chip, ref_p2) = deterministic_parts_trace(NUM_ROWS).to_air_matrices();
-        let (moved_core, moved_chip, moved_p2) =
+        let (ref_core, ref_chip, ref_p2, ref_and8) =
+            deterministic_parts_trace(NUM_ROWS).to_air_matrices();
+        let (moved_core, moved_chip, moved_p2, moved_and8) =
             deterministic_parts_trace(NUM_ROWS).into_air_matrices();
 
         assert_eq!(ref_core.width(), moved_core.width());
         assert_eq!(ref_chip.width(), moved_chip.width());
         assert_eq!(ref_p2.width(), moved_p2.width());
+        assert_eq!(ref_and8.width(), moved_and8.width());
         assert_eq!(ref_core.values, moved_core.values);
         assert_eq!(ref_chip.values, moved_chip.values);
         assert_eq!(ref_p2.values, moved_p2.values);
+        assert_eq!(ref_and8.values, moved_and8.values);
     }
 }

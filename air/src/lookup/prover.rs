@@ -1,46 +1,12 @@
-//! Prover-path adapter — pushes individual `(m, v)` fractions per
-//! interaction into a dense per-column flat [`LookupFractions`] buffer
-//! owned by the caller.
+//! Prover-path adapter for the closure-based LogUp API.
 //!
-//! Implements [`LookupBuilder`] for concrete base-field rows. Where the
-//! [constraint-path adapter](super::constraint::ConstraintLookupBuilder)
-//! emits symbolic `(V, U)` constraint expressions against a
-//! `LiftedAirBuilder`, this adapter consumes two concrete rows of
-//! base-field values and **pushes the individual fractions** each
-//! interaction contributes — one `(multiplicity, denominator)` entry per
-//! active interaction, appended to the current column's flat Vec inside
-//! [`LookupFractions`].
+//! The adapter walks concrete row pairs and records one `(multiplicity, denominator)` entry for
+//! each active interaction. Entries are packed into [`LookupFractions`] in row-major,
+//! column-major-within-row order; the companion `counts` buffer records how many entries each
+//! `(row, column)` emitted.
 //!
-//! ## Runtime shape
-//!
-//! The caller:
-//!
-//! 1. Builds one [`Challenges<EF>`] once, outside the per-row loop.
-//! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::from_shape`], sized from
-//!    [`LookupAir::column_shape`]. Each column's internal Vec is `Vec::with_capacity(num_rows *
-//!    shape[col])` so pushes in the row loop never re-allocate.
-//! 3. For each row pair, constructs a `ProverLookupBuilder` (cheap — just stores pointers), calls
-//!    `air.eval(&mut lb)`, then drops the builder. `column(f)` records how many fractions the row
-//!    pushed into `LookupFractions::counts_per_row[col]`, so the downstream accumulator can later
-//!    slice each row's contribution out via a running cursor without a separate offsets array.
-//!
-//! ## Flag-zero skip
-//!
-//! `add` / `remove` / `insert` short-circuit on `flag == F::ZERO`,
-//! avoiding both the `msg.encode()` call and the Vec push when the
-//! interaction is inactive. `batch(flag, build)` sets an `active` bit on
-//! the child `ProverBatch` so individual pushes inside the batch skip
-//! work together when the outer flag is zero.
-//!
-//! ## Encoded-group collapse
-//!
-//! Per the plan (§Prover-path adapter) the cached-encoding split is
-//! collapsed on the prover side: [`LookupColumn::group`] and
-//! [`LookupColumn::group_with_cached_encoding`] both open a
-//! [`ProverGroup`] against the same column fraction `Vec`, and the
-//! cached-encoding variant runs only the `canonical` closure (the
-//! `encoded` closure is dropped unused, since the canonical description
-//! is always the cheapest path for concrete rows).
+//! Zero flags skip message encoding and do not push a fraction. Cached-encoding groups use the
+//! canonical path on the prover side because concrete rows do not need symbolic denominator reuse.
 
 use alloc::{vec, vec::Vec};
 use core::borrow::Borrow;
@@ -59,24 +25,17 @@ use super::{
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
-/// Concrete-row `LookupBuilder` running on two rows of base-field values.
-///
-/// See the module docs for the full runtime shape. Parameterised
-/// by the base field `F` and the extension field `EF`; every `Expr` /
-/// `Var` / `VarEF` etc. associated type collapses to `F` or `EF`
-/// directly — there is no symbolic tree on the prover side.
+/// Concrete-row [`LookupBuilder`] used while collecting LogUp fractions.
 pub struct ProverLookupBuilder<'a, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     main: RowWindow<'a, F>,
+    preprocessed: RowWindow<'a, F>,
     periodic_values: &'a [F],
     challenges: &'a Challenges<EF>,
-    /// Dense per-column fraction buffers shared across all rows. Each
-    /// [`LookupBuilder::next_column`] call appends the current row's fractions to the end of
-    /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
-    /// `fractions.counts_per_row[column_idx]`.
+    /// Fraction buffer for the current collection pass.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
 }
@@ -86,22 +45,20 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Create a new prover-path adapter for one row pair.
+    /// Create a prover-path adapter for one row pair.
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
-    /// - `challenges`: precomputed LogUp challenges (shared across every row — the caller builds
-    ///   this once outside the row loop and passes a shared reference here).
-    /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
-    ///   air.num_columns()`; the builder never calls `air.eval` itself — that's the caller's job).
-    /// - `fractions`: dense per-column fraction buffers, sized once via
-    ///   [`LookupFractions::from_shape`] and re-used across every row of the same trace.
+    /// - `challenges`: precomputed LogUp challenges.
+    /// - `air`: lookup shape, used for a debug assertion only.
+    /// - `fractions`: dense fraction and count buffers.
     ///
     /// # Panics
     ///
     /// Panics in debug builds if `fractions.num_columns() != air.num_columns()`.
     pub fn new<A>(
         main: RowWindow<'a, F>,
+        preprocessed: RowWindow<'a, F>,
         periodic_values: &'a [F],
         challenges: &'a Challenges<EF>,
         air: &A,
@@ -117,6 +74,7 @@ where
         );
         Self {
             main,
+            preprocessed,
             periodic_values,
             challenges,
             fractions,
@@ -132,7 +90,7 @@ where
 /// [`LookupFractions`] buffer the collection phase produces.
 ///
 /// Generic over the base field `F` and extension field `EF`. The caller supplies the
-/// main trace and periodic columns — this function does row slicing, periodic-column
+/// main trace and periodic columns - this function does row slicing, periodic-column
 /// indexing, and fraction collection. Concrete AIRs wrap this with their own
 /// periodic-column layout.
 ///
@@ -147,11 +105,12 @@ where
 /// # Panics
 ///
 /// Panics in debug builds if any row pushes more fractions into a column than that
-/// column's declared [`LookupAir::column_shape`] bound — this indicates the emitter's
+/// column's declared [`LookupAir::column_shape`] bound - this indicates the emitter's
 /// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
 pub fn build_lookup_fractions<A, F, EF>(
     air: &A,
     main_trace: &RowMajorMatrix<F>,
+    preprocessed_trace: Option<&RowMajorMatrix<F>>,
     periodic_columns: &[Vec<F>],
     challenges: &Challenges<EF>,
 ) -> LookupFractions<F, EF>
@@ -164,6 +123,16 @@ where
     let num_rows = main_trace.height();
     let width = main_trace.width();
     let flat: &[F] = main_trace.values.borrow();
+    let (preprocessed_width, preprocessed_flat): (usize, &[F]) =
+        preprocessed_trace.map_or((0, &[][..]), |trace| {
+            assert_eq!(
+                trace.height(),
+                num_rows,
+                "lookup-fraction collection expects preprocessed and main traces to have equal height"
+            );
+            (trace.width(), trace.values.borrow())
+        });
+    let empty_row: &[F] = &[];
 
     let shape = air.column_shape().to_vec();
 
@@ -176,11 +145,25 @@ where
             let nxt_idx = (r + 1) % num_rows;
             let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
             let window = RowWindow::from_two_rows(curr, next);
+            let preprocessed_window = if preprocessed_width == 0 {
+                RowWindow::from_two_rows(empty_row, empty_row)
+            } else {
+                let curr = &preprocessed_flat[r * preprocessed_width..(r + 1) * preprocessed_width];
+                let next = &preprocessed_flat
+                    [nxt_idx * preprocessed_width..(nxt_idx + 1) * preprocessed_width];
+                RowWindow::from_two_rows(curr, next)
+            };
             for (i, col) in periodic_columns.iter().enumerate() {
                 periodic_row[i] = col[r % col.len()];
             }
-            let mut lb =
-                ProverLookupBuilder::new(window, &periodic_row, challenges, air, &mut chunk);
+            let mut lb = ProverLookupBuilder::new(
+                window,
+                preprocessed_window,
+                &periodic_row,
+                challenges,
+                air,
+                &mut chunk,
+            );
             air.eval(&mut lb);
         }
         chunk
@@ -244,6 +227,7 @@ where
     type PeriodicVar = F;
 
     type MainWindow = RowWindow<'a, F>;
+    type PreprocessedWindow = RowWindow<'a, F>;
 
     type Column<'c>
         = ProverColumn<'c, F, EF>
@@ -252,6 +236,10 @@ where
 
     fn main(&self) -> Self::MainWindow {
         self.main
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -294,7 +282,7 @@ where
 ///
 /// Holds a mutable borrow of the column's per-row fraction `Vec`. Each
 /// group opened inside the column reborrows the same `Vec` and pushes
-/// fractions onto it — no intermediate `(N, D)` state, no
+/// fractions onto it - no intermediate `(N, D)` state, no
 /// cross-denominator clearing.
 pub struct ProverColumn<'c, F, EF>
 where
@@ -353,7 +341,7 @@ where
 ///
 /// Pushes individual `(multiplicity, denominator)` fractions onto the
 /// column's per-row `Vec`. No `(N, D)` state, no cross-denominator
-/// clearing — LogUp's aux-trace builder consumes individual fractions
+/// clearing - LogUp's aux-trace builder consumes individual fractions
 /// downstream.
 ///
 /// ## Boolean-flag convention
@@ -362,14 +350,13 @@ where
 /// 0/1 boolean selector: if `flag == F::ZERO` the interaction is
 /// skipped entirely (no encode, no push); otherwise the push happens
 /// with the canonical multiplicity (`+1` for `add`, `-1` for `remove`,
-/// `multiplicity` for `insert`). This matches the constraint path's
-/// `(V_g, U_g)` algebra, which silently assumes flag is 0 or 1 —
-/// non-boolean flags produce wrong results on both sides.
+/// `multiplicity` for `insert`). This matches the constraint path's `(V_g, U_g)` algebra, which
+/// silently assumes flag is 0 or 1 - non-boolean flags produce wrong results on both sides.
 ///
 /// ## Encoded-group methods
 ///
 /// The encoding primitives (`beta_powers`, `bus_prefix`, `insert_encoded`)
-/// use the default panicking implementations from [`LookupGroup`] — the
+/// use the default panicking implementations from [`LookupGroup`] - the
 /// prover path always runs the `canonical` closure, never the `encoded`
 /// one, so these methods should never be reached.
 pub struct ProverGroup<'g, F, EF>
@@ -405,7 +392,7 @@ where
         M: LookupMessage<F, EF>,
     {
         // The prover path short-circuits on `flag == F::ZERO`, while the constraint path
-        // evaluates the encode unconditionally. The two agree only when `flag ∈ {0, 1}`.
+        // evaluates the encode unconditionally. The two agree only when `flag in {0, 1}`.
         // Every Miden bus emitter today drives `flag` as a product of decoder/op selectors
         // pinned boolean by the AIR. This debug assertion catches regressions at test time.
         debug_assert!(
@@ -433,7 +420,7 @@ where
             "ProverGroup::batch flag must be in {{0, 1}}; non-boolean flag would diverge \
              from the constraint path",
         );
-        // When `active == false` every push inside the batch is a no-op — the
+        // When `active == false` every push inside the batch is a no-op - the
         // `msg.encode()` call is skipped too. The `build` closure still runs so
         // it can produce its `R` return value without requiring `R: Default`.
         let active = flag != F::ZERO;
@@ -453,12 +440,10 @@ where
 ///
 /// Holds the same mutable borrow of the column's fraction `Vec` as the
 /// enclosing [`ProverGroup`], plus an `active` flag copied from the
-/// outer `batch(flag, …)` call. When `active == false` every push is a
-/// no-op — the `msg.encode()` call is skipped too, so inactive batches
-/// do essentially no work.
+/// outer `batch(flag, ...)` call. Inactive batches skip message encoding and do not push.
 ///
 /// Each push appends one fraction entry when active. There's no `(N, D)` state
-/// inside the batch — LogUp's aux-trace builder handles the combination downstream.
+/// inside the batch - LogUp's aux-trace builder handles the combination downstream.
 pub struct ProverBatch<'b, F, EF>
 where
     F: Field,
@@ -522,7 +507,7 @@ mod tests {
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
-    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
+    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + beta^0*value`, which is
     /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
     /// without blowing up).
     #[derive(Clone, Copy, Debug)]
@@ -537,7 +522,7 @@ mod tests {
     }
 
     /// Two-column stand-in for the real Miden lookup AIR, with a handcrafted `eval` body
-    /// that respects its own shape on **every** row — no mutual-exclusion assumptions, so
+    /// that respects its own shape on **every** row - no mutual-exclusion assumptions, so
     /// random (non-trace) input data drives it without tripping the shape debug_assert.
     ///
     /// - Column 0 always pushes 2 fractions (one `add`, one `remove`) with shape 2.
@@ -624,17 +609,17 @@ mod tests {
 
         let air = SmokeAir;
 
-        // Any reasonable non-zero challenges — SmokeMsg encodes to `bus_prefix[0] + v`
+        // Any reasonable non-zero challenges - SmokeMsg encodes to `bus_prefix[0] + v`
         // which is non-zero as long as the challenges are.
         let alpha = QuadFelt::new([Felt::new_unchecked(7), Felt::new_unchecked(11)]);
         let beta = QuadFelt::new([Felt::new_unchecked(13), Felt::new_unchecked(17)]);
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
-        // `LookupAir` impl — the trait-method path can't be called directly because
+        // `LookupAir` impl - the trait-method path can't be called directly because
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
         let challenges = Challenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
         // `SmokeAir::eval` never touches the main trace, periodic columns, or public
-        // values — pass dummy zero-length slices.
+        // values - pass dummy zero-length slices.
         let empty_row: Vec<Felt> = vec![];
         let periodic_values: Vec<Felt> = vec![];
 
@@ -645,8 +630,10 @@ mod tests {
 
         for _row in 0..NUM_ROWS {
             let window = RowWindow::from_two_rows(&empty_row, &empty_row);
+            let preprocessed = RowWindow::from_two_rows(&empty_row, &empty_row);
             let mut lb = ProverLookupBuilder::new(
                 window,
+                preprocessed,
                 &periodic_values,
                 &challenges,
                 &air,

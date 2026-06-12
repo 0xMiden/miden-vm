@@ -37,13 +37,22 @@ pub struct BusFraction {
     pub message: Vec<MessageElement>,
 }
 
+/// One aux-boundary term in the cross-AIR LogUp balance.
+#[derive(Debug, Clone)]
+pub struct AuxBoundaryTerm {
+    /// Aux-bus-boundary column index in proof-order layout.
+    pub column: usize,
+    /// Optional scale for AIRs whose committed boundary value is not already a raw LogUp sum.
+    pub scale: Option<InputKey>,
+}
+
 /// Configuration for the LogUp auxiliary-trace boundary batching.
 ///
 /// This is the ACE form of the boundary term returned by `MidenMultiAir::eval_external`.
 #[derive(Debug, Clone)]
 pub struct LogUpBoundaryConfig {
-    /// Aux-bus-boundary column indices summed into `sum_aux_bound`.
-    pub sum_columns: Vec<usize>,
+    /// Aux-bus-boundary slots summed into `sum_aux_bound`.
+    pub aux_terms: Vec<AuxBoundaryTerm>,
     /// Rational `(+/-1, d_i)` fractions folded into the running rational `(N, D)`.
     pub fractions: Vec<BusFraction>,
     /// Scalar EF inputs added directly to the aux-boundary sum.
@@ -56,7 +65,8 @@ pub struct LogUpBoundaryConfig {
 ///
 /// Builds:
 ///
-///   `sum_aux   = sum(AuxBusBoundary(col)) + sum(scalar_corrections)`
+///   `sum_aux   = sum(scale_i * AuxBusBoundary(col_i)) + sum(scalar_corrections)`, with
+///                 `scale_i = 1` when no scale is supplied.
 ///   `(N, D)    = fold((0, 1), fractions)` via `(N', D') = (N*d_i + D*n_i, D*d_i)`
 ///   `boundary  = sum_aux * D + N`
 ///   `root      = constraint_check + gamma * boundary`
@@ -71,8 +81,12 @@ where
     EF: ExtensionField<Felt>,
 {
     let mut sum_aux = builder.constant(EF::ZERO);
-    for &col in &config.sum_columns {
-        let node = builder.input(InputKey::AuxBusBoundary(col));
+    for term in &config.aux_terms {
+        let mut node = builder.input(InputKey::AuxBusBoundary(term.column));
+        if let Some(scale) = term.scale {
+            let scale = builder.input(scale);
+            node = builder.mul(node, scale);
+        }
         sum_aux = builder.add(sum_aux, node);
     }
     for &scalar in &config.scalar_corrections {
@@ -107,8 +121,8 @@ where
 
 /// Builds the LogUp boundary config for the combined multi-AIR ACE circuit.
 ///
-/// Boundary column indices are mapped into the combined layout in proof order.
-pub fn multi_air_logup_boundary_config(total_aux_slots: usize) -> LogUpBoundaryConfig {
+/// Aux terms are already mapped into the combined proof-order layout.
+pub fn multi_air_logup_boundary_config(aux_terms: Vec<AuxBoundaryTerm>) -> LogUpBoundaryConfig {
     use MessageElement::{Constant, PublicInput};
 
     use crate::constraints::lookup::messages::BusId;
@@ -136,7 +150,7 @@ pub fn multi_air_logup_boundary_config(total_aux_slots: usize) -> LogUpBoundaryC
     ];
 
     LogUpBoundaryConfig {
-        sum_columns: (0..total_aux_slots).collect(),
+        aux_terms,
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,

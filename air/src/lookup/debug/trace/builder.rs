@@ -1,4 +1,4 @@
-//! `DebugTraceBuilder` — the `LookupBuilder` adapter that updates
+//! `DebugTraceBuilder` - the `LookupBuilder` adapter that updates
 //! [`super::DebugTraceState`] per row of a concrete main trace.
 //!
 //! Pure implementation detail: instantiation happens inside
@@ -25,6 +25,7 @@ use crate::Felt;
 /// Real-trace `LookupBuilder` that updates [`super::DebugTraceState`] per row.
 pub struct DebugTraceBuilder<'a> {
     main: RowWindow<'a, Felt>,
+    preprocessed: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
     challenges: &'a Challenges<QuadFelt>,
     state: &'a mut DebugTraceState,
@@ -35,6 +36,7 @@ pub struct DebugTraceBuilder<'a> {
 impl<'a> DebugTraceBuilder<'a> {
     pub fn new(
         main: RowWindow<'a, Felt>,
+        preprocessed: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
         challenges: &'a Challenges<QuadFelt>,
         state: &'a mut DebugTraceState,
@@ -42,6 +44,7 @@ impl<'a> DebugTraceBuilder<'a> {
     ) -> Self {
         Self {
             main,
+            preprocessed,
             periodic_values,
             challenges,
             state,
@@ -63,6 +66,7 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
     type PeriodicVar = Felt;
 
     type MainWindow = RowWindow<'a, Felt>;
+    type PreprocessedWindow = RowWindow<'a, Felt>;
 
     type Column<'c>
         = DebugTraceColumn<'c>
@@ -71,6 +75,10 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
 
     fn main(&self) -> Self::MainWindow {
         self.main
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        &self.preprocessed
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -141,7 +149,7 @@ impl<'c> DebugTraceColumn<'c> {
                 active_flags: group.active_flag_count,
             });
         }
-        // Fold `(V_g, U_g)` into `(V_col, U_col)`:  (V, U) ← (V·U_g + V_g·U, U·U_g)
+        // Fold `(V_g, U_g)` into `(V_col, U_col)`:  (V, U) <- (V*U_g + V_g*U, U*U_g)
         let (v_col, u_col) = group.state.column_folds[column_idx];
         group.state.column_folds[column_idx] = (v_col * group.u + group.v * u_col, u_col * group.u);
 
@@ -193,14 +201,14 @@ pub struct DebugTraceGroup<'g> {
     row_idx: usize,
     column_idx: usize,
     group_idx: usize,
-    /// `true` for `group_with_cached_encoding` — triggers the mutex check at group close.
+    /// `true` for `group_with_cached_encoding` - triggers the mutex check at group close.
     check_mutex: bool,
     active_flag_count: usize,
 }
 
 impl<'g> DebugTraceGroup<'g> {
-    /// Count active flags for mutex checks. Only meaningful when `check_mutex == true`,
-    /// but cheap enough to run unconditionally.
+    /// Count active flags for mutex checks. The count is read only when
+    /// `check_mutex == true`.
     fn track_mutex(&mut self, flag: Felt) {
         if self.check_mutex && flag != Felt::ZERO {
             self.active_flag_count += 1;
@@ -312,7 +320,7 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
 pub struct DebugTraceBatch<'b> {
     challenges: &'b Challenges<QuadFelt>,
     state: &'b mut DebugTraceState,
-    /// `false` if the outer group's flag was zero — batch-level short-circuit for balance
+    /// `false` if the outer group's flag was zero - batch-level short-circuit for balance
     /// accumulation. `(N, D)` still tracks normally so the outer group's `(V_g, U_g)` fold
     /// stays correct.
     active: bool,

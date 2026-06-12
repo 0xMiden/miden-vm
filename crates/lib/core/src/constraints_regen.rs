@@ -1,13 +1,18 @@
 use alloc::{
     format,
     string::{String, ToString},
+    vec,
     vec::Vec,
 };
 use std::{fs, io, println};
 
 use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
-use miden_air::ProofOrder;
+use miden_air::{
+    MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
+    trace::and8_lookup::LOG_AND8_TABLE_HEIGHT,
+};
 use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
+use miden_crypto::stark::Preprocessed;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -120,6 +125,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     }
 
     let relation_digest = compute_relation_digest(&commitments);
+    let and8_preprocessed_commitment = compute_and8_preprocessed_commitment();
     let dispatcher = render_constraints_eval_dispatcher(&order_artifacts);
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH);
@@ -130,6 +136,18 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             &elem.as_canonical_u64().to_string(),
         );
     }
+    for (i, elem) in and8_preprocessed_commitment.iter().enumerate() {
+        replace_masm_const(
+            &mut relation_mod,
+            &format!("AND8_PREPROCESSED_TRACE_COM_{i}"),
+            &elem.as_canonical_u64().to_string(),
+        );
+    }
+    replace_masm_const(
+        &mut relation_mod,
+        "AND8_LOOKUP_LOG_HEIGHT",
+        &LOG_AND8_TABLE_HEIGHT.to_string(),
+    );
 
     let mut air_config = read_file(AIR_CONFIG_PATH);
     let marker = "pub const RELATION_DIGEST: [Felt; 4] = [";
@@ -154,10 +172,22 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     Ok(ComputedArtifacts {
         order_artifacts,
         relation_digest,
+        and8_preprocessed_commitment,
         dispatcher,
         relation_mod,
         air_config,
     })
+}
+
+fn compute_and8_preprocessed_commitment() -> [Felt; 4] {
+    let config = config::poseidon2_config(config::pcs_params());
+    let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
+        Statement::new(MidenMultiAir::new(), vec![Felt::ZERO; NUM_PUBLIC_VALUES], Vec::new())
+            .expect("zero public inputs satisfy Miden statement shape");
+    let preprocessed = Preprocessed::build(&statement, &config)
+        .expect("Miden relation must declare the AND8 preprocessed table");
+
+    preprocessed.commitment().into()
 }
 
 fn render_constraints_eval_file(
@@ -411,6 +441,16 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
         return Err("RELATION_DIGEST in sys/vm/mod.masm is stale".into());
     }
 
+    let mut masm_preprocessed: [Felt; 4] = [Felt::ZERO; 4];
+    for (i, slot) in masm_preprocessed.iter_mut().enumerate() {
+        let name = format!("AND8_PREPROCESSED_TRACE_COM_{i}");
+        *slot =
+            parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm").map(Felt::new_unchecked)?;
+    }
+    if masm_preprocessed != artifact.and8_preprocessed_commitment {
+        return Err("AND8 preprocessed commitment in sys/vm/mod.masm is stale".into());
+    }
+
     Ok(())
 }
 
@@ -469,6 +509,7 @@ struct OrderArtifact {
 struct ComputedArtifacts {
     order_artifacts: Vec<OrderArtifact>,
     relation_digest: [Felt; 4],
+    and8_preprocessed_commitment: [Felt; 4],
     dispatcher: String,
     relation_mod: String,
     air_config: String,

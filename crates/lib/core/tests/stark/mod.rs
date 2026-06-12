@@ -12,7 +12,7 @@ use miden_core::{
     proof::HashFunction,
 };
 use miden_crypto::stark::{
-    StarkConfig, challenger::CanObserve, symmetric::CryptographicPermutation,
+    Preprocessed, StarkConfig, challenger::CanObserve, symmetric::CryptographicPermutation,
 };
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
@@ -30,7 +30,7 @@ mod ace_read_check;
 mod batch_query_gen;
 
 const SECURITY_PARAMS_LEN: usize = 4;
-const AIR_SHAPE_RESERVED: u64 = 0;
+const AND8_LOOKUP_LOG_HEIGHT: u64 = 16;
 const STATEMENT_DESCRIPTOR_LEN: usize = 4;
 const SHAPE_TEST_OUTPUT_PTR: u32 = 1000;
 
@@ -256,6 +256,7 @@ fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
         shape_log(data, 0),
         shape_log(data, 1),
         shape_log(data, 2),
+        shape_log(data, 3),
     ])
 }
 
@@ -321,27 +322,25 @@ fn miden_air_shape_accepts_valid_logs() {
 
 #[test]
 fn order_tag_derivation_matches_rust_for_height_orderings() {
-    let mut seen_tags = [false; 6];
+    let mut representatives = [None; 24];
 
-    for log_core in 6..=8 {
-        for log_chiplets in 6..=8 {
-            for log_poseidon2 in 6..=8 {
-                let logs = [log_core, log_chiplets, log_poseidon2];
-                let (cached_logs, masm_tag) = masm_shape_state_from_advice(logs);
-                let rust_order = ProofOrder::from_instance_log_heights(&logs.map(|log| log as u8));
-
-                assert_eq!(cached_logs, logs, "cached shape mismatch for advice {logs:?}");
-                assert_eq!(
-                    masm_tag,
-                    rust_order.tag(),
-                    "order tag mismatch for log heights {logs:?}"
-                );
-                seen_tags[masm_tag as usize] = true;
+    for log_core in 6..=29 {
+        for log_chiplets in 6..=29 {
+            for log_poseidon2 in 6..=29 {
+                let logs = [log_core, log_chiplets, log_poseidon2, AND8_LOOKUP_LOG_HEIGHT];
+                let order = ProofOrder::from_instance_log_heights(&logs.map(|log| log as u8));
+                representatives[order.tag() as usize].get_or_insert(logs);
             }
         }
     }
 
-    assert_eq!(seen_tags, [true; 6], "height cases did not exercise every proof-order tag");
+    for (tag, logs) in representatives.into_iter().enumerate() {
+        let logs = logs.unwrap_or_else(|| panic!("no representative logs for order tag {tag}"));
+        let (cached_logs, masm_tag) = masm_shape_state_from_advice(logs);
+
+        assert_eq!(cached_logs, logs, "cached shape mismatch for advice {logs:?}");
+        assert_eq!(masm_tag, tag as u32, "order tag mismatch for log heights {logs:?}");
+    }
 }
 
 #[rstest]
@@ -351,7 +350,6 @@ fn order_tag_derivation_matches_rust_for_height_orderings() {
 #[case::high_chiplets_height(1, 30)]
 #[case::low_poseidon2_height(2, 5)]
 #[case::high_poseidon2_height(2, 30)]
-#[case::nonzero_reserved(3, 1)]
 fn miden_air_shape_rejects_malformed_fields(#[case] index: usize, #[case] value: u64) {
     let mut shape = miden_air_shape_advice(10, 10, 10);
     shape[index] = value;
@@ -529,7 +527,8 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     let test = build_test!(source, &[], &advice_stack);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let mut challenger = config::poseidon2_config(config::pcs_params()).challenger();
+    let config = config::poseidon2_config(config::pcs_params());
+    let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
     let air_inputs = fixed_length_public_inputs
@@ -542,6 +541,7 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
         log_core_trace_length as u8,
         log_chiplets_trace_length as u8,
         log_poseidon2_trace_length as u8,
+        AND8_LOOKUP_LOG_HEIGHT as u8,
     ];
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
         MidenMultiAir::new(),
@@ -550,8 +550,13 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     )
     .expect("valid statement");
 
+    let preprocessed = Preprocessed::build(&statement, &config).expect("AND8 setup is present");
+    let preprocessed_commitment: [Felt; WORD_SIZE] = preprocessed.commitment().into();
+    for &element in &preprocessed_commitment {
+        challenger.observe(element);
+    }
     statement.observe(&mut challenger, &log_heights);
-    challenger.observe(Felt::new_unchecked(3));
+    challenger.observe(Felt::new_unchecked(4));
     for &log_height in &log_heights {
         challenger.observe(Felt::new_unchecked(log_height as u64));
     }
@@ -634,8 +639,8 @@ fn variable_length_public_inputs_rejects_too_many_kernel_proc_digests() {
 // HELPERS
 // ===============================================================================================
 
-fn miden_air_shape_advice(log_core: u64, log_chiplets: u64, log_poseidon2: u64) -> [u64; 4] {
-    [log_core, log_chiplets, log_poseidon2, AIR_SHAPE_RESERVED]
+fn miden_air_shape_advice(log_core: u64, log_chiplets: u64, log_poseidon2: u64) -> [u64; 3] {
+    [log_core, log_chiplets, log_poseidon2]
 }
 
 fn shape_init_succeeds(shape: &[u64]) -> bool {
@@ -651,7 +656,7 @@ fn shape_init_succeeds(shape: &[u64]) -> bool {
     test.execute().is_ok()
 }
 
-fn masm_shape_state_from_advice(logs: [u64; 3]) -> ([u64; 3], u32) {
+fn masm_shape_state_from_advice(logs: [u64; 4]) -> ([u64; 4], u32) {
     let source = format!(
         "
         use miden::core::stark::constants
@@ -662,12 +667,14 @@ fn masm_shape_state_from_advice(logs: [u64; 3]) -> ([u64; 3], u32) {
             exec.constants::get_core_trace_length_log push.{SHAPE_TEST_OUTPUT_PTR} mem_store
             exec.constants::get_chiplets_trace_length_log push.{chiplets_ptr} mem_store
             exec.constants::get_poseidon2_permutation_trace_length_log push.{poseidon2_ptr} mem_store
+            exec.constants::get_and8_lookup_trace_length_log push.{and8_ptr} mem_store
             exec.constants::get_order_tag push.{tag_ptr} mem_store
         end
         ",
         chiplets_ptr = SHAPE_TEST_OUTPUT_PTR + 1,
         poseidon2_ptr = SHAPE_TEST_OUTPUT_PTR + 2,
-        tag_ptr = SHAPE_TEST_OUTPUT_PTR + 3,
+        and8_ptr = SHAPE_TEST_OUTPUT_PTR + 3,
+        tag_ptr = SHAPE_TEST_OUTPUT_PTR + 4,
     );
     let shape = miden_air_shape_advice(logs[0], logs[1], logs[2]);
     let test = build_test!(&source, &[], &shape);
@@ -681,8 +688,9 @@ fn masm_shape_state_from_advice(logs: [u64; 3]) -> ([u64; 3], u32) {
             read(SHAPE_TEST_OUTPUT_PTR).as_canonical_u64(),
             read(SHAPE_TEST_OUTPUT_PTR + 1).as_canonical_u64(),
             read(SHAPE_TEST_OUTPUT_PTR + 2).as_canonical_u64(),
+            read(SHAPE_TEST_OUTPUT_PTR + 3).as_canonical_u64(),
         ],
-        read(SHAPE_TEST_OUTPUT_PTR + 3).as_canonical_u64() as u32,
+        read(SHAPE_TEST_OUTPUT_PTR + 4).as_canonical_u64() as u32,
     )
 }
 

@@ -84,6 +84,8 @@ pub enum BusId {
     HasherPermLinkInput = 23,
     /// Hasher perm-link output bus: pairs controller-output rows with perm-cycle row 15.
     HasherPermLinkOutput = 24,
+    /// Byte AND lookup table: `[a, b, a & b]` for byte-sized operands.
+    And8Lookup = 25,
 }
 
 impl BusId {
@@ -91,7 +93,7 @@ impl BusId {
     /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
     /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
     /// discriminant isn't contiguous).
-    pub const COUNT: usize = Self::HasherPermLinkOutput as usize + 1;
+    pub const COUNT: usize = Self::And8Lookup as usize + 1;
 }
 
 // Per-variant discriminant locks. `BusId::COUNT` only catches gaps — a *reorder* that
@@ -99,8 +101,7 @@ impl BusId {
 // to, breaking domain separation across every emitter and consumer. These per-variant
 // asserts pin the entire layout so any reorder fails at compile time.
 //
-// If a new bus is added: append it after the current tail, bump `HasherPermLinkOutput`'s
-// expected index here only if necessary, and add a matching assert for the new variant.
+// If a new bus is added: append it after the current tail and add a matching assert.
 const _: () = assert!(BusId::KernelRomInit as usize == 0);
 const _: () = assert!(BusId::BlockHashTable as usize == 1);
 const _: () = assert!(BusId::LogPrecompileTranscript as usize == 2);
@@ -126,6 +127,7 @@ const _: () = assert!(BusId::RangeCheck as usize == 21);
 const _: () = assert!(BusId::AceWiring as usize == 22);
 const _: () = assert!(BusId::HasherPermLinkInput as usize == 23);
 const _: () = assert!(BusId::HasherPermLinkOutput as usize == 24);
+const _: () = assert!(BusId::And8Lookup as usize == 25);
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -501,6 +503,23 @@ pub enum HasherPermLinkMsg<E> {
     Output { state: [E; 12] },
 }
 
+// AND8 LOOKUP MESSAGE
+// ================================================================================================
+
+/// Byte AND lookup message (3 elements): `[a, b, result]`.
+#[derive(Clone, Debug)]
+pub struct And8Msg<E> {
+    pub a: E,
+    pub b: E,
+    pub result: E,
+}
+
+impl<E> And8Msg<E> {
+    pub fn new(a: E, b: E, result: E) -> Self {
+        Self { a, b, result }
+    }
+}
+
 // KERNEL ROM MESSAGE
 // ================================================================================================
 
@@ -663,6 +682,21 @@ where
         challenges.encode(
             BusId::Bitwise as usize,
             [self.op.clone(), self.a.clone(), self.b.clone(), self.result.clone()],
+        )
+    }
+}
+
+// --- And8Msg -------------------------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for And8Msg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::And8Lookup as usize,
+            [self.a.clone(), self.b.clone(), self.result.clone()],
         )
     }
 }

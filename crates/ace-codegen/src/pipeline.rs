@@ -109,7 +109,7 @@ where
     layout.validate();
 
     let air_layout = AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: counts.preprocessed_width,
         main_width: counts.width,
         num_public_values: counts.num_public,
         permutation_width: counts.aux_width,
@@ -143,10 +143,6 @@ where
     EF: ExtensionField<F>,
 {
     assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
-    assert!(
-        air.preprocessed_trace().is_none(),
-        "preprocessed trace inputs are not supported"
-    );
 
     let num_randomness = air.num_randomness();
     assert!(
@@ -163,6 +159,7 @@ where
     };
 
     InputCounts {
+        preprocessed_width: air.preprocessed_width(),
         width: air.width(),
         aux_width: air.aux_width(),
         num_aux_boundary: air.num_aux_values(),

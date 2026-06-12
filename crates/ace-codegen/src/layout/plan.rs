@@ -21,6 +21,8 @@ impl InputRegion {
 /// Counts needed to build the ACE input layout.
 #[derive(Debug, Clone, Copy)]
 pub struct InputCounts {
+    /// Width of the preprocessed trace.
+    pub preprocessed_width: usize,
     /// Width of the main trace.
     pub width: usize,
     /// Width of the aux trace.
@@ -50,12 +52,16 @@ pub(crate) struct LayoutRegions {
     pub vlpi_reductions: InputRegion,
     /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
+    /// Preprocessed trace OOD values at `zeta`.
+    pub preprocessed_curr: InputRegion,
     /// Main trace OOD values at `zeta`.
     pub main_curr: InputRegion,
     /// Aux trace OOD coordinates at `zeta`.
     pub aux_curr: InputRegion,
     /// Quotient chunk OOD coordinates at `zeta`.
     pub quotient_curr: InputRegion,
+    /// Preprocessed trace OOD values at `g * zeta`.
+    pub preprocessed_next: InputRegion,
     /// Main trace OOD values at `g * zeta`.
     pub main_next: InputRegion,
     /// Aux trace OOD coordinates at `g * zeta`.
@@ -108,6 +114,8 @@ pub(crate) struct StarkVarIndices {
     pub multi_air_beta: Option<usize>,
     /// First EF slot of the per-AIR selector block.
     pub air_selectors_start: Option<usize>,
+    /// First EF slot of the per-AIR trace-length block.
+    pub air_trace_lengths_start: Option<usize>,
     /// Number of AIR selector triples present in the multi-AIR selector block.
     pub num_airs: usize,
 }
@@ -123,6 +131,13 @@ impl StarkVarIndices {
         }
         self.air_selectors_start
             .map(|start| start + air_index * SELECTORS_PER_AIR + selector_offset)
+    }
+
+    pub(crate) fn air_trace_len_index(&self, air_index: usize) -> Option<usize> {
+        if air_index >= self.num_airs {
+            return None;
+        }
+        self.air_trace_lengths_start.map(|start| start + air_index)
     }
 }
 
@@ -165,9 +180,11 @@ impl InputLayout {
             self.regions.public_values,
             self.regions.vlpi_reductions,
             self.regions.randomness,
+            self.regions.preprocessed_curr,
             self.regions.main_curr,
             self.regions.aux_curr,
             self.regions.quotient_curr,
+            self.regions.preprocessed_next,
             self.regions.main_next,
             self.regions.aux_next,
             self.regions.quotient_next,
@@ -178,6 +195,15 @@ impl InputLayout {
         }
 
         assert!(max_end <= self.total_inputs, "regions exceed total_inputs");
+
+        assert_eq!(
+            self.regions.preprocessed_curr.width, self.counts.preprocessed_width,
+            "preprocessed_curr width mismatch"
+        );
+        assert_eq!(
+            self.regions.preprocessed_next.width, self.counts.preprocessed_width,
+            "preprocessed_next width mismatch"
+        );
 
         let aux_coord_width = self.counts.aux_width * EXT_DEGREE;
         assert_eq!(self.regions.aux_curr.width, aux_coord_width, "aux_curr width mismatch");
@@ -235,6 +261,12 @@ impl InputLayout {
                 self.stark
                     .air_selector_index(air_index, 2)
                     .expect("multi-AIR selector block is missing"),
+            );
+            check(
+                "trace_len_air",
+                self.stark
+                    .air_trace_len_index(air_index)
+                    .expect("multi-AIR trace-length block is missing"),
             );
         }
 

@@ -10,7 +10,8 @@ use alloc::{boxed::Box, vec::Vec};
 use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::{
-    StarkConfig, VerifierInstance, lmcs::Lmcs, proof::StarkProofData, verifier::VerifierError,
+    Preprocessed, PreprocessedValidationError, StarkConfig, VerifierInstance, lmcs::Lmcs,
+    proof::StarkProofData, verifier::VerifierError,
 };
 use serde::de::DeserializeOwned;
 use serde_wincode::SerdeCompat;
@@ -195,9 +196,11 @@ pub enum StarkVerificationError {
     ProofTooLarge { size: usize, max: usize },
     #[error(transparent)]
     Verifier(#[from] VerifierError),
+    #[error(transparent)]
+    Preprocessed(#[from] PreprocessedValidationError),
 }
 
-/// Verifies a multi-AIR STARK proof for the given (Core, Chiplets) split.
+/// Verifies a multi-AIR STARK proof for the Miden VM relation.
 ///
 /// Pre-seeds the challenger with the protocol parameters, public values, and the
 /// concatenated kernel-procedure digests (the only variable-length public input today,
@@ -240,8 +243,9 @@ where
     )
     .map_err(|e| StarkVerificationError::Verifier(VerifierError::from(e)))?;
 
-    VerifierInstance::new(config, &statement, None)
-        .expect("Miden AIRs declare no preprocessed columns")
+    let preprocessed_commitment =
+        Preprocessed::build(&statement, config).map(|preprocessed| preprocessed.commitment());
+    VerifierInstance::new(config, &statement, preprocessed_commitment)?
         .verify(&proof, challenger)?;
     Ok(())
 }

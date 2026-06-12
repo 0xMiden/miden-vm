@@ -21,7 +21,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LiftedAir, MidenAir,
+    BaseAir, LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, accumulate, build_lookup_fractions, debug::collect_column_oracle_folds},
 };
@@ -99,12 +99,15 @@ fn assert_prover_matches_oracle(
 fn build_lookup_fractions_matches_constraint_path_oracle() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
 
-    let (core_matrix, chip_matrix, p2_matrix) = trace.main_trace().to_air_matrices();
+    let (core_matrix, chip_matrix, p2_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns.
     let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
     let p2_periodic =
         LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION);
+    let and8_preprocessed = MidenAir::AND8_LOOKUP
+        .preprocessed_trace()
+        .expect("AND8 lookup AIR declares a preprocessed table");
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
     // implement Randomizable, so we draw base-field elements and pair them).
@@ -115,7 +118,8 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
     // --- Core ---
-    let core_fractions = build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
+    let core_fractions =
+        build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &challenges);
     assert!(
         !core_fractions.fractions().is_empty(),
         "no Core fractions collected — trace is degenerate or emitters are broken",
@@ -131,8 +135,13 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     );
 
     // --- Chiplets ---
-    let chip_fractions =
-        build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
+    let chip_fractions = build_lookup_fractions(
+        &MidenAir::CHIPLETS,
+        &chip_matrix,
+        None,
+        &chip_periodic,
+        &challenges,
+    );
     assert!(
         !chip_fractions.fractions().is_empty(),
         "no Chiplets fractions collected — trace is degenerate or emitters are broken",
@@ -156,6 +165,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let p2_fractions = build_lookup_fractions(
         &MidenAir::POSEIDON2_PERMUTATION,
         &p2_matrix,
+        None,
         &p2_periodic,
         &challenges,
     );
@@ -176,5 +186,32 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         &p2_aux,
         &p2_folds,
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::POSEIDON2_PERMUTATION),
+    );
+
+    // --- AND8 lookup table ---
+    let and8_fractions = build_lookup_fractions(
+        &MidenAir::AND8_LOOKUP,
+        &and8_matrix,
+        Some(&and8_preprocessed),
+        &[],
+        &challenges,
+    );
+    assert!(
+        and8_fractions.fractions().is_empty(),
+        "the placeholder AND8 table should have zero dynamic multiplicity before consumers are wired",
+    );
+    let and8_aux = accumulate(&and8_fractions);
+    let and8_folds = collect_column_oracle_folds(
+        &MidenAir::AND8_LOOKUP,
+        &and8_matrix,
+        &[],
+        &public_vals,
+        &challenges,
+    );
+    assert_prover_matches_oracle(
+        "And8Lookup",
+        &and8_aux,
+        &and8_folds,
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::AND8_LOOKUP),
     );
 }

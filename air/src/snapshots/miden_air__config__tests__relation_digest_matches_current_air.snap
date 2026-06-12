@@ -1,30 +1,101 @@
 ---
 source: air/src/config.rs
-assertion_line: 359
 expression: snapshot
 ---
-constraints_eval_core_then_chiplets_then_poseidon2_permutation:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [5740969082080905748, 15256857719477362058, 9237469715028178334, 4872574089214631908]
-constraints_eval_core_then_poseidon2_permutation_then_chiplets:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [2321037513260098392, 17286149498063284068, 6356359887919611268, 17855249847917882650]
-constraints_eval_chiplets_then_core_then_poseidon2_permutation:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [8319327866188342022, 6197593604002099625, 9370667984553446365, 7480530112177254958]
-constraints_eval_chiplets_then_poseidon2_permutation_then_core:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [271885901254429354, 2641757094298307851, 18292160197079039231, 13674100753457674243]
-constraints_eval_poseidon2_permutation_then_core_then_chiplets:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [13132138677012121625, 7319544671157415564, 4610824057987530505, 16297325917500303945]
-constraints_eval_poseidon2_permutation_then_chiplets_then_core:
-  num_inputs: 640
-  num_eval_gates: 5548
-  commitment: [12789623142267307166, 11968219272187174498, 12424998591848215068, 11506834662713263622]
-relation_digest: [8068690199881128576, 15752653923667764930, 4618337672943346065, 9135763419457635012]
+constraints_eval_core_then_chiplets_then_poseidon2_permutation_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [10640048936890120464, 18265508487173318435, 4667371179627372317, 565161362560535612]
+constraints_eval_core_then_chiplets_then_and8_lookup_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [1010275733792238055, 16086085931689389117, 5446183102816949616, 6664124054859184085]
+constraints_eval_core_then_poseidon2_permutation_then_chiplets_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [5553619702714618208, 5056053965659829638, 7625870443834521205, 10610799423710654258]
+constraints_eval_core_then_poseidon2_permutation_then_and8_lookup_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [4834521624462735653, 9538756064291400625, 8158486699443235681, 15549568856677789208]
+constraints_eval_core_then_and8_lookup_then_chiplets_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [932681556177029414, 16829111920437876615, 8575098326816285, 16373861304352859784]
+constraints_eval_core_then_and8_lookup_then_poseidon2_permutation_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [286620477291880165, 7416137470079605050, 11494632239000635342, 18241663371556291447]
+constraints_eval_chiplets_then_core_then_poseidon2_permutation_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [11748125021684673981, 11861472791698519161, 4976332095566155156, 16896521331484330766]
+constraints_eval_chiplets_then_core_then_and8_lookup_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [8542256524305834302, 15409990882634685095, 1583253974692593101, 1653659616351255617]
+constraints_eval_chiplets_then_poseidon2_permutation_then_core_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [10037133760872850104, 12441144097177421763, 16621107411914551323, 13794356340341580023]
+constraints_eval_chiplets_then_poseidon2_permutation_then_and8_lookup_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [12197913310577839503, 5865475401741875993, 15673615188383454849, 17213155184402881494]
+constraints_eval_chiplets_then_and8_lookup_then_core_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [17582624556259593696, 17683147453931438073, 10757931346133365095, 676177883308377829]
+constraints_eval_chiplets_then_and8_lookup_then_poseidon2_permutation_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [6651568570192270876, 13702090161119894086, 4617774190866230195, 14328179601054052637]
+constraints_eval_poseidon2_permutation_then_core_then_chiplets_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [15973286554241848629, 11818165726569099664, 3831087587750750464, 7668938998225888775]
+constraints_eval_poseidon2_permutation_then_core_then_and8_lookup_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [9677457428947250094, 2409480619714931992, 3580555447934094386, 5698983412488945279]
+constraints_eval_poseidon2_permutation_then_chiplets_then_core_then_and8_lookup:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [9837925621222668580, 11963004037262834163, 2457055534020781245, 3275232467341151303]
+constraints_eval_poseidon2_permutation_then_chiplets_then_and8_lookup_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [7422447259932990963, 2737125912336228497, 14240523298954601316, 3276159354510734260]
+constraints_eval_poseidon2_permutation_then_and8_lookup_then_core_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [8246791139101308423, 10024660283840423350, 17565792667188647877, 16721865601427334136]
+constraints_eval_poseidon2_permutation_then_and8_lookup_then_chiplets_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [12543195995485770376, 18356669241899127210, 7196251421640222889, 16364552883925285650]
+constraints_eval_and8_lookup_then_core_then_chiplets_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [13007888772540611750, 13299844499701626490, 4838165834908658451, 9509789769312508128]
+constraints_eval_and8_lookup_then_core_then_poseidon2_permutation_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [11679523538755950800, 12208470273038471236, 5083414227428377505, 16410259274264672528]
+constraints_eval_and8_lookup_then_chiplets_then_core_then_poseidon2_permutation:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [17218150080302285974, 18033020439759926971, 13269514132471692274, 16044269580443257885]
+constraints_eval_and8_lookup_then_chiplets_then_poseidon2_permutation_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [12187916555959582633, 8670082697567014653, 15080844131724031599, 16804522294616873841]
+constraints_eval_and8_lookup_then_poseidon2_permutation_then_core_then_chiplets:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [4299028569242046221, 4705555639820319488, 17474603980135862368, 14145390407885757576]
+constraints_eval_and8_lookup_then_poseidon2_permutation_then_chiplets_then_core:
+  num_inputs: 696
+  num_eval_gates: 5568
+  commitment: [5243394877344716052, 11279507783323334675, 13465837992333543601, 13605446811517570614]
+relation_digest: [15794697767175421542, 12015852685764691680, 3313672886670830370, 20246485947112053]

@@ -11,7 +11,7 @@ use ::serde::Serialize;
 use miden_air::{MidenMultiAir, ProverStatement, Statement};
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_crypto::stark::{
-    ProverInstance, StarkConfig,
+    Preprocessed, ProverInstance, StarkConfig,
     lmcs::Lmcs,
     proof::{StarkOutput, StarkProofData},
 };
@@ -136,7 +136,7 @@ fn prove_execution_trace(
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
-    let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix) = {
+    let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix) = {
         let _span = tracing::info_span!("into_air_matrices").entered();
         trace.into_air_matrices()
     };
@@ -150,6 +150,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -161,6 +162,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -172,6 +174,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -183,6 +186,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -194,6 +198,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -205,6 +210,7 @@ fn prove_execution_trace(
                 core_matrix,
                 chiplets_matrix,
                 poseidon2_permutation_matrix,
+                and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
             )
@@ -228,6 +234,7 @@ pub fn prove_stark<SC>(
     core_trace: RowMajorMatrix<Felt>,
     chiplets_trace: RowMajorMatrix<Felt>,
     poseidon2_permutation_trace: RowMajorMatrix<Felt>,
+    and8_lookup_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
     kernel_felts: &[Felt],
 ) -> Result<Vec<u8>, ExecutionError>
@@ -246,12 +253,13 @@ where
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let prover_statement = ProverStatement::new(
         statement,
-        vec![core_trace, chiplets_trace, poseidon2_permutation_trace],
+        vec![core_trace, chiplets_trace, poseidon2_permutation_trace, and8_lookup_trace],
     )
     .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    let preprocessed = Preprocessed::build(prover_statement.statement(), config);
 
     let output: StarkOutput<Felt, QuadFelt, SC> =
-        ProverInstance::new(config, &prover_statement, None)
+        ProverInstance::new(config, &prover_statement, preprocessed.as_ref())
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?
             .prove(challenger)
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;

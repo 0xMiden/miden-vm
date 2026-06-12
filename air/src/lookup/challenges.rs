@@ -30,7 +30,7 @@ use miden_core::field::PrimeCharacteristicRing;
 ///
 /// Widths (`beta_powers.len()` and `bus_prefix.len()`) come from the [`LookupAir`]'s
 /// `max_message_width()` / `num_bus_ids()` at construction time. The struct is built
-/// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops the unused
+/// once and read-only thereafter - `Box<[EF]>` over `Vec<EF>` drops the unused
 /// capacity word and signals fixed length.
 ///
 /// [`LookupAir`]: crate::lookup::LookupAir
@@ -100,9 +100,9 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
 
     /// Returns **sum(beta_powers\[offset + i\] * elems\[i\])**.
     ///
-    /// Unlike [`Self::encode`], this does **not** add a bus prefix — callers compose it
+    /// Unlike [`Self::encode`], this does **not** add a bus prefix - callers compose it
     /// with their own prefix and other contributions when a single message absorbs
-    /// multiple slices at different β offsets (e.g. addr at β⁰, payload at β²).
+    /// multiple slices at different beta offsets (e.g. addr at beta^0, payload at beta^2).
     #[inline(always)]
     pub fn inner_product_at<BF: Clone>(&self, offset: usize, elems: &[BF]) -> EF
     where

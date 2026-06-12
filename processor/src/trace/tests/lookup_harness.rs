@@ -17,7 +17,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LiftedAir, MidenAir,
+    BaseAir, LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, LookupFractions, LookupMessage, build_lookup_fractions},
 };
@@ -49,11 +49,15 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
-        let (core_matrix, chip_matrix, p2_matrix) = trace.main_trace().to_air_matrices();
+        let (core_matrix, chip_matrix, p2_matrix, and8_matrix) =
+            trace.main_trace().to_air_matrices();
         // Core has no periodic columns.
         let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
         let p2_periodic =
             LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION);
+        let and8_preprocessed = MidenAir::AND8_LOOKUP
+            .preprocessed_trace()
+            .expect("AND8 lookup AIR declares a preprocessed table");
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -63,18 +67,34 @@ impl InteractionLog {
             Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
         let core_fractions =
-            build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
-        let chip_fractions =
-            build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
+            build_lookup_fractions(&MidenAir::CORE, &core_matrix, None, &[], &challenges);
+        let chip_fractions = build_lookup_fractions(
+            &MidenAir::CHIPLETS,
+            &chip_matrix,
+            None,
+            &chip_periodic,
+            &challenges,
+        );
         let p2_fractions = build_lookup_fractions(
             &MidenAir::POSEIDON2_PERMUTATION,
             &p2_matrix,
+            None,
             &p2_periodic,
             &challenges,
         );
+        let and8_fractions = build_lookup_fractions(
+            &MidenAir::AND8_LOOKUP,
+            &and8_matrix,
+            Some(&and8_preprocessed),
+            &[],
+            &challenges,
+        );
         let rows = merge_rows(
-            merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions)),
-            split_rows(&p2_fractions),
+            merge_rows(
+                merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions)),
+                split_rows(&p2_fractions),
+            ),
+            split_rows(&and8_fractions),
         );
 
         Self { challenges, rows }

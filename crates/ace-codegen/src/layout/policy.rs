@@ -17,6 +17,7 @@ struct LayoutPolicy {
     vlpi: Alignment,
     vlpi_stride: usize,
     randomness: Alignment,
+    preprocessed: Alignment,
     main: Alignment,
     aux: Alignment,
     quotient: Alignment,
@@ -32,6 +33,7 @@ impl LayoutPolicy {
             vlpi: Alignment::Unaligned,
             vlpi_stride: 1,
             randomness: Alignment::Unaligned,
+            preprocessed: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
             quotient: Alignment::Unaligned,
@@ -47,6 +49,7 @@ impl LayoutPolicy {
             vlpi: Alignment::Word,
             vlpi_stride: 2,
             randomness: Alignment::Word,
+            preprocessed: Alignment::DoubleWord,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
             quotient: Alignment::DoubleWord,
@@ -109,12 +112,14 @@ impl InputLayout {
         // extension-field element (QuadFelt). Some stark vars are base-field values
         // embedded as (val, 0); see the slot table below for which is which.
         const NUM_STARK_VARS_BASE: usize = 10;
+        const MULTI_AIR_PREFIX_SLOTS: usize = 2;
         let num_stark_vars = NUM_STARK_VARS_BASE
             + num_multi_airs.map_or(0, |num_airs| {
                 assert!(num_airs > 0, "multi-AIR layout requires at least one AIR");
                 // One beta challenge, one unused EF slot reserved by the MASM
-                // stark-vars layout, then the lifted selectors for each AIR.
-                2 + SELECTORS_PER_AIR * num_airs
+                // stark-vars layout, the lifted selectors, then one trace-length
+                // slot per AIR.
+                MULTI_AIR_PREFIX_SLOTS + SELECTORS_PER_AIR * num_airs + num_airs
             });
 
         let mut builder = LayoutBuilder::new();
@@ -125,10 +130,12 @@ impl InputLayout {
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
         let (aux_rand_alpha, aux_rand_beta) = randomness::aux_rand_indices(randomness);
+        let preprocessed_curr = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
         let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let preprocessed_next = builder.alloc(counts.preprocessed_width, policy.preprocessed);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
@@ -164,8 +171,12 @@ impl InputLayout {
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
-        let multi_air_beta = num_multi_airs.map(|_| b + 10);
-        let air_selectors_start = num_multi_airs.map(|_| b + 12);
+        let multi_air_start = b + NUM_STARK_VARS_BASE;
+        let multi_air_beta = num_multi_airs.map(|_| multi_air_start);
+        let air_selectors_start = num_multi_airs.map(|_| multi_air_start + MULTI_AIR_PREFIX_SLOTS);
+        let air_trace_lengths_start = num_multi_airs.map(|num_airs| {
+            multi_air_start + MULTI_AIR_PREFIX_SLOTS + SELECTORS_PER_AIR * num_airs
+        });
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -176,9 +187,11 @@ impl InputLayout {
                 public_values,
                 vlpi_reductions,
                 randomness,
+                preprocessed_curr,
                 main_curr,
                 aux_curr,
                 quotient_curr,
+                preprocessed_next,
                 main_next,
                 aux_next,
                 quotient_next,
@@ -201,6 +214,7 @@ impl InputLayout {
                 s0,
                 multi_air_beta,
                 air_selectors_start,
+                air_trace_lengths_start,
                 num_airs: num_multi_airs.unwrap_or(0),
             },
             total_inputs: builder.offset,
@@ -213,9 +227,28 @@ impl InputLayout {
 mod tests {
     use super::super::{InputCounts, InputKey, InputLayout};
 
+    const CONSTRAINTS_EVAL_INPUTS: &str =
+        include_str!("../../../../crates/lib/core/asm/sys/vm/constraints_eval_inputs.masm");
+
+    fn constraints_eval_inputs_const(name: &str) -> usize {
+        CONSTRAINTS_EVAL_INPUTS
+            .lines()
+            .find_map(|line| {
+                let mut parts = line.split_whitespace();
+                match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                    (Some("const"), Some(found), Some("="), Some(value)) if found == name => {
+                        value.parse().ok()
+                    },
+                    _ => None,
+                }
+            })
+            .unwrap_or_else(|| panic!("missing MASM constant {name}"))
+    }
+
     #[test]
     fn masm_layout_vlpi_groups_use_word_stride() {
         let counts = InputCounts {
+            preprocessed_width: 0,
             width: 1,
             aux_width: 1,
             num_aux_boundary: 1,
@@ -241,6 +274,7 @@ mod tests {
     #[test]
     fn native_layout_vlpi_groups_use_unit_stride() {
         let counts = InputCounts {
+            preprocessed_width: 0,
             width: 1,
             aux_width: 1,
             num_aux_boundary: 1,
@@ -263,6 +297,7 @@ mod tests {
     #[test]
     fn multi_air_masm_layout_preserves_multi_air_stark_slots() {
         let counts = InputCounts {
+            preprocessed_width: 0,
             width: 1,
             aux_width: 1,
             num_aux_boundary: 2,
@@ -275,13 +310,62 @@ mod tests {
         let layout = InputLayout::new_masm_multi_air_for_airs(counts, 2);
         let beta = layout.index(InputKey::MultiAirBeta).expect("multi-AIR beta");
 
-        assert_eq!(layout.regions.stark_vars.width, 18);
+        assert_eq!(layout.regions.stark_vars.width, 20);
         assert_eq!(layout.index(InputKey::IsFirstAir(0)), Some(beta + 2));
         assert_eq!(layout.index(InputKey::IsLastAir(0)), Some(beta + 3));
         assert_eq!(layout.index(InputKey::IsTransitionAir(0)), Some(beta + 4));
         assert_eq!(layout.index(InputKey::IsFirstAir(1)), Some(beta + 5));
         assert_eq!(layout.index(InputKey::IsLastAir(1)), Some(beta + 6));
         assert_eq!(layout.index(InputKey::IsTransitionAir(1)), Some(beta + 7));
+        assert_eq!(layout.index(InputKey::TraceLenAir(0)), Some(beta + 8));
+        assert_eq!(layout.index(InputKey::TraceLenAir(1)), Some(beta + 9));
         assert_eq!(layout.index(InputKey::IsFirstAir(2)), None);
+        assert_eq!(layout.index(InputKey::TraceLenAir(2)), None);
+    }
+
+    #[test]
+    fn constraints_eval_inputs_offsets_match_masm_layout() {
+        let counts = InputCounts {
+            preprocessed_width: 0,
+            width: 1,
+            aux_width: 1,
+            num_aux_boundary: 4,
+            num_public: 8,
+            num_vlpi: 2,
+            num_randomness: 2,
+            num_periodic: 0,
+            num_quotient_chunks: 1,
+        };
+        let layout = InputLayout::new_masm_multi_air_for_airs(counts, 4);
+
+        let base_offset = |key| {
+            let index = layout.index(key).expect("layout key must exist");
+            (index - layout.regions.stark_vars.offset) * crate::EXT_DEGREE
+        };
+
+        assert_eq!(
+            constraints_eval_inputs_const("CORE_SELECTOR_OFFSET"),
+            base_offset(InputKey::IsFirstAir(0))
+        );
+        assert_eq!(
+            constraints_eval_inputs_const("CHIPLETS_SELECTOR_OFFSET"),
+            base_offset(InputKey::IsFirstAir(1))
+        );
+        assert_eq!(
+            constraints_eval_inputs_const("POSEIDON2_SELECTOR_OFFSET"),
+            base_offset(InputKey::IsFirstAir(2))
+        );
+        assert_eq!(
+            constraints_eval_inputs_const("AND8_SELECTOR_OFFSET"),
+            base_offset(InputKey::IsFirstAir(3))
+        );
+        assert_eq!(
+            constraints_eval_inputs_const("CORE_CHIPLETS_TRACE_LENGTHS_OFFSET"),
+            base_offset(InputKey::TraceLenAir(0))
+        );
+        assert_eq!(
+            constraints_eval_inputs_const("POSEIDON2_AND8_TRACE_LENGTHS_OFFSET"),
+            base_offset(InputKey::TraceLenAir(2))
+        );
     }
 }

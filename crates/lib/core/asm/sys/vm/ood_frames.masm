@@ -2,22 +2,20 @@ use miden::core::crypto::hashes::poseidon2
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes as input a Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
-#! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
-#! into the hasher state and simultaneously computing a random linear combination using Horner
-#! evaluation.
-#!
+#! Takes a Poseidon2 hasher state, a destination pointer, and the current Horner accumulator. Loads
+#! one OOD frame from advice, stores it at `ptr`, absorbs it into the transcript, and folds it into
+#! the accumulator.
 #!
 #! Inputs:  [R0, R1, C, ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
+#! Outputs: [R0, R1, C, ptr, acc0', acc1']
 pub proc process_row_ood_evaluations
-    # One OOD-point frame matches the LMCS-aligned wire format:
-    #   main curr/next:  2 * (ceil(51/8)*8 + ceil(21/8)*8 + ceil(16/8)*8) = 192 felts
-    #   aux curr/next:   2 * (ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8)    = 48 felts
-    #   quotient curr/next: 2 * (8 EF chunks * 2 coords)                  = 32 felts
-    #   total                                                             = 272 felts
-    # 272 / 8 = 34 iterations.
-    repeat.34
+    # One OOD-point frame has 160 logical slots in the LMCS-aligned wire format:
+    #   preprocessed openings: ceil(3/8)*8                                      = 8
+    #   main openings:         ceil(51/8)*8 + ceil(22/8)*8 + ceil(16/8)*8 + 8   = 104
+    #   auxiliary coord slots: ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8 + 8      = 32
+    #   quotient coord slots:  8*2                                              = 16
+    # The advice stream supplies 320 base felts, read as 40 `adv_pipe` blocks.
+    repeat.40
         adv_pipe
         horner_eval_ext
         exec.poseidon2::permute

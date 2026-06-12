@@ -16,6 +16,10 @@ use crate::{
     ChipletCols, CoreCols, Felt, MAX_KERNEL_PROC_DIGEST_INPUTS, MidenAirBuilder, NUM_PUBLIC_VALUES,
     NUM_VAR_LEN_PUBLIC_INPUT_GROUPS, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
     constraints,
+    constraints::and8_lookup::{
+        self,
+        columns::{And8LookupCols, LOG_AND8_TABLE_HEIGHT},
+    },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
         BoundaryBuilder, Challenges, ConstraintLookupBuilder, LookupAir, LookupMessage,
@@ -25,6 +29,7 @@ use crate::{
 };
 
 use constraints::lookup::{
+    and8_lookup_air::And8LookupBuilder,
     chiplet_air::ChipletLookupBuilder,
     main_air::{MainLookupAir, MainLookupBuilder},
     poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
@@ -282,6 +287,82 @@ impl Poseidon2PermutationAir {
     fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
 }
 
+/// Standalone byte-AND lookup table AIR.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct And8LookupAir;
+
+impl And8LookupAir {
+    fn width(self) -> usize {
+        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+    }
+
+    fn preprocessed_trace(self) -> Option<RowMajorMatrix<Felt>> {
+        Some(and8_lookup::preprocessed_trace())
+    }
+
+    fn preprocessed_width(self) -> usize {
+        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
+    }
+
+    fn periodic_columns(self) -> Vec<Vec<Felt>> {
+        Vec::new()
+    }
+
+    fn aux_width(self) -> usize {
+        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+    }
+
+    fn boundary_correction<EF: ExtensionField<Felt>>(
+        self,
+        _challenges: &Challenges<EF>,
+        _public_values: &[Felt],
+        var_len_public_inputs: &[&[Felt]],
+    ) -> Result<EF, ReductionError> {
+        if !var_len_public_inputs.is_empty() {
+            return Err(format!(
+                "And8LookupAir expects 0 var-len public input slices, got {}",
+                var_len_public_inputs.len()
+            )
+            .into());
+        }
+        Ok(EF::ZERO)
+    }
+
+    fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::AND8_LOOKUP);
+        self.lookup_eval(&mut lb);
+    }
+
+    fn lookup_num_columns(self) -> usize {
+        constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len()
+    }
+
+    fn lookup_column_shape(self) -> &'static [usize] {
+        &constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE
+    }
+
+    fn lookup_max_message_width(self) -> usize {
+        MIDEN_MAX_MESSAGE_WIDTH
+    }
+
+    fn lookup_num_bus_ids(self) -> usize {
+        BusId::COUNT
+    }
+
+    fn lookup_accumulator_mode(self) -> crate::lookup::LookupAccumulatorMode {
+        crate::lookup::LookupAccumulatorMode::WrappedCentered
+    }
+
+    fn lookup_eval<LB: And8LookupBuilder>(self, builder: &mut LB) {
+        let main = builder.main();
+        let local: &And8LookupCols<_> = main.current_slice().borrow();
+
+        constraints::lookup::and8_lookup_air::emit_and8_lookup_columns(builder, local);
+    }
+
+    fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
+}
+
 // AIR REGISTRY AND PROOF ORDER
 // ================================================================================================
 
@@ -291,12 +372,14 @@ pub enum MidenAir {
     Core(CoreAir),
     Chiplets(ChipletsAir),
     Poseidon2Permutation(Poseidon2PermutationAir),
+    And8Lookup(And8LookupAir),
 }
 
 impl MidenAir {
     pub const CORE: Self = Self::Core(CoreAir);
     pub const CHIPLETS: Self = Self::Chiplets(ChipletsAir);
     pub const POSEIDON2_PERMUTATION: Self = Self::Poseidon2Permutation(Poseidon2PermutationAir);
+    pub const AND8_LOOKUP: Self = Self::And8Lookup(And8LookupAir);
 }
 
 /// Stable identity of an AIR in the Miden multi-AIR relation.
@@ -305,6 +388,7 @@ pub enum MidenAirId {
     Core,
     Chiplets,
     Poseidon2Permutation,
+    And8Lookup,
 }
 
 impl MidenAirId {
@@ -313,6 +397,7 @@ impl MidenAirId {
             Self::Core => 0,
             Self::Chiplets => 1,
             Self::Poseidon2Permutation => 2,
+            Self::And8Lookup => 3,
         }
     }
 
@@ -321,6 +406,7 @@ impl MidenAirId {
             Self::Core => "Core",
             Self::Chiplets => "Chiplets",
             Self::Poseidon2Permutation => "Poseidon2Permutation",
+            Self::And8Lookup => "And8Lookup",
         }
     }
 
@@ -329,6 +415,7 @@ impl MidenAirId {
             Self::Core => "core",
             Self::Chiplets => "chiplets",
             Self::Poseidon2Permutation => "poseidon2_permutation",
+            Self::And8Lookup => "and8_lookup",
         }
     }
 
@@ -337,6 +424,16 @@ impl MidenAirId {
             Self::Core => MidenAir::CORE,
             Self::Chiplets => MidenAir::CHIPLETS,
             Self::Poseidon2Permutation => MidenAir::POSEIDON2_PERMUTATION,
+            Self::And8Lookup => MidenAir::AND8_LOOKUP,
+        }
+    }
+
+    pub const fn lookup_accumulator_mode(self) -> crate::lookup::LookupAccumulatorMode {
+        match self {
+            Self::Core | Self::Chiplets | Self::Poseidon2Permutation => {
+                crate::lookup::LookupAccumulatorMode::LastRowIdle
+            },
+            Self::And8Lookup => crate::lookup::LookupAccumulatorMode::WrappedCentered,
         }
     }
 }
@@ -349,7 +446,7 @@ pub struct AirSpec {
     pub air: MidenAir,
 }
 
-pub const MIDEN_AIR_COUNT: usize = 3;
+pub const MIDEN_AIR_COUNT: usize = 4;
 
 /// Supported AIRs in semantic instance order.
 pub const AIRS: [AirSpec; MIDEN_AIR_COUNT] = [
@@ -367,6 +464,11 @@ pub const AIRS: [AirSpec; MIDEN_AIR_COUNT] = [
         id: MidenAirId::Poseidon2Permutation,
         name: MidenAirId::Poseidon2Permutation.name(),
         air: MidenAirId::Poseidon2Permutation.air(),
+    },
+    AirSpec {
+        id: MidenAirId::And8Lookup,
+        name: MidenAirId::And8Lookup.name(),
+        air: MidenAirId::And8Lookup.air(),
     },
 ];
 
@@ -516,6 +618,14 @@ impl BaseAir<Felt> for MidenAir {
             Self::Core(a) => a.width(),
             Self::Chiplets(a) => a.width(),
             Self::Poseidon2Permutation(a) => a.width(),
+            Self::And8Lookup(a) => a.width(),
+        }
+    }
+
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
+        match self {
+            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => None,
+            Self::And8Lookup(a) => a.preprocessed_trace(),
         }
     }
 
@@ -530,6 +640,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
             Self::Core(a) => a.periodic_columns(),
             Self::Chiplets(a) => a.periodic_columns(),
             Self::Poseidon2Permutation(a) => a.periodic_columns(),
+            Self::And8Lookup(a) => a.periodic_columns(),
+        }
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        match self {
+            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => 0,
+            Self::And8Lookup(a) => a.preprocessed_width(),
         }
     }
 
@@ -542,6 +660,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
             Self::Core(a) => a.aux_width(),
             Self::Chiplets(a) => a.aux_width(),
             Self::Poseidon2Permutation(a) => a.aux_width(),
+            Self::And8Lookup(a) => a.aux_width(),
         }
     }
 
@@ -569,6 +688,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core(_) | Self::Chiplets(_) => ConstraintDegrees { base: 9, ext: 9 },
             Self::Poseidon2Permutation(_) => ConstraintDegrees { base: 8, ext: 3 },
+            Self::And8Lookup(_) => ConstraintDegrees { base: 0, ext: 2 },
         }
     }
 
@@ -577,19 +697,24 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
             Self::Core(a) => a.eval(builder),
             Self::Chiplets(a) => a.eval(builder),
             Self::Poseidon2Permutation(a) => a.eval(builder),
+            Self::And8Lookup(a) => a.eval(builder),
         }
     }
 }
 
 impl<LB> LookupAir<LB> for MidenAir
 where
-    LB: MainLookupBuilder + ChipletLookupBuilder + Poseidon2PermutationLookupBuilder,
+    LB: MainLookupBuilder
+        + ChipletLookupBuilder
+        + Poseidon2PermutationLookupBuilder
+        + And8LookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
             Self::Core(a) => a.lookup_num_columns(),
             Self::Chiplets(a) => a.lookup_num_columns(),
             Self::Poseidon2Permutation(a) => a.lookup_num_columns(),
+            Self::And8Lookup(a) => a.lookup_num_columns(),
         }
     }
 
@@ -598,6 +723,16 @@ where
             Self::Core(a) => a.lookup_column_shape(),
             Self::Chiplets(a) => a.lookup_column_shape(),
             Self::Poseidon2Permutation(a) => a.lookup_column_shape(),
+            Self::And8Lookup(a) => a.lookup_column_shape(),
+        }
+    }
+
+    fn accumulator_mode(&self) -> crate::lookup::LookupAccumulatorMode {
+        match self {
+            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => {
+                crate::lookup::LookupAccumulatorMode::LastRowIdle
+            },
+            Self::And8Lookup(a) => a.lookup_accumulator_mode(),
         }
     }
 
@@ -606,6 +741,7 @@ where
             Self::Core(a) => a.lookup_max_message_width(),
             Self::Chiplets(a) => a.lookup_max_message_width(),
             Self::Poseidon2Permutation(a) => a.lookup_max_message_width(),
+            Self::And8Lookup(a) => a.lookup_max_message_width(),
         }
     }
 
@@ -614,6 +750,7 @@ where
             Self::Core(a) => a.lookup_num_bus_ids(),
             Self::Chiplets(a) => a.lookup_num_bus_ids(),
             Self::Poseidon2Permutation(a) => a.lookup_num_bus_ids(),
+            Self::And8Lookup(a) => a.lookup_num_bus_ids(),
         }
     }
 
@@ -622,6 +759,7 @@ where
             Self::Core(a) => a.lookup_eval(builder),
             Self::Chiplets(a) => a.lookup_eval(builder),
             Self::Poseidon2Permutation(a) => a.lookup_eval(builder),
+            Self::And8Lookup(a) => a.lookup_eval(builder),
         }
     }
 
@@ -633,6 +771,7 @@ where
             Self::Core(a) => a.lookup_eval_boundary(boundary),
             Self::Chiplets(a) => a.lookup_eval_boundary(boundary),
             Self::Poseidon2Permutation(a) => a.lookup_eval_boundary(boundary),
+            Self::And8Lookup(a) => a.lookup_eval_boundary(boundary),
         }
     }
 }
@@ -649,7 +788,7 @@ pub struct MidenMultiAir {
 impl MidenMultiAir {
     pub const fn new() -> Self {
         Self {
-            airs: [AIRS[0].air, AIRS[1].air, AIRS[2].air],
+            airs: [AIRS[0].air, AIRS[1].air, AIRS[2].air, AIRS[3].air],
         }
     }
 }
@@ -709,8 +848,32 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         air_inputs: &[Felt],
         aux_inputs: &[Felt],
         aux_values: &[&[EF]],
-        _log_trace_heights: &[u8],
+        log_trace_heights: &[u8],
     ) -> Result<Vec<EF>, ReductionError> {
+        if aux_values.len() != self.airs.len() {
+            return Err(format!(
+                "expected aux values for {} AIRs, got {}",
+                self.airs.len(),
+                aux_values.len()
+            )
+            .into());
+        }
+        if log_trace_heights.len() != self.airs.len() {
+            return Err(format!(
+                "expected log heights for {} AIRs, got {}",
+                self.airs.len(),
+                log_trace_heights.len()
+            )
+            .into());
+        }
+        if log_trace_heights[MidenAirId::And8Lookup.instance_index()] != LOG_AND8_TABLE_HEIGHT {
+            return Err(format!(
+                "And8Lookup log height must be {LOG_AND8_TABLE_HEIGHT}, got {}",
+                log_trace_heights[MidenAirId::And8Lookup.instance_index()]
+            )
+            .into());
+        }
+
         let challenges = Challenges::<EF>::new(
             challenges[0],
             challenges[1],
@@ -724,9 +887,43 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             ChipletsAir.boundary_correction(&challenges, air_inputs, &[aux_inputs])?;
         let poseidon2_correction =
             Poseidon2PermutationAir.boundary_correction(&challenges, air_inputs, &[])?;
+        let and8_correction = And8LookupAir.boundary_correction(&challenges, air_inputs, &[])?;
 
-        let aux_sum: EF = aux_values.iter().flat_map(|vals| vals.iter().copied()).sum();
-        Ok(vec![aux_sum + core_correction + chiplets_correction + poseidon2_correction])
+        let mut aux_sum = EF::ZERO;
+        for ((spec, values), &log_height) in
+            AIRS.iter().zip(aux_values.iter()).zip(log_trace_heights)
+        {
+            let expected = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&spec.air);
+            if values.len() != expected {
+                return Err(format!(
+                    "{} expects {expected} aux boundary values, got {}",
+                    spec.id.name(),
+                    values.len()
+                )
+                .into());
+            }
+            let weight = match spec.id.lookup_accumulator_mode() {
+                crate::lookup::LookupAccumulatorMode::LastRowIdle => EF::ONE,
+                crate::lookup::LookupAccumulatorMode::WrappedCentered => {
+                    let trace_len = 1u64.checked_shl(u32::from(log_height)).ok_or_else(|| {
+                        format!("{} AIR trace length log is too large", spec.id.name())
+                    })?;
+                    let trace_len = Felt::new(trace_len).map_err(|err| -> ReductionError {
+                        format!("{} AIR trace length is not canonical: {err}", spec.id.name())
+                            .into()
+                    })?;
+                    EF::from(trace_len)
+                },
+            };
+            aux_sum += values.iter().copied().map(|value| value * weight).sum::<EF>();
+        }
+        Ok(vec![
+            aux_sum
+                + core_correction
+                + chiplets_correction
+                + poseidon2_correction
+                + and8_correction,
+        ])
     }
 }
 
@@ -780,6 +977,9 @@ impl<'a, EF: ExtensionField<Felt>> BoundaryBuilder for ReduceBoundaryBuilder<'a,
 
 #[cfg(test)]
 mod tests {
+    use miden_ace_codegen::{
+        DagBuilder, InputCounts, InputKey, InputLayout, emit_circuit, testing::fill_inputs,
+    };
     use miden_core::field::QuadFelt;
 
     use super::*;
@@ -787,46 +987,40 @@ mod tests {
     #[test]
     fn order_follows_height_then_instance_index() {
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 9, 10]),
+            ProofOrder::from_instance_log_heights(&[8, 9, 10, 11]),
             ProofOrder::from_ids(&[
                 MidenAirId::Core,
                 MidenAirId::Chiplets,
                 MidenAirId::Poseidon2Permutation,
+                MidenAirId::And8Lookup,
             ]),
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[9, 8, 10]),
+            ProofOrder::from_instance_log_heights(&[9, 8, 10, 11]),
             ProofOrder::from_ids(&[
                 MidenAirId::Chiplets,
                 MidenAirId::Core,
                 MidenAirId::Poseidon2Permutation,
+                MidenAirId::And8Lookup,
             ]),
         );
         assert_eq!(
-            ProofOrder::from_instance_log_heights(&[8, 8, 8]),
+            ProofOrder::from_instance_log_heights(&[8, 8, 8, 8]),
             ProofOrder::from_ids(&[
                 MidenAirId::Core,
                 MidenAirId::Chiplets,
                 MidenAirId::Poseidon2Permutation,
+                MidenAirId::And8Lookup,
             ]),
         );
     }
 
     #[test]
     fn tags_use_lehmer_rank() {
+        assert_eq!(ProofOrder::variants().len(), 24);
         assert_eq!(
-            ProofOrder::variants()
-                .into_iter()
-                .map(|order| order.ids().to_vec())
-                .collect::<Vec<_>>(),
-            vec![
-                vec![MidenAirId::Core, MidenAirId::Chiplets, MidenAirId::Poseidon2Permutation],
-                vec![MidenAirId::Core, MidenAirId::Poseidon2Permutation, MidenAirId::Chiplets],
-                vec![MidenAirId::Chiplets, MidenAirId::Core, MidenAirId::Poseidon2Permutation],
-                vec![MidenAirId::Chiplets, MidenAirId::Poseidon2Permutation, MidenAirId::Core],
-                vec![MidenAirId::Poseidon2Permutation, MidenAirId::Core, MidenAirId::Chiplets],
-                vec![MidenAirId::Poseidon2Permutation, MidenAirId::Chiplets, MidenAirId::Core],
-            ],
+            ProofOrder::variants().first().unwrap().ids(),
+            ProofOrder::instance_order().ids()
         );
         for (tag, order) in ProofOrder::variants().into_iter().enumerate() {
             assert_eq!(order.tag(), tag as u32);
@@ -847,5 +1041,148 @@ mod tests {
                 spec.name,
             );
         }
+    }
+
+    #[test]
+    fn eval_external_scales_wrapped_centered_aux_values_by_trace_length() {
+        let air = MidenMultiAir::default();
+        let challenges = [QuadFelt::from(Felt::from_u32(7)), QuadFelt::from(Felt::from_u32(11))];
+        let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES as u32).map(Felt::from_u32).collect();
+        let kernel_digests = Vec::new();
+        let log_heights = [6, 6, 6, LOG_AND8_TABLE_HEIGHT];
+
+        let zero = [QuadFelt::from(Felt::ZERO)];
+        let centered = [QuadFelt::from(Felt::from_u32(3))];
+
+        let base_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &zero];
+        let shifted_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &centered];
+
+        let base = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &base_aux_values,
+                &log_heights,
+            )
+            .expect("base boundary reduction");
+        let shifted = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &shifted_aux_values,
+                &log_heights,
+            )
+            .expect("shifted boundary reduction");
+
+        let trace_len =
+            Felt::new(1u64 << LOG_AND8_TABLE_HEIGHT).expect("trace length must be canonical");
+        let expected_delta = centered[0] * QuadFelt::from(trace_len);
+        assert_eq!(shifted[0] - base[0], expected_delta);
+    }
+
+    #[test]
+    fn ace_and_native_boundary_use_same_wrapped_centered_scale() {
+        let counts = InputCounts {
+            preprocessed_width: 0,
+            width: 0,
+            aux_width: 0,
+            num_aux_boundary: MIDEN_AIR_COUNT,
+            num_public: NUM_PUBLIC_VALUES,
+            num_vlpi: NUM_VAR_LEN_PUBLIC_INPUT_GROUPS,
+            num_randomness: 2,
+            num_periodic: 0,
+            num_quotient_chunks: 1,
+        };
+        let layout = InputLayout::new_multi_air_for_airs(counts, MIDEN_AIR_COUNT);
+        let mut builder = DagBuilder::<QuadFelt>::new();
+        let constraint_root = builder.constant(QuadFelt::from(Felt::ZERO));
+        let root = crate::ace::batch_logup_boundary_into_builder(
+            &mut builder,
+            constraint_root,
+            &crate::ace::LogUpBoundaryConfig {
+                aux_terms: vec![
+                    crate::ace::AuxBoundaryTerm { column: 0, scale: None },
+                    crate::ace::AuxBoundaryTerm {
+                        column: MidenAirId::And8Lookup.instance_index(),
+                        scale: Some(InputKey::TraceLenAir(MidenAirId::And8Lookup.instance_index())),
+                    },
+                ],
+                fractions: Vec::new(),
+                scalar_corrections: Vec::new(),
+            },
+        );
+        let circuit = emit_circuit(&builder.build(root), layout).expect("ACE boundary circuit");
+        let layout = circuit.layout();
+        let mut inputs = fill_inputs(layout);
+
+        let log_heights = [6, 6, 6, LOG_AND8_TABLE_HEIGHT];
+        for (air_idx, &log_height) in log_heights.iter().enumerate() {
+            let trace_len = Felt::new(1u64 << log_height).expect("trace length must be canonical");
+            let idx = layout.index(InputKey::TraceLenAir(air_idx)).expect("trace length slot");
+            inputs[idx] = QuadFelt::from(trace_len);
+        }
+        inputs[layout.index(InputKey::Gamma).expect("gamma slot")] =
+            QuadFelt::from(Felt::from_u32(13));
+
+        let centered = QuadFelt::from(Felt::from_u32(3));
+        let core_boundary = layout.index(InputKey::AuxBusBoundary(0)).expect("core boundary slot");
+        let and8_boundary = layout.index(InputKey::AuxBusBoundary(3)).expect("AND8 boundary slot");
+
+        let base = circuit.eval(&inputs).expect("ACE base eval");
+        let mut core_shifted = inputs.clone();
+        core_shifted[core_boundary] += centered;
+        let core_delta = circuit.eval(&core_shifted).expect("ACE core-shift eval") - base;
+
+        let mut and8_shifted = inputs;
+        and8_shifted[and8_boundary] += centered;
+        let and8_delta = circuit.eval(&and8_shifted).expect("ACE AND8-shift eval") - base;
+        assert_ne!(core_delta, QuadFelt::from(Felt::ZERO));
+
+        let air = MidenMultiAir::default();
+        let challenges = [QuadFelt::from(Felt::from_u32(7)), QuadFelt::from(Felt::from_u32(11))];
+        let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES as u32).map(Felt::from_u32).collect();
+        let kernel_digests = Vec::new();
+
+        let zero = [QuadFelt::from(Felt::ZERO)];
+        let native_centered = [centered];
+        let base_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &zero];
+        let core_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
+            [&native_centered, &zero, &zero, &zero];
+        let and8_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
+            [&zero, &zero, &zero, &native_centered];
+
+        let native_base = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &base_aux_values,
+                &log_heights,
+            )
+            .expect("native base boundary");
+        let native_core_delta = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &core_aux_values,
+                &log_heights,
+            )
+            .expect("native core-shift boundary")[0]
+            - native_base[0];
+        let native_and8_delta = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &and8_aux_values,
+                &log_heights,
+            )
+            .expect("native AND8-shift boundary")[0]
+            - native_base[0];
+
+        assert_eq!(and8_delta * native_core_delta, core_delta * native_and8_delta);
     }
 }

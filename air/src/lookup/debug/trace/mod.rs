@@ -3,20 +3,20 @@
 //! One walk over a concrete main trace, row by row, produces three outputs projected
 //! out of the shared `run_trace_walk` driver:
 //!
-//! - **Balance** — signed multiplicities keyed by encoded denominator. Any residual at the end of
+//! - **Balance** - signed multiplicities keyed by encoded denominator. Any residual at the end of
 //!   the walk is an unmatched interaction.
-//! - **Push log** — a [`PushRecord`] per interaction emission, capturing pre-encoding payload,
+//! - **Push log** - a [`PushRecord`] per interaction emission, capturing pre-encoding payload,
 //!   encoded denominator, signed multiplicity, and `(row, column, group)` source coordinates.
 //!   Joined back against the balance map at finalize time so each unmatched denominator lists the
 //!   exact pushes that summed to it.
-//! - **Column oracle folds** — per-row per-column `(V_col, U_col)` pairs computed via the
+//! - **Column oracle folds** - per-row per-column `(V_col, U_col)` pairs computed via the
 //!   constraint-path cross-multiplication rule, used by the processor's LogUp cross-check.
 //!
 //! Layout:
 //!
-//! - [`builder`] — the `DebugTraceBuilder` (plus column / group / batch handles) that drives each
+//! - [`builder`] - the `DebugTraceBuilder` (plus column / group / batch handles) that drives each
 //!   per-row walk.
-//! - This file — the report types ([`BalanceReport`], [`Unmatched`], [`PushRecord`], …), the
+//! - This file - the report types ([`BalanceReport`], [`Unmatched`], [`PushRecord`], ...), the
 //!   row-by-row `run_trace_walk` driver, and the two public entry points.
 
 use alloc::{string::String, vec, vec::Vec};
@@ -27,7 +27,7 @@ use miden_core::{
     field::{PrimeCharacteristicRing, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
-use miden_crypto::stark::air::RowWindow;
+use miden_crypto::stark::air::{BaseAir, RowWindow};
 
 use super::super::{Challenges, LookupAir};
 use crate::Felt;
@@ -37,6 +37,18 @@ pub mod builder;
 pub use builder::{
     DebugBoundaryEmitter, DebugTraceBatch, DebugTraceBuilder, DebugTraceColumn, DebugTraceGroup,
 };
+
+fn row_window<'a>(
+    flat: &'a [Felt],
+    width: usize,
+    row: usize,
+    next_row: usize,
+) -> RowWindow<'a, Felt> {
+    RowWindow::from_two_rows(
+        &flat[row * width..(row + 1) * width],
+        &flat[next_row * width..(next_row + 1) * width],
+    )
+}
 
 // REPORT TYPES
 // ================================================================================================
@@ -120,7 +132,7 @@ impl fmt::Display for BalanceReport {
             if u.contributions.len() > MAX_CONTRIB_LINES {
                 writeln!(
                     f,
-                    "    … {} more contributions",
+                    "    ... {} more contributions",
                     u.contributions.len() - MAX_CONTRIB_LINES,
                 )?;
             }
@@ -175,6 +187,7 @@ pub fn check_trace_balance<A>(
     challenges: &Challenges<QuadFelt>,
 ) -> BalanceReport
 where
+    A: BaseAir<Felt>,
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
     run_trace_walk(
@@ -191,7 +204,7 @@ where
 /// Walk a complete main trace and return the per-row constraint-path `(V_col, U_col)`
 /// folds. `folds[r][col]` is the fold for column `col` at row `r`.
 ///
-/// Does not incorporate boundary contributions — the folds are a per-row property of
+/// Does not incorporate boundary contributions - the folds are a per-row property of
 /// the main trace, independent of once-per-proof outer emissions.
 pub fn collect_column_oracle_folds<A>(
     air: &A,
@@ -201,6 +214,7 @@ pub fn collect_column_oracle_folds<A>(
     challenges: &Challenges<QuadFelt>,
 ) -> Vec<Vec<(QuadFelt, QuadFelt)>>
 where
+    A: BaseAir<Felt>,
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
     run_trace_walk(air, main_trace, periodic_columns, public_values, &[], challenges).folds_per_row
@@ -226,11 +240,21 @@ fn run_trace_walk<A>(
     challenges: &Challenges<QuadFelt>,
 ) -> TraceWalkOutput
 where
+    A: BaseAir<Felt>,
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
 {
     let num_rows = main_trace.height();
     let width = main_trace.width();
     let flat: &[Felt] = main_trace.values.borrow();
+    let preprocessed = air.preprocessed_trace();
+    let preprocessed_rows = preprocessed.as_ref().map(|trace| {
+        assert_eq!(
+            trace.height(),
+            num_rows,
+            "trace-balance walk expects preprocessed and main traces to have equal height"
+        );
+        (trace.width(), trace.values.borrow())
+    });
     let num_cols = air.num_columns();
 
     let mut state = DebugTraceState {
@@ -243,10 +267,14 @@ where
     let mut periodic_row: Vec<Felt> = vec![Felt::ZERO; periodic_columns.len()];
 
     for r in 0..num_rows {
-        let curr = &flat[r * width..(r + 1) * width];
         let nxt_idx = (r + 1) % num_rows;
-        let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
-        let window = RowWindow::from_two_rows(curr, next);
+        let window = row_window(flat, width, r, nxt_idx);
+        let preprocessed_window = preprocessed_rows.map_or_else(
+            || RowWindow::from_two_rows(&[], &[]),
+            |(preprocessed_width, preprocessed_flat)| {
+                row_window(preprocessed_flat, preprocessed_width, r, nxt_idx)
+            },
+        );
 
         for (i, col) in periodic_columns.iter().enumerate() {
             periodic_row[i] = col[r % col.len()];
@@ -258,7 +286,14 @@ where
         }
 
         {
-            let mut lb = DebugTraceBuilder::new(window, &periodic_row, challenges, &mut state, r);
+            let mut lb = DebugTraceBuilder::new(
+                window,
+                preprocessed_window,
+                &periodic_row,
+                challenges,
+                &mut state,
+                r,
+            );
             air.eval(&mut lb);
         }
 
@@ -266,8 +301,8 @@ where
     }
 
     // Boundary / outer interactions (once per proof, no row): kernel init, block
-    // hash, log-precompile terminals, …. Accumulates into the same balance map as
-    // the per-row trace emissions — a fully closed AIR produces `is_ok() == true`.
+    // hash, log-precompile terminals, .... Accumulates into the same balance map as
+    // the per-row trace emissions - a fully closed AIR produces `is_ok() == true`.
     {
         let mut boundary = DebugBoundaryEmitter {
             challenges,
@@ -303,7 +338,7 @@ fn finalize(state: DebugTraceState) -> BalanceReport {
             contributions,
         });
     }
-    // Sort for deterministic output — `HashMap` iteration order is arbitrary.
+    // Sort for deterministic output - `HashMap` iteration order is arbitrary.
     unmatched.sort_by_key(|u| u.denom);
     BalanceReport { unmatched, mutex_violations }
 }

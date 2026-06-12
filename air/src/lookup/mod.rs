@@ -29,6 +29,15 @@ pub use constraint::ConstraintLookupBuilder;
 pub use message::LookupMessage;
 pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 
+/// Running-sum closing convention for a lookup AIR.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LookupAccumulatorMode {
+    /// The final trace row is idle; the committed value is the raw global sum.
+    LastRowIdle,
+    /// Every row may contribute; the committed value is the centered sum `S / N`.
+    WrappedCentered,
+}
+
 // LOOKUP AIR
 // ================================================================================================
 
@@ -42,7 +51,7 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// The trait carries both the static *shape* (column count, payload
 /// width bound, bus-id upper bound) and the `eval` method that actually
 /// emits the interactions. Adapter constructors take a `&impl
-/// LookupAir<Self>` and read the shape via the trait — the `LB` type
+/// LookupAir<Self>` and read the shape via the trait - the `LB` type
 /// parameter is pinned to the adapter itself, so there is no
 /// ambiguity when the blanket `impl<LB: LookupBuilder> LookupAir<LB>
 /// for MyAir` implementations apply.
@@ -50,12 +59,12 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 /// ## Contract
 ///
 /// - [`num_columns()`](Self::num_columns) must match the number of `LookupBuilder::next_column`
-///   calls issued from [`eval`](Self::eval) — the adapter advances its internal column index each
+///   calls issued from [`eval`](Self::eval) - the adapter advances its internal column index each
 ///   time the closure returns and will panic (or produce undefined constraints) on a mismatch.
-/// - [`max_message_width()`](Self::max_message_width) must be ≥ the widest payload any message in
-///   the AIR emits. It counts **only** contiguous payload slots — the bus identifier is handled
+/// - [`max_message_width()`](Self::max_message_width) must be >= the widest payload any message in
+///   the AIR emits. It counts **only** contiguous payload slots - the bus identifier is handled
 ///   separately through the precomputed bus-prefix table.
-/// - [`num_bus_ids()`](Self::num_bus_ids) must be ≥ the largest bus ID any message in the AIR
+/// - [`num_bus_ids()`](Self::num_bus_ids) must be >= the largest bus ID any message in the AIR
 ///   emits, plus one; the adapter precomputes exactly that many bus prefixes and indexes into the
 ///   table with `bus_id as usize`.
 pub trait LookupAir<LB: LookupBuilder> {
@@ -65,13 +74,18 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Per-column upper bound on the number of fractions a single row can push.
     ///
     /// Length must equal [`num_columns()`](Self::num_columns). Each entry is the
-    /// **mutual-exclusion-aware** max — i.e. the largest active branch count taken across
+    /// **mutual-exclusion-aware** max - i.e. the largest active branch count taken across
     /// all mutually exclusive groups inside the column, not the sum of every structural
     /// `add` / `remove` / `insert` / `batch` push site.
     ///
     /// The prover-path adapter uses this to size the dense per-column fraction buffer
     /// (`Vec::with_capacity`) so the hot row loop never re-allocates.
     fn column_shape(&self) -> &[usize];
+
+    /// Running-sum closing convention for this lookup AIR.
+    fn accumulator_mode(&self) -> LookupAccumulatorMode {
+        LookupAccumulatorMode::LastRowIdle
+    }
 
     /// Upper bound on the **payload** width of any message emitted by
     /// [`eval`](Self::eval), exclusive of the bus identifier slot.
@@ -88,7 +102,7 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// the builder's closure API.
     fn eval(&self, builder: &mut LB);
 
-    /// Emit boundary / "outer" interactions — once-per-proof contributions that don't
+    /// Emit boundary / "outer" interactions - once-per-proof contributions that don't
     /// come from any main-trace row.
     ///
     /// Typical sources are committed-final terminals and public-input-driven seed
@@ -99,7 +113,7 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Consumed today only by the real-trace debug walker in
     /// [`crate::lookup::debug::trace`], which combines per-row and boundary emissions
     /// into a single balance check. The constraint and prover paths don't call this
-    /// method yet — boundary terms still flow through `when_first_row` / `when_last_row`
+    /// method yet - boundary terms still flow through `when_first_row` / `when_last_row`
     /// flag selectors inside [`eval`](Self::eval) until they are refactored to read
     /// from here too.
     ///

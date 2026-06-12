@@ -6,13 +6,13 @@ use alloc::vec::Vec;
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use crate::{MIDEN_AIR_COUNT, PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
 
 /// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
-pub const NUM_LOGUP_COMMITTED_FINALS: usize = 3;
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 
 // BOUNDARY EMITTERS
 // ================================================================================================
@@ -97,7 +97,7 @@ mod tests {
     };
 
     use crate::{
-        ChipletsAir, Felt, MidenAir, NUM_PUBLIC_VALUES,
+        ChipletsAir, Felt, LiftedAir, MidenAir, NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             lookup::{
@@ -167,6 +167,7 @@ mod tests {
     #[test]
     fn core_air_lookup_validates() {
         let layout = ValidateLayout {
+            preprocessed_width: 0,
             trace_width: NUM_CORE_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             // Core has no periodic columns (all serve the chiplets).
@@ -186,6 +187,7 @@ mod tests {
     fn chiplets_air_lookup_validates() {
         let num_periodic = ChipletsAir.periodic_columns().len();
         let layout = ValidateLayout {
+            preprocessed_width: 0,
             trace_width: NUM_CHIPLETS_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
@@ -195,6 +197,43 @@ mod tests {
         };
         ValidateLookupAir::validate(&MidenAir::CHIPLETS, layout)
             .unwrap_or_else(|err| panic!("ChipletsAir LookupAir validation failed: {err}"));
+    }
+
+    #[test]
+    fn poseidon2_permutation_air_lookup_validates() {
+        let num_periodic =
+            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION).len();
+        let layout = ValidateLayout {
+            preprocessed_width: 0,
+            trace_width:
+                crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: num_periodic,
+            permutation_width: crate::constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
+                .len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&MidenAir::POSEIDON2_PERMUTATION, layout).unwrap_or_else(
+            |err| panic!("Poseidon2PermutationAir LookupAir validation failed: {err}"),
+        );
+    }
+
+    #[test]
+    fn and8_lookup_air_lookup_validates() {
+        let layout = ValidateLayout {
+            preprocessed_width:
+                crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS,
+            trace_width: crate::constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS,
+            num_public_values: NUM_PUBLIC_VALUES,
+            num_periodic_columns: 0,
+            permutation_width:
+                crate::constraints::lookup::and8_lookup_air::AND8_LOOKUP_COLUMN_SHAPE.len(),
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: 1,
+        };
+        ValidateLookupAir::validate(&MidenAir::AND8_LOOKUP, layout)
+            .unwrap_or_else(|err| panic!("And8LookupAir LookupAir validation failed: {err}"));
     }
 
     /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued

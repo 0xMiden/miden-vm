@@ -8,10 +8,10 @@
 //! - Per-group and per-column `Deg { n, d }` declared vs observed (via
 //!   [`SymbolicExpression::degree_multiple`] on the running `(V, U)`).
 //! - Cached-encoding canonical vs encoded `(V, U)` equivalence, checked by evaluating the symbolic
-//!   difference `U_c·V_e − U_e·V_c` at a random row.
+//!   difference `U_c*V_e - U_e*V_c` at a random row.
 //! - Simple-group scope: no illegal `insert_encoded` outside the `encoded` closure.
 //!
-//! The global max-degree budget is **not** checked here — the STARK prover's
+//! The global max-degree budget is **not** checked here - the STARK prover's
 //! quotient validation already enforces it and duplicating that check muddies
 //! this module's purpose.
 
@@ -52,7 +52,7 @@ pub enum ValidationError {
     NumColumnsMismatch { declared: usize, observed: usize },
     /// A column's declared `Deg` differs from the observed symbolic degree of
     /// its accumulated `(V, U)`. Declared degrees are authoritative and must
-    /// match exactly — loose upper bounds are rejected.
+    /// match exactly - loose upper bounds are rejected.
     ColumnDegreeMismatch {
         column_idx: usize,
         declared: Deg,
@@ -60,7 +60,7 @@ pub enum ValidationError {
     },
     /// A group's declared `Deg` differs from the observed symbolic degree of
     /// the group's `(V, U)` fold. Declared degrees are authoritative and must
-    /// match exactly — loose upper bounds are rejected.
+    /// match exactly - loose upper bounds are rejected.
     GroupDegreeMismatch {
         column_idx: usize,
         group_idx: usize,
@@ -69,7 +69,7 @@ pub enum ValidationError {
         observed: Deg,
     },
     /// A cached-encoding group's canonical and encoded closures produced different
-    /// `(V, U)` pairs: the symbolic difference `V_c·U_e − V_e·U_c` evaluated to a
+    /// `(V, U)` pairs: the symbolic difference `V_c*U_e - V_e*U_c` evaluated to a
     /// non-zero `QuadFelt` at the sampled random row.
     EncodingMismatch {
         column_idx: usize,
@@ -110,7 +110,7 @@ impl fmt::Display for ValidationError {
             ),
             Self::EncodingMismatch { column_idx, group_idx, name, diff } => write!(
                 f,
-                "column[{column_idx}] group[{group_idx}] {name:?} cached-encoding mismatch: V_c·U_e − V_e·U_c = {diff:?}",
+                "column[{column_idx}] group[{group_idx}] {name:?} cached-encoding mismatch: V_c*U_e - V_e*U_c = {diff:?}",
             ),
             Self::ScopeViolation { column_idx, group_idx, name } => write!(
                 f,
@@ -128,6 +128,7 @@ impl fmt::Display for ValidationError {
 /// committed final count) through just to run the self-check.
 #[derive(Clone, Copy, Debug)]
 pub struct ValidateLayout {
+    pub preprocessed_width: usize,
     pub trace_width: usize,
     pub num_public_values: usize,
     pub num_periodic_columns: usize,
@@ -139,7 +140,7 @@ pub struct ValidateLayout {
 impl ValidateLayout {
     fn to_symbolic(self) -> miden_crypto::stark::air::symbolic::AirLayout {
         miden_crypto::stark::air::symbolic::AirLayout {
-            preprocessed_width: 0,
+            preprocessed_width: self.preprocessed_width,
             main_width: self.trace_width,
             num_public_values: self.num_public_values,
             permutation_width: self.permutation_width,
@@ -278,7 +279,7 @@ impl<'r> RowValuation<'r> {
                     i => panic!("unexpected challenge index {i} in LookupAir::eval"),
                 },
                 // LookupBuilder doesn't expose permutation columns or permutation
-                // values — the prover-side builder is the only one that touches them.
+                // values - the prover-side builder is the only one that touches them.
                 ExtEntry::Permutation { .. } | ExtEntry::PermutationValue => {
                     panic!("unexpected {entry:?} leaf in LookupAir::eval")
                 },
@@ -347,6 +348,7 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
     type PeriodicVar = SymbolicVariable<Felt>;
 
     type MainWindow = <Inner as AirBuilder>::MainWindow;
+    type PreprocessedWindow = <Inner as AirBuilder>::PreprocessedWindow;
 
     type Column<'c>
         = ValidationColumn<'c, 'r>
@@ -355,6 +357,10 @@ impl<'ab, 'r> LookupBuilder for ValidationBuilder<'ab, 'r> {
 
     fn main(&self) -> Self::MainWindow {
         self.ab.main()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        self.ab.preprocessed()
     }
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
@@ -450,7 +456,7 @@ impl<'c, 'r> ValidationColumn<'c, 'r> {
 }
 
 /// Build a fresh group scoped to `challenges`. Taken as a free function (not a
-/// method) so calling it doesn't borrow the containing `ValidationColumn` —
+/// method) so calling it doesn't borrow the containing `ValidationColumn` -
 /// the caller can still mutate `self.error` while the group is alive.
 fn fresh_group<'g>(
     challenges: &'g Challenges<ExprEF>,
@@ -510,8 +516,8 @@ impl<'c, 'r> LookupColumn for ValidationColumn<'c, 'r> {
         encoded(&mut enc);
 
         // Cached-encoding equivalence: the two closures must agree on `(V, U)`
-        // up to cross-multiplication, i.e. `V_c·U_e − V_e·U_c == 0`. We don't
-        // rely on symbolic simplification to zero — we evaluate the difference
+        // up to cross-multiplication, i.e. `V_c*U_e - V_e*U_c == 0`. We don't
+        // rely on symbolic simplification to zero - we evaluate the difference
         // at the shared random row.
         if self.error.is_none() {
             let diff_expr = canon.v.clone() * enc.u.clone() - enc.v.clone() * canon.u;

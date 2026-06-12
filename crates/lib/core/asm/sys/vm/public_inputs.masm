@@ -72,8 +72,11 @@ end
 #!    starting from the address pointed to by `public_inputs_address_ptr`.
 #! 2. Loading kernel procedure digests from the advice stack into memory at
 #!    `variable_length_public_inputs_address_ptr`.
-#! 3. Absorbing the statement public inputs into the transcript, matching `MultiAir::observe`:
-#!        [ len(FLPI), num_VLPI_groups, len(kernel_felts), 0, FLPI..., kernel_felts... ].
+#! 3. Absorbing the trusted preprocessed commitment and statement public inputs into the
+#!    transcript, matching the host verifier order:
+#!        [ preprocessed_commitment,
+#!          len(FLPI), num_VLPI_groups, len(kernel_felts), 0,
+#!          FLPI..., kernel_felts... ].
 #!    Full 8-felt blocks are absorbed directly; only the trailing partial block is buffered.
 #! 4. Observing the Miden AIR shape in the transcript.
 #! 5. Loading auxiliary randomness from the advice stack and reducing the kernel digests.
@@ -202,10 +205,11 @@ proc load_kernel_digests
         reversew
         # => [d0, d1, d2, d3, Y, ptr + 8, dst, remaining, ...]
         dup.9 mem_storew_le
-        # => [d0, d1, d2, d3, Y, ptr + 8, dst, remaining, ...]
-        movup.9 add.4 movdn.9
-        # => [Y, Y, ptr + 8, dst + 4, remaining, ...]
-        padw
+        dropw
+        # => [Y, ptr + 8, dst, remaining, ...]
+        movup.5 add.4 movdn.5
+        # => [Y, ptr + 8, dst + 4, remaining, ...]
+        padw padw
         # => [Y, Y, Y, ptr + 8, dst + 4, remaining, ...]
         movup.14
         # => [remaining, Y, Y, Y, ptr + 8, dst + 4, ...]
@@ -215,23 +219,37 @@ proc load_kernel_digests
     drop dropw dropw dropw drop drop
 end
 
-#! Absorbs the statement public inputs using `MultiAir::observe` order:
-#! `[len(FLPI), num_VLPI_groups, len(kernel_felts), 0, FLPI..., kernel_felts...]`.
+#! Absorbs the trusted preprocessed commitment followed by the statement stream.
 proc absorb_public_inputs
     # `load_public_inputs` filled the descriptor and fixed-input scratch prefix;
     # `load_kernel_digests` filled scratch[KERNEL_FELTS_OFFSET..).
     exec.constants::tmp3 mem_load mul.4 exec.constants::absorb_scratch_ptr add.2 mem_store
 
-    # L = KERNEL_FELTS_OFFSET + 4 * num_kernel_proc_digests. Store scratch_end in tmp1 and keep
-    # nfb = L / 8 full blocks on the stack.
+    # First block: [preprocessed_commitment, statement_descriptor].
+    exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+    exec.constants::absorb_scratch_ptr mem_loadw_le
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+    exec.random_coin::observe_felt
+
+    # Remaining stream:
+    #   [FLPI..., kernel_felts...]
+    # L = NUM_FIXED_LEN_PUBLIC_INPUTS + 4 * num_kernel_proc_digests.
+    # Store scratch_end in tmp1 and keep nfb = L / 8 full blocks on the stack.
     push.KERNEL_FELTS_OFFSET exec.constants::tmp3 mem_load mul.4 add
     dup exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
+    push.STATEMENT_DESCRIPTOR_LEN sub
     u32divmod.8 drop
     # => [nfb]
 
     # Absorb full 8-felt blocks with the sponge state on the stack.
     exec.random_coin::load_random_coin_state
-    exec.constants::absorb_scratch_ptr movdn.12
+    exec.constants::absorb_scratch_ptr add.STATEMENT_DESCRIPTOR_LEN movdn.12
     # => [R1, R2, C, ptr, nfb]
     movup.13 dup push.0 neq
     while.true
@@ -267,10 +285,11 @@ end
 #! This mirrors `TraceOrder::observe_shape`: instance count first, then log trace heights in
 #! fixed instance order. Proof order is derived from these heights and is not observed separately.
 proc observe_miden_air_shape
-    push.3 exec.random_coin::observe_felt
+    push.4 exec.random_coin::observe_felt
     exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
     exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
     exec.constants::get_poseidon2_permutation_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
 end
 
 #! Loads auxiliary randomness and reduces the kernel digest terms.

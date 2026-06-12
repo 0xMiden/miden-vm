@@ -89,12 +89,15 @@ where
                     let key = InputKey::Main { offset, index: v.index };
                     inputs[layout.index(key).unwrap()]
                 },
+                BaseEntry::Preprocessed { offset } => {
+                    let key = InputKey::Preprocessed { offset, index: v.index };
+                    inputs[layout.index(key).unwrap()]
+                },
                 BaseEntry::Public => {
                     let key = InputKey::Public(v.index);
                     inputs[layout.index(key).unwrap()]
                 },
                 BaseEntry::Periodic => periodic_values[v.index],
-                BaseEntry::Preprocessed { .. } => panic!("preprocessed not supported in test"),
             },
             BaseLeaf::IsFirstRow => inputs[layout.index(InputKey::IsFirst).unwrap()],
             BaseLeaf::IsLastRow => inputs[layout.index(InputKey::IsLast).unwrap()],

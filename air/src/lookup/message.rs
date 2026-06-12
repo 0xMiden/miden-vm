@@ -8,12 +8,12 @@
 //! the denominator
 //!
 //! ```text
-//!     bus_prefix[bus] + Σ_{k=0..width} β^k · values[k]
+//!     bus_prefix[bus] + sum_{k=0..width} beta^k * values[k]
 //! ```
 //!
-//! where `bus_prefix[i] = α + (i + 1) · β^W` is precomputed at builder construction time
+//! where `bus_prefix[i] = alpha + (i + 1) * beta^W` is precomputed at builder construction time
 //! and `W = MAX_MESSAGE_WIDTH`. Interaction-specific bus prefixes also provide domain
-//! separation; payloads then begin directly at `β⁰`.
+//! separation; payloads then begin directly at `beta^0`.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
@@ -28,7 +28,7 @@ use crate::lookup::Challenges;
 /// `E` is the base-field expression type (typically `AB::Expr` on the constraint path and
 /// `F` on the prover path); `EF` is the matching extension-field expression type
 /// (`AB::ExprEF` / `EF` respectively). The [`Algebra<E>`] bound on `EF` lets each message
-/// multiply a base-field payload by an `EF`-typed β-power without manually lifting.
+/// multiply a base-field payload by an `EF`-typed beta-power without manually lifting.
 ///
 /// Implementors start from the selected bus prefix and fold each payload value
 /// against `challenges.beta_powers[k]`.

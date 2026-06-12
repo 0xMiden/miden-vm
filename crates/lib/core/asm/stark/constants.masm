@@ -32,8 +32,8 @@ const LDE_DOMAIN_GEN_PTR = 3223322626
 ### Address to store the number of FRI queries
 const NUM_QUERIES_PTR = 3223322628
 
-### Address to store the size of the FRI remainder polynomial, which is basically the number of its
-### coefficients or equivalently its degree plus one.
+### Address to store the size of the FRI remainder polynomial, which is the number of its
+### coefficients, or equivalently its degree plus one.
 const REMAINDER_POLY_SIZE_PTR = 3223322629
 
 ### Address to store the number of FRI folded oracles
@@ -58,6 +58,7 @@ const TRACE_LENGTH_LOG_PTR = 3223322634
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
 const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR = 3223322637
+const AND8_LOOKUP_TRACE_LENGTH_LOG_PTR = 3223322765
 
 ### Canonical LDE coset shift and inverse. These are derived from the LDE order in
 ### `random_coin::init_seed` and match `LiftedDomain::canonical_lde_shift`.
@@ -95,7 +96,7 @@ const C_PTR = 3223322672
 const R1_PTR = 3223322676
 const R2_PTR = 3223322680
 
-### Addresses used for storing temporary values
+### Addresses used for scratch values
 const TMP1 = 3223322684
 const TMP2 = 3223322688
 const TMP3 = 3223322692
@@ -143,17 +144,17 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 
-### Proof-order tags are Lehmer ranks over [Core, Chiplets, Poseidon2Permutation].
-const ORDER_TAG_COUNT = 6
+### Proof-order tags are Lehmer ranks over [Core, Chiplets, Poseidon2Permutation, And8Lookup].
+const ORDER_TAG_COUNT = 24
 const ORDER_TAG_PTR = 3223322764
 
 ### Miden AIR shape consumed by the VM-specific recursive verifier wrapper.
 ###
 ### Layout:
-###   [log_core, log_chiplets, log_poseidon2, reserved]
+###   [log_core, log_chiplets, log_poseidon2, log_and8_lookup]
 ###
-### Shape values are supplied by advice, validated by the Miden-specific wrapper, and cached into
-### the per-AIR log-height pointers above before the generic verifier runs.
+### Advice supplies the first three dynamic heights. `log_and8_lookup` is fixed verifier setup and
+### is written by the Miden-specific wrapper before the generic verifier runs.
 const AIR_SHAPE_PTR = 3223322768
 
 ### Relation digest for this verifier instance.
@@ -162,10 +163,13 @@ const AIR_SHAPE_PTR = 3223322768
 ### value.
 const RELATION_DIGEST_PTR = 3223322784
 
+### Trusted setup commitment for the preprocessed trace group.
+const PREPROCESSED_TRACE_COM_PTR = 3223322788
+
 ### Scratch buffer used while absorbing VM statement public inputs.
 ###
-### It holds 43 fixed stream elements plus up to MAX_AUX_INPUTS kernel digest elements during
-### `sys::vm::public_inputs::process_public_inputs`.
+### It holds the 4-felt statement descriptor, 40 fixed public-input felts, and up to
+### MAX_AUX_INPUTS kernel digest felts during `sys::vm::public_inputs::process_public_inputs`.
 const ABSORB_SCRATCH_PTR = 3223324000
 
 ## ACE related
@@ -199,33 +203,35 @@ const ABSORB_SCRATCH_PTR = 3223324000
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
-### (alignment = 8 for Poseidon2). One OOD point stores current and next frames:
-###   main:  2 * (ceil(51/8)*8 + ceil(21/8)*8 + ceil(16/8)*8) = 192 felts
-###   aux:   2 * (ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8)    = 48 felts
-###   quot:  2 * (8 EF chunks * 2 coords)                     = 32 felts
-###   total per OOD point                                      = 272 felts
-### Two OOD points (z and g*z) require 544 felts.
+### OOD evaluations region. One OOD point has 160 logical slots in the LMCS-aligned wire format:
+###   preprocessed openings:    aligned(3)                                           = 8
+###   main openings:            aligned(51) + aligned(22) + aligned(16) + aligned(1) = 104
+###   auxiliary coord slots:    aligned(4*2) + aligned(3*2) + aligned(1*2) + aligned(1*2)
+###                                                                                   = 32
+###   quotient coord slots:     8*2                                                   = 16
+### The advice stream stores one OOD point as 320 base felts. Two points (z and g*z)
+### occupy 640 base felts.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
-### Auxiliary bus boundary values (3 extension field elements = 6 base elements).
-### Stored in 8 base elements so the following ACE stark-vars region is word-aligned.
-const AUX_BUS_BOUNDARY_PTR = 3225420324       # OOD_EVALUATIONS_PTR + 544
+### Auxiliary bus boundary values (4 extension field elements = 8 base elements).
+const AUX_BUS_BOUNDARY_PTR = 3225420420       # OOD_EVALUATIONS_PTR + 640
 
-### Auxiliary inputs for ACE (stark vars), 21 EF slots padded to 22 = 44 base felts:
+### Auxiliary inputs for ACE (stark vars), 28 EF slots = 56 base felts:
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
 ###   slot 10:     multi_air_beta
 ###   slot 11:     reserved
 ###   slots 12-14: Core is_{first,last,transition}
 ###   slots 15-17: Chiplets is_{first,last,transition}
 ###   slots 18-20: Poseidon2Permutation is_{first,last,transition}
-const AUXILIARY_ACE_INPUTS_PTR = 3225420332   # AUX_BUS_BOUNDARY_PTR + 8
+###   slots 21-23: And8Lookup is_{first,last,transition}
+###   slots 24-27: per-AIR trace lengths in semantic instance order
+const AUXILIARY_ACE_INPUTS_PTR = 3225420428   # AUX_BUS_BOUNDARY_PTR + 8
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420376     # AUXILIARY_ACE_INPUTS_PTR + 44
+const ACE_CIRCUIT_STREAM_PTR = 3225420484     # AUXILIARY_ACE_INPUTS_PTR + 56
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420972            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225421084            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (600 for multi-AIR)
 
 ## FRI
 ##
@@ -259,8 +265,9 @@ const ACE_CIRCUIT_PTR = 3225420972            # ACE_CIRCUIT_STREAM_PTR + num_con
 const FRI_COM_PTR = 4294912800
 
 ## Current trace row
-## 96 field elements for the aligned main trace row, 24 field elements for aligned auxiliary
-## coordinates, and 16 field elements for quotient chunks, i.e. 96 + 24 + 16 = 136 slots.
+## 8 slots for the aligned preprocessed row, 104 for the aligned main trace row,
+## 32 slots for aligned auxiliary coordinates, and 16 slots for quotient chunks:
+## 8 + 104 + 32 + 16 = 160 slots.
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
 ## Its size is determined by the sum of widths of all traces.
@@ -424,6 +431,14 @@ pub proc get_poseidon2_permutation_trace_length_log
     push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_load
 end
 
+pub proc set_and8_lookup_trace_length_log
+    push.AND8_LOOKUP_TRACE_LENGTH_LOG_PTR mem_store
+end
+
+pub proc get_and8_lookup_trace_length_log
+    push.AND8_LOOKUP_TRACE_LENGTH_LOG_PTR mem_load
+end
+
 pub proc set_query_pow_bits
     push.QUERY_POW_BITS_PTR mem_store
 end
@@ -458,6 +473,10 @@ end
 
 pub proc composition_poly_com_ptr
     push.COMPOSITION_POLY_COM_PTR
+end
+
+pub proc preprocessed_trace_com_ptr
+    push.PREPROCESSED_TRACE_COM_PTR
 end
 
 #! Address for the point `z` and its exponentiation `z^N` where `N=trace_len`.

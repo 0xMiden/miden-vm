@@ -4,11 +4,15 @@
 //! `build_ace_dag_for_air` with the LogUp auxiliary-trace boundary check:
 //!
 //! ```text
-//! 0  =  sum(aux_bound[0..NUM_LOGUP_COMMITTED_FINALS])
+//! 0  =  weighted_sum(aux_bound[0..NUM_LOGUP_COMMITTED_FINALS])
 //!         + c_block_hash
 //!         + c_log_precompile
 //!         + c_kernel_rom
 //! ```
+//!
+//! Most AIRs commit raw LogUp boundary sums. Wrapped-centered AIRs commit `sum / trace_len`; their
+//! boundary slot is therefore scaled by the corresponding trace length before it enters the
+//! cross-AIR identity.
 //!
 //! Two of the three corrections depend only on fixed-length public inputs
 //! (`c_bh`, `c_lp`), so they are rebuilt directly inside the DAG as rational
@@ -16,8 +20,8 @@
 //! in-circuit inversion. The kernel-ROM correction depends on the variable-
 //! length kernel digest list which the circuit can't walk, so MASM computes
 //! it (one final `ext2inv`) and hands it in as a single scalar via the
-//! existing `VlpiReduction(0)` input. The final boundary check is the
-//! quadratic identity `(sum_aux_bound + c_kr) * D + N = 0`.
+//! existing `VlpiReduction(0)` input. The final boundary check is the quadratic identity
+//! `(weighted_aux_sum + c_kr) * D + N = 0`.
 
 use alloc::{format, vec::Vec};
 
@@ -31,17 +35,21 @@ use miden_crypto::{
     stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
 };
 
-use crate::{AIRS, MIDEN_AIR_COUNT, MidenAir, MidenAirId, ProofOrder};
+use crate::{
+    AIRS, MIDEN_AIR_COUNT, MidenAir, MidenAirId, ProofOrder, lookup::LookupAccumulatorMode,
+};
 
 mod logup_boundary;
 
 pub use logup_boundary::{
-    BusFraction, LogUpBoundaryConfig, MessageElement, Sign, batch_logup_boundary_into_builder,
-    multi_air_logup_boundary_config,
+    AuxBoundaryTerm, BusFraction, LogUpBoundaryConfig, MessageElement, Sign,
+    batch_logup_boundary_into_builder, multi_air_logup_boundary_config,
 };
 
 #[derive(Copy, Clone)]
 struct SlotOffsets {
+    /// Preprocessed-trace column offset of this AIR in the combined proof-order layout.
+    preprocessed: usize,
     /// Main-trace column offset of this AIR in the combined proof-order layout.
     main: usize,
     /// Aux-trace column offset of this AIR in the combined proof-order layout.
@@ -58,6 +66,8 @@ struct AirSubDag<EF> {
     dag: AceDag<EF>,
     /// Single-AIR input counts from the source DAG layout.
     counts: InputCounts,
+    /// Preprocessed-trace width rounded to the LMCS matrix alignment.
+    aligned_preprocessed: usize,
     /// Main-trace width rounded to the LMCS matrix alignment.
     aligned_main: usize,
     /// Aux-trace width rounded to the LMCS matrix alignment.
@@ -99,7 +109,7 @@ where
 ///    Main, aux-coordinate, and aux-boundary slots are rewritten according to `order`.
 /// 3. Beta-fold the per-AIR roots in proof order with the single multi-AIR beta challenge.
 /// 4. Apply the shared boundary via [`batch_logup_boundary_into_builder`] using a
-///    [`LogUpBoundaryConfig`] whose `sum_columns` covers every AIR's boundary slot.
+///    [`LogUpBoundaryConfig`] whose aux terms cover every AIR's boundary slot.
 ///
 /// Returns the combined `AceCircuit` ready for emission to the MASM ACE chip.
 pub fn build_multi_air_ace_circuit_for_order<EF>(
@@ -136,6 +146,7 @@ where
     let global_periodic_max = sub_dags.iter().map(|air| air.periodic_max).max().unwrap_or(0);
     validate_periodic_embedding(&sub_dags, global_periodic_max)?;
 
+    let combined_preprocessed_w: usize = sub_dags.iter().map(|air| air.aligned_preprocessed).sum();
     let combined_main_w: usize = sub_dags.iter().map(|air| air.aligned_main).sum();
     let combined_aux_w: usize = sub_dags.iter().map(|air| air.aligned_aux).sum();
     let total_aux_values: usize = sub_dags.iter().map(|air| air.aux_values).sum();
@@ -164,13 +175,14 @@ where
 
     // Step 2: combined input counts.
     //
-    // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen layout matches
-    //   the wire byte order exactly. Padding slots inside each AIR subregion are unreferenced by
-    //   that AIR's constraints.
+    // - Trace widths sum the LMCS-aligned per-AIR widths so the codegen layout matches the wire
+    //   byte order exactly. Padding slots inside each AIR subregion are unreferenced by that AIR's
+    //   constraints.
     // - `num_aux_boundary` sums each AIR's boundary slot count.
     // - `num_periodic` is metadata for the combined layout. Periodic columns were already
     //   lowered inside each sub-DAG as polynomials in that AIR's `z_k`.
     let combined_counts = InputCounts {
+        preprocessed_width: combined_preprocessed_w,
         width: combined_main_w,
         aux_width: combined_aux_w,
         num_aux_boundary: total_aux_values,
@@ -250,7 +262,8 @@ where
     let combined_constraint = builder.sub(combined_acc, shared_qv);
 
     // Step 4: combined LogUp boundary.
-    let combined_boundary_config = multi_air_logup_boundary_config(total_aux_values);
+    let combined_boundary_config =
+        multi_air_logup_boundary_config(aux_boundary_terms(&sub_dags, &offsets));
     let final_root = batch_logup_boundary_into_builder(
         &mut builder,
         combined_constraint,
@@ -275,6 +288,7 @@ where
     let aux_values = <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(&air);
     let periodic_columns = <MidenAir as LiftedAir<Felt, EF>>::periodic_columns(&air);
     let periodic_max = periodic_columns.iter().map(Vec::len).max().unwrap_or(0);
+    let preprocessed_width = <MidenAir as LiftedAir<Felt, EF>>::preprocessed_width(&air);
 
     let aligned_aux_coord = (aux_width * miden_ace_codegen::EXT_DEGREE).next_multiple_of(alignment);
     assert!(
@@ -286,6 +300,7 @@ where
         id,
         dag: artifacts.dag,
         counts: artifacts.layout.counts,
+        aligned_preprocessed: preprocessed_width.next_multiple_of(alignment),
         aligned_main: main_width.next_multiple_of(alignment),
         aligned_aux: aligned_aux_coord / miden_ace_codegen::EXT_DEGREE,
         aux_values,
@@ -322,7 +337,13 @@ fn slot_offsets_by_air<EF>(
     sub_dags: &[AirSubDag<EF>],
     order: &ProofOrder,
 ) -> [SlotOffsets; MIDEN_AIR_COUNT] {
-    let mut offsets = [SlotOffsets { main: 0, aux: 0, boundary: 0 }; MIDEN_AIR_COUNT];
+    let mut offsets = [SlotOffsets {
+        preprocessed: 0,
+        main: 0,
+        aux: 0,
+        boundary: 0,
+    }; MIDEN_AIR_COUNT];
+    let mut preprocessed = 0usize;
     let mut main = 0usize;
     let mut aux = 0usize;
     let mut boundary = 0usize;
@@ -330,13 +351,35 @@ fn slot_offsets_by_air<EF>(
     for id in order.ids().iter().copied() {
         let air = &sub_dags[id.instance_index()];
         debug_assert_eq!(air.id, id);
-        offsets[id.instance_index()] = SlotOffsets { main, aux, boundary };
+        offsets[id.instance_index()] = SlotOffsets { preprocessed, main, aux, boundary };
+        preprocessed += air.aligned_preprocessed;
         main += air.aligned_main;
         aux += air.aligned_aux;
         boundary += air.aux_values;
     }
 
     offsets
+}
+
+fn aux_boundary_terms<EF>(
+    sub_dags: &[AirSubDag<EF>],
+    offsets: &[SlotOffsets; MIDEN_AIR_COUNT],
+) -> Vec<AuxBoundaryTerm> {
+    let total_aux_values: usize = sub_dags.iter().map(|air| air.aux_values).sum();
+    let mut terms = Vec::with_capacity(total_aux_values);
+    for air in sub_dags {
+        let offset = offsets[air.id.instance_index()].boundary;
+        let scale = aux_boundary_scale(air.id);
+        terms.extend((0..air.aux_values).map(|i| AuxBoundaryTerm { column: offset + i, scale }));
+    }
+    terms
+}
+
+fn aux_boundary_scale(id: MidenAirId) -> Option<InputKey> {
+    match id.lookup_accumulator_mode() {
+        LookupAccumulatorMode::LastRowIdle => None,
+        LookupAccumulatorMode::WrappedCentered => Some(InputKey::TraceLenAir(id.instance_index())),
+    }
 }
 
 fn rewrite_air_input<EF>(
@@ -354,6 +397,10 @@ where
         InputKey::Main { offset, index } => {
             builder.input(InputKey::Main { offset, index: index + offsets.main })
         },
+        InputKey::Preprocessed { offset, index } => builder.input(InputKey::Preprocessed {
+            offset,
+            index: index + offsets.preprocessed,
+        }),
         InputKey::AuxCoord { offset, index, coord } => builder.input(InputKey::AuxCoord {
             offset,
             index: index + offsets.aux,

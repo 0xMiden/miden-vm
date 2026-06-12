@@ -33,19 +33,22 @@
 //! Layout order (both Native and Masm):
 //! 1) public_values
 //! 2) aux randomness (alpha/beta)
-//! 3) main_curr
-//! 4) aux_curr
-//! 5) quotient_curr
-//! 6) main_next
-//! 7) aux_next
-//! 8) quotient_next
-//! 9) aux_bus_boundary
-//! 10) stark_vars
+//! 3) preprocessed_curr
+//! 4) main_curr
+//! 5) aux_curr
+//! 6) quotient_curr
+//! 7) preprocessed_next
+//! 8) main_next
+//! 9) aux_next
+//! 10) quotient_next
+//! 11) aux_bus_boundary
+//! 12) stark_vars
 //!
 //! Notes:
 //! - `quotient_next` is included in the READ layout and is mapped via
 //!   `InputKey::QuotientChunkCoord` with `offset = 1`.
-//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs.
+//! - `stark_vars` starts with 10 EF slots for the canonical verifier inputs; multi-AIR layouts
+//!   append beta, one reserved slot, per-AIR selector triples, and per-AIR trace lengths.
 
 mod keys;
 mod plan;

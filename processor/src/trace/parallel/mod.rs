@@ -6,7 +6,9 @@ use miden_air::{
     CoreCols, Felt, StackCols, SystemCols,
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, decoder::NUM_OP_BITS,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        and8_lookup::{AND8_TABLE_HEIGHT, NUM_AND8_LOOKUP_COLS},
+        decoder::NUM_OP_BITS,
     },
 };
 use miden_core::{
@@ -178,7 +180,12 @@ pub fn build_trace_with_max_len(
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
     let poseidon2_permutation_height =
         pad_to_trace_length(chiplets.poseidon2_permutation_trace_len());
-    let padded_trace_len = core_height.max(chiplets_height).max(poseidon2_permutation_height);
+    let and8_lookup_trace_len = AND8_TABLE_HEIGHT;
+    let and8_lookup_height = AND8_TABLE_HEIGHT;
+    let padded_trace_len = core_height
+        .max(chiplets_height)
+        .max(poseidon2_permutation_height)
+        .max(and8_lookup_height);
 
     // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
     // when the unpadded check above passed.
@@ -191,6 +198,7 @@ pub fn build_trace_with_max_len(
         range_table_len,
         ChipletsLengths::new(&chiplets),
         chiplets.poseidon2_permutation_trace_len(),
+        and8_lookup_trace_len,
         padded_trace_len,
     );
 
@@ -199,6 +207,7 @@ pub fn build_trace_with_max_len(
         || chiplets.into_traces(chiplets_height, poseidon2_permutation_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
+    let and8_lookup_trace = Felt::zero_vec(and8_lookup_height * NUM_AND8_LOOKUP_COLS);
 
     // The range checker occupies the two trailing columns of the core buffer.
     range_checker.write_range_into_core(
@@ -217,6 +226,7 @@ pub fn build_trace_with_max_len(
             core_trace_data,
             chiplets_trace.trace,
             poseidon2_permutation_trace.trace,
+            and8_lookup_trace,
             last_program_row,
         )
     };

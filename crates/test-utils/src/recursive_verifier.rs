@@ -9,7 +9,7 @@
 //! The advice stack ordering must match the MASM consumption order exactly:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   Miden AIR shape ->
+//!   dynamic Miden AIR heights ->
 //!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
 //!   aux randomness -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
@@ -19,12 +19,14 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_air::{
+    MidenMultiAir, PublicInputs, Statement, config, trace::and8_lookup::LOG_AND8_TABLE_HEIGHT,
+};
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
-        StarkConfig, VerifierInstance,
+        Preprocessed, PreprocessedValidationError, StarkConfig, VerifierInstance,
         air::InstanceError,
         lmcs::{Lmcs, proof::BatchProofView},
         pcs::PcsProof,
@@ -42,7 +44,6 @@ type Challenge = QuadFelt;
 type P2Config = config::Poseidon2Config;
 type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
-const AIR_SHAPE_RESERVED: u64 = 0;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
@@ -60,6 +61,8 @@ pub enum VerifierError {
     InvalidProofShape(&'static str),
     #[error(transparent)]
     Statement(#[from] InstanceError),
+    #[error(transparent)]
+    Preprocessed(#[from] PreprocessedValidationError),
     #[error(transparent)]
     Transcript(#[from] CryptoVerifierError),
 }
@@ -100,14 +103,19 @@ pub fn generate_advice_inputs(
     let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
         Statement::new(MidenMultiAir::new(), public_values, kernel_felts)?;
 
-    // 3. Seed challenger with protocol params. `StarkProof::from_data` absorbs the statement and
-    //    log trace heights internally.
+    let preprocessed = Preprocessed::build(&statement, &config);
+    let preprocessed_commitment = preprocessed.as_ref().map(Preprocessed::commitment);
+    if preprocessed_commitment.is_none() {
+        return Err(VerifierError::InvalidProofShape("missing Miden preprocessed setup"));
+    }
+
+    // 3. Seed challenger with protocol params. `StarkProof::from_data` absorbs the trusted
+    //    preprocessed commitment, then the statement and log trace heights.
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
     // 4. Replay the Fiat-Shamir transcript.
-    let verifier_instance = VerifierInstance::new(&config, &statement, None)
-        .expect("Miden AIRs declare no preprocessed columns");
+    let verifier_instance = VerifierInstance::new(&config, &statement, preprocessed_commitment)?;
     let (proof, _digest) = StarkProof::from_data(&verifier_instance, &proof_data, challenger)?;
 
     // log_trace_heights() returns instance order, which is caller order for MidenMultiAir.
@@ -115,6 +123,9 @@ pub fn generate_advice_inputs(
     let log_core_trace_height = log_trace_heights[0] as usize;
     let log_chiplets_trace_height = log_trace_heights[1] as usize;
     let log_poseidon2_trace_height = log_trace_heights[2] as usize;
+    if log_trace_heights[3] != LOG_AND8_TABLE_HEIGHT {
+        return Err(VerifierError::InvalidProofShape("invalid And8Lookup trace height"));
+    }
 
     build_advice(
         &config,
@@ -134,19 +145,18 @@ fn build_miden_air_shape(
     log_core_trace_height: usize,
     log_chiplets_trace_height: usize,
     log_poseidon2_trace_height: usize,
-) -> [u64; 4] {
+) -> [u64; 3] {
     [
         log_core_trace_height as u64,
         log_chiplets_trace_height as u64,
         log_poseidon2_trace_height as u64,
-        AIR_SHAPE_RESERVED,
     ]
 }
 
 /// Packs the parsed STARK transcript into the advice inputs consumed by the MASM verifier.
 ///
 /// The initial operand stack is empty. The advice stack receives security parameters first,
-/// then the Miden AIR shape, then all remaining data in the order listed above.
+/// then the dynamic Miden AIR heights, then all remaining data in the order listed above.
 fn build_advice(
     config: &P2Config,
     proof: &StarkProof<Challenge, P2Lmcs>,
@@ -177,8 +187,8 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Miden AIR shape. The VM wrapper validates this before calling the generic verifier and
-    //    caches the per-AIR log heights in memory.
+    // 1. Dynamic Miden AIR heights. The VM wrapper appends the fixed AND8 height before calling
+    //    the generic verifier and caches the per-AIR log heights in memory.
     advice_stack.extend_from_slice(&build_miden_air_shape(
         log_core_trace_height,
         log_chiplets_trace_height,
@@ -273,8 +283,8 @@ fn build_advice(
 /// Flatten OOD evaluations into the advice stack.
 ///
 /// The DEEP transcript contains evaluations at two points (z and z*g) for each committed
-/// matrix (main, aux, quotient). We split them into local (at z) and next (at z*g) rows,
-/// then append local followed by next.
+/// matrix group (preprocessed, main, aux, quotient). We split them into local (at z) and
+/// next (at z*g) rows, then append local followed by next.
 fn append_ood_evaluations<L>(advice_stack: &mut Vec<u64>, pcs: &PcsProof<Challenge, L>)
 where
     L: Lmcs<F = Felt>,
@@ -320,7 +330,7 @@ fn build_merkle_data(
     let mut partial_trees = Vec::new();
     let mut advice_map = Vec::new();
 
-    // DEEP openings -- one BatchProof per commitment (main, aux, quotient).
+    // DEEP openings -- one BatchProof per commitment group.
     for batch_proof in pcs.deep_witnesses.iter() {
         let (trees, advs) = batch_proof_to_merkle(lmcs, batch_proof)?;
         partial_trees.extend(trees);

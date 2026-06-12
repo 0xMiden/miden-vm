@@ -78,6 +78,52 @@ impl LiftedAir<F, EF> for MockAir {
     }
 }
 
+struct PreprocessedAir;
+
+impl BaseAir<F> for PreprocessedAir {
+    fn width(&self) -> usize {
+        1
+    }
+
+    fn num_public_values(&self) -> usize {
+        0
+    }
+}
+
+impl LiftedAir<F, EF> for PreprocessedAir {
+    fn preprocessed_width(&self) -> usize {
+        1
+    }
+
+    fn num_randomness(&self) -> usize {
+        2
+    }
+
+    fn aux_width(&self) -> usize {
+        1
+    }
+
+    fn num_aux_values(&self) -> usize {
+        0
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), Vec::new())
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
+        let main: AB::Expr = builder.main().current_slice()[0].into();
+        let preprocessed: AB::Expr = builder.preprocessed().current_slice()[0].into();
+        builder.assert_zero(main - preprocessed);
+    }
+}
+
 fn ef(x: u64) -> EF {
     EF::from(F::new_unchecked(x))
 }
@@ -148,7 +194,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
 
     let air_layout = AirLayout {
-        preprocessed_width: 0,
+        preprocessed_width: layout.counts.preprocessed_width,
         main_width: layout.counts.width,
         num_public_values: layout.counts.num_public,
         permutation_width: layout.counts.aux_width,
@@ -210,4 +256,39 @@ fn test_encoded_circuit_structure() {
     let encoded = circuit.to_ace().unwrap();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
+}
+
+#[test]
+fn test_preprocessed_inputs_lower_into_dag() {
+    let air = PreprocessedAir;
+    let config = AceConfig {
+        num_quotient_chunks: 1,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+        is_multi_air: false,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let layout = artifacts.layout.clone();
+
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    let mut set = |key, value| inputs[layout.index(key).unwrap()] = value;
+    set(InputKey::AuxRandAlpha, ef(7));
+    set(InputKey::AuxRandBeta, ef(11));
+    set(InputKey::Preprocessed { offset: 0, index: 0 }, ef(3));
+    set(InputKey::Preprocessed { offset: 1, index: 0 }, ef(5));
+    set(InputKey::Main { offset: 0, index: 0 }, ef(3));
+    set(InputKey::Main { offset: 1, index: 0 }, ef(5));
+    set(InputKey::Alpha, ef(17));
+    set(InputKey::ZPowN, ef(19));
+    set(InputKey::ZK, ef(23));
+    set(InputKey::IsFirst, ef(47));
+    set(InputKey::IsLast, ef(43));
+    set(InputKey::IsTransition, ef(2) - ef(3));
+    set(InputKey::Gamma, ef(53));
+    set(InputKey::Weight0, ef(31));
+    set(InputKey::F, ef(37));
+    set(InputKey::S0, ef(41));
+
+    let value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
+    assert_eq!(value, EF::ZERO);
 }

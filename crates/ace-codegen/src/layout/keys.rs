@@ -6,15 +6,17 @@ use crate::EXT_DEGREE;
 pub enum InputKey {
     /// Public input at the given index.
     Public(usize),
-    /// Aux randomness α supplied as an input.
+    /// Aux randomness alpha supplied as an input.
     AuxRandAlpha,
-    /// Aux randomness β supplied as an input.
+    /// Aux randomness beta supplied as an input.
     AuxRandBeta,
-    /// Multi-AIR β challenge used to fold per-AIR constraint roots in proof order.
+    /// Multi-AIR beta challenge used to fold per-AIR constraint roots in proof order.
     /// Only present in `is_multi_air = true`.
     MultiAirBeta,
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
+    /// Preprocessed trace value at (offset, index).
+    Preprocessed { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
     AuxCoord {
         offset: usize,
@@ -49,6 +51,9 @@ pub enum InputKey {
     IsLastAir(usize),
     /// Per-AIR lifted transition selector. The index is the AIR's semantic instance index.
     IsTransitionAir(usize),
+    /// Per-AIR trace length as a base-field value embedded in an extension-field slot.
+    /// The index is the AIR's semantic instance index.
+    TraceLenAir(usize),
     /// First barycentric weight for quotient recomposition.
     Weight0,
     /// `f = h^N`, the chunk shift ratio between cosets.
@@ -64,7 +69,7 @@ pub enum InputKey {
     },
 }
 
-/// Canonical InputKey → index mapping for a given layout.
+/// Canonical InputKey-to-index mapping for a given layout.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct InputKeyMapper<'a> {
     pub(super) layout: &'a InputLayout,
@@ -82,6 +87,11 @@ impl InputKeyMapper<'_> {
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),
+                _ => None,
+            },
+            InputKey::Preprocessed { offset, index } => match offset {
+                0 => layout.regions.preprocessed_curr.index(index),
+                1 => layout.regions.preprocessed_next.index(index),
                 _ => None,
             },
             InputKey::AuxCoord { offset, index, coord } => {
@@ -110,6 +120,7 @@ impl InputKeyMapper<'_> {
             InputKey::IsFirstAir(i) => layout.stark.air_selector_index(i, 0),
             InputKey::IsLastAir(i) => layout.stark.air_selector_index(i, 1),
             InputKey::IsTransitionAir(i) => layout.stark.air_selector_index(i, 2),
+            InputKey::TraceLenAir(i) => layout.stark.air_trace_len_index(i),
             InputKey::Gamma => Some(layout.stark.gamma),
             // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),

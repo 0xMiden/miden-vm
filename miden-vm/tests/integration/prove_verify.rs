@@ -316,7 +316,8 @@ mod fast_parallel {
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
         // Multi-AIR splitting: derive one matrix per Miden AIR instance.
-        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix) = trace.to_air_matrices();
+        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix) =
+            trace.to_air_matrices();
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
@@ -325,6 +326,7 @@ mod fast_parallel {
             core_matrix,
             chiplets_matrix,
             poseidon2_permutation_matrix,
+            and8_lookup_matrix,
             &public_values,
             &kernel_felts,
         )

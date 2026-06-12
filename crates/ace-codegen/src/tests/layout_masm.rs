@@ -3,6 +3,7 @@ use crate::{InputCounts, InputKey, InputLayout};
 #[test]
 fn masm_layout_aligns_and_maps_aux_inputs() {
     let counts = InputCounts {
+        preprocessed_width: 0,
         width: 3,
         aux_width: 2,
         num_aux_boundary: 2,
@@ -114,4 +115,29 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         layout.index(InputKey::QuotientChunkCoord { offset: 1, chunk: 0, coord: 1 }),
         Some(quotient_next + 1)
     );
+}
+
+#[test]
+fn masm_layout_aligns_and_maps_preprocessed_inputs() {
+    let counts = InputCounts {
+        preprocessed_width: 3,
+        width: 1,
+        aux_width: 0,
+        num_aux_boundary: 0,
+        num_public: 0,
+        num_vlpi: 0,
+        num_randomness: 2,
+        num_periodic: 0,
+        num_quotient_chunks: 1,
+    };
+    let layout = InputLayout::new_masm(counts);
+
+    let curr = layout.index(InputKey::Preprocessed { offset: 0, index: 0 }).unwrap();
+    let next = layout.index(InputKey::Preprocessed { offset: 1, index: 0 }).unwrap();
+    assert_eq!(curr % 4, 0);
+    assert_eq!(next % 4, 0);
+    assert_eq!(layout.index(InputKey::Preprocessed { offset: 0, index: 2 }), Some(curr + 2));
+    assert_eq!(layout.index(InputKey::Preprocessed { offset: 1, index: 2 }), Some(next + 2));
+    assert_eq!(layout.index(InputKey::Preprocessed { offset: 0, index: 3 }), None);
+    assert_eq!(layout.index(InputKey::Preprocessed { offset: 2, index: 0 }), None);
 }

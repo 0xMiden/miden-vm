@@ -206,14 +206,14 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
 
     // Combined widths concatenate each per-AIR matrix after LMCS alignment.
     assert_eq!(
-        layout.counts.width, 96,
+        layout.counts.width, 104,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 12,
-        "combined aux_width must include Core, Chiplets, and Poseidon2Permutation"
+        layout.counts.aux_width, 16,
+        "combined aux_width must include Core, Chiplets, Poseidon2Permutation, and And8Lookup"
     );
-    assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
+    assert_eq!(layout.counts.num_aux_boundary, 4, "one boundary slot per AIR");
 
     let beta = layout.index(InputKey::MultiAirBeta).expect("multi-AIR beta slot");
     assert!(beta < layout.total_inputs, "multi-AIR beta slot must be in bounds");
@@ -230,7 +230,15 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     assert_eq!(layout.index(InputKey::IsFirstAir(2)), Some(beta + 8));
     assert_eq!(layout.index(InputKey::IsLastAir(2)), Some(beta + 9));
     assert_eq!(layout.index(InputKey::IsTransitionAir(2)), Some(beta + 10));
-    assert_eq!(layout.index(InputKey::IsFirstAir(3)), None);
+    assert_eq!(layout.index(InputKey::IsFirstAir(3)), Some(beta + 11));
+    assert_eq!(layout.index(InputKey::IsLastAir(3)), Some(beta + 12));
+    assert_eq!(layout.index(InputKey::IsTransitionAir(3)), Some(beta + 13));
+    assert_eq!(layout.index(InputKey::TraceLenAir(0)), Some(beta + 14));
+    assert_eq!(layout.index(InputKey::TraceLenAir(1)), Some(beta + 15));
+    assert_eq!(layout.index(InputKey::TraceLenAir(2)), Some(beta + 16));
+    assert_eq!(layout.index(InputKey::TraceLenAir(3)), Some(beta + 17));
+    assert_eq!(layout.index(InputKey::IsFirstAir(4)), None);
+    assert_eq!(layout.index(InputKey::TraceLenAir(4)), None);
 }
 
 #[test]
