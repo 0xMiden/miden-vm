@@ -128,7 +128,7 @@ end
 #!   Word 0 (slots 0-1): alpha, z^N                (EF: composition challenge, trace-length power)
 #!   Word 1 (slots 2-3): z_k, is_first             (EF: periodic eval point, first-row selector)
 #!   Word 2 (slots 4-5): is_last, is_transition    (EF: last-row selector, transition selector)
-#!   Word 3 (slots 6-7): gamma, weight0            (EF: batching challenge; base as EF: barycentric weight)
+#!   Word 3 (slots 6-7): gamma, weight0            (EF: reserved slot, zero; base as EF: barycentric weight)
 #!   Word 4 (slots 8-9): f, s0                     (base as EF: chunk shift ratio h^N, first shift)
 #!
 #! Multi-AIR appends 8 more EF slots (4 words):
@@ -234,7 +234,7 @@ pub proc set_up_auxiliary_inputs_ace
     # => [...]
 
     # ==================================================================
-    # Phase 3: f, s0, weight0, gamma -> Words 3-4
+    # Phase 3: f, s0, weight0 -> Words 3-4
     # ==================================================================
 
     # Compute s0 = offset^N, where the LDE coset offset is g^(2^(TWO_ADICITY - log_lde))
@@ -275,12 +275,13 @@ pub proc set_up_auxiliary_inputs_ace
     dropw
     # => [weight0, ...]
 
-    # Store Word 3: [gamma_0, gamma_1, weight0, 0]
-    # weight0 is still on the stack -- sample gamma and assemble the word.
-    exec.sample_gamma
-    # => [gamma_0, gamma_1, weight0, ...]
+    # Store Word 3: [0, 0, weight0, 0]
+    # The gamma slot (slot 6) is reserved and unreferenced by the circuit; write zero.
+    # weight0 is still on the stack -- assemble the word.
+    push.0.0
+    # => [0, 0, weight0, ...]
     push.0 movdn.3
-    # => [gamma_0, gamma_1, weight0, 0, ...]
+    # => [0, 0, weight0, 0, ...]
     exec.constants::auxiliary_ace_inputs_ptr add.12
     mem_storew_le
     dropw
@@ -389,30 +390,6 @@ proc compute_per_air_selectors
     dup.1 exec.constants::auxiliary_ace_inputs_ptr add.5 add mem_store
     # => [out_offset, ...]
     drop
-end
-
-#! Sample the batching challenge gamma (EF element).
-#!
-#! gamma batches the constraint evaluation with the auxiliary trace boundary checks:
-#!   output = constraint_check + gamma * product_check + gamma^2 * sum_check
-#!
-#! WORKAROUND (unsound): Reads gamma directly from the sponge rate buffer without
-#! consuming it. This gives gamma == deep_alpha (the next challenge that will be
-#! properly sampled in generate_deep_composition_random_coefficients). Using the
-#! same value for both is unsound.
-#!
-#! TODO: Replace with a proper `sample_ext` call once the Rust-side transcript
-#! draws gamma between the OOD and DEEP phases.
-#!
-#! Input:  [...]
-#! Output: [gamma_0, gamma_1, ...]
-proc sample_gamma
-    # Assert output_len == 8 so the rate buffer indices are correct.
-    exec.constants::random_coin_output_len_ptr mem_load push.8 assert_eq
-    # Read the top 2 elements of the sponge rate buffer.
-    exec.constants::r1_ptr add.7 mem_load
-    exec.constants::r1_ptr add.6 mem_load
-    swap
 end
 
 #! Executes the constraints evaluation check.

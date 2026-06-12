@@ -67,7 +67,6 @@ fn sanity_check_ace_inputs(inputs: &[QuadFelt], layout: &InputLayout) {
     // Fiat-Shamir challenges
     assert!(!get(InputKey::Alpha).is_zero(), "alpha is zero");
     assert!(!get(InputKey::AuxRandBeta).is_zero(), "beta is zero");
-    assert!(!get(InputKey::Gamma).is_zero(), "gamma is zero");
 
     // Vanishing polynomial
     assert!(

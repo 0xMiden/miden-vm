@@ -291,6 +291,49 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         coeffs[1].as_canonical_u64(),
         "kernel_reduced coord 1 mismatch (nk={num_kernel_proc_digests})"
     );
+
+    // 7) Verify the outer-LogUp boundary correction c_total at C_TOTAL_PTR.
+    //
+    //     c_total = kernel_corr
+    //             + 1 / ((α + 2γ) + msg(FLPI[0..4]))     (BlockHashTable, program digest)
+    //             + 1 / (α + 3γ)                          (LogPrecompileTranscript init)
+    //             − 1 / ((α + 3γ) + msg(FLPI[36..40]))    (LogPrecompileTranscript final)
+    //
+    // MASM reads the two messages from FLPI elements 0..4 and 36..40 (the production
+    // advice layout puts the program digest and transcript state there); this test's
+    // advice fills those slots with arbitrary values, which is fine — the expectation
+    // below mirrors by index.
+    let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    let msg = |felts: &[u64]| -> QuadFelt {
+        felts
+            .iter()
+            .rev()
+            .fold(QuadFelt::ZERO, |acc, m| acc * beta + QuadFelt::from(Felt::new_unchecked(*m)))
+    };
+    let d_bh = alpha + gamma.double() + msg(&fixed_length_public_inputs[0..4]);
+    let prefix_lp = alpha + gamma * QuadFelt::from_u8(3);
+    let d_lpf = prefix_lp + msg(&fixed_length_public_inputs[36..40]);
+    let expected_c_total = reduced_value
+        + d_bh.try_inverse().expect("zero block-hash denominator")
+        + prefix_lp.try_inverse().expect("zero log-precompile init denominator")
+        - d_lpf.try_inverse().expect("zero log-precompile final denominator");
+    let expected: &[Felt] = expected_c_total.as_basis_coefficients_slice();
+
+    // Must match `C_TOTAL_PTR` in `crates/lib/core/asm/stark/constants.masm`.
+    let c_total_ptr = 3223322704_u32;
+    let c_total_0 = output.memory.read_element(ctx, Felt::from_u32(c_total_ptr)).unwrap();
+    let c_total_1 = output.memory.read_element(ctx, Felt::from_u32(c_total_ptr + 1)).unwrap();
+
+    assert_eq!(
+        c_total_0.as_canonical_u64(),
+        expected[0].as_canonical_u64(),
+        "c_total coord 0 mismatch (nk={num_kernel_proc_digests})"
+    );
+    assert_eq!(
+        c_total_1.as_canonical_u64(),
+        expected[1].as_canonical_u64(),
+        "c_total coord 1 mismatch (nk={num_kernel_proc_digests})"
+    );
 }
 
 /// The recursive verifier must reject statements the Rust `Statement::new` refuses:

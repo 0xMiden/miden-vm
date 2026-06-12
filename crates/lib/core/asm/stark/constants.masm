@@ -108,6 +108,12 @@ const TMP4 = 3223322696
 ### Computed once in generate_aux_randomness, read by reduce_kernel_digests.
 const BUS_GAMMA_PTR = 3223322700
 
+### Outer-LogUp boundary correction `c_total` (one extension field element, 2 base felts).
+### Computed by `compute_boundary_correction` in `sys/vm/public_inputs.masm` from the
+### non-deterministically supplied aux randomness; `observe_aux_trace` asserts
+### `c_total + aux_sum == 0` after that randomness is verified against the FS samples.
+const C_TOTAL_PTR = 3223322704
+
 ### Address to the word holding the non-deterministically loaded 2 random challenges, which will be
 ### checked for correctness once we receive the commitment to the auxiliary trace and are able to
 ### generate the auxiliary randomness
@@ -199,7 +205,8 @@ const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
 
 ### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
-###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
+###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma (reserved, zero),
+###                weight0, f, s0
 ###   slots 10-11: multi_air_beta_{core,chip}
 ###   slots 12-14: is_{first,last,transition}_core
 ###   slots 15-17: is_{first,last,transition}_chip
@@ -525,6 +532,10 @@ end
 
 pub proc bus_gamma_ptr
     push.BUS_GAMMA_PTR
+end
+
+pub proc c_total_ptr
+    push.C_TOTAL_PTR
 end
 
 pub proc aux_rand_nd_ptr

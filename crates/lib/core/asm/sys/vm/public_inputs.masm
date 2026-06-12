@@ -8,7 +8,7 @@ use miden::core::crypto::hashes::poseidon2
 #
 # This module handles the Miden VM-specific public input processing for the recursive verifier.
 # It populates the FLPI and VLPI portions of the ACE READ section (see `stark/constants.masm`
-# for the full layout diagram).
+# for the full layout diagram) and computes the outer-LogUp boundary correction `c_total`.
 #
 # Memory layout populated by this module (growing backward from AUX_RAND_ELEM_PTR):
 #
@@ -16,10 +16,21 @@ use miden::core::crypto::hashes::poseidon2
 #               [ VLPI: reduced kernel value (1 word) ]   reduce_variable_length_public_inputs
 #   anchor -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   (loaded ND here, verified in random_coin)
 #
-# The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
-# The VLPI reduction is the LogUp kernel ROM boundary correction
-#     kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)
-# (chiplet-side INIT removes; boundary adds).
+# The FLPI are the program digest (4), the input/output stacks (32), and the precompile
+# transcript state (4), in `PublicInputs::to_air_inputs` order.
+#
+# The outer-LogUp boundary correction
+#     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))    (KernelRomInit)
+#             +     1 / ((α + 2γ) + msg(program_digest))    (BlockHashTable)
+#             +     1 / (α + 3γ)                            (LogPrecompileTranscript init)
+#             −     1 / ((α + 3γ) + msg(transcript_state))  (LogPrecompileTranscript final)
+# with `γ = β^16` and `msg(w) = Σ_{i<4} w_i·β^i` is computed using the non-deterministically
+# supplied `α, β` (verified against the FS-sampled values by `generate_aux_randomness` in
+# step II) and stored at `C_TOTAL_PTR`. The step-II `observe_aux_trace` then asserts the
+# boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals,
+# mirroring `MidenMultiAir::eval_external` on the Rust side. The kernel-ROM part of the sum
+# is also stored at the start of the VLPI region (the slot is reserved in the ACE layout
+# but unreferenced by the circuit).
 #
 # Advice stack consumption order:
 #   1. fixed-length PI (40 base felts)         -- load_public_inputs
@@ -285,11 +296,13 @@ proc absorb_public_inputs
     drop drop
 end
 
-#! Loads the auxiliary randomness from the advice stack and reduces the kernel digests.
+#! Loads the auxiliary randomness from the advice stack and computes the outer-LogUp
+#! boundary correction.
 #!
 #! Loads `[beta0, beta1, alpha0, alpha1]` (word-aligned for `horner_eval_ext`), precomputes
-#! `gamma = beta^16` for per-bus domain separation, then reduces the kernel digests; the reduced
-#! value overwrites the start of the kernel-digest region (in the ACE READ section).
+#! `gamma = beta^16` for per-bus domain separation, then reduces the kernel digests (the reduced
+#! value overwrites the start of the kernel-digest region) and folds the remaining boundary
+#! fractions into `c_total` at `C_TOTAL_PTR`.
 #!
 #! Input:
 #!      - Advice stack: [beta0, beta1, alpha0, alpha1, ...]
@@ -318,6 +331,9 @@ proc finalize_kernel_reduction
     exec.constants::variable_length_public_inputs_address_ptr mem_load
     exec.constants::tmp3 mem_load
     exec.reduce_kernel_digests
+
+    # Fold the fixed boundary fractions into c_total at C_TOTAL_PTR.
+    exec.compute_boundary_correction
 end
 
 #! Reduces the kernel procedures digests using auxiliary randomness.
@@ -485,5 +501,127 @@ proc reduce_kernel_digests
     # => [original_digests_ptr, prod0, prod1, 0, 0, ...]
     mem_storew_le
     dropw
+    # => [...]
+end
+
+#! Folds the 4 base-felt public values stored as EF slots at `addr` (one base felt per EF
+#! slot, stride 2) into `msg = m0 + m1·β + m2·β^2 + m3·β^3` via Horner evaluation.
+#!
+#! Input:  [addr, beta0, beta1, ...]
+#! Output: [msg0, msg1, beta0, beta1, ...]
+proc fold_small_message
+    # acc = m3
+    dup add.6 mem_load push.0 swap
+    # => [m3, 0, addr, beta0, beta1, ...]
+
+    # acc = acc·β + m2
+    dup.4 dup.4 ext2mul
+    dup.2 add.4 mem_load add
+    # => [acc0, acc1, addr, beta0, beta1, ...]
+
+    # acc = acc·β + m1
+    dup.4 dup.4 ext2mul
+    dup.2 add.2 mem_load add
+
+    # acc = acc·β + m0
+    dup.4 dup.4 ext2mul
+    dup.2 mem_load add
+    # => [msg0, msg1, addr, beta0, beta1, ...]
+
+    movup.2 drop
+    # => [msg0, msg1, beta0, beta1, ...]
+end
+
+#! Computes the outer-LogUp boundary correction `c_total` and stores it at `C_TOTAL_PTR`.
+#!
+#!     c_total = kernel_corr                                   (KernelRomInit)
+#!             + 1 / ((α + 2γ) + msg(program_digest))          (BlockHashTable)
+#!             + 1 / (α + 3γ)                                  (LogPrecompileTranscript init)
+#!             − 1 / ((α + 3γ) + msg(transcript_state))        (LogPrecompileTranscript final)
+#!
+#! where `γ = β^16` (precomputed at `BUS_GAMMA_PTR`), `msg(w) = Σ_{i<4} w_i·β^i`, the bus
+#! prefixes are `α + (bus_id + 1)·γ` for `BlockHashTable = 1` / `LogPrecompileTranscript = 2`,
+#! and `kernel_corr` is the kernel-digest reduction stored at `var_len_ptr` by
+#! `reduce_kernel_digests`. Uses the non-deterministically supplied `α, β`; soundness comes
+#! from `generate_aux_randomness` verifying them against the Fiat-Shamir samples before
+#! `observe_aux_trace` asserts the boundary identity over `c_total`.
+#!
+#! This mirrors the fixed-fraction part of `MidenMultiAir::eval_external` on the Rust side.
+#!
+#! Input:  [...]
+#! Output: [...]
+proc compute_boundary_correction
+    # acc = kernel_corr, read back from the start of the reduced kernel-digest region.
+    exec.constants::variable_length_public_inputs_address_ptr mem_load
+    dup add.1 mem_load swap mem_load
+    # => [acc0, acc1, ...]
+
+    # --- term_bh = 1 / ((α + 2γ) + msg(program_digest)) ---
+
+    # msg(program_digest): the program digest is FLPI elements 0..3 (base offset 0 from pi_ptr).
+    exec.constants::aux_rand_nd_ptr add.1 mem_load
+    exec.constants::aux_rand_nd_ptr mem_load
+    # => [beta0, beta1, acc0, acc1, ...]
+    exec.constants::public_inputs_address_ptr mem_load
+    exec.fold_small_message
+    # => [msg0, msg1, beta0, beta1, acc0, acc1, ...]
+    movup.3 drop movup.2 drop
+    # => [msg0, msg1, acc0, acc1, ...]
+
+    # d_bh = α + 2γ + msg
+    exec.constants::aux_rand_nd_ptr add.3 mem_load
+    exec.constants::aux_rand_nd_ptr add.2 mem_load
+    ext2add
+    # => [s0, s1, acc0, acc1, ...]
+    exec.constants::bus_gamma_ptr add.1 mem_load mul.2
+    exec.constants::bus_gamma_ptr mem_load mul.2
+    ext2add
+    # => [d_bh0, d_bh1, acc0, acc1, ...]
+
+    # acc += 1 / d_bh
+    ext2inv
+    ext2add
+    # => [acc0, acc1, ...]
+
+    # --- log-precompile terms, sharing prefix_lp = α + 3γ ---
+
+    exec.constants::aux_rand_nd_ptr add.3 mem_load
+    exec.constants::aux_rand_nd_ptr add.2 mem_load
+    exec.constants::bus_gamma_ptr add.1 mem_load mul.3
+    exec.constants::bus_gamma_ptr mem_load mul.3
+    ext2add
+    # => [p0, p1, acc0, acc1, ...]
+
+    # d_lp_final = prefix_lp + msg(transcript_state)
+    # transcript_state is FLPI elements 36..39 (base offset 72 from pi_ptr).
+    exec.constants::aux_rand_nd_ptr add.1 mem_load
+    exec.constants::aux_rand_nd_ptr mem_load
+    # => [beta0, beta1, p0, p1, acc0, acc1, ...]
+    exec.constants::public_inputs_address_ptr mem_load add.72
+    exec.fold_small_message
+    # => [msg0, msg1, beta0, beta1, p0, p1, acc0, acc1, ...]
+    movup.3 drop movup.2 drop
+    # => [msg0, msg1, p0, p1, acc0, acc1, ...]
+    dup.3 dup.3
+    ext2add
+    # => [d_lpf0, d_lpf1, p0, p1, acc0, acc1, ...]
+
+    # term_final = 1 / d_lp_final; term_init = 1 / prefix_lp
+    ext2inv
+    movup.3 movup.3
+    # => [p0, p1, t_f0, t_f1, acc0, acc1, ...]
+    ext2inv
+    # => [t_i0, t_i1, t_f0, t_f1, acc0, acc1, ...]
+
+    # acc += term_init - term_final
+    movup.3 movup.3
+    # => [t_f0, t_f1, t_i0, t_i1, acc0, acc1, ...]
+    ext2sub
+    ext2add
+    # => [c_total0, c_total1, ...]
+
+    # Store c_total at C_TOTAL_PTR.
+    exec.constants::c_total_ptr mem_store
+    exec.constants::c_total_ptr add.1 mem_store
     # => [...]
 end
