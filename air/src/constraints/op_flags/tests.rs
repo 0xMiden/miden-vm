@@ -347,8 +347,15 @@ fn degree_4_op_flags() {
 #[test]
 fn composite_no_shift_flags() {
     // Operations where all 16 positions remain unchanged
-    let no_shift_opcodes: [u8; 4] =
-        [opcodes::MPVERIFY, opcodes::SPAN, opcodes::HALT, opcodes::EMIT];
+    let no_shift_opcodes: [u8; 7] = [
+        opcodes::MPVERIFY,
+        opcodes::SPAN,
+        opcodes::HALT,
+        opcodes::EMIT,
+        opcodes::CALL,
+        opcodes::SYSCALL,
+        opcodes::EVALCIRCUIT,
+    ];
 
     for opcode in no_shift_opcodes {
         let op_flags = op_flags_for_opcode(opcode.into());
@@ -398,7 +405,7 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite flags for HPERM (no shift from position 12 onwards).
+/// Tests HPERM flags (top three words are overwritten, the tail is preserved).
 #[test]
 fn composite_hperm_flags() {
     let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
