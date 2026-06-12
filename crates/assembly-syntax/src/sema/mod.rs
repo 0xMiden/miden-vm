@@ -91,6 +91,7 @@ pub fn analyze(
                 });
             },
             Form::Namespace(ns) => {
+                namespace_allowed = false;
                 if let Some(unused) = docs.take() {
                     analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
                 }
