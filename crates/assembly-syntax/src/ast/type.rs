@@ -382,17 +382,27 @@ impl From<Type> for TypeExpr {
     fn from(ty: Type) -> Self {
         match ty {
             Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
-            Type::Struct(t) => Self::Struct(StructType::new(
-                None,
-                t.fields().iter().enumerate().map(|(i, ft)| {
-                    let name = Ident::new(format!("field{i}")).unwrap();
+            Type::Struct(t) => {
+                let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
+                let fields = t.fields().iter().enumerate().map(|(i, ft)| {
+                    let name = ft
+                        .name
+                        .as_deref()
+                        .map(Ident::new)
+                        .and_then(Result::ok)
+                        .unwrap_or_else(|| Ident::new(format!("field{i}")).unwrap());
                     StructField {
                         span: SourceSpan::UNKNOWN,
                         name,
                         ty: ft.ty.clone().into(),
                     }
-                }),
-            )),
+                });
+                Self::Struct(
+                    StructType::new(name, fields)
+                        .with_repr(Span::unknown(t.repr()))
+                        .with_span(SourceSpan::UNKNOWN),
+                )
+            },
             Type::Ptr(t) => Self::Ptr((*t).clone().into()),
             Type::Function(_) => {
                 Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
@@ -400,8 +410,6 @@ impl From<Type> for TypeExpr {
             Type::List(t) => Self::Ptr(
                 PointerType::new((*t).clone().into()).with_address_space(AddressSpace::Byte),
             ),
-            Type::I128 | Type::U128 => Self::Array(ArrayType::new(Type::U32.into(), 4)),
-            Type::I64 | Type::U64 => Self::Array(ArrayType::new(Type::U32.into(), 2)),
             Type::Unknown | Type::Never | Type::F64 => panic!("unrepresentable type value: {ty}"),
             ty => Self::Primitive(Span::unknown(ty)),
         }
@@ -1262,5 +1270,39 @@ mod tests {
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)
         );
+    }
+
+    #[test]
+    fn type_expr_from_type_preserves_wide_integer_primitives() {
+        for ty in [Type::I64, Type::U64, Type::I128, Type::U128] {
+            let expr = TypeExpr::from(ty.clone());
+            let TypeExpr::Primitive(actual) = expr else {
+                panic!("expected primitive type expression for {ty}, got {expr:?}");
+            };
+            assert_eq!(actual.into_inner(), ty);
+        }
+    }
+
+    #[test]
+    fn type_expr_from_type_preserves_struct_metadata() {
+        let ty = Type::Struct(Arc::new(types::StructType::from_parts(
+            Some(Arc::from("miden:base/core-types@1.0.0/account-id")),
+            TypeRepr::BigEndian,
+            [
+                (Arc::<str>::from("prefix"), Type::Felt),
+                (Arc::<str>::from("suffix"), Type::Felt),
+            ],
+        )));
+
+        let TypeExpr::Struct(actual) = TypeExpr::from(ty) else {
+            panic!("expected struct type expression");
+        };
+        assert_eq!(
+            actual.name.as_ref().map(|name| name.as_str()),
+            Some("miden:base/core-types@1.0.0/account-id"),
+        );
+        assert_eq!(*actual.repr, TypeRepr::BigEndian);
+        assert_eq!(actual.fields[0].name.as_str(), "prefix");
+        assert_eq!(actual.fields[1].name.as_str(), "suffix");
     }
 }
