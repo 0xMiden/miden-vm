@@ -215,7 +215,18 @@ impl AsRef<str> for Ident {
 
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.name, f)
+        if Self::requires_quoting(&self.name) {
+            write!(f, "\"{}\"", &self.name)
+        } else {
+            f.write_str(&self.name)
+        }
+    }
+}
+
+impl crate::prettier::PrettyPrint for Ident {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+        display(self)
     }
 }
 

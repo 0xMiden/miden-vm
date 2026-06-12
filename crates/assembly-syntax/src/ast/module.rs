@@ -863,12 +863,7 @@ impl crate::prettier::PrettyPrint for Module {
             if i > 0 {
                 doc += nl();
             }
-            doc += const_text("extern package") + const_text(" ");
-            if Ident::requires_quoting(package) {
-                doc += text(format!("\"{package}\""));
-            } else {
-                doc += package.render();
-            }
+            doc += const_text("extern package") + const_text(" ") + package.render();
         }
 
         if !self.extern_packages.is_empty() {
@@ -884,12 +879,7 @@ impl crate::prettier::PrettyPrint for Module {
             } else {
                 doc += const_text("mod");
             }
-            doc += const_text(" ");
-            if Ident::requires_quoting(&submodule.name) {
-                doc += text(format!("\"{}\"", submodule.name));
-            } else {
-                doc += submodule.name.render();
-            }
+            doc += const_text(" ") + submodule.name.render();
         }
 
         if !self.submodules.is_empty() {
