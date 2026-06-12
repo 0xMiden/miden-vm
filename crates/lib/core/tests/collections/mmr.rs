@@ -806,7 +806,7 @@ fn test_mmr_unpack_frontier_rejects_wrong_len() {
 
 #[test]
 fn test_mmb_root_matches_crypto_belt_root() {
-    for num_leaves in [1usize, 2, 3, 7, 13, 1024] {
+    for num_leaves in (1usize..=64).chain([127, 128, 255, 257, 1024, 1337]) {
         let mmb = TestMmb::from_len(num_leaves);
         let mmb_ptr = 1000_u32;
         let source = format!(
@@ -1052,20 +1052,75 @@ fn test_mmb_closed_form_shape_matches_walk() {
     }
 }
 
+/// Builds a proof with the canonical shape for `(num_leaves, position)` but synthetic sibling
+/// words, using the same closed forms `mmb_verify_leaf` derives (validated against the shape walk
+/// in `test_mmb_closed_form_shape_matches_walk`). The matching root is `proof_root` of the fold,
+/// so the proof verifies without materializing a `TestMmb` — this is what makes trace
+/// measurements at large `num_leaves` feasible.
+fn synthetic_mmb_proof(num_leaves: usize, position: usize) -> TestMmbProof {
+    assert!(position < num_leaves);
+    let bits = num_leaves + 1;
+    let g = num_leaves - position;
+    let m = floor_log2(g);
+    let pm = 1usize << m;
+    let pos = if (bits & (pm - 1)) <= g - pm { m } else { m - 1 };
+    let s = bits >> pos;
+    let height = pos + (s & 1);
+    let start = ((s >> 1) - 1) << (pos + 1);
+    let local = position - start;
+    let split_mask = bits & !((bits << 1) & (bits >> 1));
+    let low = split_mask & ((1usize << (pos + 1)) - 2);
+    let ranges_after = low.count_ones() as usize;
+    let right_in_range = pos - floor_log2(low | 1);
+
+    let mut siblings = Vec::new();
+    for i in 0..height {
+        siblings.push(TestMmbProofStep {
+            is_right: (local >> i) & 1 == 0,
+            sibling: word_from_u64(1_000 + i as u64),
+        });
+    }
+    siblings.push(TestMmbProofStep {
+        is_right: false,
+        sibling: word_from_u64(2_000),
+    });
+    for i in 0..right_in_range {
+        siblings.push(TestMmbProofStep {
+            is_right: true,
+            sibling: word_from_u64(3_000 + i as u64),
+        });
+    }
+    siblings.push(TestMmbProofStep {
+        is_right: false,
+        sibling: word_from_u64(4_000),
+    });
+    for i in 0..ranges_after {
+        siblings.push(TestMmbProofStep {
+            is_right: true,
+            sibling: word_from_u64(5_000 + i as u64),
+        });
+    }
+
+    TestMmbProof {
+        position,
+        leaf: word_from_u64(7),
+        siblings,
+    }
+}
+
 /// Prints the trace-segment breakdown of `mmb_verify_leaf` per (num_leaves, recency); the padded
 /// length is the proving-cost driver. Diagnostic only.
 #[test]
 #[ignore = "trace-cost diagnostic; run with --ignored --nocapture"]
 fn print_mmb_verify_trace_costs() {
-    for num_leaves in [1024usize, 65_536] {
-        let mmb = TestMmb::from_len(num_leaves);
-        let root = mmb.root();
-        for recency in [1usize, 16, 256, 16_384] {
+    for num_leaves in [1024usize, 65_536, 1 << 20, 1 << 26, (1 << 31) - 1] {
+        for recency in [1usize, 16, 256, 4_096, 65_536, 1 << 20, 1 << 26] {
             if recency > num_leaves {
                 continue;
             }
-            let position = mmb.len - recency;
-            let proof = mmb.open(position);
+            let position = num_leaves - recency;
+            let proof = synthetic_mmb_proof(num_leaves, position);
+            let root = proof_root(&proof);
             let proof_ptr = 2000_u32;
             let source = format!(
                 "
@@ -1080,7 +1135,7 @@ fn print_mmb_verify_trace_costs() {
                 end
                 ",
                 mmb_proof_memory_source(proof_ptr, &proof),
-                mmb.len,
+                num_leaves,
                 push_word(&root),
             );
 
@@ -1088,8 +1143,64 @@ fn print_mmb_verify_trace_costs() {
             let s = trace.trace_len_summary();
             let c = s.chiplets_trace_len();
             println!(
-                "num_leaves={num_leaves:>6} recency={recency:>6} proof_len={:>3} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
+                "num_leaves={num_leaves:>10} recency={recency:>8} proof_len={:>3} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
                 proof.siblings.len(),
+                s.core_trace_len(),
+                s.range_trace_len(),
+                c.trace_len(),
+                c.hash_chiplet_len(),
+                c.bitwise_chiplet_len(),
+                c.memory_chiplet_len(),
+                s.trace_len(),
+                s.padded_trace_len(),
+            );
+        }
+    }
+}
+
+/// Prints the trace-segment breakdown of recomputing the commitment from peaks in memory, for
+/// the MMR rooted frontier (`root`) and the MMB belt (`mmb_root`). Peak values are synthetic;
+/// neither procedure asserts anything about them. Diagnostic only.
+#[test]
+#[ignore = "trace-cost diagnostic; run with --ignored --nocapture"]
+fn print_mmb_root_trace_costs() {
+    fn peaks_memory_source(ptr: u32, num_leaves: usize, num_peaks: usize) -> String {
+        let mut source = format!("push.{num_leaves} push.{ptr} mem_store drop\n");
+        for idx in 0..num_peaks {
+            source.push_str(&format!(
+                "{} push.{} mem_storew_le dropw\n",
+                push_word(&word_from_u64(100 + idx as u64)),
+                ptr + 4 + idx as u32 * 4,
+            ));
+        }
+        source
+    }
+
+    for num_leaves in [1024usize, 65_536, 1 << 20, 1 << 26, (1 << 31) - 1] {
+        let ptr = 1000_u32;
+        let variants = [
+            ("mmr_root", "root", num_leaves.count_ones() as usize),
+            ("mmb_root", "mmb_root", floor_log2(num_leaves + 1)),
+        ];
+        for (name, proc_name, num_peaks) in variants {
+            let source = format!(
+                "
+                use miden::core::collections::mmr
+
+                begin
+                    {}
+                    push.{ptr} exec.mmr::{proc_name}
+                    dropw
+                end
+                ",
+                peaks_memory_source(ptr, num_leaves, num_peaks),
+            );
+
+            let trace = build_test!(&source).execute().unwrap();
+            let s = trace.trace_len_summary();
+            let c = s.chiplets_trace_len();
+            println!(
+                "{name:>8} num_leaves={num_leaves:>10} peaks={num_peaks:>2} core={:>5} range={:>5} chiplets={:>5} (hash={:>5} bitwise={:>4} memory={:>4}) max={:>5} padded={:>5}",
                 s.core_trace_len(),
                 s.range_trace_len(),
                 c.trace_len(),

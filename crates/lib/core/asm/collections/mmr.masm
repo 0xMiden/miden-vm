@@ -252,66 +252,74 @@ end
 #! The MMB memory layout is `[num_leaves, 0, 0, 0] || peaks`, where the peaks are U-MMB
 #! mountains ordered from oldest to newest.
 #!
+#! The range boundaries are not tracked via mountain heights: with `bits = num_leaves + 1`,
+#! the splits sit at the set bits of `split_mask = bits & !((bits << 1) & (bits >> 1))` (see
+#! `mmb_verify_leaf`). The mask is shifted so the boundary after the oldest mountain sits at
+#! bit 31, and the fold consumes one bit per peak from the top — the bit is the exit condition
+#! of the inner per-range loop, so the fold needs no per-mountain branch at all.
+#!
 #! The range and belt accumulators are kept on the operand stack as `[RANGE_ACC, BELT_ACC]`,
-#! so the fold avoids per-iteration memory traffic; only the small scalars (cursor, mountain
-#! counters, range-split history) live in locals.
+#! so the fold avoids per-iteration memory traffic; only the boundary bits and the peak cursor
+#! bound live in locals.
 #!
 #! Input: [mmb_ptr, ...]
 #! Output: [ROOT, ...]
-@locals(9)
+@locals(3)
 pub proc mmb_root
-  loc_store.0
+  dup mem_load
+  # => [num_leaves, mmb_ptr, ...]
 
-  # loc.1 = num_leaves
-  loc_load.0 mem_load loc_store.1
-
-  loc_load.1 eq.0
+  dup eq.0
   if.true
-    padw
+    drop drop padw
+    # => [ZERO, ...]
   else
-    # loc.2 = mountain_count = floor(log2(num_leaves + 1)).
-    loc_load.1 add.1 ilog2 loc_store.2
-    # loc.3 = peak cursor.
-    loc_load.0 add.4 loc_store.3
-    # loc.4 = remaining mountains, loc.5 = current index.
-    loc_load.2 loc_store.4
-    push.0 loc_store.5
+    # bits = num_leaves + 1; mountain count = floor(log2(bits)).
+    add.1 dup ilog2
+    # => [count, bits, mmb_ptr, ...]
 
-    # Initialize the accumulators on the operand stack: [RANGE_ACC=ZERO, BELT_ACC=ZERO].
+    # loc.1 = peak cursor = mmb_ptr + 4; loc.2 = cursor bound = cursor + 4 * count.
+    movup.2 add.4 dup loc_store.1
+    dup.1 mul.4 add loc_store.2
+    # => [count, bits, ...]
+
+    # loc.0 = range boundary bits: split_mask aligned so the boundary consumed after folding
+    # the oldest peak sits at bit 31. The shift also discards the always-set bit at position
+    # `count` (the boundary above the oldest mountain, which opens no range).
+    swap dup u32shl.1 dup.1 u32shr.1 u32and u32not u32and
+    # => [split_mask, count, ...]
+    swap push.32 swap sub u32shl loc_store.0
+    # => [...]
+
+    # Accumulators live on the operand stack: [RANGE_ACC = ZERO, BELT_ACC = ZERO].
     padw padw
 
-    loc_load.4 neq.0
+    # Outer loop: one iteration per range.
+    push.1
     while.true
-      # loc.8 = current mountain height.
-      loc_load.2 loc_load.5 sub sub.1
-      dup loc_load.1 add.1 swap u32shr is_odd add loc_store.8
+      # Inner loop: fold peaks into the range until a boundary bit or the cursor bound.
+      push.1
+      while.true
+        # RANGE_ACC' = merge(RANGE_ACC, PEAK).
+        loc_load.1 dup add.4 loc_store.1
+        padw movup.4 mem_loadw_le swapw hmerge
+        # => [RANGE_ACC, BELT_ACC, ...]
 
-      # Split before this mountain when the crypto belt range rule says to start a new range:
-      # BELT_ACC' = merge(BELT_ACC, RANGE_ACC); RANGE_ACC' = ZERO.
-      loc_load.5 neq.0
-      if.true
-        loc_load.6 loc_load.8 add.2 eq
-        loc_load.5 u32gt.1
-        loc_load.7 loc_load.6 eq
-        and
-        or
-        if.true
-          swapw hmerge padw
-        end
+        # Continue while the boundary bit after this peak is unset and peaks remain.
+        loc_load.0 dup u32shl.1 loc_store.0 u32shr.31 not
+        loc_load.1 loc_load.2 neq and
       end
 
-      # RANGE_ACC' = merge(RANGE_ACC, PEAK).
-      loc_load.3 padw movup.4 mem_loadw_le swapw hmerge
+      # Close the range: BELT_ACC' = merge(BELT_ACC, RANGE_ACC); reopen with RANGE_ACC = ZERO.
+      swapw hmerge padw
+      # => [ZERO, BELT_ACC, ...]
 
-      loc_load.3 add.4 loc_store.3
-      loc_load.6 loc_store.7
-      loc_load.8 loc_store.6
-      loc_load.5 add.1 loc_store.5
-      loc_load.4 sub.1 dup loc_store.4 neq.0
+      loc_load.1 loc_load.2 neq
     end
 
-    # Final merge: BELT_ACC = merge(BELT_ACC, RANGE_ACC).
-    swapw hmerge
+    # The fold ends with a dead range accumulator above the finished belt.
+    dropw
+    # => [ROOT, ...]
   end
 end
 
