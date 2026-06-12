@@ -182,8 +182,8 @@ fn test_poseidon2_prove_verify_rust_only() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, false);
 }
 
-/// Equal-heights regression: tiny program where both AIRs land at MIN_TRACE_LEN.
-/// Catches mistakes in the MASM `air_order` reconstruction's tie-break rule.
+/// Equal-heights regression: tiny program where all AIR traces land at MIN_TRACE_LEN.
+/// Catches mistakes in the MASM per-AIR ordering tie-break.
 #[test]
 fn test_equal_heights_recursive() {
     let source = "
@@ -194,8 +194,8 @@ fn test_equal_heights_recursive() {
     assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
 }
 
-/// Hash-heavy program where `chip_height > core_height`. Regression for the
-/// per-AIR-height boundary handling on the SLICED Core trace.
+/// Hash-heavy program where `chip_height > core_height`. Regression for per-AIR-height
+/// boundary handling when the chiplets trace is taller than the core trace.
 #[test]
 fn test_hash_heavy_divergent_heights() {
     let source = "
@@ -315,8 +315,8 @@ mod fast_parallel {
         // Build public inputs
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
-        // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
-        let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
+        // Multi-AIR splitting: derive one matrix per Miden AIR instance.
+        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix) = trace.to_air_matrices();
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
@@ -324,6 +324,7 @@ mod fast_parallel {
             &blake3_config,
             core_matrix,
             chiplets_matrix,
+            poseidon2_permutation_matrix,
             &public_values,
             &kernel_felts,
         )

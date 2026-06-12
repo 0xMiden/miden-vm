@@ -13,7 +13,6 @@ use core::{
 use super::{
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
-        PermutationCols,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
@@ -85,7 +84,7 @@ impl<T> CoreCols<T> {
 #[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
-    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
+    /// Reserved chiplet selector column. It is constrained to zero in `ChipletsAir`.
     pub s_perm: T,
     /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
     pub chip_clk: T,
@@ -97,9 +96,7 @@ pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 impl<T> ChipletCols<T> {
     /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
     ///
-    /// `s_ctrl = chiplets[0]` and `s_perm` are the two physical selectors for the controller
-    /// and permutation sub-chiplets. `s1..s4` subdivide the remaining chiplets under the
-    /// virtual `s0 = 1 - (s_ctrl + s_perm)`.
+    /// `s_perm` is a reserved zero column included in the selector bundle.
     pub fn chiplet_selectors(&self) -> [T; 6]
     where
         T: Copy,
@@ -157,11 +154,6 @@ impl<T> ChipletCols<T> {
         self.chiplets[5..10].borrow()
     }
 
-    /// Returns a typed borrow of the permutation sub-chiplet columns (chiplets\[1..20\]).
-    pub fn permutation(&self) -> &PermutationCols<T> {
-        self.chiplets[1..].borrow()
-    }
-
     /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
     pub fn controller(&self) -> &ControllerCols<T> {
         self.chiplets[1..].borrow()
@@ -207,7 +199,7 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
 // ================================================================================================
 //
 // The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `build_aux_trace` (see `air/src/constraints/lookup/`): 4 Core
+// and `ChipletsAir`'s `AuxBuilder` impls (see `air/src/constraints/lookup/`): 4 Core
 // columns + 3 Chiplets columns.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
@@ -392,10 +384,5 @@ mod tests {
     #[test]
     fn hasher_controller_col_map_layout() {
         insta::assert_debug_snapshot!(col_map!(ControllerCols));
-    }
-
-    #[test]
-    fn hasher_permutation_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(PermutationCols));
     }
 }

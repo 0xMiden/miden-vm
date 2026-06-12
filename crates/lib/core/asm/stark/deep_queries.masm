@@ -53,8 +53,6 @@ end
 #!
 #! 1. X is [q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]
 #! 2. W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
-#!
-#! Cycles: 54
 proc divide_and_add
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
@@ -173,14 +171,10 @@ end
 #! 7. `?` is a binary flag indicating if there are further queries to process.
 pub proc compute_deep_query
         # 1) Compute x := offset * domain_gen^index and denominators (x - z) and (x - gz)
-        #
-        # Cycles: 58
         exec.compute_denominators
         #=> [Z, X, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
         # 2) Compute final result
-        #
-        # Cycles: 62
         exec.divide_and_add
         #=> [eval0, eval1, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
@@ -188,22 +182,16 @@ pub proc compute_deep_query
         # for next iteration.
 
         ## a) Compute poe
-        ##
-        ## Cycles: 4
         movup.3 movup.3
         exec.constants::get_domain_offset_inv mul
         #=> [poe, index, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
 
         ## b) Store [poe, index, eval0, eval1]
-        ##
-        ## Cycles: 5
         dup.4 add.4 swap.5
         mem_storew_le
         #=> [poe, index, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
 
         ## c) Prepare stack for next iteration
-        ##
-        ## Cycles: 4
         dup.5 dup.5
         neq
         #=> [?, Y, query_ptr+1, query_end_ptr, ...]

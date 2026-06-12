@@ -3,12 +3,6 @@
 
 # General constants
 const ROOT_UNITY = 1753635133440165772
-# The LDE coset offset is the canonical lifted-domain shift
-# `g^(2^(TWO_ADICITY - log_lde))` (g = 7, the field generator), so it depends on the
-# LDE domain size and is computed per proof in `random_coin::init_seed`. These pointers
-# hold the computed offset and its inverse.
-const DOMAIN_OFFSET_PTR = 3223322832
-const DOMAIN_OFFSET_INV_PTR = 3223322833
 
 # Number of random extension field coefficients related to the auxiliary trace (i.e. the alphas)
 const NUM_AUX_TRACE_COEFS = 2
@@ -55,16 +49,20 @@ const TRACE_LENGTH_PTR = 3223322632
 ### data for running FRI check
 const FRI_QUERIES_ADDRESS_PTR = 3223322633
 
-### Address storing the maximum per-AIR log height (= max(log_core, log_chip)).
+### Address storing the maximum per-AIR log height.
 ### Used for the lifted-domain math (LDE size, max-AIR selectors, vanishing).
 const TRACE_LENGTH_LOG_PTR = 3223322634
 
-### Per-AIR log heights — stored separately (not as min/max) so MASM can derive the
-### proof_order permutation locally for the β-fold and per-AIR selectors.
+### Per-AIR log heights - stored separately (not as min/max) so MASM can derive the
+### proof-order tag and each AIR's lifted selectors.
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
+const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR = 3223322637
 
-### Gap at 3223322637..3223322639 to restore word alignment for MAIN_TRACE_COM_PTR.
+### Canonical LDE coset shift and inverse. These are derived from the LDE order in
+### `random_coin::init_seed` and match `LiftedDomain::canonical_lde_shift`.
+const LDE_DOMAIN_SHIFT_PTR = 3223322638
+const LDE_DOMAIN_SHIFT_INV_PTR = 3223322639
 
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 const MAIN_TRACE_COM_PTR = 3223322640
@@ -145,9 +143,30 @@ const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 
-### Scratch buffer (64 felts) used by `swap_air_regions_if_chip_first` to hold the
-### smaller AIR's main block during the swap.
-const SWAP_SCRATCH_PTR = 3223322764
+### Proof-order tags are Lehmer ranks over [Core, Chiplets, Poseidon2Permutation].
+const ORDER_TAG_COUNT = 6
+const ORDER_TAG_PTR = 3223322764
+
+### Miden AIR shape consumed by the VM-specific recursive verifier wrapper.
+###
+### Layout:
+###   [log_core, log_chiplets, log_poseidon2, reserved]
+###
+### Shape values are supplied by advice, validated by the Miden-specific wrapper, and cached into
+### the per-AIR log-height pointers above before the generic verifier runs.
+const AIR_SHAPE_PTR = 3223322768
+
+### Relation digest for this verifier instance.
+###
+### The Miden-specific wrapper stores the compile-time meta digest here. Advice never supplies this
+### value.
+const RELATION_DIGEST_PTR = 3223322784
+
+### Scratch buffer used while absorbing VM statement public inputs.
+###
+### It holds 43 fixed stream elements plus up to MAX_AUX_INPUTS kernel digest elements during
+### `sys::vm::public_inputs::process_public_inputs`.
+const ABSORB_SCRATCH_PTR = 3223324000
 
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
@@ -181,30 +200,32 @@ const SWAP_SCRATCH_PTR = 3223322764
 const AUX_RAND_ELEM_PTR = 3225419776
 
 ### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
-### (alignment = 8 for Poseidon2). Per row in EF slots:
-###   main = aligned(51) + aligned(22) = 56 + 24       = 80 EFs
-###   aux  = aligned(4·2) + aligned(3·2) = 8 + 8       = 16 EFs
-###   quot = 16                                         = 16 EFs
-###   total per row                                     = 112 EFs = 224 felts
-### Two rows (curr + next) × 224 = 448 felts.
+### (alignment = 8 for Poseidon2). One OOD point stores current and next frames:
+###   main:  2 * (ceil(51/8)*8 + ceil(21/8)*8 + ceil(16/8)*8) = 192 felts
+###   aux:   2 * (ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8)    = 48 felts
+###   quot:  2 * (8 EF chunks * 2 coords)                     = 32 felts
+###   total per OOD point                                      = 272 felts
+### Two OOD points (z and g*z) require 544 felts.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
-### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
-### One LogUp final per AIR: Core at slot 0, Chiplets at slot 1.
-const AUX_BUS_BOUNDARY_PTR = 3225420228       # OOD_EVALUATIONS_PTR + 448
+### Auxiliary bus boundary values (3 extension field elements = 6 base elements).
+### Stored in 8 base elements so the following ACE stark-vars region is word-aligned.
+const AUX_BUS_BOUNDARY_PTR = 3225420324       # OOD_EVALUATIONS_PTR + 544
 
-### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
+### Auxiliary inputs for ACE (stark vars), 21 EF slots padded to 22 = 44 base felts:
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
-###   slots 10-11: multi_air_beta_{core,chip}
-###   slots 12-14: is_{first,last,transition}_core
-###   slots 15-17: is_{first,last,transition}_chip
-const AUXILIARY_ACE_INPUTS_PTR = 3225420232   # AUX_BUS_BOUNDARY_PTR + 4
+###   slot 10:     multi_air_beta
+###   slot 11:     reserved
+###   slots 12-14: Core is_{first,last,transition}
+###   slots 15-17: Chiplets is_{first,last,transition}
+###   slots 18-20: Poseidon2Permutation is_{first,last,transition}
+const AUXILIARY_ACE_INPUTS_PTR = 3225420332   # AUX_BUS_BOUNDARY_PTR + 8
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420268     # AUXILIARY_ACE_INPUTS_PTR + 36
+const ACE_CIRCUIT_STREAM_PTR = 3225420376     # AUXILIARY_ACE_INPUTS_PTR + 44
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225420864            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225420972            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (596 for multi-AIR)
 
 ## FRI
 ##
@@ -238,9 +259,8 @@ const ACE_CIRCUIT_PTR = 3225420864            # ACE_CIRCUIT_STREAM_PTR + num_con
 const FRI_COM_PTR = 4294912800
 
 ## Current trace row
-## 80 field elements for main portion of trace, 8 * 2 field elements for auxiliary portion of trace
-## and 8 * 2 field elements for constraint composition polynomials, i.e., the number of slots
-## required is 80 + 16 + 16 = 112
+## 96 field elements for the aligned main trace row, 24 field elements for aligned auxiliary
+## coordinates, and 16 field elements for quotient chunks, i.e. 96 + 24 + 16 = 136 slots.
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
 ## Its size is determined by the sum of widths of all traces.
@@ -253,20 +273,20 @@ pub proc get_root_unity
     push.ROOT_UNITY
 end
 
-pub proc get_domain_offset
-    push.DOMAIN_OFFSET_PTR mem_load
-end
-
 pub proc set_domain_offset
-    push.DOMAIN_OFFSET_PTR mem_store
+    push.LDE_DOMAIN_SHIFT_PTR mem_store
 end
 
-pub proc get_domain_offset_inv
-    push.DOMAIN_OFFSET_INV_PTR mem_load
+pub proc get_domain_offset
+    push.LDE_DOMAIN_SHIFT_PTR mem_load
 end
 
 pub proc set_domain_offset_inv
-    push.DOMAIN_OFFSET_INV_PTR mem_store
+    push.LDE_DOMAIN_SHIFT_INV_PTR mem_store
+end
+
+pub proc get_domain_offset_inv
+    push.LDE_DOMAIN_SHIFT_INV_PTR mem_load
 end
 
 pub proc get_num_aux_trace_coefs
@@ -396,6 +416,14 @@ pub proc get_chiplets_trace_length_log
     push.CHIPLETS_TRACE_LENGTH_LOG_PTR mem_load
 end
 
+pub proc set_poseidon2_permutation_trace_length_log
+    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_store
+end
+
+pub proc get_poseidon2_permutation_trace_length_log
+    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_load
+end
+
 pub proc set_query_pow_bits
     push.QUERY_POW_BITS_PTR mem_store
 end
@@ -498,8 +526,34 @@ pub proc tmp4
     push.TMP4
 end
 
-pub proc swap_scratch_ptr
-    push.SWAP_SCRATCH_PTR
+#! Scratch buffer for VM public-input transcript absorption.
+pub proc absorb_scratch_ptr
+    push.ABSORB_SCRATCH_PTR
+end
+
+pub proc set_order_tag
+    push.ORDER_TAG_PTR mem_store
+end
+
+pub proc get_order_tag
+    push.ORDER_TAG_PTR mem_load
+end
+
+pub proc order_tag_count
+    push.ORDER_TAG_COUNT
+end
+
+pub proc air_shape_ptr
+    push.AIR_SHAPE_PTR
+end
+
+pub proc relation_digest_ptr
+    push.RELATION_DIGEST_PTR
+end
+
+pub proc assert_valid_order_tag
+    push.ORDER_TAG_PTR mem_load
+    u32lt.ORDER_TAG_COUNT assert.err="invalid order tag"
 end
 
 pub proc random_coin_input_buf_ptr

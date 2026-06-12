@@ -491,7 +491,7 @@ pub struct StackOverflowMsg<E> {
 
 /// Hasher perm-link message (12 elements): `state[0..12]`.
 ///
-/// Binds hasher controller rows to permutation sub-chiplet rows. The `Input` variant pairs a
+/// Binds hasher controller rows to Poseidon2 permutation rows. The `Input` variant pairs a
 /// controller-input row with perm-cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
 /// variant pairs a controller-output row with perm-cycle row 15 on
 /// `BusId::HasherPermLinkOutput`. `state` carries all 12 sponge lanes (rate_0, rate_1, capacity).

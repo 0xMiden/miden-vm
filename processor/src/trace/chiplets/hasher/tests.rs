@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
+use miden_air::trace::{
+    chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
+    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
+};
 
 // Chiplet-local column indices used by the hasher trace tests.
 const STATE_COL_RANGE: Range<usize> = 3..15;
@@ -10,6 +13,11 @@ const MRUPDATE_ID_COL_IDX: usize = 16;
 const IS_BOUNDARY_COL_IDX: usize = 17;
 const DIRECTION_BIT_COL_IDX: usize = 18;
 const S_PERM_COL_IDX: usize = 19;
+
+fn controller_len(controller_rows: usize) -> usize {
+    controller_rows.next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
+}
+
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
@@ -42,18 +50,17 @@ fn hasher_permute() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 2 rows (1 pair), padded to 16 rows total.
-    // Perm segment: 1 packed 16-row cycle (1 unique state).
-    // Total hasher rows: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    // Controller region: 2 rows (1 pair), padded to the chiplet alignment boundary.
+    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(2);
+    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
     // Row 0: input (LINEAR_HASH, is_boundary=1, s_perm=0)
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
     // Row 1: output (RETURN_STATE, is_boundary=1, s_perm=0)
     check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
 
-    // Perm segment starts at row 16 (after padding)
-    check_perm_segment(&trace, HASH_CYCLE_LEN, &init_state, ONE);
+    check_perm_segment(&trace, perm_start, &init_state, ONE);
 }
 
 #[test]
@@ -74,10 +81,10 @@ fn hasher_permute_two() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 4 rows (2 pairs), padded to 16 rows total.
-    // Perm segment: 2 packed 16-row cycles = 32 rows.
-    // Total hasher rows: 48.
-    assert_eq!(trace[0].len(), HASH_CYCLE_LEN + 2 * HASH_CYCLE_LEN);
+    // Controller region: 4 rows (2 pairs), padded to the chiplet alignment boundary.
+    // Poseidon2 AIR: 2 real cycles plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(4);
+    assert_eq!(trace[0].len(), perm_start + 3 * HASH_CYCLE_LEN);
 
     // Pair 1
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO);
@@ -213,12 +220,12 @@ fn hasher_update_merkle_root() {
     check_merkle_controller_pair(&trace, 6, MR_UPDATE_NEW, 0, false, true, ONE, ZERO, ZERO);
 }
 
-// PERM SEGMENT TESTS
+// COMBINED TEST-VIEW PERMUTATION CYCLE TESTS
 // ================================================================================================
 
 #[test]
 fn perm_segment_structure() {
-    // One permutation -> perm segment has 1 cycle with multiplicity 1
+    // One permutation yields one 16-row cycle with multiplicity 1.
     let mut hasher = Hasher::default();
     let init_state: HasherState = rand_array();
     let (addr, result) = hasher.permute(init_state);
@@ -229,12 +236,13 @@ fn perm_segment_structure() {
 
     let trace = build_trace(hasher);
 
-    // Perm segment starts at HASH_CYCLE_LEN (after padding)
-    let perm_start = HASH_CYCLE_LEN;
+    // The test view appends permutation cycles after the padded controller rows.
+    let perm_start = controller_len(2);
 
-    // All perm rows have s_perm=1
+    // The appended cycles are not chiplets rows. This test-only view marks them in the
+    // reserved column so the assertions can share the controller-width table.
     for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[S_PERM_COL_IDX][row], ONE, "s_perm should be 1 at row {row}");
+        assert_eq!(trace[S_PERM_COL_IDX][row], ONE, "perm marker should be 1 at row {row}");
     }
 
     // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
@@ -255,6 +263,7 @@ fn perm_segment_structure() {
 
     // Multiplicity in node_index column
     assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], ONE);
+    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start + HASH_CYCLE_LEN], ZERO);
 
     // is_boundary, direction_bit, mrupdate_id all zero on perm rows
     for row in perm_start..perm_start + HASH_CYCLE_LEN {
@@ -266,7 +275,7 @@ fn perm_segment_structure() {
 
 #[test]
 fn perm_deduplication() {
-    // Two permutations with the SAME input state -> perm segment has 1 cycle with multiplicity 2
+    // Two permutations with the same input state collapse to one cycle with multiplicity 2.
     let mut hasher = Hasher::default();
     let init_state: HasherState = rand_array();
     let (addr1, result1) = hasher.permute(init_state);
@@ -278,11 +287,12 @@ fn perm_deduplication() {
 
     let trace = build_trace(hasher);
 
-    // Controller: 4 rows (2 pairs), padded to 16. Perm: 1 cycle = 16 rows (deduped). Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    // Controller: 4 rows (2 pairs), padded to the chiplet alignment boundary.
+    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(4);
+    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
-    // Perm segment: multiplicity should be 2
-    let perm_start = HASH_CYCLE_LEN;
+    // Poseidon2 AIR multiplicity should be 2.
     assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
 }
 
@@ -313,11 +323,11 @@ fn hash_memoization_control_blocks() {
     let trace = build_trace(hasher);
 
     // Both calls produce controller pairs (4 rows), but share perm requests.
-    // Controller: 4 rows, padded to 16. Perm: 1 cycle (deduped). Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(4);
+    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
-    // Perm segment has multiplicity 2 (two requests for same state)
-    let perm_start = HASH_CYCLE_LEN;
+    // Poseidon2 AIR has multiplicity 2 (two requests for same state).
     assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
 }
 
@@ -342,9 +352,10 @@ fn hash_memoization_basic_blocks_single_batch() {
 
     let trace = build_trace(hasher);
 
-    // Single batch -> 1 controller pair per call = 4 rows total, padded to 16.
-    // Perm: 1 unique state with multiplicity 2 = 16 rows. Total: 32.
-    assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
+    // Single batch -> 1 controller pair per call = 4 rows total.
+    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(4);
+    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-1
     check_controller_input(
@@ -370,8 +381,7 @@ fn hash_memoization_basic_blocks_single_batch() {
     // Verify memoized call: rows 2-3 should match rows 0-1 in selectors and state
     check_memoized_trace(&trace, 0..2, 2..4);
 
-    // Perm segment: multiplicity should be 2 (original + memoized)
-    let perm_start = HASH_CYCLE_LEN;
+    // Poseidon2 AIR multiplicity should be 2 (original + memoized).
     assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
 }
 
@@ -393,10 +403,10 @@ fn hash_memoization_basic_blocks_multi_batch() {
 
     let trace = build_trace(hasher);
 
-    // 3 batches -> 3 controller pairs per call = 12 rows total, padded to 16.
-    // 3 unique perm states (each with multiplicity 2) = 3 * 16 = 48 rows.
-    // Total: 16 + 48 = 64 rows.
-    assert_eq!(trace[0].len(), HASH_CYCLE_LEN + 3 * HASH_CYCLE_LEN);
+    // 3 batches -> 3 controller pairs per call = 12 rows total.
+    // 3 real perm states plus one zero-multiplicity dummy cycle.
+    let perm_start = controller_len(12);
+    assert_eq!(trace[0].len(), perm_start + 4 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-5 (3 pairs)
     // Row 0: first batch input, is_boundary=1 (start)
@@ -415,8 +425,7 @@ fn hash_memoization_basic_blocks_multi_batch() {
     // Verify memoized call: rows 6-11 should match rows 0-5
     check_memoized_trace(&trace, 0..6, 6..12);
 
-    // Perm segment: each of the 3 unique states should have multiplicity 2
-    let perm_start = HASH_CYCLE_LEN;
+    // Poseidon2 AIR: each of the 3 unique states should have multiplicity 2.
     for i in 0..3 {
         let cycle_start = perm_start + i * HASH_CYCLE_LEN;
         assert_eq!(
@@ -502,7 +511,7 @@ fn hash_memoization_basic_blocks_check() {
     // (original from BB1 + memoized from BB2). The loop body's perm state and the two
     // join perm states should each have multiplicity 1.
     let controller_rows: usize = 14; // 4 + 2 + 2 + 4 + 2
-    let controller_padded_len = controller_rows.next_multiple_of(HASH_CYCLE_LEN);
+    let controller_padded_len = controller_len(controller_rows);
 
     // Count unique perm states: BB1 has 2 unique states (2 batches), loop body has 1,
     // join2 has 1, join1 has 1 = 5 unique states total (unless some coincide, which is
@@ -510,7 +519,7 @@ fn hash_memoization_basic_blocks_check() {
     // BB2 is memoized so its 2 states are the same as BB1's.
     // Total perm cycles: at most 5 (could be less if join states happen to match).
 
-    // Verify that the perm segment has correct multiplicities
+    // Verify that the appended cycles have correct multiplicities.
     let perm_start = controller_padded_len;
     let total_len = trace[0].len();
     let num_perm_cycles = (total_len - perm_start) / HASH_CYCLE_LEN;
@@ -540,12 +549,32 @@ fn hash_memoization_basic_blocks_check() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Builds the full hasher trace (controller + perm segment).
+/// Builds a test-only view with controller rows followed by standalone permutation cycles.
+///
+/// Production chiplets keep `s_perm` zero and write permutation cycles to
+/// `Poseidon2PermutationAir`. This helper appends those cycles to a controller-width
+/// table and uses the reserved column as a marker for local tests.
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
-    let trace_len = hasher.trace_len();
+    let (controller_len, perm_len) = hasher.region_lengths();
+    let trace_len = controller_len + perm_len;
     let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
-    let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
-    hasher.fill_trace(&mut fragment);
+    let mut poseidon2_trace = Felt::zero_vec(NUM_POSEIDON2_PERMUTATION_COLS * perm_len);
+
+    {
+        let controller_band = &mut band[..TRACE_WIDTH * controller_len];
+        let mut fragment =
+            ChipletTraceFragment::row_major(controller_band, TRACE_WIDTH, 0, TRACE_WIDTH);
+        hasher.fill_trace(&mut fragment, &mut poseidon2_trace);
+    }
+
+    for row in 0..perm_len {
+        let dst = (controller_len + row) * TRACE_WIDTH;
+        let src = row * NUM_POSEIDON2_PERMUTATION_COLS;
+        band[dst..dst + NUM_POSEIDON2_PERMUTATION_COLS]
+            .copy_from_slice(&poseidon2_trace[src..src + NUM_POSEIDON2_PERMUTATION_COLS]);
+        band[dst + S_PERM_COL_IDX] = ONE;
+    }
+
     (0..TRACE_WIDTH)
         .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())
         .collect()
@@ -670,7 +699,7 @@ fn check_merkle_controller_pair(
     );
 }
 
-/// Checks a 16-row permutation cycle in the perm segment.
+/// Checks a 16-row permutation cycle in the combined test view.
 ///
 /// The packed schedule records the PRE-transition state on each row:
 /// - Row 0: initial state

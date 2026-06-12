@@ -428,23 +428,22 @@ fn test_trace_generation_at_fragment_boundaries(
     // lookup collection that `DeterministicTrace` (main-trace only) would miss.
     let raw = rand_array::<Felt, 4>();
     let challenges = [QuadFelt::new([raw[0], raw[1]]), QuadFelt::new([raw[2], raw[3]])];
-    let (core_from_fragments, chip_from_fragments) =
-        trace_from_fragments.main_trace().to_core_chiplets_matrices();
-    let (core_from_single, chip_from_single) =
-        trace_from_single_fragment.main_trace().to_core_chiplets_matrices();
-    for (label, air_frag, air_single) in [
-        ("Core", &core_from_fragments, &core_from_single),
-        ("Chiplets", &chip_from_fragments, &chip_from_single),
+    let (core_from_fragments, chip_from_fragments, p2_from_fragments) =
+        trace_from_fragments.main_trace().to_air_matrices();
+    let (core_from_single, chip_from_single, p2_from_single) =
+        trace_from_single_fragment.main_trace().to_air_matrices();
+    for (label, air, air_frag, air_single) in [
+        ("Core", MidenAir::CORE, &core_from_fragments, &core_from_single),
+        ("Chiplets", MidenAir::CHIPLETS, &chip_from_fragments, &chip_from_single),
+        (
+            "Poseidon2Permutation",
+            MidenAir::POSEIDON2_PERMUTATION,
+            &p2_from_fragments,
+            &p2_from_single,
+        ),
     ] {
-        let (aux_frag, committed_frag, aux_single, committed_single) = if label == "Core" {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CORE, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CORE, air_single, &challenges);
-            (a, c, b, d)
-        } else {
-            let (a, c) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_frag, &challenges);
-            let (b, d) = build_logup_aux_trace(&MidenAir::CHIPLETS, air_single, &challenges);
-            (a, c, b, d)
-        };
+        let (aux_frag, committed_frag) = build_logup_aux_trace(&air, air_frag, &challenges);
+        let (aux_single, committed_single) = build_logup_aux_trace(&air, air_single, &challenges);
         assert_eq!(
             aux_frag.values, aux_single.values,
             "{label} LogUp aux trace mismatch between fragments and single fragment"

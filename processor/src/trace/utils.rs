@@ -171,13 +171,15 @@ impl<'a> ChipletTraceFragment<'a> {
 ///
 /// - `core_trace_len` contains the length of the core trace (system + decoder + stack).
 /// - `range_trace_len` contains the length of the range checker trace.
-/// - `chiplets_trace_len` contains the trace lengths of the all chiplets (hash, bitwise, memory,
-///   kernel ROM)
+/// - `chiplets_trace_len` contains the trace lengths of all chiplets (hash, bitwise, memory, kernel
+///   ROM).
+/// - `poseidon2_permutation_trace_len` contains the standalone Poseidon2-permutation AIR length.
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
     core_trace_len: usize,
     range_trace_len: usize,
     chiplets_trace_len: ChipletsLengths,
+    poseidon2_permutation_trace_len: usize,
     /// Set by the trace builder when known. `None` falls back to deriving from the
     /// unpadded component lengths via `next_power_of_two`.
     padded_trace_len: Option<usize>,
@@ -193,6 +195,7 @@ impl TraceLenSummary {
             core_trace_len,
             range_trace_len,
             chiplets_trace_len,
+            poseidon2_permutation_trace_len: 0,
             padded_trace_len: None,
         }
     }
@@ -204,12 +207,14 @@ impl TraceLenSummary {
         core_trace_len: usize,
         range_trace_len: usize,
         chiplets_trace_len: ChipletsLengths,
+        poseidon2_permutation_trace_len: usize,
         padded_trace_len: usize,
     ) -> Self {
         TraceLenSummary {
             core_trace_len,
             range_trace_len,
             chiplets_trace_len,
+            poseidon2_permutation_trace_len,
             padded_trace_len: Some(padded_trace_len),
         }
     }
@@ -229,11 +234,17 @@ impl TraceLenSummary {
         self.chiplets_trace_len
     }
 
+    /// Returns the standalone Poseidon2-permutation AIR trace length.
+    pub fn poseidon2_permutation_trace_len(&self) -> usize {
+        self.poseidon2_permutation_trace_len
+    }
+
     /// Returns the maximum of all component lengths.
     pub fn trace_len(&self) -> usize {
         self.range_trace_len
             .max(self.core_trace_len)
             .max(self.chiplets_trace_len.trace_len())
+            .max(self.poseidon2_permutation_trace_len)
     }
 
     /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.

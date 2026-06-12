@@ -11,13 +11,10 @@ use miden::core::stark::verifier
 #!   D2. `process_row_ood_evaluations`
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
-#! 2. Per-proof parameters: `log(core_trace_length), log(chiplets_trace_length)` — the two
-#!    per-AIR log heights, in caller order (Core first, Chiplets second).
-#! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
-#!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
 #!
-#! Precondition: security parameters (num_queries, query_pow_bits, deep_pow_bits,
-#! folding_pow_bits) must already be stored in memory before calling this procedure.
+#! Precondition: security parameters, per-AIR trace-height logs, ORDER_TAG, and
+#! RELATION_DIGEST must already be stored in memory before calling this procedure.
+#! The instance-specific wrapper owns validation and setup of that state.
 #!
 #! The following simplifying assumptions are currently made and hardcoded:
 #!
@@ -28,6 +25,6 @@ use miden::core::stark::verifier
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4, log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3]
+#! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: []
 pub use verifier::verify

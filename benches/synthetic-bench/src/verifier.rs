@@ -5,6 +5,7 @@
 //!   bracket, `next_pow2(max(core_rows, range_rows))`. If a future AIR split gives range its own
 //!   segment, this check can be revised to assert separate brackets.
 //! - `padded_chiplets(actual) == padded_chiplets(target)`
+//! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)`
 //!
 //! Soft reporting:
 //! - unpadded totals (`core_rows`, `chiplets_rows`) within [`PER_COMPONENT_TOLERANCE`]
@@ -63,6 +64,12 @@ impl VerificationReport {
                 DeltaStatus::Enforced,
             ),
             (
+                "poseidon2_permutation_rows",
+                target.totals.poseidon2_permutation_rows,
+                actual.totals.poseidon2_permutation_rows,
+                DeltaStatus::Enforced,
+            ),
+            (
                 // range_rows is derived, not independently driven.
                 "range_rows",
                 target.totals.range_rows,
@@ -102,6 +109,8 @@ impl VerificationReport {
     pub fn brackets_match(&self) -> bool {
         self.target.totals.padded_core_side() == self.actual.totals.padded_core_side()
             && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
+            && self.target.totals.padded_poseidon2_permutation()
+                == self.actual.totals.padded_poseidon2_permutation()
     }
 
     /// True if `range_rows` is the largest unpadded component in either side, which means snippet
@@ -141,6 +150,12 @@ impl Display for VerificationReport {
             "padded_chiplets",
             self.target.totals.padded_chiplets(),
             self.actual.totals.padded_chiplets(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_poseidon2",
+            self.target.totals.padded_poseidon2_permutation(),
+            self.actual.totals.padded_poseidon2_permutation(),
         )?;
 
         writeln!(f, "\n-- totals (soft: {:.0}% band) --", PER_COMPONENT_TOLERANCE * 100.0)?;
@@ -228,6 +243,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: core,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: hasher,
             range_rows: 0,
         };
         TraceShape::new(totals, breakdown)
@@ -279,6 +295,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 100,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: 0,
             range_rows: 500,
         };
         let t = TraceShape::new(totals, breakdown);
@@ -289,9 +306,9 @@ mod tests {
 
     #[test]
     fn per_component_overshoot_stays_within_bracket() {
-        // Hasher overshoots but both core and chiplets stay within their brackets.
+        // Hasher overshoots but every AIR stays within its padded bracket.
         let target = shape(68000, 8000, 12000);
-        let actual = shape(68000, 14000, 12000);
+        let actual = shape(68000, 8170, 12000);
         let r = VerificationReport::new(target, actual);
         assert!(r.brackets_match());
         let hasher_delta = r.breakdown_deltas.iter().find(|d| d.name == "hasher").unwrap();

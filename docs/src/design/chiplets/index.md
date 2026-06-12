@@ -58,7 +58,7 @@ This is true for any transition constraints that are applied at every row and se
 
 This requires the following adjustments for each chiplet.
 
-**In the hash chiplet:** the permutation-step constraints are periodic, while the controller constraints explicitly confine the controller/permutation boundary. The controller region is padded to a multiple of the 16-row cycle before the permutation segment begins, so no extra inter-chiplet alignment rows are required.
+**In the hash chiplet:** controller constraints explicitly confine the controller boundary. Poseidon2 permutation steps are proved by `Poseidon2PermutationAir`.
 
 **In the bitwise chiplet:** there is no conflict, and therefore no change, since all constraints are periodic.
 

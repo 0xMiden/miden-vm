@@ -2,7 +2,7 @@ use miden::core::crypto::hashes::poseidon2
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes as input an Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
+#! Takes as input a Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
 #! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
 #! into the hasher state and simultaneously computing a random linear combination using Horner
 #! evaluation.
@@ -10,18 +10,14 @@ use miden::core::crypto::hashes::poseidon2
 #!
 #! Inputs:  [R0, R1, C, ptr, acc0, acc1]
 #! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
-#!
-#! Cycles: 78
 pub proc process_row_ood_evaluations
-    # Per-row OOD layout matches the LMCS aligned wire format (alignment = 8 for
-    # Poseidon2). Multi-AIR (CoreAir + ChipletsAir, after combined-circuit codegen
-    # uses LMCS-aligned per-AIR widths):
-    #   main:  ceil(51/8)·8 + ceil(22/8)·8     = 56 + 24      = 80  EFs
-    #   aux:   ceil(8/8)·8 + ceil(6/8)·8       = 8 + 8        = 16  EFs
-    #   quot:  16                                              = 16  EFs
-    #   total per row                                          = 112 EFs = 224 felts
-    # 224 / 8 = 28 iterations.
-    repeat.28
+    # One OOD-point frame matches the LMCS-aligned wire format:
+    #   main curr/next:  2 * (ceil(51/8)*8 + ceil(21/8)*8 + ceil(16/8)*8) = 192 felts
+    #   aux curr/next:   2 * (ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8)    = 48 felts
+    #   quotient curr/next: 2 * (8 EF chunks * 2 coords)                  = 32 felts
+    #   total                                                             = 272 felts
+    # 272 / 8 = 34 iterations.
+    repeat.34
         adv_pipe
         horner_eval_ext
         exec.poseidon2::permute

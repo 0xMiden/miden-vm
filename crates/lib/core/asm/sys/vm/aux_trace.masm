@@ -5,10 +5,10 @@ use miden::core::stark::random_coin
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the boundary values (2 extension field elements = 4 base field elements = 1 word).
+#! and absorbs the boundary values (3 extension field elements = 6 base field elements).
 #!
-#! The advice provider must supply exactly 2 words in order:
-#!   [commitment, W0]
+#! The advice provider supplies the commitment, then aux finals in proof order:
+#!   [commitment, aux0, aux1, aux2]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
 #! aux_bus_boundary_ptr.
@@ -30,7 +30,7 @@ pub proc observe_aux_trace
     # Reseeding clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Single permutation: Absorb [COM, W0] ---
+    # --- First permutation: absorb [COM, aux0, aux1] ---
 
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
@@ -47,6 +47,28 @@ pub proc observe_aux_trace
     # => [R1', R2', C', ...]
 
     # Store final sponge state.
+    exec.random_coin::store_random_coin_state
+    # => [...]
+
+    # --- Second permutation: flush the remaining aux2 EF.
+    #
+    # This mirrors the host duplex: only buffered slots 0 and 1 are overwritten; slots 2..7
+    # deliberately keep the previous sponge output.
+    push.0.0 adv_push adv_push swap
+    # => [aux2_0, aux2_1, 0, 0, ...]
+    exec.constants::aux_bus_boundary_ptr add.4 mem_storew_le
+    # => [aux2_0, aux2_1, 0, 0, ...]
+    exec.constants::r1_ptr mem_store
+    # => [aux2_1, 0, 0, ...]
+    exec.constants::r1_ptr add.1 mem_store
+    # => [0, 0, ...]
+    drop drop
+    # => [...]
+
+    exec.random_coin::load_random_coin_state
+    # => [R0, R1, C, ...]
+    exec.poseidon2::permute
+    # => [R0', R1', C', ...]
     exec.random_coin::store_random_coin_state
     # => [...]
 

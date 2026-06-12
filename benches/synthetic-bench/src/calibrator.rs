@@ -47,6 +47,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let totals = TraceTotals {
         core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
+        poseidon2_permutation_rows: summary.poseidon2_permutation_trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };
 
@@ -139,7 +140,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
     let k = iters as f64;
     IterCost {
         core: shape.totals.core_rows as f64 / k,
-        hasher: shape.breakdown.hasher_rows as f64 / k,
+        hasher: shape.totals.poseidon2_permutation_rows as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
         range: shape.totals.range_rows as f64 / k,
@@ -168,10 +169,11 @@ mod tests {
         let with_hperm =
             measure_program("begin padw padw padw hperm dropw dropw dropw end").expect("hperm");
         assert!(
-            with_hperm.breakdown.hasher_rows > baseline.breakdown.hasher_rows,
-            "hperm should add hasher rows above the baseline ({} vs {})",
-            with_hperm.breakdown.hasher_rows,
-            baseline.breakdown.hasher_rows,
+            with_hperm.totals.poseidon2_permutation_rows
+                > baseline.totals.poseidon2_permutation_rows,
+            "hperm should add Poseidon2-permutation rows above the baseline ({} vs {})",
+            with_hperm.totals.poseidon2_permutation_rows,
+            baseline.totals.poseidon2_permutation_rows,
         );
     }
 

@@ -4,8 +4,9 @@
 //! scenario keys to entries; only the `trace` section of each entry is consumed.
 //!
 //! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
-//! `range_rows`). `shape` (nested under `trace`) is an advisory per-chiplet breakdown used by the
-//! solver. The loader checks `trace.chiplets_rows == shape.chiplets_sum()`.
+//! `poseidon2_permutation_rows`, `range_rows`). `shape` (nested under `trace`) is an advisory
+//! per-chiplet breakdown used by the solver. The loader checks
+//! `trace.chiplets_rows == shape.chiplets_sum()`.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -38,6 +39,8 @@ pub struct TraceTotals {
     /// Total chiplets trace length, matching `ChipletsLengths::trace_len` in the processor (sum of
     /// per-chiplet lengths + 1 mandatory padding row).
     pub chiplets_rows: u64,
+    /// Standalone Poseidon2-permutation AIR length.
+    pub poseidon2_permutation_rows: u64,
     /// Range-checker trace length. Derived from memory + bitwise activity; not independently
     /// targeted but tracked so the verifier can warn if it ever dominates.
     pub range_rows: u64,
@@ -81,6 +84,11 @@ impl TraceTotals {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
+    /// Padded power-of-two bracket for the Poseidon2-permutation AIR.
+    pub fn padded_poseidon2_permutation(&self) -> u64 {
+        self.poseidon2_permutation_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    }
+
     /// Single global padded length as reported by the processor's
     /// `TraceLenSummary::padded_trace_len`. Used by the calibrator to cross-check our derived
     /// formulas against the prover.
@@ -88,13 +96,16 @@ impl TraceTotals {
         self.core_rows
             .max(self.range_rows)
             .max(self.chiplets_rows)
+            .max(self.poseidon2_permutation_rows)
             .next_power_of_two()
             .max(MIN_TRACE_LEN)
     }
 
     /// True iff `range_rows` is the largest unpadded component.
     pub fn range_dominates(&self) -> bool {
-        self.range_rows > self.core_rows && self.range_rows > self.chiplets_rows
+        self.range_rows > self.core_rows
+            && self.range_rows > self.chiplets_rows
+            && self.range_rows > self.poseidon2_permutation_rows
     }
 }
 
@@ -145,6 +156,7 @@ impl TraceSnapshot {
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
+                poseidon2_permutation_rows: entry.trace.poseidon2_permutation_rows,
                 range_rows: entry.trace.range_rows,
             };
             let shape = entry.trace.chiplets_shape;
@@ -178,6 +190,8 @@ struct RawScenarioEntry {
 struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
+    #[serde(default)]
+    poseidon2_permutation_rows: u64,
     range_rows: u64,
     chiplets_shape: TraceBreakdown,
 }
@@ -278,6 +292,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1000,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: 700,
             range_rows: 100,
         };
         (totals, breakdown)
@@ -295,12 +310,14 @@ mod tests {
     #[test]
     fn padded_totals_match_processor_formula() {
         let (t, _) = sample_shape();
-        // max(1000, 100, 651) = 1000 → next pow2 = 1024
+        // max(1000, 100, 651, 700) = 1000 → next pow2 = 1024
         assert_eq!(t.padded_total(), 1024);
         // core + range: max(1000, 100) = 1000 → 1024
         assert_eq!(t.padded_core_side(), 1024);
         // chiplets alone: 651 → 1024
         assert_eq!(t.padded_chiplets(), 1024);
+        // Poseidon2 alone: 700 → 1024
+        assert_eq!(t.padded_poseidon2_permutation(), 1024);
     }
 
     #[test]
@@ -308,11 +325,13 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1,
             chiplets_rows: 1,
+            poseidon2_permutation_rows: 1,
             range_rows: 0,
         };
         assert_eq!(totals.padded_total(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_core_side(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_chiplets(), MIN_TRACE_LEN);
+        assert_eq!(totals.padded_poseidon2_permutation(), MIN_TRACE_LEN);
     }
 
     #[test]
@@ -320,12 +339,14 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 100,
             chiplets_rows: 200,
+            poseidon2_permutation_rows: 300,
             range_rows: 500,
         };
         assert!(totals.range_dominates());
         let totals = TraceTotals {
             core_rows: 500,
             chiplets_rows: 200,
+            poseidon2_permutation_rows: 300,
             range_rows: 100,
         };
         assert!(!totals.range_dominates());
@@ -417,6 +438,7 @@ mod tests {
         let (_, snap) = &scenarios[0];
         assert_eq!(snap.shape.kernel_rom_rows, 0);
         assert_eq!(snap.shape.ace_rows, 0);
+        assert_eq!(snap.trace.poseidon2_permutation_rows, 0);
     }
 
     #[test]

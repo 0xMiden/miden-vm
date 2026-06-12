@@ -113,7 +113,7 @@ end
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes as input an Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
+#! Takes as input a Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
 #! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
 #! into the hasher state and simultaneously computing a random linear combination using Horner
 #! evaluation.

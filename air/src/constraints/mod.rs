@@ -21,6 +21,7 @@ pub mod decoder;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;
+pub mod poseidon2_permutation;
 pub mod public_inputs;
 pub mod range;
 pub mod stack;
@@ -52,8 +53,8 @@ pub fn enforce_core<AB>(
     decoder::enforce_main(builder, local, next, op_flags);
 }
 
-/// Enforces the Chiplets-trace main constraints (hasher permutation/controller, bitwise,
-/// memory, ACE). Selector validity is enforced separately via
+/// Enforces the Chiplets-trace main constraints (hasher controller, bitwise, memory, ACE).
+/// Selector validity is enforced separately via
 /// [`chiplets::selectors::build_chiplet_selectors`].
 pub fn enforce_chiplets<AB>(
     builder: &mut AB,

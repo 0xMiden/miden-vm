@@ -22,7 +22,8 @@ use miden::core::stark::constants
 #! i.e., only their reduced values are.
 #! Both fixed-length and variable-length public inputs are absorbed into the Fiat-Shamir
 #! transcript through the buffered duplex (`random_coin::observe_felt`), in `MultiAir::observe`
-#! order, after loading.
+#! order, after loading. Instance-specific implementations may also observe shape data that
+#! belongs to their statement before returning.
 #!
 #! It is worth noting that:
 #!
@@ -119,7 +120,7 @@ end
 #! in memory, and returns the original base element words on the stack.
 #!
 #! Transcript absorption is handled separately (see `sys/vm/public_inputs::absorb_public_inputs`),
-#! so the caller discards the returned words `A0`/`A1`.
+#! so callers may treat the returned `A0`/`A1` words as disposable placeholders.
 #!
 #! Inputs:  [Y, Y, C, ptr, ...]
 #! Outputs: [A0, A1, C, ptr + 16, ..]

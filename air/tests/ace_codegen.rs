@@ -88,6 +88,7 @@ fn core_air_dag_rejects_mismatched_layout() {
 }
 
 #[test]
+#[allow(clippy::print_stdout)]
 fn chiplets_air_ace_rows() {
     let air = MidenAir::CHIPLETS;
     let config = AceConfig {
@@ -103,7 +104,7 @@ fn chiplets_air_ace_rows() {
     let eval_rows = encoded.num_eval_rows();
     let total_rows = read_rows + eval_rows;
 
-    eprintln!(
+    println!(
         "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,
@@ -203,23 +204,33 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined main width is each per-AIR width aligned to LMCS rate (8 for Poseidon2)
-    // and concatenated: aligned(51) + aligned(22) = 56 + 24 = 80. Combined aux is
-    // aligned(4*2) + aligned(3*2) = 8 + 8 = 16 base coords = 8 EFs.
+    // Combined widths concatenate each per-AIR matrix after LMCS alignment.
     assert_eq!(
-        layout.counts.width, 80,
+        layout.counts.width, 96,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 8,
-        "combined aux_width = aligned(4) + aligned(3) = 8 EFs"
+        layout.counts.aux_width, 12,
+        "combined aux_width must include Core, Chiplets, and Poseidon2Permutation"
     );
-    assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
+    assert_eq!(layout.counts.num_aux_boundary, 3, "one boundary slot per AIR");
 
-    for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {
-        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
-        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
-    }
+    let beta = layout.index(InputKey::MultiAirBeta).expect("multi-AIR beta slot");
+    assert!(beta < layout.total_inputs, "multi-AIR beta slot must be in bounds");
+    assert_eq!(
+        layout.index(InputKey::IsFirstAir(0)),
+        Some(beta + 2),
+        "Core selector block starts after the beta and reserved slots"
+    );
+    assert_eq!(layout.index(InputKey::IsLastAir(0)), Some(beta + 3));
+    assert_eq!(layout.index(InputKey::IsTransitionAir(0)), Some(beta + 4));
+    assert_eq!(layout.index(InputKey::IsFirstAir(1)), Some(beta + 5));
+    assert_eq!(layout.index(InputKey::IsLastAir(1)), Some(beta + 6));
+    assert_eq!(layout.index(InputKey::IsTransitionAir(1)), Some(beta + 7));
+    assert_eq!(layout.index(InputKey::IsFirstAir(2)), Some(beta + 8));
+    assert_eq!(layout.index(InputKey::IsLastAir(2)), Some(beta + 9));
+    assert_eq!(layout.index(InputKey::IsTransitionAir(2)), Some(beta + 10));
+    assert_eq!(layout.index(InputKey::IsFirstAir(3)), None);
 }
 
 #[test]

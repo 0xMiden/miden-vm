@@ -99,10 +99,12 @@ fn assert_prover_matches_oracle(
 fn build_lookup_fractions_matches_constraint_path_oracle() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
 
-    let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
+    let (core_matrix, chip_matrix, p2_matrix) = trace.main_trace().to_air_matrices();
     let public_vals = trace.to_public_values();
-    // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
+    // Core has no periodic columns.
     let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
+    let p2_periodic =
+        LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION);
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
     // implement Randomizable, so we draw base-field elements and pair them).
@@ -148,5 +150,31 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
         &chip_aux,
         &chip_folds,
         LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CHIPLETS),
+    );
+
+    // --- Poseidon2 permutation ---
+    let p2_fractions = build_lookup_fractions(
+        &MidenAir::POSEIDON2_PERMUTATION,
+        &p2_matrix,
+        &p2_periodic,
+        &challenges,
+    );
+    assert!(
+        !p2_fractions.fractions().is_empty(),
+        "no Poseidon2-permutation fractions collected — trace is degenerate or emitters are broken",
+    );
+    let p2_aux = accumulate(&p2_fractions);
+    let p2_folds = collect_column_oracle_folds(
+        &MidenAir::POSEIDON2_PERMUTATION,
+        &p2_matrix,
+        &p2_periodic,
+        &public_vals,
+        &challenges,
+    );
+    assert_prover_matches_oracle(
+        "Poseidon2Permutation",
+        &p2_aux,
+        &p2_folds,
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::POSEIDON2_PERMUTATION),
     );
 }

@@ -1,8 +1,8 @@
 use alloc::collections::BTreeMap;
 
 use miden_air::trace::chiplets::hasher::{
-    DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN,
-    RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
+    MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
 };
 use miden_core::chiplets::hasher::apply_permutation;
 
@@ -12,9 +12,10 @@ use super::{
 };
 
 mod trace;
-use trace::HasherTrace;
+use trace::{HasherTrace, fill_poseidon2_permutation_trace};
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR
@@ -37,27 +38,21 @@ fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
 
-/// Reconstructs a HasherState from a StateKey.
-fn key_to_state(key: &StateKey) -> HasherState {
-    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
-}
-
 /// Hash chiplet for the VM.
 ///
 /// This component uses a controller/permutation split architecture:
 ///
-/// - **Controller region** (s_perm=0): pairs of (input, output) rows for each permutation request.
+/// - **Controller region**: pairs of (input, output) rows for each permutation request.
 ///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
 ///   s1=0) capture the post-permutation state.
 ///
-/// - **Permutation segment** (s_perm=1): one 16-row Poseidon2 cycle per unique input state.
-///   Multiplicity is stored in the node_index column. Linked to controller rows via the hasher_perm
-///   LogUp bus.
+/// - **Poseidon2 permutation AIR**: one 16-row Poseidon2 cycle per unique input state. The cycle
+///   multiplicity is linked to controller rows via the hasher perm-link LogUp bus.
 ///
 /// This architecture enables permutation deduplication: N requests with the same input state
 /// produce N controller pairs but only one permutation cycle (with multiplicity N).
 ///
-/// ## Trace layout (20 columns)
+/// ## Controller trace layout (20 columns)
 ///
 ///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
 /// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
@@ -67,11 +62,11 @@ pub struct Hasher {
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps input state -> multiplicity for permutation deduplication.
-    /// During finalize_trace(), one 16-row perm cycle is emitted per entry.
+    /// During trace generation, one 16-row Poseidon2 cycle is emitted per entry.
     perm_request_map: BTreeMap<StateKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
-    /// Whether the permutation segment has been finalized.
+    /// Whether the controller trace has been finalized.
     finalized: bool,
 }
 
@@ -82,8 +77,8 @@ impl Hasher {
     /// Returns the length of the execution trace.
     ///
     /// Before finalization, this returns an estimate based on the controller region length
-    /// plus the expected permutation segment size. The estimate is verified against the
-    /// actual length during `fill_trace()` via a debug assertion.
+    /// The estimate is verified against the actual length during `fill_trace()` via a
+    /// debug assertion.
     pub(super) fn trace_len(&self) -> usize {
         if self.finalized {
             self.trace.trace_len()
@@ -92,26 +87,39 @@ impl Hasher {
         }
     }
 
-    /// Returns the layout of the hasher region as `(controller_len, perm_len)`, both exact
-    /// multiples of `HASH_CYCLE_LEN`. Must be called before `fill_trace()` consumes the hasher.
+    /// Returns the layout of the hasher region as `(controller_len, perm_len)`.
     ///
     /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
-    /// round the raw controller count up to a cycle boundary; `perm_len` is the total span of
-    /// the permutation cycles that `finalize_trace()` will emit, one per unique input state.
+    /// align the following chiplet section. `perm_len` is the standalone Poseidon2 AIR length,
+    /// including the final zero-multiplicity cycle required by the LogUp accumulator.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
-        let controller_len = self.trace.trace_len().next_multiple_of(HASH_CYCLE_LEN);
-        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
+        let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
+        let perm_len = self.poseidon2_permutation_trace_len();
         (controller_len, perm_len)
     }
 
-    /// Estimates the total trace length before finalization.
+    /// Returns the unpadded Poseidon2-permutation AIR trace length.
+    ///
+    /// The extra dummy cycle is required by the generic LogUp accumulator: the last
+    /// trace row must not emit bus interactions. Real Poseidon2 cycles emit their
+    /// output-side perm-link receive on row 15, so the trace always ends with a
+    /// zero-multiplicity cycle.
+    pub(super) fn poseidon2_permutation_trace_len(&self) -> usize {
+        if self.finalized {
+            0
+        } else {
+            (self.perm_request_map.len() + 1) * HASH_CYCLE_LEN
+        }
+    }
+
+    /// Estimates the controller trace length before finalization.
     ///
     /// This must match the actual length produced by `finalize_trace()`. The invariant is
     /// verified by a debug assertion in `fill_trace()`.
     fn estimate_trace_len(&self) -> usize {
-        let (controller_len, perm_len) = self.region_lengths();
-        controller_len + perm_len
+        let (controller_len, _) = self.region_lengths();
+        controller_len
     }
 
     // HASHING METHODS
@@ -306,11 +314,16 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Finalizes and fills the provided trace fragment with data from this hasher trace.
+    /// Finalizes and fills the controller and Poseidon2-permutation traces.
     ///
-    /// Finalization pads the controller region and appends one 16-row permutation cycle
-    /// per unique input state. This is the only place where the perm segment is materialized.
-    pub(super) fn fill_trace(mut self, trace: &mut ChipletTraceFragment) {
+    /// Finalization pads the controller region and materializes one 16-row Poseidon2 cycle
+    /// per unique input state. Remaining Poseidon2 rows are valid zero-multiplicity dummy
+    /// cycles.
+    pub(super) fn fill_trace(
+        mut self,
+        trace: &mut ChipletTraceFragment,
+        poseidon2_trace: &mut [Felt],
+    ) {
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
             self.finalize_trace();
@@ -322,25 +335,18 @@ impl Hasher {
                 self.trace.trace_len(),
             );
         }
+        let perm_requests = core::mem::take(&mut self.perm_request_map);
         self.trace.fill_trace(trace);
+        fill_poseidon2_permutation_trace(perm_requests, poseidon2_trace);
     }
 
-    /// Finalizes the trace by padding the controller region and appending the permutation segment.
+    /// Finalizes the controller trace by padding it to the chiplet alignment boundary.
     fn finalize_trace(&mut self) {
         if self.finalized {
             return;
         }
 
-        // Pad controller region to a multiple of HASH_CYCLE_LEN.
-        // Padding rows must carry the current mrupdate_id to satisfy the AIR progression
-        // constraint (mrupdate_id is constant on non-MV-start transitions).
-        self.trace.pad_to_cycle_boundary(self.mrupdate_id);
-
-        // Append one 16-row permutation cycle per unique input state
-        for (key, multiplicity) in core::mem::take(&mut self.perm_request_map) {
-            let state = key_to_state(&key);
-            self.trace.append_permutation_cycle(&state, Felt::new_unchecked(multiplicity));
-        }
+        self.trace.pad_to_controller_boundary(self.mrupdate_id);
 
         self.finalized = true;
     }

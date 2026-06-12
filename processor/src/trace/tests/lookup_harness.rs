@@ -49,9 +49,11 @@ impl InteractionLog {
     /// Drive the prover-path pipeline on `trace` with fresh random challenges and slice the
     /// resulting [`LookupFractions`] buffer into per-row bags.
     pub fn new(trace: &ExecutionTrace) -> Self {
-        let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
-        // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
+        let (core_matrix, chip_matrix, p2_matrix) = trace.main_trace().to_air_matrices();
+        // Core has no periodic columns.
         let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
+        let p2_periodic =
+            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION);
 
         // `QuadFelt` itself isn't `Randomizable`, so draw 4 base-field elements and pair them.
         let raw = rand_array::<Felt, 4>();
@@ -64,7 +66,16 @@ impl InteractionLog {
             build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
         let chip_fractions =
             build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
-        let rows = merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions));
+        let p2_fractions = build_lookup_fractions(
+            &MidenAir::POSEIDON2_PERMUTATION,
+            &p2_matrix,
+            &p2_periodic,
+            &challenges,
+        );
+        let rows = merge_rows(
+            merge_rows(split_rows(&core_fractions), split_rows(&chip_fractions)),
+            split_rows(&p2_fractions),
+        );
 
         Self { challenges, rows }
     }

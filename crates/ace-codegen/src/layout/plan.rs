@@ -1,6 +1,9 @@
 use super::InputKey;
 use crate::EXT_DEGREE;
 
+/// Number of lifted selector values stored for each AIR.
+pub(crate) const SELECTORS_PER_AIR: usize = 3;
+
 /// A contiguous region of inputs within the ACE READ layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InputRegion {
@@ -89,7 +92,7 @@ pub(crate) struct StarkVarIndices {
     pub is_last: usize,
     /// Precomputed transition selector: `z - g^{-1}`.
     pub is_transition: usize,
-    /// Batching challenge `gamma` for reduced_aux_values.
+    /// Batching challenge `gamma` for auxiliary trace boundary checks.
     pub gamma: usize,
 
     // -- Base-field values stored as (val, 0) in EF slots --
@@ -101,18 +104,26 @@ pub(crate) struct StarkVarIndices {
     pub s0: usize,
 
     // -- Multi-AIR additions (only present when `AceConfig::is_multi_air`) --
-    /// β coefficient for Core in `combined = mab_core · core_acc + mab_chip · chip_acc`.
-    /// The verifier sets `(mab_core, mab_chip) = (β, 1)` or `(1, β)` per proof_order.
-    pub multi_air_beta_core: Option<usize>,
-    pub multi_air_beta_chip: Option<usize>,
-    /// Per-AIR lifted selectors for Core (at `z^{r_core}`).
-    pub is_first_core: Option<usize>,
-    pub is_last_core: Option<usize>,
-    pub is_transition_core: Option<usize>,
-    /// Per-AIR lifted selectors for Chiplets (at `z^{r_chip}`).
-    pub is_first_chip: Option<usize>,
-    pub is_last_chip: Option<usize>,
-    pub is_transition_chip: Option<usize>,
+    /// Beta challenge for Horner-folding per-AIR constraint roots in proof order.
+    pub multi_air_beta: Option<usize>,
+    /// First EF slot of the per-AIR selector block.
+    pub air_selectors_start: Option<usize>,
+    /// Number of AIR selector triples present in the multi-AIR selector block.
+    pub num_airs: usize,
+}
+
+impl StarkVarIndices {
+    pub(crate) fn air_selector_index(
+        &self,
+        air_index: usize,
+        selector_offset: usize,
+    ) -> Option<usize> {
+        if air_index >= self.num_airs || selector_offset >= SELECTORS_PER_AIR {
+            return None;
+        }
+        self.air_selectors_start
+            .map(|start| start + air_index * SELECTORS_PER_AIR + selector_offset)
+    }
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -203,29 +214,28 @@ impl InputLayout {
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);
         check("s0", self.stark.s0);
-        if let Some(idx) = self.stark.multi_air_beta_core {
-            check("multi_air_beta_core", idx);
+        if let Some(idx) = self.stark.multi_air_beta {
+            check("multi_air_beta", idx);
         }
-        if let Some(idx) = self.stark.multi_air_beta_chip {
-            check("multi_air_beta_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_first_core {
-            check("is_first_core", idx);
-        }
-        if let Some(idx) = self.stark.is_last_core {
-            check("is_last_core", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_core {
-            check("is_transition_core", idx);
-        }
-        if let Some(idx) = self.stark.is_first_chip {
-            check("is_first_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_last_chip {
-            check("is_last_chip", idx);
-        }
-        if let Some(idx) = self.stark.is_transition_chip {
-            check("is_transition_chip", idx);
+        for air_index in 0..self.stark.num_airs {
+            check(
+                "is_first_air",
+                self.stark
+                    .air_selector_index(air_index, 0)
+                    .expect("multi-AIR selector block is missing"),
+            );
+            check(
+                "is_last_air",
+                self.stark
+                    .air_selector_index(air_index, 1)
+                    .expect("multi-AIR selector block is missing"),
+            );
+            check(
+                "is_transition_air",
+                self.stark
+                    .air_selector_index(air_index, 2)
+                    .expect("multi-AIR selector block is missing"),
+            );
         }
 
         let rand_start = self.regions.randomness.offset;

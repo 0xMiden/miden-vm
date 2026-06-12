@@ -6,12 +6,12 @@ use core::{
     mem::size_of,
 };
 
-use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
+use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
     bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, HASH_CYCLE_LEN, NUM_SELECTORS, RATE_LEN, STATE_WIDTH},
+    hasher::{CAPACITY_LEN, DIGEST_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -40,108 +40,22 @@ macro_rules! impl_borrow_for_chiplet_cols {
     };
 }
 
-// PERMUTATION COLUMNS
-// ================================================================================================
-
-/// Permutation chiplet columns (19 columns), viewed from `chiplets[1..20]`.
-///
-/// Logical overlay for permutation segment rows (`s_perm = 1`). The 3 witness columns
-/// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
-/// and `multiplicity` shares the same physical column as the controller's `node_index`.
-///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `ChipletCols::s_perm`) are consumed by the chiplet
-/// selector system and are NOT part of this overlay.
-///
-/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
-/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
-/// sub-views into the state array.
-///
-/// ## Layout
-///
-/// ```text
-/// | witnesses[3] | state[12]                                    | extra cols      |
-/// |              | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
-/// | w0, w1, w2   | h0..h3              | h4..h7   | h8..h11     | m  --  --  --   |
-/// ```
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct PermutationCols<T> {
-    /// S-box witness columns (same physical columns as hasher selectors).
-    pub witnesses: [T; NUM_SELECTORS],
-    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
-    pub state: [T; STATE_WIDTH],
-    /// Request multiplicity (same physical column as node_index).
-    pub multiplicity: T,
-    /// Physical slots for controller columns mrupdate_id, is_boundary, and direction_bit.
-    /// These must be zero on permutation rows; access via [`Self::unused_padding()`] only.
-    _unused: [T; 3],
-}
-
-impl<T: Copy> PermutationCols<T> {
-    /// Returns the rate portion of the state (state[0..8]).
-    pub fn rate(&self) -> [T; RATE_LEN] {
-        [
-            self.state[0],
-            self.state[1],
-            self.state[2],
-            self.state[3],
-            self.state[4],
-            self.state[5],
-            self.state[6],
-            self.state[7],
-        ]
-    }
-
-    /// Returns the capacity portion of the state (state[8..12]).
-    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
-        [self.state[8], self.state[9], self.state[10], self.state[11]]
-    }
-
-    /// Returns the digest portion of the state (state[0..4]).
-    pub fn digest(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
-    }
-
-    /// Returns rate0 (state[0..4]).
-    pub fn rate0(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
-    }
-
-    /// Returns rate1 (state[4..8]).
-    pub fn rate1(&self) -> [T; DIGEST_LEN] {
-        [self.state[4], self.state[5], self.state[6], self.state[7]]
-    }
-
-    /// Returns the 3 padding columns (mrupdate_id, is_boundary, direction_bit) that must
-    /// be zero on permutation rows.
-    pub fn unused_padding(&self) -> [T; 3] {
-        self._unused
-    }
-
-    /// Sets the 3 padding columns (mrupdate_id, is_boundary, direction_bit) to the given value.
-    pub fn set_unused_padding(&mut self, value: T) {
-        self._unused.fill(value);
-    }
-}
-
 // CONTROLLER COLUMNS
 // ================================================================================================
 
 /// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
 /// Logical overlay for controller rows (`s_ctrl = 1`). `s0` distinguishes input rows
-/// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
-/// [`PermutationCols`], but column names reflect the controller/permutation split.
+/// (`s0 = 1`) from output/padding rows (`s0 = 0`).
 ///
 /// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `ChipletCols::s_perm`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay. Because the chiplet-level
-/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl - s_perm`) and is
+/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl`) and is
 /// never a named column or struct field, there is no name collision with the
 /// controller-internal `s0` defined here.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
-/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
-/// sub-views into the state array.
+/// Helper methods provide the sub-views used by controller constraints.
 ///
 /// ## Layout
 ///
@@ -172,28 +86,9 @@ pub struct ControllerCols<T> {
 }
 
 impl<T: Copy> ControllerCols<T> {
-    /// Returns the rate portion of the state (state[0..8]).
-    pub fn rate(&self) -> [T; RATE_LEN] {
-        [
-            self.state[0],
-            self.state[1],
-            self.state[2],
-            self.state[3],
-            self.state[4],
-            self.state[5],
-            self.state[6],
-            self.state[7],
-        ]
-    }
-
     /// Returns the capacity portion of the state (state[8..12]).
     pub fn capacity(&self) -> [T; CAPACITY_LEN] {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
-    }
-
-    /// Returns the digest portion of the state (state[0..4]).
-    pub fn digest(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
     }
 
     /// Returns rate0 (state[0..4]).
@@ -204,28 +99,6 @@ impl<T: Copy> ControllerCols<T> {
     /// Returns rate1 (state[4..8]).
     pub fn rate1(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
-    }
-
-    /// Merkle-update new-path flag: `s0 * s1 * s2`.
-    ///
-    /// Active on controller input rows that insert the new Merkle path into the sibling
-    /// table (request/remove side of the sibling bus).
-    pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
-    where
-        T: Into<E>,
-    {
-        self.s0.into() * self.s1.into() * self.s2.into()
-    }
-
-    /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
-    ///
-    /// Active on controller input rows that extract the old Merkle path from the sibling
-    /// table (response/add side of the sibling bus).
-    pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
-    where
-        T: Into<E>,
-    {
-        self.s0.into() * self.s1.into() * (E::ONE - self.s2.into())
     }
 }
 
@@ -475,47 +348,12 @@ pub struct KernelRomCols<T> {
 // PERIODIC COLUMNS
 // ================================================================================================
 
-/// All chiplet periodic columns (20 columns).
-///
-/// Aggregates hasher (18 columns) and bitwise (2 columns) periodic values into a single
-/// typed view. Use `builder.periodic_values().borrow()` to obtain a `&PeriodicCols<_>`.
+/// Chiplets periodic columns.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct PeriodicCols<T> {
-    /// Hasher periodic columns (cycle markers, step selectors, round constants).
-    pub hasher: HasherPeriodicCols<T>,
     /// Bitwise periodic columns.
     pub bitwise: BitwisePeriodicCols<T>,
-}
-
-/// Hasher chiplet periodic columns (16 columns, period = 16 rows).
-///
-/// Provides step-type selectors and Poseidon2 round constants for the hasher chiplet.
-/// The hasher operates on a 16-row cycle (15 transitions + 1 boundary row).
-///
-/// ## Layout
-///
-/// | Index | Name           | Description |
-/// |-------|----------------|-------------|
-/// | 0     | is_init_ext    | 1 on row 0 (init linear + first external round) |
-/// | 1     | is_ext         | 1 on rows 1-3, 12-14 (single external round) |
-/// | 2     | is_packed_int  | 1 on rows 4-10 (3 packed internal rounds) |
-/// | 3     | is_int_ext     | 1 on row 11 (int22 + ext5 merged) |
-/// | 4-15  | ark[0..12]     | Shared round constants |
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct HasherPeriodicCols<T> {
-    /// 1 on row 0 (init linear + first external round).
-    pub is_init_ext: T,
-    /// 1 on rows 1-3, 12-14 (single external round).
-    pub is_ext: T,
-    /// 1 on rows 4-10 (3 packed internal rounds).
-    pub is_packed_int: T,
-    /// 1 on row 11 (int22 + ext5 merged).
-    pub is_int_ext: T,
-    /// Shared round constants (12 lanes). Carry external round constants on external
-    /// rows, and internal round constants in ark[0..2] on packed-internal rows.
-    pub ark: [T; STATE_WIDTH],
 }
 
 /// Bitwise chiplet periodic columns (2 columns, period = 8 rows).
@@ -531,112 +369,7 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-impl Default for HasherPeriodicCols<Vec<Felt>> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HasherPeriodicCols<Vec<Felt>> {
-    /// Generate periodic columns for the Poseidon2 hasher chiplet.
-    ///
-    /// All columns repeat every 16 rows, matching one permutation cycle.
-    ///
-    /// The 4 selector columns identify the row type. The 12 ark columns carry either
-    /// external round constants (on external rows) or internal round constants in
-    /// `ark[0..2]` (on packed-internal rows).
-    ///
-    /// ## 16-Row Schedule
-    ///
-    /// ```text
-    /// Row  Transition              Selector
-    /// 0    init + ext1             is_init_ext
-    /// 1-3  ext2-ext4               is_ext
-    /// 4-10 3x packed internal      is_packed_int
-    /// 11   int22 + ext5            is_int_ext
-    /// 12-14 ext6-ext8              is_ext
-    /// 15   boundary                (none)
-    /// ```
-    #[expect(
-        clippy::needless_range_loop,
-        reason = "index-based assignments mirror the documented 16-row schedule"
-    )]
-    pub fn new() -> Self {
-        // -------------------------------------------------------------------------
-        // Selectors
-        // -------------------------------------------------------------------------
-        let mut is_init_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut is_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut is_packed_int = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut is_int_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
-
-        is_init_ext[0] = Felt::ONE;
-
-        for r in [1, 2, 3, 12, 13, 14] {
-            is_ext[r] = Felt::ONE;
-        }
-
-        for r in 4..=10 {
-            is_packed_int[r] = Felt::ONE;
-        }
-
-        is_int_ext[11] = Felt::ONE;
-
-        // -------------------------------------------------------------------------
-        // Shared round constants (12 columns)
-        // -------------------------------------------------------------------------
-        // On external rows (0-3, 11-14): hold per-lane external round constants.
-        // On packed-internal rows (4-10): ark[0..2] hold 3 internal round constants,
-        //   ark[3..12] are zero.
-        // On boundary (row 15): all zero.
-        let ark = core::array::from_fn(|lane| {
-            let mut col = vec![Felt::ZERO; HASH_CYCLE_LEN];
-
-            // Row 0 (init+ext1): first initial external round constants
-            col[0] = Hasher::ARK_EXT_INITIAL[0][lane];
-
-            // Rows 1-3 (ext2, ext3, ext4): remaining initial external round constants
-            for r in 1..=3 {
-                col[r] = Hasher::ARK_EXT_INITIAL[r][lane];
-            }
-
-            // Rows 4-10 (packed internal): internal constants in lanes 0-2 only
-            if lane < 3 {
-                for triple in 0..7_usize {
-                    let row = 4 + triple;
-                    let ark_idx = triple * 3 + lane;
-                    col[row] = Hasher::ARK_INT[ark_idx];
-                }
-            }
-
-            // Row 11 (int22+ext5): terminal external round 0 constants
-            // (internal constant ARK_INT[21] is hardcoded in the constraint)
-            col[11] = Hasher::ARK_EXT_TERMINAL[0][lane];
-
-            // Rows 12-14 (ext6, ext7, ext8): remaining terminal external round constants
-            for r in 12..=14 {
-                col[r] = Hasher::ARK_EXT_TERMINAL[r - 11][lane];
-            }
-
-            col
-        });
-
-        Self {
-            is_init_ext,
-            is_ext,
-            is_packed_int,
-            is_int_ext,
-            ark,
-        }
-    }
-}
-
-impl Default for BitwisePeriodicCols<Vec<Felt>> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
+#[allow(clippy::new_without_default)]
 impl BitwisePeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the bitwise chiplet.
     pub fn new() -> Self {
@@ -669,36 +402,9 @@ impl BitwisePeriodicCols<Vec<Felt>> {
 impl PeriodicCols<Vec<Felt>> {
     /// Generate all chiplet periodic columns as a flat `Vec<Vec<Felt>>`.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        let HasherPeriodicCols {
-            is_init_ext,
-            is_ext,
-            is_packed_int,
-            is_int_ext,
-            ark: [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11],
-        } = HasherPeriodicCols::new();
-
         let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
 
-        vec![
-            is_init_ext,
-            is_ext,
-            is_packed_int,
-            is_int_ext,
-            a0,
-            a1,
-            a2,
-            a3,
-            a4,
-            a5,
-            a6,
-            a7,
-            a8,
-            a9,
-            a10,
-            a11,
-            k_first,
-            k_transition,
-        ]
+        vec![k_first, k_transition]
     }
 }
 
@@ -715,13 +421,9 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
 }
 
 const _: () = {
-    assert!(size_of::<PeriodicCols<u8>>() == 18);
-    assert!(size_of::<HasherPeriodicCols<u8>>() == 16);
+    assert!(size_of::<PeriodicCols<u8>>() == 2);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 
-    // PermutationCols and ControllerCols overlay chiplets[1..20] (19 columns,
-    // excluding s_perm which is consumed by the chiplet selector system).
-    assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };
 
@@ -732,7 +434,6 @@ const _: () = {
 // length. Mirrors the `Borrow<CoreCols<T>>` / `Borrow<ChipletCols<T>>` impls on the parent
 // `crate::constraints::columns` module.
 
-impl_borrow_for_chiplet_cols!(PermutationCols);
 impl_borrow_for_chiplet_cols!(ControllerCols);
 impl_borrow_for_chiplet_cols!(BitwiseCols);
 impl_borrow_for_chiplet_cols!(MemoryCols);
@@ -750,96 +451,8 @@ mod tests {
         let cols = PeriodicCols::periodic_columns();
         assert_eq!(cols.len(), NUM_PERIODIC_COLUMNS);
 
-        let (hasher_cols, bitwise_cols) = cols.split_at(size_of::<HasherPeriodicCols<u8>>());
-        for col in hasher_cols {
-            assert_eq!(col.len(), HASH_CYCLE_LEN);
-        }
-        for col in bitwise_cols {
+        for col in &cols {
             assert_eq!(col.len(), 8);
-        }
-    }
-
-    #[test]
-    fn hasher_step_selectors_are_exclusive() {
-        let h = HasherPeriodicCols::new();
-        for row in 0..HASH_CYCLE_LEN {
-            let init_ext = h.is_init_ext[row];
-            let ext = h.is_ext[row];
-            let packed_int = h.is_packed_int[row];
-            let int_ext = h.is_int_ext[row];
-
-            // Each selector is binary.
-            assert_eq!(init_ext * (init_ext - Felt::ONE), Felt::ZERO);
-            assert_eq!(ext * (ext - Felt::ONE), Felt::ZERO);
-            assert_eq!(packed_int * (packed_int - Felt::ONE), Felt::ZERO);
-            assert_eq!(int_ext * (int_ext - Felt::ONE), Felt::ZERO);
-
-            // At most one selector is active per row.
-            let sum = init_ext + ext + packed_int + int_ext;
-            assert!(sum == Felt::ZERO || sum == Felt::ONE, "row {row}: sum = {sum}");
-        }
-    }
-
-    #[test]
-    fn external_round_constants_correct() {
-        let h = HasherPeriodicCols::new();
-
-        // Row 0: ARK_EXT_INITIAL[0]
-        for lane in 0..STATE_WIDTH {
-            assert_eq!(h.ark[lane][0], Hasher::ARK_EXT_INITIAL[0][lane]);
-        }
-
-        // Rows 1-3: ARK_EXT_INITIAL[1..3]
-        for r in 1..=3 {
-            for lane in 0..STATE_WIDTH {
-                assert_eq!(h.ark[lane][r], Hasher::ARK_EXT_INITIAL[r][lane]);
-            }
-        }
-
-        // Row 11: ARK_EXT_TERMINAL[0]
-        for lane in 0..STATE_WIDTH {
-            assert_eq!(h.ark[lane][11], Hasher::ARK_EXT_TERMINAL[0][lane]);
-        }
-
-        // Rows 12-14: ARK_EXT_TERMINAL[1..3]
-        for r in 12..=14 {
-            for lane in 0..STATE_WIDTH {
-                assert_eq!(h.ark[lane][r], Hasher::ARK_EXT_TERMINAL[r - 11][lane]);
-            }
-        }
-    }
-
-    #[test]
-    fn internal_round_constants_correct() {
-        let h = HasherPeriodicCols::new();
-
-        // Rows 4-10: packed internal round constants in ark[0..2]
-        for triple in 0..7_usize {
-            let row = 4 + triple;
-            for k in 0..3 {
-                let ark_idx = triple * 3 + k;
-                assert_eq!(
-                    h.ark[k][row],
-                    Hasher::ARK_INT[ark_idx],
-                    "mismatch at row {row}, int constant {k} (ARK_INT[{ark_idx}])"
-                );
-            }
-            // ark[3..12] must be zero on packed-internal rows
-            for lane in 3..STATE_WIDTH {
-                assert_eq!(
-                    h.ark[lane][row],
-                    Felt::ZERO,
-                    "ark[{lane}] nonzero at packed-int row {row}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn boundary_row_all_zero() {
-        let h = HasherPeriodicCols::new();
-        for (lane, col) in h.ark.iter().enumerate() {
-            assert_eq!(col[15], Felt::ZERO, "ark column {lane} nonzero at row 15");
         }
     }
 }

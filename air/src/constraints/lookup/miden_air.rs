@@ -11,9 +11,8 @@ use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
 // COMMITTED-FINALS COUNT
 // ================================================================================================
 
-/// Number of committed final aux values in the multi-AIR proof shape: Core final at slot 0
-/// and Chiplets final at slot 1.
-pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
+/// Number of committed final aux values in the multi-AIR proof shape: one per AIR.
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = 3;
 
 // BOUNDARY EMITTERS
 // ================================================================================================

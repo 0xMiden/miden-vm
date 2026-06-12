@@ -15,18 +15,27 @@ const ACCEPTABLE_QUERY_POW_BITS = 16
 const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
-# RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT).
-# This is a compile-time constant computed once per AIR that binds the Fiat-Shamir
-# transcript to the relation (AIR structure + fix protocol parameter choices).
+# RELATION_DIGEST is the tagged meta digest for all supported proof-order ACE circuits.
+# It binds the Fiat-Shamir transcript to the relation while allowing the recursive
+# verifier to dispatch to the circuit matching the proof's AIR order.
 #
 # PROTOCOL_ID (defined in circuit_evaluation.rs) implicitly covers every hardcoded
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
-# CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 6871187650964071150
-const RELATION_DIGEST_1 = 18248677907557382765
-const RELATION_DIGEST_2 = 12787859665698063802
-const RELATION_DIGEST_3 = 14988796724621435560
+# Each circuit commitment covers one order-specific encoded ACE circuit. The digest
+# input is:
+#   [PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...]
+const RELATION_DIGEST_0 = 8068690199881128576
+const RELATION_DIGEST_1 = 15752653923667764930
+const RELATION_DIGEST_2 = 4618337672943346065
+const RELATION_DIGEST_3 = 9135763419457635012
+
+const SHAPE_RESERVED = 0
+
+# MIN matches `MIN_TRACE_LEN = 2^6 = 64` in `air/src/trace/mod.rs`.
+# MAX matches `MAX_TRACE_LEN = 1 << 29` in `processor/src/trace/parallel/mod.rs`.
+const MIN_LOG_TRACE_HEIGHT = 6
+const MAX_LOG_TRACE_HEIGHT = 29
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!
@@ -63,44 +72,160 @@ proc assert_acceptable_options
     push.ACCEPTABLE_FOLDING_POW_BITS assert_eq.err="folding_pow_bits does not match acceptable security policy"
 end
 
+#! Loads, validates, and caches the Miden AIR shape from advice.
+#!
+#! The shape is part of the VM-specific recursive verifier wrapper, not the
+#! generic STARK verifier. It is supplied in fixed instance order:
+#!
+#!   [log_core, log_chiplets, log_poseidon2, reserved=0]
+#!
+#! Soundness contract:
+#! - RELATION_DIGEST is a compile-time MASM constant; advice never supplies it.
+#! - Heights are advice-supplied, but the Fiat-Shamir replay observes them after
+#!   public inputs in instance order. Wrong heights diverge from the prover transcript.
+#! - Shape checks reject malformed advice before transcript work starts.
+#!
+#! Writes:
+#!   AIR_SHAPE_PTR
+#!   CORE_TRACE_LENGTH_LOG_PTR
+#!   CHIPLETS_TRACE_LENGTH_LOG_PTR
+#!   POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR
+#!   TRACE_LENGTH_LOG_PTR
+#!   ORDER_TAG_PTR
+#!   RELATION_DIGEST_PTR
+#!
+#! Stack-neutral.
+pub proc init_miden_air_shape_state
+    exec.load_miden_air_shape_from_advice
+    exec.validate_miden_air_shape
+    exec.derive_miden_air_cached_state
+    exec.store_relation_digest
+end
+
+proc load_miden_air_shape_from_advice
+    padw
+    adv_loadw
+    # => [log_core, log_chiplets, log_poseidon2, reserved, ...]
+    exec.constants::air_shape_ptr mem_storew_le
+    # => [log_core, log_chiplets, log_poseidon2, reserved, ...]
+    dropw
+    # => [...]
+end
+
+proc validate_miden_air_shape
+    padw
+    exec.constants::air_shape_ptr mem_loadw_le
+    exec.assert_shape_log
+    exec.assert_shape_log
+    exec.assert_shape_log
+    push.SHAPE_RESERVED assert_eq.err="nonzero Miden AIR shape reserved field"
+end
+
+proc assert_shape_log
+    u32assert.err="AIR log height must be u32"
+    dup push.MIN_LOG_TRACE_HEIGHT u32gte assert.err="AIR log height below minimum"
+    push.MAX_LOG_TRACE_HEIGHT u32lte assert.err="AIR log height above maximum"
+end
+
+proc derive_miden_air_cached_state
+    exec.constants::air_shape_ptr mem_load
+    dup
+    exec.constants::set_core_trace_length_log
+
+    exec.constants::air_shape_ptr add.1 mem_load
+    dup
+    exec.constants::set_chiplets_trace_length_log
+
+    exec.constants::air_shape_ptr add.2 mem_load
+    dup
+    exec.constants::set_poseidon2_permutation_trace_length_log
+
+    u32max
+    u32max
+    exec.constants::set_trace_length_log
+
+    exec.derive_order_tag
+    exec.constants::set_order_tag
+end
+
+#! Derives the proof-order tag from the Miden AIR log heights cached in memory.
+#!
+#! Tags are Lehmer ranks over instance order `[Core, Chiplets, Poseidon2Permutation]`:
+#!   0: Core, Chiplets, Poseidon2Permutation
+#!   1: Core, Poseidon2Permutation, Chiplets
+#!   2: Chiplets, Core, Poseidon2Permutation
+#!   3: Chiplets, Poseidon2Permutation, Core
+#!   4: Poseidon2Permutation, Core, Chiplets
+#!   5: Poseidon2Permutation, Chiplets, Core
+proc derive_order_tag
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    u32lte
+    if.true
+        exec.constants::get_chiplets_trace_length_log
+        exec.constants::get_poseidon2_permutation_trace_length_log
+        u32lte
+        if.true
+            push.0
+        else
+            exec.constants::get_core_trace_length_log
+            exec.constants::get_poseidon2_permutation_trace_length_log
+            u32lte
+            if.true
+                push.1
+            else
+                push.4
+            end
+        end
+    else
+        exec.constants::get_core_trace_length_log
+        exec.constants::get_poseidon2_permutation_trace_length_log
+        u32lte
+        if.true
+            push.2
+        else
+            exec.constants::get_chiplets_trace_length_log
+            exec.constants::get_poseidon2_permutation_trace_length_log
+            u32lte
+            if.true
+                push.3
+            else
+                push.5
+            end
+        end
+    end
+end
+
+proc store_relation_digest
+    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
+    exec.constants::relation_digest_ptr mem_storew_le
+    dropw
+end
+
 #! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
 #!
 #! Security parameters (num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits) are
 #! loaded from the advice stack, validated against the acceptable security policy, and
 #! stored in memory for use by the generic verifier.
+#! The Miden AIR shape is also loaded from advice, validated, and cached
+#! before the generic verifier runs.
 #!
 #! - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
 #!   well as the program and the kernel procedures digests.
-#! - There are two trace segments, main and auxiliary. It is assumed that the main trace segment
-#!   is 73 columns wide while the auxiliary trace segment is 8 columns wide. Note that we pad the main
-#!   trace to the next multiple of 8.
-#! - The OOD evaluation frame is composed of two concatenated rows, current and next, each composed
-#!   of 73 elements representing the main trace portion and 8 elements for the auxiliary trace one.
-#!   Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
-#!   is 80 for the main trace.
+#! - The proof uses three AIRs: Core, Chiplets, and Poseidon2Permutation. Main and auxiliary
+#!   leaves are concatenated in proof order after LMCS alignment.
 #!
-#! Inputs:  [log(core_trace_length), log(chiplets_trace_length)]
+#! Inputs:  []
 #! Outputs: []
 pub proc verify_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
-    # => [log(core_tl), log(chiplets_tl)]
+    # => [...]
 
-    # --- Get constants -------------------------------------------------------
-
-    # Push RELATION_DIGEST below the two log heights.
-    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
-    # => [rd0, rd1, rd2, rd3, log_core, log_chiplets]
-
-    # Bring log_core to top, then log_chiplets underneath, restoring the verifier signature.
-    movup.4
-    # => [log_core, rd0, rd1, rd2, rd3, log_chiplets]
-    movup.5
-    # => [log_chiplets, log_core, rd0, rd1, rd2, rd3]
-    swap
-    # => [log_core, log_chiplets, rd0, rd1, rd2, rd3]
+    exec.init_miden_air_shape_state
+    # => [...]
 
     # --- Load the digests of all dynamically invoked procedures --------------
 
@@ -109,7 +234,7 @@ pub proc verify_proof
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     procref.aux_trace::observe_aux_trace
-    # => [D0, D1, D2, D3, D4, log_core, log_chiplets, rd0, rd1, rd2, rd3]
+    # => [D0, D1, D2, D3, D4]
 
     # --- Call the core verification procedure from `core-lib` ------------------
 

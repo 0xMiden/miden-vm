@@ -1,6 +1,6 @@
 //! Miden-side extension-trait impls pinning the generic
 //! [`ConstraintLookupBuilder`] and [`ProverLookupBuilder`] adapters to the
-//! Miden [`MainLookupBuilder`] / [`ChipletLookupBuilder`] traits.
+//! Miden lookup-builder extension traits.
 //!
 //! Both traits require `LookupBuilder<F = Felt>`, so the impls live here
 //! (Miden-side) rather than alongside the adapters — the generic adapter
@@ -19,7 +19,10 @@
 use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
+use super::{
+    buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
+};
 use crate::{
     CoreCols, Felt,
     lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
@@ -34,6 +37,11 @@ impl<'ab, AB> MainLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
 }
 
 impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
+    AB: LiftedAirBuilder<F = Felt>
+{
+}
+
+impl<'ab, AB> Poseidon2PermutationLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
     AB: LiftedAirBuilder<F = Felt>
 {
 }
@@ -66,6 +74,11 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 {
 }
 
+impl<'a, EF> Poseidon2PermutationLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
+    EF: ExtensionField<Felt>
+{
+}
+
 // DEBUG BUILDERS
 // ================================================================================================
 //
@@ -76,12 +89,14 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 
 #[cfg(feature = "std")]
 mod debug_impls {
-    use super::{ChipletLookupBuilder, MainLookupBuilder};
+    use super::{ChipletLookupBuilder, MainLookupBuilder, Poseidon2PermutationLookupBuilder};
     use crate::lookup::debug::{DebugTraceBuilder, ValidationBuilder};
 
     impl<'ab, 'r> MainLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
+    impl<'ab, 'r> Poseidon2PermutationLookupBuilder for ValidationBuilder<'ab, 'r> {}
 
     impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
     impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
+    impl<'a> Poseidon2PermutationLookupBuilder for DebugTraceBuilder<'a> {}
 }

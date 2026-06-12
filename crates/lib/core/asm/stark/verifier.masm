@@ -19,15 +19,10 @@ use miden::core::stark::utils
 #!   D2. `process_row_ood_evaluations`
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
-#! 2. Per-proof parameters: `log(core_trace_length), log(chiplets_trace_length)` —
-#!    the two per-AIR log heights, in caller order (Core first, Chiplets second).
-#!    The verifier internally derives the max for lifted-domain math and uses each
-#!    AIR's own height for its lifted selectors and β-fold coefficient.
-#! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
-#!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
 #!
-#! Precondition: security parameters (num_queries, query_pow_bits, deep_pow_bits,
-#! folding_pow_bits) must already be stored in memory before calling this procedure.
+#! Precondition: security parameters, per-AIR trace-height logs, ORDER_TAG, and
+#! RELATION_DIGEST must already be stored in memory before calling this procedure.
+#! The instance-specific wrapper owns validation and setup of that state.
 #!
 #! The following simplifying assumptions are currently made and hardcoded:
 #!
@@ -38,7 +33,7 @@ use miden::core::stark::utils
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4, log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3]
+#! Inputs:  [D0, D1, D2, D3, D4]
 #! Outputs: []
 pub proc verify
 
@@ -48,27 +43,23 @@ pub proc verify
 
     # Store digests of dynamically executed procedures
     exec.utils::store_dynamically_executed_procedures
-    # => [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]
+    # => [...]
 
-    # Validate inputs (each height independently)
+    # Validate memory-resident inputs.
     exec.utils::validate_inputs
-    # => [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]
+    # => [...]
 
     # Initialize sponge with DSFS seeding and derive trace domain parameters.
-    # Consumes [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]. Security params are read from memory.
+    # Security params, per-AIR heights, and relation digest are read from memory.
     exec.random_coin::init_seed
     # => [...]
 
-    # Load and observe public inputs
+    # Load and observe public inputs. The instance-specific implementation also observes any
+    # statement shape it owns before returning.
     exec.public_inputs::process_public_inputs
     # => [...]
 
-    # Observe the AIR instance shape (instance count + per-AIR log heights), continuing the
-    # buffered duplex begun while absorbing the public inputs.
-    exec.random_coin::observe_instance_shape
-    # => [...]
-
-    # Load the main trace commitment, observe it onto the buffered stream, and flush.
+    # Load main trace commitment, observe it onto the buffered stream, and flush.
     padw adv_loadw
     exec.constants::main_trace_com_ptr mem_storew_le
     # => [main_trace_commitment, ...]
@@ -90,7 +81,6 @@ pub proc verify
     #       III) Draw constraint composition coefficients
     #==============================================================================================
 
-    # Cycles: 13
     exec.random_coin::generate_constraint_composition_coefficients
     # => [...]
 
@@ -114,13 +104,9 @@ pub proc verify
     #       V) Read the OOD frames for the main trace, auxiliary trace and the trace of evaluations
     #           of H over the LDE domain. This also computes some values needed for the computation
     #           of the DEEP queries.
-    #
-    # Cycles: 307
     #==============================================================================================
 
     exec.ood_frames::load_and_horner_eval_ood_frames
-
-    exec.utils::swap_air_regions_if_chip_first
 
     #==============================================================================================
     #       VI) Draw gamma for the LogUp boundary batching and evaluate constraints
@@ -150,7 +136,6 @@ pub proc verify
     #       -   Number of FRI layers.
     #============================================
 
-    # Cycles: 45
     exec.helper::generate_fri_parameters
     # => [...]
 
@@ -160,7 +145,6 @@ pub proc verify
     #      computing the degree respecting projection
     #============================================
 
-    # Cycles: 21 + 225 * num_fri_layers
     exec.helper::load_fri_layer_commitments
     # => [...]
 
@@ -169,9 +153,6 @@ pub proc verify
     #      polynomial.
     #============================================
 
-    # Cycles:
-    #  1- Remainder polynomial of degree less than 64: 156
-    #  2- Remainder polynomial of degree less than 128: 188
     exec.helper::load_and_verify_remainder
     # => [...]
 
@@ -191,11 +172,9 @@ pub proc verify
     # the first layer commitment and the total number of queries.
     exec.helper::compute_query_pointer
 
-    # Cycles: ~134 * num_queries
     exec.random_coin::generate_list_indices
     # => [...]
 
-    # Cycles: ~348 * num_queries
     exec.deep_queries::compute_deep_composition_polynomial_queries
     # => [...]
 
@@ -203,10 +182,6 @@ pub proc verify
     #   7) Call the FRI verifier
     #============================================
 
-    # Call FRI verifier
-    #
-    # Cycles:
-    #  1- Remainder of size 64: 22 + num_queries * (43 + num_layers * 93)
-    #  2- Remainder of size 128: 22 + num_queries * (75 + num_layers * 93)
+    # Call FRI verifier.
     exec.frie2f4::verify
 end

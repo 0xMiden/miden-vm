@@ -12,7 +12,7 @@ use miden_crypto::{
 
 use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
+    AceConfig, AceError, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
     pipeline::build_ace_dag_for_air,
 };
 
@@ -115,6 +115,21 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 1, coord: 1 }, ef(7));
 
     inputs
+}
+
+#[test]
+fn generic_air_pipeline_rejects_multi_air_layout() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 2,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+        is_multi_air: true,
+    };
+
+    let err = build_ace_dag_for_air::<_, F, EF>(&air, config)
+        .expect_err("generic pipeline should not infer a multi-AIR layout");
+    assert!(matches!(err, AceError::InvalidInputLayout { .. }));
 }
 
 #[test]

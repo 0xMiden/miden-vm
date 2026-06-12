@@ -73,6 +73,10 @@ pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
 // hasher responder address on the chiplet side.
 pub const CHIPLETS_WIDTH: usize = 22;
 
+pub mod poseidon2_permutation {
+    pub use crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS;
+}
+
 pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
     + DECODER_TRACE_WIDTH
     + STACK_TRACE_WIDTH
@@ -83,7 +87,7 @@ pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
 // ------------------------------------------------------------------------------------------------
 //
 // The auxiliary trace is the LogUp lookup-argument segment built per-AIR by `CoreAir`'s
-// and `ChipletsAir`'s `build_aux_trace`: 4 main-trace LogUp columns for Core and 3
+// and `ChipletsAir`'s `AuxBuilder` impls: 4 main-trace LogUp columns for Core and 3
 // chiplet-trace LogUp columns for Chiplets. See
 // [`crate::constraints::lookup::main_air::MainLookupAir`] and
 // [`crate::constraints::lookup::chiplet_air::emit_chiplet_lookup_columns`] for the

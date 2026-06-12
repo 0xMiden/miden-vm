@@ -81,15 +81,16 @@ pub fn pcs_params() -> PcsParams {
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
 // ================================================================================================
 
-/// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, CIRCUIT_COMMITMENT]).
+/// RELATION_DIGEST binds the recursive-verifier relation to all supported proof-order circuits.
 ///
-/// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
+/// It is the tagged meta digest of the order-specific ACE circuit commitments:
+/// `H(PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...)`.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(6871187650964071150),
-    Felt::new_unchecked(18248677907557382765),
-    Felt::new_unchecked(12787859665698063802),
-    Felt::new_unchecked(14988796724621435560),
+    Felt::new_unchecked(8068690199881128576),
+    Felt::new_unchecked(15752653923667764930),
+    Felt::new_unchecked(4618337672943346065),
+    Felt::new_unchecked(9135763419457635012),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -277,7 +278,7 @@ mod tests {
     use miden_ace_codegen::{AceConfig, LayoutKind};
     use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
-    use crate::ace;
+    use crate::{ProofOrder, ace};
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
@@ -295,22 +296,33 @@ mod tests {
             layout: LayoutKind::Masm,
             is_multi_air: true,
         };
-        let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
-        let encoded = circuit.to_ace().unwrap();
-        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+        let mut commitments = Vec::new();
+        let mut snapshot_lines = Vec::new();
+        for order in ProofOrder::variants() {
+            let circuit =
+                ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order).unwrap();
+            let encoded = circuit.to_ace().unwrap();
+            let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+            snapshot_lines.push(format!(
+                "{}:\n  num_inputs: {}\n  num_eval_gates: {}\n  commitment: {:?}",
+                order.file_stem(),
+                encoded.num_vars(),
+                encoded.num_eval_rows(),
+                circuit_commitment.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
+            ));
+            commitments.push((order, circuit_commitment));
+        }
 
         let input: Vec<Felt> = core::iter::once(Felt::new_unchecked(PROTOCOL_ID))
-            .chain(circuit_commitment.iter().copied())
+            .chain(commitments.iter().flat_map(|(order, commitment)| {
+                core::iter::once(Felt::new_unchecked(order.tag() as u64))
+                    .chain(commitment.iter().copied())
+            }))
             .collect();
         let digest = Poseidon2::hash_elements(&input);
         let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
 
-        let snapshot = format!(
-            "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
-            encoded.num_vars(),
-            encoded.num_eval_rows(),
-            expected,
-        );
+        let snapshot = format!("{}\nrelation_digest: {:?}", snapshot_lines.join("\n"), expected);
         insta::assert_snapshot!(snapshot);
 
         let actual: Vec<u64> = super::RELATION_DIGEST.iter().map(Felt::as_canonical_u64).collect();

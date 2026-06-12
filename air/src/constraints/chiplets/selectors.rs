@@ -6,15 +6,14 @@
 //!
 //! ## Selector Hierarchy
 //!
-//! The chiplet system uses two physical selector columns (`s_ctrl = chiplets[0]` and
-//! `s_perm = chiplets[20]`) plus the virtual `s0 = 1 - (s_ctrl + s_perm)` to partition
-//! rows into three top-level regions. The remaining selectors `s1..s4` subdivide the
-//! `s0` region into the remaining chiplets.
+//! The chiplet system uses `s_ctrl = chiplets[0]` for hasher-controller rows and
+//! the virtual selector `s0 = 1 - s_ctrl` for all remaining chiplets. The `s_perm`
+//! column is reserved and constrained to zero. The remaining
+//! selectors `s1..s4` subdivide the `s0` region.
 //!
 //! | Chiplet     | Active when                    |
 //! |-------------|--------------------------------|
 //! | Controller  | `s_ctrl`                       |
-//! | Permutation | `s_perm`                       |
 //! | Bitwise     | `s0 * !s1`                     |
 //! | Memory      | `s0 * s1 * !s2`                |
 //! | ACE         | `s0 * s1 * s2 * !s3`           |
@@ -22,14 +21,11 @@
 //!
 //! ## Selector Transition Rules
 //!
-//! - `s_ctrl`, `s_perm`, and `s_ctrl + s_perm` are boolean (at most one is active)
-//! - `s_ctrl = 1 → s_ctrl' + s_perm' = 1` (a controller row must be followed by another controller
-//!   row or a permutation row)
-//! - `s_perm = 1 → s_ctrl' = 0` (a permutation row cannot be followed by a controller row; it can
-//!   only continue as permutation or transition to s0)
-//! - `s0 = 1 → s_ctrl' = 0 ∧ s_perm' = 0` (once in the s0 region, stay there)
+//! - `s_ctrl` is boolean.
+//! - `s_perm = 0`.
+//! - `s0 = 1` forces `s_ctrl' = 0` (once in the non-controller region, stay there).
 //!
-//! These force the trace ordering: `ctrl...ctrl, perm...perm, s0...s0`.
+//! These force the trace ordering: controller rows first, then non-controller chiplets.
 //!
 //! ## Precomputed Flags
 //!
@@ -39,16 +35,16 @@
 //! - `is_last`: last row of this chiplet's section (`is_active * s_n'`)
 //! - `next_is_first`: next row is the first of this chiplet (`is_last[n-1] * (1 - s_n')`)
 //!
-//! For controller and permutation, `is_active` is the direct physical selector (`s_ctrl` or
-//! `s_perm`). For the remaining chiplets under `s0`, `is_active` uses the subtraction trick
+//! For the controller, `is_active` is the direct physical selector `s_ctrl`. For
+//! the remaining chiplets under `s0`, `is_active` uses the subtraction trick
 //! (`prefix - prefix * s_n`).
 //!
 //! ## Constraints
 //!
-//! 1. **Tri-state partition**: `s_ctrl`, `s_perm`, `(s_ctrl + s_perm)` are boolean
-//! 2. **Transition rules**: ctrl→ctrl|perm, perm→perm|s0, s0→s0
+//! 1. **Top-level partition**: `s_ctrl` is boolean and `s_perm` is zero.
+//! 2. **Transition rules**: ctrl to ctrl-or-s0, s0 to s0
 //! 3. **Binary constraints**: `s1..s4` are binary when their prefix is active
-//! 4. **Stability constraints**: Once `s1..s4` become 1, they stay 1 (no 1→0 transitions)
+//! 4. **Stability constraints**: Once `s1..s4` become 1, they stay 1
 //! 5. **Last-row invariant**: `s_ctrl = 0`, `s1 = s2 = s3 = s4 = 1` on the final row
 //!
 //! The last-row invariant ensures every chiplet's `is_active` flag is zero on the last
@@ -69,11 +65,11 @@ use crate::{ChipletCols, MidenAirBuilder, constraints::utils::BoolNot};
 pub struct ChipletFlags<E> {
     /// 1 when this chiplet owns the current row.
     pub is_active: E,
-    /// `is_transition() * prefix * (1 - s_n')` — bakes in the transition flag.
+    /// `is_transition() * prefix * (1 - s_n')` bakes in the transition flag.
     pub is_transition: E,
-    /// `is_active * s_n'` — last row of this chiplet's section.
+    /// `is_active * s_n'` marks the last row of this chiplet's section.
     pub is_last: E,
-    /// `is_last[n-1] * (1 - s_n')` — next row is the first row of this chiplet.
+    /// `is_last[n-1] * (1 - s_n')` marks the first row of this chiplet's section.
     pub next_is_first: E,
 }
 
@@ -81,7 +77,6 @@ pub struct ChipletFlags<E> {
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
     pub controller: ChipletFlags<E>,
-    pub permutation: ChipletFlags<E>,
     pub bitwise: ChipletFlags<E>,
     pub memory: ChipletFlags<E>,
     pub ace: ChipletFlags<E>,
@@ -93,11 +88,10 @@ pub struct ChipletSelectors<E> {
 /// Enforce chiplet selector constraints and build precomputed flags.
 ///
 /// This enforces:
-/// 1. Tri-state partition constraints for `s_ctrl`, `s_perm`, virtual `s0`
-/// 2. Transition rules (ctrl→ctrl|perm, perm→perm|s0, s0→s0)
+/// 1. Top-level partition constraints for `s_ctrl`, `s_perm = 0`, virtual `s0`
+/// 2. Transition rules (ctrl to ctrl-or-s0, s0 to s0)
 /// 3. Binary and stability constraints for `s1..s4` under `s0`
 /// 4. Last-row invariant (`s_ctrl = 0`, `s1..s4 = 1`)
-/// 5. Hasher domain-specific constraints (sub-selector booleanity, pairing, cycle alignment)
 ///
 /// Returns [`ChipletSelectors`] with precomputed flags for gating chiplet constraints.
 pub fn build_chiplet_selectors<AB>(
@@ -116,17 +110,13 @@ where
     let sel = local.chiplet_selectors();
     let sel_next = next.chiplet_selectors();
 
-    // s_ctrl = chiplets[0]: 1 on controller rows, 0 on perm/non-hasher rows.
+    // s_ctrl = chiplets[0]: 1 on hasher-controller rows, 0 on all other chiplet rows.
     let s_ctrl: AB::Expr = sel[0].into();
     let s_ctrl_next: AB::Expr = sel_next[0].into();
 
-    // s_perm: 1 on permutation rows, 0 elsewhere.
+    // Reserved selector slot. Poseidon2 lives in its own AIR, so this column is zero
+    // on every chiplets row.
     let s_perm: AB::Expr = sel[1].into();
-    let s_perm_next: AB::Expr = sel_next[1].into();
-
-    // s_ctrl_or_s_perm: 1 on any hasher row (controller or permutation), 0 on s0 rows.
-    let s_ctrl_or_s_perm = s_ctrl.clone() + s_perm.clone();
-    let s_ctrl_or_s_perm_next = s_ctrl_next.clone() + s_perm_next.clone();
 
     // s1..s4: remaining chiplet selectors.
     let s1: AB::Expr = sel[2].into();
@@ -139,39 +129,22 @@ where
     let s3_next: AB::Expr = sel_next[4].into();
     let s4_next: AB::Expr = sel_next[5].into();
 
-    // Virtual s0 = 1 - (s_ctrl + s_perm): same semantics as old chiplets[0].
-    // 0 on controller and perm rows, 1 on non-hasher rows.
-    let s0: AB::Expr = s_ctrl_or_s_perm.not();
+    // Virtual s0 = 1 - s_ctrl: 0 on controller rows, 1 on all other chiplet rows.
+    let s0: AB::Expr = s_ctrl.not();
 
     // =========================================================================
-    // TRI-STATE SELECTOR CONSTRAINTS
+    // TOP-LEVEL SELECTOR CONSTRAINTS
     // =========================================================================
 
-    // s_ctrl and s_perm are each boolean, and at most one can be active (their
-    // sum is also boolean, so they cannot both be 1 simultaneously).
     builder.assert_bool(s_ctrl.clone());
-    builder.assert_bool(s_perm.clone());
-    builder.assert_bool(s_ctrl_or_s_perm);
+    builder.assert_zero(s_perm);
 
-    // Transition rules: enforce the trace ordering ctrl...ctrl, perm...perm, s0...s0.
+    // Transition rules: enforce the trace ordering ctrl...ctrl, s0...s0.
     {
         let builder = &mut builder.when_transition();
 
-        // A controller row must be followed by another controller or permutation row.
-        // s_ctrl * (1 - (s_ctrl' + s_perm')) = 0.
-        builder.when(s_ctrl.clone()).assert_one(s_ctrl_or_s_perm_next);
-
-        // A permutation row cannot be followed by a controller row.
-        // s_perm * s_ctrl' = 0.
-        builder.when(s_perm.clone()).assert_zero(s_ctrl_next.clone());
-
-        // Once in the s0 region, neither s_ctrl nor s_perm can appear again.
-        // s0 * s_ctrl' = 0, s0 * s_perm' = 0.
-        {
-            let builder = &mut builder.when(s0.clone());
-            builder.assert_zero(s_ctrl_next.clone());
-            builder.assert_zero(s_perm_next.clone());
-        }
+        // Once in the s0 region, controller rows cannot appear again.
+        builder.when(s0.clone()).assert_zero(s_ctrl_next.clone());
     }
 
     // =========================================================================
@@ -189,10 +162,10 @@ where
     builder.when(s012.clone()).assert_bool(s3.clone());
     builder.when(s0123.clone()).assert_bool(s4.clone());
 
-    // s1..s4 stability: once set to 1, they stay 1 (forbids 1→0 transitions).
+    // s1..s4 stability: once set to 1, they stay 1.
     // Gated by the cumulative product including the target selector, so the gate
-    // is only active when the selector is already 1 — permitting the 0→1
-    // transition at section boundaries while forbidding 1→0.
+    // is only active when the selector is already 1. This permits the 0-to-1
+    // transition at section boundaries while forbidding 1-to-0.
     let s01234 = s0123.clone() * s4.clone();
     {
         let builder = &mut builder.when_transition();
@@ -205,15 +178,14 @@ where
     // =========================================================================
     // LAST-ROW INVARIANT
     // =========================================================================
-    // On the last row: s_ctrl = s_perm = 0 and s1 = s2 = s3 = s4 = 1 (kernel_rom
-    // section). Virtual s0 = 1 follows from s_ctrl = s_perm = 0.
+    // On the last row: s_ctrl = 0 and s1 = s2 = s3 = s4 = 1 (kernel_rom
+    // section). Virtual s0 = 1 follows from s_ctrl = 0.
     // This ensures every chiplet's is_active flag is zero on the last row.
     // Combined with the (1 - s_n') factor in precomputed flags, chiplet-gated
     // constraints automatically vanish without explicit when_transition() guards.
     {
         let builder = &mut builder.when_last_row();
         builder.assert_zero(s_ctrl.clone());
-        builder.assert_zero(s_perm.clone());
         builder.assert_one(s1);
         builder.assert_one(s2);
         builder.assert_one(s3);
@@ -239,16 +211,6 @@ where
     let ctrl_is_last = s_ctrl * s_ctrl_next.not();
     let ctrl_next_is_first = AB::Expr::ZERO; // controller is first section
 
-    // --- Permutation flags (direct physical selector s_perm) ---
-    // is_active = s_perm (deg 1)
-    // is_transition = is_transition_flag * s_perm * s_perm' (deg 3)
-    // is_last = s_perm * (1 - s_perm') (deg 2)
-    // next_is_first = ctrl_is_last * s_perm' (deg 3)
-    let perm_is_active = s_perm.clone();
-    let perm_is_transition = is_transition_flag.clone() * s_perm.clone() * s_perm_next.clone();
-    let perm_is_last = s_perm * s_perm_next.not();
-    let perm_next_is_first = ctrl_is_last.clone() * s_perm_next;
-
     // --- Remaining chiplet active flags (subtraction trick: prefix - prefix * s_n) ---
     let is_bitwise = s0.clone() - s01.clone();
     let is_memory = s01.clone() - s012.clone();
@@ -260,16 +222,16 @@ where
     let is_ace_last = is_ace.clone() * s3_next;
 
     // --- Remaining chiplet next-is-first flags: is_last[n-1] * (1 - s_n') ---
-    let next_is_bitwise_first = perm_is_last.clone() * not_s1_next.clone();
+    let next_is_bitwise_first = ctrl_is_last.clone() * not_s1_next.clone();
     let next_is_memory_first = is_bitwise_last.clone() * not_s2_next.clone();
     let next_is_ace_first = is_memory_last.clone() * not_s3_next.clone();
 
     // --- Remaining chiplet transition flags ---
     // Each sub-s0 chiplet fires its transition flag when the current row is in that
     // chiplet's section (the prefix product) and the next row hasn't yet advanced
-    // past it (the `1 - s_n'` factor). We don't need an explicit `(1 - s_ctrl' -
-    // s_perm')` factor because the tri-state transition rule already enforces
-    // `s0 = 1 → s_ctrl' = 0 ∧ s_perm' = 0`, so on valid traces that factor is
+    // past it (the `1 - s_n'` factor). We don't need an explicit `(1 - s_ctrl')`
+    // factor because the top-level transition rule already enforces
+    // `s0 = 1` forces `s_ctrl' = 0`, so on valid traces that factor is
     // always 1 whenever the prefix is active.
     let bitwise_transition = is_transition_flag.clone() * s0 * not_s1_next;
     let memory_transition = is_transition_flag.clone() * s01 * not_s2_next;
@@ -281,12 +243,6 @@ where
             is_transition: ctrl_is_transition,
             is_last: ctrl_is_last,
             next_is_first: ctrl_next_is_first,
-        },
-        permutation: ChipletFlags {
-            is_active: perm_is_active,
-            is_transition: perm_is_transition,
-            is_last: perm_is_last,
-            next_is_first: perm_next_is_first,
         },
         bitwise: ChipletFlags {
             is_active: is_bitwise,

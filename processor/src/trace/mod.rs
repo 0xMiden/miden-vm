@@ -320,34 +320,35 @@ impl ExecutionTrace {
     ///
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
-        let public_inputs = self.public_inputs();
-        let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
+        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix) =
+            self.main_trace.to_air_matrices();
+        let (public_values, kernel_felts) = self.public_inputs().to_air_inputs();
 
-        let (public_values, kernel_felts) = public_inputs.to_air_inputs();
+        let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
+            Statement::new(MidenMultiAir::new(), public_values, kernel_felts)
+                .expect("statement construction failed");
+        let prover_statement = ProverStatement::new(
+            statement,
+            vec![core_matrix, chiplets_matrix, poseidon2_permutation_matrix],
+        )
+        .expect("prover statement construction failed");
 
-        let statement =
-            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
-                .expect("valid statement inputs");
-        let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
-            .expect("valid trace shapes");
-
-        // A deterministic challenger seeds the debug constraint check; this is a local
-        // constraint debugger, not a full proof transcript, so any fixed challenge set works.
         let config = config::poseidon2_config(config::pcs_params());
         debug::check_constraints(&prover_statement, config.challenger());
     }
 
-    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
-    /// multi-AIR proving path. Strips the Poseidon2 rate-alignment padding columns
-    /// before returning.
-    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        self.main_trace.to_core_chiplets_matrices()
+    /// Splits the trace into the per-AIR matrices consumed by the multi-AIR prover.
+    pub fn to_air_matrices(
+        &self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.to_air_matrices()
     }
 
-    /// Consuming variant for the proving hot path: moves the chiplets row-major buffer
-    /// instead of copying it. See [`MainTrace::into_core_chiplets_matrices`].
-    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
-        self.main_trace.into_core_chiplets_matrices()
+    /// Consuming variant for the proving hot path: moves the row-major buffers.
+    pub fn into_air_matrices(
+        self,
+    ) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.into_air_matrices()
     }
 
     // HELPER METHODS

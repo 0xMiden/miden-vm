@@ -9,6 +9,7 @@ use miden_air::trace::{
         hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
+    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
 use miden_core::{mast::OpBatch, program::Kernel};
 
@@ -34,12 +35,17 @@ mod kernel_rom;
 use kernel_rom::KernelRom;
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // TRACE
 // ================================================================================================
 
 pub struct ChipletsTrace {
+    pub(crate) trace: Vec<Felt>,
+}
+
+pub struct Poseidon2PermutationTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
@@ -50,17 +56,16 @@ pub struct ChipletsTrace {
 /// and kernel ROM chiplets and is responsible for building a final execution trace from their
 /// stacked execution traces and chiplet selectors.
 ///
-/// The module's trace can be thought of as 6 stacked segments in the following form.
+/// The module's trace can be thought of as 5 stacked segments in the following form.
 ///
-/// The chiplet system uses two physical selector columns (`s_ctrl = column 0` and
-/// `s_perm = column 20`) plus the virtual `s0 = 1 - (s_ctrl + s_perm)` to partition
-/// rows into three top-level regions. Columns 1-4 (`s1..s4`) subdivide the `s0` region.
+/// The chiplet system uses `s_ctrl = column 0` to select the hasher controller.
+/// Columns 1-4 (`s1..s4`) subdivide the remaining region. Column 20 (`s_perm`)
+/// is reserved and constrained to zero in `ChipletsAir`.
 ///
-/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`. Split into
-///   controller (s_ctrl=1, s_perm=0) and permutation (s_ctrl=0, s_perm=1) sub-regions.
-///   - column 0 (s_ctrl): 1 on controller rows, 0 on permutation rows
-///   - columns 1-19: execution trace of hash chiplet
-///   - column 20 (s_perm): 0 on controller rows, 1 on permutation rows
+/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
+///   - column 0 (s_ctrl): ONE
+///   - columns 1-19: hasher-controller trace
+///   - column 20 (s_perm): ZERO
 ///
 /// * Bitwise segment: begins at the end of the hasher segment.
 ///   - column 0 (s_ctrl): ZERO
@@ -104,10 +109,6 @@ pub struct ChipletsTrace {
 ///         | . |       20 columns                                         | . |
 ///         | 1 |       constraint degree 9                                | 0 |
 ///         +---+                                                          +---+
-///  perm   | 0 |       Hash chiplet (permutation rows)                    | 1 |
-///         | . |                                                          | . |
-///         | 0 |                                                          | 1 |
-///         +---+---+------------------------------------------------------+---+
 ///         | 0 | 0 |                                                      |---|
 ///         | . | . |                Bitwise chiplet                       |---|
 ///         | . | . |                  13 columns                          |---|
@@ -171,6 +172,11 @@ impl Chiplets {
             + 1
     }
 
+    /// Returns the unpadded trace length of the standalone Poseidon2 permutation AIR.
+    pub fn poseidon2_permutation_trace_len(&self) -> usize {
+        self.hasher.poseidon2_permutation_trace_len()
+    }
+
     /// Returns the index of the first row of `Bitwise` execution trace.
     pub fn bitwise_start(&self) -> RowIndex {
         self.hasher.trace_len().into()
@@ -205,15 +211,24 @@ impl Chiplets {
         self.memory.append_range_checks(self.memory_start(), range_checker);
     }
 
-    /// Returns an execution trace of the chiplets containing the stacked traces of the
-    /// Hasher, Bitwise, ACE, Memory chiplets, and kernel ROM chiplet.
-    pub fn into_trace(self, trace_len: usize) -> ChipletsTrace {
+    /// Returns execution traces for `ChipletsAir` and `Poseidon2PermutationAir`.
+    pub fn into_traces(
+        self,
+        trace_len: usize,
+        poseidon2_trace_len: usize,
+    ) -> (ChipletsTrace, Poseidon2PermutationTrace) {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
+        assert!(
+            self.poseidon2_permutation_trace_len() <= poseidon2_trace_len,
+            "target Poseidon2 trace length too small"
+        );
 
         let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
-        self.fill_trace(&mut trace, trace_len);
+        let mut poseidon2_trace =
+            vec![Felt::ZERO; NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len];
+        self.fill_trace(&mut trace, trace_len, &mut poseidon2_trace);
 
-        ChipletsTrace { trace }
+        (ChipletsTrace { trace }, Poseidon2PermutationTrace { trace: poseidon2_trace })
     }
 
     // HELPER METHODS
@@ -223,7 +238,7 @@ impl Chiplets {
     /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
-    fn fill_trace(self, trace: &mut [Felt], trace_len: usize) {
+    fn fill_trace(self, trace: &mut [Felt], trace_len: usize, poseidon2_trace: &mut [Felt]) {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
 
@@ -245,8 +260,8 @@ impl Chiplets {
         // Chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom and begin at columns
         // 1, 2, 3, 4, 5; the widest (hasher) fills every data column up to `chip_clk` (the
         // final column). Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
-        // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, `s_perm`
-        // (col 20) is hasher-internal, and padding rows are filled directly below.
+        // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, and
+        // padding rows are filled directly below.
         const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
 
         // Carve `trace` into the per-chiplet contiguous row bands.
@@ -293,7 +308,7 @@ impl Chiplets {
 
         rayon::scope(|s| {
             s.spawn(move |_| {
-                hasher.fill_trace(&mut hasher_fragment);
+                hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
             });
             s.spawn(move |_| {
                 bitwise.fill_trace(&mut bitwise_fragment);

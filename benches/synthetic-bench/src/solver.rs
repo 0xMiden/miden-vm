@@ -69,7 +69,7 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let component_target = |c: Component| -> f64 {
         match c {
             Component::Core => target.totals.core_rows as f64,
-            Component::Hasher => target.breakdown.hasher_rows as f64,
+            Component::Hasher => target.totals.poseidon2_permutation_rows as f64,
             Component::Bitwise => target.breakdown.bitwise_rows as f64,
             Component::Memory => target.breakdown.memory_target() as f64,
             Component::Range => target.totals.range_rows as f64,
@@ -134,12 +134,12 @@ mod tests {
     fn shape_of(
         core_rows: u64,
         range_rows: u64,
-        hasher: u64,
+        poseidon2: u64,
         bitwise: u64,
         memory: u64,
     ) -> TraceShape {
         let breakdown = TraceBreakdown {
-            hasher_rows: hasher,
+            hasher_rows: 0,
             bitwise_rows: bitwise,
             memory_rows: memory,
             kernel_rom_rows: 0,
@@ -148,6 +148,7 @@ mod tests {
         let totals = TraceTotals {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
+            poseidon2_permutation_rows: poseidon2,
             range_rows,
         };
         TraceShape::new(totals, breakdown)

@@ -105,8 +105,8 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     //
     // Cycle-end = `row % BITWISE_CYCLE_LEN == BITWISE_CYCLE_LEN - 1` (the periodic `k_transition`
     // column is `0` on the last row of every 8-row cycle, starting from trace row 0). The bitwise
-    // chiplet segment starts at a multiple of `HASH_CYCLE_LEN = 16`, which is a multiple of 8,
-    // so this alignment condition holds across the whole trace.
+    // chiplet segment starts on the 8-row controller alignment boundary, so this condition holds
+    // across the whole trace.
     let mut response_rows_seen = 0usize;
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
