@@ -19,10 +19,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::{
-    fmt,
-    ops::{Bound, RangeBounds},
-};
+use core::fmt;
 
 use miden_core::{Felt, Word};
 use miden_processor::{
@@ -157,9 +154,9 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
             let operand_stack = stack.get(1..).unwrap_or(&[]);
             write_stack(w, operand_stack, None, "Stack", process.clock())?;
         } else if id == PRINT_MEM_EVENT_NAME.to_event_id() {
-            let range = read_mem_print_range(process, 1, 2)?;
+            let bounds = read_mem_print_range(process, 1, 2)?;
             // Guard against an accidentally huge explicit range.
-            if let Some((first, last)) = resolve_addr_bounds(&range) {
+            if let Some((first, last)) = bounds {
                 let len = u64::from(last - first) + 1;
                 if len > MAX_PRINT_MEM_RANGE {
                     return Err(format!(
@@ -168,7 +165,7 @@ impl<W: fmt::Write + Send + Sync + 'static> EventHandler for DebugPrinter<W> {
                     .into());
                 }
             }
-            write_mem_range(w, process, range)?;
+            write_mem_range(w, process, bounds)?;
         } else if id == PRINT_MEM_ALL_EVENT_NAME.to_event_id() {
             write_mem_all(w, process)?;
         } else if id == PRINT_ADV_STACK_EVENT_NAME.to_event_id() {
@@ -213,16 +210,16 @@ fn slice_range(slice: &[Felt], start: usize, end: usize) -> &[Felt] {
 }
 
 /// Reads a half-open `[start, end)` memory range off the operand stack and returns it as inclusive
-/// `u32` address bounds.
+/// `(first, last)` `u32` address bounds, or `None` if the range is empty (`start == end`).
 ///
 /// Memory addresses are `u32`, so both bounds are valid `u32` values. The half-open end may be
 /// `2^32` (one past the last address) so the cell at `u32::MAX` stays reachable; it folds into an
-/// inclusive end of `u32::MAX`. An empty range (`start == end`) is returned with an excluded end.
+/// inclusive end of `u32::MAX`.
 fn read_mem_print_range(
     process: &ProcessorState,
     start_idx: usize,
     end_idx: usize,
-) -> Result<(Bound<u32>, Bound<u32>), MemoryError> {
+) -> Result<Option<(u32, u32)>, MemoryError> {
     let start_addr = process.get_stack_item(start_idx).as_canonical_u64();
     let end_addr = process.get_stack_item(end_idx).as_canonical_u64();
 
@@ -237,46 +234,27 @@ fn read_mem_print_range(
         return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
     }
 
-    let start = start_addr as u32;
     if start_addr == end_addr {
-        // Empty range: an excluded end represents it without a reversed range.
-        Ok((Bound::Included(start), Bound::Excluded(start)))
+        Ok(None)
     } else {
         // Subtract in `u64` before the cast, since `end_addr` may be `2^32`; the result is in
         // `[0, u32::MAX]`.
-        Ok((Bound::Included(start), Bound::Included((end_addr - 1) as u32)))
+        Ok(Some((start_addr as u32, (end_addr - 1) as u32)))
     }
 }
 
-/// Resolves `range` to its inclusive `[first, last]` `u32` address bounds, or `None` if the range
-/// is empty.
-fn resolve_addr_bounds<R: RangeBounds<u32>>(range: &R) -> Option<(u32, u32)> {
-    let first = match range.start_bound() {
-        Bound::Included(&a) => a,
-        Bound::Excluded(&a) => a.checked_add(1)?,
-        Bound::Unbounded => 0,
-    };
-    let last = match range.end_bound() {
-        Bound::Included(&b) => b,
-        Bound::Excluded(&b) => b.checked_sub(1)?,
-        Bound::Unbounded => u32::MAX,
-    };
-    (first <= last).then_some((first, last))
-}
-
-/// Prints every memory cell in `range` for the current context, showing uninitialized cells as
-/// `EMPTY`.
+/// Prints every memory cell in the inclusive `[first, last]` bounds for the current context,
+/// showing uninitialized cells as `EMPTY`. `None` denotes an empty range.
 ///
-/// `range` may be exclusive (`start..end`) or inclusive (`start..=end`); the inclusive form lets
-/// the cell at `u32::MAX` be printed without the end overflowing `u32`. The caller is responsible
-/// for capping the range length (see [`MAX_PRINT_MEM_RANGE`]).
-fn write_mem_range<W, R>(w: &mut W, process: &ProcessorState, range: R) -> fmt::Result
-where
-    W: fmt::Write,
-    R: RangeBounds<u32>,
-{
+/// The bounds are inclusive so the cell at `u32::MAX` can be printed without the end overflowing
+/// `u32`. The caller is responsible for capping the range length (see [`MAX_PRINT_MEM_RANGE`]).
+fn write_mem_range<W: fmt::Write>(
+    w: &mut W,
+    process: &ProcessorState,
+    bounds: Option<(u32, u32)>,
+) -> fmt::Result {
     let (ctx, clk) = (process.ctx(), process.clock());
-    let Some((start, end)) = resolve_addr_bounds(&range) else {
+    let Some((start, end)) = bounds else {
         return writeln!(w, "Memory state before step {clk} for context {ctx}: range is empty.");
     };
     writeln!(
