@@ -12,7 +12,11 @@ use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
+use miden_processor::{
+    ProcessorState,
+    advice::{AdviceMutation, MAX_ADVICE_STACK_SIZE},
+    event::EventError,
+};
 
 use crate::handlers::read_memory_region;
 
@@ -129,6 +133,9 @@ fn compute_sizes(num_blocks: u64, src_ptr: u64) -> Result<(u64, u64, usize), Aea
         .checked_mul(8)
         .and_then(|count| count.try_into().ok())
         .ok_or(AeadDecryptError::SizeOverflow)?;
+    if data_blocks_count > MAX_ADVICE_STACK_SIZE {
+        return Err(AeadDecryptError::SizeOverflow);
+    }
 
     Ok((num_ciphertext_elements, tag_ptr, data_blocks_count))
 }
@@ -157,6 +164,8 @@ enum AeadDecryptError {
 
 #[cfg(test)]
 mod tests {
+    use miden_processor::advice::MAX_ADVICE_STACK_SIZE;
+
     use crate::handlers::aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, AeadDecryptError, compute_sizes};
 
     #[test]
@@ -171,6 +180,24 @@ mod tests {
         assert_eq!(num_ciphertext_elements, 16);
         assert_eq!(tag_ptr, 16);
         assert_eq!(data_blocks_count, 8);
+    }
+
+    #[test]
+    fn test_compute_sizes_accepts_max_advice_stack_budget() {
+        let max_budget_num_blocks = MAX_ADVICE_STACK_SIZE / 8;
+        let (_, _, data_blocks_count) =
+            compute_sizes(max_budget_num_blocks as u64, 0).expect("max budget should fit");
+
+        assert_eq!(data_blocks_count, MAX_ADVICE_STACK_SIZE);
+    }
+
+    #[test]
+    fn test_compute_sizes_rejects_plaintext_larger_than_advice_stack_budget() {
+        let first_over_budget_num_blocks = (MAX_ADVICE_STACK_SIZE / 8) + 1;
+        let err = compute_sizes(first_over_budget_num_blocks as u64, 0)
+            .expect_err("oversized decrypt should fail before host-side decryption work");
+
+        assert!(matches!(err, AeadDecryptError::SizeOverflow));
     }
 
     #[test]
