@@ -903,7 +903,7 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
 pub fn get_column_name(col_idx: usize) -> String {
     let core_names = CORE_COL_NAMES.as_slice();
     if let Some(name) = core_names.get(col_idx) {
-        return name.to_string();
+        return (*name).to_string();
     }
     format!("unknown_col[{col_idx}]")
 }

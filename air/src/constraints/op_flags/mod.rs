@@ -326,7 +326,7 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<11>(&[
+        let no_shift_depth0 = E::sum_array::<13>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
@@ -347,8 +347,12 @@ where
             op4(opcodes::HALT),
             // +CALL         — control flow: enters procedure
             op4(opcodes::CALL),
+            // +SYSCALL      - control flow: enters kernel procedure.
+            op4(opcodes::SYSCALL),
             // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
             op4(opcodes::END) * (E::ONE - is_loop_end),
+            // +EVALCIRCUIT  - asserts an ACE evaluation without changing the stack.
+            op5(opcodes::EVALCIRCUIT),
         ]);
 
         // +opcodes[0..8] –NOOP — unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
@@ -357,41 +361,49 @@ where
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
 
-        let no_shift_depth4 = E::sum_array::<5>(&[
+        let no_shift_depth4 = E::sum_array::<6>(&[
             // +MOVUP3|MOVDN3  — permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC — overwrite s0..s3 in place
             advpopw_or_expacc,
             // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
-            swapw2_or_swapw3.clone(),
+            swapw2_or_swapw3,
             // +EXT2MUL        — ext field multiply on s0..s3
             op7(opcodes::EXT2MUL),
             // +MRUPDATE       — Merkle root update on s0..s3
             op4(opcodes::MRUPDATE),
+            // +CALLER         - overwrite s0..s3 with the caller hash.
+            op7(opcodes::CALLER),
         ]);
 
-        // SWAPW2/SWAPW3 depth lifecycle:
-        //   Op      Swaps               No-shift depths
-        //   SWAPW2  s[0..4] ↔ s[8..12]  0-7, 12-15
-        //   SWAPW3  s[0..4] ↔ s[12..16] 0-7, 8-11
-        //   Combined pair: enters at 4, leaves at 8, re-enters at 12 (minus SWAPW3)
+        // Prefix-summed deltas for SWAPW2/SWAPW3:
+        //   SWAPW2 is active at depths 4..7 and 12..15.
+        //   SWAPW3 is active at depths 4..11.
+        // The shared SWAPW2|SWAPW3 term starts at depth 4. Depth 8 removes only SWAPW2,
+        // and depth 12 adds SWAPW2 back while removing SWAPW3.
+
+        let stream_word_ops = op5(opcodes::MSTREAM) + op5(opcodes::PIPE);
 
         let no_shift_depth8
             // +MOVUP7|MOVDN7  — permute s0..s7
             = movup_or_movdn[5].clone()
             // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0-7
             + op7(opcodes::SWAPW)
-            // –SWAPW2|SWAPW3  — target range s8+ now affected at this depth
-            - swapw2_or_swapw3.clone();
+            // +MSTREAM/PIPE   - overwrite s0..s7 and increment s12; preserve s8..s11.
+            + stream_word_ops.clone()
+            // -SWAPW2         - s8..s11 are SWAPW2's target word, but unchanged for SWAPW3.
+            - op7(opcodes::SWAPW2);
 
         let no_shift_depth12
-            // +SWAPW2|SWAPW3 — pair re-enters (both leave depths 12+ untouched)
-            = swapw2_or_swapw3
+            // +SWAPW2         - s12..s15 are unchanged by SWAPW2.
+            = op7(opcodes::SWAPW2)
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
             // +LOGPRECOMPILE — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
             + op5(opcodes::LOGPRECOMPILE)
-            // –SWAPW3        — SWAPW3 swaps s0..s3 with s12..s15, so s12+ still changes
+            // -MSTREAM/PIPE  - s12 is incremented by these ops.
+            - stream_word_ops.clone()
+            // -SWAPW3         - s12..s15 are SWAPW3's target word.
             - op7(opcodes::SWAPW3);
 
         let no_shift = accumulate_depth_deltas([
@@ -422,8 +434,8 @@ where
             E::ZERO,
             // d=12
             no_shift_depth12,
-            // d=13 (unchanged)
-            E::ZERO,
+            // +MSTREAM/PIPE   - preserve s13..s15 after skipping the incremented s12.
+            stream_word_ops,
             // d=14 (unchanged)
             E::ZERO,
             // d=15 (unchanged)
@@ -439,7 +451,7 @@ where
         let all_mov_pairs = E::sum_array::<7>(&movup_or_movdn);
         let all_movdn = all_mov_pairs.clone() * bits[0][1].clone();
 
-        let left_shift_depth1 = E::sum_array::<10>(&[
+        let left_shift_depth1 = E::sum_array::<11>(&[
             // +ASSERT      — consumes s0 (must be 1)
             op7(opcodes::ASSERT),
             // +MOVDN{2..8} — move s0 down, shifts left above
@@ -454,6 +466,8 @@ where
             deg7[47].clone(),
             // +SPLIT        — control flow: pops condition from s0
             op5(opcodes::SPLIT),
+            // +REPEAT       - control flow: pops condition before re-entering a loop body
+            op4(opcodes::REPEAT),
             // +END*loop     — END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
             // +DYN          — control flow: consumes s0..s3 (target hash)
@@ -955,10 +969,8 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of HORNEREXT operation.
         hornerext => opcodes::HORNEREXT,
         /// Operation Flag of MSTREAM operation.
-        #[expect(dead_code)]
         mstream => opcodes::MSTREAM,
         /// Operation Flag of PIPE operation.
-        #[expect(dead_code)]
         pipe => opcodes::PIPE,
     );
 

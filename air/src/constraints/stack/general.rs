@@ -87,3 +87,44 @@ pub fn enforce_main<AB>(
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+
+    use super::enforce_main;
+    use crate::constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+        stack::test_utils::ConstraintEvalBuilder,
+    };
+
+    fn eval_stack_general(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
+    }
+
+    #[test]
+    fn evalcircuit_rejects_forged_stack_transition() {
+        let local = generate_test_row(opcodes::EVALCIRCUIT.into());
+        let mut next = generate_test_row(0);
+
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(evaluations.iter().all(|value| *value == QuadFelt::ZERO));
+
+        next.stack.top[7] += Felt::ONE;
+        let evaluations = eval_stack_general(&local, &next);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "EVALCIRCUIT must preserve the visible stack"
+        );
+    }
+}
