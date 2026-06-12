@@ -141,9 +141,8 @@ fn cli_bundle_kernel() {
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib/mod.masm")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_main.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -157,9 +156,8 @@ fn cli_bundle_kernel_noexports() {
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib_noexports/mod.masm")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_noexports.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
