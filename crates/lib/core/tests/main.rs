@@ -122,6 +122,21 @@ fn core_library_does_not_export_precompile_impl_helpers() {
     }
 }
 
+#[test]
+fn core_library_does_not_export_fri_preprocess_test_helper() {
+    use miden_core_lib::CoreLibrary;
+
+    let core_lib = CoreLibrary::default();
+    let package = core_lib.package();
+
+    assert!(
+        package
+            .get_procedure_root_by_path("::miden::core::pcs::fri::frie2f4::preprocess")
+            .is_none(),
+        "FRI preprocess helper must not be exported by corelib",
+    );
+}
+
 mod collections;
 mod crypto;
 mod helpers;

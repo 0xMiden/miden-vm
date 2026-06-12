@@ -143,65 +143,154 @@ fn check_pow_invalid_has_message() {
     expect_assert_error_message!(test);
 }
 
+const FRI_PREPROCESS_SOURCE: &str = "
+    use miden::core::stark::constants
+
+    const MAX_FRI_QUERIES = 150
+    const MAX_FRI_LAYERS = 32
+    const MAX_FRI_REMAINDER_WORDS = 64
+
+    proc preprocess
+        adv_push
+        # => [num_queries, g, ...]
+        dup u32gt.0 assert.err=\"number of FRI queries must be nonzero\"
+        dup u32lte.MAX_FRI_QUERIES assert.err=\"number of FRI queries exceeds FRI workspace\"
+
+        exec.constants::fri_com_ptr
+        # => [layer_ptr, num_queries, g, ...]
+        dup.1 mul.4 sub
+        # => [query_ptr, num_queries, g, ...]
+        dup exec.constants::set_fri_queries_address
+        swap
+        sub.1
+        padw
+        push.1
+        while.true
+            adv_loadw
+            dup.5
+            u32wrapping_add.4
+            swap.6
+            mem_storew_le
+            dup.4
+            sub.1
+            swap.5
+            neq.0
+        end
+        #=> [X, x, layer_ptr, g]
+
+        drop
+        #=> [X, layer_ptr, g]
+
+        dup.4
+        movdn.5
+        #=> [X, layer_ptr, layer_ptr, g]
+
+        adv_push
+        dup u32lte.MAX_FRI_LAYERS assert.err=\"number of FRI layers exceeds FRI workspace\"
+
+        dup push.0 neq
+        if.true
+            mul.2
+            sub.1
+            movdn.4
+            #=> [X, num_layers, layer_ptr, layer_ptr, g]
+
+            push.1
+            while.true
+                adv_loadw
+                dup.5
+                u32wrapping_add.4
+                swap.6
+                mem_storew_le
+                dup.4
+                sub.1
+                swap.5
+                neq.0
+            end
+            #=> [X, x, remainder_poly_ptr, layer_ptr, g]
+
+            drop
+        else
+            drop
+        end
+        #=> [X, remainder_poly_ptr, layer_ptr, g]
+
+        dup.4
+        movdn.5
+        #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
+
+        adv_push
+        dup u32gt.0 assert.err=\"FRI remainder polynomial must be nonzero\"
+        dup u32lte.MAX_FRI_REMAINDER_WORDS assert.err=\"FRI remainder polynomial exceeds FRI workspace\"
+
+        dup mul.2 exec.constants::set_remainder_poly_size
+
+        sub.1
+        movdn.4
+        #=> [X, len_remainder/2, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
+
+        push.1
+        while.true
+            adv_loadw
+            dup.5
+            u32wrapping_add.4
+            swap.6
+            mem_storew_le
+            dup.4
+            sub.1
+            swap.5
+            neq.0
+        end
+        #=> [X, x, x, remainder_poly_ptr, layer_ptr, g]
+        dropw drop drop
+        #=> [remainder_poly_ptr, layer_ptr, g]
+
+        exec.constants::set_remainder_poly_address
+        drop drop
+    end
+";
+
+fn fri_preprocess_source(body: &str) -> String {
+    format!(
+        "{FRI_PREPROCESS_SOURCE}
+         begin
+             {body}
+         end"
+    )
+}
+
 #[test]
 fn fri_preprocess_rejects_oversized_query_count() {
-    let source = "
-        use miden::core::pcs::fri::frie2f4
-
-        begin
-            exec.frie2f4::preprocess
-        end
-        ";
-
+    let source = fri_preprocess_source("exec.preprocess");
     let advice_stack = build_preprocess_advice_stack(151, 0, 0);
-    let test = build_test!(source, &[1], &advice_stack);
+    let test = build_test!(&source, &[1], &advice_stack);
     expect_assert_error_message!(test, contains "number of FRI queries exceeds FRI workspace");
 }
 
 #[test]
 fn fri_preprocess_rejects_oversized_layer_count() {
-    let source = "
-        use miden::core::pcs::fri::frie2f4
-
-        begin
-            exec.frie2f4::preprocess
-        end
-        ";
-
+    let source = fri_preprocess_source("exec.preprocess");
     let advice_stack = build_preprocess_advice_stack(1, 33, 0);
-    let test = build_test!(source, &[1], &advice_stack);
+    let test = build_test!(&source, &[1], &advice_stack);
     expect_assert_error_message!(test, contains "number of FRI layers exceeds FRI workspace");
 }
 
 #[test]
 fn fri_preprocess_rejects_oversized_remainder() {
-    let source = "
-        use miden::core::pcs::fri::frie2f4
-
-        begin
-            exec.frie2f4::preprocess
-        end
-        ";
-
+    let source = fri_preprocess_source("exec.preprocess");
     let advice_stack = build_preprocess_advice_stack(1, 1, 65);
-    let test = build_test!(source, &[1], &advice_stack);
+    let test = build_test!(&source, &[1], &advice_stack);
     expect_assert_error_message!(test, contains "FRI remainder polynomial exceeds FRI workspace");
 }
 
 #[test]
 fn fri_preprocess_rejects_zero_counts() {
-    let source = "
-        use miden::core::pcs::fri::frie2f4
+    let source = fri_preprocess_source("exec.preprocess");
 
-        begin
-            exec.frie2f4::preprocess
-        end
-        ";
-
-    let test = build_test!(source, &[1], &build_preprocess_advice_stack(0, 1, 1));
+    let test = build_test!(&source, &[1], &build_preprocess_advice_stack(0, 1, 1));
     expect_assert_error_message!(test, contains "number of FRI queries must be nonzero");
 
-    let test = build_test!(source, &[1], &build_preprocess_advice_stack(1, 1, 0));
+    let test = build_test!(&source, &[1], &build_preprocess_advice_stack(1, 1, 0));
     expect_assert_error_message!(test, contains "FRI remainder polynomial must be nonzero");
 }
 
@@ -210,17 +299,15 @@ fn fri_preprocess_accepts_zero_layers() {
     const VICTIM_ADDR: u32 = 0;
     const VICTIM_WORD: [u64; 4] = [91, 92, 93, 94];
 
-    let source = "
-        use miden::core::pcs::fri::frie2f4
-
-        begin
-            push.[91,92,93,94] push.0 mem_storew_le dropw
-            exec.frie2f4::preprocess
-        end
-        ";
+    let source = fri_preprocess_source(
+        "
+        push.[91,92,93,94] push.0 mem_storew_le dropw
+        exec.preprocess
+        ",
+    );
 
     let advice_stack = build_preprocess_advice_stack(1, 0, 1);
-    build_test!(source, &[1], &advice_stack).expect_stack_and_memory(
+    build_test!(&source, &[1], &advice_stack).expect_stack_and_memory(
         &[],
         VICTIM_ADDR,
         &VICTIM_WORD,
@@ -232,17 +319,15 @@ fn fri_preprocess_accepts_full_workspace_bounds() {
     const VICTIM_ADDR: u32 = 0;
     const VICTIM_WORD: [u64; 4] = [91, 92, 93, 94];
 
-    let source = "
-        use miden::core::pcs::fri::frie2f4
-
-        begin
-            push.[91,92,93,94] push.0 mem_storew_le dropw
-            exec.frie2f4::preprocess
-        end
-        ";
+    let source = fri_preprocess_source(
+        "
+        push.[91,92,93,94] push.0 mem_storew_le dropw
+        exec.preprocess
+        ",
+    );
 
     let advice_stack = build_preprocess_advice_stack(1, 32, 64);
-    build_test!(source, &[1], &advice_stack).expect_stack_and_memory(
+    build_test!(&source, &[1], &advice_stack).expect_stack_and_memory(
         &[],
         VICTIM_ADDR,
         &VICTIM_WORD,

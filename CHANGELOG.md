@@ -43,7 +43,7 @@
 #### Fixes
 
 - Rejected empty query regions in the standalone FRI verifier ([#3237](https://github.com/0xMiden/miden-vm/pull/3237)).
-- Bounded FRI preprocessing advice counts before writing query, layer, and remainder data into verifier workspace ([#3248](https://github.com/0xMiden/miden-vm/pull/3248)).
+- [BREAKING] Removed the test-only `frie2f4::preprocess` helper from corelib exports ([#3248](https://github.com/0xMiden/miden-vm/pull/3248)).
 - Pinned the initial AIR system context and function hash to zero, preventing forged caller hashes at row 0 ([#3240](https://github.com/0xMiden/miden-vm/pull/3240)).
 - Preserved `LOGPRECOMPILE` tail stack slots in the AIR, preventing forged values in `stack[12..15]` ([#3244](https://github.com/0xMiden/miden-vm/pull/3244)).
 - Bound memory AIR word addresses to their range-checked decomposition limbs ([#3245](https://github.com/0xMiden/miden-vm/pull/3245)).
