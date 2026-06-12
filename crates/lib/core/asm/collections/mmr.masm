@@ -506,7 +506,136 @@ pub proc mmb_verify_leaf
   assert_eqw
 end
 
-#! Authenticates a rooted frontier `(num_leaves, ROOT)` and loads its peaks into memory.
+#! Authenticates an MMB commitment `(num_leaves, ROOT)` and loads its peaks into memory.
+#!
+#! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
+#! followed by the peaks (oldest to newest, zero-padded to a 16-word minimum and an even count,
+#! the same padding rule `pack`/`unpack` use). The peaks are loaded into memory at `mmb_ptr` in
+#! the `mmb_root` layout and the belt root is recomputed over them and asserted equal to `ROOT`.
+#!
+#! `num_leaves` is taken from the operand stack as a *trusted* input and is what the recomputed
+#! belt is folded over, which authenticates the advice peaks against the `(num_leaves, ROOT)`
+#! pair. Note that unlike the rooted frontier — whose root folds over the length bits — the raw
+#! belt root does NOT bind the length by itself: lengths with the same mountain count and range
+#! structure (e.g. 7 and 8) fold the same peaks to the same root. The MMB commitment is
+#! therefore the pair, as in the crypto-side `BeltSummary`; callers must never treat `ROOT`
+#! alone as a commitment.
+#!
+#! On success the MMB is laid out at `mmb_ptr` exactly as `mmb_root` expects, so `mmb_add` can
+#! be used against the authenticated peaks.
+#!
+#! Input: [ROOT, num_leaves, mmb_ptr, ...]
+#! Output: [...]
+@locals(1)
+pub proc mmb_unpack
+  # store the trusted num_leaves at mmb_ptr; `mmb_root` reads it from there.
+  dup.4 dup.6 mem_store
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # loc.0 = padded-peak pairs beyond the 16-word fast path (zero whenever the mountain count
+  # is at most 16, which holds for any MMB below 2^17 leaves).
+  dup.4 u32assert add.1 ilog2 exec.num_peaks_to_padded_words sub.16 u32shr.1 loc_store.0
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Pull `[num_leaves, 0, 0, 0] || padded_peaks` to the advice stack and assert the header
+  # length matches the trusted length from the operand stack.
+  adv.push_mapval
+  adv_pushw
+  dup.8 assert_eq.err="advice header does not match the trusted MMB length"
+  drop drop drop
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Set up adv_pipe state with cursor = mmb_ptr + 4 at depth 12, then load the first 16 padded
+  # words via 8 unrolled adv_pipes (1 cycle each, no hash-chiplet rows) and any extras two
+  # words at a time.
+  dup.5 add.4 padw padw padw
+  # => [PAD, PAD, PAD, peak_start, ROOT, num_leaves, mmb_ptr, ...]
+  adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe adv_pipe
+  loc_load.0 neq.0
+  while.true
+    adv_pipe
+    loc_load.0 sub.1 dup loc_store.0 neq.0
+  end
+
+  # Drop the leftover sponge state and the advanced cursor.
+  dropw dropw dropw drop
+  # => [ROOT, num_leaves, mmb_ptr, ...]
+
+  # Recompute the belt root over the trusted length and assert it matches the commitment.
+  movup.5 exec.mmb_root
+  # => [COMPUTED_ROOT, ROOT, num_leaves, ...]
+  assert_eqw.err="belt root does not match the unpacked peaks"
+  drop
+end
+
+#! Appends a leaf to the MMB.
+#!
+#! This is the lazy U-MMB append: the new leaf joins as a height-0 mountain and at most the
+#! rightmost mergeable pair of mountains is merged. With `m = num_leaves' + 1` (the post-append
+#! shape bits), the merge is skipped exactly when `m` is a power of two; otherwise the pair
+#! sits at mountain positions `j` and `j + 1` from the right, where `j` is the index of the
+#! lowest set bit of `m`, and the mountains right of the pair slide down one slot.
+#!
+#! This updates the peaks in memory only; the belt commitment is recomputed on demand by
+#! `mmb_root`.
+#!
+#! Input: [EL, mmb_ptr, ...]
+#! Output: [...]
+@locals(2)
+pub proc mmb_add
+  # loc.0 = mmb_ptr; loc.1 = num_leaves' = num_leaves + 1.
+  movup.4 dup loc_store.0
+  mem_load add.1 dup loc_store.1
+  # => [num_leaves', EL, ...]
+
+  # The new leaf becomes the newest mountain at index old_count = ilog2(num_leaves').
+  ilog2 mul.4 loc_load.0 add add.4
+  # => [leaf_addr, EL, ...]
+  mem_storew_le dropw
+  # => [...]
+
+  loc_load.1 loc_load.0 mem_store
+  # => [...]
+
+  # Merge step: skipped exactly when num_leaves' + 1 is a power of two.
+  loc_load.1 dup add.1 u32and neq.0
+  if.true
+    # j = lowest set bit index of m = num_leaves' + 1; the pair's left member sits at index
+    # ilog2(num_leaves') - j - 1 (post-add count is ilog2(num_leaves') + 1).
+    loc_load.1 add.1 dup u32not u32wrapping_add.1 u32and ilog2
+    # => [j, ...]
+    loc_load.1 ilog2 swap sub sub.1
+    # => [left_idx, ...]
+    mul.4 loc_load.0 add add.4
+    # => [addr_left, ...]
+
+    # Merged peak = merge(left, right), stored in the left slot.
+    dup add.4 padw movup.4 mem_loadw_le
+    # => [PEAK_RIGHT, addr_left, ...]
+    dup.4 padw movup.4 mem_loadw_le
+    # => [PEAK_LEFT, PEAK_RIGHT, addr_left, ...]
+    hmerge
+    # => [MERGED, addr_left, ...]
+    movup.4 dup movdn.5 mem_storew_le dropw
+    # => [addr_left, ...]
+
+    # Slide the j mountains right of the pair down one slot. The copy runs until the source
+    # reaches the post-add peak end = mmb_ptr + 4 + 4 * (ilog2(num_leaves') + 1).
+    loc_load.1 ilog2 add.1 mul.4 loc_load.0 add add.4 loc_store.1
+    add.8
+    # => [src, ...]
+    dup loc_load.1 neq
+    while.true
+      dup padw movup.4 mem_loadw_le
+      # => [W, src, ...]
+      dup.4 sub.4 mem_storew_le dropw
+      # => [src, ...]
+      add.4
+      dup loc_load.1 neq
+    end
+    drop
+  end
+end
 #!
 #! The peaks are provided via the advice map keyed by `ROOT`, encoded as `[num_leaves, 0, 0, 0]`
 #! followed by the peaks (the same value layout `pack`/`unpack` use). The peaks are loaded into
