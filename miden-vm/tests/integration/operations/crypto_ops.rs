@@ -1,14 +1,19 @@
+#[cfg(feature = "arbitrary")]
 use miden_core::field::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::build_test;
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_hash, build_expected_perm, build_op_test, build_test,
+    Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
-    proptest::prelude::*,
 };
 
 // TESTS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn hash_proptest(
@@ -30,6 +35,7 @@ proptest! {
     }
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn hperm_proptest(
@@ -118,6 +124,7 @@ fn hmerge() {
     assert_eq!(expected_stack_slice, &last_state[4..8]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn hmerge_proptest(
@@ -584,10 +591,14 @@ fn crypto_stream_allows_adjacent_before() {
 // ================================================================================================
 
 // Constants for stack positions (low coefficient closer to top / lower index)
+#[cfg(feature = "arbitrary")]
 const ALPHA_ADDR_INDEX: usize = 13;
+#[cfg(feature = "arbitrary")]
 const ACC_LOW_INDEX: usize = 14;
+#[cfg(feature = "arbitrary")]
 const ACC_HIGH_INDEX: usize = 15;
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(5))]
     #[test]

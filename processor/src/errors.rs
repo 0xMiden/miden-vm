@@ -8,7 +8,7 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
-    BaseHost, ContextId, Felt, TraceError, Word,
+    BaseHost, ContextId, Felt, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
@@ -153,19 +153,13 @@ pub enum AceEvalError {
 // HOST ERROR
 // ================================================================================================
 
-/// Error type for host-related operations (event handlers, trace handlers).
+/// Error type for host-related operations.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error("trace handler error for trace ID {trace_id}: {err}")]
-    TraceHandlerError {
-        trace_id: u32,
-        #[source]
-        err: TraceError,
-    },
 }
 
 // IO ERROR
@@ -227,6 +221,13 @@ pub enum MemoryError {
     UnalignedWordAccess { addr: u32, ctx: ContextId },
     #[error("failed to read from memory: {0}")]
     MemoryReadFailed(String),
+    #[error(
+        "writing to memory address {addr} in context {ctx} would exceed the maximum number of memory elements {max}"
+    )]
+    #[diagnostic(help(
+        "increase the limit via `ExecutionOptions::with_max_memory_elements`, or reduce the number of distinct memory addresses the program writes to"
+    ))]
+    MemoryElementLimitExceeded { ctx: ContextId, addr: u32, max: usize },
 }
 
 // CRYPTO ERROR
@@ -398,8 +399,8 @@ pub struct MerklePathVerificationFailedInner {
 /// Computes the label and source file for error context.
 ///
 /// This function is called by the extension traits to compute source location
-/// only when an error occurs. Since errors are rare, the cost of decorator
-/// traversal is acceptable.
+/// only when an error occurs. Since errors are rare, the cost of source metadata lookup is
+/// acceptable.
 fn get_label_and_source_file<F>(
     op_idx: Option<usize>,
     mast_forest: &F,

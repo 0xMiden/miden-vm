@@ -181,6 +181,21 @@ fn type_alias_with_name(name: &str) -> TypeAlias {
 }
 
 #[test]
+fn empty_enum_still_reports_type_name_conflicts() {
+    let context = SyntaxTestContext::default();
+    let source = "\
+type thing = felt
+enum thing: u8 {}
+";
+    let error = context
+        .parse_module(source)
+        .expect_err("expected symbol conflict when enum name matches existing type");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert_symbol_conflict(&error, "thing");
+    assert!(rendered.contains("symbol conflict"));
+}
+
+#[test]
 fn repeat_count_zero_rejected_in_analysis() {
     let context = SyntaxTestContext::default();
     let error = context
@@ -281,4 +296,90 @@ fn define_items_detect_cross_kind_duplicates_for_all_pairs_and_orders() {
             assert_cross_kind_conflict(first, second);
         }
     }
+}
+
+#[test]
+fn name_map_stays_consistent_after_take_items() {
+    // Verify that take_items() clears the name index, so re-adding the same
+    // name after a take does not trigger a false conflict.
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("foo"))
+        .expect("first insertion should succeed");
+
+    let _items = module.take_items();
+
+    // After take_items(), name_map is cleared — same name should succeed again.
+    module
+        .define_constant(constant_with_name("foo"))
+        .expect("re-insertion after take_items should succeed");
+}
+
+#[test]
+fn name_map_detects_conflict_via_define_api() {
+    // Verify that duplicate names are detected through the define_* API.
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("dup"))
+        .expect("first insertion should succeed");
+
+    let result = module.define_constant(constant_with_name("dup"));
+    assert!(
+        matches!(result, Err(SemanticAnalysisError::SymbolConflict { .. })),
+        "expected SymbolConflict for duplicate name, got {result:?}"
+    );
+}
+
+#[test]
+fn name_map_rebuilds_after_mutable_item_rename() {
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("old"))
+        .expect("first insertion should succeed");
+
+    for item in module.items_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.name = ident_with_name("dup");
+    }
+
+    let result = module.define_type(type_alias_with_name("dup"));
+    assert!(
+        matches!(result, Err(SemanticAnalysisError::SymbolConflict { .. })),
+        "expected SymbolConflict after renaming through items_mut(), got {result:?}"
+    );
+}
+
+#[test]
+fn name_map_drops_old_name_after_mutable_item_rename() {
+    let mut module = Module::new(ModuleKind::Library, Path::new("mod"));
+    module
+        .define_constant(constant_with_name("old"))
+        .expect("first insertion should succeed");
+
+    for item in module.items_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.name = ident_with_name("new");
+    }
+
+    module
+        .define_type(type_alias_with_name("old"))
+        .expect("old name should be available after the name map is rebuilt");
+}
+
+#[test]
+fn enum_variant_matching_enum_name_reports_symbol_conflict() {
+    let context = SyntaxTestContext::default();
+    let source = "\
+enum DUP : u8 {
+    DUP,
+}
+";
+    let error = context
+        .parse_module(source)
+        .expect_err("expected symbol conflict when enum variant matches enum name");
+    assert_symbol_conflict(&error, "DUP");
 }

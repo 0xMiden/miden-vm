@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_air::trace::{STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
+use miden_air::{StackCols, SystemCols};
 use miden_core::program::MIN_STACK_DEPTH;
 
 use super::{
@@ -34,8 +34,8 @@ mod trace_row;
 /// to initialize the first row of the next fragment, as well as the number of trace rows that were
 /// built.
 pub(crate) struct TracerFinalState {
-    pub last_stack_cols: [Felt; STACK_TRACE_WIDTH],
-    pub last_system_cols: [Felt; SYS_TRACE_WIDTH],
+    pub last_stack_cols: StackCols<Felt>,
+    pub last_system_cols: SystemCols<Felt>,
     pub num_rows_written: usize,
 }
 
@@ -70,11 +70,11 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// Buffered stack trace column data from the current clock cycle. Written to the fragment on
     /// the *next* clock cycle (since stack columns are one row behind), and returned via
     /// [`into_parts`](Self::into_parts) so the next fragment can continue from this state.
-    stack_cols: Option<[Felt; STACK_TRACE_WIDTH]>,
+    stack_cols: Option<StackCols<Felt>>,
     /// Buffered system trace column data from the current clock cycle. Written to the fragment on
     /// the *next* clock cycle (since system columns are one row behind), and returned via
     /// [`into_parts`](Self::into_parts) so the next fragment can continue from this state.
-    system_cols: Option<[Felt; SYS_TRACE_WIDTH]>,
+    system_cols: Option<SystemCols<Felt>>,
 
     /// Execution context info captured at the beginning of a DYNCALL clock cycle (in
     /// [`start_clock_cycle`](Tracer::start_clock_cycle)) to be used when finalizing it.
@@ -138,8 +138,17 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         }
 
         Ok(TracerFinalState {
-            last_stack_cols: self.stack_cols.unwrap_or([ZERO; STACK_TRACE_WIDTH]),
-            last_system_cols: self.system_cols.unwrap_or([ZERO; SYS_TRACE_WIDTH]),
+            last_stack_cols: self.stack_cols.unwrap_or(StackCols {
+                top: [ZERO; MIN_STACK_DEPTH],
+                b0: ZERO,
+                b1: ZERO,
+                h0: ZERO,
+            }),
+            last_system_cols: self.system_cols.unwrap_or(SystemCols {
+                clk: ZERO,
+                ctx: ZERO,
+                fn_hash: [ZERO; miden_core::WORD_SIZE],
+            }),
             num_rows_written: self.row_write_index,
         })
     }
@@ -290,7 +299,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation<Arc<SparseMastForest>>,
         processor: &ReplayProcessor,
     ) -> Option<bool> {
-        if let Continuation::FinishLoop { .. } = &continuation {
+        if let Continuation::FinishLoop(_) = &continuation {
             let condition = processor.stack.get(0);
             return Some(condition == ONE);
         }
@@ -308,9 +317,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         let is_loop_body = self.is_loop_body;
 
         match continuation {
-            Continuation::FinishLoop { was_entered, .. } => {
-                // The Loop node itself is ending. `loop_entered` = `was_entered`.
-                Ok(NodeFlags::new(is_loop_body, *was_entered, false, false))
+            Continuation::FinishLoop(_) => {
+                // The Loop node itself is ending. With do-while semantics every loop is entered, so
+                // the `is_loop` flag is unconditionally true here.
+                Ok(NodeFlags::new(is_loop_body, true, false, false))
             },
             Continuation::FinishCall(node_id) => {
                 let node = get_node_in_forest(current_forest, *node_id)?;
@@ -406,7 +416,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             // whether the next clock-incrementing continuation is a FinishLoop.
             self.is_loop_body = matches!(
                 continuation_stack.iter_continuations_for_next_clock().last(),
-                Some(Continuation::FinishLoop { was_entered: true, .. })
+                Some(Continuation::FinishLoop(_))
             );
 
             // Store state for finalizing the clock cycle later.
@@ -466,7 +476,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                FinishLoop { node_id, was_entered: _ } => {
+                FinishLoop(node_id) => {
                     let loop_condition = self.finish_loop_condition.take().ok_or(
                         ExecutionError::Internal(
                             "loop condition not stored at start of clock cycle for FinishLoop continuation",
@@ -600,9 +610,9 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                FinishExternal(_) | EnterForest(_) | AfterExitDecorators(_) => {
+                EnterForest(_) => {
                     unreachable!(
-                        "Tracer contract guarantees that these continuations do not occur here"
+                        "Tracer contract guarantees that EnterForest continuations do not occur here"
                     )
                 },
             }

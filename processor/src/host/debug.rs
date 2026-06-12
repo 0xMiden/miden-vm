@@ -6,8 +6,6 @@ use core::fmt;
 
 use miden_core::Felt;
 
-use crate::{ProcessorState, TraceError, host::handlers::TraceHandler};
-
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
 
@@ -19,38 +17,6 @@ impl fmt::Write for StdoutWriter {
     fn write_str(&mut self, _s: &str) -> fmt::Result {
         #[cfg(feature = "std")]
         std::print!("{_s}");
-        Ok(())
-    }
-}
-
-// DEFAULT TRACE HANDLER IMPLEMENTATION
-// ================================================================================================
-
-/// Default trace handler that ignores trace events.
-pub struct DefaultTraceHandler<W: fmt::Write + Sync = StdoutWriter> {
-    writer: W,
-}
-
-impl Default for DefaultTraceHandler<StdoutWriter> {
-    fn default() -> Self {
-        Self { writer: StdoutWriter }
-    }
-}
-
-impl<W: fmt::Write + Sync> DefaultTraceHandler<W> {
-    /// Creates a new [`DefaultTraceHandler`] with the specified writer.
-    pub fn new(writer: W) -> Self {
-        Self { writer }
-    }
-
-    /// Returns a reference to the writer for accessing writer-specific methods.
-    pub fn writer(&self) -> &W {
-        &self.writer
-    }
-}
-
-impl<W: fmt::Write + Sync> TraceHandler for DefaultTraceHandler<W> {
-    fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
         Ok(())
     }
 }

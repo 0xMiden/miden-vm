@@ -13,8 +13,6 @@ pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
-    enable_tracing: bool,
-    enable_debugging: bool,
     /// Maximum number of field elements that can be inserted into the advice map in a single
     /// `adv.insert_mem` operation.
     max_adv_map_value_size: usize,
@@ -28,6 +26,9 @@ pub struct ExecutionOptions {
     /// Maximum number of field elements allowed on the operand stack in the active execution
     /// context.
     max_stack_depth: usize,
+    /// Maximum number of field elements allowed in the processor's memory at any point during
+    /// execution, rounded up to the nearest multiple of 4.
+    max_memory_elements: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -36,13 +37,12 @@ impl Default for ExecutionOptions {
             max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            enable_tracing: false,
-            enable_debugging: false,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         }
     }
 }
@@ -81,6 +81,15 @@ impl ExecutionOptions {
     /// `FastProcessor` stack buffer.
     pub const DEFAULT_MAX_STACK_DEPTH: usize = 6615;
 
+    /// Default maximum number of field elements allowed in the processor's memory.
+    ///
+    /// Memory is element-addressable, so this bounds the total number of elements live across all
+    /// contexts. Internally memory is stored at word granularity (4 elements per word), so the
+    /// effective limit is rounded up to a whole number of words. Set to 2^28, which lets programs
+    /// use a large amount of memory while still providing a finite host-memory backstop against
+    /// unbounded growth from writes to arbitrarily many unique addresses.
+    pub const DEFAULT_MAX_MEMORY_ELEMENTS: usize = 1 << 28;
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -97,8 +106,6 @@ impl ExecutionOptions {
         max_cycles: Option<u32>,
         expected_cycles: u32,
         core_trace_fragment_size: usize,
-        enable_tracing: bool,
-        enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
         // Validate max cycles.
         let max_cycles = if let Some(max_cycles) = max_cycles {
@@ -138,13 +145,12 @@ impl ExecutionOptions {
             max_cycles,
             expected_cycles,
             core_trace_fragment_size,
-            enable_tracing,
-            enable_debugging,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         })
     }
 
@@ -160,22 +166,6 @@ impl ExecutionOptions {
         }
         self.core_trace_fragment_size = size;
         Ok(self)
-    }
-
-    /// Enables execution of the `trace` instructions.
-    pub fn with_tracing(mut self, enable_tracing: bool) -> Self {
-        self.enable_tracing = enable_tracing;
-        self
-    }
-
-    /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
-    /// otherwise, debug mode is disabled.
-    ///
-    /// This flag is kept for backwards compatibility but no longer affects decorator execution
-    /// since the `Decorator::Debug` variant has been removed.
-    pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
-        self.enable_debugging = enable_debugging;
-        self
     }
 
     // PUBLIC ACCESSORS
@@ -199,18 +189,6 @@ impl ExecutionOptions {
     /// Returns the fragment size for core trace generation.
     pub fn core_trace_fragment_size(&self) -> usize {
         self.core_trace_fragment_size
-    }
-
-    /// Returns a flag indicating whether the VM should execute `trace` instructions.
-    #[inline]
-    pub fn enable_tracing(&self) -> bool {
-        self.enable_tracing
-    }
-
-    /// Returns a flag indicating whether the VM should execute a program in debug mode.
-    #[inline]
-    pub fn enable_debugging(&self) -> bool {
-        self.enable_debugging
     }
 
     /// Returns the maximum number of field elements allowed in a single live advice map value.
@@ -263,6 +241,15 @@ impl ExecutionOptions {
         self.max_stack_depth
     }
 
+    /// Returns the configured maximum number of field elements allowed in the processor's memory.
+    ///
+    /// This is the raw value as set via [`Self::with_max_memory_elements`]; the effective cap is
+    /// rounded up to a whole number of words (a multiple of 4) when memory is initialized.
+    #[inline]
+    pub fn max_memory_elements(&self) -> usize {
+        self.max_memory_elements
+    }
+
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
@@ -283,6 +270,12 @@ impl ExecutionOptions {
         }
         self.max_stack_depth = max_stack_depth;
         Ok(self)
+    }
+
+    /// Sets the maximum number of field elements allowed in the processor's memory.
+    pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
+        self.max_memory_elements = max_memory_elements;
+        self
     }
 }
 
@@ -318,20 +311,20 @@ mod tests {
     #[test]
     fn valid_fragment_size() {
         // Valid power of two values should succeed
-        let opts = ExecutionOptions::new(None, 64, 1024, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().core_trace_fragment_size(), 1024);
 
-        let opts = ExecutionOptions::new(None, 64, 4096, false, false);
+        let opts = ExecutionOptions::new(None, 64, 4096);
         assert!(opts.is_ok());
 
-        let opts = ExecutionOptions::new(None, 64, 1, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1);
         assert!(opts.is_ok());
     }
 
     #[test]
     fn zero_fragment_size_fails() {
-        let opts = ExecutionOptions::new(None, 64, 0, false, false);
+        let opts = ExecutionOptions::new(None, 64, 0);
         assert!(matches!(opts, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
     }
 
@@ -350,7 +343,7 @@ mod tests {
     #[test]
     fn expected_cycles_validated_after_rounding() {
         // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
-        let opts = ExecutionOptions::new(Some(100), 65, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 65, 1024);
         assert!(matches!(
             opts,
             Err(ExecutionOptionsError::ExpectedCyclesTooBig {
@@ -360,7 +353,7 @@ mod tests {
         ));
 
         // expected_cycles=64 rounds to 64; max_cycles=100 -> ok.
-        let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
     }

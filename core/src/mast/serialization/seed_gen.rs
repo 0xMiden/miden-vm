@@ -38,7 +38,7 @@ fn generate_fuzz_seeds() {
     // Seed 1: Minimal valid forest (single basic block)
     {
         let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(block_id);
@@ -61,10 +61,10 @@ fn generate_fuzz_seeds() {
     // Seed 2: Forest with join node
     {
         let mut forest = MastForest::new();
-        let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
-        let block2 = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let block2 = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut forest)
             .unwrap();
         let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
@@ -88,7 +88,7 @@ fn generate_fuzz_seeds() {
     // Seed 3: Stripped forest (no debug info)
     {
         let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(block_id);
@@ -111,7 +111,7 @@ fn generate_fuzz_seeds() {
     // Seed 4: Hashless forest (no internal hash section, no debug info)
     {
         let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(block_id);
@@ -158,7 +158,7 @@ fn generate_fuzz_seeds() {
     // Program seed
     {
         let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(block_id);
@@ -169,7 +169,7 @@ fn generate_fuzz_seeds() {
     // Program seed with invalid duplicate-kernel payload.
     {
         let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(block_id);

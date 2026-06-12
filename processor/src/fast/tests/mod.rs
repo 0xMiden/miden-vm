@@ -5,22 +5,22 @@ use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     ONE, assert_matches,
     events::SystemEvent,
-    mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-        MastForestContributor,
-    },
+    mast::{BasicBlockNodeBuilder, CallNodeBuilder, JoinNodeBuilder, MastForestContributor},
     operations::Operation,
     program::StackInputs,
 };
-use miden_utils_testing::build_test;
+use miden_utils_testing::{build_test, stack_inputs_from_ints};
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, operation::OperationError};
+use crate::{
+    AdviceInputs, DefaultHost,
+    operation::OperationError,
+    processor::{StackInterface, SystemInterface},
+};
 
 mod advice_provider;
 mod all_ops;
-mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
 
@@ -60,7 +60,7 @@ fn stack_get_word_out_of_bounds_read() {
 
 #[test]
 fn stack_get_safe_boundary() {
-    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let inputs = stack_inputs_from_ints(1..=16_u64);
     let processor = FastProcessor::new(inputs);
 
     // idx == stack_top_idx: out of bounds, should return ZERO.
@@ -78,7 +78,7 @@ fn stack_get_safe_boundary() {
 
 #[test]
 fn stack_get_word_safe_partial_read() {
-    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let inputs = stack_inputs_from_ints(1..=16_u64);
     let processor = FastProcessor::new(inputs);
 
     // The stack has 16 elements (indices 0..=15). Reading a word at start_idx=15 means we want
@@ -174,7 +174,7 @@ fn test_syscall_fail() {
     let stack_inputs = StackInputs::new(&[Felt::from_u32(5)]).unwrap();
     let program = {
         let mut program = MastForest::new();
-        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut program)
             .unwrap();
         let root_id = CallNodeBuilder::new_syscall(basic_block_id)
@@ -223,8 +223,6 @@ fn test_cycle_limit_exceeded() {
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        false,
-        false,
     )
     .unwrap();
 
@@ -261,8 +259,6 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
         Some(2048),
         MIN_TRACE_LEN as u32,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        false,
-        false,
     )
     .unwrap();
 
@@ -419,25 +415,27 @@ fn test_call_node_preserves_stack_overflow_table() {
     let program = {
         let mut program = MastForest::new();
         // foo proc
-        let foo_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let foo_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut program)
             .unwrap();
 
         // before call
-        let push10_push20_id = BasicBlockNodeBuilder::new(
-            vec![Operation::Push(Felt::from_u32(10)), Operation::Push(Felt::from_u32(20))],
-            Vec::new(),
-        )
+        let push10_push20_id = BasicBlockNodeBuilder::new(vec![
+            Operation::Push(Felt::from_u32(10)),
+            Operation::Push(Felt::from_u32(20)),
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
         // call
         let call_node_id = CallNodeBuilder::new(foo_id).add_to_forest(&mut program).unwrap();
         // after call
-        let swap_drop_swap_drop = BasicBlockNodeBuilder::new(
-            vec![Operation::Swap, Operation::Drop, Operation::Swap, Operation::Drop],
-            Vec::new(),
-        )
+        let swap_drop_swap_drop = BasicBlockNodeBuilder::new(vec![
+            Operation::Swap,
+            Operation::Drop,
+            Operation::Swap,
+            Operation::Drop,
+        ])
         .add_to_forest(&mut program)
         .unwrap();
 
@@ -504,76 +502,6 @@ fn test_call_node_preserves_stack_overflow_table() {
             Felt::from_u32(15),
             Felt::from_u32(16),
         ]
-    );
-}
-
-// EXTERNAL NODE TESTS
-// -----------------------------------------------------------------------------------------------
-
-#[test]
-fn test_external_node_decorator_sequencing() {
-    let mut lib_forest = MastForest::new();
-
-    // Add a decorator to the lib forest to track execution inside the external node
-    let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
-
-    let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
-    // Attach the decorator to the first operation (index 0)
-    let lib_block_id =
-        BasicBlockNodeBuilder::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)])
-            .add_to_forest(&mut lib_forest)
-            .unwrap();
-    lib_forest.make_root(lib_block_id);
-
-    let mut main_forest = MastForest::new();
-    let before_decorator = Decorator::Trace(1);
-    let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator).unwrap();
-
-    let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
-        .with_before_enter([before_id])
-        .with_after_exit([after_id])
-        .add_to_forest(&mut main_forest)
-        .unwrap();
-    main_forest.make_root(external_id);
-
-    let program = Program::new(main_forest.into(), external_id);
-    let mut host = crate::test_utils::TestHost::with_kernel_forest(Arc::new(lib_forest));
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
-
-    let result = processor.execute_sync(&program, &mut host);
-    assert!(result.is_ok(), "Execution failed: {result:?}");
-
-    // Verify all decorators executed
-    assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
-    assert_eq!(
-        host.get_trace_count(2),
-        1,
-        "external node decorator should execute exactly once"
-    );
-    assert_eq!(host.get_trace_count(3), 1, "after_exit decorator should execute exactly once");
-
-    // More importantly, verify the complete execution order
-    let execution_order = host.get_execution_order();
-    assert_eq!(execution_order.len(), 3, "Should have exactly 3 trace events");
-    assert_eq!(execution_order[0].0, 1, "before_enter should execute first");
-    assert_eq!(execution_order[1].0, 2, "external node decorator should execute second");
-    assert_eq!(execution_order[2].0, 3, "after_exit should execute last");
-
-    // Verify that clock cycles are in strictly increasing order
-    assert!(
-        execution_order[1].1 > execution_order[0].1,
-        "external node should execute after before_enter"
-    );
-    assert!(
-        execution_order[2].1 > execution_order[1].1,
-        "after_exit should execute after external node operations"
     );
 }
 
@@ -700,17 +628,20 @@ fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
             .expect("processor advice inputs should fit advice map limits");
 
     assert_eq!(processor.stack.len(), INITIAL_STACK_BUFFER_SIZE);
-    processor.call_stack.push(ExecutionContextInfo {
-        overflow_stack: vec![Felt::from_u32(42); caller_overflow_len],
+    processor
+        .stack_overflow_save_stack
+        .push(vec![Felt::from_u32(42); caller_overflow_len]);
+    processor.system_call_state_stack.push(SystemCallState {
         ctx: processor.ctx,
-        fn_hash: processor.caller_hash,
+        caller_hash: processor.caller_hash,
     });
 
     // The active callee context is still at the minimum stack depth and the storage has not grown.
     // Restoring this suspended caller is what requires moving the active stack and growing storage.
-    processor
-        .restore_context()
+    StackInterface::restore_context(&mut processor)
         .expect("restoring a suspended caller should grow the stack buffer when needed");
+    SystemInterface::restore_call_state(&mut processor)
+        .expect("restoring system call state should succeed");
     assert!(
         processor.stack.len() > INITIAL_STACK_BUFFER_SIZE,
         "context restore should have grown the stack buffer"
@@ -981,7 +912,7 @@ fn test_continuation_stack_limit_exceeded() {
         let mut forest = MastForest::new();
 
         // Create a simple leaf basic block (just a noop).
-        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
 
@@ -1016,7 +947,7 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
     let program = {
         let mut forest = MastForest::new();
 
-        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
 
@@ -1042,8 +973,7 @@ fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
 fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     let program: Program = {
         let mut program = MastForest::new();
-        let root_id =
-            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut program).unwrap();
+        let root_id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut program).unwrap();
         program.make_root(root_id);
 
         Program::new(program.into(), root_id)

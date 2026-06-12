@@ -19,7 +19,7 @@ AIR constraints for the decoder involve operations listed in the table below. Fo
 | --------- | :-----------: |:------:| ------------------------------------------------------------------------------------------------ |
 | `JOIN`    | $f_{join}$    |   5    | Stack remains unchanged.                                                                         |
 | `SPLIT`   | $f_{split}$   |   5    | Top stack element is dropped.                                                                    |
-| `LOOP`    | $f_{loop}$    |   5    | Top stack element is dropped.                                                                    |
+| `LOOP`    | $f_{loop}$    |   5    | Stack remains unchanged.                                                                         |
 | `REPEAT`  | $f_{repeat}$  |   4    | Top stack element is dropped.                                                                    |
 | `SPAN`    | $f_{span}$    |   5    | Stack remains unchanged.                                                                         |
 | `RESPAN`  | $f_{respan}$  |   4    | Stack remains unchanged.                                                                         |
@@ -43,10 +43,10 @@ In the sections below, we describe constraints according to their logical groupi
 
 ## General constraints
 
-When `SPLIT` or `LOOP` operation is executed, the top of the operand stack must contain a binary value:
+When `SPLIT` operation is executed, the top of the operand stack must contain a binary value:
 
 > $$
-> (f_{split} + f_{loop}) \cdot (s_0^2 - s_0) = 0 \text{ | degree} = 7
+> f_{split} \cdot (s_0^2 - s_0) = 0 \text{ | degree} = 7
 > $$
 
 When a `DYN` operation is executed, the second half of the hasher registers
@@ -317,10 +317,10 @@ $$
 v_{split} = f_{split} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot 0) \text{ | degree} = 6
 $$
 
-When `LOOP` operation is executed, row $(a', a, 1)$ is added to the block stack table if the value at the top of the operand stack is $1$, and row $(a', a, 0)$ is added to the block stack table if the value at the top of the operand stack is $0$:
+When `LOOP` operation is executed, row $(a', a, 1)$ is added to the block stack table. Because `LOOP` has do-while semantics, the body is always entered, so the `is_loop` slot is unconditionally $1$:
 
 $$
-v_{loop} = f_{loop} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3 \cdot s_0) \text{ | degree} = 6
+v_{loop} = f_{loop} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a + \alpha_3) \text{ | degree} = 5
 $$
 
 When `SPAN` operation is executed, row $(a', a, 0)$ is added to the block stack table:
@@ -430,12 +430,12 @@ $$
 v_{split} = f_{split} \cdot (s_0 \cdot ch_1 + (1 - s_0) \cdot ch_2)  \text{ | degree} = 7
 $$
 
-When `LOOP` operation is executed and the top of the stack is $1$, hash of the loop body
-is added to the block hash table (with `is_loop_body = 1`). When the top of the stack
-is $0$, no insertion is made:
+When `LOOP` operation is executed, the hash of the loop body is unconditionally added to the
+block hash table (with `is_loop_body = 1`), since the body is always entered for the first
+iteration:
 
 $$
-v_{loop} = f_{loop} \cdot (s_0 \cdot m(a', h_0..h_3, 0, 1) + (1 - s_0)) \text{ | degree} = 7
+v_{loop} = f_{loop} \cdot m(a', h_0..h_3, 0, 1) \text{ | degree} = 6
 $$
 
 When `REPEAT` operation is executed, hash of the loop body is added to the block hash table:

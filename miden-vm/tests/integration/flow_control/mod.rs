@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
+use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionError, Word, operation::OperationError};
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
@@ -63,6 +63,60 @@ fn faulty_condition_from_loop() {
                 push.100
             end
             drop
+        end";
+
+    let test = build_test!(source, &[10]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::NotBinaryValueLoop { value: _ },
+            ..
+        }
+    );
+}
+
+#[test]
+fn tail_controlled_loop() {
+    // --- multiple iterations --------------------------------------------------------------------
+    // Count down from the top of the stack to 0; the body runs `n` times.
+    let source = "
+        begin
+            do
+                push.1 sub
+            while
+                dup neq.0
+            end
+        end";
+
+    let test = build_test!(source, &[3]);
+    test.expect_stack(&[0]);
+
+    // --- body always runs at least once ---------------------------------------------------------
+    // Unlike `while.true`, a `do`..`while` executes its body before evaluating the condition, so
+    // the `add` runs once even though the condition is immediately false.
+    let source = "
+        begin
+            do
+                add
+            while
+                push.0
+            end
+        end";
+
+    let test = build_test!(source, &[5, 3]);
+    test.expect_stack(&[8]);
+}
+
+#[test]
+fn faulty_condition_from_tail_controlled_loop() {
+    // A non-binary loop condition fails directly in the LOOP's tail check (no SPLIT wrapper).
+    let source = "
+        begin
+            do
+                push.100
+            while
+                push.2
+            end
         end";
 
     let test = build_test!(source, &[10]);
@@ -402,8 +456,11 @@ fn simple_dyn_exec() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let context = miden_assembly::testing::TestContext::new();
-    let program = context.assemble(program_source).unwrap();
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -496,8 +553,11 @@ fn simple_dyncall() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let context = miden_assembly::testing::TestContext::new();
-    let program = context.assemble(program_source).unwrap();
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", program_source)
+        .unwrap()
+        .unwrap_program();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -594,7 +654,7 @@ fn procref() -> Result<(), Report> {
 
     // obtain procedures' MAST roots by compiling them as module
     let mast_roots: Vec<Word> = {
-        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(DefaultSourceManager::default());
         let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, source_manager.clone())?;

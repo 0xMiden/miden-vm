@@ -23,8 +23,6 @@ use crate::{
     operation::Operation,
 };
 
-mod trace_decorator_tests;
-
 #[derive(Debug, thiserror::Error)]
 #[error("dummy host event failure")]
 struct DummyHostEventError;
@@ -97,7 +95,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop])
         .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(basic_block_id);
@@ -122,7 +120,7 @@ fn test_diagnostic_advice_map_key_already_present() {
 fn test_diagnostic_advice_map_key_not_found_1() {
     let source = "
         begin
-            swap swap trace.2 adv.push_mapval
+            swap swap adv.push_mapval
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -130,10 +128,10 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:31\]"#),
+        regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
-        " 3 |             swap swap trace.2 adv.push_mapval",
-        "   :                               ^^^^^^^^^^^^^^^",
+        " 3 |             swap swap adv.push_mapval",
+        "   :                       ^^^^^^^^^^^^^^^",
         "4 |         end",
         "   `----"
     );
@@ -143,7 +141,7 @@ fn test_diagnostic_advice_map_key_not_found_1() {
 fn test_diagnostic_advice_map_key_not_found_2() {
     let source = "
         begin
-            swap swap trace.2 adv.push_mapvaln
+            swap swap adv.push_mapvaln
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -151,10 +149,10 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:31\]"#),
+        regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
-        " 3 |             swap swap trace.2 adv.push_mapvaln",
-        "   :                               ^^^^^^^^^^^^^^^^",
+        " 3 |             swap swap adv.push_mapvaln",
+        "   :                       ^^^^^^^^^^^^^^^^",
         "4 |         end",
         "   `----"
     );
@@ -182,9 +180,7 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
@@ -219,9 +215,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
@@ -244,7 +238,7 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
 fn test_diagnostic_advice_stack_read_failed() {
     let source = "
         begin
-            swap adv_push trace.2
+            swap adv_push
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -254,7 +248,7 @@ fn test_diagnostic_advice_stack_read_failed() {
         "  x advice stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
-        " 3 |             swap adv_push trace.2",
+        " 3 |             swap adv_push",
         "   :                  ^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -268,7 +262,7 @@ fn test_diagnostic_advice_stack_read_failed() {
 fn test_diagnostic_divide_by_zero_1() {
     let source = "
         begin
-            trace.2 div
+            div
         end";
 
     let build_test = build_test_by_mode!(true, source, &[]);
@@ -276,10 +270,10 @@ fn test_diagnostic_divide_by_zero_1() {
     assert_diagnostic_lines!(
         err,
         "  x division by zero",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             trace.2 div",
-        "   :                     ^^^",
+        " 3 |             div",
+        "   :             ^^^",
         " 4 |         end",
         "   `----",
         "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
@@ -290,7 +284,7 @@ fn test_diagnostic_divide_by_zero_1() {
 fn test_diagnostic_divide_by_zero_2() {
     let source = "
         begin
-            trace.2 u32div
+            u32div
         end";
 
     let build_test = build_test_by_mode!(true, source, &[]);
@@ -298,10 +292,10 @@ fn test_diagnostic_divide_by_zero_2() {
     assert_diagnostic_lines!(
         err,
         "  x division by zero",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             trace.2 u32div",
-        "   :                     ^^^^^^",
+        " 3 |             u32div",
+        "   :             ^^^^^^",
         " 4 |         end",
         "   `----",
         "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
@@ -315,7 +309,7 @@ fn test_diagnostic_divide_by_zero_2() {
 fn test_diagnostic_procedure_not_found_dynexec() {
     let source = "
         begin
-            trace.2 dynexec
+            dynexec
         end";
 
     let build_test = build_test_by_mode!(true, source, &[]);
@@ -323,10 +317,10 @@ fn test_diagnostic_procedure_not_found_dynexec() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             trace.2 dynexec",
-        "   :                     ^^^^^^^",
+        " 3 |             dynexec",
+        "   :             ^^^^^^^",
         " 4 |         end",
         "   `----"
     );
@@ -336,7 +330,7 @@ fn test_diagnostic_procedure_not_found_dynexec() {
 fn test_diagnostic_procedure_not_found_dyncall() {
     let source = "
         begin
-            trace.2 dyncall
+            dyncall
         end";
 
     let build_test = build_test_by_mode!(true, source, &[]);
@@ -344,10 +338,10 @@ fn test_diagnostic_procedure_not_found_dyncall() {
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             trace.2 dyncall",
-        "   :                     ^^^^^^^",
+        " 3 |             dyncall",
+        "   :             ^^^^^^^",
         " 4 |         end",
         "   `----"
     );
@@ -541,14 +535,13 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
 #[test]
 fn test_diagnostic_invalid_stack_depth_on_return_call() {
     // returning from a function with non-empty overflow table should result in an error
-    // Note: we add the `trace.2` to ensure that asm ops co-exist well with other decorators.
     let source = "
         proc foo
             push.1
         end
 
         begin
-            trace.2 call.foo
+            call.foo
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -556,10 +549,10 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     assert_diagnostic_lines!(
         err,
         "  x when returning from a call, stack depth must be 16, but was 17",
-        regex!(r#",-\[test[\d]+:7:21\]"#),
+        regex!(r#",-\[test[\d]+:7:13\]"#),
         " 6 |         begin",
-        " 7 |             trace.2 call.foo",
-        "   :                     ^^^^^^^^",
+        " 7 |             call.foo",
+        "   :             ^^^^^^^^",
         " 8 |         end",
         "   `----"
     );
@@ -602,7 +595,7 @@ fn test_diagnostic_log_argument_zero() {
     // taking the log of 0 should result in an error
     let source = "
         begin
-            trace.2 ilog2
+            ilog2
         end";
 
     let build_test = build_test_by_mode!(true, source, &[]);
@@ -610,10 +603,10 @@ fn test_diagnostic_log_argument_zero() {
     assert_diagnostic_lines!(
         err,
         "  x attempted to calculate integer logarithm with zero argument",
-        regex!(r#",-\[test[\d]+:3:21\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             trace.2 ilog2",
-        "   :                     ^^^^^",
+        " 3 |             ilog2",
+        "   :             ^^^^^",
         " 4 |         end",
         "   `----",
         "  help: ilog2 requires a non-zero argument"
@@ -846,9 +839,7 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -909,9 +900,7 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -976,9 +965,7 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1044,9 +1031,7 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1096,16 +1081,20 @@ fn test_diagnostic_not_binary_value_loop_node() {
 
     let build_test = build_test_by_mode!(true, source, &[2]);
     let err = build_test.execute().expect_err("expected error");
+    // The entry-check error originates from the SPLIT that the assembler wraps around the LOOP
+    // when desugaring `while.true`, so the message reads "if statement". The source pointer is
+    // still the `while.true` token because the SPLIT carries that asm_op. The iteration-check
+    // (REPEAT/END) still produces a `NotBinaryValueLoop` error — see masm_errors_consistency
+    // case_2 for that path.
     assert_diagnostic_lines!(
         err,
-        "  x loop condition must be a binary value, but got 2",
+        "  x if statement expected a binary value on top of the stack, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: this could happen either when first entering the loop, or any subsequent iteration"
+        "   `----"
     );
 }
 
@@ -1155,7 +1144,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     // and
     let source = "
         begin
-            and trace.2
+            and
         end";
 
     let build_test = build_test_by_mode!(true, source, &[2]);
@@ -1165,7 +1154,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
         "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             and trace.2",
+        " 3 |             and",
         "   :             ^^^",
         " 4 |         end",
         "   `----"
@@ -1174,7 +1163,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     // or
     let source = "
         begin
-            or trace.2
+            or
         end";
 
     let build_test = build_test_by_mode!(true, source, &[2]);
@@ -1184,7 +1173,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
         "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             or trace.2",
+        " 3 |             or",
         "   :             ^^",
         " 4 |         end",
         "   `----"
@@ -1199,7 +1188,7 @@ fn test_diagnostic_not_u32_value() {
     // u32and
     let source = "
         begin
-            u32and trace.2
+            u32and
         end";
 
     let big_value = u32::MAX as u64 + 1_u64;
@@ -1210,7 +1199,7 @@ fn test_diagnostic_not_u32_value() {
         "  x operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             u32and trace.2",
+        " 3 |             u32and",
         "   :             ^^^^^^",
         " 4 |         end",
         "   `----"
@@ -1219,7 +1208,7 @@ fn test_diagnostic_not_u32_value() {
     // u32madd
     let source = "
         begin
-            u32overflowing_add3 trace.2
+            u32overflowing_add3
         end";
 
     let big_value = u32::MAX as u64 + 1_u64;
@@ -1230,7 +1219,7 @@ fn test_diagnostic_not_u32_value() {
         "  x operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             u32overflowing_add3 trace.2",
+        " 3 |             u32overflowing_add3",
         "   :             ^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -1275,9 +1264,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
-        .expect("advice inputs should fit advice map limits")
-        .with_debugging(true)
-        .with_tracing(true);
+        .expect("advice inputs should fit advice map limits");
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,

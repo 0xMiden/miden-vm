@@ -17,7 +17,7 @@ fn eval_circuit_overflow_panic_check() {
 
     let program = {
         let mut forest = MastForest::new();
-        let root = BasicBlockNodeBuilder::new(vec![Operation::EvalCircuit], Vec::new())
+        let root = BasicBlockNodeBuilder::new(vec![Operation::EvalCircuit])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(root);

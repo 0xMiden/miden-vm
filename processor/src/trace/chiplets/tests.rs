@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    CHIPLETS_RANGE, CHIPLETS_WIDTH,
+    CHIPLETS_WIDTH, TRACE_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
         NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
-        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, S_PERM_COL_IDX},
+        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH},
         memory,
     },
 };
@@ -147,7 +147,7 @@ fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() 
     let program = {
         let mut forest = MastForest::new();
 
-        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop])
             .add_to_forest(&mut forest)
             .unwrap();
         forest.make_root(callee);
@@ -188,9 +188,8 @@ fn build_trace(
     let mut host = DefaultHost::default();
     let program = {
         let mut mast_forest = MastForest::new();
-        let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-            .add_to_forest(&mut mast_forest)
-            .unwrap();
+        let basic_block_id =
+            BasicBlockNodeBuilder::new(operations).add_to_forest(&mut mast_forest).unwrap();
         mast_forest.make_root(basic_block_id);
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
@@ -201,7 +200,7 @@ fn build_trace(
     let trace_len = trace.get_trace_len();
     (
         trace
-            .get_column_range(CHIPLETS_RANGE)
+            .get_column_range((TRACE_WIDTH - CHIPLETS_WIDTH)..TRACE_WIDTH)
             .try_into()
             .expect("failed to convert vector to array"),
         trace_len,
@@ -230,7 +229,7 @@ fn validate_hasher_trace(
     let s0_col = 1; // hasher selector s0
     let s1_col = 2; // hasher selector s1
     let s2_col = 3; // hasher selector s2
-    let s_perm_col = 1 + S_PERM_COL_IDX; // s_perm in chiplets trace (= column 20)
+    let s_perm_col = 20; // s_perm in chiplets trace
 
     let controller_padded = controller_rows.next_multiple_of(HASH_CYCLE_LEN);
     let perm_segment_start = controller_padded;

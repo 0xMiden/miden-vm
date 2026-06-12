@@ -7,13 +7,10 @@ use miden_core::{
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
-use super::{
-    debug::DefaultTraceHandler,
-    handlers::{EventError, EventHandler, EventHandlerRegistry},
-};
+use super::handlers::{EventError, EventHandler, EventHandlerRegistry};
 use crate::{
     BaseHost, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    TraceError, TraceHandler, advice::AdviceMutation,
+    advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -21,13 +18,9 @@ use crate::{
 
 /// A default SyncHost implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
-pub struct DefaultHost<
-    D: TraceHandler = DefaultTraceHandler,
-    S: SourceManager = DefaultSourceManager,
-> {
+pub struct DefaultHost<S: SourceManager = DefaultSourceManager> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
-    trace_handler: D,
     source_manager: Arc<S>,
 }
 
@@ -36,27 +29,24 @@ impl Default for DefaultHost {
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
-            trace_handler: DefaultTraceHandler::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 }
 
-impl<D, S> DefaultHost<D, S>
+impl<S> DefaultHost<S>
 where
-    D: TraceHandler,
     S: SourceManager,
 {
     /// Use the given source manager implementation instead of the default one
     /// [`DefaultSourceManager`].
-    pub fn with_source_manager<O>(self, source_manager: Arc<O>) -> DefaultHost<D, O>
+    pub fn with_source_manager<O>(self, source_manager: Arc<O>) -> DefaultHost<O>
     where
         O: SourceManager,
     {
-        DefaultHost::<D, O> {
+        DefaultHost::<O> {
             store: self.store,
             event_handlers: self.event_handlers,
-            trace_handler: self.trace_handler,
             source_manager,
         }
     }
@@ -105,27 +95,10 @@ where
         self.register_handler(event, handler).unwrap();
         existed
     }
-
-    /// Replace the current [`TraceHandler`] with a custom one.
-    pub fn with_trace_handler<H: TraceHandler>(self, handler: H) -> DefaultHost<H, S> {
-        DefaultHost::<H, S> {
-            store: self.store,
-            event_handlers: self.event_handlers,
-            trace_handler: handler,
-            source_manager: self.source_manager,
-        }
-    }
-
-    /// Returns a reference to the [`TraceHandler`], useful for recovering trace information
-    /// emitted during a program execution.
-    pub fn trace_handler(&self) -> &D {
-        &self.trace_handler
-    }
 }
 
-impl<D, S> BaseHost for DefaultHost<D, S>
+impl<S> BaseHost for DefaultHost<S>
 where
-    D: TraceHandler,
     S: SourceManager,
 {
     fn get_label_and_source_file(
@@ -137,18 +110,13 @@ where
         (span, maybe_file)
     }
 
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        self.trace_handler.on_trace(process, trace_id)
-    }
-
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         self.event_handlers.resolve_event(event_id)
     }
 }
 
-impl<D, S> SyncHost for DefaultHost<D, S>
+impl<S> SyncHost for DefaultHost<S>
 where
-    D: TraceHandler,
     S: SourceManager,
 {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {

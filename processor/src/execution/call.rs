@@ -12,7 +12,7 @@ use crate::{
     mast::{CallNode, ExecutableMastForest, MastNodeId},
     operation::OperationError,
     option_map_break_reason,
-    processor::{MemoryInterface, Processor, SystemInterface},
+    processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
 };
 
@@ -41,12 +41,8 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)?;
-
-    state.processor.save_context_and_truncate_stack();
+    state.processor.stack_mut().start_context();
+    state.processor.system_mut().save_call_state();
 
     let callee_hash = option_map_break_reason(
         current_forest.get_digest_by_id(call_node.callee()),
@@ -128,7 +124,14 @@ where
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
-    if let Err(e) = state.processor.restore_context() {
+    if let Err(e) = state.processor.stack_mut().restore_context() {
+        return ControlFlow::Break(BreakReason::Err(e.with_context(
+            current_forest,
+            node_id,
+            state.host,
+        )));
+    }
+    if let Err(e) = state.processor.system_mut().restore_call_state() {
         return ControlFlow::Break(BreakReason::Err(e.with_context(
             current_forest,
             node_id,
@@ -141,11 +144,7 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }

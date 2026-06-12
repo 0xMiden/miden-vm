@@ -1,4 +1,10 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::fmt;
 
 use miden_core::{
@@ -146,6 +152,11 @@ pub struct Module {
     kind: ModuleKind,
     /// The items (defined or re-exported) in the module body.
     pub(crate) items: Vec<Export>,
+    /// Maps export name to its position in `items`, for O(log n) conflict checks.
+    /// Must be kept in sync with `items` via `push_export`.
+    name_map: BTreeMap<String, usize>,
+    /// Whether mutable item access may have changed item names without updating `name_map`.
+    name_map_dirty: bool,
     /// AdviceMap that this module expects to be loaded in the host before executing.
     pub(crate) advice_map: AdviceMap,
 }
@@ -174,6 +185,8 @@ impl Module {
             path,
             kind,
             items: Default::default(),
+            name_map: BTreeMap::new(),
+            name_map_dirty: false,
             advice_map: Default::default(),
         }
     }
@@ -228,32 +241,56 @@ impl Module {
 
     pub(crate) fn push_export(&mut self, item: Export) -> Result<(), SemanticAnalysisError> {
         self.ensure_item_capacity(item.span())?;
+        self.ensure_name_map_current();
+        let idx = self.items.len();
+        let prev = self.name_map.insert(item.name().to_string(), idx);
+        debug_assert!(prev.is_none(), "duplicate export inserted via push_export: {}", item.name());
         self.items.push(item);
         Ok(())
     }
 
+    fn ensure_name_map_current(&mut self) {
+        if !self.name_map_dirty {
+            return;
+        }
+
+        self.name_map.clear();
+        self.name_map.extend(
+            self.items.iter().enumerate().map(|(idx, item)| (item.name().to_string(), idx)),
+        );
+        self.name_map_dirty = false;
+    }
+
+    /// Takes all items from this module, clearing the name index.
+    /// Used by the linker to consume module contents.
+    pub fn take_items(&mut self) -> Vec<Export> {
+        self.name_map.clear();
+        self.name_map_dirty = false;
+        core::mem::take(&mut self.items)
+    }
+
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) = self.items.iter().find(|item| item.name() == &constant.name) {
+        self.ensure_name_map_current();
+        if let Some(&idx) = self.name_map.get(constant.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: constant.span,
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
             });
         }
-        self.push_export(Export::Constant(constant))?;
-        Ok(())
+        self.push_export(Export::Constant(constant))
     }
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) = self.items.iter().find(|item| item.name() == ty.name()) {
+        self.ensure_name_map_current();
+        if let Some(&idx) = self.name_map.get(ty.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: ty.span(),
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
             });
         }
-        self.push_export(Export::Type(ty.into()))?;
-        Ok(())
+        self.push_export(Export::Type(ty.into()))
     }
 
     /// Define a new enum type `ty` with `visibility`
@@ -266,26 +303,33 @@ impl Module {
     ///   with the same name as any of the variants of the given enum type, is already defined
     /// * The concrete type of the enumeration is not an integral type
     pub fn define_enum(&mut self, ty: EnumType) -> Result<(), SemanticAnalysisError> {
+        self.ensure_name_map_current();
         let repr = ty.ty().clone();
+        let is_c_like = ty.is_c_like();
 
         if !repr.is_integer() {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 
-        // We only define constants for C-like enums
-        if !ty.is_c_like() {
-            self.items.push(Export::Type(ty.into()));
-            return Ok(());
-        }
-
         let export = ty.clone();
-
         let (alias, variants) = ty.into_parts();
-
-        if let Some(prev) = self.items.iter().find(|t| t.name() == &alias.name) {
+        if let Some(&idx) = self.name_map.get(alias.name.as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: alias.span(),
-                prev_span: prev.span(),
+                prev_span: self.items[idx].span(),
+            });
+        }
+
+        // We only define constants for C-like enums
+        if !is_c_like {
+            self.push_export(Export::Type(export.into()))?;
+            return Ok(());
+        }
+        // Check that no variant name conflicts with the enum type name itself
+        if let Some(conflict) = variants.iter().find(|v| v.name.as_str() == alias.name.as_str()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: conflict.name.span(),
+                prev_span: alias.span(),
             });
         }
 
@@ -343,16 +387,14 @@ impl Module {
         procedure: Procedure,
         _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) =
-            self.items.iter().find(|item| item.name().as_str() == procedure.name().as_str())
-        {
+        self.ensure_name_map_current();
+        if let Some(&idx) = self.name_map.get(procedure.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: procedure.span(),
-                prev_span: prev.name().span(),
+                prev_span: self.items[idx].name().span(),
             });
         }
-        self.push_export(Export::Procedure(procedure))?;
-        Ok(())
+        self.push_export(Export::Procedure(procedure))
     }
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
@@ -362,21 +404,17 @@ impl Module {
         item: Alias,
         _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
+        self.ensure_name_map_current();
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        if let Some(prev) = self
-            .items
-            .iter()
-            .find(|existing| existing.name().as_str() == item.name().as_str())
-        {
+        if let Some(&idx) = self.name_map.get(item.name().as_str()) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: item.name().span(),
-                prev_span: prev.name().span(),
+                prev_span: self.items[idx].name().span(),
             });
         }
-        self.push_export(Export::Alias(item))?;
-        Ok(())
+        self.push_export(Export::Alias(item))
     }
 }
 
@@ -482,6 +520,7 @@ impl Module {
 
     /// Same as [Module::constants], but returns mutable references.
     pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut Constant> + '_ {
+        self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
             Export::Constant(item) => Some(item),
             _ => None,
@@ -498,6 +537,7 @@ impl Module {
 
     /// Same as [Module::types], but returns mutable references.
     pub fn types_mut(&mut self) -> impl Iterator<Item = &mut TypeDecl> + '_ {
+        self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
             Export::Type(item) => Some(item),
             _ => None,
@@ -514,6 +554,7 @@ impl Module {
 
     /// Same as [Module::procedures], but returns mutable references.
     pub fn procedures_mut(&mut self) -> impl Iterator<Item = &mut Procedure> + '_ {
+        self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
             Export::Procedure(item) => Some(item),
             _ => None,
@@ -530,6 +571,7 @@ impl Module {
 
     /// Same as [Module::aliases], but returns mutable references.
     pub fn aliases_mut(&mut self) -> impl Iterator<Item = &mut Alias> + '_ {
+        self.name_map_dirty = true;
         self.items.iter_mut().filter_map(|item| match item {
             Export::Alias(item) => Some(item),
             _ => None,
@@ -540,10 +582,11 @@ impl Module {
     pub fn items(&self) -> &[Export] {
         &self.items
     }
-
-    /// Get a mutable reference to the storage for items defined in this module
-    pub fn items_mut(&mut self) -> &mut Vec<Export> {
-        &mut self.items
+    /// Returns a mutable iterator over the items in this module.
+    /// Note: does not expose `Vec` directly to preserve the `name_map` invariant.
+    pub fn items_mut(&mut self) -> impl Iterator<Item = &mut Export> {
+        self.name_map_dirty = true;
+        self.items.iter_mut()
     }
 
     /// Returns items exported from this module.
@@ -633,6 +676,7 @@ impl Module {
 
     /// Same as [Module::get_import], but returns a mutable reference to the [Alias]
     pub fn get_import_mut(&mut self, module_name: &str) -> Option<&mut Alias> {
+        self.name_map_dirty = true;
         self.items.iter_mut().find_map(|item| match item {
             Export::Alias(item) if item.name().as_str() == module_name => Some(item),
             _ => None,
@@ -670,6 +714,7 @@ impl core::ops::Index<ItemIndex> for Module {
 impl core::ops::IndexMut<ItemIndex> for Module {
     #[inline]
     fn index_mut(&mut self, index: ItemIndex) -> &mut Self::Output {
+        self.name_map_dirty = true;
         &mut self.items[index.as_usize()]
     }
 }

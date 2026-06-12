@@ -1,0 +1,7 @@
+error[E0594]: cannot assign to data in an index of `MastForest`
+ --> tests/ui/mast_forest_immutable/index_node_mut.rs:7:5
+  |
+7 |     forest[node_id] = forest[node_id].clone();
+  |     ^^^^^^^^^^^^^^^ cannot assign
+  |
+  = help: trait `IndexMut` is required to modify indexed content, but it is not implemented for `MastForest`

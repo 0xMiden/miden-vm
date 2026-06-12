@@ -586,9 +586,7 @@ fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionErr
     ];
 
     let mut forest = MastForest::new();
-    let node_id = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
+    let node_id = BasicBlockNodeBuilder::new(ops.clone()).add_to_forest(&mut forest).unwrap();
 
     for (op_idx, op) in ops.iter().enumerate() {
         let _ = execute_op(&mut processor, op, op_idx, &forest, node_id, &mut host, &mut tracer)?;

@@ -5,7 +5,7 @@ use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
-    mast::{ExecutableMastForest, MastNodeId, SparseMastForest},
+    mast::SparseMastForest,
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BaseHost, BreakReason, ContextId, ExecutionError, Stopper,
+    BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -248,6 +248,10 @@ impl SystemInterface for ReplayProcessor {
         self.system.ctx
     }
 
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.system.pc_transcript_state
+    }
+
     fn set_caller_hash(&mut self, caller_hash: Word) {
         self.system.fn_hash = caller_hash;
     }
@@ -258,6 +262,22 @@ impl SystemInterface for ReplayProcessor {
 
     fn increment_clock(&mut self) {
         self.system.clk += 1_u32;
+    }
+
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.system.pc_transcript_state = state;
+    }
+
+    fn save_call_state(&mut self) {
+        // no-op for the replay processor: the system call state was already recorded by the
+        // tracer into `execution_context_replay` during the original execution.
+    }
+
+    fn restore_call_state(&mut self) -> Result<(), OperationError> {
+        let ctx_info = self.execution_context_replay.replay_execution_context()?;
+        self.system.ctx = ctx_info.parent_ctx;
+        self.system.fn_hash = ctx_info.parent_fn_hash;
+        Ok(())
     }
 }
 
@@ -407,6 +427,14 @@ impl StackInterface for ReplayProcessor {
 
         Ok(())
     }
+
+    fn start_context(&mut self) {
+        self.stack.start_context();
+    }
+
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        self.stack.restore_context(&mut self.stack_overflow_replay)
+    }
 }
 
 impl Processor for ReplayProcessor {
@@ -446,71 +474,6 @@ impl Processor for ReplayProcessor {
 
     fn hasher(&mut self) -> &mut Self::Hasher {
         &mut self.hasher_response_replay
-    }
-
-    fn save_context_and_truncate_stack(&mut self) {
-        self.stack.start_context();
-    }
-
-    fn restore_context(&mut self) -> Result<(), OperationError> {
-        let ctx_info = self.execution_context_replay.replay_execution_context()?;
-
-        // Restore system state
-        self.system_mut().set_ctx(ctx_info.parent_ctx);
-        self.system_mut().set_caller_hash(ctx_info.parent_fn_hash);
-
-        // Restore stack state
-        self.stack.restore_context(&mut self.stack_overflow_replay)?;
-
-        Ok(())
-    }
-
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.system.pc_transcript_state
-    }
-
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.system.pc_transcript_state = state;
-    }
-
-    fn execute_before_enter_decorators<F>(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_after_exit_decorators<F>(
-        &self,
-        _node_id: MastNodeId,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_decorators_for_op<F>(
-        &self,
-        _node_id: MastNodeId,
-        _op_idx_in_block: usize,
-        _current_forest: &F,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
     }
 }
 

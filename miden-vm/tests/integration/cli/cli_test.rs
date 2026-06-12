@@ -1,4 +1,8 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use assert_cmd::prelude::*;
 use miden_mast_package::Package;
@@ -34,6 +38,14 @@ fn bin_under_test() -> escargot::CargoRun {
         })
 }
 
+fn test_file_path(name: &str) -> PathBuf {
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("miden-vm-cli-{name}-{id}"))
+}
+
 #[test]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
@@ -58,6 +70,40 @@ fn cli_run() {
 }
 
 #[test]
+fn run_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-run-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("run").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-run-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
+}
+
+#[test]
+fn prove_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-prove-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("prove").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-prove-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
+}
+
+#[test]
 fn cli_bundle_debug() {
     let output_file = std::env::temp_dir().join("cli_bundle_debug.masp");
 
@@ -70,7 +116,6 @@ fn cli_bundle_debug() {
 
     let lib = Package::deserialize_from_file(&output_file).unwrap();
     // If there are any AssemblyOps in the forest, the bundle is in debug mode.
-    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
     let found_one_asm_op = lib.mast_forest().debug_info().num_asm_ops() > 0;
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();

@@ -70,8 +70,8 @@ pub struct BusFraction {
 /// Configuration for the LogUp auxiliary-trace boundary batching.
 ///
 /// Consumed by [`batch_logup_boundary_into_builder`] to extend the constraint-check DAG
-/// with the per-AIR LogUp boundary identity (the same one checked at runtime by
-/// `CoreAir`/`ChipletsAir`'s `reduced_aux_values`).
+/// with the per-AIR LogUp boundary identity (the same one checked at runtime via
+/// `CoreAir`/`ChipletsAir`'s `boundary_correction`).
 #[derive(Debug, Clone)]
 pub struct LogUpBoundaryConfig {
     /// Aux-bus-boundary column indices summed as `Σ aux_bound[col]`.

@@ -1,20 +1,27 @@
 use alloc::vec::Vec;
+use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{
-    DIRECTION_BIT_COL_IDX, HASH_CYCLE_LEN, IS_BOUNDARY_COL_IDX, MRUPDATE_ID_COL_IDX,
-    NODE_INDEX_COL_IDX, S_PERM_COL_IDX, STATE_COL_RANGE, TRACE_WIDTH,
-};
+use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
+
+// Chiplet-local column indices used by the hasher trace tests.
+const STATE_COL_RANGE: Range<usize> = 3..15;
+const NODE_INDEX_COL_IDX: usize = 15;
+const MRUPDATE_ID_COL_IDX: usize = 16;
+const IS_BOUNDARY_COL_IDX: usize = 17;
+const DIRECTION_BIT_COL_IDX: usize = 18;
+const S_PERM_COL_IDX: usize = 19;
 use miden_core::{
     ONE, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
+    field::PrimeCharacteristicRing,
     mast::OpBatch,
 };
 use miden_utils_testing::rand::rand_array;
 
 use super::{
-    Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD,
-    RETURN_HASH, RETURN_STATE, Selectors, TraceFragment, absorb_into_state, get_digest, init_state,
+    ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
+    MR_UPDATE_OLD, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state, get_digest, init_state,
     init_state_from_words,
 };
 
@@ -536,10 +543,12 @@ fn hash_memoization_basic_blocks_check() {
 /// Builds the full hasher trace (controller + perm segment).
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let trace_len = hasher.trace_len();
-    let mut trace = (0..TRACE_WIDTH).map(|_| vec![ZERO; trace_len]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
     hasher.fill_trace(&mut fragment);
-    trace
+    (0..TRACE_WIDTH)
+        .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 /// Checks a controller input row.
@@ -772,11 +781,7 @@ fn init_leaf(value: u64) -> Digest {
 ///
 /// Checks selectors (s0, s1, s2), state columns (h0..h11), and node_index.
 /// Does NOT check mrupdate_id (which is overwritten by the hasher on copy).
-fn check_memoized_trace(
-    trace: &[Vec<Felt>],
-    original: core::ops::Range<usize>,
-    copied: core::ops::Range<usize>,
-) {
+fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Range<usize>) {
     assert_eq!(
         original.len(),
         copied.len(),
@@ -830,9 +835,7 @@ fn check_memoized_trace(
 fn make_basic_block_batches(ops: Vec<miden_core::operations::Operation>) -> Vec<OpBatch> {
     use miden_core::mast::BasicBlockNodeBuilder;
 
-    let node = BasicBlockNodeBuilder::new(ops, Vec::new())
-        .build()
-        .expect("failed to build basic block");
+    let node = BasicBlockNodeBuilder::new(ops).build().expect("failed to build basic block");
     node.op_batches().to_vec()
 }
 

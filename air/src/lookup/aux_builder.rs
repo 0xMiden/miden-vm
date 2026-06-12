@@ -59,7 +59,7 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 // TOP-LEVEL DRIVER
 // ================================================================================================
 
-/// Generic `AuxBuilder::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
+/// Generic `LiftedAir::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
 ///
 /// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns
 /// from the AIR, runs collection + accumulation, and returns `(aux_trace, vec![acc_final])`.
@@ -593,7 +593,7 @@ mod tests {
         for (col, slow_col) in slow.iter().enumerate() {
             assert_eq!(slow_col.len(), num_rows + 1, "slow col {col} row count mismatch");
             for (row, &s) in slow_col.iter().enumerate() {
-                let f = fast.values[row * num_cols + col];
+                let f = fast.get(row, col).expect("Accessed element is in bounds");
                 assert_eq!(s, f, "row {row} col {col} differs: slow={s:?} fast={f:?}",);
             }
         }

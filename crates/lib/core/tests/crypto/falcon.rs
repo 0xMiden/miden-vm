@@ -10,12 +10,14 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program, StackInputs,
+    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
 };
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::proptest;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
@@ -23,10 +25,10 @@ use miden_utils_testing::{
         falcon512_poseidon2::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
-    proptest::proptest,
     rand::random_word,
+    stack_inputs_from_ints,
 };
-use rand::{Rng, SeedableRng, rng};
+use rand::{Rng, RngExt, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
@@ -163,6 +165,7 @@ fn test_falcon512_diff_mod_m() {
     test2.expect_stack(&[simplified_answer as u64]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
@@ -508,7 +511,7 @@ fn falcon_prove_verify() {
         .expect("failed to compile test source")
         .unwrap_program();
 
-    let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
+    let stack_inputs = stack_inputs_from_ints(op_stack);
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&CoreLibrary::default()).expect("failed to load mast forest");
@@ -524,7 +527,6 @@ fn falcon_prove_verify() {
     trace.check_constraints();
 }
 
-#[allow(clippy::type_complexity)]
 fn generate_test(
     sk: SecretKey,
     message: Word,

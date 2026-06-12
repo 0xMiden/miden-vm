@@ -13,6 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
@@ -33,6 +34,8 @@ use miden_core::{
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::Package;
+#[cfg(not(target_family = "wasm"))]
+use miden_processor::trace::build_trace;
 pub use miden_processor::{
     ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
@@ -42,13 +45,11 @@ use miden_processor::{
     DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
 #[cfg(not(target_family = "wasm"))]
-use miden_processor::{DefaultTraceHandler, trace::build_trace};
-#[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
 
@@ -70,7 +71,7 @@ pub mod recursive_verifier;
 
 mod test_builders;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
 // CONSTANTS
 // ================================================================================================
@@ -222,22 +223,6 @@ pub struct Test {
     pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
-// BUFFER WRITER FOR TESTING
-// ================================================================================================
-
-/// A writer that buffers output in a String for testing debug output.
-#[derive(Default)]
-pub struct BufferWriter {
-    pub buffer: String,
-}
-
-impl core::fmt::Write for BufferWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.buffer.push_str(s);
-        Ok(())
-    }
-}
-
 impl Test {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -285,7 +270,7 @@ impl Test {
     /// Sets the stack inputs for this test using stack-ordered values.
     #[track_caller]
     pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
-        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self.stack_inputs = stack_inputs_from_ints(stack_inputs.as_ref().iter().copied());
         self
     }
 
@@ -349,7 +334,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     #[track_caller]
     pub fn expect_stack(&self, final_stack: &[u64]) {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -372,8 +357,7 @@ impl Test {
         // execute the test
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .expect("test advice inputs should fit default advice map limits")
-            .with_tracing(self.in_tracing_mode);
+            .expect("test advice inputs should fit default advice map limits");
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -402,12 +386,12 @@ impl Test {
     /// Asserts that executing the test inside a proptest results in the expected final stack state.
     /// The proptest will return a test failure instead of panicking if the assertion condition
     /// fails.
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
     pub fn prop_expect_stack(
         &self,
         final_stack: &[u64],
     ) -> Result<(), proptest::prelude::TestCaseError> {
-        let result = self.get_last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&self.get_last_stack_state());
         proptest::prop_assert_eq!(resize_to_min_stack_depth(final_stack), result);
 
         Ok(())
@@ -428,7 +412,7 @@ impl Test {
             })
             .expect("failed to execute");
 
-        let result = trace.last_stack_state().as_int_vec();
+        let result = stack_outputs_as_int_vec(&trace.last_stack_state());
         let expected = resize_to_min_stack_depth(final_stack);
         assert_eq!(expected, result, "Expected stack to be {:?}, found {:?}", expected, result);
     }
@@ -528,7 +512,7 @@ impl Test {
         &self,
         stack_inputs: &[u64],
     ) -> Result<ExecutionTrace, ExecutionError> {
-        let stack_inputs = StackInputs::try_from_ints(stack_inputs.to_vec()).unwrap();
+        let stack_inputs = stack_inputs_from_ints(stack_inputs.iter().copied());
         self.execute_with_stack_inputs_inner(stack_inputs)
     }
 
@@ -551,7 +535,6 @@ impl Test {
                 stack_inputs,
                 self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
-                    .with_tracing(self.in_tracing_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             )
@@ -580,43 +563,9 @@ impl Test {
 
         let processor = FastProcessor::new(self.stack_inputs)
             .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_tracing(true);
+            .map_err(ExecutionError::advice_error_no_context)?;
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
-    }
-
-    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
-    /// the [`StackOutputs`] and a [`String`] containing all trace output.
-    ///
-    /// If the execution fails, the output is printed `stderr`.
-    #[cfg(not(target_family = "wasm"))]
-    pub fn execute_with_trace_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
-        let trace_handler = DefaultTraceHandler::new(BufferWriter::default());
-
-        let (program, host) = self.get_program_and_host();
-        let mut host = host
-            .with_source_manager(self.source_manager.clone())
-            .with_trace_handler(trace_handler);
-
-        let processor = FastProcessor::new(self.stack_inputs)
-            .with_advice(self.advice_inputs.clone())
-            .map_err(ExecutionError::advice_error_no_context)?
-            .with_tracing(true);
-
-        let stack_result = processor.execute_sync(&program, &mut host);
-
-        let trace_output = host.trace_handler().writer().buffer.clone();
-
-        match stack_result {
-            Ok(exec_output) => Ok((exec_output.stack, trace_output)),
-            Err(err) => {
-                // If we get an error, we print the output as an error
-                #[cfg(feature = "std")]
-                std::eprintln!("{trace_output}");
-                Err(err)
-            },
-        }
     }
 
     /// Compiles the test's code into a program, then generates and verifies a STARK proof of
@@ -629,8 +578,8 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
-        let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = prove_sync(
+        let stack_inputs = stack_inputs_from_ints(pub_inputs);
+        let (stack_outputs, proof) = prove_sync(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
@@ -642,7 +591,11 @@ impl Test {
 
         let program_info = ProgramInfo::from(program);
         if test_fail {
-            stack_outputs.as_mut()[0] += ONE;
+            let mut elements = [ZERO; MIN_STACK_DEPTH];
+            elements.copy_from_slice(&*stack_outputs);
+            elements[0] += ONE;
+            let stack_outputs =
+                StackOutputs::new(&elements).expect("stack outputs should fit the VM stack");
             assert!(verify(program_info, stack_inputs, stack_outputs, proof).is_err());
         } else {
             let result = verify(program_info, stack_inputs, stack_outputs, proof);
@@ -766,8 +719,7 @@ impl Test {
         let fast_result_by_step = {
             let fast_process = FastProcessor::new(stack_inputs)
                 .with_advice(self.advice_inputs.clone())
-                .expect("test advice inputs should fit default advice map limits")
-                .with_tracing(self.in_tracing_mode);
+                .expect("test advice inputs should fit default advice map limits");
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 
@@ -818,6 +770,20 @@ pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
     values.iter().map(|e| (*e).as_canonical_u64()).collect()
 }
 
+#[doc(hidden)]
+#[track_caller]
+pub fn stack_inputs_from_ints(values: impl IntoIterator<Item = u64>) -> StackInputs {
+    let values = values
+        .into_iter()
+        .map(|value| Felt::new(value).expect("stack input should be a valid field element"))
+        .collect::<Vec<_>>();
+    StackInputs::new(&values).expect("stack inputs should fit the VM stack")
+}
+
+fn stack_outputs_as_int_vec(outputs: &StackOutputs) -> Vec<u64> {
+    outputs.iter().map(Felt::as_canonical_u64).collect()
+}
+
 pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
     let mut result: Vec<u64> = values.to_vec();
     result.resize(MIN_STACK_DEPTH, 0);
@@ -825,7 +791,7 @@ pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
 }
 
 /// A proptest strategy for generating a random word with 4 values of type T.
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     use proptest::prelude::{any, prop};
     prop::collection::vec(any::<T>(), 4)
@@ -870,80 +836,74 @@ pub fn push_inputs(inputs: &[u64]) -> String {
     result
 }
 
+/// Hierarchical column-name table for the Core AIR row, used by [`get_column_name`].
+const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
+    system: SystemCols {
+        clk: "clk",
+        ctx: "ctx",
+        fn_hash: ["fn_hash[0]", "fn_hash[1]", "fn_hash[2]", "fn_hash[3]"],
+    },
+    decoder: DecoderCols {
+        addr: "decoder_addr",
+        op_bits: [
+            "op_bits[0]",
+            "op_bits[1]",
+            "op_bits[2]",
+            "op_bits[3]",
+            "op_bits[4]",
+            "op_bits[5]",
+            "op_bits[6]",
+        ],
+        hasher_state: [
+            "hasher_state[0]",
+            "hasher_state[1]",
+            "hasher_state[2]",
+            "hasher_state[3]",
+            "hasher_state[4]",
+            "hasher_state[5]",
+            "hasher_state[6]",
+            "hasher_state[7]",
+        ],
+        in_span: "in_span",
+        group_count: "group_count",
+        op_index: "op_index",
+        batch_flags: ["op_batch_flag[0]", "op_batch_flag[1]", "op_batch_flag[2]"],
+        extra: ["op_bits_extra[0]", "op_bits_extra[1]"],
+    },
+    stack: StackCols {
+        top: [
+            "stack[0]",
+            "stack[1]",
+            "stack[2]",
+            "stack[3]",
+            "stack[4]",
+            "stack[5]",
+            "stack[6]",
+            "stack[7]",
+            "stack[8]",
+            "stack[9]",
+            "stack[10]",
+            "stack[11]",
+            "stack[12]",
+            "stack[13]",
+            "stack[14]",
+            "stack[15]",
+        ],
+        b0: "stack_b0",
+        b1: "stack_b1",
+        h0: "stack_h0",
+    },
+    range: RangeCols {
+        multiplicity: "range_check[0]",
+        value: "range_check[1]",
+    },
+};
+
 /// Helper function to get column name for debugging
 pub fn get_column_name(col_idx: usize) -> String {
-    use miden_air::trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET,
-        STACK_TRACE_OFFSET,
-        decoder::{
-            ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
-            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
-            OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
-        },
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
-    };
-
-    match col_idx {
-        // System columns
-        CLK_COL_IDX => "clk".to_string(),
-        CTX_COL_IDX => "ctx".to_string(),
-        i if (FN_HASH_OFFSET..FN_HASH_OFFSET + 4).contains(&i) => {
-            format!("fn_hash[{}]", i - FN_HASH_OFFSET)
-        },
-
-        // Decoder columns
-        i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
-            .contains(&i) =>
-        {
-            format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
-            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
-            .contains(&i) =>
-        {
-            format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
-        },
-        i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
-        i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
-        i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
-            .contains(&i) =>
-        {
-            format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
-            .contains(&i) =>
-        {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
-        },
-        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
-            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
-            .contains(&i) =>
-        {
-            format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
-        },
-
-        // Stack columns
-        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
-            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
-            .contains(&i) =>
-        {
-            format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
-        },
-        i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),
-        i if i == STACK_TRACE_OFFSET + B1_COL_IDX => "stack_b1".to_string(),
-        i if i == STACK_TRACE_OFFSET + H0_COL_IDX => "stack_h0".to_string(),
-
-        // Range check columns
-        i if i >= RANGE_CHECK_TRACE_OFFSET => {
-            format!("range_check[{}]", i - RANGE_CHECK_TRACE_OFFSET)
-        },
-
-        // Default case
-        _ => format!("unknown_col[{col_idx}]"),
+    let core_names = CORE_COL_NAMES.as_slice();
+    if let Some(name) = core_names.get(col_idx) {
+        return (*name).to_string();
     }
+    format!("unknown_col[{col_idx}]")
 }

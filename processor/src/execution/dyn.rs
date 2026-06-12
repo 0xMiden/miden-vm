@@ -39,12 +39,6 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
-
     let dyn_node = option_map_break_reason(
         current_forest.get_node_by_id(current_node_id),
         "dyn node not found in current forest",
@@ -85,7 +79,8 @@ where
         let new_ctx: ContextId = get_next_ctx_id(state.processor);
 
         // Save the current state, and update the system registers.
-        state.processor.save_context_and_truncate_stack();
+        state.processor.stack_mut().start_context();
+        state.processor.system_mut().save_call_state();
 
         state.processor.system_mut().set_ctx(new_ctx);
         state.processor.system_mut().set_caller_hash(callee_hash);
@@ -207,14 +202,21 @@ where
     )?
     .unwrap_dyn();
     // For dyncall, restore the context.
-    if dyn_node.is_dyncall()
-        && let Err(e) = state.processor.restore_context()
-    {
-        return ControlFlow::Break(BreakReason::Err(e.with_context(
-            current_forest,
-            node_id,
-            state.host,
-        )));
+    if dyn_node.is_dyncall() {
+        if let Err(e) = state.processor.stack_mut().restore_context() {
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                state.host,
+            )));
+        }
+        if let Err(e) = state.processor.system_mut().restore_call_state() {
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                state.host,
+            )));
+        }
     }
 
     // Finalize the clock cycle corresponding to the END operation.
@@ -223,11 +225,7 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }

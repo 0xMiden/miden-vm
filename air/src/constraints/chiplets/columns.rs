@@ -1,7 +1,10 @@
 //! Column structs for all chiplet sub-components and periodic columns.
 
 use alloc::{vec, vec::Vec};
-use core::{borrow::Borrow, mem::size_of};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
 
 use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 
@@ -14,11 +17,27 @@ use crate::trace::chiplets::{
 // HELPERS
 // ================================================================================================
 
-/// Zero-copy cast from a slice to a `#[repr(C)]` chiplet column struct.
-pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
-    let (prefix, cols, suffix) = unsafe { slice.align_to::<S>() };
-    debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
-    &cols[0]
+/// Generates `Borrow<$cols<T>> for [T]` and the mutable counterpart for a chiplet column
+/// struct. The slice length must equal `size_of::<$cols<u8>>()` cells.
+macro_rules! impl_borrow_for_chiplet_cols {
+    ($cols:ident) => {
+        impl<T> Borrow<$cols<T>> for [T] {
+            fn borrow(&self) -> &$cols<T> {
+                debug_assert_eq!(self.len(), size_of::<$cols<u8>>());
+                let (prefix, cols, suffix) = unsafe { self.align_to::<$cols<T>>() };
+                debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+                &cols[0]
+            }
+        }
+        impl<T> BorrowMut<$cols<T>> for [T] {
+            fn borrow_mut(&mut self) -> &mut $cols<T> {
+                debug_assert_eq!(self.len(), size_of::<$cols<u8>>());
+                let (prefix, cols, suffix) = unsafe { self.align_to_mut::<$cols<T>>() };
+                debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+                &mut cols[0]
+            }
+        }
+    };
 }
 
 // PERMUTATION COLUMNS
@@ -45,6 +64,7 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// | w0, w1, w2   | h0..h3              | h4..h7   | h8..h11     | m  --  --  --   |
 /// ```
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct PermutationCols<T> {
     /// S-box witness columns (same physical columns as hasher selectors).
     pub witnesses: [T; NUM_SELECTORS],
@@ -97,6 +117,11 @@ impl<T: Copy> PermutationCols<T> {
     pub fn unused_padding(&self) -> [T; 3] {
         self._unused
     }
+
+    /// Sets the 3 padding columns (mrupdate_id, is_boundary, direction_bit) to the given value.
+    pub fn set_unused_padding(&mut self, value: T) {
+        self._unused.fill(value);
+    }
 }
 
 // CONTROLLER COLUMNS
@@ -126,6 +151,7 @@ impl<T: Copy> PermutationCols<T> {
 /// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
 /// ```
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct ControllerCols<T> {
     /// Hasher-internal sub-selector: `s0 = 1` on controller input rows, 0 on output/padding.
     pub s0: T,
@@ -211,6 +237,7 @@ impl<T: Copy> ControllerCols<T> {
 /// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
 /// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct BitwiseCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.
     pub op_flag: T,
@@ -236,6 +263,7 @@ pub struct BitwiseCols<T> {
 /// When reading from a new word address (first access to a context/addr pair), the
 /// `values` are initialized to zero.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct MemoryCols<T> {
     /// Read/write flag (0 = write, 1 = read).
     pub is_read: T,
@@ -288,6 +316,7 @@ pub struct MemoryCols<T> {
 ///
 /// Use `ace.read()` / `ace.eval()` for typed overlays of the mode columns.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct AceCols<T> {
     /// Start-of-circuit flag (1 on the first row of a new circuit evaluation).
     pub s_start: T,
@@ -316,12 +345,22 @@ pub struct AceCols<T> {
 impl<T> AceCols<T> {
     /// Returns a READ-mode overlay of the mode-dependent columns.
     pub fn read(&self) -> &AceReadCols<T> {
-        borrow_chiplet(&self.mode)
+        self.mode.as_slice().borrow()
     }
 
     /// Returns an EVAL-mode overlay of the mode-dependent columns.
     pub fn eval(&self) -> &AceEvalCols<T> {
-        borrow_chiplet(&self.mode)
+        self.mode.as_slice().borrow()
+    }
+
+    /// Returns a mutable READ-mode overlay of the mode-dependent columns.
+    pub fn read_mut(&mut self) -> &mut AceReadCols<T> {
+        self.mode.as_mut_slice().borrow_mut()
+    }
+
+    /// Returns a mutable EVAL-mode overlay of the mode-dependent columns.
+    pub fn eval_mut(&mut self) -> &mut AceEvalCols<T> {
+        self.mode.as_mut_slice().borrow_mut()
     }
 }
 
@@ -353,6 +392,7 @@ impl<T: Copy> AceCols<T> {
 /// (`m_0`, `m_1`) track how many times each wire participates in circuit gates, used
 /// by the wiring bus to verify correct wire connections.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct AceReadCols<T> {
     /// Number of EVAL rows that follow this READ block.
     pub num_eval: T,
@@ -370,6 +410,7 @@ pub struct AceReadCols<T> {
 /// (`id_1`, `id_2`) and one output (`id_0`). The third wire's ID and value occupy the
 /// same physical columns as `num_eval`/`unused`/`m_1` in READ mode.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct AceEvalCols<T> {
     /// ID of the third wire (second input / right operand).
     pub id_2: T,
@@ -423,6 +464,7 @@ const _: () = {
 
 /// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct KernelRomCols<T> {
     /// Number of SYSCALLs to this procedure (CALL-label multiplicity).
     pub multiplicity: T,
@@ -489,7 +531,12 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-#[allow(clippy::new_without_default)]
+impl Default for HasherPeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HasherPeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the Poseidon2 hasher chiplet.
     ///
@@ -510,7 +557,10 @@ impl HasherPeriodicCols<Vec<Felt>> {
     /// 12-14 ext6-ext8              is_ext
     /// 15   boundary                (none)
     /// ```
-    #[allow(clippy::needless_range_loop)]
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "index-based assignments mirror the documented 16-row schedule"
+    )]
     pub fn new() -> Self {
         // -------------------------------------------------------------------------
         // Selectors
@@ -581,7 +631,12 @@ impl HasherPeriodicCols<Vec<Felt>> {
     }
 }
 
-#[allow(clippy::new_without_default)]
+impl Default for BitwisePeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitwisePeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the bitwise chiplet.
     pub fn new() -> Self {
@@ -669,6 +724,22 @@ const _: () = {
     assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };
+
+// BORROW IMPLS
+// ================================================================================================
+//
+// Each chiplet column struct can be borrowed zero-copy from a `[T]` slice of the matching
+// length. Mirrors the `Borrow<CoreCols<T>>` / `Borrow<ChipletCols<T>>` impls on the parent
+// `crate::constraints::columns` module.
+
+impl_borrow_for_chiplet_cols!(PermutationCols);
+impl_borrow_for_chiplet_cols!(ControllerCols);
+impl_borrow_for_chiplet_cols!(BitwiseCols);
+impl_borrow_for_chiplet_cols!(MemoryCols);
+impl_borrow_for_chiplet_cols!(AceCols);
+impl_borrow_for_chiplet_cols!(AceReadCols);
+impl_borrow_for_chiplet_cols!(AceEvalCols);
+impl_borrow_for_chiplet_cols!(KernelRomCols);
 
 #[cfg(test)]
 mod tests {

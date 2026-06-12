@@ -3,11 +3,8 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::{
-    AirWitness, MidenAir, PublicInputs, debug,
-    trace::{
-        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
-        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    },
+    MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
+    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
@@ -16,11 +13,11 @@ use crate::{
     fast::ExecutionOutput,
     field::QuadFelt,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    utils::{Matrix, RowMajorMatrix},
+    utils::RowMajorMatrix,
 };
 
 pub(crate) mod utils;
-use utils::TraceFragment;
+use utils::ChipletTraceFragment;
 
 pub mod chiplets;
 pub(crate) mod execution_tracer;
@@ -289,7 +286,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
+            *result = self.main_trace.helper_register(i, row);
         }
         result
     }
@@ -327,36 +324,21 @@ impl ExecutionTrace {
         let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let chiplets_var_len: &[&[Felt]] = &[&kernel_felts];
 
-        // Derive deterministic challenges by hashing public values with Poseidon2.
-        // The 4-element digest maps directly to 2 QuadFelt challenges.
-        let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
-        let challenges =
-            [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
+        let statement =
+            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
+                .expect("valid statement inputs");
+        let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
+            .expect("valid trace shapes");
 
-        let core_witness = AirWitness::new(&core_matrix, &public_values, &[]);
-        let chiplets_witness = AirWitness::new(&chiplets_matrix, &public_values, chiplets_var_len);
-        let core_air = MidenAir::CORE;
-        let chiplets_air = MidenAir::CHIPLETS;
-        debug::check_constraints_multi(
-            &[
-                (&core_air, core_witness, &core_air),
-                (&chiplets_air, chiplets_witness, &chiplets_air),
-            ],
-            &challenges,
-        );
-    }
-
-    /// Returns the main trace as a row-major matrix for proving.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let row_major = self.main_trace.to_row_major();
-        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
-        row_major
+        // A deterministic challenger seeds the debug constraint check; this is a local
+        // constraint debugger, not a full proof transcript, so any fixed challenge set works.
+        let config = config::poseidon2_config(config::pcs_params());
+        debug::check_constraints(&prover_statement, config.challenger());
     }
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
-    /// multi-AIR `prove_multi` path. Strips the Poseidon2 rate-alignment padding columns
+    /// multi-AIR proving path. Strips the Poseidon2 rate-alignment padding columns
     /// before returning.
     pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
         self.main_trace.to_core_chiplets_matrices()
@@ -371,20 +353,9 @@ impl ExecutionTrace {
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the index of the last row in the trace.
+    /// Returns the index of the last row in the Core trace.
     fn last_step(&self) -> usize {
-        self.length() - 1
-    }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-    #[cfg(feature = "std")]
-    pub fn print(&self) {
-        let mut row = [ZERO; TRACE_WIDTH];
-        for i in 0..self.length() {
-            self.main_trace.read_row_into(i, &mut row);
-            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
-        }
+        self.main_trace.core_height() - 1
     }
 
     #[cfg(any(test, feature = "testing"))]

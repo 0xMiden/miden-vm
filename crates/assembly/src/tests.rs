@@ -11,11 +11,8 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{
-        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeId, SplitNodeBuilder,
-    },
-    operations::{Decorator, Operation},
+    mast::{MastNode, MastNodeExt, MastNodeId},
+    operations::{AssemblyOp, Operation},
     program::Program,
     serde::{Deserializable, Serializable},
 };
@@ -23,7 +20,7 @@ use miden_mast_package::{MastForest, Package, PackageExport, ProcedureExport, Ta
 use miden_project::Linkage;
 
 use crate::{
-    Assembler, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
+    Assembler, ModuleParser, PathBuf,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -36,6 +33,23 @@ use crate::{
 };
 
 type TestResult = Result<(), Report>;
+
+fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
+    let mut reachable = BTreeSet::new();
+    let mut worklist = forest.procedure_roots().to_vec();
+
+    while let Some(node_id) = worklist.pop() {
+        if reachable.insert(node_id) {
+            forest[node_id].append_children_to(&mut worklist);
+        }
+    }
+
+    assert_eq!(
+        reachable.len(),
+        forest.num_nodes() as usize,
+        "finalized MAST forest contains nodes unreachable from any procedure root",
+    );
+}
 
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
 //
@@ -154,6 +168,33 @@ fn repeat_basic_blocks_merged() -> TestResult {
 
     // Also ensure that dead code elimination works properly
     assert_eq!(program.mast_forest().num_nodes(), 1);
+    Ok(())
+}
+
+/// A tail-controlled `do`..`while` loop lowers to a *bare* LOOP node, with no SPLIT wrapper
+/// (unlike the head-controlled `while.true`, which adds a SPLIT for the entry check). The loop
+/// body merges the `body` and `condition` sections into a single basic block.
+#[test]
+fn do_while_lowers_to_bare_loop() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "begin do push.1 while eq.0 end end");
+    let program = context.assemble(source)?;
+    let forest = program.mast_forest();
+
+    let num_loops = forest.nodes().iter().filter(|n| matches!(n, MastNode::Loop(_))).count();
+    let num_splits = forest.nodes().iter().filter(|n| matches!(n, MastNode::Split(_))).count();
+    assert_eq!(num_loops, 1, "expected exactly one LOOP node");
+    assert_eq!(num_splits, 0, "expected no SPLIT node for a do-while loop");
+
+    let loop_node = forest
+        .nodes()
+        .iter()
+        .find_map(|n| match n {
+            MastNode::Loop(loop_node) => Some(loop_node),
+            _ => None,
+        })
+        .unwrap();
+    assert_matches!(&forest[loop_node.body()], MastNode::Block(_));
     Ok(())
 }
 
@@ -292,6 +333,7 @@ fn library_exports() -> Result<(), Report> {
     // make sure foo2, bar2, and bar3 map to the same MastNode
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar2));
     assert_eq!(lib2.get_export_node_id(foo2), lib2.get_export_node_id(bar3));
+    assert_all_nodes_reachable_from_roots(lib2.mast_forest());
 
     // make sure there are 6 roots in the MAST (foo1, foo2, foo3, bar1, bar4, and bar5)
     assert_eq!(lib2.mast_forest().num_procedures(), 6);
@@ -497,10 +539,7 @@ fn simple_main_call() -> TestResult {
 
 #[test]
 fn call_without_path() -> TestResult {
-    let mut context = TestContext::default();
-
-    let project =
-        miden_project::Package::new("call_without_path", miden_project::Target::executable("main"));
+    let context = TestContext::default();
 
     let account_code1_src = source_file!(
         &context,
@@ -566,15 +605,9 @@ end
         context.source_manager(),
     )?;
 
-    let mut project_assembler = context.project_assembler(project.into())?;
-    project_assembler.assemble_with_sources(
-        ProjectTargetSelector::Executable("main"),
-        "dev",
-        ProjectSourceInputs {
-            root: main,
-            support: vec![account_code1, account_code2],
-        },
-    )?;
+    let mut assembler = Assembler::new(context.source_manager());
+    assembler.compile_and_statically_link_all([account_code1, account_code2])?;
+    assembler.assemble_program("main", main)?;
 
     Ok(())
 }
@@ -937,6 +970,8 @@ fn constant_err_div_by_zero() {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5/0 begin push.TEST_CONSTANT end",
@@ -954,6 +989,8 @@ fn constant_err_div_by_zero() {
     assert_assembler_diagnostic!(
         context,
         source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:1:23\]"#),
         "1 | const TEST_CONSTANT = 5//0 begin push.TEST_CONSTANT end",
@@ -1179,18 +1216,12 @@ fn constants_defined_in_global_scope() {
     end"
     );
 
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:11\]"#),
-        "1 |",
-        "2 |     begin const CONSTANT = 12",
-        "  :           ^^|^^",
-        "  :             `-- expected `end` to close `begin` block before top-level item",
-        "3 |     push.CONSTANT end",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected block-local constants to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before top-level item");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -1590,54 +1621,46 @@ fn test_push_word_slice_invalid() {
     let context = TestContext::default();
     let source_invalid_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[6..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_range).is_err());
 
     let source_empty_range = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_WORD = [2, 3, 4, 5]
 
     begin
         push.SAMPLE_WORD[2..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_empty_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     const SAMPLE_VALUE = 6
     begin
         push.SAMPLE_VALUE[1..3]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
-        format!(
-            "\
+        "\
     begin
         push.5[0..2]
     end
     "
-        )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
 }
@@ -1760,249 +1783,6 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     Ok(())
 }
-// DECORATORS
-// ================================================================================================
-
-#[test]
-fn decorators_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        add
-        trace.1
-        mul
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn trailing_decorator_is_after_exit_not_last_op_decorator() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        push.1
-        push.2
-        trace.1
-        add
-        trace.2
-    end"
-    );
-
-    let program = context.assemble(source)?;
-    let forest = program.mast_forest();
-    let (block_id, block) = forest
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, node)| {
-            node.get_basic_block().map(|block| (MastNodeId::from(idx as u32), block))
-        })
-        .find(|(_, block)| matches!(block.raw_operations().last(), Some(Operation::Add)))
-        .expect("expected a basic block ending in add");
-
-    let raw_ops = block.raw_operations().collect::<Vec<_>>();
-    let last_real_op_idx = raw_ops.len() - 1;
-    assert!(
-        matches!(raw_ops.last(), Some(Operation::Add)),
-        "expected add to be the last real operation in the block",
-    );
-
-    let indexed_decorators = block.indexed_decorator_iter(forest).collect::<Vec<_>>();
-    let last_op_trace_decorators = indexed_decorators
-        .iter()
-        .filter_map(|(op_idx, decorator_id)| {
-            (*op_idx == last_real_op_idx).then(|| match &forest[*decorator_id] {
-                Decorator::Trace(value) => Some(*value),
-            })?
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        last_op_trace_decorators,
-        vec![1],
-        "only the pre-add decorator should be attached to the last real op",
-    );
-
-    let after_exit_trace_decorators = block
-        .after_exit(forest)
-        .iter()
-        .map(|decorator_id| match &forest[*decorator_id] {
-            Decorator::Trace(value) => *value,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        after_exit_trace_decorators,
-        vec![2],
-        "trailing decorator should be placed in the containing block's after_exit set",
-    );
-
-    assert!(
-        forest.after_exit_decorators(block_id) == block.after_exit(forest),
-        "block-level and forest-level after_exit accessors should agree",
-    );
-
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_one_basic_block() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2 add end
-        trace.1
-        repeat.2 mul end
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_repeat_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        repeat.2
-            if.true
-                trace.1 push.42 trace.2
-            else
-                trace.3 push.22 trace.3
-            end
-            trace.4
-        end
-        trace.5
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_call() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-        trace.2
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_dyn() -> TestResult {
-    // single line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0
-        dynexec
-        trace.1
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-
-    // multi line
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1 trace.2 trace.3 trace.4
-        dynexec
-        trace.5 trace.6 trace.7 trace.8 trace.9
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
-#[test]
-fn decorators_external() -> TestResult {
-    let context = TestContext::default();
-    let baz = r#"
-        pub proc f
-            push.7 push.8 sub
-        end
-    "#;
-    let baz = parse_module!(&context, "lib::baz", baz);
-
-    let lib = Assembler::new(context.source_manager()).assemble_library("lib", [baz])?;
-
-    let program_source = source_file!(
-        &context,
-        "\
-    use lib::baz
-    begin
-        trace.0
-        exec.baz::f
-        trace.1
-    end"
-    );
-
-    let program = Assembler::new(context.source_manager())
-        .with_package(Arc::from(lib), Linkage::Dynamic)?
-        .assemble_program("program", program_source)?
-        .unwrap_program();
-    insta::assert_snapshot!(program);
-
-    Ok(())
-}
-
-#[test]
-fn decorators_join_and_split() -> TestResult {
-    let context = TestContext::default();
-    let source = source_file!(
-        &context,
-        "\
-    begin
-        trace.0 trace.1
-        if.true
-            trace.2 add trace.3
-        else
-            trace.4 mul trace.5
-        end
-        trace.6
-        if.true
-            trace.7 push.42 trace.8
-        else
-            trace.9 push.22 trace.10
-        end
-        trace.11
-    end"
-    );
-    let program = context.assemble(source)?;
-    insta::assert_snapshot!(program);
-    Ok(())
-}
-
 // ASSERTIONS
 // ================================================================================================
 
@@ -2174,8 +1954,8 @@ fn u32assertw_with_code() -> TestResult {
     Ok(())
 }
 
-/// Ensure that there is no collision between `Assert`, `U32assert2`, and `MpVerify`
-/// instructions with different inner values (which all don't contribute to the MAST root).
+/// Ensure that assertion and `mtree_verify` error codes are preserved after assembly, including
+/// through duplicate procedures with metadata-neutral MAST roots.
 #[test]
 fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     let context = TestContext::default();
@@ -2245,6 +2025,54 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn dynamic_link_to_ambiguous_same_digest_export_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let library_module = parse_module!(
+        &context,
+        "lib::a",
+        r#"
+        pub proc f1
+            assert.err="1"
+        end
+
+        pub proc f2
+            assert.err="2"
+        end
+        "#
+    );
+    let library =
+        Assembler::new(context.source_manager()).assemble_library("lib", [library_module])?;
+
+    let f1 = QualifiedProcedureName::from_str("lib::a::f1").unwrap();
+    let f2 = QualifiedProcedureName::from_str("lib::a::f2").unwrap();
+    assert_eq!(library.get_procedure_root_by_path(&f1), library.get_procedure_root_by_path(&f2));
+    assert_ne!(library.get_export_node_id(&f1), library.get_export_node_id(&f2));
+
+    let source = source_file!(
+        &context,
+        "\
+        use lib::a
+
+        begin
+            exec.a::f2
+        end
+        "
+    );
+    let err = Assembler::new(context.source_manager())
+        .with_package(Arc::from(library), Linkage::Dynamic)?
+        .assemble_program("program", source)
+        .expect_err("expected ambiguous dynamic link diagnostic");
+
+    assert_diagnostic!(&err, "ambiguous dynamic procedure link for MAST root");
+    assert_diagnostic!(
+        &err,
+        "dynamic reference cannot select one of the same-digest exported roots"
+    );
+
     Ok(())
 }
 
@@ -2330,61 +2158,6 @@ fn control_flow_nesting_depth_exceeded() {
 
 // PROGRAMS WITH PROCEDURES
 // ================================================================================================
-
-/// If the program has 2 procedures with the same MAST root (but possibly different decorators), the
-/// correct procedure is chosen on exec
-#[test]
-fn ensure_correct_procedure_selection_on_collision() -> TestResult {
-    let context = TestContext::default();
-
-    // if with else
-    let source = source_file!(
-        &context,
-        "
-        proc f
-            add
-        end
-
-        proc g
-            trace.2
-            add
-        end
-
-        begin
-            if.true
-                exec.f
-            else
-                exec.g
-            end
-        end"
-    );
-    let program = context.assemble(source)?;
-
-    // Note: those values were taken from adding prints to the assembler at the time of writing. It
-    // is possible that this test starts failing if we end up ordering procedures differently.
-    let expected_f_node_id =
-        MastNodeId::from_u32_safe(1_u32, program.mast_forest().as_ref()).unwrap();
-    let expected_g_node_id =
-        MastNodeId::from_u32_safe(0_u32, program.mast_forest().as_ref()).unwrap();
-
-    let (exec_f_node_id, exec_g_node_id) = {
-        let split_node_id = {
-            // Note: the program starts with a join node, which joins:
-            // - left: the fmp initialization sequence,
-            // - right: the actual entrypoint of the program (the if statement).
-            let root_join_id = program.entrypoint();
-            program.mast_forest()[root_join_id].unwrap_join().second()
-        };
-        let split_node = &program.mast_forest()[split_node_id].unwrap_split();
-
-        (split_node.on_true(), split_node.on_false())
-    };
-
-    assert_eq!(program.mast_forest()[expected_f_node_id], program.mast_forest()[exec_f_node_id]);
-    assert_eq!(program.mast_forest()[expected_g_node_id], program.mast_forest()[exec_g_node_id]);
-
-    Ok(())
-}
 
 #[test]
 fn program_with_one_procedure() -> TestResult {
@@ -2966,18 +2739,12 @@ fn module_alias() -> TestResult {
             exec.bigint->invalidname::checked_add
         end"
     );
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:2:37\]"#),
-        "1 |",
-        "2 |         use dummy::math::u64->bigint->invalidname",
-        "  :                                     ^|",
-        "  :                                      `-- unexpected top-level token",
-        "3 |",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected chained module alias to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "use dummy::math::u64->bigint->invalidname");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     Ok(())
 }
@@ -3391,16 +3158,12 @@ fn missing_import() {
 fn invalid_proc_invalid_numeric_name() {
     let context = TestContext::default();
     let source = source_file!(&context, "proc 123 add mul end begin push.1 exec.123 end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:6\]"#),
-        "1 | proc 123 add mul end begin push.1 exec.123 end",
-        "  :      ^|^",
-        "  :       `-- expected a procedure name",
-        "  `----"
-    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected numeric procedure name to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected a procedure name");
+    assert_diagnostic!(&err, "unexpected token in block");
 }
 
 #[test]
@@ -3443,28 +3206,16 @@ fn invalid_if_missing_end_no_else() {
 fn invalid_else_with_no_if() {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 add else mul end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:18\]"#),
-        "1 | begin push.1 add else mul end",
-        "  :                  ^^|^",
-        "  :                    `-- expected `end` to close `begin` block before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected unmatched else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 
     let source = source_file!(&context, "begin push.1 while.true add else mul end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:29\]"#),
-        "1 | begin push.1 while.true add else mul end end",
-        "  :                             ^^|^",
-        "  :                               `-- expected `end` to close `while` before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected while-local else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `while` before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -3473,16 +3224,11 @@ fn invalid_unmatched_else_within_if_else() {
 
     let source =
         source_file!(&context, "begin push.1 if.true add else mul else push.1 end end end");
-    assert_assembler_diagnostic!(
-        context,
-        source,
-        "syntax error",
-        regex!(r#",-\[test[\d]+:1:35\]"#),
-        "1 | begin push.1 if.true add else mul else push.1 end end end",
-        "  :                                   ^^|^",
-        "  :                                     `-- expected `end` to close `if` before `else`",
-        "  `----"
-    );
+    let err = context.assemble(source).expect_err("expected duplicate else to be rejected");
+    assert_diagnostic!(&err, "Multiple syntax errors were identified");
+    assert_diagnostic!(&err, "expected `end` to close `if` before `else`");
+    assert_diagnostic!(&err, "expected `end` to close `begin` block before `else`");
+    assert_diagnostic!(&err, "unexpected top-level token");
 }
 
 #[test]
@@ -3573,13 +3319,12 @@ fn invalid_repeat_count_zero() {
 }
 
 #[test]
-fn invalid_repeat_count_zero_with_decorator() {
+fn invalid_repeat_count_zero_in_procedure() {
     let context = TestContext::default();
     let source = source_file!(
         &context,
         "\
 proc foo
-    trace.1
     repeat.0
         nop
     end
@@ -3589,9 +3334,7 @@ begin
     call.foo
 end"
     );
-    let error = context
-        .assemble(source)
-        .expect_err("expected repeat.0 with decorator to be rejected");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
     let rendered =
         format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
@@ -4067,37 +3810,6 @@ fn test_program_serde_simple() {
     assert_eq!(original_program, deserialized_program);
 }
 
-#[test]
-fn test_program_serde_with_decorators() {
-    let source = "
-    const DEFAULT_CONST = 100
-    const EVENT_CONST = event(\"serde::evt\")
-
-    proc foo
-        push.1.2 add
-    end
-
-    begin
-        emit.EVENT_CONST
-
-        exec.foo
-
-        drop
-
-        trace.DEFAULT_CONST
-    end
-    ";
-
-    let assembler = Assembler::default();
-    let original_program = assembler.assemble_program("test", source).unwrap().unwrap_program();
-
-    let mut target = Vec::new();
-    original_program.write_into(&mut target);
-    let deserialized_program = Program::read_from_bytes(&target).unwrap();
-
-    assert_eq!(original_program, deserialized_program);
-}
-
 // MAST BUILDER ACCEPTANCE CORPUS
 // ================================================================================================
 
@@ -4108,7 +3820,7 @@ fn mast_builder_acceptance_corpus() -> TestResult {
 
     let cases = [
         (
-            "straight_line_decorators",
+            "straight_line_events",
             source_file!(
                 &context,
                 r#"
@@ -4117,7 +3829,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 begin
                     push.1 push.2 add
                     emit.EVT
-                    trace.7
                 end
                 "#
             ),
@@ -4130,9 +3841,9 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 begin
                     push.1
                     if.true
-                        push.2 trace.1
+                        push.2
                     else
-                        push.3 trace.2
+                        push.3
                     end
 
                     repeat.3
@@ -4156,7 +3867,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
                 end
 
                 proc decorated
-                    trace.44
                     push.0 drop
                 end
 
@@ -4183,7 +3893,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
             r#"
             pub proc inc
                 push.1 add
-                trace.11
             end
 
             pub proc inspect
@@ -4239,19 +3948,13 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
 
     writeln!(
         output,
-        "debug_counts=decorators:{} asm_ops:{} debug_vars:{} procedure_names:{}",
-        debug_info.num_decorators(),
+        "debug_counts=asm_ops:{} debug_vars:{} procedure_names:{}",
         debug_info.num_asm_ops(),
         debug_info.num_debug_vars(),
         debug_info.num_procedure_names(),
     )
     .unwrap();
 
-    let decorators = debug_info
-        .decorators()
-        .iter()
-        .map(|decorator| format!("{decorator:?}"))
-        .collect::<Vec<_>>();
     let asm_ops = debug_info
         .asm_ops()
         .iter()
@@ -4266,29 +3969,11 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
         })
         .collect::<Vec<_>>();
     let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
-    writeln!(output, "decorators={decorators:?}").unwrap();
     writeln!(output, "asm_ops={asm_ops:?}").unwrap();
     writeln!(output, "debug_vars={debug_vars:?}").unwrap();
 
     for node_idx in 0..forest.num_nodes() {
         let node_id = MastNodeId::new_unchecked(node_idx);
-        let before_enter = forest
-            .before_enter_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let after_exit = forest
-            .after_exit_decorators(node_id)
-            .iter()
-            .map(|&decorator_id| u32::from(decorator_id))
-            .collect::<Vec<_>>();
-        let indexed_decorators = match &forest[node_id] {
-            MastNode::Block(block) => block
-                .indexed_decorator_iter(forest)
-                .map(|(op_idx, decorator_id)| (op_idx, u32::from(decorator_id)))
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
         let asm_op_links = debug_info
             .asm_ops_for_node(node_id)
             .into_iter()
@@ -4300,17 +3985,9 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
             .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
             .collect::<Vec<_>>();
 
-        if !before_enter.is_empty()
-            || !after_exit.is_empty()
-            || !indexed_decorators.is_empty()
-            || !asm_op_links.is_empty()
-            || !debug_var_links.is_empty()
-        {
-            writeln!(
-                output,
-                "node[{node_idx}]=before:{before_enter:?} after:{after_exit:?} indexed:{indexed_decorators:?} asm:{asm_op_links:?} debug:{debug_var_links:?}",
-            )
-            .unwrap();
+        if !asm_op_links.is_empty() || !debug_var_links.is_empty() {
+            writeln!(output, "node[{node_idx}]=asm:{asm_op_links:?} debug:{debug_var_links:?}",)
+                .unwrap();
         }
     }
 }
@@ -4486,15 +4163,15 @@ fn nested_blocks() -> Result<(), Report> {
     // contains the MAST nodes for the kernel after a call to
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
-        let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
+        let kernel_foo_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(vec![Operation::Add], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_node(
-                CallNodeBuilder::new_syscall(kernel_foo_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
+            .ensure_call_node_ref(
+                kernel_foo_node_ref,
+                true,
+                AssemblyOp::new(None, "test".into(), 1, "syscall.foo".into()),
             )
             .unwrap()
     };
@@ -4538,156 +4215,103 @@ fn nested_blocks() -> Result<(), Report> {
     let program = assembler.assemble_program("program", program).unwrap().unwrap_program();
 
     // basic block representing foo::bar.baz procedure
-    let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(29))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+    let exec_foo_bar_baz_node_ref = expected_mast_forest_builder
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(29))], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![], vec![])
+        .ensure_block_ref(fmp_initialization_sequence(), vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(2))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(2))], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(3))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(3))], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(5))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(5))], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true1, r#false1])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
+        .ensure_split_node_ref(
+            [r#true1, r#false1],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
         )
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(7))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(7))], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(11))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(11))], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true3, r#false3])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
+        .ensure_split_node_ref(
+            [r#true3, r#false3],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
         )
         .unwrap();
 
     let r#while = {
-        let body_node_id = expected_mast_forest_builder
-            .ensure_block(
+        let body_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(
                 vec![
                     Operation::Push(Felt::from_u32(17)),
                     Operation::Push(Felt::from_u32(19)),
                     Operation::Push(Felt::from_u32(23)),
                 ],
-                Vec::new(),
-                vec![],
-                vec![],
                 vec![],
                 vec![],
             )
             .unwrap();
 
+        let asm_op = AssemblyOp::new(None, "test".into(), 1, "while.true".into());
+        let loop_node_ref = expected_mast_forest_builder
+            .ensure_loop_node_ref(body_node_ref, asm_op.clone())
+            .unwrap();
+        let noop_node_ref = expected_mast_forest_builder
+            .ensure_block_ref(vec![Operation::Noop], vec![], vec![])
+            .unwrap();
+
         expected_mast_forest_builder
-            .ensure_node(
-                LoopNodeBuilder::new(body_node_id)
-                    .with_before_enter(vec![])
-                    .with_after_exit(vec![]),
-            )
+            .ensure_split_node_ref([loop_node_ref, noop_node_ref], asm_op)
             .unwrap()
     };
-    let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(
-            vec![Operation::Push(Felt::from_u32(13))],
-            Vec::new(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-        )
+    let push_13_basic_block_ref = expected_mast_forest_builder
+        .ensure_block_ref(vec![Operation::Push(Felt::from_u32(13))], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_node(
-            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
-        )
+        .join_node_refs(vec![push_13_basic_block_ref, r#while], None)
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_node(
-            SplitNodeBuilder::new([r#true2, r#false2])
-                .with_before_enter(vec![])
-                .with_after_exit(vec![]),
+        .ensure_split_node_ref(
+            [r#true2, r#false2],
+            AssemblyOp::new(None, "test".into(), 1, "if.true".into()),
         )
         .unwrap();
 
-    let combined_node_id = expected_mast_forest_builder
-        .join_nodes(
+    let combined_node_ref = expected_mast_forest_builder
+        .join_node_refs(
             vec![
                 fmp_initialization,
                 before,
                 r#if1,
                 nested,
-                exec_foo_bar_baz_node_id,
+                exec_foo_bar_baz_node_ref,
                 syscall_foo_node_id,
             ],
             None,
         )
         .unwrap();
 
-    let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();
-    expected_mast_forest.make_root(node_remapping[&combined_node_id]);
+    expected_mast_forest_builder.record_procedure_root_ref(combined_node_ref);
+    let (mut expected_mast_forest, node_remapping) =
+        expected_mast_forest_builder.build().unwrap().into_parts();
+    expected_mast_forest.make_root(node_remapping[&combined_node_ref]);
     let expected_program =
-        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_id]);
+        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_ref]);
     assert_eq!(expected_program.hash(), program.hash());
 
     // also check that the program has the right number of procedures (which excludes the dummy
@@ -4821,7 +4445,8 @@ fn distinguish_grandchildren_correctly() {
     begin
         if.true
             while.true
-                trace.1234
+                push.2
+                drop
                 push.1
             end
         end
@@ -5014,7 +4639,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
     )?;
 
     let library = Assembler::new(context.source_manager()).assemble_library("lib", [module])?;
-    let mut forest = library.mast_forest().as_ref().clone();
+    let forest = library.mast_forest().as_ref().clone();
     assert!(
         forest
             .nodes()
@@ -5024,7 +4649,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         "test input must create at least one padded basic block"
     );
 
-    forest.clear_debug_info();
+    let forest = forest.without_debug_info();
     let stripped_size = forest.to_bytes().len();
     let stripped_without_debug_info_size = {
         let mut bytes = Vec::new();
@@ -5043,7 +4668,7 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
 
     assert!(
         compacted_size <= stripped_size,
-        "MastForest::compact increased serialized size after clear_debug_info(): \
+        "MastForest::compact increased serialized size after stripping debug info: \
          stripped={stripped_size}, compacted={compacted_size}, \
          stripped_without_debug_info={stripped_without_debug_info_size}, \
          compacted_without_debug_info={compacted_without_debug_info_size}, \
@@ -5093,13 +4718,35 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
     // This should act as identity (return the same forest) but doesn't
     let (merged_forest, _) = MastForest::merge([&*original_forest]).into_diagnostic()?;
 
-    // Assert that the merged forest reorders nodes and both have Join nodes at expected positions
-    let original_join = original_forest.nodes()[6].unwrap_join();
-    let merged_join = merged_forest.nodes()[5].unwrap_join();
+    // Assert that the merged forest still contains the same join structure even if finalization
+    // order changes where that join appears.
+    let original_join = original_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) => Some(join),
+            _ => None,
+        })
+        .expect("original forest must contain a join node");
+    let merged_join = merged_forest
+        .nodes()
+        .iter()
+        .find_map(|node| match node {
+            MastNode::Join(join) => Some(join),
+            _ => None,
+        })
+        .expect("merged forest must contain a join node");
 
-    // Check that they have the same structure (same first and second children, same digest)
-    assert_eq!(original_join.first(), merged_join.first());
-    assert_eq!(original_join.second(), merged_join.second());
+    // Check that they have the same structure. Finalization may remap node IDs, so compare the
+    // children by content commitment rather than by positional ID.
+    assert_eq!(
+        original_forest[original_join.first()].digest(),
+        merged_forest[merged_join.first()].digest(),
+    );
+    assert_eq!(
+        original_forest[original_join.second()].digest(),
+        merged_forest[merged_join.second()].digest(),
+    );
     assert_eq!(original_join.digest(), merged_join.digest());
 
     //Assert that merging is idempotent
@@ -5300,7 +4947,7 @@ fn test_assembler_debug_info_present() {
     let mast_forest = library.mast_forest();
 
     // Debug info should be present since debug mode is always enabled.
-    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    // AssemblyOps are stored separately in DebugInfo.
     let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
     assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }

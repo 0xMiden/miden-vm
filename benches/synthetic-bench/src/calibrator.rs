@@ -45,7 +45,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         ace_rows: chiplets.ace_chiplet_len() as u64,
     };
     let totals = TraceTotals {
-        core_rows: summary.main_trace_len() as u64,
+        core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };

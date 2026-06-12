@@ -145,7 +145,7 @@ These fuzz internal structures through the MastForest deserialization path:
 cargo +nightly fuzz run basic_block_data --fuzz-dir miden-core-fuzz
 ```
 
-**`debug_info`** — Decorators, string table, CSR structures, error codes.
+**`debug_info`** — Debug info string tables, CSR structures, and error codes.
 
 ```bash
 cargo +nightly fuzz run debug_info --fuzz-dir miden-core-fuzz

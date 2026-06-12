@@ -90,7 +90,6 @@ use crate::{
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the merged block-stack + u32rc + logpre + range-table column.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -119,7 +118,6 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let h1_next = dec_next.hasher_state[1];
     let end_flags = dec.end_block_flags();
 
-    let s0 = stk.get(0);
     let b0 = stk.b0;
     let b1 = stk.b1;
     let b0_next = stk_next.b0;
@@ -173,14 +171,15 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // LOOP: push with is_loop = s0.
+                    // LOOP: push with `is_loop = 1`. Under do-while semantics LOOP reads no
+                    // stack input, as it unconditionally enters the loop.
                     g.add(
                         "loop",
                         op_flags.loop_op(),
                         || {
                             let block_id = addr_next.into();
                             let parent_id = addr.into();
-                            let is_loop = s0.into();
+                            let is_loop = LB::Expr::ONE;
                             BlockStackMsg::Simple { block_id, parent_id, is_loop }
                         },
                         Deg { v: 5, u: 6 },

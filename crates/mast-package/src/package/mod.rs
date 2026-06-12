@@ -159,8 +159,7 @@ impl Package {
 
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
-        let mast_forest = Arc::make_mut(&mut self.mast);
-        mast_forest.advice_map_mut().extend(advice_map);
+        self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
     }
 }
 
@@ -654,9 +653,14 @@ mod tests {
         Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+        advice::AdviceMap,
+        mast::{
+            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestContributor, MastNode,
+            MastNodeExt, MastNodeId,
+        },
         operations::{AssemblyOp, Operation},
         serde::Serializable,
+        utils::IndexVec,
     };
 
     use super::*;
@@ -664,7 +668,7 @@ mod tests {
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut forest)
             .expect("failed to build basic block");
         forest.make_root(node_id);
@@ -689,33 +693,37 @@ mod tests {
     fn build_same_digest_package_exports(
         exports: &[(&str, &str)],
     ) -> (Arc<MastForest>, Vec<PackageExport>) {
-        let mut forest = MastForest::new();
+        let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
+        let mut roots = Vec::new();
+        let mut debug_info = DebugInfo::new();
         let mut new_exports = vec![];
 
         for (path_str, context_name) in exports {
-            let asm_op_id = forest
-                .debug_info_mut()
+            let asm_op_id = debug_info
                 .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
                 .expect("failed to add asm op");
-            let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-                .add_to_forest(&mut forest)
+            let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
+                .build()
                 .expect("failed to build basic block");
-            let num_ops = forest[node_id].get_basic_block().unwrap().num_operations() as usize;
-            forest
-                .debug_info_mut()
+            let num_ops = node.num_operations() as usize;
+            let digest = node.digest();
+            let node_id = nodes.push(node.into()).expect("failed to add basic block");
+            debug_info
                 .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
                 .expect("failed to register asm ops");
-            forest.make_root(node_id);
+            roots.push(node_id);
 
             let path = absolute_path(path_str);
             new_exports.push(PackageExport::Procedure(ProcedureExport::new(
                 path,
                 Some(node_id),
-                forest[node_id].digest(),
+                digest,
                 None,
             )));
         }
 
+        let forest = MastForest::from_raw_parts(nodes, roots, AdviceMap::default(), debug_info)
+            .expect("failed to build forest");
         (Arc::new(forest), new_exports)
     }
 

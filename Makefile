@@ -53,34 +53,34 @@ FEATURES_air             := testing
 FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
-FEATURES_vm              := concurrent,executable,internal
+FEATURES_vm              := concurrent,executable,internal,testing
 FEATURES_mast-package    := serde
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_project         := resolver,serde
 FEATURES_package-registry:= resolver
 FEATURES_prover          := concurrent
-FEATURES_core-lib        :=
+FEATURES_core-lib        := testing
 FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
 clippy: ## Runs Clippy with configs (alias for xclippy)
-	cargo +nightly xclippy
+	cargo +stable xclippy
 
 
 .PHONY: xclippy
 xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
-	cargo +nightly xclippy
+	cargo +stable xclippy
 
 
 .PHONY: fix
 fix: ## Runs Fix with configs (alias for xclippy-fix)
-	cargo +nightly xclippy-fix
+	cargo +stable xclippy-fix
 
 .PHONY: xclippy-fix
 xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
-	cargo +nightly xclippy-fix
+	cargo +stable xclippy-fix
 
 
 .PHONY: format

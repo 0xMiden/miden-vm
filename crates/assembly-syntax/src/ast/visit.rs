@@ -433,6 +433,10 @@ where
             visitor.visit_block(else_blk)
         },
         Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_block(body),
+        Op::DoWhile { body, condition, .. } => {
+            visitor.visit_block(body)?;
+            visitor.visit_block(condition)
+        },
         Op::Inst(inst) => visitor.visit_inst(inst),
     }
 }
@@ -478,8 +482,7 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
@@ -1005,6 +1008,10 @@ where
             visitor.visit_mut_block(else_blk)
         },
         Op::While { body, .. } => visitor.visit_mut_block(body),
+        Op::DoWhile { body, condition, .. } => {
+            visitor.visit_mut_block(body)?;
+            visitor.visit_mut_block(condition)
+        },
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
         Op::Repeat { count, body, .. } => {
             visitor.visit_mut_immediate_u32(count)?;
@@ -1054,8 +1061,7 @@ where
         | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWBeImm(imm)
-        | MemStoreWLeImm(imm)
-        | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
+        | MemStoreWLeImm(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),

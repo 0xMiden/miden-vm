@@ -46,10 +46,6 @@ pub struct RunCmd {
     #[arg(short = 'o', long = "output", value_parser)]
     output_file: Option<PathBuf>,
 
-    /// Enable tracing to monitor execution of the VM
-    #[arg(short = 't', long = "trace")]
-    trace: bool,
-
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
@@ -110,7 +106,7 @@ impl RunCmd {
             trace.trace_len_summary().trace_len(),
             trace.trace_len_summary().padded_trace_len(),
             padding_percentage,
-            trace.trace_len_summary().main_trace_len(),
+            trace.trace_len_summary().core_trace_len(),
             trace.trace_len_summary().range_trace_len(),
             trace.trace_len_summary().chiplets_trace_len().trace_len(),
             trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
@@ -143,8 +139,6 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        params.trace,
-        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
@@ -205,8 +199,6 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        params.trace,
-        true,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 

@@ -3,21 +3,19 @@ use alloc::{string::ToString, vec::Vec};
 use miden_assembly_syntax_cst::{
     SyntaxElement, SyntaxKind, SyntaxToken,
     ast::{
-        AstNode, Block as CstBlock, IfOp as CstIfOp, Instruction as CstInstruction,
-        Operation as CstOperation, RepeatOp as CstRepeatOp, WhileOp as CstWhileOp,
+        AstNode, Block as CstBlock, DoWhileOp as CstDoWhileOp, IfOp as CstIfOp,
+        Instruction as CstInstruction, Operation as CstOperation, RepeatOp as CstRepeatOp,
+        WhileOp as CstWhileOp,
     },
     rowan,
 };
-use miden_debug_types::{SourceSpan, Span};
+use miden_debug_types::SourceSpan;
 
 use super::{
     context::LoweringContext, fragments::lower_u32_immediate_token,
     instructions::try_lower_instruction,
 };
-use crate::{
-    ast::{self, Instruction},
-    parser::ParsingError,
-};
+use crate::{ast, parser::ParsingError};
 
 /// Lowers `block` and rejects source-level empty bodies using `empty_message`.
 ///
@@ -66,6 +64,7 @@ fn lower_operation(
     match op {
         CstOperation::If(op) => Ok(vec![lower_if_op(context, op)?]),
         CstOperation::While(op) => Ok(vec![lower_while_op(context, op)?]),
+        CstOperation::DoWhile(op) => Ok(vec![lower_do_while_op(context, op)?]),
         CstOperation::Repeat(op) => Ok(vec![lower_repeat_op(context, op)?]),
         CstOperation::Instruction(op) => lower_instruction(context, op),
     }
@@ -73,8 +72,8 @@ fn lower_operation(
 
 /// Lowers an `if.true` / `if.false` operation.
 ///
-/// This preserves legacy semantics for empty branches: a missing `then` branch is only tolerated
-/// when an `else` branch exists, in which case the empty side is lowered as an explicit `nop`.
+/// Empty source branches are accepted when an `else` branch is present. Missing `else` branches and
+/// accepted empty source branches lower to empty AST blocks.
 fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::Op, ParsingError> {
     let span = context.parse().span_for_node(op.syntax());
     let cond = parse_if_condition(context, op)?;
@@ -91,7 +90,7 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
     let then_blk = if then_has_ops {
         lower_block(context, &then_node)?
     } else if else_node.is_some() {
-        nop_block(span)
+        empty_block(span)
     } else {
         return Err(ParsingError::InvalidSyntax {
             span: context.parse().span_for_node(then_node.syntax()),
@@ -102,12 +101,12 @@ fn lower_if_op(context: &mut LoweringContext<'_>, op: &CstIfOp) -> Result<ast::O
     let else_blk = match else_node {
         Some(else_node) => {
             if !else_has_ops {
-                nop_block(span)
+                empty_block(span)
             } else {
                 lower_block(context, &else_node)?
             }
         },
-        None => nop_block(span),
+        None => empty_block(span),
     };
 
     if cond {
@@ -136,6 +135,26 @@ fn lower_while_op(
     Ok(ast::Op::While { span, body })
 }
 
+/// Lowers a `do`..`while`..`end` operation and enforces a non-empty body and condition.
+fn lower_do_while_op(
+    context: &mut LoweringContext<'_>,
+    op: &CstDoWhileOp,
+) -> Result<ast::Op, ParsingError> {
+    let span = context.parse().span_for_node(op.syntax());
+    let body = op.body().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a block body for `do`".to_string(),
+    })?;
+    let body = lower_required_block(context, &body, "expected a non-empty `do` block")?;
+    let condition = op.condition().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a condition block after `while`".to_string(),
+    })?;
+    let condition =
+        lower_required_block(context, &condition, "expected a non-empty `while` condition")?;
+    Ok(ast::Op::DoWhile { span, body, condition })
+}
+
 /// Lowers a `repeat.<count>` operation and validates the repeat-count immediate.
 fn lower_repeat_op(
     context: &mut LoweringContext<'_>,
@@ -153,8 +172,7 @@ fn lower_repeat_op(
 
 /// Lowers a single instruction node, delegating operand decoding to `instructions.rs`.
 ///
-/// Any instruction spelling that the direct lowerer does not recognize is reported using the
-/// legacy “invalid instruction or malformed operands” surface.
+/// Any instruction spelling that the direct lowerer does not recognize is reported as malformed.
 fn lower_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
@@ -262,7 +280,6 @@ fn has_source_operations(block: &CstBlock) -> bool {
     block.operations().next().is_some()
 }
 
-/// Builds the legacy fallback diagnostic for malformed instruction spellings.
 fn invalid_instruction_error(
     context: &LoweringContext<'_>,
     instruction: &CstInstruction,
@@ -280,8 +297,6 @@ fn invalid_instruction_error(
     ParsingError::InvalidSyntax { span, message }
 }
 
-/// Constructs the synthetic `nop` block used by legacy lowering for omitted `else` branches and
-/// empty-then/with-else forms.
-fn nop_block(span: SourceSpan) -> ast::Block {
-    ast::Block::new(span, vec![ast::Op::Inst(Span::new(span, Instruction::Nop))])
+fn empty_block(span: SourceSpan) -> ast::Block {
+    ast::Block::new(span, Vec::new())
 }

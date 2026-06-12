@@ -198,8 +198,9 @@ where
         let right_shift = prefix_011 + push.clone() + u32split;
 
         // left_shift_scalar (degree 5):
-        //   prefix_010 + u32_add3_madd_group + SPLIT + LOOP + REPEAT + END*is_loop + DYN.
-        // DYNCALL intentionally excluded (see OpFlags::left_shift doc).
+        //   prefix_010 + u32_add3_madd_group + SPLIT + REPEAT + END*is_loop + DYN.
+        // DYNCALL intentionally excluded (see OpFlags::left_shift doc). LOOP is also excluded:
+        // under do-while semantics the LOOP op reads no stack input.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = u32_rc_op.clone() * bits[3][1].clone() * bits[2][1].clone();
         let is_loop = decoder.end_block_flags().is_loop;
@@ -207,7 +208,6 @@ where
         let left_shift = prefix_010
             + u32_add3_madd_group
             + split.clone()
-            + loop_op.clone()
             + repeat.clone()
             + end_loop
             + dyn_op.clone();
@@ -330,8 +330,8 @@ impl LookupOpFlags<Felt> {
         f.right_shift = bool_to_felt(
             (48..64).contains(&opcode) || opcode == opcodes::PUSH || opcode == opcodes::U32SPLIT,
         );
-        // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/LOOP/
-        // REPEAT/DYN + END*is_loop. DYNCALL intentionally excluded — see OpFlags::left_shift.
+        // left_shift_scalar: prefix_010 (opcodes 32..48) + U32ADD3/U32MADD + SPLIT/REPEAT/DYN
+        // + END*is_loop. DYNCALL and LOOP intentionally excluded — see OpFlags::left_shift.
         let is_end_loop = opcode == opcodes::END && decoder.end_block_flags().is_loop == Felt::ONE;
         f.left_shift = bool_to_felt(
             (32..48).contains(&opcode)
@@ -340,7 +340,6 @@ impl LookupOpFlags<Felt> {
                     opcodes::U32ADD3
                         | opcodes::U32MADD
                         | opcodes::SPLIT
-                        | opcodes::LOOP
                         | opcodes::REPEAT
                         | opcodes::DYN
                 )
@@ -595,6 +594,35 @@ mod tests {
         let row = generate_test_row(opcode);
         let row_next = generate_test_row(0);
         LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)
+    }
+
+    fn valid_opcodes() -> impl Iterator<Item = usize> {
+        let degree7 = 0..=63;
+        let degree6 = (64..=79).step_by(2);
+        let degree5 = 80..=95;
+        let degree4 = (96..=127).step_by(4);
+        degree7.chain(degree6).chain(degree5).chain(degree4)
+    }
+
+    #[test]
+    fn boolean_row_matches_polynomial_for_all_valid_opcodes() {
+        for opcode in valid_opcodes() {
+            let row = generate_test_row(opcode);
+            let row_next = generate_test_row(0);
+            let polynomial =
+                LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+            let boolean =
+                LookupOpFlags::from_boolean_row(&row.decoder, &row.stack, &row_next.decoder);
+
+            assert_flags_match(&alloc::format!("opcode {opcode}"), &boolean, &polynomial);
+        }
+
+        let mut row = generate_test_row(opcodes::END.into());
+        row.decoder.hasher_state[5] = ONE;
+        let row_next = generate_test_row(0);
+        let polynomial = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+        let boolean = LookupOpFlags::from_boolean_row(&row.decoder, &row.stack, &row_next.decoder);
+        assert_flags_match("loop end", &boolean, &polynomial);
     }
 
     #[test]

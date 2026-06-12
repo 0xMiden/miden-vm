@@ -10,6 +10,9 @@ pub mod ops;
 pub mod overflow;
 pub mod stack_arith;
 
+#[cfg(test)]
+mod test_utils;
+
 use crate::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS

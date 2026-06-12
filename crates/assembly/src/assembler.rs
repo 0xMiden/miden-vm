@@ -8,8 +8,8 @@ use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
     MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
-        self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
-        Visibility, types::FunctionType,
+        self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
+        SymbolResolution, Visibility, types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
     diagnostics::{IntoDiagnostic, RelatedLabel, Report},
@@ -17,10 +17,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    mast::{
-        DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
-    },
+    mast::{MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     program::Kernel,
     serde::Serializable,
@@ -35,10 +32,10 @@ use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
-    basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
+    basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::MastForestBuilder,
+    mast_forest_builder::{MastForestBuilder, MastNodeRef},
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -46,6 +43,53 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
+#[derive(Debug)]
+enum PendingPackageExport {
+    Procedure(PendingProcedureExport),
+    Constant(ConstantExport),
+    Type(TypeExport),
+}
+
+#[derive(Debug)]
+struct PendingProcedureExport {
+    node_ref: MastNodeRef,
+    digest: Word,
+    path: Arc<Path>,
+    signature: Option<FunctionType>,
+    attributes: AttributeSet,
+}
+
+impl PendingPackageExport {
+    fn into_package_export(
+        self,
+        node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+    ) -> Result<PackageExport, Report> {
+        match self {
+            Self::Procedure(export) => export.into_package_export(node_id_by_ref),
+            Self::Constant(export) => Ok(PackageExport::Constant(export)),
+            Self::Type(export) => Ok(PackageExport::Type(export)),
+        }
+    }
+}
+
+impl PendingProcedureExport {
+    fn into_package_export(
+        self,
+        node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+    ) -> Result<PackageExport, Report> {
+        let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
+            Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
+        })?;
+        Ok(PackageExport::Procedure(ProcedureExport {
+            digest: self.digest,
+            path: self.path,
+            node: Some(node),
+            signature: self.signature,
+            attributes: self.attributes,
+        }))
+    }
+}
 
 // ASSEMBLER
 // ================================================================================================
@@ -505,8 +549,7 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
-        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
-        let mut exports = {
+        let exports = {
             let mut exports = BTreeMap::new();
 
             for module_idx in module_indices.iter().copied() {
@@ -549,15 +592,13 @@ impl Assembler {
             exports
         };
 
-        let (mast_forest, id_remappings) = mast_forest_builder.build();
-        for export in exports.values_mut() {
-            if let PackageExport::Procedure(export) = export
-                && let Some(node_id) = export.node
-                && let Some(new_node_id) = id_remappings.get(&node_id)
-            {
-                export.node = Some(*new_node_id);
-            }
-        }
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let exports = exports
+            .into_iter()
+            .map(|(path, export)| {
+                export.into_package_export(&node_id_by_ref).map(|export| (path, export))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         self.finish_library_product(name, mast_forest, exports, kind)
     }
@@ -573,7 +614,7 @@ impl Assembler {
         module_kind: ModuleKind,
         symbol_path: Arc<Path>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<PackageExport, Report> {
+    ) -> Result<PendingPackageExport, Report> {
         log::trace!(target: "assembler::export_symbol", "exporting {} {symbol_path}", match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(_)) => "compiled procedure",
             SymbolItem::Compiled(ItemInfo::Constant(_)) => "compiled constant",
@@ -588,7 +629,7 @@ impl Assembler {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => ResolvedProcedure {
-                        node: proc.body_node_id(),
+                        node: proc.body_node_ref(),
                         signature: proc.signature(),
                     },
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -599,6 +640,8 @@ impl Assembler {
                             InvokeKind::ProcRef,
                             SourceSpan::UNKNOWN,
                             item.digest,
+                            item.source_library_commitment(),
+                            item.source_root_id(),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -620,22 +663,22 @@ impl Assembler {
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
-                PackageExport::Procedure(ProcedureExport {
+                PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
-                    node: Some(node),
+                    node_ref: node,
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
             },
             SymbolItem::Compiled(ItemInfo::Constant(item)) => {
-                PackageExport::Constant(ConstantExport {
+                PendingPackageExport::Constant(ConstantExport {
                     path: symbol_path,
                     value: item.value.clone(),
                 })
             },
             SymbolItem::Compiled(ItemInfo::Type(item)) => {
-                PackageExport::Type(TypeExport { path: symbol_path, ty: item.ty.clone() })
+                PendingPackageExport::Type(TypeExport { path: symbol_path, ty: item.ty.clone() })
             },
             SymbolItem::Procedure(_) => {
                 self.compile_subgraph(SubgraphRoot::not_as_entrypoint(gid), mast_forest_builder)?;
@@ -645,10 +688,10 @@ impl Assembler {
                 let digest = proc.mast_root();
                 let signature = self.linker.resolve_signature(gid)?;
                 let attributes = self.linker.resolve_attributes(gid)?;
-                PackageExport::Procedure(ProcedureExport {
+                PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
-                    node: Some(proc.body_node_id()),
+                    node_ref: proc.body_node_ref(),
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
                 })
@@ -657,11 +700,11 @@ impl Assembler {
                 // Evaluate constant to a concrete value for export
                 let value = self.linker.const_eval(gid, &item.value, &mut cache)?;
 
-                PackageExport::Constant(ConstantExport { path: symbol_path, value })
+                PendingPackageExport::Constant(ConstantExport { path: symbol_path, value })
             },
             SymbolItem::Type(item) => {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
-                PackageExport::Type(TypeExport { path: symbol_path, ty })
+                PendingPackageExport::Type(TypeExport { path: symbol_path, ty })
             },
 
             SymbolItem::Alias { alias, resolved } => {
@@ -685,9 +728,8 @@ impl Assembler {
                 };
 
                 let digest = mast_forest_builder
-                    .get_mast_node(node)
-                    .expect("resolved alias export node must exist")
-                    .digest();
+                    .mast_root_for_ref(node)
+                    .expect("resolved alias export node must exist");
                 let pctx = ProcedureContext::new(
                     gid,
                     /* is_program_entrypoint= */ false,
@@ -698,14 +740,14 @@ impl Assembler {
                     self.source_manager.clone(),
                 );
                 let procedure = pctx.into_procedure(digest, node);
-                let body_node = procedure.body_node_id();
+                let body_node_ref = procedure.body_node_ref();
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure)?;
 
-                return Ok(PackageExport::Procedure(ProcedureExport {
+                return Ok(PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
-                    node: Some(body_node),
+                    node_ref: body_node_ref,
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes: Default::default(),
                 }));
@@ -787,21 +829,21 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
-        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
 
         if let Some(advice_map) = self.linker[module_index].advice_map() {
             mast_forest_builder.merge_advice_map(advice_map)?;
         }
 
         self.compile_subgraph(SubgraphRoot::with_entrypoint(entrypoint), &mut mast_forest_builder)?;
-        let entry_node_id = mast_forest_builder
+        let entry_node_ref = mast_forest_builder
             .get_procedure(entrypoint)
             .expect("compilation succeeded but root not found in cache")
-            .body_node_id();
+            .body_node_ref();
 
-        // in case the node IDs changed, update the entrypoint ID to the new value
-        let (mast_forest, id_remappings) = mast_forest_builder.build();
-        let entry_node_id = *id_remappings.get(&entry_node_id).unwrap_or(&entry_node_id);
+        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
+            Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
+        })?;
 
         self.finish_program_product(name, mast_forest, entry_node_id, self.linker.kernel_package())
     }
@@ -809,11 +851,11 @@ impl Assembler {
     fn finish_library_product(
         &self,
         name: PackageId,
-        mut mast_forest: miden_core::mast::MastForest,
+        mast_forest: miden_core::mast::MastForest,
         exports: BTreeMap<Arc<Path>, PackageExport>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        self.apply_debug_options(&mut mast_forest);
+        let mast_forest = self.apply_debug_options(mast_forest);
 
         let mast = Arc::new(mast_forest);
         let package = Box::new(
@@ -843,11 +885,11 @@ impl Assembler {
     fn finish_program_product(
         &self,
         name: PackageId,
-        mut mast_forest: miden_core::mast::MastForest,
+        mast_forest: miden_core::mast::MastForest,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
-        self.apply_debug_options(&mut mast_forest);
+        let mast_forest = self.apply_debug_options(mast_forest);
 
         let mast = Arc::new(mast_forest);
         let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
@@ -881,21 +923,25 @@ impl Assembler {
         Ok(AssemblyProduct::new(package, kernel, debug_info))
     }
 
-    fn apply_debug_options(&self, mast_forest: &mut miden_core::mast::MastForest) {
+    fn apply_debug_options(
+        &self,
+        mast_forest: miden_core::mast::MastForest,
+    ) -> miden_core::mast::MastForest {
         if !self.emit_debug_info {
-            mast_forest.clear_debug_info();
-            return;
+            return mast_forest.without_debug_info();
         }
 
         if self.trim_paths {
             #[cfg(feature = "std")]
             if let Some(trimmer) = self.source_path_trimmer() {
-                mast_forest.debug_info_mut().rewrite_source_locations(
+                return mast_forest.with_rewritten_source_locations(
                     |location| trimmer.trim_location(location),
                     |location| trimmer.trim_file_line_col(location),
                 );
             }
         }
+
+        mast_forest
     }
 
     #[cfg(feature = "std")]
@@ -1039,7 +1085,7 @@ impl Assembler {
                     // We must resolve aliases at this point to their real definition, in order to
                     // know whether we need to emit a MAST node for a foreign procedure item. If
                     // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_id, signature }) = self
+                    let Some(ResolvedProcedure { node: proc_node_ref, signature }) = self
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
@@ -1052,10 +1098,11 @@ impl Assembler {
 
                     pctx.set_signature(signature);
 
-                    let proc_mast_root =
-                        mast_forest_builder.get_mast_node(proc_node_id).unwrap().digest();
+                    let proc_mast_root = mast_forest_builder
+                        .mast_root_for_ref(proc_node_ref)
+                        .expect("resolved alias node must exist");
 
-                    let procedure = pctx.into_procedure(proc_mast_root, proc_node_id);
+                    let procedure = pctx.into_procedure(proc_mast_root, proc_node_ref);
 
                     // Make the MAST root available to all dependents
                     self.linker.register_procedure_root(procedure_gid, proc_mast_root);
@@ -1125,17 +1172,17 @@ impl Assembler {
             None
         };
 
-        let proc_body_id =
+        let proc_body_ref =
             self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
-        let proc_body_node = mast_forest_builder
-            .get_mast_node(proc_body_id)
+        let proc_mast_root = mast_forest_builder
+            .mast_root_for_ref(proc_body_ref)
             .expect("no MAST node for compiled procedure");
-        Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_id))
+        Ok(proc_ctx.into_procedure(proc_mast_root, proc_body_ref))
     }
 
-    /// Creates an assembly operation decorator for control flow nodes.
-    fn create_asmop_decorator(
+    /// Creates assembly operation metadata for control flow nodes.
+    fn create_asm_op(
         &self,
         span: &SourceSpan,
         op_name: &str,
@@ -1154,37 +1201,32 @@ impl Assembler {
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &mut MastForestBuilder,
         nesting_depth: usize,
-    ) -> Result<MastNodeId, Report>
+    ) -> Result<MastNodeRef, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
     {
         use ast::Op;
 
-        let mut body_node_ids: Vec<MastNodeId> = Vec::new();
+        let mut body_node_refs: Vec<MastNodeRef> = Vec::new();
         let mut block_builder = BasicBlockBuilder::new(wrapper, mast_forest_builder);
 
         for op in body {
             match op {
                 Op::Inst(inst) => {
-                    if let Some(node_id) =
+                    if let Some(node_ref) =
                         self.compile_instruction(inst, &mut block_builder, proc_ctx)?
                     {
                         if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                            body_node_ids.push(basic_block_id);
-                        } else if let Some(decorator_ids) = block_builder.drain_decorators() {
-                            block_builder
-                                .mast_forest_builder_mut()
-                                .append_before_enter(node_id, decorator_ids)
-                                .into_diagnostic()?;
+                            body_node_refs.push(basic_block_id);
                         }
 
-                        body_node_ids.push(node_id);
+                        body_node_refs.push(node_ref);
                     }
                 },
 
                 Op::If { then_blk, else_blk, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1211,22 +1253,17 @@ impl Assembler {
                         next_depth,
                     )?;
 
-                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        split_builder.append_before_enter(decorator_ids);
-                    }
-
-                    let split_node_id = block_builder
+                    let asm_op = self.create_asm_op(span, "if.true", proc_ctx);
+                    let split_node_ref = block_builder
                         .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op(split_builder, asm_op)?;
+                        .ensure_split_node_ref([then_blk, else_blk], asm_op)?;
 
-                    body_node_ids.push(split_node_id);
+                    body_node_refs.push(split_node_ref);
                 },
 
                 Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1238,7 +1275,7 @@ impl Assembler {
                         }));
                     }
 
-                    let repeat_node_id = self.compile_body(
+                    let repeat_node_ref = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
@@ -1271,54 +1308,14 @@ impl Assembler {
                             .into());
                     }
 
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        // Attach decorators before the first iteration. We must carry the
-                        // original node's external metadata into the dedup fingerprint,
-                        // otherwise structurally identical nodes with different source mappings
-                        // can alias.
-                        let first_repeat_builder = block_builder.mast_forest_builder()
-                            [repeat_node_id]
-                            .clone()
-                            .to_builder(block_builder.mast_forest_builder().mast_forest())
-                            .with_before_enter(decorator_ids);
-                        let first_repeat_node_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_node_preserving_debug_vars(
-                                first_repeat_builder,
-                                repeat_node_id,
-                            )?;
-
-                        body_node_ids.push(first_repeat_node_id);
-                        let remaining_iterations =
-                            iteration_count.checked_sub(1).ok_or_else(|| {
-                                Report::new(
-                                    RelatedLabel::error("invalid repeat count")
-                                        .with_help("repeat count must be greater than 0")
-                                        .with_labeled_span(
-                                            count.span(),
-                                            "repeat count must be at least 1",
-                                        )
-                                        .with_source_file(
-                                            proc_ctx
-                                                .source_manager()
-                                                .get(proc_ctx.span().source_id())
-                                                .ok(),
-                                        ),
-                                )
-                            })?;
-                        for _ in 0..remaining_iterations {
-                            body_node_ids.push(repeat_node_id);
-                        }
-                    } else {
-                        for _ in 0..iteration_count {
-                            body_node_ids.push(repeat_node_id);
-                        }
+                    for _ in 0..iteration_count {
+                        body_node_refs.push(repeat_node_ref);
                     }
                 },
 
                 Op::While { body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
-                        body_node_ids.push(basic_block_id);
+                        body_node_refs.push(basic_block_id);
                     }
 
                     let next_depth = nesting_depth + 1;
@@ -1330,87 +1327,98 @@ impl Assembler {
                         }));
                     }
 
-                    let loop_body_node_id = self.compile_body(
+                    // `while.true` desugars to `if.true { LOOP { body } } else { noop }`. The LOOP
+                    // itself has do-while semantics: the body executes unconditionally for the
+                    // first iteration, so the surrounding SPLIT performs the initial true-check.
+                    //
+                    // The `while.true` asm_op is attached to *both* the LOOP and the wrapping
+                    // SPLIT: both nodes belong to a single source-level `while.true` construct, and
+                    // diagnostics emitted from inside the body walk up the continuation stack to
+                    // the nearest control-flow parent (the LOOP), so it must carry the source
+                    // mapping too.
+                    let asm_op = self.create_asm_op(span, "while.true", proc_ctx);
+
+                    let loop_body_node_ref = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
                         next_depth,
                     )?;
-                    let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
-                    if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        loop_builder.append_before_enter(decorator_ids);
+                    let loop_node_ref = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_loop_node_ref(loop_body_node_ref, asm_op.clone())?;
+                    let noop_block_ref = block_builder.mast_forest_builder_mut().ensure_block_ref(
+                        vec![Operation::Noop],
+                        vec![],
+                        vec![],
+                    )?;
+
+                    let split_node_ref = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_split_node_ref([loop_node_ref, noop_block_ref], asm_op)?;
+
+                    body_node_refs.push(split_node_ref);
+                },
+
+                Op::DoWhile { body, condition, span } => {
+                    if let Some(basic_block_id) = block_builder.make_basic_block()? {
+                        body_node_refs.push(basic_block_id);
                     }
 
-                    let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
-                    let loop_node_id = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_node_with_asm_op(loop_builder, asm_op)?;
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
 
-                    body_node_ids.push(loop_node_id);
+                    // A `do { body } while { cond } end` loop maps directly onto the LOOP node's
+                    // native do-while semantics: the body executes unconditionally on the first
+                    // pass, and iteration is decided at the tail. Unlike `while.true`, no SPLIT
+                    // wrapper (head-entry check) is needed. The loop body is `body ++ cond`; the
+                    // condition leaves the re-entry boolean on top of the stack, and the
+                    // contiguous basic blocks are merged by the MAST forest builder.
+                    let asm_op = self.create_asm_op(span, "do.while", proc_ctx);
+
+                    let loop_body_node_ref = self.compile_body(
+                        body.iter().chain(condition.iter()),
+                        proc_ctx,
+                        None,
+                        block_builder.mast_forest_builder_mut(),
+                        next_depth,
+                    )?;
+                    let loop_node_ref = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_loop_node_ref(loop_body_node_ref, asm_op)?;
+
+                    body_node_refs.push(loop_node_ref);
                 },
             }
         }
 
-        let maybe_post_decorators: Option<Vec<DecoratorId>> =
-            match block_builder.try_into_basic_block()? {
-                BasicBlockOrDecorators::BasicBlock(basic_block_id) => {
-                    body_node_ids.push(basic_block_id);
-                    None
-                },
-                BasicBlockOrDecorators::Decorators(decorator_ids) => {
-                    // the procedure body ends with a list of decorators
-                    Some(decorator_ids)
-                },
-                BasicBlockOrDecorators::Nothing => None,
-            };
+        if let Some(basic_block_id) = block_builder.try_into_basic_block()? {
+            body_node_refs.push(basic_block_id);
+        }
 
-        let procedure_body_id = if body_node_ids.is_empty() {
-            // We cannot allow only decorators in a procedure body, since decorators don't change
-            // the MAST digest of a node. Hence, two empty procedures with different decorators
-            // would look the same to the `MastForestBuilder`.
-            if maybe_post_decorators.is_some() {
-                return Err(Report::new(
-                    RelatedLabel::error("invalid procedure")
-                        .with_labeled_span(
-                            proc_ctx.span(),
-                            "body must contain at least one instruction if it has decorators",
-                        )
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        ),
-                ));
-            }
-
-            mast_forest_builder.ensure_block(
-                vec![Operation::Noop],
-                Vec::new(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            )?
+        let procedure_body_ref = if body_node_refs.is_empty() {
+            mast_forest_builder.ensure_block_ref(vec![Operation::Noop], vec![], vec![])?
         } else {
-            let asm_op = self.create_asmop_decorator(&proc_ctx.span(), "begin", proc_ctx);
-            mast_forest_builder.join_nodes(body_node_ids, Some(asm_op))?
+            let asm_op = self.create_asm_op(&proc_ctx.span(), "begin", proc_ctx);
+            mast_forest_builder.join_node_refs(body_node_refs, Some(asm_op))?
         };
 
-        // Make sure that any post decorators are added at the end of the procedure body
-        if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder
-                .append_after_exit(procedure_body_id, post_decorator_ids)
-                .into_diagnostic()?;
-        }
-
-        Ok(procedure_body_id)
+        Ok(procedure_body_ref)
     }
 
-    /// Resolves the specified target to the corresponding procedure root [`MastNodeId`].
+    /// Resolves the specified target to the corresponding procedure root [`MastNodeRef`].
     ///
     /// If the resolved target is a non-procedure item, this returns `Ok(None)`.
     ///
-    /// If no [`MastNodeId`] exists for that procedure root, we wrap the root in an
-    /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeId`].
+    /// If no [`MastNodeRef`] exists for that procedure root, we wrap the root in an
+    /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeRef`].
     pub(super) fn resolve_target(
         &self,
         kind: InvokeKind,
@@ -1430,6 +1438,8 @@ impl Assembler {
                     kind,
                     target.span(),
                     mast_root.into_inner(),
+                    None,
+                    None,
                     mast_forest_builder,
                 )?;
                 Ok(Some(ResolvedProcedure { node, signature: None }))
@@ -1437,7 +1447,7 @@ impl Assembler {
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
                     Some(proc) => Ok(Some(ResolvedProcedure {
-                        node: proc.body_node_id(),
+                        node: proc.body_node_ref(),
                         signature: proc.signature(),
                     })),
                     // We didn't find the procedure in our current MAST forest. We still need to
@@ -1448,6 +1458,8 @@ impl Assembler {
                                 kind,
                                 target.span(),
                                 p.digest,
+                                p.source_library_commitment(),
+                                p.source_root_id(),
                                 mast_forest_builder,
                             )?;
                             Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
@@ -1479,8 +1491,10 @@ impl Assembler {
         kind: InvokeKind,
         span: SourceSpan,
         mast_root: Word,
+        source_library_commitment: Option<Word>,
+        source_root_id: Option<MastNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<MastNodeId, Report> {
+    ) -> Result<MastNodeRef, Report> {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
@@ -1504,7 +1518,29 @@ impl Assembler {
             }
         }
 
-        mast_forest_builder.ensure_external_link(mast_root)
+        if let (Some(source_library_commitment), Some(source_root_id)) =
+            (source_library_commitment, source_root_id)
+            && let Some(conflicting_root) = self.linker.conflicting_dynamic_procedure_export_root(
+                source_library_commitment,
+                mast_root,
+                source_root_id,
+            )
+        {
+            return Err(Report::new(LinkerError::AmbiguousDynamicProcedureRoot {
+                span,
+                source_file: current_source_file,
+                mast_root,
+                source_library_commitment,
+                selected_root: source_root_id,
+                conflicting_root,
+            }));
+        }
+
+        mast_forest_builder.ensure_external_link_with_source_ref(
+            mast_root,
+            source_library_commitment,
+            source_root_id,
+        )
     }
 }
 
@@ -1538,6 +1574,6 @@ pub(crate) struct BodyWrapper {
 }
 
 pub(super) struct ResolvedProcedure {
-    pub node: MastNodeId,
+    pub node: MastNodeRef,
     pub signature: Option<Arc<FunctionType>>,
 }

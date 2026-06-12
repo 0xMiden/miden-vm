@@ -1,0 +1,23 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(MemoryCols)
+---
+MemoryCols {
+    is_read: 0,
+    is_word: 1,
+    ctx: 2,
+    word_addr: 3,
+    idx0: 4,
+    idx1: 5,
+    clk: 6,
+    values: [
+        7,
+        8,
+        9,
+        10,
+    ],
+    d0: 11,
+    d1: 12,
+    d_inv: 13,
+    is_same_ctx_and_addr: 14,
+}

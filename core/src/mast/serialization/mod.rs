@@ -63,13 +63,14 @@
 //! - Advice map (`AdviceMap`)
 //!
 //! (DebugInfo section - omitted if FLAGS bit 0 is set)
-//! - Decorator data (raw bytes for decorator payloads)
-//! - String table (deduplicated strings)
-//! - Decorator infos (`Vec<DecoratorInfo>`)
 //! - Error codes map (`BTreeMap<u64, String>`)
-//! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
-//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
 //! - Procedure names map (`BTreeMap<Word, String>`)
+//! - Assembly operation data (raw bytes for AssemblyOp payloads)
+//! - Assembly operation string table (deduplicated strings)
+//! - Assembly operation infos (`Vec<AsmOpInfo>`)
+//! - OpToAsmOpId CSR (operation-indexed AssemblyOp metadata)
+//! - Debug variables (`Vec<DebugVarInfo>`)
+//! - OpToDebugVarIds CSR (operation-indexed debug variable metadata)
 //!
 //! In stripped format, the `DebugInfo` section is omitted and readers materialize an empty
 //! `DebugInfo`.
@@ -112,8 +113,6 @@ use crate::{
 
 pub(crate) mod asm_op;
 use asm_op::AsmOpInfo;
-pub(crate) mod decorator;
-use decorator::DecoratorInfo;
 
 mod info;
 pub use info::{MastNodeEntry, MastNodeInfo};
@@ -146,9 +145,6 @@ mod tests;
 
 /// Specifies an offset into the `node_data` section of an encoded [`MastForest`].
 type NodeDataOffset = u32;
-
-/// Specifies an offset into the `decorator_data` section of an encoded [`MastForest`].
-type DecoratorDataOffset = u32;
 
 /// Specifies an offset into the `strings_data` section of an encoded [`MastForest`].
 type StringDataOffset = usize;
@@ -218,22 +214,29 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 /// version field itself, but should be considered invalid for now.
 ///
 /// Version history:
-/// - [0, 0, 0]: Initial format
+/// - [0, 0, 0]: Initial format.
 /// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
-///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
-///   serialization in CSR format (eliminates per-node decorator sections and round-trip
+///   indptr, padding, and group metadata for exact OpBatch reconstruction). Added asm-op metadata
+///   and debug-variable storage in CSR layout (eliminates per-node metadata sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
-/// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
-///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
-///   Removed `breakpoint` instruction (#2655).
+/// - [0, 0, 2]: AssemblyOps moved out of inline metadata into a dedicated DebugInfo section.
+///   Removed `should_break` field from AssemblyOp serialization (#2646). Removed `breakpoint`
+///   instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
-///   Dropped the serialized decorator-count field because it was not used by the wire layout or
-///   deserializers. Before any public release on this branch, the same unreleased wire version also
-///   grew explicit internal/external node counts in the header.
-/// - [0, 0, 4]: Removed debug decorator variants from serialized decorators. Trace decorators keep
-///   discriminant 6.
+///   Removed the unused metadata-count field from the wire header. Before any public release on
+///   this branch, the same unreleased wire version also grew explicit internal/external node counts
+///   in the header.
+/// - [0, 0, 4]: Removed the legacy inline metadata wire slots entirely. All assembly op metadata
+///   and debug variable metadata are now stored in the DebugInfo section as separate indexed
+///   records. MAST nodes are metadata-free identifiers.
+///
+/// Legacy wire versions (pre-#3192 decorator terminology):
+///   [0,0,1] stored metadata as serialized decorator variants in CSR per-node slots.
+///   [0,0,2] removed AssemblyOp from the decorator enum and stored them separately in DebugInfo.
+///   [0,0,3] removed the unused decorator-count wire field.
+///   [0,0,4] eliminated the decorator wire slots entirely.
 const VERSION: [u8; 3] = [0, 0, 4];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -406,7 +409,7 @@ pub enum MastForestReadView<'a> {
 /// };
 ///
 /// let mut forest = MastForest::new();
-/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
 ///     .add_to_forest(&mut forest)
 ///     .unwrap();
 /// forest.make_root(block_id);
@@ -465,7 +468,7 @@ impl<'a> MastForestWireView<'a> {
     /// };
     ///
     /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
     ///     .add_to_forest(&mut forest)
     ///     .unwrap();
     /// forest.make_root(block_id);
@@ -527,7 +530,7 @@ impl<'a> MastForestWireView<'a> {
     /// };
     ///
     /// let mut forest = MastForest::new();
-    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
     ///     .add_to_forest(&mut forest)
     ///     .unwrap();
     /// forest.make_root(block_id);
@@ -609,13 +612,7 @@ fn check_ignored_debug_payload(
 }
 
 fn skip_debug_info<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_len_prefixed_bytes(source)?; // decorator_data
-    skip_string_table(source)?;
-    skip_fixed_vec(source, DecoratorInfo::min_serialized_size())?;
     skip_btree_map_u64_string(source)?;
-    skip_op_to_u32_ids(source)?;
-    skip_csr_u32_data(source)?;
-    skip_csr_u32_data(source)?;
     skip_btree_map_word_string(source)?;
     skip_len_prefixed_bytes(source)?; // asm_op_data
     skip_string_table(source)?;
@@ -663,11 +660,6 @@ fn skip_btree_map_word_string<R: ByteReader>(source: &mut R) -> Result<(), Deser
 fn skip_op_to_u32_ids<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
     skip_u32_vec(source)?;
     skip_usize_vec(source)?;
-    skip_usize_vec(source)
-}
-
-fn skip_csr_u32_data<R: ByteReader>(source: &mut R) -> Result<(), DeserializationError> {
-    skip_u32_vec(source)?;
     skip_usize_vec(source)
 }
 

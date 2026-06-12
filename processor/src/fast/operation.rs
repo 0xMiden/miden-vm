@@ -1,4 +1,4 @@
-use core::ops::ControlFlow;
+use alloc::vec::Vec;
 
 use miden_air::{
     Felt,
@@ -7,15 +7,15 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    mast::{ExecutableMastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
+    program::MIN_STACK_DEPTH,
+    utils::range,
 };
 
-use super::step::BreakReason;
 use crate::{
-    AdviceProvider, BaseHost, ContextId, ExecutionError,
+    AdviceProvider, ContextId, ExecutionError,
     errors::OperationError,
-    fast::{FastProcessor, memory::Memory},
+    fast::{FastProcessor, INITIAL_STACK_TOP_IDX, SystemCallState, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 
@@ -64,78 +64,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn system_mut(&mut self) -> &mut Self::System {
         self
-    }
-
-    #[inline(always)]
-    fn save_context_and_truncate_stack(&mut self) {
-        self.save_context_and_truncate_stack();
-    }
-
-    #[inline(always)]
-    fn restore_context(&mut self) -> Result<(), OperationError> {
-        self.restore_context()
-    }
-
-    #[inline(always)]
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.pc_transcript.state()
-    }
-
-    #[inline(always)]
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.pc_transcript = PrecompileTranscript::from_state(state);
-    }
-
-    #[inline(always)]
-    fn execute_before_enter_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        self.execute_before_enter_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_after_exit_decorators<F>(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        self.execute_after_exit_decorators(node_id, current_forest, host)
-    }
-
-    #[inline(always)]
-    fn execute_decorators_for_op<F>(
-        &self,
-        node_id: MastNodeId,
-        op_idx_in_block: usize,
-        current_forest: &F,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason<F>>
-    where
-        F: ExecutableMastForest,
-    {
-        if self.should_execute_decorators() {
-            #[cfg(test)]
-            self.record_decorator_retrieval();
-
-            for &decorator_id in current_forest.decorator_indices_for_op(node_id, op_idx_in_block) {
-                let decorator = current_forest
-                    .decorator_by_id(decorator_id)
-                    .expect("decorator id must be valid");
-                self.execute_decorator(decorator, host)?;
-            }
-        }
-
-        ControlFlow::Continue(())
     }
 }
 
@@ -210,6 +138,11 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.pc_transcript.state()
+    }
+
+    #[inline(always)]
     fn increment_clock(&mut self) {
         self.clk += 1_u32;
     }
@@ -222,6 +155,30 @@ impl SystemInterface for FastProcessor {
     #[inline(always)]
     fn set_ctx(&mut self, ctx: ContextId) {
         self.ctx = ctx;
+    }
+
+    #[inline(always)]
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.pc_transcript = PrecompileTranscript::from_state(state);
+    }
+
+    #[inline(always)]
+    fn save_call_state(&mut self) {
+        self.system_call_state_stack.push(SystemCallState {
+            ctx: self.ctx,
+            caller_hash: self.caller_hash,
+        });
+    }
+
+    #[inline(always)]
+    fn restore_call_state(&mut self) -> Result<(), OperationError> {
+        let saved = self
+            .system_call_state_stack
+            .pop()
+            .expect("system call state stack should never be empty when restoring context");
+        self.ctx = saved.ctx;
+        self.caller_hash = saved.caller_hash;
+        Ok(())
     }
 }
 
@@ -317,6 +274,63 @@ impl StackInterface for FastProcessor {
     #[inline(always)]
     fn decrement_size(&mut self) -> Result<(), OperationError> {
         self.decrement_stack_size();
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn start_context(&mut self) {
+        let overflow_stack = if self.stack_size() > MIN_STACK_DEPTH {
+            // save the overflow stack, and zero out the buffer.
+            //
+            // Note: we need to zero the overflow buffer, since the new context expects ZERO's to be
+            // pulled in if they decrement the stack size (e.g. by executing a `drop`).
+            let overflow_stack =
+                self.stack[self.stack_bot_idx..self.stack_top_idx - MIN_STACK_DEPTH].to_vec();
+            self.stack[self.stack_bot_idx..self.stack_top_idx - MIN_STACK_DEPTH].fill(ZERO);
+
+            overflow_stack
+        } else {
+            Vec::new()
+        };
+
+        self.stack_bot_idx = self.stack_top_idx - MIN_STACK_DEPTH;
+
+        self.stack_overflow_save_stack.push(overflow_stack);
+    }
+
+    #[inline(always)]
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
+        if self.stack_size() > MIN_STACK_DEPTH {
+            return Err(OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() });
+        }
+
+        let overflow_stack = self
+            .stack_overflow_save_stack
+            .pop()
+            .expect("stack overflow save stack should never be empty when restoring context");
+
+        let target_overflow_len = overflow_stack.len();
+        debug_assert!(
+            MIN_STACK_DEPTH.saturating_add(target_overflow_len) <= self.options.max_stack_depth(),
+            "suspended caller stacks are checked against the operand stack depth limit before being saved"
+        );
+
+        // Check if there's enough room to restore the overflow stack in the current stack buffer.
+        // If not, move the stack within the buffer so that after restoring the overflow stack, the
+        // `stack_bot_idx` is at its original position (i.e. `INITIAL_STACK_TOP_IDX - 16`).
+        if target_overflow_len > self.stack_bot_idx {
+            let new_stack_top_idx = INITIAL_STACK_TOP_IDX + target_overflow_len;
+            self.ensure_stack_capacity_for_top_idx(new_stack_top_idx);
+
+            self.reset_stack_in_buffer(new_stack_top_idx);
+        }
+
+        // Restore the overflow.
+        self.stack[range(self.stack_bot_idx - target_overflow_len, target_overflow_len)]
+            .copy_from_slice(&overflow_stack);
+        self.stack_bot_idx -= target_overflow_len;
+
         Ok(())
     }
 }
