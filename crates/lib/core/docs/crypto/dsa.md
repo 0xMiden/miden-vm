@@ -1,4 +1,4 @@
 
-## miden::core::collections::mod
+## miden::core::crypto::dsa
 | Procedure | Description |
 | ----------- | ------------- |

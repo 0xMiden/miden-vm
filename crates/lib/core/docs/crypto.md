@@ -1,4 +1,4 @@
 
-## miden::core::math::mod
+## miden::core::crypto
 | Procedure | Description |
 | ----------- | ------------- |

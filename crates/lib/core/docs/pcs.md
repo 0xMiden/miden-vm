@@ -1,4 +1,4 @@
 
-## miden::core::crypto::mod
+## miden::core::pcs
 | Procedure | Description |
 | ----------- | ------------- |

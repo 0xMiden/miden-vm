@@ -1,3 +1,5 @@
+Initializes four memory addresses, provided for storing initial 4x4 blake3<br />state matrix ( i.e. 16 elements each of 32 -bit ), for computing blake3 2-to-1 hash<br /><br />Expected stack state:<br /><br />[state_0_3_addr, state_4_7_addr, state_8_11_addr, state_12_15_addr]<br /><br />Note, state_`i`_`j`_addr -> absolute address of {state[i], state[i+1], state[i+2], state[i+3]} in memory \| j = i+3<br /><br />Final stack state:<br /><br />[...]<br /><br />Initialized stack state is written back to provided memory addresses.<br /><br />Functionally this routine is equivalent to https://github.com/itzmeanjan/blake3/blob/f07d32e/include/blake3.hpp#!L1709-L1713<br />
+
 
 ## miden::core::crypto::hashes::blake3
 | Procedure | Description |

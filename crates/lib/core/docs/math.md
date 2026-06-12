@@ -1,4 +1,4 @@
 
-## miden::core::pcs::mod
+## miden::core::math
 | Procedure | Description |
 | ----------- | ------------- |

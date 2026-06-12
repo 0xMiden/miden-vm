@@ -1,4 +1,6 @@
+This is the top-level module of the miden::core namespace.<br />
 
-## miden::core::mod
+
+## miden::core
 | Procedure | Description |
 | ----------- | ------------- |

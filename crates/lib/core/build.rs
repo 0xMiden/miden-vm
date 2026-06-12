@@ -7,10 +7,10 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    self as masm, Assembler, Report,
+    Assembler, Report,
     ast::{self, Module},
     debuginfo::DefaultSourceManager,
-    diagnostics::IntoDiagnostic,
+    diagnostics::{IntoDiagnostic, reporting::PrintDiagnostic},
 };
 
 // CONSTANTS
@@ -44,17 +44,25 @@ impl MarkdownRenderer {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn markdown_file_name(ns: &str) -> String {
-    let parts: Vec<&str> = ns.split("::").collect();
+fn markdown_file_name(ns: &miden_assembly_syntax::Path) -> String {
+    use miden_assembly_syntax::Path as MasmPath;
 
     // Remove the "miden::core::" prefix
-    if parts.len() > 2 && parts[0] == "miden" && parts[1] == "core" {
-        // Use the full module path without "miden::core::" prefix, add .md extension
-        format!("{}.md", parts[2..].join("/"))
-    } else {
-        // Fallback for modules without miden::core:: prefix
-        format!("{}.md", parts.join("/"))
+    let ns = ns.strip_prefix(MasmPath::new("miden::core")).unwrap_or(ns);
+    let mut buf = String::with_capacity(256);
+    for (i, part) in ns.components().enumerate() {
+        let part = part.unwrap();
+        if i > 0 {
+            buf.push('/');
+        }
+        buf.push_str(part.as_str());
     }
+    // Handle the root `miden::core` module
+    if buf.is_empty() {
+        buf.push_str("mod");
+    }
+    buf.push_str(".md");
+    buf
 }
 
 // LIBCORE DOCUMENTATION
@@ -63,6 +71,7 @@ fn markdown_file_name(ns: &str) -> String {
 /// Writes Miden core library modules documentation markdown files based on the available
 /// modules and comments.
 pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
+    use miden_assembly_syntax::{Path as MasmPath, ast::ModuleKind, parser};
     let output_path = Path::new(output_dir);
 
     // Try to delete, but ignore “not found” error
@@ -76,11 +85,21 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     fs::create_dir_all(output_path)?;
 
     // Find all .masm
-    let modules = find_masm_modules(asm_dir, asm_dir)?;
+    let namespace = Arc::<MasmPath>::from(MasmPath::new("::miden::core"));
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (root, support) = parser::read_modules_from_root(
+        asm_dir.join("mod.masm"),
+        Some(namespace),
+        Some(ModuleKind::Library),
+        source_manager,
+        true,
+    )
+    .unwrap_or_else(|err| panic!("{}", PrintDiagnostic::new(err)));
 
     // Render the modules into markdown
-    for (label, file_path) in modules {
-        let relative = markdown_file_name(&label);
+    for module in core::slice::from_ref(&root).iter().chain(support.iter()) {
+        let label = module.path().to_relative();
+        let relative = markdown_file_name(label);
         let out = output_path.join(&relative);
 
         // Create directories if needed
@@ -91,7 +110,7 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
         let mut f = fs::File::create(&out)?;
 
         // Parse module using AST-based approach
-        let (module_docs, procedures) = parse_module_with_ast(&label, &file_path)?;
+        let (module_docs, procedures) = extract_docs(module, &support);
 
         // Write module docs
         if let Some(docs) = module_docs {
@@ -101,7 +120,7 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
         }
 
         // Write header
-        MarkdownRenderer::write_docs_header(&f, &label);
+        MarkdownRenderer::write_docs_header(&f, label.as_str());
 
         // Write procedures
         for (name, docs) in procedures {
@@ -112,59 +131,32 @@ pub fn build_core_lib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Find all .masm files recursively
-fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
-    let mut modules = Vec::new();
-    let entries = match fs::read_dir(current_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("Warning: read_dir({}): {e}", current_dir.display());
-            return Ok(modules);
-        },
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension()
-                && ext == "masm"
-            {
-                // Convert relative path to module path
-                let relative_path = path.strip_prefix(base_dir).unwrap();
-                let module_path = relative_path
-                    .with_extension("")
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("::");
-
-                let label = format!("miden::core::{module_path}");
-
-                modules.push((label, path));
-            }
-        } else if path.is_dir() {
-            // Recursively scan subdirectories
-            modules.extend(find_masm_modules(base_dir, &path)?);
-        }
-    }
-
-    Ok(modules)
-}
-
 // Module doc, procedures doc
 type DocPayload = (Option<String>, Vec<(String, Option<String>)>);
 
 /// Parse MASM source using AST-parsing
-fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload> {
-    let source = fs::read_to_string(file_path)?;
-    let source = format!("namespace {}\n\n{}", masm::Path::new(label), source);
-    let module = Module::parser(None)
-        .parse_str(None, &source, Arc::new(DefaultSourceManager::default()))
-        .map_err(|e| io::Error::other(e.to_string()))?;
-
+fn extract_docs(module: &Module, modules: &[Box<Module>]) -> DocPayload {
     // Extract module documentation
     let module_docs = module.docs().map(|d| d.to_string());
 
     // Extract procedures and their documentation
+    let mut procedures = local_procedure_docs(module);
+    for import in module.imports() {
+        let ast::Import::Item(import) = import else {
+            continue;
+        };
+        if !import.visibility().is_public() {
+            continue;
+        }
+        if let Some(docs) = reexport_target_docs(import, module.path(), modules) {
+            procedures.push((import.local_name().to_string(), docs));
+        }
+    }
+
+    (module_docs, procedures)
+}
+
+fn local_procedure_docs(module: &Module) -> Vec<(String, Option<String>)> {
     let mut procedures = Vec::new();
     for (index, name) in module.exported() {
         match &module[index] {
@@ -172,18 +164,34 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
                 let docs = proc.docs().map(|d| d.to_string());
                 procedures.push((name.name().to_string(), docs));
             },
-            ast::Item::Alias(alias) => {
-                // Ignore undocumented aliases, as they may not be procedure items
-                if let Some(docs) = alias.docs() {
-                    procedures.push((name.name().to_string(), Some(docs.to_string())));
-                }
-            },
             // TODO: Update doc format to allow for other item types
             ast::Item::Constant(_) | ast::Item::Type(_) => {},
         }
     }
+    procedures
+}
 
-    Ok((module_docs, procedures))
+fn reexport_target_docs(
+    import: &ast::ItemImport,
+    current_module_path: &miden_assembly_syntax::Path,
+    modules: &[Box<Module>],
+) -> Option<Option<String>> {
+    use std::borrow::Cow;
+
+    let target_path = import.target_path().into_inner();
+    let target_path = if target_path.starts_with("self") {
+        let (_, rest) = target_path.split_first()?;
+        Cow::Owned(current_module_path.join(rest))
+    } else {
+        target_path.to_absolute().unwrap()
+    };
+    let target_module_path = target_path.parent()?;
+    let target_module = modules.iter().find(|m| m.path() == target_module_path)?;
+
+    target_module
+        .procedures()
+        .find(|proc| proc.name().as_str() == import.source_name().as_str())
+        .map(|proc| proc.docs().map(|docs| docs.to_string()))
 }
 
 // PRE-PROCESSING
