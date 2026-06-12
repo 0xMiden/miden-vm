@@ -414,6 +414,44 @@ fn composite_hperm_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
+/// Tests composite flags for LOGPRECOMPILE (hasher output rewrites positions 0..12, no shift from
+/// position 12 onwards).
+#[test]
+fn composite_log_precompile_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::LOGPRECOMPILE.into());
+
+    for i in 0..12 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ZERO,
+            "no_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+    }
+    for i in 12..16 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ONE,
+            "no_shift_at({i}) should be ONE for LOGPRECOMPILE"
+        );
+    }
+
+    for i in 0..16 {
+        assert_eq!(
+            op_flags.left_shift_at(i),
+            ZERO,
+            "left_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+        assert_eq!(
+            op_flags.right_shift_at(i),
+            ZERO,
+            "right_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
 /// Tests composite shift flags for LOOP operation. Under do-while semantics LOOP reads no stack
 /// input, so it is classified as no-shift at every depth.
 #[test]

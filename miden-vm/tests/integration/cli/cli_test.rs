@@ -1,4 +1,8 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use assert_cmd::prelude::*;
 use miden_mast_package::Package;
@@ -34,6 +38,14 @@ fn bin_under_test() -> escargot::CargoRun {
         })
 }
 
+fn test_file_path(name: &str) -> PathBuf {
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("miden-vm-cli-{name}-{id}"))
+}
+
 #[test]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
@@ -55,6 +67,40 @@ fn cli_run() {
     // However we the X and the Y can change in future versions.
     // There is no other 'steps in' in the output
     output.assert().stdout(predicate::str::contains("VM cycles"));
+}
+
+#[test]
+fn run_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-run-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("run").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-run-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
+}
+
+#[test]
+fn prove_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-prove-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("prove").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-prove-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
 }
 
 #[test]

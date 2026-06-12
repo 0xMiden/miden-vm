@@ -149,6 +149,11 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 ### smaller AIR's main block during the swap.
 const SWAP_SCRATCH_PTR = 3223322764
 
+### Scratch buffer for gathering the Fiat-Shamir public-input stream before block absorption.
+### Sized for the max stream length (43 + MAX_AUX_INPUTS = 1063 felts); only live during
+### `process_public_inputs`, in the free span between this region and the ACE READ section.
+const ABSORB_SCRATCH_PTR = 3223324000
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
@@ -500,6 +505,10 @@ end
 
 pub proc swap_scratch_ptr
     push.SWAP_SCRATCH_PTR
+end
+
+pub proc absorb_scratch_ptr
+    push.ABSORB_SCRATCH_PTR
 end
 
 pub proc random_coin_input_buf_ptr

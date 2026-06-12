@@ -146,26 +146,31 @@ end
 
 #! Absorb a single base field element into the transcript via the buffered duplex.
 #!
-#! Mirrors p3's `DuplexChallenger::observe`: the element is appended to the rate input buffer at
-#! `rate[input_len]`, the output buffer is invalidated, and the sponge is permuted only once the
-#! buffer fills (`input_len == 8`). A partial buffer is flushed lazily by `flush_buffer` (or by the
-#! next permutation), so the permutation boundaries follow the absorbed-element count, not any
-#! per-section alignment.
+#! Mirrors p3's `DuplexChallenger::observe`: invalidates any buffered rate output
+#! (`output_len = 0`), appends the element at `rate[input_len]`, and permutes only once the buffer
+#! fills (`input_len == 8`). A partial buffer is duplexed lazily by `flush_buffer`, which callers
+#! must run before sampling; until then `sample_felt`'s `output_len > 0` assertion fails loudly
+#! rather than returning a stale rate element.
 #!
 #! Input:  [felt, ...]
 #! Output: [...]
 pub proc observe_felt
-    # Observing invalidates any buffered sponge output.
+    # Invalidate any buffered rate output (p3's `output_buffer.clear()`): a partial buffer left here
+    # leaves output_len = 0, so an unflushed `sample_felt` trips its assertion instead of reading a
+    # stale rate. The full-buffer branch below restores output_len = 8 after permuting.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
 
-    # Write felt to rate[input_len] (rate elements 0..7 are addressed as r1_ptr + index).
+    # Load input_len once and derive the write address rate[input_len] (rate elements 0..7 are
+    # addressed as r1_ptr + index), keeping input_len on the stack for the increment below.
     exec.constants::random_coin_input_len_ptr mem_load
-    exec.constants::r1_ptr add
-    mem_store
-    # => [...]
+    # => [input_len, felt, ...]
+    dup exec.constants::r1_ptr add
+    # => [rate_addr, input_len, felt, ...]
+    movup.2 swap mem_store
+    # => [input_len, ...]
 
     # input_len += 1; permute and reset the buffer once the rate is full.
-    exec.constants::random_coin_input_len_ptr mem_load add.1
+    add.1
     dup eq.8
     if.true
         drop

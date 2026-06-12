@@ -118,6 +118,7 @@ version = "1.0.0"
 
 [lib]
 namespace = "{invalid_namespace}"
+path = "mod.masm"
 "#
         ),
     )
