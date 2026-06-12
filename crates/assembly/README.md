@@ -83,7 +83,7 @@ end
 
 The `namespace` declaration gives the module its fully-qualified path. It is optional when the caller or project manifest already provides the module path, but if both are present they must agree. It must appear before any item, import, submodule, or external package declaration.
 
-The `extern package "<package-id>"` declaration records an external package dependency for a standalone root module. It is optional when the module is assembled as part of a project, because the manifest supplies the dependency set. When reading a module tree from a root source file, `namespace` and `extern package` declarations belong in that root source file.
+The `extern package "<package-id>"` declaration records an external package dependency for a standalone root module. It is optional when the module is assembled as part of a project, because the manifest supplies the dependency set. When reading a module tree from a root source file, `namespace` and `extern package` declarations belong in that root source file. *NOTE:* Currently this declaration acts only as a hint to the linker, it is not wired up to package metadata directly. Future work will take full advantage of these declarations, but for now they are only surfaced in the syntax.
 
 The `mod foo` and `pub mod foo` declarations define the direct child modules of the current module. Linked descendants must be declared by their parent modules. A private `mod` child is visible inside the declaring module and its descendants; a `pub mod` child is also visible through public module paths outside that internal scope. Module visibility is separate from item visibility, so public procedures, constants, and types still require `pub` or `pub use`.
 
