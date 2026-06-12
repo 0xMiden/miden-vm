@@ -45,7 +45,10 @@ pub use miden_mast_package as package;
 #[doc(hidden)]
 pub use self::linker::LinkerError;
 #[cfg(feature = "std")]
-pub use self::project::{ProjectAssembler, ProjectSourceInputs, ProjectTargetSelector};
+pub use self::project::{
+    MasmSourceProvider, ProjectAssembler, ProjectSourceInputs, ProjectSourceProvenanceInputs,
+    ProjectSourceProvider, ProjectTargetSelector, SourceFileProvenance, TargetAssemblyContext,
+};
 pub use self::{
     assembler::Assembler,
     linker::Linkage,
