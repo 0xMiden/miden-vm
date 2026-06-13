@@ -308,20 +308,23 @@ fn generate_core_trace_row_major(
         let w = CORE_STORAGE_WIDTH;
         core_trace_data[..total_core_trace_rows * w]
             .par_chunks_mut(fragment_size * w)
-            .for_each(|fragment_chunk| {
-                let num_rows = fragment_chunk.len() / w;
-                let mut h0_vals: Vec<Felt> = (0..num_rows)
-                    .map(|r| {
+            .for_each_init(
+                Vec::<Felt>::new,
+                |h0_vals, fragment_chunk| {
+                    let num_rows = fragment_chunk.len() / w;
+                    h0_vals.clear();
+                    h0_vals.extend((0..num_rows).map(|r| {
                         let row: &CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow();
                         row.stack.h0
-                    })
-                    .collect();
-                batch_inversion_allow_zeros(&mut h0_vals);
-                for (r, &val) in h0_vals.iter().enumerate() {
-                    let row: &mut CoreCols<Felt> = fragment_chunk[r * w..(r + 1) * w].borrow_mut();
-                    row.stack.h0 = val;
-                }
-            });
+                    }));
+                    batch_inversion_allow_zeros(h0_vals);
+                    for (r, &val) in h0_vals.iter().enumerate() {
+                        let row: &mut CoreCols<Felt> =
+                            fragment_chunk[r * w..(r + 1) * w].borrow_mut();
+                        row.stack.h0 = val;
+                    }
+                },
+            );
     }
 
     // Truncate the core trace columns to the actual number of rows written.

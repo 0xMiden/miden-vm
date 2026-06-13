@@ -1,6 +1,7 @@
 //! Module which concerns itself with all the trace row building logic.
 
 use alloc::sync::Arc;
+use core::borrow::BorrowMut;
 
 use miden_air::{
     CoreCols, DecoderCols, StackCols, SystemCols,
@@ -478,7 +479,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         decoder_row: DecoderRow,
     ) {
-        let mut row = CoreCols::<Felt>::default();
+        let dest = self.writer.row_mut(self.row_write_index);
+        let row: &mut CoreCols<Felt> = dest.borrow_mut();
         if let Some(system) = &self.system_cols {
             row.system = system.clone();
         }
@@ -486,8 +488,6 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             row.stack = stack.clone();
         }
         Self::write_decoder(&mut row.decoder, &decoder_row);
-
-        self.writer.write_row(self.row_write_index, row.as_slice());
 
         // Store the buffer for the next call
         self.system_cols = Some(Self::build_system_cols(system));

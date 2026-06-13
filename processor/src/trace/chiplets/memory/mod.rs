@@ -317,92 +317,94 @@ impl Memory {
         };
 
         let num_rows = self.trace_len();
-        let mut buffer = vec![ZERO; num_rows * MEMORY_TRACE_WIDTH];
-        let (out_rows, _) = buffer.as_chunks_mut::<MEMORY_TRACE_WIDTH>();
         let mut deltas: Vec<Felt> = Vec::with_capacity(num_rows);
-        let mut row: usize = 0;
 
-        for (ctx, segment) in self.trace {
-            let ctx = Felt::from(ctx);
-            for (addr, addr_trace) in segment.into_inner() {
-                // when we start a new address, we set the previous value to all zeros. the effect
-                // of this is that memory is always initialized to zero.
-                let felt_addr = Felt::from_u32(addr);
-                for memory_access in addr_trace {
-                    let clk = memory_access.clk();
-                    let value = memory_access.word();
+        // Write payload columns straight into the trace band (no staged scratch buffer + copy).
+        trace.stamp_overheads();
+        {
+            let mut rows = trace.payload_rows_mut();
+            for (ctx, segment) in self.trace {
+                let ctx = Felt::from(ctx);
+                for (addr, addr_trace) in segment.into_inner() {
+                    // when we start a new address, we set the previous value to all zeros. the
+                    // effect of this is that memory is always initialized to zero.
+                    let felt_addr = Felt::from_u32(addr);
+                    for memory_access in addr_trace {
+                        let clk = memory_access.clk();
+                        let value = memory_access.word();
 
-                    let (mem_slice, aux_slice) = out_rows[row].split_at_mut(MEMORY_TRACE_WIDTH - 2);
-                    let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
+                        let payload = rows.next().expect("memory trace row count mismatch");
+                        let (mem_slice, aux_slice) = payload.split_at_mut(MEMORY_TRACE_WIDTH - 2);
+                        let cols: &mut MemoryCols<Felt> = mem_slice.borrow_mut();
 
-                    cols.is_read = match memory_access.operation() {
-                        MemoryOperation::Read => MEMORY_READ,
-                        MemoryOperation::Write => MEMORY_WRITE,
-                    };
-                    let (idx1, idx0) = match memory_access.access_type() {
-                        segment::MemoryAccessType::Element { addr_idx_in_word } => {
-                            cols.is_word = MEMORY_ACCESS_ELEMENT;
-                            match addr_idx_in_word {
-                                0 => (ZERO, ZERO),
-                                1 => (ZERO, ONE),
-                                2 => (ONE, ZERO),
-                                3 => (ONE, ONE),
-                                _ => panic!("invalid address index in word: {addr_idx_in_word}"),
-                            }
-                        },
-                        segment::MemoryAccessType::Word => {
-                            cols.is_word = MEMORY_ACCESS_WORD;
-                            (ZERO, ZERO)
-                        },
-                    };
-                    cols.ctx = ctx;
-                    cols.word_addr = felt_addr;
-                    cols.idx0 = idx0;
-                    cols.idx1 = idx1;
-                    cols.clk = clk;
-                    cols.values = *value;
+                        cols.is_read = match memory_access.operation() {
+                            MemoryOperation::Read => MEMORY_READ,
+                            MemoryOperation::Write => MEMORY_WRITE,
+                        };
+                        let (idx1, idx0) = match memory_access.access_type() {
+                            segment::MemoryAccessType::Element { addr_idx_in_word } => {
+                                cols.is_word = MEMORY_ACCESS_ELEMENT;
+                                match addr_idx_in_word {
+                                    0 => (ZERO, ZERO),
+                                    1 => (ZERO, ONE),
+                                    2 => (ONE, ZERO),
+                                    3 => (ONE, ONE),
+                                    _ => {
+                                        panic!("invalid address index in word: {addr_idx_in_word}")
+                                    },
+                                }
+                            },
+                            segment::MemoryAccessType::Word => {
+                                cols.is_word = MEMORY_ACCESS_WORD;
+                                (ZERO, ZERO)
+                            },
+                        };
+                        cols.ctx = ctx;
+                        cols.word_addr = felt_addr;
+                        cols.idx0 = idx0;
+                        cols.idx1 = idx1;
+                        cols.clk = clk;
+                        cols.values = *value;
 
-                    // compute delta as difference between context IDs, addresses, or clock cycles
-                    let delta = if prev_ctx != ctx {
-                        ctx - prev_ctx
-                    } else if prev_addr != felt_addr {
-                        felt_addr - prev_addr
-                    } else {
-                        clk - prev_clk
-                    };
+                        // compute delta as difference between context IDs, addresses, or clk cycles
+                        let delta = if prev_ctx != ctx {
+                            ctx - prev_ctx
+                        } else if prev_addr != felt_addr {
+                            felt_addr - prev_addr
+                        } else {
+                            clk - prev_clk
+                        };
 
-                    let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
-                    cols.d0 = delta_lo;
-                    cols.d1 = delta_hi;
-                    // `cols.d_inv` is filled in the batched-inversion pass below; defer.
-                    deltas.push(delta);
-                    cols.is_same_ctx_and_addr = if prev_ctx == ctx && prev_addr == felt_addr {
-                        ONE
-                    } else {
-                        ZERO
-                    };
+                        let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
+                        cols.d0 = delta_lo;
+                        cols.d1 = delta_hi;
+                        // `cols.d_inv` is filled in the batched-inversion pass below; defer.
+                        deltas.push(delta);
+                        cols.is_same_ctx_and_addr = if prev_ctx == ctx && prev_addr == felt_addr {
+                            ONE
+                        } else {
+                            ZERO
+                        };
 
-                    // decompose word address into 16-bit limbs of word index
-                    let word_index = addr / WORD_SIZE as u32;
-                    aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
-                    aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
+                        // decompose word address into 16-bit limbs of word index
+                        let word_index = addr / WORD_SIZE as u32;
+                        aux_slice[0] = Felt::from_u16((word_index & 0xffff) as u16);
+                        aux_slice[1] = Felt::from_u16((word_index >> 16) as u16);
 
-                    // update values for the next iteration of the loop
-                    prev_ctx = ctx;
-                    prev_addr = felt_addr;
-                    prev_clk = clk;
-                    row += 1;
+                        // update values for the next iteration of the loop
+                        prev_ctx = ctx;
+                        prev_addr = felt_addr;
+                        prev_clk = clk;
+                    }
                 }
             }
         }
 
         batch_inversion_allow_zeros(&mut deltas);
-        for (r, &inv) in deltas.iter().enumerate() {
-            let cols: &mut MemoryCols<Felt> = out_rows[r][..MEMORY_TRACE_WIDTH - 2].borrow_mut();
+        for (payload, &inv) in trace.payload_rows_mut().zip(deltas.iter()) {
+            let cols: &mut MemoryCols<Felt> = payload[..MEMORY_TRACE_WIDTH - 2].borrow_mut();
             cols.d_inv = inv;
         }
-
-        trace.copy_rows_from(&buffer);
     }
 
     // HELPER METHODS

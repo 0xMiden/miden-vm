@@ -11,7 +11,7 @@ use crate::{operation::Operation, utils::ToElements};
 // ROW-MAJOR TRACE WRITER
 // ================================================================================================
 
-/// Row-major flat buffer writer (`write_row` is a single `copy_from_slice`).
+/// Row-major flat buffer writer handing out one row's payload at a time via [`Self::row_mut`].
 ///
 /// `payload` is the number of leading columns written per row; `stride` is the physical row
 /// width of the backing buffer. When `stride > payload`, the trailing `stride - payload`
@@ -38,12 +38,13 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
         Self { data, payload, stride }
     }
 
-    /// Writes one row's payload; `values.len()` must equal `payload`.
+    /// Returns a mutable view over `row`'s payload columns (`[start..start + payload]`), letting
+    /// callers fill columns in place instead of copying from a staged row buffer. The trailing
+    /// `stride - payload` columns are not exposed and stay zero-initialized.
     #[inline(always)]
-    pub fn write_row(&mut self, row: usize, values: &[E]) {
-        debug_assert_eq!(values.len(), self.payload);
+    pub fn row_mut(&mut self, row: usize) -> &mut [E] {
         let start = row * self.stride;
-        self.data[start..start + self.payload].copy_from_slice(values);
+        &mut self.data[start..start + self.payload]
     }
 }
 
@@ -161,6 +162,35 @@ impl<'a> ChipletTraceFragment<'a> {
                 row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
             }
         }
+    }
+
+    /// Stamps the per-row prefix-selector ONEs and trailing `chip_clk` for every row in the band,
+    /// without touching the payload columns. Pair with [`Self::payload_rows_mut`] to fill payload
+    /// columns in place instead of staging them in a separate buffer for [`Self::copy_rows_from`].
+    pub fn stamp_overheads(&mut self) {
+        let write_chip_clk = self.stride > self.col_start + self.num_cols;
+        let clk_col = self.stride - 1;
+        for dst_row in 0..self.num_rows {
+            let row_start = dst_row * self.stride;
+            let row = &mut self.band[row_start..row_start + self.stride];
+            for &col in self.prefix_one_cols {
+                row[col] = ONE;
+            }
+            if write_chip_clk {
+                row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
+            }
+        }
+    }
+
+    /// Iterator over each row's mutable payload slice (`num_cols` cells starting at `col_start`),
+    /// in row order, for chiplets that fill payload columns directly into the band. Leaves prefix
+    /// selectors and `chip_clk` untouched — call [`Self::stamp_overheads`] once for those.
+    pub fn payload_rows_mut(&mut self) -> impl Iterator<Item = &mut [Felt]> {
+        let col_start = self.col_start;
+        let num_cols = self.num_cols;
+        self.band
+            .chunks_mut(self.stride)
+            .map(move |row| &mut row[col_start..col_start + num_cols])
     }
 }
 

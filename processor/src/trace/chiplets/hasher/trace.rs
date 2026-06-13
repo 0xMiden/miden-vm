@@ -162,10 +162,11 @@ impl HasherTrace {
         range: Range<usize>,
         new_mrupdate_id: Felt,
     ) -> (HasherState, Vec<HasherState>) {
-        let copied: Vec<HasherOp> = self.ops[range].to_vec();
         let mut last_state = [ZERO; STATE_WIDTH];
         let mut input_states = Vec::new();
-        for mut op in copied {
+        self.ops.reserve(range.len());
+        for i in range {
+            let mut op = self.ops[i].clone();
             match &mut op {
                 HasherOp::Controller { mrupdate_id, selectors, state, .. } => {
                     *mrupdate_id = new_mrupdate_id;
