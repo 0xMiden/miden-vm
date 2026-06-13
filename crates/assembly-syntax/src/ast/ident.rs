@@ -216,7 +216,7 @@ impl AsRef<str> for Ident {
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if Self::requires_quoting(&self.name) {
-            write!(f, "\"{}\"", &self.name)
+            write!(f, "\"{}\"", &self.name.escape_debug())
         } else {
             f.write_str(&self.name)
         }
@@ -283,6 +283,18 @@ impl Deserializable for Ident {
         let id = core::str::from_utf8(bytes)
             .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         Self::new(id).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ident_with_quotes_is_properly_escaped() {
+        let id = Ident::new("a\"b").unwrap();
+        let output = id.to_string();
+        assert_eq!(output, "\"a\\\"b\"")
     }
 }
 
