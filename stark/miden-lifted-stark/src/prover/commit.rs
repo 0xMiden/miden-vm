@@ -20,7 +20,6 @@ use crate::{
     StarkConfig,
     domain::{Coset, EvaluationDomain, LiftedDomain},
     lmcs::{Lmcs, LmcsTree},
-    util::bitrev::materialize_bitrev,
 };
 
 // ============================================================================
@@ -170,10 +169,8 @@ where
             let log_trace_height = domain.log_trace_height();
             let coset_shift = domain.lde_shift();
 
-            info_span!("LDE", trace = idx, log_height = log_trace_height, width).in_scope(|| {
-                let lde = config.dft().coset_lde_batch(trace, log_blowup.into(), coset_shift);
-                materialize_bitrev(lde)
-            })
+            info_span!("LDE", trace = idx, log_height = log_trace_height, width)
+                .in_scope(|| config.dft().coset_lde_batch(trace, log_blowup.into(), coset_shift))
         })
         .collect();
 

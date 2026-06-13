@@ -65,7 +65,7 @@ impl<T> RowList<T> {
 
     /// Iterate over all elements by value.
     #[inline]
-    pub fn iter_values(&self) -> impl Iterator<Item = T> + '_
+    pub fn iter_values(&self) -> impl DoubleEndedIterator<Item = T> + '_
     where
         T: Copy,
     {
@@ -79,13 +79,8 @@ impl<T> RowList<T> {
     }
 
     /// Iterate over rows as slices.
-    pub fn iter_rows(&self) -> impl Iterator<Item = &[T]> {
-        let mut offset = 0;
-        self.widths.iter().map(move |&w| {
-            let row = &self.elems[offset..offset + w];
-            offset += w;
-            row
-        })
+    pub fn iter_rows(&self) -> impl DoubleEndedIterator<Item = &[T]> {
+        RowIter { elems: &self.elems, widths: &self.widths }
     }
 
     /// Get a single row by index.
@@ -108,7 +103,7 @@ impl<T: Copy + Default> RowList<T> {
     ///
     /// Yields the original row elements followed by implicit zeros, without allocating
     /// a padded copy.
-    pub fn iter_aligned(&self, alignment: usize) -> impl Iterator<Item = T> + '_ {
+    pub fn iter_aligned(&self, alignment: usize) -> impl DoubleEndedIterator<Item = T> + '_ {
         self.iter_rows().flat_map(move |row| {
             let padding = aligned_len(row.len(), alignment) - row.len();
             row.iter().copied().chain(core::iter::repeat_n(T::default(), padding))
@@ -132,5 +127,37 @@ impl<T: Default + Clone> RowList<T> {
             elems.resize(elems.len() + (padded_len - row.len()), T::default());
         }
         Self { elems, widths }
+    }
+}
+
+/// Double-ended iterator over the rows of a [`RowList`].
+struct RowIter<'a, T> {
+    elems: &'a [T],
+    widths: &'a [usize],
+}
+
+impl<'a, T> Iterator for RowIter<'a, T> {
+    type Item = &'a [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (&width, rest) = self.widths.split_first()?;
+        let (row, elems) = self.elems.split_at(width);
+        self.widths = rest;
+        self.elems = elems;
+        Some(row)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.widths.len(), Some(self.widths.len()))
+    }
+}
+
+impl<T> DoubleEndedIterator for RowIter<'_, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let (&width, rest) = self.widths.split_last()?;
+        let (elems, row) = self.elems.split_at(self.elems.len() - width);
+        self.widths = rest;
+        self.elems = elems;
+        Some(row)
     }
 }

@@ -95,14 +95,14 @@ impl BaseAir<Felt> for PeriodicPowerAir {
     fn width(&self) -> usize {
         1
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         // Period 2: entries [1, 0] repeat across the trace.
         vec![vec![Felt::ONE, Felt::ZERO]]
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for PeriodicPowerAir {
     fn num_randomness(&self) -> usize {
         1
     }

@@ -84,13 +84,13 @@ mod tests;
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_stark_transcript::{ProverChannel, TranscriptError, VerifierChannel};
-use p3_matrix::Matrix;
+use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
 use proof::BatchProofView;
 use row_list::RowList;
 use thiserror::Error;
 use tree_indices::TreeIndices;
 
-use crate::util::{align::aligned_len, bitrev::BitReversibleMatrix};
+use crate::util::align::aligned_len;
 
 // ============================================================================
 // Type Aliases

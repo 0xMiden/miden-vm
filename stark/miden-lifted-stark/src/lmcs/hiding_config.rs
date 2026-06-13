@@ -6,19 +6,16 @@ use core::cell::RefCell;
 use miden_stark_transcript::VerifierChannel;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform},
 };
 
-use crate::{
-    lmcs::{
-        Lmcs, LmcsError, OpenedRows, config::LmcsConfig, lifted_tree::LiftedMerkleTree,
-        proof::BatchProof, tree_indices::TreeIndices,
-    },
-    util::bitrev::BitReversibleMatrix,
+use crate::lmcs::{
+    Lmcs, LmcsError, OpenedRows, config::LmcsConfig, lifted_tree::LiftedMerkleTree,
+    proof::BatchProof, tree_indices::TreeIndices,
 };
 
 /// Configuration for hiding LMCS with random salt.

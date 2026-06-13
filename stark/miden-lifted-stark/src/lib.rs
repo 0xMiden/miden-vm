@@ -110,7 +110,6 @@ pub mod air {
         LiftedAir,
         LiftedAirBuilder,
         MultiAir,
-        PeriodicAirBuilder,
         PermutationAirBuilder,
         ProverStatement,
         ReductionError,

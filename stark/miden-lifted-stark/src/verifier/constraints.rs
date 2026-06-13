@@ -5,9 +5,7 @@
 
 use core::marker::PhantomData;
 
-use miden_lifted_air::{
-    AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
-};
+use miden_lifted_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow};
 use p3_field::{ExtensionField, Field};
 
 use crate::selectors::Selectors;
@@ -59,6 +57,7 @@ where
     type PreprocessedWindow = RowWindow<'a, EF>;
     type MainWindow = RowWindow<'a, EF>;
     type PublicVar = F;
+    type PeriodicVar = EF;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -76,8 +75,7 @@ where
         self.selectors.is_last_row
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "AIR uses window size {size}; only 2 supported");
+    fn is_transition(&self) -> Self::Expr {
         self.selectors.is_transition
     }
 
@@ -87,6 +85,10 @@ where
 
     fn public_values(&self) -> &[Self::PublicVar] {
         self.public_values
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        self.periodic_values
     }
 }
 
@@ -126,17 +128,5 @@ where
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         self.permutation_values
-    }
-}
-
-impl<'a, F, EF> PeriodicAirBuilder for ConstraintFolder<'a, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type PeriodicVar = EF;
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
     }
 }

@@ -23,11 +23,11 @@ pub mod field {
     //! [Felt](super::Felt)).
 
     pub use miden_field::{
-        Algebra, BasedVectorSpace, BinomialExtensionField, BinomiallyExtendable,
-        BinomiallyExtendableAlgebra, BoundedPowers, ExtensionField, Field,
-        HasTwoAdicBinomialExtension, InjectiveMonomial, Packable, PermutationMonomial, Powers,
-        PrimeCharacteristicRing, PrimeField, PrimeField64, QuotientMap, RawDataSerializable,
-        TwoAdicField, batch_multiplicative_inverse,
+        Algebra, BasedVectorSpace, Binomial, BinomialExtensionField, BinomiallyExtendable,
+        BoundedPowers, ExtensionAlgebra, ExtensionField, Field, HasTwoAdicBinomialExtension,
+        InjectiveMonomial, Packable, PermutationMonomial, Powers, PrimeCharacteristicRing,
+        PrimeField, PrimeField64, QuotientMap, RawDataSerializable, TwoAdicField,
+        batch_multiplicative_inverse,
     };
 
     pub use super::batch_inversion::batch_inversion_allow_zeros;

@@ -3,6 +3,7 @@
 - [BREAKING] Upgraded the RustCrypto and dalek stack: `der`, `hkdf`, `sha2`, `sha3`, `k256`, `curve25519-dalek`, `ed25519-dalek`, and `x25519-dalek` ([#1045](https://github.com/0xMiden/crypto/pull/1045)).
 - Added `Display` (`0x`-prefixed lowercase hex) for the public key and signature types of all DSA schemes ([#1048](https://github.com/0xMiden/crypto/pull/1048)).
 - Use faster DFT algorithm for `PeriodicPolys` ([#1054](https://github.com/0xMiden/crypto/pull/1054)).
+- [BREAKING] Bumped Plonky3 upstream dependencies to v0.6.0 ([#1053](https://github.com/0xMiden/crypto/pull/1053)).
 
 ## 0.26.0 (06-02-2026)
 

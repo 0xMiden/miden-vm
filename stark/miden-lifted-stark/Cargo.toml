@@ -43,15 +43,14 @@ tracing.workspace   = true
 
 [dev-dependencies]
 # Plonky3
-p3-blake3.workspace        = true
-p3-challenger.workspace    = true
-p3-commit.workspace        = true
-p3-fri.workspace           = true
-p3-goldilocks.workspace    = true
-p3-interpolation.workspace = true
-p3-keccak.workspace        = true
-p3-merkle-tree.workspace   = true
-p3-symmetric.workspace     = true
+p3-blake3.workspace      = true
+p3-challenger.workspace  = true
+p3-commit.workspace      = true
+p3-fri.workspace         = true
+p3-goldilocks.workspace  = true
+p3-keccak.workspace      = true
+p3-merkle-tree.workspace = true
+p3-symmetric.workspace   = true
 
 # Third-party
 criterion.workspace          = true

@@ -8,9 +8,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
-use p3_field::{ExtensionField, TwoAdicField};
-
-use crate::util::horner::horner_acc;
+use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 
 /// Verifier-side periodic polynomials for OOD evaluation.
 ///
@@ -74,9 +72,9 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
         for coeffs in &self.polys {
             let period = coeffs.len();
             let y = z.exp_u64((trace_height / period) as u64);
-            // Coefficients are stored in ascending degree (idft output): [c₀, c₁, ..., cₙ₋₁].
-            // Horner needs descending order (highest degree first), hence `.rev()`.
-            result.push(horner_acc(EF::ZERO, y, coeffs.iter().rev().copied()));
+            // Coefficients are stored in ascending degree (idft output): [c₀, c₁, ..., cₙ₋₁],
+            // which is the order `HornerIter` consumes directly.
+            result.push(coeffs.iter().copied().horner(y));
         }
 
         result

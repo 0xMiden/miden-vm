@@ -3,7 +3,7 @@ use core::iter::zip;
 
 use miden_stark_transcript::ProverChannel;
 use p3_field::{
-    ExtensionField, Field, FieldArray, PackedFieldExtension, PackedValue, TwoAdicField,
+    ExtensionField, Field, FieldArray, HornerIter, PackedFieldExtension, PackedValue, TwoAdicField,
 };
 use p3_matrix::Matrix;
 use p3_maybe_rayon::prelude::*;
@@ -13,7 +13,7 @@ use crate::{
     domain::{Coset, LiftedDomain},
     lmcs::{Lmcs, LmcsTree, row_list::RowList},
     pcs::deep::{DeepParams, interpolate::PointQuotients},
-    util::{align::aligned_widths, horner::horner, packing::PackedFieldExtensionExt},
+    util::align::aligned_widths,
 };
 
 /// The DEEP quotient `Q(X)` evaluated over the LDE domain.
@@ -164,7 +164,7 @@ impl<EF> DeepPoly<EF> {
         // Pre-compute f_reduced(zⱼ) for all N points using Horner.
         // Reduces across all matrices' aligned columns in flat order.
         let f_reduced_at_points: FieldArray<EF, N> =
-            horner(challenge_columns, batched_evals.iter_aligned(alignment));
+            batched_evals.iter_aligned(alignment).rev().horner(challenge_columns);
 
         let w = <L::F as Field>::Packing::WIDTH;
         let point_quotient = &quotient.point_quotient;
@@ -459,7 +459,7 @@ mod tests {
             dot_product(neg_coeffs.iter().flatten().copied(), padded.iter_values());
 
         // Horner using reduce_with_powers (same as used in verifier)
-        let horner: QuadFelt = horner(c, padded.iter_values());
+        let horner: QuadFelt = padded.iter_values().rev().horner(c);
 
         assert_eq!(explicit, QuadFelt::NEG_ONE * horner);
     }
@@ -503,7 +503,7 @@ mod tests {
 
         let explicit: QuadFelt =
             dot_product(coeffs.iter().flatten().copied(), padded.iter_values());
-        let horner: QuadFelt = horner(c, padded.iter_values());
+        let horner: QuadFelt = padded.iter_values().rev().horner(c);
 
         assert_eq!(explicit, QuadFelt::NEG_ONE * horner);
     }

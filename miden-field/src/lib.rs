@@ -31,7 +31,7 @@ pub use p3_field::{
     PermutationMonomial, Powers, PrimeCharacteristicRing, PrimeField, PrimeField64,
     RawDataSerializable, TwoAdicField, batch_multiplicative_inverse,
     extension::{
-        BinomialExtensionField, BinomiallyExtendable, BinomiallyExtendableAlgebra,
+        Binomial, BinomialExtensionField, BinomiallyExtendable, ExtensionAlgebra,
         HasTwoAdicBinomialExtension,
     },
     integers::QuotientMap,

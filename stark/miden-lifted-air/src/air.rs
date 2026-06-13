@@ -11,7 +11,7 @@
 //! [`public_values()`](crate::AirBuilder::public_values),
 //! [`permutation_randomness()`](crate::PermutationAirBuilder::permutation_randomness),
 //! [`permutation_values()`](crate::PermutationAirBuilder::permutation_values), and
-//! [`periodic_values()`](crate::PeriodicAirBuilder::periodic_values) — which return
+//! [`periodic_values()`](crate::AirBuilder::periodic_values) — which return
 //! matrices or slices.
 //!
 //! If the symbolic evaluation in [`LiftedAir::constraint_degree`] succeeds (i.e.
@@ -45,55 +45,10 @@ use crate::{
 /// - `F`: Base field
 /// - `EF`: Extension field (for aux trace challenges and aux values)
 pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
-    /// Number of base-field columns in the preprocessed trace.
-    ///
-    /// A preprocessed trace is data fixed per AIR — typically a lookup table
-    /// or selector polynomial — committed once and reused across proofs. AIRs
-    /// without preprocessed columns return 0 (the default). The content comes
-    /// from [`BaseAir::preprocessed_trace`]; this is the cheap width the
-    /// verifier reads without materialising the table.
-    fn preprocessed_width(&self) -> usize {
-        0
-    }
-
-    /// Return the periodic table data: a list of columns, each a `Vec<F>` of evaluations.
-    ///
-    /// Each inner `Vec<F>` represents one periodic column. Its length is the period of
-    /// that column, and the entries are the evaluations over a subgroup of that order.
-    ///
-    /// Default: no periodic columns.
-    fn periodic_columns(&self) -> Vec<Vec<F>> {
-        Vec::new()
-    }
-
-    /// Return a matrix with all periodic columns extended to a common height.
-    ///
-    /// Columns with smaller periods are repeated cyclically to fill the extended domain.
-    /// Returns `None` if there are no periodic columns.
-    fn periodic_columns_matrix(&self) -> Option<RowMajorMatrix<F>> {
-        let cols = self.periodic_columns();
-        if cols.is_empty() {
-            return None;
-        }
-
-        let max_period = cols.iter().map(Vec::len).max()?;
-        let num_cols = cols.len();
-
-        let mut values = Vec::with_capacity(max_period * num_cols);
-        for row in 0..max_period {
-            for col in &cols {
-                let period = col.len();
-                values.push(col[row % period]);
-            }
-        }
-
-        Some(RowMajorMatrix::new(values, num_cols))
-    }
-
     /// Maximum periodic-column length, or `0` if there are none. A trace's height
     /// must be at least this, so it is the per-AIR lower bound on trace height.
     ///
-    /// The default derives it from [`periodic_columns`](Self::periodic_columns),
+    /// The default derives it from [`periodic_columns`](BaseAir::periodic_columns),
     /// asserting each column is a non-empty power of two. Override to return it
     /// directly when known statically; the override is cross-checked by
     /// [`crate::debug::assert_multi_air_valid`].

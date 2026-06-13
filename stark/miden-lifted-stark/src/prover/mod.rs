@@ -78,7 +78,7 @@ use alloc::vec::Vec;
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
 use miden_lifted_air::{
-    InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement,
+    BaseAir, InstanceError, LiftedAir, MultiAir, ProverStatement, ReductionError, Statement,
 };
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_challenger::CanObserve;

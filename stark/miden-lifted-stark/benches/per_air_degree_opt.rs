@@ -166,12 +166,12 @@ impl<A: BaseAir<Felt>> BaseAir<Felt> for OverrideConstraintDegree<A> {
     fn num_public_values(&self) -> usize {
         self.inner.num_public_values()
     }
-}
-
-impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         self.inner.periodic_columns()
     }
+}
+
+impl<A: LiftedAir<Felt, QuadFelt>> LiftedAir<Felt, QuadFelt> for OverrideConstraintDegree<A> {
     fn num_randomness(&self) -> usize {
         self.inner.num_randomness()
     }

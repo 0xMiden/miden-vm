@@ -19,7 +19,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_stark_transcript::{TranscriptError, VerifierChannel};
-use p3_field::{ExtensionField, TwoAdicField};
+use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 use p3_util::reverse_bits_len;
 use thiserror::Error;
 
@@ -27,7 +27,6 @@ use crate::{
     domain::{Coset, LiftedDomain, TwoAdicSubgroup},
     lmcs::{Lmcs, LmcsError, tree_indices::TreeIndices},
     pcs::fri::FriParams,
-    util::horner::horner,
 };
 
 /// FRI low-degree test oracle.
@@ -206,7 +205,7 @@ where
         for (idx, eval) in evals {
             // Domain index directly gives the exponent (no bit-reversal needed).
             let x = generator.exp_u64(idx as u64);
-            let final_eval: EF = horner(x, self.final_poly.iter().copied());
+            let final_eval: EF = self.final_poly.iter().copied().rev().horner(x);
 
             if final_eval != eval {
                 return Err(FriError::FinalPolyMismatch { tree_index: idx });

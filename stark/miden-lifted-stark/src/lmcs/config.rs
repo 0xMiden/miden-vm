@@ -6,19 +6,16 @@ use core::marker::PhantomData;
 use miden_stark_transcript::VerifierChannel;
 use miden_stateful_hasher::{Alignable, StatefulHasher};
 use p3_field::PackedValue;
-use p3_matrix::Matrix;
+use p3_matrix::{Matrix, bitrev::BitReversibleMatrix};
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 
-use crate::{
-    lmcs::{
-        Lmcs, LmcsError, OpenedRows,
-        lifted_tree::LiftedMerkleTree,
-        merkle_witness::MerkleWitness,
-        proof::{BatchProof, LeafOpening},
-        row_list::RowList,
-        tree_indices::TreeIndices,
-    },
-    util::bitrev::BitReversibleMatrix,
+use crate::lmcs::{
+    Lmcs, LmcsError, OpenedRows,
+    lifted_tree::LiftedMerkleTree,
+    merkle_witness::MerkleWitness,
+    proof::{BatchProof, LeafOpening},
+    row_list::RowList,
+    tree_indices::TreeIndices,
 };
 
 /// LMCS configuration holding cryptographic primitives (sponge + compression).

@@ -34,29 +34,28 @@ miden-stark-transcript = { default-features = false, path = "stark/miden-stark-t
 miden-stateful-hasher  = { default-features = false, path = "stark/miden-stateful-hasher", version = "0.27" }
 
 # Plonky3
-p3-air           = { default-features = false, version = "0.5" }
-p3-batch-stark   = { default-features = false, version = "0.5" }
-p3-blake3        = { default-features = false, version = "0.5" }
-p3-blake3-air    = { default-features = false, version = "0.5" }
-p3-bn254         = { default-features = false, version = "0.5" }
-p3-challenger    = { default-features = false, version = "0.5" }
-p3-commit        = { default-features = false, version = "0.5" }
-p3-dft           = { default-features = false, version = "0.5" }
-p3-field         = { default-features = false, version = "0.5" }
-p3-fri           = { default-features = false, version = "0.5" }
-p3-goldilocks    = { default-features = false, version = "0.5" }
-p3-interpolation = { default-features = false, version = "0.5" }
-p3-keccak        = { default-features = false, version = "0.5" }
-p3-keccak-air    = { default-features = false, version = "0.5" }
-p3-lookup        = { default-features = false, version = "0.5" }
-p3-matrix        = { default-features = false, version = "0.5" }
-p3-maybe-rayon   = { default-features = false, version = "0.5" }
-p3-merkle-tree   = { default-features = false, version = "0.5" }
-p3-mersenne-31   = { default-features = false, version = "0.5" }
-p3-poseidon2-air = { default-features = false, version = "0.5" }
-p3-symmetric     = { default-features = false, version = "0.5" }
-p3-uni-stark     = { default-features = false, version = "0.5" }
-p3-util          = { default-features = false, version = "0.5" }
+p3-air           = { default-features = false, version = "0.6" }
+p3-batch-stark   = { default-features = false, version = "0.6" }
+p3-blake3        = { default-features = false, version = "0.6" }
+p3-blake3-air    = { default-features = false, version = "0.6" }
+p3-bn254         = { default-features = false, version = "0.6" }
+p3-challenger    = { default-features = false, version = "0.6" }
+p3-commit        = { default-features = false, version = "0.6" }
+p3-dft           = { default-features = false, version = "0.6" }
+p3-field         = { default-features = false, version = "0.6" }
+p3-fri           = { default-features = false, version = "0.6" }
+p3-goldilocks    = { default-features = false, version = "0.6" }
+p3-keccak        = { default-features = false, version = "0.6" }
+p3-keccak-air    = { default-features = false, version = "0.6" }
+p3-lookup        = { default-features = false, version = "0.6" }
+p3-matrix        = { default-features = false, version = "0.6" }
+p3-maybe-rayon   = { default-features = false, version = "0.6" }
+p3-merkle-tree   = { default-features = false, version = "0.6" }
+p3-mersenne-31   = { default-features = false, version = "0.6" }
+p3-poseidon2-air = { default-features = false, version = "0.6" }
+p3-symmetric     = { default-features = false, version = "0.6" }
+p3-uni-stark     = { default-features = false, version = "0.6" }
+p3-util          = { default-features = false, version = "0.6" }
 
 # Shared third-party dependencies used across workspace crates
 assert_matches   = { default-features = false, version = "1.5" }

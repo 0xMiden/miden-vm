@@ -14,8 +14,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use miden_lifted_air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PeriodicAirBuilder, PermutationAirBuilder,
-    ProverStatement, RowWindow, debug::assert_multi_air_valid,
+    AirBuilder, ExtensionBuilder, LiftedAir, MultiAir, PermutationAirBuilder, ProverStatement,
+    RowWindow, debug::assert_multi_air_valid,
 };
 use p3_challenger::{CanObserve, CanSample};
 use p3_field::{ExtensionField, Field};
@@ -248,6 +248,7 @@ where
     type PreprocessedWindow = RowWindow<'a, F>;
     type MainWindow = RowWindow<'a, F>;
     type PublicVar = F;
+    type PeriodicVar = F;
 
     fn main(&self) -> Self::MainWindow {
         self.main
@@ -265,8 +266,7 @@ where
         self.is_last_row
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert!(size <= 2, "only two-row windows are supported, got {size}");
+    fn is_transition(&self) -> Self::Expr {
         self.is_transition
     }
 
@@ -282,6 +282,10 @@ where
 
     fn public_values(&self) -> &[Self::PublicVar] {
         self.public_values
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        self.periodic_values
     }
 }
 
@@ -327,17 +331,5 @@ where
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         self.permutation_values
-    }
-}
-
-impl<F, EF> PeriodicAirBuilder for DebugConstraintBuilder<'_, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    type PeriodicVar = F;
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        self.periodic_values
     }
 }

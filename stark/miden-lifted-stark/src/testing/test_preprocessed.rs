@@ -50,12 +50,12 @@ impl BaseAir<Felt> for RowCounterAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         Some(self.preprocessed.clone())
     }
-}
-
-impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
     fn preprocessed_width(&self) -> usize {
         1
     }
+}
+
+impl LiftedAir<Felt, QuadFelt> for RowCounterAir {
     fn aux_width(&self) -> usize {
         1
     }
@@ -165,15 +165,15 @@ impl BaseAir<Felt> for MixedAir {
             Self::RowCounter(a) => a.preprocessed_trace(),
         }
     }
-}
-
-impl LiftedAir<Felt, QuadFelt> for MixedAir {
     fn preprocessed_width(&self) -> usize {
         match self {
             Self::Constant(_) => 0,
             Self::RowCounter(a) => a.preprocessed_width(),
         }
     }
+}
+
+impl LiftedAir<Felt, QuadFelt> for MixedAir {
     fn aux_width(&self) -> usize {
         1
     }
@@ -222,12 +222,12 @@ impl BaseAir<Felt> for WrongWidthAir {
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         Some(self.preprocessed.clone())
     }
-}
-
-impl LiftedAir<Felt, QuadFelt> for WrongWidthAir {
     fn preprocessed_width(&self) -> usize {
         2
     }
+}
+
+impl LiftedAir<Felt, QuadFelt> for WrongWidthAir {
     fn aux_width(&self) -> usize {
         1
     }

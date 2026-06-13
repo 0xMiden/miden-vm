@@ -206,8 +206,11 @@ mod tests {
 
     use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
     use p3_field::PrimeCharacteristicRing;
-    use p3_interpolation::{interpolate_coset, interpolate_coset_with_precomputation};
-    use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+    use p3_matrix::{
+        bitrev::BitReversibleMatrix,
+        dense::RowMajorMatrix,
+        interpolation::{Interpolate, compute_adjusted_weights},
+    };
     use p3_util::reverse_slice_index_bits;
     use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 
@@ -286,7 +289,7 @@ mod tests {
                 result.as_slice()[1..].iter().map(|arr| arr[0]).collect();
 
             // Standard interpolation on the lifted coset
-            let expected_evals = interpolate_coset(&evals_std, lifted_shift, z_lifted);
+            let expected_evals = evals_std.interpolate_coset(lifted_shift, z_lifted);
 
             assert_eq!(
                 our_evals.len(),
@@ -312,10 +315,8 @@ mod tests {
         let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
-        // Coset points in both orderings
+        // Coset points in bit-reversed order
         let coset_points_br = domain.lde_coset().bit_reversed_points();
-        let mut coset_points_std = coset_points_br.clone();
-        reverse_slice_index_bits(&mut coset_points_std); // Convert to standard order
 
         // Random out-of-domain evaluation point
         let z: QuadFelt = rng.sample(StandardUniform);
@@ -349,14 +350,10 @@ mod tests {
             quotient.point_quotient[..lde_height].iter().map(|arr| arr[0]).collect();
         reverse_slice_index_bits(&mut diff_invs_std);
 
-        // Interpolation with precomputation (both in standard order)
-        let expected_evals = interpolate_coset_with_precomputation(
-            &evals_std,
-            shift,
-            z,
-            &coset_points_std[..lde_height],
-            &diff_invs_std,
-        );
+        // Interpolation with precomputation (standard order)
+        let adjusted_weights = compute_adjusted_weights(z, &diff_invs_std);
+        let expected_evals =
+            evals_std.interpolate_coset_with_precomputation(shift, z, &adjusted_weights);
 
         assert_eq!(our_evals.len(), expected_evals.len(), "length mismatch");
         for (col, (&our, &expected)) in our_evals.iter().zip(expected_evals.iter()).enumerate() {
@@ -504,14 +501,14 @@ mod tests {
             [(0, "z1", z1), (1, "z2", z2)].into_iter().map(|(i, l, z)| (i, (l, z)))
         {
             // Matrix 1 (no lifting): evaluate at z directly
-            let expected1 = interpolate_coset(&evals1_std, lifted_shift_1, z);
+            let expected1 = evals1_std.interpolate_coset(lifted_shift_1, z);
             for (col, (&our, &exp)) in rows[0].iter().zip(expected1.iter()).enumerate() {
                 assert_eq!(our[point_idx], exp, "{label}, mat1, col={col}: mismatch");
             }
 
             // Matrix 2 (lift factor 2): evaluate at z^2
             let z_lifted = z.square();
-            let expected2 = interpolate_coset(&evals2_std, lifted_shift_2, z_lifted);
+            let expected2 = evals2_std.interpolate_coset(lifted_shift_2, z_lifted);
             for (col, (&our, &exp)) in rows[1].iter().zip(expected2.iter()).enumerate() {
                 assert_eq!(our[point_idx], exp, "{label}, mat2, col={col}: mismatch");
             }
