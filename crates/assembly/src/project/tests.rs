@@ -145,9 +145,17 @@ path = "kernel.masm"
 "#,
     );
     write_file(
-        &tempdir.path().join("kernel.masm"),
+        &tempdir.path().join("support.masm"),
         r#"pub proc foo
     caller
+end
+"#,
+    );
+    write_file(
+        &tempdir.path().join("kernel.masm"),
+        r#"pub mod support
+pub proc foo
+    exec.support::foo
 end
 "#,
     );

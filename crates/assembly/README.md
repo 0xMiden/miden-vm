@@ -160,7 +160,7 @@ let kernel = parser.parse_str(
 ).unwrap();
 
 let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel("my-kernel", kernel)
+    .assemble_kernel("my-kernel", kernel, None)
     .unwrap();
 
 // Create assembler with the kernel
@@ -189,7 +189,7 @@ Programs compiled by this assembler will be able to make calls to the
 #     source_manager.clone(),
 # ).unwrap();
 # let kernel_lib = Assembler::new(source_manager.clone())
-#     .assemble_kernel("my-kernel", kernel)
+#     .assemble_kernel("my-kernel", kernel, None)
 #     .unwrap();
 #
 // Create assembler with the kernel and assemble program
@@ -236,7 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     let kernel = parser.parse_str(Some(Path::KERNEL), kernel, source_manager.clone())?;
     let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel("my-kernel", kernel)?;
+        .assemble_kernel("my-kernel", kernel, None)?;
 
     // Instantiate the assembler with multiple options at once
     let assembler = Assembler::with_kernel(source_manager, kernel_lib.into()).unwrap();

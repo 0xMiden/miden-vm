@@ -1244,7 +1244,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let kernel = parse_kernel_module(source_manager.clone(), kernel_source);
     let kernel_library = Assembler::new(source_manager.clone())
-        .assemble_kernel("kernel", kernel)
+        .assemble_kernel("kernel", kernel, None)
         .unwrap();
 
     let program = {

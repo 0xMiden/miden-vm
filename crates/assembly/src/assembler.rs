@@ -443,8 +443,10 @@ impl Assembler {
         self,
         name: impl Into<PackageId>,
         root: Box<ast::Module>,
+        support: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<Box<Package>, Report> {
-        self.assemble_kernel_module(name.into(), root)?.into_artifact()
+        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
+            .into_artifact()
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -462,7 +464,7 @@ impl Assembler {
     /// <https://github.com/0xMiden/miden-vm/issues/1436> is implemented.
     #[cfg(feature = "std")]
     pub fn assemble_kernel_from_root(
-        mut self,
+        self,
         name: impl Into<PackageId>,
         sys_module_path: impl AsRef<std::path::Path>,
     ) -> Result<Box<Package>, Report> {
@@ -476,10 +478,8 @@ impl Assembler {
             self.warnings_as_errors,
         )?;
 
-        self.linker.link_modules(support)?;
-
-        let name = name.into();
-        self.assemble_kernel(name, root)
+        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
+            .into_artifact()
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -784,17 +784,11 @@ impl Assembler {
         support: impl IntoIterator<Item = Box<ast::Module>>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let module_indices = self.linker.link([root], support)?;
+        let module_indices = match kind {
+            TargetType::Kernel => self.linker.link_kernel(root, support)?,
+            _ => self.linker.link([root], support)?,
+        };
         self.assemble_library_product(name, &module_indices, kind)
-    }
-
-    pub(crate) fn assemble_kernel_module(
-        mut self,
-        name: PackageId,
-        module: Box<ast::Module>,
-    ) -> Result<AssemblyProduct, Report> {
-        let module_indices = self.linker.link_kernel(module)?;
-        self.assemble_library_product(name, &module_indices, TargetType::Kernel)
     }
 
     pub(crate) fn assemble_executable_modules(

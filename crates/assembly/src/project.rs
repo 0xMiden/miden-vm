@@ -343,12 +343,6 @@ where
             TargetType::Executable => {
                 assembler.assemble_executable_modules(package_id.clone(), root, support)?
             },
-            TargetType::Kernel => {
-                if !support.is_empty() {
-                    assembler.compile_and_statically_link_all(support)?;
-                }
-                assembler.assemble_kernel_module(package_id.clone(), root)?
-            },
             _ if target.ty.is_library() => {
                 assembler.assemble_library_modules(package_id.clone(), root, support, target.ty)?
             },

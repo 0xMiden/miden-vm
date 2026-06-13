@@ -85,7 +85,7 @@ pub fn generate_recursive_verifier_data(
                 let context = miden_assembly::testing::TestContext::new();
                 let kernel = context.parse_kernel(source_file!(&context, kernel)).unwrap();
                 let kernel_lib = Assembler::new(context.source_manager())
-                    .assemble_kernel("kernel", kernel)
+                    .assemble_kernel("kernel", kernel, None)
                     .map(Arc::<Package>::from)
                     .unwrap();
                 let assembler =

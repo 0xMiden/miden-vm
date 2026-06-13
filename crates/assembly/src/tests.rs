@@ -3954,8 +3954,6 @@ fn test_assert_diagnostic_lines() {
 #[test]
 fn nested_blocks() -> Result<(), Report> {
     const KERNEL: &str = r#"
-        namespace $kernel
-
         pub proc foo
             add
         end"#;
@@ -3969,7 +3967,7 @@ fn nested_blocks() -> Result<(), Report> {
     let context = TestContext::new();
     let assembler = {
         let kernel_lib = Assembler::new(context.source_manager())
-            .assemble_kernel("kernel", context.parse_kernel(source_file!(&context, KERNEL))?)
+            .assemble_kernel("kernel", context.parse_kernel(source_file!(&context, KERNEL))?, None)
             .map(Arc::<Package>::from)
             .unwrap();
 
@@ -4416,14 +4414,20 @@ fn module_ordering_can_be_arbitrary() -> Result<(), Report> {
 #[test]
 fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
     const KERNEL: &str = r#"
-        namespace $kernel
-
-        use kernellib::helpers as h
+        mod helpers
+        use external::helpers as h
         pub proc foo
             exec.h::get_caller
+            exec.helpers::get_caller
         end"#;
     const HELPERS: &str = r#"
-        namespace kernellib::helpers
+        namespace $kernel::helpers
+
+        pub proc get_caller
+            caller
+        end"#;
+    const EXTERNAL_HELPERS: &str = r#"
+        namespace external::helpers
 
         pub proc get_caller
             caller
@@ -4437,11 +4441,12 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 
     let kernel_lib = {
         let helpers = context.parse_module(HELPERS)?;
+        let external_helpers = context.parse_module(EXTERNAL_HELPERS)?;
         let kernel = context.parse_kernel(source_file!(&context, KERNEL)).unwrap();
 
         let mut assembler = Assembler::new(context.source_manager());
-        assembler.compile_and_statically_link(helpers)?;
-        assembler.assemble_kernel("kernel", kernel).unwrap()
+        assembler.compile_and_statically_link(external_helpers)?;
+        assembler.assemble_kernel("kernel", kernel, [helpers]).unwrap()
     };
 
     assert_eq!(kernel_lib.to_kernel().ok().map(|k| k.proc_hashes().len()), Some(1));
@@ -4453,19 +4458,48 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 }
 
 #[test]
-fn regression_empty_kernel_library_is_rejected() {
+fn regression_empty_kernel_is_rejected() {
     let context = TestContext::default();
     let source_manager = context.source_manager();
 
     // A kernel module with no exported procedures should be rejected.
-    let kernel_masm = "namespace $kernel\n\npub const FOO = 1\n";
+    let kernel_masm = "pub const FOO = 1\n";
     let err = Assembler::new(source_manager)
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_masm)).unwrap(),
+            None,
         )
         .expect_err("expected empty kernel to be rejected");
     assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
+}
+
+#[test]
+fn regression_empty_kernel_with_submodule_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    // A kernel module with no exported procedures should be rejected.
+    let kernel_masm = "mod sub\n\npub const FOO = 1\n";
+    let submodule_masm = "namespace $kernel::sub\n\npub proc foo push.1 end\n";
+    let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
+    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
+    let err = Assembler::new(source_manager)
+        .assemble_kernel("kernel", kernel_module, [submodule])
+        .expect_err("expected empty kernel to be rejected");
+    assert_diagnostic_lines!(err, "package must contain at least one exported procedure");
+}
+
+#[test]
+fn regression_reexport_procedure_from_kernel_submodule_is_rejected() {
+    let context = TestContext::default();
+
+    // A kernel module with no exported procedures should be rejected.
+    let kernel_masm = "mod sub\n\npub use {foo} from self::sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n";
+    let err = context
+        .parse_kernel(source_file!(&context, kernel_masm))
+        .expect_err("expected sema to reject re-export from kernel module");
+    assert_diagnostic!(err, "invalid re-exported procedure");
 }
 
 /// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
@@ -7046,8 +7080,6 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
     let kernel = context.parse_kernel(source_file!(
         &context,
         r#"
-        namespace $kernel
-
         pub mod lib
 
         proc internal_proc
@@ -7073,11 +7105,7 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
             "#
     ))?;
 
-    let mut assembler = Assembler::new(context.source_manager());
-
-    assembler.compile_and_statically_link(lib)?;
-
-    let _ = assembler.assemble_kernel("kernel", kernel)?;
+    let _ = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, [lib])?;
 
     Ok(())
 }
@@ -7089,8 +7117,6 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
     let kernel = context.parse_kernel(source_file!(
         &context,
         r#"
-        namespace $kernel
-
         pub proc foo
             caller
             drop
@@ -7132,7 +7158,8 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel)?;
+    let kernel =
+        Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, None)?;
     let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
     let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
 
@@ -7166,8 +7193,6 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
     let kernel = context.parse_kernel(source_file!(
         &context,
         r#"
-        namespace $kernel
-
         pub proc foo
             caller
             drop
@@ -7196,7 +7221,8 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
         "#
     );
 
-    let kernel = Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel)?;
+    let kernel =
+        Assembler::new(context.source_manager()).assemble_kernel("kernel", kernel, None)?;
     let lib = Assembler::new(context.source_manager()).assemble_library(
         "lib",
         lib,
@@ -7222,8 +7248,6 @@ fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
     let source_manager = context.source_manager();
 
     let kernel_src = r#"
-namespace $kernel
-
 pub proc k1
     push.1
 end
@@ -7233,6 +7257,7 @@ end
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
+            None,
         )
         .expect("kernel assembly must succeed");
 
@@ -7262,8 +7287,6 @@ fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configu
     let source_manager = context.source_manager();
 
     let kernel_src = r#"
-namespace $kernel
-
 pub proc k1
     push.1
 end
@@ -7273,6 +7296,7 @@ end
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
+            None,
         )
         .expect("kernel assembly must succeed");
 
@@ -7314,8 +7338,6 @@ fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() 
     let source_manager = context.source_manager();
 
     let kernel_src = r#"
-namespace $kernel
-
 pub proc k1
     push.1
 end
@@ -7325,6 +7347,7 @@ end
         .assemble_kernel(
             "kernel",
             context.parse_kernel(source_file!(&context, kernel_src)).unwrap(),
+            None,
         )
         .map(Arc::<Package>::from)
         .expect("kernel assembly must succeed");

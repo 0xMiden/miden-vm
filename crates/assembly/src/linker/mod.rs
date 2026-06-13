@@ -485,7 +485,9 @@ impl Linker {
     pub fn link_kernel(
         &mut self,
         mut kernel: Box<Module>,
+        support: impl IntoIterator<Item = Box<Module>>,
     ) -> Result<Vec<ModuleIndex>, LinkerError> {
+        self.link_modules(support)?;
         let original_module_len = self.modules.len();
         let original_callgraph = self.callgraph.clone();
         let module_index = self.link_module(&mut kernel)?;
@@ -511,21 +513,24 @@ impl Linker {
         let result = (|| {
             let namespaces = NamespaceGraph::build(self)?;
             let imports = namespaces.resolve_imports(self)?;
-            self.link_and_rewrite(&namespaces, &imports)
+            self.link_and_rewrite(&namespaces, &imports)?;
+
+            Ok(namespaces.reachable_from_root(module_index))
         })();
 
-        if let Err(err) = result {
-            self.kernel_index = original_kernel_index;
-            self.callgraph = original_callgraph;
-            self.modules.truncate(original_module_len);
-            for (module_index, module_kind) in original_module_kinds {
-                self.modules[module_index].set_kind(module_kind);
-            }
+        match result {
+            ok @ Ok(_) => ok,
+            err => {
+                self.kernel_index = original_kernel_index;
+                self.callgraph = original_callgraph;
+                self.modules.truncate(original_module_len);
+                for (module_index, module_kind) in original_module_kinds {
+                    self.modules[module_index].set_kind(module_kind);
+                }
 
-            return Err(err);
+                err
+            },
         }
-
-        Ok(vec![module_index])
     }
 
     /// Compute the module graph from the set of pending modules, and link it, rewriting any AST
@@ -1003,6 +1008,7 @@ mod tests {
                 context
                     .parse_kernel(source_file!(&context, kernel_source))
                     .expect("kernel parsing must succeed"),
+                None,
             )
             .expect_err("expected cyclic kernel to be rejected");
 
@@ -1015,6 +1021,7 @@ mod tests {
                 context
                     .parse_kernel(source_file!(&context, kernel_source))
                     .expect("kernel parsing must succeed"),
+                None,
             )
             .expect_err("expected cyclic kernel retry to be rejected");
         assert!(second_err.to_string().contains("found a cycle in the call graph"));

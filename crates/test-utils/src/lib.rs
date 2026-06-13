@@ -467,7 +467,7 @@ impl Test {
             let mut parser = Module::parser(Some(ModuleKind::Kernel));
             let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
             let kernel_lib = Assembler::new(self.source_manager.clone())
-                .assemble_kernel("kernel", kernel)
+                .assemble_kernel("kernel", kernel, None)
                 .map(Arc::<Package>::from)
                 .unwrap();
 

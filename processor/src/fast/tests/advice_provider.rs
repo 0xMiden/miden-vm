@@ -147,7 +147,7 @@ fn test_advice_provider() {
         let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
 
         let kernel_lib = Assembler::new(source_manager.clone())
-            .assemble_kernel("kernel", kernel)
+            .assemble_kernel("kernel", kernel, None)
             .map(Arc::<Package>::from)
             .unwrap();
         let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
