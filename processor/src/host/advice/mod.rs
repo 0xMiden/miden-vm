@@ -18,7 +18,7 @@ use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInt
 // ================================================================================================
 
 /// Maximum number of elements allowed on the advice stack. Set to 2^17.
-const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+pub const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 
 // ADVICE PROVIDER
 // ================================================================================================

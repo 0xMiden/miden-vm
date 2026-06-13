@@ -68,7 +68,7 @@ pub mod advice {
 
     pub use super::host::{
         AdviceMutation,
-        advice::{AdviceError, AdviceProvider},
+        advice::{AdviceError, AdviceProvider, MAX_ADVICE_STACK_SIZE},
     };
 }
 
