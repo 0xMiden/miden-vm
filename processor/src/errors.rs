@@ -1086,8 +1086,8 @@ mod error_assertions {
             ByteIndex::new(30),
             ByteIndex::new(35),
         );
-        let debug_info = PackageDebugInfo {
-            source_map: Some(DebugSourceMapSection::from_parts(
+        let debug_info =
+            PackageDebugInfo::default().with_source_map(DebugSourceMapSection::from_parts(
                 vec![
                     DebugSourceAsmOp::new(
                         source_a,
@@ -1115,9 +1115,7 @@ mod error_assertions {
                     ),
                 ],
                 Vec::new(),
-            )),
-            ..PackageDebugInfo::default()
-        };
+            ));
         let host = RecordingHost {
             expected_location: location_b,
             returned_span: SourceSpan::new(SourceId::new(7), 20u32..24),
@@ -1141,8 +1139,8 @@ mod error_assertions {
     #[test]
     fn package_source_context_without_location_uses_unknown_span() {
         let source_node_id = DebugSourceNodeId::from(0);
-        let debug_info = PackageDebugInfo {
-            source_map: Some(DebugSourceMapSection::from_parts(
+        let debug_info =
+            PackageDebugInfo::default().with_source_map(DebugSourceMapSection::from_parts(
                 vec![DebugSourceAsmOp::new(
                     source_node_id,
                     0,
@@ -1152,9 +1150,7 @@ mod error_assertions {
                     1,
                 )],
                 Vec::new(),
-            )),
-            ..PackageDebugInfo::default()
-        };
+            ));
         let host = RecordingHost {
             expected_location: Location::new(
                 Uri::new("file://unused.masm"),
@@ -1184,12 +1180,10 @@ mod error_assertions {
 
     #[test]
     fn package_debug_info_without_source_node_restores_error_message() {
-        let debug_info = PackageDebugInfo {
-            error_messages: Some(DebugErrorMessagesSection::from_parts(vec![
-                DebugErrorMessage::new(7, Arc::from("some error message")),
-            ])),
-            ..PackageDebugInfo::default()
-        };
+        let debug_info =
+            PackageDebugInfo::default().with_error_messages(DebugErrorMessagesSection::from_parts(
+                vec![DebugErrorMessage::new(7, Arc::from("some error message"))],
+            ));
         let context = PackageSourceDebugContext::new_optional(&debug_info, None);
         let err = Err::<(), _>(OperationError::FailedAssertion {
             err_code: Felt::from_u32(7),
@@ -1225,12 +1219,10 @@ mod error_assertions {
 
     #[test]
     fn package_debug_info_restores_merkle_path_error_message() {
-        let debug_info = PackageDebugInfo {
-            error_messages: Some(DebugErrorMessagesSection::from_parts(vec![
-                DebugErrorMessage::new(7, Arc::from("some error message")),
-            ])),
-            ..PackageDebugInfo::default()
-        };
+        let debug_info =
+            PackageDebugInfo::default().with_error_messages(DebugErrorMessagesSection::from_parts(
+                vec![DebugErrorMessage::new(7, Arc::from("some error message"))],
+            ));
         let err = OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: Word::default(),

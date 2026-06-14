@@ -8,7 +8,7 @@
 //! The debug info section contains:
 //! - **Type definitions**: Describe the types of variables (primitives, structs, arrays, etc.)
 //! - **Source file paths**: Deduplicated file paths for source locations
-//! - **Function metadata**: Function signatures, local variables, and inline call sites
+//! - **Function metadata**: Function signatures and source locations
 //!
 //! # Usage
 //!
@@ -269,7 +269,9 @@ impl DebugSourcesSection {
 // ================================================================================================
 
 /// The version of the debug_functions section format.
-pub const DEBUG_FUNCTIONS_VERSION: u8 = 1;
+///
+/// Version 2 removes the version 1 local-variable and inline-call payloads.
+pub const DEBUG_FUNCTIONS_VERSION: u8 = 2;
 /// The version of the debug_source_graph section format.
 pub const DEBUG_SOURCE_GRAPH_VERSION: u8 = 1;
 /// The version of the debug_source_map section format.
@@ -277,10 +279,9 @@ pub const DEBUG_SOURCE_MAP_VERSION: u8 = 1;
 /// The version of the debug_error_messages section format.
 pub const DEBUG_ERROR_MESSAGES_VERSION: u8 = 1;
 
-/// Debug functions section containing function metadata, variables, and inlined calls.
+/// Debug functions section containing function metadata.
 ///
-/// This section stores function debug information including local variables and
-/// inlined call sites.
+/// This section stores function debug information.
 ///
 /// String indices in sub-types (e.g., `name_idx` in `DebugFunctionInfo`) are relative
 /// to this section's own string table.
@@ -289,7 +290,7 @@ pub const DEBUG_ERROR_MESSAGES_VERSION: u8 = 1;
 pub struct DebugFunctionsSection {
     /// Version of the debug functions format
     pub version: u8,
-    /// String table containing function names, variable names, linkage names
+    /// String table containing function names and linkage names
     pub strings: Vec<Arc<str>>,
     /// Function debug information
     pub functions: Vec<DebugFunctionInfo>,
@@ -339,20 +340,80 @@ impl DebugFunctionsSection {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageDebugInfo {
     /// Type definitions for source-level debug consumers.
-    pub types: Option<DebugTypesSection>,
+    pub(crate) types: Option<DebugTypesSection>,
     /// Source file table.
-    pub sources: Option<DebugSourcesSection>,
+    pub(crate) sources: Option<DebugSourcesSection>,
     /// Function metadata.
-    pub functions: Option<DebugFunctionsSection>,
+    pub(crate) functions: Option<DebugFunctionsSection>,
     /// Source/debug MAST occurrence graph.
-    pub source_graph: Option<DebugSourceGraphSection>,
+    pub(crate) source_graph: Option<DebugSourceGraphSection>,
     /// Source-keyed assembly operation and debug variable rows.
-    pub source_map: Option<DebugSourceMapSection>,
+    pub(crate) source_map: Option<DebugSourceMapSection>,
     /// Assertion error messages keyed by runtime error code.
-    pub error_messages: Option<DebugErrorMessagesSection>,
+    pub(crate) error_messages: Option<DebugErrorMessagesSection>,
 }
 
 impl PackageDebugInfo {
+    /// Creates debug info with source/debug graph and map sections.
+    pub fn with_source_debug(
+        source_graph: DebugSourceGraphSection,
+        source_map: DebugSourceMapSection,
+    ) -> Self {
+        Self {
+            source_graph: Some(source_graph),
+            source_map: Some(source_map),
+            ..Self::default()
+        }
+    }
+
+    /// Sets the source/debug graph section.
+    pub fn with_source_graph(mut self, source_graph: DebugSourceGraphSection) -> Self {
+        self.source_graph = Some(source_graph);
+        self
+    }
+
+    /// Sets the source/debug map section.
+    pub fn with_source_map(mut self, source_map: DebugSourceMapSection) -> Self {
+        self.source_map = Some(source_map);
+        self
+    }
+
+    /// Sets the assertion error messages section.
+    pub fn with_error_messages(mut self, error_messages: DebugErrorMessagesSection) -> Self {
+        self.error_messages = Some(error_messages);
+        self
+    }
+
+    /// Returns the type definitions section, if present.
+    pub fn types(&self) -> Option<&DebugTypesSection> {
+        self.types.as_ref()
+    }
+
+    /// Returns the source file table section, if present.
+    pub fn sources(&self) -> Option<&DebugSourcesSection> {
+        self.sources.as_ref()
+    }
+
+    /// Returns the function metadata section, if present.
+    pub fn functions(&self) -> Option<&DebugFunctionsSection> {
+        self.functions.as_ref()
+    }
+
+    /// Returns the source/debug graph section, if present.
+    pub fn source_graph(&self) -> Option<&DebugSourceGraphSection> {
+        self.source_graph.as_ref()
+    }
+
+    /// Returns the source/debug map section, if present.
+    pub fn source_map(&self) -> Option<&DebugSourceMapSection> {
+        self.source_map.as_ref()
+    }
+
+    /// Returns the assertion error messages section, if present.
+    pub fn error_messages(&self) -> Option<&DebugErrorMessagesSection> {
+        self.error_messages.as_ref()
+    }
+
     /// Returns true if no package debug sections were decoded.
     pub fn is_empty(&self) -> bool {
         self.types.is_none()
@@ -1086,36 +1147,6 @@ pub enum DebugPrimitiveType {
 }
 
 impl DebugPrimitiveType {
-    /// Returns the size of this primitive type in bytes.
-    pub const fn size_in_bytes(self) -> u32 {
-        match self {
-            Self::Void => 0,
-            Self::Bool | Self::I8 | Self::U8 => 1,
-            Self::I16 | Self::U16 => 2,
-            Self::I32 | Self::U32 | Self::F32 => 4,
-            Self::I64 | Self::U64 | Self::F64 | Self::Felt => 8,
-            Self::I128 | Self::U128 => 16,
-            Self::Word | Self::U256 => 32,
-        }
-    }
-
-    /// Returns the size of this primitive type in Miden stack elements (felts).
-    pub const fn size_in_felts(self) -> u32 {
-        match self {
-            Self::Void => 0,
-            Self::Bool
-            | Self::I8
-            | Self::U8
-            | Self::I16
-            | Self::U16
-            | Self::I32
-            | Self::U32
-            | Self::Felt => 1,
-            Self::I64 | Self::U64 | Self::F32 | Self::F64 => 2,
-            Self::I128 | Self::U128 | Self::Word | Self::U256 => 4,
-        }
-    }
-
     /// Converts a discriminant byte to a primitive type.
     pub fn from_discriminant(discriminant: u8) -> Option<Self> {
         match discriminant {
@@ -1210,8 +1241,7 @@ impl DebugFileInfo {
 
 /// Debug information for a function.
 ///
-/// Links source-level function information to the compiled MAST representation,
-/// including local variables and inlined call sites.
+/// Links source-level function information to the compiled MAST representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFunctionInfo {
@@ -1230,10 +1260,6 @@ pub struct DebugFunctionInfo {
     /// MAST root digest of this function (if known).
     /// This links the debug info to the compiled code.
     pub mast_root: Option<Word>,
-    /// Local variables declared in this function
-    pub variables: Vec<DebugVariableInfo>,
-    /// Inline call sites within this function
-    pub inlined_calls: Vec<DebugInlinedCallInfo>,
 }
 
 impl DebugFunctionInfo {
@@ -1247,8 +1273,6 @@ impl DebugFunctionInfo {
             column,
             type_idx: None,
             mast_root: None,
-            variables: Vec::new(),
-            inlined_calls: Vec::new(),
         }
     }
 
@@ -1268,124 +1292,6 @@ impl DebugFunctionInfo {
     pub fn with_mast_root(mut self, mast_root: Word) -> Self {
         self.mast_root = Some(mast_root);
         self
-    }
-
-    /// Adds a variable to this function.
-    pub fn add_variable(&mut self, variable: DebugVariableInfo) {
-        self.variables.push(variable);
-    }
-
-    /// Adds an inlined call site.
-    pub fn add_inlined_call(&mut self, call: DebugInlinedCallInfo) {
-        self.inlined_calls.push(call);
-    }
-}
-
-// DEBUG VARIABLE INFO
-// ================================================================================================
-
-/// Debug information for a local variable or parameter.
-///
-/// This struct captures the source-level information about a variable, enabling
-/// debuggers to display variable names, types, and locations to users.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DebugVariableInfo {
-    /// Name of the variable (index into string table)
-    pub name_idx: u32,
-    /// Type of the variable (index into type table)
-    pub type_idx: DebugTypeIdx,
-    /// If this is a parameter, its 1-based index (0 = not a parameter)
-    pub arg_index: u32,
-    /// Line where the variable is declared (1-indexed)
-    pub line: LineNumber,
-    /// Column where the variable is declared (1-indexed)
-    pub column: ColumnNumber,
-    /// Scope depth indicating the lexical nesting level of this variable.
-    ///
-    /// - `0` = function-level scope (parameters and variables at function body level)
-    /// - `1` = first nested block (e.g., inside an `if` or `loop`)
-    /// - `2` = second nested block, and so on
-    ///
-    /// This is used by debuggers to:
-    /// 1. Determine variable visibility at a given execution point
-    /// 2. Handle variable shadowing (a variable with the same name but higher depth shadows one
-    ///    with lower depth when both are in scope)
-    /// 3. Display variables grouped by their scope level
-    ///
-    /// For example, in:
-    /// ```text
-    /// fn foo(x: i32) {           // x has scope_depth 0
-    ///     let y = 1;             // y has scope_depth 0
-    ///     if condition {
-    ///         let z = 2;         // z has scope_depth 1
-    ///         let x = 3;         // this x has scope_depth 1, shadows parameter x
-    ///     }
-    /// }
-    /// ```
-    pub scope_depth: u32,
-}
-
-impl DebugVariableInfo {
-    /// Creates a new variable info.
-    pub fn new(
-        name_idx: u32,
-        type_idx: DebugTypeIdx,
-        line: LineNumber,
-        column: ColumnNumber,
-    ) -> Self {
-        Self {
-            name_idx,
-            type_idx,
-            arg_index: 0,
-            line,
-            column,
-            scope_depth: 0,
-        }
-    }
-
-    /// Sets this variable as a parameter with the given 1-based index.
-    pub fn with_arg_index(mut self, arg_index: u32) -> Self {
-        self.arg_index = arg_index;
-        self
-    }
-
-    /// Sets the scope depth.
-    pub fn with_scope_depth(mut self, scope_depth: u32) -> Self {
-        self.scope_depth = scope_depth;
-        self
-    }
-
-    /// Returns true if this variable is a function parameter.
-    pub fn is_parameter(&self) -> bool {
-        self.arg_index > 0
-    }
-}
-
-// DEBUG INLINED CALL INFO
-// ================================================================================================
-
-/// Debug information for an inlined function call.
-///
-/// Captures the call site location when a function has been inlined,
-/// enabling debuggers to show the original call stack.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DebugInlinedCallInfo {
-    /// The function that was inlined (index into function table)
-    pub callee_idx: u32,
-    /// Call site file (index into file table)
-    pub file_idx: u32,
-    /// Call site line number (1-indexed)
-    pub line: LineNumber,
-    /// Call site column number (1-indexed)
-    pub column: ColumnNumber,
-}
-
-impl DebugInlinedCallInfo {
-    /// Creates a new inlined call info.
-    pub fn new(callee_idx: u32, file_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
-        Self { callee_idx, file_idx, line, column }
     }
 }
 
@@ -1682,22 +1588,6 @@ mod tests {
             Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
         );
         assert_eq!(package_debug.child_source_node(root, 1).unwrap().unwrap().0, child_b);
-    }
-
-    #[test]
-    fn test_primitive_type_sizes() {
-        assert_eq!(DebugPrimitiveType::Void.size_in_bytes(), 0);
-        assert_eq!(DebugPrimitiveType::I32.size_in_bytes(), 4);
-        assert_eq!(DebugPrimitiveType::I64.size_in_bytes(), 8);
-        assert_eq!(DebugPrimitiveType::Felt.size_in_bytes(), 8);
-        assert_eq!(DebugPrimitiveType::Word.size_in_bytes(), 32);
-        assert_eq!(DebugPrimitiveType::U256.size_in_bytes(), 32);
-
-        assert_eq!(DebugPrimitiveType::Void.size_in_felts(), 0);
-        assert_eq!(DebugPrimitiveType::I32.size_in_felts(), 1);
-        assert_eq!(DebugPrimitiveType::I64.size_in_felts(), 2);
-        assert_eq!(DebugPrimitiveType::Word.size_in_felts(), 4);
-        assert_eq!(DebugPrimitiveType::U256.size_in_felts(), 4);
     }
 
     #[test]

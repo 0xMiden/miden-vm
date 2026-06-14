@@ -10,8 +10,9 @@ use miden_core::{
 use miden_mast_package::{
     PackageExport, ProcedureExport, Section, SectionId,
     debug_info::{
-        DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection,
-        DebugSourceNode, DebugSourceNodeId, DebugSourceVar, DebugSourcesSection, DebugTypesSection,
+        DEBUG_FUNCTIONS_VERSION, DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection,
+        DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
+        DebugSourcesSection, DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -58,8 +59,7 @@ end
         dev.debug_info()
             .expect("dev package debug info should decode")
             .expect("dev package should contain debug info")
-            .source_map
-            .as_ref()
+            .source_map()
             .is_some_and(|source_map| !source_map.asm_ops().is_empty())
     );
     assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
@@ -260,7 +260,7 @@ end
     let mut functions_reader = SliceReader::new(debug_functions.data.as_ref());
     let debug_functions = DebugFunctionsSection::read_from(&mut functions_reader)
         .expect("DEBUG_FUNCTIONS should deserialize");
-    assert_eq!(debug_functions.version, 1);
+    assert_eq!(debug_functions.version, DEBUG_FUNCTIONS_VERSION);
     assert_eq!(debug_functions.functions.len(), 1);
 
     let mut types_reader = SliceReader::new(debug_types.data.as_ref());
@@ -563,8 +563,7 @@ end
         .expect("root package should contain debug info");
     let source_for_context = |context_name: &str| {
         debug_info
-            .source_map
-            .as_ref()
+            .source_map()
             .expect("root package should contain source map")
             .asm_ops()
             .iter()
@@ -668,7 +667,7 @@ end
         .debug_info()
         .expect("package debug info should decode")
         .expect("package should contain debug info")
-        .source_map
+        .source_map()
         .expect("package should contain source map")
         .asm_ops()
         .iter()

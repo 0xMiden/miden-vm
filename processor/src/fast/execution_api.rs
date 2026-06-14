@@ -463,8 +463,7 @@ impl FastProcessor {
                 BreakReason::Err(err) => Err(err),
                 BreakReason::Stopped(maybe_continuation) => {
                     if let Some((continuation, source_node_id)) = maybe_continuation {
-                        continuation_stack
-                            .push_continuation_with_source_node_id(continuation, source_node_id);
+                        continuation_stack.push_with_source_node_id(continuation, source_node_id);
                     }
 
                     Ok(Some(ResumeContext {

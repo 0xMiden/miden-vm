@@ -43,15 +43,17 @@ where
         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
     };
 
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::FinishJoin(node_id),
+        state.current_source_node_id(),
+    );
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::StartNode(join_node.second()),
+        second_source_node_id,
+    );
     state
         .continuation_stack
-        .push_finish_join_with_source_node_id(node_id, state.current_source_node_id());
-    state
-        .continuation_stack
-        .push_start_node_with_source_node_id(join_node.second(), second_source_node_id);
-    state
-        .continuation_stack
-        .push_start_node_with_source_node_id(join_node.first(), first_source_node_id);
+        .push_with_source_node_id(Continuation::StartNode(join_node.first()), first_source_node_id);
 
     // Finalize the clock cycle corresponding to the JOIN operation.
     finalize_clock_cycle(

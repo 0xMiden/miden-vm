@@ -279,16 +279,16 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
     let source_root = DebugSourceNodeId::from(0);
     let source_true = DebugSourceNodeId::from(1);
     let source_false = DebugSourceNodeId::from(2);
-    let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection::from_parts(
+    let package_debug_info = PackageDebugInfo::with_source_debug(
+        DebugSourceGraphSection::from_parts(
             vec![
                 DebugSourceNode::new(root_id, vec![source_true, source_false], 0, 1),
                 DebugSourceNode::new(block_id, vec![], 0, 1),
                 DebugSourceNode::new(block_id, vec![], 0, 1),
             ],
             vec![source_root],
-        )),
-        source_map: Some(DebugSourceMapSection::from_parts(
+        ),
+        DebugSourceMapSection::from_parts(
             vec![
                 DebugSourceAsmOp::new(
                     source_true,
@@ -308,9 +308,8 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
                 ),
             ],
             Vec::new(),
-        )),
-        ..PackageDebugInfo::default()
-    };
+        ),
+    );
 
     let processor = FastProcessor::new(StackInputs::default());
     let err = processor
@@ -361,17 +360,15 @@ fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
     let source_entry = DebugSourceNodeId::from(0);
     let source_callee_a = DebugSourceNodeId::from(1);
     let source_callee_b = DebugSourceNodeId::from(2);
-    let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection::from_parts(
+    let package_debug_info =
+        PackageDebugInfo::default().with_source_graph(DebugSourceGraphSection::from_parts(
             vec![
                 DebugSourceNode::new(entrypoint, vec![], 0, 1),
                 DebugSourceNode::new(callee_root, vec![], 0, 1),
                 DebugSourceNode::new(callee_root, vec![], 0, 1),
             ],
             vec![source_entry, source_callee_a, source_callee_b],
-        )),
-        ..PackageDebugInfo::default()
-    };
+        ));
 
     let processor = FastProcessor::new(StackInputs::default());
     let err = processor
@@ -414,15 +411,15 @@ fn missing_external_package_source_debug_fixture() -> (
     let source_root = DebugSourceNodeId::from(0);
     let source_external = DebugSourceNodeId::from(1);
     let expected_span = SourceSpan::new(source_file.id(), 10u32..28);
-    let package_debug_info = PackageDebugInfo {
-        source_graph: Some(DebugSourceGraphSection::from_parts(
+    let package_debug_info = PackageDebugInfo::with_source_debug(
+        DebugSourceGraphSection::from_parts(
             vec![
                 DebugSourceNode::new(root_id, vec![source_external], 0, 1),
                 DebugSourceNode::new(external_id, vec![], 0, 1),
             ],
             vec![source_root],
-        )),
-        source_map: Some(DebugSourceMapSection::from_parts(
+        ),
+        DebugSourceMapSection::from_parts(
             vec![DebugSourceAsmOp::new(
                 source_external,
                 0,
@@ -432,9 +429,8 @@ fn missing_external_package_source_debug_fixture() -> (
                 2,
             )],
             Vec::new(),
-        )),
-        ..PackageDebugInfo::default()
-    };
+        ),
+    );
 
     (program, package_debug_info, host, expected_span, source_file)
 }

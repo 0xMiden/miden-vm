@@ -404,8 +404,7 @@ where
         current_forest,
     )?;
 
-    continuation_stack
-        .push_continuation_with_source_node_id(post_emit_continuation, source_node_id);
+    continuation_stack.push_with_source_node_id(post_emit_continuation, source_node_id);
 
     ControlFlow::Continue(())
 }

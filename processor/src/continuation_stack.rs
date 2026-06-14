@@ -145,7 +145,7 @@ impl<F> ContinuationStack<F> {
         self.push_source_node_id(None);
     }
 
-    pub(crate) fn push_continuation_with_source_node_id(
+    pub(crate) fn push_with_source_node_id(
         &mut self,
         continuation: Continuation<F>,
         source_node_id: Option<DebugSourceNodeId>,
@@ -169,28 +169,10 @@ impl<F> ContinuationStack<F> {
         self.push_source_node_id(None);
     }
 
-    pub(crate) fn push_finish_join_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::FinishJoin(node_id));
-        self.push_source_node_id(source_node_id);
-    }
-
     /// Pushes a split finish continuation onto the stack.
     pub fn push_finish_split(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishSplit(node_id));
         self.push_source_node_id(None);
-    }
-
-    pub(crate) fn push_finish_split_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::FinishSplit(node_id));
-        self.push_source_node_id(source_node_id);
     }
 
     /// Pushes a loop finish continuation onto the stack.
@@ -199,43 +181,16 @@ impl<F> ContinuationStack<F> {
         self.push_source_node_id(None);
     }
 
-    pub(crate) fn push_finish_loop_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::FinishLoop(node_id));
-        self.push_source_node_id(source_node_id);
-    }
-
     /// Pushes a call finish continuation onto the stack.
     pub fn push_finish_call(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishCall(node_id));
         self.push_source_node_id(None);
     }
 
-    pub(crate) fn push_finish_call_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::FinishCall(node_id));
-        self.push_source_node_id(source_node_id);
-    }
-
     /// Pushes a dyn finish continuation onto the stack.
     pub fn push_finish_dyn(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishDyn(node_id));
         self.push_source_node_id(None);
-    }
-
-    pub(crate) fn push_finish_dyn_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::FinishDyn(node_id));
-        self.push_source_node_id(source_node_id);
     }
 
     /// Pushes a continuation to start processing the given node.
@@ -245,15 +200,6 @@ impl<F> ContinuationStack<F> {
     pub fn push_start_node(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::StartNode(node_id));
         self.push_source_node_id(None);
-    }
-
-    pub(crate) fn push_start_node_with_source_node_id(
-        &mut self,
-        node_id: MastNodeId,
-        source_node_id: Option<DebugSourceNodeId>,
-    ) {
-        self.stack.push(Continuation::StartNode(node_id));
-        self.push_source_node_id(source_node_id);
     }
 
     /// Pops the next continuation from the continuation stack, and returns it along with its

@@ -30,7 +30,7 @@ impl SectionId {
     pub const DEBUG_TYPES: Self = Self(Cow::Borrowed("debug_types"));
     /// The section containing debug source file paths and checksums
     pub const DEBUG_SOURCES: Self = Self(Cow::Borrowed("debug_sources"));
-    /// The section containing debug function metadata, variables, and inlined calls
+    /// The section containing debug function metadata
     pub const DEBUG_FUNCTIONS: Self = Self(Cow::Borrowed("debug_functions"));
     /// The section containing source/debug MAST occurrence graph topology
     pub const DEBUG_SOURCE_GRAPH: Self = Self(Cow::Borrowed("debug_source_graph"));

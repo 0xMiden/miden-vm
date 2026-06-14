@@ -13,10 +13,9 @@ use super::{
     DEBUG_ERROR_MESSAGES_VERSION, DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_GRAPH_VERSION,
     DEBUG_SOURCE_MAP_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugErrorMessage,
     DebugErrorMessagesSection, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
-    DebugFunctionsSection, DebugInlinedCallInfo, DebugPrimitiveType, DebugSourceAsmOp,
-    DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
-    DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
-    DebugVariableInfo, DebugVariantInfo,
+    DebugFunctionsSection, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceGraphSection,
+    DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar, DebugSourcesSection,
+    DebugTypeIdx, DebugTypeInfo, DebugTypesSection, DebugVariantInfo,
 };
 
 // DEBUG TYPES SECTION SERIALIZATION
@@ -625,18 +624,6 @@ impl Serializable for DebugFunctionInfo {
         if let Some(root) = &self.mast_root {
             root.write_into(target);
         }
-
-        // Write variables
-        target.write_usize(self.variables.len());
-        for var in &self.variables {
-            var.write_into(target);
-        }
-
-        // Write inlined calls
-        target.write_usize(self.inlined_calls.len());
-        for call in &self.inlined_calls {
-            call.write_into(target);
-        }
     }
 }
 
@@ -671,14 +658,6 @@ impl Deserializable for DebugFunctionInfo {
             None
         };
 
-        // Read variables
-        let vars_len = source.read_usize()?;
-        let variables = source.read_many_iter(vars_len)?.collect::<Result<_, _>>()?;
-
-        // Read inlined calls
-        let calls_len = source.read_usize()?;
-        let inlined_calls = source.read_many_iter(calls_len)?.collect::<Result<_, _>>()?;
-
         Ok(Self {
             name_idx,
             linkage_name_idx,
@@ -687,68 +666,7 @@ impl Deserializable for DebugFunctionInfo {
             column,
             type_idx,
             mast_root,
-            variables,
-            inlined_calls,
         })
-    }
-}
-
-// DEBUG VARIABLE INFO SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugVariableInfo {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.name_idx);
-        target.write_u32(self.type_idx.as_u32());
-        target.write_u32(self.arg_index);
-        target.write_u32(self.line.to_u32());
-        target.write_u32(self.column.to_u32());
-        target.write_u32(self.scope_depth);
-    }
-}
-
-impl Deserializable for DebugVariableInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name_idx = source.read_u32()?;
-        let type_idx = DebugTypeIdx::from(source.read_u32()?);
-        let arg_index = source.read_u32()?;
-        let line_raw = source.read_u32()?;
-        let column_raw = source.read_u32()?;
-        let line = LineNumber::new(line_raw).unwrap_or_default();
-        let column = ColumnNumber::new(column_raw).unwrap_or_default();
-        let scope_depth = source.read_u32()?;
-        Ok(Self {
-            name_idx,
-            type_idx,
-            arg_index,
-            line,
-            column,
-            scope_depth,
-        })
-    }
-}
-
-// DEBUG INLINED CALL INFO SERIALIZATION
-// ================================================================================================
-
-impl Serializable for DebugInlinedCallInfo {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.callee_idx);
-        target.write_u32(self.file_idx);
-        target.write_u32(self.line.to_u32());
-        target.write_u32(self.column.to_u32());
-    }
-}
-
-impl Deserializable for DebugInlinedCallInfo {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let callee_idx = source.read_u32()?;
-        let file_idx = source.read_u32()?;
-        let line_raw = source.read_u32()?;
-        let column_raw = source.read_u32()?;
-        let line = LineNumber::new(line_raw).unwrap_or_default();
-        let column = ColumnNumber::new(column_raw).unwrap_or_default();
-        Ok(Self { callee_idx, file_idx, line, column })
     }
 }
 
@@ -933,14 +851,7 @@ mod tests {
 
         let line = LineNumber::new(10).unwrap();
         let column = ColumnNumber::new(1).unwrap();
-        let mut func = DebugFunctionInfo::new(name_idx, 0, line, column);
-        let var_name_idx = section.add_string(Arc::from("x"));
-        let var_line = LineNumber::new(10).unwrap();
-        let var_column = ColumnNumber::new(5).unwrap();
-        func.add_variable(
-            DebugVariableInfo::new(var_name_idx, DebugTypeIdx::from(0), var_line, var_column)
-                .with_arg_index(1),
-        );
+        let func = DebugFunctionInfo::new(name_idx, 0, line, column);
         section.add_function(func);
 
         roundtrip(&section);
@@ -1065,24 +976,23 @@ mod tests {
     fn test_function_with_mast_root_roundtrip() {
         let line1 = LineNumber::new(1).unwrap();
         let col1 = ColumnNumber::new(1).unwrap();
-        let mut func = DebugFunctionInfo::new(0, 0, line1, col1)
+        let func = DebugFunctionInfo::new(0, 0, line1, col1)
             .with_linkage_name(1)
             .with_type(DebugTypeIdx::from(2))
             .with_mast_root(Word::default());
 
-        let var_line = LineNumber::new(5).unwrap();
-        let var_col = ColumnNumber::new(10).unwrap();
-        func.add_variable(
-            DebugVariableInfo::new(0, DebugTypeIdx::from(0), var_line, var_col)
-                .with_arg_index(1)
-                .with_scope_depth(2),
-        );
-
-        let call_line = LineNumber::new(20).unwrap();
-        let call_col = ColumnNumber::new(5).unwrap();
-        func.add_inlined_call(DebugInlinedCallInfo::new(0, 0, call_line, call_col));
-
         roundtrip(&func);
+    }
+
+    #[test]
+    fn test_debug_functions_v1_is_rejected() {
+        let bytes = section_with_strings(1, 0);
+        let mut reader = miden_core::serde::SliceReader::new(&bytes);
+        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("unsupported debug_functions version: 1"));
     }
 
     #[test]

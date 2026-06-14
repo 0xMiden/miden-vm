@@ -4,7 +4,7 @@ use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
     BreakReason,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
@@ -90,7 +90,8 @@ where
     //
     // Caller package debug info describes the forest that contained the `External` node, not the
     // loaded forest. The loaded root therefore starts without a source sidecar here.
-    continuation_stack.push_start_node_with_source_node_id(resolved_node_id_new_forest, None);
+    continuation_stack
+        .push_with_source_node_id(Continuation::StartNode(resolved_node_id_new_forest), None);
 
     // Update the current forest to the new MAST forest.
     *current_forest = new_mast_forest;

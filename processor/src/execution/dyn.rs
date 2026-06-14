@@ -95,9 +95,10 @@ where
 
     // Update continuation stack
     // -----------------------------
-    state
-        .continuation_stack
-        .push_finish_dyn_with_source_node_id(current_node_id, state.current_source_node_id());
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::FinishDyn(current_node_id),
+        state.current_source_node_id(),
+    );
 
     // if the callee is not in the program's MAST forest, then we need to break to allow the
     // implementing processor to fetch it (possibly asynchronously in an external library in the
@@ -120,7 +121,7 @@ where
             };
             state
                 .continuation_stack
-                .push_start_node_with_source_node_id(callee_id, source_node_id);
+                .push_with_source_node_id(Continuation::StartNode(callee_id), source_node_id);
         },
         None => {
             // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some

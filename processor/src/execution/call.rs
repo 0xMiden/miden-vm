@@ -90,12 +90,14 @@ where
         Ok(source_node_id) => source_node_id,
         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
     };
-    state
-        .continuation_stack
-        .push_finish_call_with_source_node_id(current_node_id, state.current_source_node_id());
-    state
-        .continuation_stack
-        .push_start_node_with_source_node_id(call_node.callee(), callee_source_node_id);
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::FinishCall(current_node_id),
+        state.current_source_node_id(),
+    );
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::StartNode(call_node.callee()),
+        callee_source_node_id,
+    );
 
     // Finalize the clock cycle corresponding to the CALL or SYSCALL operation.
     finalize_clock_cycle(

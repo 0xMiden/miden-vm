@@ -50,12 +50,13 @@ where
         Ok(source_node_id) => source_node_id,
         Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
     };
+    state.continuation_stack.push_with_source_node_id(
+        Continuation::FinishLoop(current_node_id),
+        state.current_source_node_id(),
+    );
     state
         .continuation_stack
-        .push_finish_loop_with_source_node_id(current_node_id, state.current_source_node_id());
-    state
-        .continuation_stack
-        .push_start_node_with_source_node_id(loop_node.body(), body_source_node_id);
+        .push_with_source_node_id(Continuation::StartNode(loop_node.body()), body_source_node_id);
 
     // Finalize the clock cycle corresponding to the LOOP operation.
     finalize_clock_cycle(
@@ -150,12 +151,14 @@ where
             Ok(source_node_id) => source_node_id,
             Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
         };
-        state
-            .continuation_stack
-            .push_finish_loop_with_source_node_id(current_node_id, state.current_source_node_id());
-        state
-            .continuation_stack
-            .push_start_node_with_source_node_id(loop_node.body(), body_source_node_id);
+        state.continuation_stack.push_with_source_node_id(
+            Continuation::FinishLoop(current_node_id),
+            state.current_source_node_id(),
+        );
+        state.continuation_stack.push_with_source_node_id(
+            Continuation::StartNode(loop_node.body()),
+            body_source_node_id,
+        );
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
         finalize_clock_cycle(
