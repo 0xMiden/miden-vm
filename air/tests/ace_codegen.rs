@@ -206,12 +206,12 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
 
     // Combined widths concatenate each per-AIR matrix after LMCS alignment.
     assert_eq!(
-        layout.counts.width, 104,
+        layout.counts.width, 176,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 16,
-        "combined aux_width must include Core, Chiplets, Poseidon2Permutation, and And8Lookup"
+        layout.counts.aux_width, 32,
+        "combined aux_width must include Core, Chiplets, BlakeGCompression, and And8Lookup"
     );
     assert_eq!(layout.counts.num_aux_boundary, 4, "one boundary slot per AIR");
 
@@ -281,4 +281,25 @@ fn multi_air_ace_circuit_evaluates_without_panic() {
     // failure mode that surfaces if the chiplets-side index rewrite was wrong.
     let inputs: Vec<QuadFelt> = fill_inputs(layout);
     let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
+}
+
+#[test]
+fn multi_air_ace_circuits_evaluate_without_panic_for_all_orders() {
+    use miden_air::{ProofOrder, ace::build_multi_air_ace_circuit_for_order};
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    for order in ProofOrder::variants() {
+        let circuit = build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order)
+            .expect("multi-AIR ACE circuit");
+        let inputs: Vec<QuadFelt> = fill_inputs(circuit.layout());
+        let _ = circuit
+            .eval(&inputs)
+            .unwrap_or_else(|err| panic!("{} circuit eval failed: {err}", order.label()));
+    }
 }

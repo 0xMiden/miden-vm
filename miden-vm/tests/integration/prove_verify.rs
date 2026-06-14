@@ -70,7 +70,7 @@ fn assert_recursive_verify(
     pc_transcript_state: PrecompileTranscriptState,
     proof: &ExecutionProof,
 ) {
-    assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
+    assert_eq!(proof.hash_fn(), HashFunction::Eidos);
 
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
@@ -154,7 +154,7 @@ fn test_rpo_prove_verify() {
 }
 
 #[test]
-fn test_poseidon2_prove_verify() {
+fn test_eidos_recursive_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin
@@ -164,7 +164,7 @@ fn test_poseidon2_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", true, true);
 }
 
 /// Sanity test that the multi-AIR Rust prover + Rust verifier work end-to-end with Poseidon2,
@@ -191,7 +191,7 @@ fn test_equal_heights_recursive() {
             push.1 drop
         end
     ";
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", false, true);
+    assert_prove_verify(source, HashFunction::Eidos, "Eidos", false, true);
 }
 
 /// Hash-heavy program where `chip_height > core_height`. Regression for per-AIR-height
@@ -202,7 +202,7 @@ fn test_hash_heavy_divergent_heights() {
         begin
             padw padw padw
             repeat.20
-                hperm
+                bcompress
             end
             dropw dropw dropw
         end
@@ -316,7 +316,7 @@ mod fast_parallel {
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
         // Multi-AIR splitting: derive one matrix per Miden AIR instance.
-        let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix) =
+        let (core_matrix, chiplets_matrix, blakeg_compression_matrix, and8_lookup_matrix) =
             trace.to_air_matrices();
 
         // Generate proof using Blake3_256
@@ -325,7 +325,7 @@ mod fast_parallel {
             &blake3_config,
             core_matrix,
             chiplets_matrix,
-            poseidon2_permutation_matrix,
+            blakeg_compression_matrix,
             and8_lookup_matrix,
             &public_values,
             &kernel_felts,
@@ -393,7 +393,7 @@ mod fast_parallel {
     }
 
     #[test]
-    fn test_poseidon2_recursive_verify_with_precompile_requests() {
+    fn test_eidos_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,
             stack_inputs,
@@ -401,7 +401,7 @@ mod fast_parallel {
             proof,
             verifier_registry,
             expected_transcript,
-        } = prove_logged_precompile_fixture(HashFunction::Poseidon2);
+        } = prove_logged_precompile_fixture(HashFunction::Eidos);
 
         super::assert_recursive_verify(
             program.to_info(),

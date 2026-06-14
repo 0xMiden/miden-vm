@@ -13,7 +13,7 @@
 //!
 //! | s0 | s1 | s2 | Row type | Flag |
 //! |----|----|----|----------|------|
-//! |  1 |  0 |  0 | Sponge input (LINEAR_HASH / 2-to-1 / HPERM) | `is_sponge_input` |
+//! |  1 |  0 |  0 | Hash input (LINEAR_HASH / 2-to-1 / BCOMPRESS) | `is_hash_input` |
 //! |  1 |  0 |  1 | MP input (Merkle path verify) | `is_merkle_input` |
 //! |  1 |  1 |  0 | MV input (old-path Merkle root update) | `is_merkle_input` / `is_mv_input` |
 //! |  1 |  1 |  1 | MU input (new-path Merkle root update) | `is_merkle_input` |
@@ -27,9 +27,10 @@
 //!
 //! ## Operation semantics
 //!
-//! - **Sponge** (`is_sponge_input`): LINEAR_HASH (multi-batch span), single 2-to-1 hash, or HPERM.
-//!   In sponge mode, capacity is set once on the first input and carried through across
-//!   continuations; in tree mode (Merkle ops), capacity is zeroed at every level.
+//! - **Hash input** (`is_hash_input`): LINEAR_HASH (multi-batch span), single 2-to-1 hash,
+//!   or BCOMPRESS. In linear-hash mode, the chaining-value lanes are set on the
+//!   first input and carried across continuations; Merkle ops set those lanes independently
+//!   at each level.
 //! - **MP**: MPVERIFY — read-only Merkle path check. Does not interact with the sibling table.
 //! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling table
 //!   via the hash_kernel bus.
@@ -52,7 +53,7 @@ pub struct ControllerFlags<E> {
     // ========================================================================
     // Current row — compositions of cols.{s0, s1, s2}
     // ========================================================================
-    /// Input row: `s0` (deg 1). Covers all input operations (sponge + Merkle variants).
+    /// Input row: `s0` (deg 1). Covers all input operations (hash + Merkle variants).
     pub is_input: E,
 
     /// Output row: `(1-s0)*(1-s1)` (deg 2). Covers HOUT and SOUT.
@@ -61,8 +62,9 @@ pub struct ControllerFlags<E> {
     /// Padding row: `(1-s0)*s1` (deg 2). Inactive controller slot.
     pub is_padding: E,
 
-    /// Sponge input row (LINEAR_HASH / 2-to-1 / HPERM): `s0*(1-s1)*(1-s2)` (deg 3).
-    pub is_sponge_input: E,
+    /// Hash input row (LINEAR_HASH / 2-to-1 / BCOMPRESS):
+    /// `s0*(1-s1)*(1-s2)` (deg 3).
+    pub is_hash_input: E,
 
     /// Any Merkle input row (MP/MV/MU): `s0*(s1+s2-s1*s2)` (deg 3).
     ///
@@ -84,8 +86,8 @@ pub struct ControllerFlags<E> {
     /// Next row is a padding row: `(1-s0')*s1'` (deg 2).
     pub is_padding_next: E,
 
-    /// Next row is a sponge input — LINEAR_HASH continuation: `s0'*(1-s1')*(1-s2')` (deg 3).
-    pub is_sponge_input_next: E,
+    /// Next row is a hash input — LINEAR_HASH continuation: `s0'*(1-s1')*(1-s2')` (deg 3).
+    pub is_hash_input_next: E,
 
     /// Next row is any Merkle input (MP/MV/MU): `s0'*(s1'+s2'-s1'*s2')` (deg 3).
     pub is_merkle_input_next: E,
@@ -108,7 +110,7 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let is_input = s0.clone();
         let is_output = not_s0.clone() * not_s1.clone();
         let is_padding = not_s0 * s1.clone();
-        let is_sponge_input = s0.clone() * not_s1 * not_s2.clone();
+        let is_hash_input = s0.clone() * not_s1 * not_s2.clone();
         let is_merkle_input = s0 * (s1.clone() + s2.clone() - s1 * s2.clone());
         let is_hout = is_output.clone() * not_s2;
         let is_sout = is_output.clone() * s2;
@@ -123,7 +125,7 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
 
         let is_output_next = not_s0n.clone() * not_s1n.clone();
         let is_padding_next = not_s0n * s1n.clone();
-        let is_sponge_input_next = s0n.clone() * not_s1n * not_s2n.clone();
+        let is_hash_input_next = s0n.clone() * not_s1n * not_s2n.clone();
         let is_merkle_input_next = s0n.clone() * (s1n.clone() + s2n.clone() - s1n.clone() * s2n);
         let is_mv_input_next = s0n * s1n * not_s2n;
 
@@ -131,13 +133,13 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
             is_input,
             is_output,
             is_padding,
-            is_sponge_input,
+            is_hash_input,
             is_merkle_input,
             is_hout,
             is_sout,
             is_output_next,
             is_padding_next,
-            is_sponge_input_next,
+            is_hash_input_next,
             is_merkle_input_next,
             is_mv_input_next,
         }

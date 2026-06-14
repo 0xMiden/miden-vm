@@ -136,7 +136,7 @@ fn prove_execution_trace(
     // Extract public inputs before consuming the trace for the per-AIR matrices.
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
-    let (core_matrix, chiplets_matrix, poseidon2_permutation_matrix, and8_lookup_matrix) = {
+    let (core_matrix, chiplets_matrix, blakeg_compression_matrix, and8_lookup_matrix) = {
         let _span = tracing::info_span!("into_air_matrices").entered();
         trace.into_air_matrices()
     };
@@ -149,7 +149,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -161,7 +161,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -173,7 +173,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -185,7 +185,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -197,7 +197,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -209,7 +209,7 @@ fn prove_execution_trace(
                 &config,
                 core_matrix,
                 chiplets_matrix,
-                poseidon2_permutation_matrix,
+                blakeg_compression_matrix,
                 and8_lookup_matrix,
                 &public_values,
                 &kernel_felts,
@@ -233,7 +233,7 @@ pub fn prove_stark<SC>(
     config: &SC,
     core_trace: RowMajorMatrix<Felt>,
     chiplets_trace: RowMajorMatrix<Felt>,
-    poseidon2_permutation_trace: RowMajorMatrix<Felt>,
+    blakeg_compression_trace: RowMajorMatrix<Felt>,
     and8_lookup_trace: RowMajorMatrix<Felt>,
     public_values: &[Felt],
     kernel_felts: &[Felt],
@@ -253,7 +253,7 @@ where
             .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let prover_statement = ProverStatement::new(
         statement,
-        vec![core_trace, chiplets_trace, poseidon2_permutation_trace, and8_lookup_trace],
+        vec![core_trace, chiplets_trace, blakeg_compression_trace, and8_lookup_trace],
     )
     .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
     let preprocessed = Preprocessed::build(prover_statement.statement(), config);

@@ -1,27 +1,27 @@
-use miden::core::sys::vm::constraints_eval_core_then_chiplets_then_poseidon2_permutation_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_core_then_chiplets_then_and8_lookup_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_core_then_poseidon2_permutation_then_chiplets_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_core_then_poseidon2_permutation_then_and8_lookup_then_chiplets
-use miden::core::sys::vm::constraints_eval_core_then_and8_lookup_then_chiplets_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_core_then_and8_lookup_then_poseidon2_permutation_then_chiplets
-use miden::core::sys::vm::constraints_eval_chiplets_then_core_then_poseidon2_permutation_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_chiplets_then_core_then_and8_lookup_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_chiplets_then_poseidon2_permutation_then_core_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_chiplets_then_poseidon2_permutation_then_and8_lookup_then_core
-use miden::core::sys::vm::constraints_eval_chiplets_then_and8_lookup_then_core_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_chiplets_then_and8_lookup_then_poseidon2_permutation_then_core
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_core_then_chiplets_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_core_then_and8_lookup_then_chiplets
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_chiplets_then_core_then_and8_lookup
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_chiplets_then_and8_lookup_then_core
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_and8_lookup_then_core_then_chiplets
-use miden::core::sys::vm::constraints_eval_poseidon2_permutation_then_and8_lookup_then_chiplets_then_core
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_core_then_chiplets_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_core_then_poseidon2_permutation_then_chiplets
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_chiplets_then_core_then_poseidon2_permutation
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_chiplets_then_poseidon2_permutation_then_core
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_poseidon2_permutation_then_core_then_chiplets
-use miden::core::sys::vm::constraints_eval_and8_lookup_then_poseidon2_permutation_then_chiplets_then_core
+use miden::core::sys::vm::constraints_eval_core_then_chiplets_then_blakeg_compression_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_core_then_chiplets_then_and8_lookup_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_core_then_blakeg_compression_then_chiplets_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_core_then_blakeg_compression_then_and8_lookup_then_chiplets
+use miden::core::sys::vm::constraints_eval_core_then_and8_lookup_then_chiplets_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_core_then_and8_lookup_then_blakeg_compression_then_chiplets
+use miden::core::sys::vm::constraints_eval_chiplets_then_core_then_blakeg_compression_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_chiplets_then_core_then_and8_lookup_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_chiplets_then_blakeg_compression_then_core_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_chiplets_then_blakeg_compression_then_and8_lookup_then_core
+use miden::core::sys::vm::constraints_eval_chiplets_then_and8_lookup_then_core_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_chiplets_then_and8_lookup_then_blakeg_compression_then_core
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_core_then_chiplets_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_core_then_and8_lookup_then_chiplets
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_chiplets_then_core_then_and8_lookup
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_chiplets_then_and8_lookup_then_core
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_and8_lookup_then_core_then_chiplets
+use miden::core::sys::vm::constraints_eval_blakeg_compression_then_and8_lookup_then_chiplets_then_core
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_core_then_chiplets_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_core_then_blakeg_compression_then_chiplets
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_chiplets_then_core_then_blakeg_compression
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_chiplets_then_blakeg_compression_then_core
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_blakeg_compression_then_core_then_chiplets
+use miden::core::sys::vm::constraints_eval_and8_lookup_then_blakeg_compression_then_chiplets_then_core
 use miden::core::stark::constants
 
 # CONSTRAINT EVALUATION CHECK DISPATCHER
@@ -39,119 +39,119 @@ pub proc execute_constraint_evaluation_check
     exec.constants::get_order_tag
     push.0 eq
     if.true
-        exec.constraints_eval_core_then_chiplets_then_poseidon2_permutation_then_and8_lookup::execute_constraint_evaluation_check
+        exec.constraints_eval_core_then_chiplets_then_blakeg_compression_then_and8_lookup::execute_constraint_evaluation_check
     else
         exec.constants::get_order_tag
         push.1 eq
         if.true
-            exec.constraints_eval_core_then_chiplets_then_and8_lookup_then_poseidon2_permutation::execute_constraint_evaluation_check
+            exec.constraints_eval_core_then_chiplets_then_and8_lookup_then_blakeg_compression::execute_constraint_evaluation_check
         else
             exec.constants::get_order_tag
             push.2 eq
             if.true
-                exec.constraints_eval_core_then_poseidon2_permutation_then_chiplets_then_and8_lookup::execute_constraint_evaluation_check
+                exec.constraints_eval_core_then_blakeg_compression_then_chiplets_then_and8_lookup::execute_constraint_evaluation_check
             else
                 exec.constants::get_order_tag
                 push.3 eq
                 if.true
-                    exec.constraints_eval_core_then_poseidon2_permutation_then_and8_lookup_then_chiplets::execute_constraint_evaluation_check
+                    exec.constraints_eval_core_then_blakeg_compression_then_and8_lookup_then_chiplets::execute_constraint_evaluation_check
                 else
                     exec.constants::get_order_tag
                     push.4 eq
                     if.true
-                        exec.constraints_eval_core_then_and8_lookup_then_chiplets_then_poseidon2_permutation::execute_constraint_evaluation_check
+                        exec.constraints_eval_core_then_and8_lookup_then_chiplets_then_blakeg_compression::execute_constraint_evaluation_check
                     else
                         exec.constants::get_order_tag
                         push.5 eq
                         if.true
-                            exec.constraints_eval_core_then_and8_lookup_then_poseidon2_permutation_then_chiplets::execute_constraint_evaluation_check
+                            exec.constraints_eval_core_then_and8_lookup_then_blakeg_compression_then_chiplets::execute_constraint_evaluation_check
                         else
                             exec.constants::get_order_tag
                             push.6 eq
                             if.true
-                                exec.constraints_eval_chiplets_then_core_then_poseidon2_permutation_then_and8_lookup::execute_constraint_evaluation_check
+                                exec.constraints_eval_chiplets_then_core_then_blakeg_compression_then_and8_lookup::execute_constraint_evaluation_check
                             else
                                 exec.constants::get_order_tag
                                 push.7 eq
                                 if.true
-                                    exec.constraints_eval_chiplets_then_core_then_and8_lookup_then_poseidon2_permutation::execute_constraint_evaluation_check
+                                    exec.constraints_eval_chiplets_then_core_then_and8_lookup_then_blakeg_compression::execute_constraint_evaluation_check
                                 else
                                     exec.constants::get_order_tag
                                     push.8 eq
                                     if.true
-                                        exec.constraints_eval_chiplets_then_poseidon2_permutation_then_core_then_and8_lookup::execute_constraint_evaluation_check
+                                        exec.constraints_eval_chiplets_then_blakeg_compression_then_core_then_and8_lookup::execute_constraint_evaluation_check
                                     else
                                         exec.constants::get_order_tag
                                         push.9 eq
                                         if.true
-                                            exec.constraints_eval_chiplets_then_poseidon2_permutation_then_and8_lookup_then_core::execute_constraint_evaluation_check
+                                            exec.constraints_eval_chiplets_then_blakeg_compression_then_and8_lookup_then_core::execute_constraint_evaluation_check
                                         else
                                             exec.constants::get_order_tag
                                             push.10 eq
                                             if.true
-                                                exec.constraints_eval_chiplets_then_and8_lookup_then_core_then_poseidon2_permutation::execute_constraint_evaluation_check
+                                                exec.constraints_eval_chiplets_then_and8_lookup_then_core_then_blakeg_compression::execute_constraint_evaluation_check
                                             else
                                                 exec.constants::get_order_tag
                                                 push.11 eq
                                                 if.true
-                                                    exec.constraints_eval_chiplets_then_and8_lookup_then_poseidon2_permutation_then_core::execute_constraint_evaluation_check
+                                                    exec.constraints_eval_chiplets_then_and8_lookup_then_blakeg_compression_then_core::execute_constraint_evaluation_check
                                                 else
                                                     exec.constants::get_order_tag
                                                     push.12 eq
                                                     if.true
-                                                        exec.constraints_eval_poseidon2_permutation_then_core_then_chiplets_then_and8_lookup::execute_constraint_evaluation_check
+                                                        exec.constraints_eval_blakeg_compression_then_core_then_chiplets_then_and8_lookup::execute_constraint_evaluation_check
                                                     else
                                                         exec.constants::get_order_tag
                                                         push.13 eq
                                                         if.true
-                                                            exec.constraints_eval_poseidon2_permutation_then_core_then_and8_lookup_then_chiplets::execute_constraint_evaluation_check
+                                                            exec.constraints_eval_blakeg_compression_then_core_then_and8_lookup_then_chiplets::execute_constraint_evaluation_check
                                                         else
                                                             exec.constants::get_order_tag
                                                             push.14 eq
                                                             if.true
-                                                                exec.constraints_eval_poseidon2_permutation_then_chiplets_then_core_then_and8_lookup::execute_constraint_evaluation_check
+                                                                exec.constraints_eval_blakeg_compression_then_chiplets_then_core_then_and8_lookup::execute_constraint_evaluation_check
                                                             else
                                                                 exec.constants::get_order_tag
                                                                 push.15 eq
                                                                 if.true
-                                                                    exec.constraints_eval_poseidon2_permutation_then_chiplets_then_and8_lookup_then_core::execute_constraint_evaluation_check
+                                                                    exec.constraints_eval_blakeg_compression_then_chiplets_then_and8_lookup_then_core::execute_constraint_evaluation_check
                                                                 else
                                                                     exec.constants::get_order_tag
                                                                     push.16 eq
                                                                     if.true
-                                                                        exec.constraints_eval_poseidon2_permutation_then_and8_lookup_then_core_then_chiplets::execute_constraint_evaluation_check
+                                                                        exec.constraints_eval_blakeg_compression_then_and8_lookup_then_core_then_chiplets::execute_constraint_evaluation_check
                                                                     else
                                                                         exec.constants::get_order_tag
                                                                         push.17 eq
                                                                         if.true
-                                                                            exec.constraints_eval_poseidon2_permutation_then_and8_lookup_then_chiplets_then_core::execute_constraint_evaluation_check
+                                                                            exec.constraints_eval_blakeg_compression_then_and8_lookup_then_chiplets_then_core::execute_constraint_evaluation_check
                                                                         else
                                                                             exec.constants::get_order_tag
                                                                             push.18 eq
                                                                             if.true
-                                                                                exec.constraints_eval_and8_lookup_then_core_then_chiplets_then_poseidon2_permutation::execute_constraint_evaluation_check
+                                                                                exec.constraints_eval_and8_lookup_then_core_then_chiplets_then_blakeg_compression::execute_constraint_evaluation_check
                                                                             else
                                                                                 exec.constants::get_order_tag
                                                                                 push.19 eq
                                                                                 if.true
-                                                                                    exec.constraints_eval_and8_lookup_then_core_then_poseidon2_permutation_then_chiplets::execute_constraint_evaluation_check
+                                                                                    exec.constraints_eval_and8_lookup_then_core_then_blakeg_compression_then_chiplets::execute_constraint_evaluation_check
                                                                                 else
                                                                                     exec.constants::get_order_tag
                                                                                     push.20 eq
                                                                                     if.true
-                                                                                        exec.constraints_eval_and8_lookup_then_chiplets_then_core_then_poseidon2_permutation::execute_constraint_evaluation_check
+                                                                                        exec.constraints_eval_and8_lookup_then_chiplets_then_core_then_blakeg_compression::execute_constraint_evaluation_check
                                                                                     else
                                                                                         exec.constants::get_order_tag
                                                                                         push.21 eq
                                                                                         if.true
-                                                                                            exec.constraints_eval_and8_lookup_then_chiplets_then_poseidon2_permutation_then_core::execute_constraint_evaluation_check
+                                                                                            exec.constraints_eval_and8_lookup_then_chiplets_then_blakeg_compression_then_core::execute_constraint_evaluation_check
                                                                                         else
                                                                                             exec.constants::get_order_tag
                                                                                             push.22 eq
                                                                                             if.true
-                                                                                                exec.constraints_eval_and8_lookup_then_poseidon2_permutation_then_core_then_chiplets::execute_constraint_evaluation_check
+                                                                                                exec.constraints_eval_and8_lookup_then_blakeg_compression_then_core_then_chiplets::execute_constraint_evaluation_check
                                                                                             else
-                                                                                                exec.constraints_eval_and8_lookup_then_poseidon2_permutation_then_chiplets_then_core::execute_constraint_evaluation_check
+                                                                                                exec.constraints_eval_and8_lookup_then_blakeg_compression_then_chiplets_then_core::execute_constraint_evaluation_check
                                                                                             end
                                                                                         end
                                                                                     end

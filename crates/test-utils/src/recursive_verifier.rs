@@ -20,15 +20,17 @@
 use alloc::{vec, vec::Vec};
 
 use miden_air::{
-    MidenMultiAir, PublicInputs, Statement, config, trace::and8_lookup::LOG_AND8_TABLE_HEIGHT,
+    MidenMultiAir, PublicInputs, Statement, config,
+    trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT,
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
+    hash::eidos::{EidosLmcs, MidenEidosChallenger},
     stark::{
         Preprocessed, PreprocessedValidationError, StarkConfig, VerifierInstance,
         air::InstanceError,
-        lmcs::{Lmcs, proof::BatchProofView},
+        lmcs::{Lmcs, LmcsError, proof::BatchProofView},
         pcs::PcsProof,
         proof::{StarkProof, StarkProofData},
         verifier::VerifierError as CryptoVerifierError,
@@ -41,8 +43,8 @@ use crate::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
 // ================================================================================================
 
 type Challenge = QuadFelt;
-type P2Config = config::Poseidon2Config;
-type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+type RecursiveConfig = config::MidenStarkConfig<EidosLmcs, MidenEidosChallenger>;
+type RecursiveLmcs = <RecursiveConfig as StarkConfig<Felt, Challenge>>::Lmcs;
 const MAX_STARK_PROOF_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -65,6 +67,8 @@ pub enum VerifierError {
     Preprocessed(#[from] PreprocessedValidationError),
     #[error(transparent)]
     Transcript(#[from] CryptoVerifierError),
+    #[error(transparent)]
+    Lmcs(#[from] LmcsError),
 }
 
 /// Merkle store + advice map pair returned by Merkle data construction.
@@ -82,13 +86,13 @@ pub fn generate_advice_inputs(
     pub_inputs: PublicInputs,
 ) -> Result<VerifierData, VerifierError> {
     let params = config::pcs_params();
-    let config = config::poseidon2_config(params);
+    let config = config::eidos_config(params);
 
     // 1. Deserialize STARK proof bytes.
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof_data: StarkProofData<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
-        StarkProofData<Felt, QuadFelt, P2Config>,
+    let proof_data: StarkProofData<Felt, QuadFelt, RecursiveConfig> = <serde_wincode::SerdeCompat<
+        StarkProofData<Felt, QuadFelt, RecursiveConfig>,
     > as wincode::config::Deserialize<_>>::deserialize(
         proof_bytes,
         proof_encoding_config,
@@ -122,17 +126,18 @@ pub fn generate_advice_inputs(
     let log_trace_heights = proof.log_trace_heights();
     let log_core_trace_height = log_trace_heights[0] as usize;
     let log_chiplets_trace_height = log_trace_heights[1] as usize;
-    let log_poseidon2_trace_height = log_trace_heights[2] as usize;
-    if log_trace_heights[3] != LOG_AND8_TABLE_HEIGHT {
+    let log_blakeg_compression_trace_height = log_trace_heights[2] as usize;
+    if log_trace_heights[3] != LOG_AND8_LOOKUP_TRACE_HEIGHT {
         return Err(VerifierError::InvalidProofShape("invalid And8Lookup trace height"));
     }
 
     build_advice(
         &config,
         &proof,
+        preprocessed.as_ref().expect("preprocessed presence was checked above"),
         log_core_trace_height,
         log_chiplets_trace_height,
-        log_poseidon2_trace_height,
+        log_blakeg_compression_trace_height,
         pub_inputs,
         &kernel_digests,
     )
@@ -144,12 +149,12 @@ pub fn generate_advice_inputs(
 fn build_miden_air_shape(
     log_core_trace_height: usize,
     log_chiplets_trace_height: usize,
-    log_poseidon2_trace_height: usize,
+    log_blakeg_compression_trace_height: usize,
 ) -> [u64; 3] {
     [
         log_core_trace_height as u64,
         log_chiplets_trace_height as u64,
-        log_poseidon2_trace_height as u64,
+        log_blakeg_compression_trace_height as u64,
     ]
 }
 
@@ -158,11 +163,12 @@ fn build_miden_air_shape(
 /// The initial operand stack is empty. The advice stack receives security parameters first,
 /// then the dynamic Miden AIR heights, then all remaining data in the order listed above.
 fn build_advice(
-    config: &P2Config,
-    proof: &StarkProof<Challenge, P2Lmcs>,
+    config: &RecursiveConfig,
+    proof: &StarkProof<Challenge, RecursiveLmcs>,
+    preprocessed: &Preprocessed<Felt, RecursiveLmcs>,
     log_core_trace_height: usize,
     log_chiplets_trace_height: usize,
-    log_poseidon2_trace_height: usize,
+    log_blakeg_compression_trace_height: usize,
     pub_inputs: PublicInputs,
     kernel_digests: &[Word],
 ) -> Result<VerifierData, VerifierError> {
@@ -192,7 +198,7 @@ fn build_advice(
     advice_stack.extend_from_slice(&build_miden_air_shape(
         log_core_trace_height,
         log_chiplets_trace_height,
-        log_poseidon2_trace_height,
+        log_blakeg_compression_trace_height,
     ));
 
     // 2. Fixed-length public inputs.
@@ -267,7 +273,7 @@ fn build_advice(
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---
-    let (store, advice_map) = build_merkle_data(config, proof)?;
+    let (store, advice_map) = build_merkle_data(config, proof, preprocessed)?;
 
     Ok(VerifierData {
         initial_stack,
@@ -321,14 +327,31 @@ where
 /// and leaf-hash -> leaf-data entries (for the advice map). The MASM verifier uses
 /// `mtree_get` to fetch authentication paths and `adv_keyval` to retrieve leaf data.
 fn build_merkle_data(
-    config: &P2Config,
-    proof: &StarkProof<Challenge, P2Lmcs>,
+    config: &RecursiveConfig,
+    proof: &StarkProof<Challenge, RecursiveLmcs>,
+    preprocessed: &Preprocessed<Felt, RecursiveLmcs>,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &proof.pcs_proof;
     let lmcs = config.lmcs();
 
     let mut partial_trees = Vec::new();
     let mut advice_map = Vec::new();
+
+    let query_log_height = proof
+        .log_trace_heights()
+        .iter()
+        .copied()
+        .max()
+        .ok_or(VerifierError::InvalidProofShape("missing AIR trace heights"))?
+        + config.pcs().log_blowup();
+    let preprocessed_batch = preprocessed.batch_proof::<Challenge, _>(
+        config,
+        pcs.query_indices.iter().copied(),
+        query_log_height,
+    )?;
+    let (trees, advs) = batch_proof_to_merkle(lmcs, &preprocessed_batch)?;
+    partial_trees.extend(trees);
+    advice_map.extend(advs);
 
     // DEEP openings -- one BatchProof per commitment group.
     for batch_proof in pcs.deep_witnesses.iter() {
@@ -356,7 +379,7 @@ fn build_merkle_data(
 ///
 /// For each query index, reconstructs the Merkle authentication path from the batch proof,
 /// computes the leaf hash, and produces:
-/// - A `(index, leaf_hash, path)` triple for the partial Merkle tree
+/// - A one-path partial Merkle tree for the Merkle store
 /// - A `(leaf_hash, leaf_data)` pair for the advice map
 fn batch_proof_to_merkle<L>(
     lmcs: &L,
@@ -368,7 +391,7 @@ where
     L::BatchProof: BatchProofView<Felt, L::Commitment>,
     L::Commitment: PartialEq,
 {
-    let mut paths = Vec::new();
+    let mut trees = Vec::new();
     let mut advice_entries = Vec::new();
 
     for index in batch_proof.indices() {
@@ -381,18 +404,16 @@ where
 
         let leaf_data: Vec<Felt> = rows.as_slice().to_vec();
         let leaf_hash = lmcs.hash(rows.iter_rows());
-        let leaf_word: Word = Word::new(leaf_hash.into());
-        let merkle_path =
-            MerklePath::new(siblings.into_iter().map(|c| Word::new(c.into())).collect());
+        let leaf_word = commitment_to_word(leaf_hash);
+        let merkle_path = MerklePath::new(siblings.into_iter().map(commitment_to_word).collect());
 
-        paths.push((index as u64, leaf_word, merkle_path));
+        let tree = PartialMerkleTree::with_paths([(index as u64, leaf_word, merkle_path)])
+            .map_err(|_| VerifierError::InvalidProofShape("invalid merkle path"))?;
+        trees.push(tree);
         advice_entries.push((leaf_word, leaf_data));
     }
 
-    let tree = PartialMerkleTree::with_paths(paths)
-        .map_err(|_| VerifierError::InvalidProofShape("invalid merkle paths"))?;
-
-    Ok((vec![tree], advice_entries))
+    Ok((trees, advice_entries))
 }
 
 /// Build kernel digest advice data.
@@ -429,6 +450,10 @@ fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
 fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
     let felts: [Felt; 4] = commitment.into();
     felts.iter().map(Felt::as_canonical_u64).collect()
+}
+
+fn commitment_to_word<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Word {
+    Word::new(commitment.into())
 }
 
 fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {

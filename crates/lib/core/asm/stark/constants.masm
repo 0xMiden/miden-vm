@@ -57,7 +57,7 @@ const TRACE_LENGTH_LOG_PTR = 3223322634
 ### proof-order tag and each AIR's lifted selectors.
 const CORE_TRACE_LENGTH_LOG_PTR = 3223322635
 const CHIPLETS_TRACE_LENGTH_LOG_PTR = 3223322636
-const POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR = 3223322637
+const BLAKEG_COMPRESSION_TRACE_LENGTH_LOG_PTR = 3223322637
 const AND8_LOOKUP_TRACE_LENGTH_LOG_PTR = 3223322765
 
 ### Canonical LDE coset shift and inverse. These are derived from the LDE order in
@@ -73,7 +73,7 @@ const COMPOSITION_POLY_COM_PTR = 3223322648
 ### Address to store the OOD evaluation point
 const Z_PTR = 3223322652
 
-### Address to store the zero word, mainly used in the context of Poseidon2
+### Address to store the zero word for hash-state and transcript helpers.
 const ZERO_WORD_PTR = 3223322656
 
 ### Address to store the non-deterministically provided DEEP polynomial batching randomness
@@ -91,10 +91,11 @@ const VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR = 3223322670
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
 
-### Addresses to store the state of Poseidon2-based random coin
-const C_PTR = 3223322672
-const R1_PTR = 3223322676
-const R2_PTR = 3223322680
+### Eidos random coin state.
+const RANDOM_COIN_CV_PTR = 3223322672
+const RANDOM_COIN_OUTPUT_WORD_PTR = 3223322676
+
+### Address range 3223322680..3223322683 is an unused legacy random-coin word slot.
 
 ### Addresses used for scratch values
 const TMP1 = 3223322684
@@ -143,15 +144,18 @@ const DYNAMIC_PROCEDURE_4_PTR = 3223322748
 const RANDOM_COIN_INPUT_BUF_PTR = 3223322752
 const RANDOM_COIN_INPUT_LEN_PTR = 3223322760
 const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
+const RANDOM_COIN_COUNTER_PTR = 3223322762
 
-### Proof-order tags are Lehmer ranks over [Core, Chiplets, Poseidon2Permutation, And8Lookup].
+### Address 3223322763 is an unused legacy random-coin mode slot.
+
+### Proof-order tags are Lehmer ranks over [Core, Chiplets, BlakeGCompression, And8Lookup].
 const ORDER_TAG_COUNT = 24
 const ORDER_TAG_PTR = 3223322764
 
 ### Miden AIR shape consumed by the VM-specific recursive verifier wrapper.
 ###
 ### Layout:
-###   [log_core, log_chiplets, log_poseidon2, log_and8_lookup]
+###   [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup]
 ###
 ### Advice supplies the first three dynamic heights. `log_and8_lookup` is fixed verifier setup and
 ### is written by the Miden-specific wrapper before the generic verifier runs.
@@ -203,18 +207,18 @@ const ABSORB_SCRATCH_PTR = 3223324000
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations region. One OOD point has 160 logical slots in the LMCS-aligned wire format:
-###   preprocessed openings:    aligned(3)                                           = 8
-###   main openings:            aligned(51) + aligned(22) + aligned(16) + aligned(1) = 104
-###   auxiliary coord slots:    aligned(4*2) + aligned(3*2) + aligned(1*2) + aligned(1*2)
-###                                                                                   = 32
-###   quotient coord slots:     8*2                                                   = 16
-### The advice stream stores one OOD point as 320 base felts. Two points (z and g*z)
-### occupy 640 base felts.
+### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
+### (alignment = 8). Per row, measured in ACE extension-field slots:
+###   preprocessed = 16
+###   main         = 56 + 24 + 80 + 16 = 176
+###   aux coords   = 64
+###   quotient     = 8 chunks * 2 coordinates = 16
+###   total        = 272 EF slots = 544 base felts
+### Two rows (curr + next) occupy 1088 base felts.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
 ### Auxiliary bus boundary values (4 extension field elements = 8 base elements).
-const AUX_BUS_BOUNDARY_PTR = 3225420420       # OOD_EVALUATIONS_PTR + 640
+const AUX_BUS_BOUNDARY_PTR = 3225420868       # OOD_EVALUATIONS_PTR + 1088
 
 ### Auxiliary inputs for ACE (stark vars), 28 EF slots = 56 base felts:
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
@@ -222,16 +226,16 @@ const AUX_BUS_BOUNDARY_PTR = 3225420420       # OOD_EVALUATIONS_PTR + 640
 ###   slot 11:     reserved
 ###   slots 12-14: Core is_{first,last,transition}
 ###   slots 15-17: Chiplets is_{first,last,transition}
-###   slots 18-20: Poseidon2Permutation is_{first,last,transition}
+###   slots 18-20: BlakeGCompression is_{first,last,transition}
 ###   slots 21-23: And8Lookup is_{first,last,transition}
-###   slots 24-27: per-AIR trace lengths in semantic instance order
-const AUXILIARY_ACE_INPUTS_PTR = 3225420428   # AUX_BUS_BOUNDARY_PTR + 8
+###   slots 24-27: per-AIR trace lengths in semantic AIR order
+const AUXILIARY_ACE_INPUTS_PTR = 3225420876   # AUX_BUS_BOUNDARY_PTR + 8
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420484     # AUXILIARY_ACE_INPUTS_PTR + 56
+const ACE_CIRCUIT_STREAM_PTR = 3225420932     # AUXILIARY_ACE_INPUTS_PTR + 56
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225421084            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (600 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225422096            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (1164 for multi-AIR)
 
 ## FRI
 ##
@@ -265,9 +269,9 @@ const ACE_CIRCUIT_PTR = 3225421084            # ACE_CIRCUIT_STREAM_PTR + num_con
 const FRI_COM_PTR = 4294912800
 
 ## Current trace row
-## 8 slots for the aligned preprocessed row, 104 for the aligned main trace row,
-## 32 slots for aligned auxiliary coordinates, and 16 slots for quotient chunks:
-## 8 + 104 + 32 + 16 = 160 slots.
+## 16 field elements for the aligned preprocessed trace row, 176 field elements for the aligned
+## main trace row, 64 field elements for aligned auxiliary coordinates, and 16 field elements for
+## quotient chunks, i.e. 16 + 176 + 64 + 16 = 272 slots.
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
 ## Its size is determined by the sum of widths of all traces.
@@ -423,12 +427,12 @@ pub proc get_chiplets_trace_length_log
     push.CHIPLETS_TRACE_LENGTH_LOG_PTR mem_load
 end
 
-pub proc set_poseidon2_permutation_trace_length_log
-    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_store
+pub proc set_blakeg_compression_trace_length_log
+    push.BLAKEG_COMPRESSION_TRACE_LENGTH_LOG_PTR mem_store
 end
 
-pub proc get_poseidon2_permutation_trace_length_log
-    push.POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR mem_load
+pub proc get_blakeg_compression_trace_length_log
+    push.BLAKEG_COMPRESSION_TRACE_LENGTH_LOG_PTR mem_load
 end
 
 pub proc set_and8_lookup_trace_length_log
@@ -514,19 +518,12 @@ pub proc public_inputs_address_ptr
     push.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
-#! Returns the pointer to the capacity word of the Poseidon2-based random coin.
-pub proc c_ptr
-    push.C_PTR
+pub proc random_coin_cv_ptr
+    push.RANDOM_COIN_CV_PTR
 end
 
-#! Returns the pointer to the first rate word of the Poseidon2-based random coin.
-pub proc r1_ptr
-    push.R1_PTR
-end
-
-#! Returns the pointer to the second rate word of the Poseidon2-based random coin.
-pub proc r2_ptr
-    push.R2_PTR
+pub proc random_coin_output_word_ptr
+    push.RANDOM_COIN_OUTPUT_WORD_PTR
 end
 
 pub proc tmp1
@@ -579,12 +576,24 @@ pub proc random_coin_input_buf_ptr
     push.RANDOM_COIN_INPUT_BUF_PTR
 end
 
+pub proc random_coin_block_ptr
+    push.RANDOM_COIN_INPUT_BUF_PTR
+end
+
 pub proc random_coin_input_len_ptr
+    push.RANDOM_COIN_INPUT_LEN_PTR
+end
+
+pub proc random_coin_buffer_len_ptr
     push.RANDOM_COIN_INPUT_LEN_PTR
 end
 
 pub proc random_coin_output_len_ptr
     push.RANDOM_COIN_OUTPUT_LEN_PTR
+end
+
+pub proc random_coin_counter_ptr
+    push.RANDOM_COIN_COUNTER_PTR
 end
 
 pub proc bus_gamma_ptr

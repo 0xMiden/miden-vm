@@ -13,12 +13,22 @@ use miden_crypto::stark::{
 };
 
 use crate::{
-    ChipletCols, CoreCols, Felt, MAX_KERNEL_PROC_DIGEST_INPUTS, MidenAirBuilder, NUM_PUBLIC_VALUES,
-    NUM_VAR_LEN_PUBLIC_INPUT_GROUPS, Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols,
-    constraints,
+    BlakeGCompressionCols, ChipletCols, CoreCols, Felt, MAX_KERNEL_PROC_DIGEST_INPUTS,
+    MidenAirBuilder, NUM_BLAKEG_COMPRESSION_COLS, NUM_PUBLIC_VALUES,
+    NUM_VAR_LEN_PUBLIC_INPUT_GROUPS,
     constraints::and8_lookup::{
         self,
-        columns::{And8LookupCols, LOG_AND8_TABLE_HEIGHT},
+        columns::{
+            And8LookupCols, LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS,
+            NUM_AND8_LOOKUP_PREPROCESSED_COLS,
+        },
+    },
+    constraints::{
+        self,
+        blakeg_compression::{self, periodic::get_blakeg_periodic_column_values},
+        lookup::blakeg_compression_air::{
+            BLAKEG_COMPRESSION_COLUMN_SHAPE, emit_blakeg_compression_lookup_columns,
+        },
     },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{
@@ -30,9 +40,9 @@ use crate::{
 
 use constraints::lookup::{
     and8_lookup_air::And8LookupBuilder,
+    blakeg_compression_air::BlakeGCompressionLookupBuilder,
     chiplet_air::ChipletLookupBuilder,
     main_air::{MainLookupAir, MainLookupBuilder},
-    poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
 };
 
 // PER-TRACE AIRS
@@ -217,23 +227,23 @@ impl ChipletsAir {
     }
 }
 
-/// Standalone Poseidon2 permutation AIR.
+/// Standalone BlakeG compression AIR.
 ///
-/// Executes the hasher-controller permutation requests emitted through the perm-link bus.
+/// Executes hasher-compute requests emitted through the perm-link bus.
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Poseidon2PermutationAir;
+pub struct BlakeGCompressionAir;
 
-impl Poseidon2PermutationAir {
+impl BlakeGCompressionAir {
     fn width(self) -> usize {
-        constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS
+        NUM_BLAKEG_COMPRESSION_COLS
     }
 
-    fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        Poseidon2PermutationPeriodicCols::periodic_columns()
+    pub(crate) fn periodic_columns(self) -> Vec<Vec<Felt>> {
+        get_blakeg_periodic_column_values()
     }
 
     fn aux_width(self) -> usize {
-        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+        BLAKEG_COMPRESSION_COLUMN_SHAPE.len()
     }
 
     fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -244,7 +254,7 @@ impl Poseidon2PermutationAir {
     ) -> Result<EF, ReductionError> {
         if !var_len_public_inputs.is_empty() {
             return Err(format!(
-                "Poseidon2PermutationAir expects 0 var-len public input slices, got {}",
+                "BlakeGCompressionAir expects 0 var-len public input slices, got {}",
                 var_len_public_inputs.len()
             )
             .into());
@@ -253,18 +263,18 @@ impl Poseidon2PermutationAir {
     }
 
     fn eval<AB: MidenAirBuilder>(self, builder: &mut AB) {
-        constraints::poseidon2_permutation::enforce_main(builder);
+        blakeg_compression::enforce_main(builder);
 
-        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::POSEIDON2_PERMUTATION);
+        let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::BLAKEG_COMPRESSION);
         self.lookup_eval(&mut lb);
     }
 
     fn lookup_num_columns(self) -> usize {
-        constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE.len()
+        BLAKEG_COMPRESSION_COLUMN_SHAPE.len()
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
-        &constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
+        &BLAKEG_COMPRESSION_COLUMN_SHAPE
     }
 
     fn lookup_max_message_width(self) -> usize {
@@ -275,13 +285,11 @@ impl Poseidon2PermutationAir {
         BusId::COUNT
     }
 
-    fn lookup_eval<LB: Poseidon2PermutationLookupBuilder>(self, builder: &mut LB) {
+    fn lookup_eval<LB: BlakeGCompressionLookupBuilder>(self, builder: &mut LB) {
         let main = builder.main();
-        let local: &Poseidon2PermutationCols<_> = main.current_slice().borrow();
+        let local: &BlakeGCompressionCols<_> = main.current_slice().borrow();
 
-        constraints::lookup::poseidon2_permutation_air::emit_poseidon2_permutation_lookup_columns(
-            builder, local,
-        );
+        emit_blakeg_compression_lookup_columns(builder, local);
     }
 
     fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
@@ -293,7 +301,7 @@ pub struct And8LookupAir;
 
 impl And8LookupAir {
     fn width(self) -> usize {
-        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_COLS
+        NUM_AND8_LOOKUP_COLS
     }
 
     fn preprocessed_trace(self) -> Option<RowMajorMatrix<Felt>> {
@@ -301,7 +309,7 @@ impl And8LookupAir {
     }
 
     fn preprocessed_width(self) -> usize {
-        constraints::and8_lookup::columns::NUM_AND8_LOOKUP_PREPROCESSED_COLS
+        NUM_AND8_LOOKUP_PREPROCESSED_COLS
     }
 
     fn periodic_columns(self) -> Vec<Vec<Felt>> {
@@ -371,14 +379,14 @@ impl And8LookupAir {
 pub enum MidenAir {
     Core(CoreAir),
     Chiplets(ChipletsAir),
-    Poseidon2Permutation(Poseidon2PermutationAir),
+    BlakeGCompression(BlakeGCompressionAir),
     And8Lookup(And8LookupAir),
 }
 
 impl MidenAir {
     pub const CORE: Self = Self::Core(CoreAir);
     pub const CHIPLETS: Self = Self::Chiplets(ChipletsAir);
-    pub const POSEIDON2_PERMUTATION: Self = Self::Poseidon2Permutation(Poseidon2PermutationAir);
+    pub const BLAKEG_COMPRESSION: Self = Self::BlakeGCompression(BlakeGCompressionAir);
     pub const AND8_LOOKUP: Self = Self::And8Lookup(And8LookupAir);
 }
 
@@ -387,7 +395,7 @@ impl MidenAir {
 pub enum MidenAirId {
     Core,
     Chiplets,
-    Poseidon2Permutation,
+    BlakeGCompression,
     And8Lookup,
 }
 
@@ -396,7 +404,7 @@ impl MidenAirId {
         match self {
             Self::Core => 0,
             Self::Chiplets => 1,
-            Self::Poseidon2Permutation => 2,
+            Self::BlakeGCompression => 2,
             Self::And8Lookup => 3,
         }
     }
@@ -405,7 +413,7 @@ impl MidenAirId {
         match self {
             Self::Core => "Core",
             Self::Chiplets => "Chiplets",
-            Self::Poseidon2Permutation => "Poseidon2Permutation",
+            Self::BlakeGCompression => "BlakeGCompression",
             Self::And8Lookup => "And8Lookup",
         }
     }
@@ -414,7 +422,7 @@ impl MidenAirId {
         match self {
             Self::Core => "core",
             Self::Chiplets => "chiplets",
-            Self::Poseidon2Permutation => "poseidon2_permutation",
+            Self::BlakeGCompression => "blakeg_compression",
             Self::And8Lookup => "and8_lookup",
         }
     }
@@ -423,14 +431,14 @@ impl MidenAirId {
         match self {
             Self::Core => MidenAir::CORE,
             Self::Chiplets => MidenAir::CHIPLETS,
-            Self::Poseidon2Permutation => MidenAir::POSEIDON2_PERMUTATION,
+            Self::BlakeGCompression => MidenAir::BLAKEG_COMPRESSION,
             Self::And8Lookup => MidenAir::AND8_LOOKUP,
         }
     }
 
     pub const fn lookup_accumulator_mode(self) -> crate::lookup::LookupAccumulatorMode {
         match self {
-            Self::Core | Self::Chiplets | Self::Poseidon2Permutation => {
+            Self::Core | Self::Chiplets | Self::BlakeGCompression => {
                 crate::lookup::LookupAccumulatorMode::LastRowIdle
             },
             Self::And8Lookup => crate::lookup::LookupAccumulatorMode::WrappedCentered,
@@ -461,9 +469,9 @@ pub const AIRS: [AirSpec; MIDEN_AIR_COUNT] = [
         air: MidenAirId::Chiplets.air(),
     },
     AirSpec {
-        id: MidenAirId::Poseidon2Permutation,
-        name: MidenAirId::Poseidon2Permutation.name(),
-        air: MidenAirId::Poseidon2Permutation.air(),
+        id: MidenAirId::BlakeGCompression,
+        name: MidenAirId::BlakeGCompression.name(),
+        air: MidenAirId::BlakeGCompression.air(),
     },
     AirSpec {
         id: MidenAirId::And8Lookup,
@@ -617,14 +625,14 @@ impl BaseAir<Felt> for MidenAir {
         match self {
             Self::Core(a) => a.width(),
             Self::Chiplets(a) => a.width(),
-            Self::Poseidon2Permutation(a) => a.width(),
+            Self::BlakeGCompression(a) => a.width(),
             Self::And8Lookup(a) => a.width(),
         }
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
         match self {
-            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => None,
+            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => None,
             Self::And8Lookup(a) => a.preprocessed_trace(),
         }
     }
@@ -639,14 +647,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core(a) => a.periodic_columns(),
             Self::Chiplets(a) => a.periodic_columns(),
-            Self::Poseidon2Permutation(a) => a.periodic_columns(),
+            Self::BlakeGCompression(a) => a.periodic_columns(),
             Self::And8Lookup(a) => a.periodic_columns(),
         }
     }
 
     fn preprocessed_width(&self) -> usize {
         match self {
-            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => 0,
+            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => 0,
             Self::And8Lookup(a) => a.preprocessed_width(),
         }
     }
@@ -659,7 +667,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core(a) => a.aux_width(),
             Self::Chiplets(a) => a.aux_width(),
-            Self::Poseidon2Permutation(a) => a.aux_width(),
+            Self::BlakeGCompression(a) => a.aux_width(),
             Self::And8Lookup(a) => a.aux_width(),
         }
     }
@@ -687,7 +695,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
         match self {
             Self::Core(_) | Self::Chiplets(_) => ConstraintDegrees { base: 9, ext: 9 },
-            Self::Poseidon2Permutation(_) => ConstraintDegrees { base: 8, ext: 3 },
+            Self::BlakeGCompression(_) => ConstraintDegrees { base: 3, ext: 3 },
             Self::And8Lookup(_) => ConstraintDegrees { base: 0, ext: 2 },
         }
     }
@@ -696,7 +704,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
         match self {
             Self::Core(a) => a.eval(builder),
             Self::Chiplets(a) => a.eval(builder),
-            Self::Poseidon2Permutation(a) => a.eval(builder),
+            Self::BlakeGCompression(a) => a.eval(builder),
             Self::And8Lookup(a) => a.eval(builder),
         }
     }
@@ -706,14 +714,14 @@ impl<LB> LookupAir<LB> for MidenAir
 where
     LB: MainLookupBuilder
         + ChipletLookupBuilder
-        + Poseidon2PermutationLookupBuilder
+        + BlakeGCompressionLookupBuilder
         + And8LookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {
             Self::Core(a) => a.lookup_num_columns(),
             Self::Chiplets(a) => a.lookup_num_columns(),
-            Self::Poseidon2Permutation(a) => a.lookup_num_columns(),
+            Self::BlakeGCompression(a) => a.lookup_num_columns(),
             Self::And8Lookup(a) => a.lookup_num_columns(),
         }
     }
@@ -722,14 +730,14 @@ where
         match self {
             Self::Core(a) => a.lookup_column_shape(),
             Self::Chiplets(a) => a.lookup_column_shape(),
-            Self::Poseidon2Permutation(a) => a.lookup_column_shape(),
+            Self::BlakeGCompression(a) => a.lookup_column_shape(),
             Self::And8Lookup(a) => a.lookup_column_shape(),
         }
     }
 
     fn accumulator_mode(&self) -> crate::lookup::LookupAccumulatorMode {
         match self {
-            Self::Core(_) | Self::Chiplets(_) | Self::Poseidon2Permutation(_) => {
+            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => {
                 crate::lookup::LookupAccumulatorMode::LastRowIdle
             },
             Self::And8Lookup(a) => a.lookup_accumulator_mode(),
@@ -740,7 +748,7 @@ where
         match self {
             Self::Core(a) => a.lookup_max_message_width(),
             Self::Chiplets(a) => a.lookup_max_message_width(),
-            Self::Poseidon2Permutation(a) => a.lookup_max_message_width(),
+            Self::BlakeGCompression(a) => a.lookup_max_message_width(),
             Self::And8Lookup(a) => a.lookup_max_message_width(),
         }
     }
@@ -749,7 +757,7 @@ where
         match self {
             Self::Core(a) => a.lookup_num_bus_ids(),
             Self::Chiplets(a) => a.lookup_num_bus_ids(),
-            Self::Poseidon2Permutation(a) => a.lookup_num_bus_ids(),
+            Self::BlakeGCompression(a) => a.lookup_num_bus_ids(),
             Self::And8Lookup(a) => a.lookup_num_bus_ids(),
         }
     }
@@ -758,7 +766,7 @@ where
         match self {
             Self::Core(a) => a.lookup_eval(builder),
             Self::Chiplets(a) => a.lookup_eval(builder),
-            Self::Poseidon2Permutation(a) => a.lookup_eval(builder),
+            Self::BlakeGCompression(a) => a.lookup_eval(builder),
             Self::And8Lookup(a) => a.lookup_eval(builder),
         }
     }
@@ -770,7 +778,7 @@ where
         match self {
             Self::Core(a) => a.lookup_eval_boundary(boundary),
             Self::Chiplets(a) => a.lookup_eval_boundary(boundary),
-            Self::Poseidon2Permutation(a) => a.lookup_eval_boundary(boundary),
+            Self::BlakeGCompression(a) => a.lookup_eval_boundary(boundary),
             Self::And8Lookup(a) => a.lookup_eval_boundary(boundary),
         }
     }
@@ -866,9 +874,11 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             )
             .into());
         }
-        if log_trace_heights[MidenAirId::And8Lookup.instance_index()] != LOG_AND8_TABLE_HEIGHT {
+        if log_trace_heights[MidenAirId::And8Lookup.instance_index()]
+            != LOG_AND8_LOOKUP_TRACE_HEIGHT
+        {
             return Err(format!(
-                "And8Lookup log height must be {LOG_AND8_TABLE_HEIGHT}, got {}",
+                "And8Lookup log height must be {LOG_AND8_LOOKUP_TRACE_HEIGHT}, got {}",
                 log_trace_heights[MidenAirId::And8Lookup.instance_index()]
             )
             .into());
@@ -885,8 +895,8 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         let core_correction = CoreAir.boundary_correction(&challenges, air_inputs, &[])?;
         let chiplets_correction =
             ChipletsAir.boundary_correction(&challenges, air_inputs, &[aux_inputs])?;
-        let poseidon2_correction =
-            Poseidon2PermutationAir.boundary_correction(&challenges, air_inputs, &[])?;
+        let blakeg_correction =
+            BlakeGCompressionAir.boundary_correction(&challenges, air_inputs, &[])?;
         let and8_correction = And8LookupAir.boundary_correction(&challenges, air_inputs, &[])?;
 
         let mut aux_sum = EF::ZERO;
@@ -918,11 +928,7 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
             aux_sum += values.iter().copied().map(|value| value * weight).sum::<EF>();
         }
         Ok(vec![
-            aux_sum
-                + core_correction
-                + chiplets_correction
-                + poseidon2_correction
-                + and8_correction,
+            aux_sum + core_correction + chiplets_correction + blakeg_correction + and8_correction,
         ])
     }
 }
@@ -991,7 +997,7 @@ mod tests {
             ProofOrder::from_ids(&[
                 MidenAirId::Core,
                 MidenAirId::Chiplets,
-                MidenAirId::Poseidon2Permutation,
+                MidenAirId::BlakeGCompression,
                 MidenAirId::And8Lookup,
             ]),
         );
@@ -1000,7 +1006,7 @@ mod tests {
             ProofOrder::from_ids(&[
                 MidenAirId::Chiplets,
                 MidenAirId::Core,
-                MidenAirId::Poseidon2Permutation,
+                MidenAirId::BlakeGCompression,
                 MidenAirId::And8Lookup,
             ]),
         );
@@ -1009,7 +1015,7 @@ mod tests {
             ProofOrder::from_ids(&[
                 MidenAirId::Core,
                 MidenAirId::Chiplets,
-                MidenAirId::Poseidon2Permutation,
+                MidenAirId::BlakeGCompression,
                 MidenAirId::And8Lookup,
             ]),
         );
@@ -1049,7 +1055,7 @@ mod tests {
         let challenges = [QuadFelt::from(Felt::from_u32(7)), QuadFelt::from(Felt::from_u32(11))];
         let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES as u32).map(Felt::from_u32).collect();
         let kernel_digests = Vec::new();
-        let log_heights = [6, 6, 6, LOG_AND8_TABLE_HEIGHT];
+        let log_heights = [6, 6, 6, LOG_AND8_LOOKUP_TRACE_HEIGHT];
 
         let zero = [QuadFelt::from(Felt::ZERO)];
         let centered = [QuadFelt::from(Felt::from_u32(3))];
@@ -1076,8 +1082,8 @@ mod tests {
             )
             .expect("shifted boundary reduction");
 
-        let trace_len =
-            Felt::new(1u64 << LOG_AND8_TABLE_HEIGHT).expect("trace length must be canonical");
+        let trace_len = Felt::new(1u64 << LOG_AND8_LOOKUP_TRACE_HEIGHT)
+            .expect("trace length must be canonical");
         let expected_delta = centered[0] * QuadFelt::from(trace_len);
         assert_eq!(shifted[0] - base[0], expected_delta);
     }
@@ -1117,7 +1123,7 @@ mod tests {
         let layout = circuit.layout();
         let mut inputs = fill_inputs(layout);
 
-        let log_heights = [6, 6, 6, LOG_AND8_TABLE_HEIGHT];
+        let log_heights = [6, 6, 6, LOG_AND8_LOOKUP_TRACE_HEIGHT];
         for (air_idx, &log_height) in log_heights.iter().enumerate() {
             let trace_len = Felt::new(1u64 << log_height).expect("trace length must be canonical");
             let idx = layout.index(InputKey::TraceLenAir(air_idx)).expect("trace length slot");

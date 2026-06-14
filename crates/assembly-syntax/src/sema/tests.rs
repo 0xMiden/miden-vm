@@ -3,10 +3,11 @@ use alloc::{
     sync::Arc,
 };
 
+use miden_core::chiplets::hasher;
 use miden_debug_types::{Span, Spanned};
 
 use crate::{
-    MAX_REPEAT_COUNT, Path,
+    MAX_REPEAT_COUNT, Path, Word,
     ast::{
         Constant, ConstantExpr, Export, Module, ModuleKind, TypeAlias, TypeExpr, Visibility, types,
     },
@@ -24,6 +25,21 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
         Some(Export::Constant(constant)) => constant,
         Some(item) => panic!("expected exported constant named {name}, found {item:?}"),
         None => panic!("expected exported constant named {name}"),
+    }
+}
+
+fn constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
+    match module.items().iter().find(|item| item.name().as_str() == name) {
+        Some(Export::Constant(constant)) => constant,
+        Some(item) => panic!("expected constant named {name}, found {item:?}"),
+        None => panic!("expected constant named {name}"),
+    }
+}
+
+fn constant_word(module: &Module, name: &str) -> Word {
+    match &constant(module, name).value {
+        ConstantExpr::Word(value) => Word::from(value.inner().0),
+        other => panic!("expected constant {name} to be a word, got {other:?}"),
     }
 }
 
@@ -257,6 +273,36 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
     );
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
+}
+
+#[test]
+fn advice_map_entries_define_expected_keys() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module(
+            "\
+adv_map AUTO = [1, 2, 3]
+adv_map EXPLICIT([4, 3, 2, 1]) = [5, 6]
+",
+        )
+        .expect("expected advice-map declarations to pass semantic analysis");
+
+    let auto_values = [1u32, 2, 3].map(crate::Felt::from_u32);
+    let auto_key = hasher::hash_elements(&auto_values);
+    let explicit_key = Word::from([
+        crate::Felt::from_u32(4),
+        crate::Felt::from_u32(3),
+        crate::Felt::from_u32(2),
+        crate::Felt::from_u32(1),
+    ]);
+
+    assert_eq!(constant_word(&module, "AUTO"), auto_key);
+    assert_eq!(constant_word(&module, "EXPLICIT"), explicit_key);
+    assert_eq!(module.advice_map().get(&auto_key).map(|v| &**v), Some(&auto_values[..]));
+    assert_eq!(
+        module.advice_map().get(&explicit_key).map(|v| &**v),
+        Some(&[crate::Felt::from_u32(5), crate::Felt::from_u32(6)][..])
+    );
 }
 
 #[test]

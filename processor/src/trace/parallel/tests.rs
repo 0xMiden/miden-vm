@@ -3,7 +3,7 @@ use alloc::{string::String, sync::Arc};
 use miden_air::{
     MidenAir,
     lookup::build_logup_aux_trace,
-    trace::{RowIndex, chiplets::hasher::HASH_CYCLE_LEN},
+    trace::{RowIndex, chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION},
 };
 use miden_core::{
     Felt, Word,
@@ -123,44 +123,39 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // Join node. Same execution as case 4, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
 #[case(split_program(), 9, &[ZERO, SENTINEL_VALUE])]
-// Case 7: LOOP start — fragment boundary lands on the LOOP row. The LOOP is do-while: with
-// stack `[ZERO, SENTINEL]` the body runs once (Pad+Drop is net-zero, so the trailing condition
-// at the body's exit is the same `ZERO` that drove entry), then END exits the loop.
+// Case 7: LOOP start
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
-//  5:   LOOP                <-- fragment boundary
+//  5:   LOOP END
+//  7: END
+//  8: HALT
+#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
+// Case 8: LOOP END, when loop was not entered
+//  0: JOIN
+//  1:   BLOCK SWAP SWAP END
+//  5:   LOOP END
+//  7: END
+//  8: HALT
+#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
+// Case 9: LOOP END, when loop was entered
+//  0: JOIN
+//  1:   BLOCK SWAP SWAP END
+//  5:   LOOP
 //  6:     BLOCK PAD DROP END
 // 10:   END
 // 11: END
 // 12: HALT
-#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
-// Case 8: fragment boundary one row inside the loop body (SPAN of body) — same execution as
-// Case 7, just a different boundary.
-#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
-// Case 9: LOOP REPEAT — `[ONE, ZERO, SENTINEL]` makes the body run twice (first iteration
-// trailing condition is ONE, second is ZERO).
+#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
+// Case 10: LOOP REPEAT
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP
 //  6:     BLOCK PAD DROP END
-// 10:   REPEAT              <-- fragment boundary
+// 10:   REPEAT
 // 11:     BLOCK PAD DROP END
 // 15:   END
 // 16: END
 // 17: HALT
-#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
-// Case 10: LOOP REPEAT (deeper) — `[ONE, ONE, ZERO, SENTINEL]` makes the body run three times.
-//  0: JOIN
-//  1:   BLOCK SWAP SWAP END
-//  5:   LOOP
-//  6:     BLOCK PAD DROP END
-// 10:   REPEAT              <-- fragment boundary
-// 11:     BLOCK PAD DROP END
-// 15:   REPEAT
-// 16:     BLOCK PAD DROP END
-// 20:   END
-// 21: END
-// 22: HALT
 #[case(loop_program(), 10, &[ONE, ONE, ZERO, SENTINEL_VALUE])]
 // Case 11: CALL START
 //  0: JOIN
@@ -436,8 +431,8 @@ fn test_trace_generation_at_fragment_boundaries(
         ("Core", MidenAir::CORE, &core_from_fragments, &core_from_single),
         ("Chiplets", MidenAir::CHIPLETS, &chip_from_fragments, &chip_from_single),
         (
-            "Poseidon2Permutation",
-            MidenAir::POSEIDON2_PERMUTATION,
+            "BlakeGCompression",
+            MidenAir::BLAKEG_COMPRESSION,
             &p2_from_fragments,
             &p2_from_single,
         ),
@@ -519,11 +514,11 @@ fn test_nested_loop_end_flags_stable_across_fragmentation() {
     );
     assert!(
         end_flags.contains(&[ONE, ONE, ZERO, ZERO].into()),
-        "expected an END row for inner loop node (is_loop_body=1, is_loop=1)"
+        "expected an END row for inner loop node (is_loop_body=1, loop_entered=1)"
     );
     assert!(
         end_flags.contains(&[ZERO, ONE, ZERO, ZERO].into()),
-        "expected an END row for outer loop node (is_loop_body=0, is_loop=1)"
+        "expected an END row for outer loop node (is_loop_body=0, loop_entered=1)"
     );
 }
 
@@ -1244,12 +1239,11 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
         * trace_inputs.trace_generation_context().fragment_size;
 
-    // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
-    // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
-    // core_trace_rows / HASH_CYCLE_LEN + 1 permutations to guarantee the chiplets trace exceeds the
-    // limit.
-    let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
-    for _ in 0..num_permutations {
+    // Inject enough hasher operations so the chiplets trace exceeds core_trace_rows.
+    // BlakeG compression cycles live in their own AIR; each replayed BCOMPRESS contributes one
+    // input/output pair to the chiplets trace.
+    let num_compressions = core_trace_rows / CONTROLLER_ROWS_PER_PERMUTATION + 1;
+    for _ in 0..num_compressions {
         trace_inputs
             .trace_generation_context_mut()
             .hasher_for_chiplet

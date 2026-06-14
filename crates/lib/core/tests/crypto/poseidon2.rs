@@ -47,7 +47,7 @@ fn test_hash_empty() {
     begin
         # mem_stream state
         push.1000 padw padw padw
-        mem_stream hperm
+        mem_stream bcompress
 
         # drop everything except the hash
         exec.poseidon2::squeeze_digest movup.4 drop
@@ -93,7 +93,7 @@ fn test_single_iteration() {
 
         # mem_stream state
         push.1000 padw padw padw
-        mem_stream hperm
+        mem_stream bcompress
 
         # drop everything except the hash
         exec.poseidon2::squeeze_digest movup.4 drop

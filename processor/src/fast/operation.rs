@@ -6,7 +6,8 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    crypto::{hash::Poseidon2, merkle::MerklePath},
+    chiplets::hasher::apply_permutation,
+    crypto::merkle::MerklePath,
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
     program::MIN_STACK_DEPTH,
     utils::range,
@@ -73,7 +74,7 @@ impl HasherInterface for FastProcessor {
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
-        Poseidon2::apply_permutation(&mut input_state);
+        apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))

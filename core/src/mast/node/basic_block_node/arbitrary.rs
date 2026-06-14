@@ -86,7 +86,7 @@ pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
         Just(Operation::Emit),
         Just(Operation::Ext2Mul),
         Just(Operation::Expacc),
-        Just(Operation::HPerm),
+        Just(Operation::BCompress),
         // Note: We exclude Assert here because it has an immediate value (error code)
     ]
 }

@@ -1,6 +1,6 @@
 //! Hasher-chiplet bus tests.
 //!
-//! For each of the main hasher scenarios (SPAN/END control block, RESPAN, SPLIT merge, HPERM,
+//! For each of the main hasher scenarios (SPAN/END control block, RESPAN, SPLIT merge, BCOMPRESS,
 //! LOGPRECOMPILE, MPVERIFY, MRUPDATE) the test registers the decoder-side `remove` requests and
 //! the chiplet-side `add` responses it expects to see, then lets
 //! [`InteractionLog::assert_contains`] confirm every one of them fires somewhere in the trace.
@@ -22,11 +22,14 @@ use miden_air::{
     trace::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
+        log_precompile::{
+            HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
+        },
     },
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    chiplets::blakeg,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     operations::{Operation, opcodes},
@@ -134,7 +137,7 @@ fn span_end_hasher_bus() {
                 response_count += 1;
             },
             HasherResponseKind::Hout => {
-                let digest: [Felt; 4] = [state[0], state[1], state[2], state[3]];
+                let digest = digest_from_hasher_state(state);
                 exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
                 response_count += 1;
             },
@@ -252,8 +255,8 @@ fn merge_hasher_bus() {
 }
 
 #[test]
-fn hperm_hasher_bus() {
-    let program = single_block_program(vec![Operation::HPerm]);
+fn bcompress_hasher_bus() {
+    let program = single_block_program(vec![Operation::BCompress]);
     let stack = vec![8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8];
     let trace = build_trace_from_program(&program, &stack);
     let log = InteractionLog::new(&trace);
@@ -261,56 +264,57 @@ fn hperm_hasher_bus() {
 
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
-    let mut hperm_helper0: Option<Felt> = None;
+    let mut bcompress_helper0: Option<Felt> = None;
     for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
-        if op != opcodes::HPERM as u64 {
+        if op != opcodes::BCOMPRESS as u64 {
             continue;
         }
 
         let helper0 = main.helper_register(0, idx);
-        hperm_helper0 = Some(helper0);
+        bcompress_helper0 = Some(helper0);
         let next = RowIndex::from(row + 1);
         let stk_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, idx));
-        let stk_next_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
+        let cv_next: [Felt; 4] = core::array::from_fn(|i| main.stack_element(8 + i, next));
         exp.remove(row, &HasherMsg::linear_hash_init(helper0, stk_state));
         exp.remove(
             row,
-            &HasherMsg::return_state(helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE, stk_next_state),
+            &HasherMsg::return_hash(helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE, cv_next),
         );
         request_count += 2;
     }
-    let hperm_helper0 = hperm_helper0.expect("program should contain an HPERM row");
-    let hperm_return_addr = hperm_helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+    let bcompress_helper0 = bcompress_helper0.expect("program should contain a BCOMPRESS row");
+    let bcompress_return_addr = bcompress_helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
-    let mut sout_count = 0usize;
+    let mut hout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
         let addr = main.clk(idx) + ONE;
         let state = main.chiplet_hasher_state(idx);
         match kind {
             HasherResponseKind::SpongeStart => {
                 exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
-                // Only the HPERM-paired sponge_start matches `hperm_helper0`; the outer
+                // Only the BCOMPRESS-paired sponge_start matches `bcompress_helper0`; the outer
                 // SPAN/END controller rows live on their own `addr` track.
-                if addr == hperm_helper0 {
+                if addr == bcompress_helper0 {
                     sponge_start_count += 1;
                 }
             },
-            HasherResponseKind::Sout => {
-                exp.add(usize::from(idx), &HasherMsg::return_state(addr, state));
-                if addr == hperm_return_addr {
-                    sout_count += 1;
+            HasherResponseKind::Hout => {
+                let digest = digest_from_hasher_state(state);
+                exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
+                if addr == bcompress_return_addr {
+                    hout_count += 1;
                 }
             },
             _ => {},
         }
     }
 
-    assert_eq!(request_count, 2, "HPERM: expected 2 removes (init + return)");
-    assert_eq!(sponge_start_count, 1, "HPERM: expected 1 HPERM-paired sponge_start");
-    assert_eq!(sout_count, 1, "HPERM: expected 1 HPERM-paired SOUT");
+    assert_eq!(request_count, 2, "BCOMPRESS: expected 2 removes (init + return)");
+    assert_eq!(sponge_start_count, 1, "BCOMPRESS: expected 1 BCOMPRESS-paired sponge_start");
+    assert_eq!(hout_count, 1, "BCOMPRESS: expected 1 BCOMPRESS-paired HOUT");
     log.assert_contains(&exp);
 }
 
@@ -336,24 +340,26 @@ fn logprecompile_hasher_bus() {
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
         logprecompile_addr = Some(log_addr);
 
-        // Input: [STATE_PREV, STMNT, ZERO] — 4 helpers + 4 stack lanes + 4 ZEROs.
+        let cv = blakeg::two_to_one_chaining_word(0);
+
+        // Input: [STATE_PREV, STMNT, CV] - 4 helpers + 4 stack lanes + Eidos merge CV.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
                 main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
                 main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                ZERO
+                cv[i - 8]
             }
         });
 
-        // Output (next row): [STATE_NEW, OUT_RATE1, OUT_CAP] identity-mapped to stack[0..12].
-        let output_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
+        let state_new: [Felt; 4] =
+            core::array::from_fn(|i| main.stack_element(STACK_STATE_NEW_RANGE.start + i, next));
 
         exp.remove(row, &HasherMsg::linear_hash_init(log_addr, input_state));
         exp.remove(
             row,
-            &HasherMsg::return_state(log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE, output_state),
+            &HasherMsg::return_hash(log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE, state_new),
         );
         request_count += 2;
     }
@@ -361,7 +367,7 @@ fn logprecompile_hasher_bus() {
     let log_return_addr = log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
-    let mut sout_count = 0usize;
+    let mut hout_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
         let addr = main.clk(idx) + ONE;
         let state = main.chiplet_hasher_state(idx);
@@ -372,10 +378,11 @@ fn logprecompile_hasher_bus() {
                     sponge_start_count += 1;
                 }
             },
-            HasherResponseKind::Sout => {
-                exp.add(usize::from(idx), &HasherMsg::return_state(addr, state));
+            HasherResponseKind::Hout => {
+                let digest = digest_from_hasher_state(state);
+                exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
                 if addr == log_return_addr {
-                    sout_count += 1;
+                    hout_count += 1;
                 }
             },
             _ => {},
@@ -387,7 +394,7 @@ fn logprecompile_hasher_bus() {
         sponge_start_count, 1,
         "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired sponge_start"
     );
-    assert_eq!(sout_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired SOUT");
+    assert_eq!(hout_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired HOUT");
     log.assert_contains(&exp);
 }
 
@@ -457,7 +464,10 @@ fn mpverify_hasher_bus() {
                 // `chiplet_node_index(idx)` is `ZERO` at MPVERIFY's final HOUT row (Merkle walk
                 // terminates with node_index halved to 0). Using `return_hash` keeps the test
                 // aligned with the decoder-side `HasherMsg::return_hash(...)` shape.
-                exp.add(usize::from(idx), &HasherMsg::return_hash(addr, rate_0));
+                exp.add(
+                    usize::from(idx),
+                    &HasherMsg::return_hash(addr, digest_from_hasher_state(state)),
+                );
                 hout_count += 1;
             },
             _ => {},
@@ -546,7 +556,10 @@ fn mrupdate_hasher_bus() {
                 mu_count += 1;
             },
             HasherResponseKind::Hout => {
-                exp.add(usize::from(idx), &HasherMsg::return_hash(addr, rate_0));
+                exp.add(
+                    usize::from(idx),
+                    &HasherMsg::return_hash(addr, digest_from_hasher_state(state)),
+                );
                 hout_count += 1;
             },
             _ => {},
@@ -582,11 +595,12 @@ fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
     ]
 }
 
+fn digest_from_hasher_state(state: [Felt; 12]) -> [Felt; 4] {
+    [state[8], state[9], state[10], state[11]]
+}
+
 fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
-    if usize::from(row) >= main.chiplets_height() {
-        return false;
-    }
-    main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
+    main.is_hash_row(row)
 }
 
 /// Returns `Some(false)` for ZERO, `Some(true)` for ONE, and `None` for any other value.
@@ -656,7 +670,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
-        if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
+        if main.chiplet_selector_0(idx) != ONE {
             continue;
         }
         let hs0 = main.chiplet_selector_1(idx);

@@ -745,6 +745,16 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
+    fn record_hasher_bcompress(
+        &mut self,
+        input_state: [Felt; STATE_WIDTH],
+        output_state: [Felt; STATE_WIDTH],
+    ) {
+        self.hasher_for_chiplet.record_bcompress_input(input_state);
+        self.hasher_chiplet_shim.record_permute_output(output_state);
+    }
+
+    #[inline(always)]
     fn record_hasher_build_merkle_root(
         &mut self,
         node: Word,

@@ -3,7 +3,7 @@
 //! This module enforces the non-bus stack constraints for four crypto-related operations:
 //!
 //! - **CRYPTOSTREAM**: Encrypts memory words via XOR (i.e. addition in the prime field) with the
-//!   Poseidon2 sponge rate. Constraints here enforce pointer advancement and state stability; the
+//!   stream rate. Constraints here enforce pointer advancement and state stability; the
 //!   actual memory I/O and XOR happen via the chiplet bus (constrained elsewhere).
 //!
 //! - **HORNERBASE**: Evaluates a polynomial with base-field coefficients at an extension-field
@@ -46,6 +46,7 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
+    enforce_bcompress_constraints(builder, local, next, op_flags);
     enforce_cryptostream_constraints(builder, local, next, op_flags);
     enforce_hornerbase_constraints(builder, local, next, op_flags);
     enforce_hornerext_constraints(builder, local, next, op_flags);
@@ -55,7 +56,32 @@ pub fn enforce_main<AB>(
 // CONSTRAINT HELPERS
 // ================================================================================================
 
-/// CRYPTOSTREAM: encrypts two memory words via XOR with the Poseidon2 sponge rate.
+/// BCOMPRESS keeps the 8-felt block in place and replaces only the 4-felt chaining value.
+///
+/// The new chaining value at `s_next[8..12]` is constrained by the hasher return-state bus.
+fn enforce_bcompress_constraints<AB>(
+    builder: &mut AB,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
+) where
+    AB: MidenAirBuilder,
+{
+    let gate = builder.is_transition() * op_flags.bcompress();
+    let builder = &mut builder.when(gate);
+
+    let s = &local.stack.top;
+    let s_next = &next.stack.top;
+
+    for i in 0..8 {
+        builder.assert_eq(s_next[i], s[i]);
+    }
+    for i in 12..16 {
+        builder.assert_eq(s_next[i], s[i]);
+    }
+}
+
+/// CRYPTOSTREAM: encrypts two memory words via XOR with the stream rate.
 ///
 /// The top 8 stack elements (rate/ciphertext) are updated by the chiplet bus, not
 /// constrained here. These constraints enforce only:

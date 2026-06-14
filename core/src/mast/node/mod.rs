@@ -2,11 +2,11 @@ mod basic_block_node;
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-pub(crate) use basic_block_node::collect_immediate_placements;
 pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
 };
+pub(crate) use basic_block_node::{collect_immediate_placements, hash_op_batches};
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
 
@@ -36,7 +36,10 @@ mod mast_forest_contributor;
 pub(super) use mast_forest_contributor::fingerprint_with_child_fingerprints;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
-use crate::mast::{ExecutableMastForest, MastForest, MastNodeId};
+use crate::mast::{MastForest, MastNodeId};
+
+#[cfg(debug_assertions)]
+use crate::mast::ExecutableMastForest;
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.

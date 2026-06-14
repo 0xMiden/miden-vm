@@ -6,12 +6,11 @@ use std::{
 use super::*;
 use crate::{
     Felt, ONE, Word,
-    chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastForestView,
         MastNodeExt, MastNodeId, OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
-        UntrustedMastForestReadOptions,
+        UntrustedMastForestReadOptions, node::hash_op_batches,
     },
     operations::Operation,
     serde::{ByteReader, Deserializable, DeserializationError, Serializable, SliceReader},
@@ -136,7 +135,7 @@ fn confirm_operation_structure() {
         Operation::MStream => (),
         Operation::Pipe => (),
         Operation::CryptoStream => (),
-        Operation::HPerm => (),
+        Operation::BCompress => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),
         Operation::FriE2F4 => (),
@@ -226,7 +225,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::MStream,
         Operation::Pipe,
         Operation::CryptoStream,
-        Operation::HPerm,
+        Operation::BCompress,
         Operation::MpVerify(Felt::from_u32(1022)),
         Operation::MrUpdate,
         Operation::FriE2F4,
@@ -312,7 +311,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::MStream
         | Operation::Pipe
         | Operation::CryptoStream
-        | Operation::HPerm
+        | Operation::BCompress
         | Operation::MpVerify(_)
         | Operation::MrUpdate
         | Operation::FriE2F4
@@ -1717,15 +1716,10 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
 }
 
 fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word> {
-    use crate::chiplets::hasher;
-
     let forest = MastForest::read_from_bytes(bytes).ok()?;
     let block = forest[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
 
-    let op_groups: Vec<Felt> =
-        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-
-    Some(hasher::hash_elements(&op_groups))
+    Some(hash_op_batches(block.op_batches()))
 }
 
 /// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
@@ -1733,8 +1727,7 @@ fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word>
 fn test_untrusted_forest_rejects_non_full_prefix_batch() {
     let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)
@@ -1754,8 +1747,7 @@ fn test_untrusted_forest_rejects_non_full_prefix_batch() {
 fn test_untrusted_forest_accepts_full_prefix_batch() {
     let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
 
-    let op_groups: Vec<Felt> = op_batches.iter().flat_map(OpBatch::groups).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
+    let digest = hash_op_batches(&op_batches);
 
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, digest)

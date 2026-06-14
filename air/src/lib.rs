@@ -36,20 +36,20 @@ pub mod logup {
 
 pub use constraints::{
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
+    blakeg_compression::{BlakeGCompressionCols, NUM_BLAKEG_COMPRESSION_COLS},
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
-    poseidon2_permutation::columns::{Poseidon2PermutationCols, Poseidon2PermutationPeriodicCols},
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
 pub use multi_air::{
-    AIRS, AirSpec, And8LookupAir, ChipletsAir, CoreAir, MIDEN_AIR_COUNT, MidenAir, MidenAirId,
-    MidenMultiAir, Poseidon2PermutationAir, ProofOrder,
+    AIRS, AirSpec, And8LookupAir, BlakeGCompressionAir, ChipletsAir, CoreAir, MIDEN_AIR_COUNT,
+    MidenAir, MidenAirId, MidenMultiAir, ProofOrder,
 };
 
 // RE-EXPORTS
@@ -244,7 +244,7 @@ pub const NUM_VAR_LEN_PUBLIC_INPUT_GROUPS: usize = 1;
 /// Maximum number of kernel-digest field elements in the Miden VM statement.
 pub const MAX_KERNEL_PROC_DIGEST_INPUTS: usize = Kernel::MAX_NUM_PROCEDURES * WORD_SIZE;
 
-/// LogUp aux trace width: Core(4) + Chiplets(3) + Poseidon2Permutation(1) + AND8(1).
+/// Legacy LogUp aux trace width for the unified core/chiplets/AND8 path.
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 9;
 
 // Public-value layout offsets used by LogUp boundary corrections.

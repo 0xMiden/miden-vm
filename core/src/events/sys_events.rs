@@ -279,7 +279,7 @@ pub enum SystemEvent {
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying a Poseidon2 permutation to all three words.
+    /// under the key defined by applying `bcompress` to all three words.
     ///
     /// Inputs:
     ///   Operand stack: [A, B, C, ...]
@@ -289,9 +289,9 @@ pub enum SystemEvent {
     ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
-    /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-    HpermToMap,
+    /// Where KEY is computed by extracting the digest elements from bcompress([C, A, B]). For
+    /// example, if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
+    BCompressToMap,
 }
 
 impl SystemEvent {
@@ -363,7 +363,7 @@ impl SystemEvent {
             Self::HdwordToMap,
             Self::HdwordToMapWithDomain,
             Self::HqwordToMap,
-            Self::HpermToMap,
+            Self::BCompressToMap,
         ]
     }
 }
@@ -503,9 +503,9 @@ impl SystemEvent {
             name: "sys::hqword_to_map",
         },
         SystemEventEntry {
-            id: EventId::from_u64(6190830263511605775),
-            event: SystemEvent::HpermToMap,
-            name: "sys::hperm_to_map",
+            id: EventId::from_u64(454105713963103935),
+            event: SystemEvent::BCompressToMap,
+            name: "sys::bcompress_to_map",
         },
     ];
 }
@@ -614,7 +614,7 @@ mod test {
                 | SystemEvent::HdwordToMap
                 | SystemEvent::HdwordToMapWithDomain
                 | SystemEvent::HqwordToMap
-                | SystemEvent::HpermToMap => {},
+                | SystemEvent::BCompressToMap => {},
             }
         }
     }

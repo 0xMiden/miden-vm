@@ -12,9 +12,9 @@ use miden_core::{
 use super::{
     CHIPLETS_WIDTH, RowIndex, TRACE_WIDTH,
     and8_lookup::NUM_AND8_LOOKUP_COLS,
+    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
     chiplets::hasher::{DIGEST_LEN, STATE_WIDTH},
     decoder::{NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS},
-    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
 use crate::constraints::{
     columns::{ChipletCols, CoreCols, NUM_CHIPLETS_COLS, NUM_CORE_COLS},
@@ -70,9 +70,9 @@ struct TraceStorage {
     core_rm: RowMajorMatrix<Felt>,
     /// Chiplets matrix (`CHIPLETS_WIDTH` cols), at its own per-AIR height.
     chiplets_rm: RowMajorMatrix<Felt>,
-    /// Poseidon2 permutation matrix, at its own per-AIR height.
-    poseidon2_permutation_rm: RowMajorMatrix<Felt>,
-    /// Byte-AND lookup multiplicity matrix, at table height.
+    /// BlakeG compression matrix, at its own per-AIR height.
+    blakeg_compression_rm: RowMajorMatrix<Felt>,
+    /// Byte-AND lookup matrix, at its own fixed table height.
     and8_lookup_rm: RowMajorMatrix<Felt>,
 }
 
@@ -90,7 +90,7 @@ impl MainTrace {
     pub fn from_parts(
         core_rm: Vec<Felt>,
         chiplets_rm: Vec<Felt>,
-        poseidon2_permutation_rm: Vec<Felt>,
+        blakeg_compression_rm: Vec<Felt>,
         and8_lookup_rm: Vec<Felt>,
         last_program_row: RowIndex,
     ) -> Self {
@@ -105,9 +105,9 @@ impl MainTrace {
             "chiplets buffer not a multiple of CHIPLETS_WIDTH"
         );
         assert_eq!(
-            poseidon2_permutation_rm.len() % NUM_POSEIDON2_PERMUTATION_COLS,
+            blakeg_compression_rm.len() % NUM_BLAKEG_COMPRESSION_COLS,
             0,
-            "Poseidon2 buffer not a multiple of NUM_POSEIDON2_PERMUTATION_COLS"
+            "BlakeG compression buffer not a multiple of NUM_BLAKEG_COMPRESSION_COLS"
         );
         assert_eq!(
             and8_lookup_rm.len() % NUM_AND8_LOOKUP_COLS,
@@ -116,22 +116,22 @@ impl MainTrace {
         );
         let core_rows = core_rm.len() / CORE_STORAGE_WIDTH;
         let chiplets_rows = chiplets_rm.len() / CHIPLETS_WIDTH;
-        let poseidon2_rows = poseidon2_permutation_rm.len() / NUM_POSEIDON2_PERMUTATION_COLS;
+        let blakeg_rows = blakeg_compression_rm.len() / NUM_BLAKEG_COMPRESSION_COLS;
         let and8_rows = and8_lookup_rm.len() / NUM_AND8_LOOKUP_COLS;
         assert!(core_rows.is_power_of_two(), "core height must be a power of two");
         assert!(chiplets_rows.is_power_of_two(), "chiplets height must be a power of two");
         assert!(
-            poseidon2_rows.is_power_of_two(),
-            "Poseidon2 permutation height must be a power of two"
+            blakeg_rows.is_power_of_two(),
+            "BlakeG compression height must be a power of two"
         );
         assert!(and8_rows.is_power_of_two(), "AND8 lookup height must be a power of two");
         Self {
             storage: TraceStorage {
                 core_rm: RowMajorMatrix::new(core_rm, CORE_STORAGE_WIDTH),
                 chiplets_rm: RowMajorMatrix::new(chiplets_rm, CHIPLETS_WIDTH),
-                poseidon2_permutation_rm: RowMajorMatrix::new(
-                    poseidon2_permutation_rm,
-                    NUM_POSEIDON2_PERMUTATION_COLS,
+                blakeg_compression_rm: RowMajorMatrix::new(
+                    blakeg_compression_rm,
+                    NUM_BLAKEG_COMPRESSION_COLS,
                 ),
                 and8_lookup_rm: RowMajorMatrix::new(and8_lookup_rm, NUM_AND8_LOOKUP_COLS),
             },
@@ -177,10 +177,11 @@ impl MainTrace {
         RowMajorMatrix<Felt>,
         RowMajorMatrix<Felt>,
     ) {
+        // Each buffer is already stored at exactly its per-AIR height.
         (
             self.storage.core_rm.clone(),
             self.storage.chiplets_rm.clone(),
-            self.storage.poseidon2_permutation_rm.clone(),
+            self.storage.blakeg_compression_rm.clone(),
             self.storage.and8_lookup_rm.clone(),
         )
     }
@@ -197,7 +198,7 @@ impl MainTrace {
         (
             self.storage.core_rm,
             self.storage.chiplets_rm,
-            self.storage.poseidon2_permutation_rm,
+            self.storage.blakeg_compression_rm,
             self.storage.and8_lookup_rm,
         )
     }
@@ -206,7 +207,7 @@ impl MainTrace {
     pub fn num_rows(&self) -> usize {
         self.core_height()
             .max(self.chiplets_height())
-            .max(self.poseidon2_permutation_height())
+            .max(self.blakeg_compression_height())
             .max(self.and8_lookup_height())
     }
 
@@ -222,13 +223,13 @@ impl MainTrace {
         self.storage.chiplets_rm.height()
     }
 
-    /// Returns the Poseidon2-permutation AIR trace height.
+    /// Returns the BlakeG-compression AIR trace height.
     #[inline]
-    pub fn poseidon2_permutation_height(&self) -> usize {
-        self.storage.poseidon2_permutation_rm.height()
+    pub fn blakeg_compression_height(&self) -> usize {
+        self.storage.blakeg_compression_rm.height()
     }
 
-    /// Returns the byte-AND lookup AIR trace height.
+    /// Returns the byte-pair lookup AIR trace height.
     #[inline]
     pub fn and8_lookup_height(&self) -> usize {
         self.storage.and8_lookup_rm.height()
@@ -545,7 +546,7 @@ impl MainTrace {
     }
 
     /// Returns the reserved `s_perm` column at row i. The column is constrained to zero in
-    /// `ChipletsAir`; Poseidon2 permutation rows live in `Poseidon2PermutationAir`.
+    /// `ChipletsAir`; BlakeG compression rows live in `BlakeGCompressionAir`.
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
@@ -881,7 +882,7 @@ mod tests {
         // `core_rm` is the full per-AIR Core matrix (range columns in trailing slots).
         let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
-        let mut poseidon2_rm = Vec::with_capacity(num_rows * NUM_POSEIDON2_PERMUTATION_COLS);
+        let mut blakeg_rm = Vec::with_capacity(num_rows * NUM_BLAKEG_COMPRESSION_COLS);
         let mut and8_rm = Vec::with_capacity(num_rows * NUM_AND8_LOOKUP_COLS);
 
         for row in 0..num_rows {
@@ -892,15 +893,15 @@ mod tests {
                 chiplets_rm
                     .push(Felt::from_u32((row * TRACE_WIDTH + CORE_STORAGE_WIDTH + c) as u32));
             }
-            for c in 0..NUM_POSEIDON2_PERMUTATION_COLS {
-                poseidon2_rm.push(Felt::from_u32(c as u32));
+            for c in 0..NUM_BLAKEG_COMPRESSION_COLS {
+                blakeg_rm.push(Felt::from_u32(c as u32));
             }
             for c in 0..NUM_AND8_LOOKUP_COLS {
                 and8_rm.push(Felt::from_u32(c as u32));
             }
         }
 
-        MainTrace::from_parts(core_rm, chiplets_rm, poseidon2_rm, and8_rm, RowIndex::from(0))
+        MainTrace::from_parts(core_rm, chiplets_rm, blakeg_rm, and8_rm, RowIndex::from(0))
     }
 
     #[test]

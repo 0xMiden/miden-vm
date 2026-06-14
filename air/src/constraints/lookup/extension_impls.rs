@@ -20,8 +20,8 @@ use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::{
-    and8_lookup_air::And8LookupBuilder, buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder,
-    main_air::MainLookupBuilder, poseidon2_permutation_air::Poseidon2PermutationLookupBuilder,
+    and8_lookup_air::And8LookupBuilder, blakeg_compression_air::BlakeGCompressionLookupBuilder,
+    buses::LookupOpFlags, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 use crate::{
     CoreCols, Felt,
@@ -41,7 +41,7 @@ impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
 {
 }
 
-impl<'ab, AB> Poseidon2PermutationLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
+impl<'ab, AB> BlakeGCompressionLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
     AB: LiftedAirBuilder<F = Felt>
 {
 }
@@ -79,7 +79,7 @@ impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
 {
 }
 
-impl<'a, EF> Poseidon2PermutationLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
+impl<'a, EF> BlakeGCompressionLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
     EF: ExtensionField<Felt>
 {
 }
@@ -97,18 +97,17 @@ impl<'a, EF> And8LookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: E
 #[cfg(feature = "std")]
 mod debug_impls {
     use super::{
-        And8LookupBuilder, ChipletLookupBuilder, MainLookupBuilder,
-        Poseidon2PermutationLookupBuilder,
+        And8LookupBuilder, BlakeGCompressionLookupBuilder, ChipletLookupBuilder, MainLookupBuilder,
     };
     use crate::lookup::debug::{DebugTraceBuilder, ValidationBuilder};
 
     impl<'ab, 'r> MainLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> ChipletLookupBuilder for ValidationBuilder<'ab, 'r> {}
-    impl<'ab, 'r> Poseidon2PermutationLookupBuilder for ValidationBuilder<'ab, 'r> {}
+    impl<'ab, 'r> BlakeGCompressionLookupBuilder for ValidationBuilder<'ab, 'r> {}
     impl<'ab, 'r> And8LookupBuilder for ValidationBuilder<'ab, 'r> {}
 
     impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
     impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
-    impl<'a> Poseidon2PermutationLookupBuilder for DebugTraceBuilder<'a> {}
+    impl<'a> BlakeGCompressionLookupBuilder for DebugTraceBuilder<'a> {}
     impl<'a> And8LookupBuilder for DebugTraceBuilder<'a> {}
 }

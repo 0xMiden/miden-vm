@@ -37,20 +37,19 @@
 //!
 //! ## Hasher perm-link (`BusId::HasherPermLink{Input,Output}`)
 //!
-//! Binds hasher controller rows to the standalone Poseidon2 permutation AIR. Without this bus a
-//! malicious prover could pair any controller `(state_in, state_out)` with any perm-cycle execution
+//! Binds hasher controller rows to the standalone BlakeG compression AIR. Without this bus a
+//! malicious prover could pair any controller `(state_in, state_out)` with any compression execution
 //! (or skip the cycle entirely). The controller side emits two interactions:
 //!
 //! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`) — controller side of a
-//!   (state_in, state_out) pair. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`). Routed to
+//!   `(state_in, state_out)` pair on `BusId::HasherPermLinkInput`.
+//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`) on
 //!   `BusId::HasherPermLinkOutput`.
 //!
-//! The permutation AIR emits the matching row-0 and row-15 receives.
+//! The BlakeG compression AIR emits the matching input/output receives.
 //!
-//! The widest perm-link contribution is `f_ctrl_output` with gate degree 3 — strictly below
-//! the ACE batch's `(7, 8)` — so merging into the same group leaves the column's transition
-//! at `max(1 + 7, 8) = 8`.
+//! The output gate has degree `(6, 7)`, still below the ACE batch's `(8, 7)`.
+//! Merging into the same group therefore leaves the column's transition at `(8, 7)`.
 
 use core::array;
 
@@ -73,8 +72,8 @@ use crate::{
 /// exclusive, so on any given row only one of:
 /// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
 ///   when the outer `ace_flag` fires).
-/// - **Perm-link** on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
-///   `s0`).
+/// - **Perm-link** on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output,
+///   split by `s0`).
 ///
 /// Per-row max is therefore `max(3, 1) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
@@ -121,8 +120,11 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let ctrl = local.controller();
     let s0c: LB::Expr = ctrl.s0.into();
     let s1c: LB::Expr = ctrl.s1.into();
+    let s2c: LB::Expr = ctrl.s2.into();
+    let not_s1c = s1c.not();
     let is_input = s0c.clone();
-    let is_output = (LB::Expr::ONE - s0c) * (LB::Expr::ONE - s1c);
+    let is_output = s0c.clone().not() * not_s1c.clone();
+    let _ = (s0c, s2c);
 
     let controller_flag = ctx.chiplet_active.controller.clone();
     let f_ctrl_input = controller_flag.clone() * is_input;
@@ -186,7 +188,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
                     // ---- Hasher perm-link (BusId::HasherPermLink{Input,Output}) ----
 
-                    // Controller input: +1 / encode(ctrl.state) on HasherPermLinkInput.
+                    // Controller input: +1 / encode(ctrl.state).
                     g.add(
                         "perm_ctrl_input",
                         f_ctrl_input,
@@ -194,10 +196,10 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg::Input { state }
                         },
-                        Deg { v: 2, u: 3 },
+                        Deg { v: 5, u: 6 },
                     );
 
-                    // Controller output: +1 / encode(ctrl.state) on HasherPermLinkOutput.
+                    // Controller output: +1 / encode(ctrl.state).
                     g.add(
                         "perm_ctrl_output",
                         f_ctrl_output,
@@ -205,7 +207,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg::Output { state }
                         },
-                        Deg { v: 3, u: 4 },
+                        Deg { v: 6, u: 7 },
                     );
                 },
                 Deg { v: 8, u: 7 },

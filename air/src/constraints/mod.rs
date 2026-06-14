@@ -15,6 +15,7 @@ use chiplets::selectors::ChipletSelectors;
 use crate::{ChipletCols, CoreCols, MidenAirBuilder};
 
 pub mod and8_lookup;
+pub mod blakeg_compression;
 pub mod chiplets;
 pub mod columns;
 pub mod constants;
@@ -22,7 +23,6 @@ pub mod decoder;
 pub mod ext_field;
 pub mod lookup;
 pub(crate) mod op_flags;
-pub mod poseidon2_permutation;
 pub mod public_inputs;
 pub mod range;
 pub mod stack;

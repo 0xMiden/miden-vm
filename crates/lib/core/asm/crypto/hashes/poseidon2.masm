@@ -1,4 +1,7 @@
-# ===== POSEIDON2 PROCEDURES ====================================================================
+# ===== VM HASH PROCEDURES ======================================================================
+
+#! Compatibility surface for existing `crypto::hashes::poseidon2` imports.
+#! The procedures below execute the VM-native hash operations.
 
 #! Prepares the top of the stack with the hasher initial state.
 #!
@@ -8,7 +11,7 @@
 #! Input: []
 #! Output: [R0, R1, C, ...]
 #!
-#! Where R0, R1, C are three zero words representing the initial Poseidon2 hasher state
+#! Where R0, R1, C are three zero words representing the initial VM hasher state
 #! (R0 on top of stack).
 #!
 #! Cycles: 12
@@ -73,7 +76,7 @@ pub proc copy_digest
     dupw
 end
 
-#! Hashes the memory `start_addr` to `end_addr` given a Poseidon2 state specified by 3 words.
+#! Hashes the memory `start_addr` to `end_addr` given a three-word VM hasher state.
 #!
 #! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
 #! will enter an infinite loop.
@@ -260,7 +263,7 @@ pub proc prepare_hasher_state
     cdrop
     # => [capacity, ptr, end_pairs_addr, num_elements%8]
 
-    # prepare hasher state for Poseidon2 permutation
+    # prepare the three-word VM hasher state
     push.0.0.0 movup.3 padw padw
     # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 end
@@ -483,35 +486,35 @@ pub proc pad_and_hash_elements
     # => [HASH]
 end
 
-#! Computes Poseidon2 hash of a single word (256-bit input).
+#! Computes the VM-native hash of a single word (256-bit input).
 #!
 #! Inputs:  [A]
 #! Outputs: [B]
 #!
 #! Where:
 #! - A is the word to be hashed.
-#! - B is the resulting hash, computed as `Poseidon2(A)`.
+#! - B is the resulting hash.
 #!
 #! Cycles: 19
 pub proc hash
     hash
 end
 
-#! Merges two words (256-bit digests) via Poseidon2 hash.
+#! Merges two words (256-bit digests) via the VM-native hash.
 #!
 #! Inputs:  [A, B]
 #! Outputs: [C]
 #!
 #! Where:
 #! - A and B are the words to be merged.
-#! - C is the resulting hash, computed as `Poseidon2(A || B)`.
+#! - C is the resulting hash.
 #!
 #! Cycles: 16
 pub proc merge
     hmerge
 end
 
-#! Merges two words (256-bit digests) via Poseidon2 hash with a domain identifier.
+#! Merges two words (256-bit digests) via the VM-native hash with a domain identifier.
 #!
 #! Inputs:  [domain, A, B, ...]
 #! Outputs: [C, ...]
@@ -527,16 +530,16 @@ pub proc merge_in_domain
     movdn.8
     # => [A, B, domain, ...]
 
-    # build the hperm state [A, B, [0, domain, 0, 0]] (5 cycles)
+    # build the bcompress state [A, B, [0, domain, 0, 0]] (5 cycles)
     push.0.0 movup.10 push.0 movdnw.2
     # => [A, B, [0, domain, 0, 0], ...]
 
     # run the permutation (1 cycle) and squeeze the digest (9 cycles)
-    hperm
+    bcompress
     exec.squeeze_digest
 end
 
-#! Performs Poseidon2 permutation on the hasher state.
+#! Applies one VM-native compression step to the hasher state.
 #!
 #! Inputs:  [R0, R1, C]
 #! Outputs: [R0', R1', C']
@@ -547,5 +550,5 @@ end
 #!
 #! Cycles: 1
 pub proc permute
-    hperm
+    bcompress
 end

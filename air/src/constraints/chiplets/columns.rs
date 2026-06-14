@@ -54,14 +54,14 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// never a named column or struct field, there is no name collision with the
 /// controller-internal `s0` defined here.
 ///
-/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
-/// Helper methods provide the sub-views used by controller constraints.
+/// The state holds BlakeG's `[block_lo, block_hi, cv]` layout. `state[8..12]` is the
+/// chaining-value/digest word.
 ///
 /// ## Layout
 ///
 /// ```text
 /// | s0 s1 s2 | state[12]                                    | extra cols      |
-/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
+/// |          | block_lo[4]         | block_hi[4] | cv[4]    |                 |
 /// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
 /// ```
 #[repr(C)]
@@ -73,13 +73,13 @@ pub struct ControllerCols<T> {
     pub s1: T,
     /// Operation sub-selector s2.
     pub s2: T,
-    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
+    /// BlakeG state (8 block Felts + 4 chaining-value Felts).
     pub state: [T; STATE_WIDTH],
     /// Merkle tree node index.
     pub node_index: T,
     /// Domain separator for sibling table across MRUPDATE ops.
     pub mrupdate_id: T,
-    /// 1 on boundary rows (first input or last output of each permutation).
+    /// 1 on boundary rows (first input or last output of each compression request).
     pub is_boundary: T,
     /// Direction bit for Merkle path verification.
     pub direction_bit: T,
@@ -88,6 +88,11 @@ pub struct ControllerCols<T> {
 impl<T: Copy> ControllerCols<T> {
     /// Returns the capacity portion of the state (state[8..12]).
     pub fn capacity(&self) -> [T; CAPACITY_LEN] {
+        [self.state[8], self.state[9], self.state[10], self.state[11]]
+    }
+
+    /// Returns the digest portion of the state (state[8..12]).
+    pub fn digest(&self) -> [T; DIGEST_LEN] {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
     }
 

@@ -899,7 +899,7 @@ impl BlockAddressReplay {
 /// trace generation.
 #[derive(Debug, Default)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher operations from permutation operations (HPerm).
+    /// Recorded hasher operations from permutation operations (BCompress).
     ///
     /// Each entry contains (address, output_state)
     permutation_operations: VecDeque<(Felt, [Felt; 12])>,
@@ -1007,6 +1007,7 @@ impl HasherInterface for HasherResponseReplay {
 #[derive(Debug)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
+    BCompress([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
     /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
@@ -1029,6 +1030,11 @@ impl HasherRequestReplay {
     /// Records a `Hasher::permute()` request.
     pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
         self.hasher_ops.push_back(HasherOp::Permute(state));
+    }
+
+    /// Records a `Hasher::bcompress()` request.
+    pub fn record_bcompress_input(&mut self, state: [Felt; STATE_WIDTH]) {
+        self.hasher_ops.push_back(HasherOp::BCompress(state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.

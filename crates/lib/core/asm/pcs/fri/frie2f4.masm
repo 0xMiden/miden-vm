@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
@@ -138,35 +138,35 @@ pub proc verify_query_layer
     swapw
     # => [C, V, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
-    # unhash V and save the pre-image in locaddr.0 and locaddr.4; we don't clear values of C
-    # because adv_pipe overwrites the first 8 elements of the stack (15 cycles)
+    # Cache the committed leaf. adv_pipe stores the opened row in tmp3/tmp4.
+    swapw
+    exec.constants::tmp2 mem_storew_le
+    dropw
+
+    # Hash the opened row with Eidos init_chaining_word(0, 0).
     exec.constants::tmp3
     movdn.4
-    padw
+    push.6620516959492505600.1947077364412317696.2688637133034287986.4280581858871862887
     swapw
     padw
     adv_pipe
-    exec.poseidon2::permute
-    # => [T0, T1, T2, ptr, V, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
+    exec.eidos::compress
+    # => [CV, ZERO, DIGEST, ptr, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
 
-    # assert T0 == V (16 cycles)
-    swapw
-    swapw.3
+    # Compare the BlakeG digest against the committed leaf.
+    swapw.2
+    padw
+    exec.constants::tmp2 mem_loadw_le
+    assert_eqw
+    dropw
+    dropw
+
+    # Reload (v0, ..v7) from the row cached by adv_pipe.
     drop
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
-    movup.9
-    assert_eq
-
-    # load (v0, ..v7) from memory (8 cycles)
-    exec.constants::tmp4
-    mem_loadw_le
-    swapw
-    exec.constants::tmp3
-    mem_loadw_le
+    padw
+    exec.constants::tmp4 mem_loadw_le
+    padw
+    exec.constants::tmp3 mem_loadw_le
     # => [v0, ..., v7, f_pos, p, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
     # the FRI proof is queried in domain order, but fri_ext2fold4 expects an index whose low

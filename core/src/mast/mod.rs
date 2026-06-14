@@ -801,11 +801,7 @@ impl MastForest {
 
             // Check topological ordering and compute digest.
             let computed_digest = match node {
-                MastNode::Block(block) => {
-                    let op_groups: Vec<Felt> =
-                        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
-                    hasher::hash_elements(&op_groups)
-                },
+                MastNode::Block(block) => node::hash_op_batches(block.op_batches()),
                 MastNode::Join(join) => {
                     let left_id = join.first();
                     let right_id = join.second();

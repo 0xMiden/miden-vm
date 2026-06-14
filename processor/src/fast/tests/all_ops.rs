@@ -106,7 +106,7 @@ fn test_basic_block(
         vec![Operation::MStore],
         vec![Operation::MStream],
         // crypto ops
-        vec![Operation::HPerm],
+        vec![Operation::BCompress],
         // Note: we have more specific tests for these below
         vec![Operation::FriE2F4],
         vec![Operation::HornerBase],

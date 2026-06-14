@@ -1,23 +1,23 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::stark::random_coin
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes a Poseidon2 hasher state, a destination pointer, and the current Horner accumulator. Loads
-#! one OOD frame from advice, stores it at `ptr`, absorbs it into the transcript, and folds it into
-#! the accumulator.
+#! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
+#! Horner accumulator used by the DEEP fixed terms.
 #!
-#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, acc0', acc1']
+#! Inputs:  [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations
-    # One OOD-point frame has 160 logical slots in the LMCS-aligned wire format:
-    #   preprocessed openings: ceil(3/8)*8                                      = 8
-    #   main openings:         ceil(51/8)*8 + ceil(22/8)*8 + ceil(16/8)*8 + 8   = 104
-    #   auxiliary coord slots: ceil(8/8)*8 + ceil(6/8)*8 + ceil(2/8)*8 + 8      = 32
-    #   quotient coord slots:  8*2                                              = 16
-    # The advice stream supplies 320 base felts, read as 40 `adv_pipe` blocks.
-    repeat.40
+    # Per-row OOD layout uses LMCS alignment 8:
+    #   preprocessed: ceil(11/8)*8      = 16 EF evals
+    #   main:         56 + 24 + 80 + 16 = 176 EF evals
+    #   aux:          per-AIR aligned   = 64 EF evals
+    #   quotient:     8 chunks * 2      = 16 EF evals
+    # The advice stream supplies 544 base felts, read as 68 `adv_pipe` blocks.
+    repeat.68
         adv_pipe
         horner_eval_ext
-        exec.poseidon2::permute
+        exec.random_coin::eidos_absorb_block
+        padw padw
     end
 end

@@ -40,8 +40,9 @@
 //!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A linear hash tree over Poseidon2 that produces a rolling digest of
-//!   all recorded precompile statements; the state is itself a complete digest at every step.
+//! - [`PrecompileTranscript`]: A linear hash tree over the VM hasher that produces a rolling
+//!   digest of all recorded precompile statements; the state is itself a complete digest at every
+//!   step.
 //!
 //! # Example Implementation
 //!
@@ -58,11 +59,12 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
-use miden_crypto::{Felt, Word, hash::poseidon2::Poseidon2};
+use miden_crypto::{Felt, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    chiplets::hasher::Hasher,
     events::{EventId, EventName},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -186,10 +188,10 @@ impl PrecompileCommitment {
         Word::words_as_elements(&words).try_into().unwrap()
     }
 
-    /// Returns the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` that the
-    /// transcript folds into its rolling state.
+    /// Returns the per-call statement word `STMNT = Hasher::merge(COMM, TAG)` that the transcript
+    /// folds into its rolling state.
     pub fn statement(&self) -> Word {
-        Poseidon2::merge(&[self.comm, self.tag])
+        Hasher::merge(&[self.comm, self.tag])
     }
 
     /// Returns the `EventId` used to identify the verifier that produced this commitment from a
@@ -322,7 +324,7 @@ pub trait PrecompileVerifier: Send + Sync {
 // PRECOMPILE TRANSCRIPT
 // ================================================================================================
 
-/// Precompile transcript implemented as a linear hash tree over Poseidon2.
+/// Precompile transcript implemented as a linear hash tree over the VM hasher.
 ///
 /// # Structure
 /// The transcript holds a single 4-element [`Word`] — the rolling state. After each `record` call,
@@ -330,9 +332,9 @@ pub trait PrecompileVerifier: Send + Sync {
 ///
 /// # Operation
 /// For each commitment, the transcript first computes the per-call statement
-/// `STMNT = Poseidon2::merge(COMM, TAG)` (see [`PrecompileCommitment::statement`]), then folds the
+/// `STMNT = Hasher::merge(COMM, TAG)` (see [`PrecompileCommitment::statement`]), then folds the
 /// statement into the rolling state via the 2-to-1 hash
-/// `state' = Poseidon2::merge(state, STMNT)`. The state is exposed directly as the transcript
+/// `state' = Hasher::merge(state, STMNT)`. The state is exposed directly as the transcript
 /// digest — no finalization step is required.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
@@ -358,11 +360,10 @@ impl PrecompileTranscript {
 
     /// Records a precompile commitment into the transcript, updating the state.
     ///
-    /// Folds the per-call statement `STMNT = Poseidon2::merge(COMM, TAG)` into the rolling state
-    /// via `state' = Poseidon2::merge(state, STMNT)`.
+    /// Folds the per-call statement into the rolling state.
     pub fn record(&mut self, commitment: PrecompileCommitment) {
         let stmnt = commitment.statement();
-        self.state = Poseidon2::merge(&[self.state, stmnt]);
+        self.state = Hasher::merge(&[self.state, stmnt]);
     }
 }
 

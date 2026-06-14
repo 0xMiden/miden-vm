@@ -12,7 +12,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Poseidon2};
+use miden_core::{Word, chiplets::hasher};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -358,12 +358,13 @@ fn define_procedure(
     Ok(())
 }
 
-/// Inserts a new entry in the Advice Map and defines a constant corresposnding to the entry's
-/// key.
+/// Inserts a new entry in the Advice Map and defines a constant corresponding to the entry's key.
 fn add_advice_map_entry(module: &mut Module, entry: AdviceMapEntry, context: &mut AnalysisContext) {
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
-        None => Poseidon2::hash_elements(&entry.value),
+        // Keyless entries are content-addressed with the VM hash so assembler-generated keys
+        // match digests recomputed in MASM via `bcompress`.
+        None => hasher::hash_elements(&entry.value),
     };
     let cst = Constant::new(
         entry.span,

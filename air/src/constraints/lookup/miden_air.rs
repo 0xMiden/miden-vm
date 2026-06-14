@@ -97,12 +97,14 @@ mod tests {
     };
 
     use crate::{
-        ChipletsAir, Felt, LiftedAir, MidenAir, NUM_PUBLIC_VALUES,
+        BlakeGCompressionAir, ChipletsAir, Felt, MidenAir, NUM_BLAKEG_COMPRESSION_COLS,
+        NUM_PUBLIC_VALUES,
         constraints::{
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             lookup::{
-                BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
-                main_air::MAIN_COLUMN_SHAPE,
+                BusId, MIDEN_MAX_MESSAGE_WIDTH,
+                blakeg_compression_air::BLAKEG_COMPRESSION_COLUMN_SHAPE,
+                chiplet_air::CHIPLET_COLUMN_SHAPE, main_air::MAIN_COLUMN_SHAPE,
             },
         },
         lookup::{
@@ -200,23 +202,20 @@ mod tests {
     }
 
     #[test]
-    fn poseidon2_permutation_air_lookup_validates() {
-        let num_periodic =
-            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION).len();
+    fn blakeg_compression_air_lookup_validates() {
+        let num_periodic = BlakeGCompressionAir.periodic_columns().len();
         let layout = ValidateLayout {
             preprocessed_width: 0,
-            trace_width:
-                crate::constraints::poseidon2_permutation::columns::NUM_POSEIDON2_PERMUTATION_COLS,
+            trace_width: NUM_BLAKEG_COMPRESSION_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
-            permutation_width: crate::constraints::lookup::poseidon2_permutation_air::POSEIDON2_PERMUTATION_COLUMN_SHAPE
-                .len(),
+            permutation_width: BLAKEG_COMPRESSION_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };
-        ValidateLookupAir::validate(&MidenAir::POSEIDON2_PERMUTATION, layout).unwrap_or_else(
-            |err| panic!("Poseidon2PermutationAir LookupAir validation failed: {err}"),
-        );
+        ValidateLookupAir::validate(&MidenAir::BLAKEG_COMPRESSION, layout).unwrap_or_else(|err| {
+            panic!("BlakeGCompressionAir LookupAir validation failed: {err}")
+        });
     }
 
     #[test]

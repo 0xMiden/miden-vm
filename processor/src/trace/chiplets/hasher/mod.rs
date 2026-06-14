@@ -1,18 +1,28 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
+#[cfg(feature = "std")]
+use std::time::Instant;
 
-use miden_air::trace::chiplets::hasher::{
-    CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
-    MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+use miden_air::trace::{
+    and8_lookup::BYTE_LOOKUP_COUNT_LEN,
+    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
+    chiplets::hasher::{
+        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
+        MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+    },
 };
-use miden_core::chiplets::hasher::apply_permutation;
+use miden_core::chiplets::{blakeg, hasher::apply_permutation};
+use rayon::prelude::*;
 
 use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
-    Word as Digest, ZERO,
+    RangeChecker, Word as Digest, ZERO,
 };
 
 mod trace;
-use trace::{HasherTrace, fill_poseidon2_permutation_trace};
+use trace::HasherTrace;
+mod blakeg_trace;
+pub(crate) use blakeg_trace::build_and8_lookup_trace;
+use blakeg_trace::generate_compression_block;
 
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
@@ -38,31 +48,36 @@ fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
 
+/// Reconstructs a HasherState from a StateKey.
+fn key_to_state(key: &StateKey) -> HasherState {
+    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
+}
+
 /// Hash chiplet for the VM.
 ///
-/// This component uses a controller/permutation split architecture:
+/// This component uses a controller/compression split architecture:
 ///
-/// - **Controller region**: pairs of (input, output) rows for each permutation request.
-///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
-///   s1=0) capture the post-permutation state.
+/// - **Controller region**: pairs of (input, output) rows for each compression
+///   request. Input rows (s0=1) capture the operation type and pre-compression state. Output rows
+///   (s0=0, s1=0) capture the post-compression state.
 ///
-/// - **Poseidon2 permutation AIR**: one 16-row Poseidon2 cycle per unique input state. The cycle
-///   multiplicity is linked to controller rows via the hasher perm-link LogUp bus.
+/// - **BlakeG compression AIR**: one 64-row block per unique input state. The block multiplicity
+///   is linked to controller rows via the hasher perm-link LogUp bus.
 ///
-/// This architecture enables permutation deduplication: N requests with the same input state
-/// produce N controller pairs but only one permutation cycle (with multiplicity N).
+/// This architecture enables compression deduplication: N requests with the same input state
+/// produce N controller pairs but only one BlakeG block with multiplicity N.
 ///
 /// ## Controller trace layout (20 columns)
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit
 /// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
-    /// Maps input state -> multiplicity for permutation deduplication.
-    /// During trace generation, one 16-row Poseidon2 cycle is emitted per entry.
+    /// Maps input state -> multiplicity for compression deduplication.
+    /// During trace generation, one 64-row BlakeG block is emitted per entry.
     perm_request_map: BTreeMap<StateKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
@@ -90,27 +105,49 @@ impl Hasher {
     /// Returns the layout of the hasher region as `(controller_len, perm_len)`.
     ///
     /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
-    /// align the following chiplet section. `perm_len` is the standalone Poseidon2 AIR length,
+    /// align the following chiplet section. `perm_len` is the standalone BlakeG AIR length,
     /// including the final zero-multiplicity cycle required by the LogUp accumulator.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
         let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
-        let perm_len = self.poseidon2_permutation_trace_len();
+        let perm_len = self.blakeg_compression_trace_len();
         (controller_len, perm_len)
     }
 
-    /// Returns the unpadded Poseidon2-permutation AIR trace length.
+    /// Returns the unpadded BlakeG-compression AIR trace length.
     ///
     /// The extra dummy cycle is required by the generic LogUp accumulator: the last
-    /// trace row must not emit bus interactions. Real Poseidon2 cycles emit their
-    /// output-side perm-link receive on row 15, so the trace always ends with a
-    /// zero-multiplicity cycle.
-    pub(super) fn poseidon2_permutation_trace_len(&self) -> usize {
+    /// trace row must not emit bus interactions. Real BlakeG blocks emit their
+    /// perm-link receives on the input interface row, so the trace always ends
+    /// with a zero-multiplicity block.
+    pub(super) fn blakeg_compression_trace_len(&self) -> usize {
         if self.finalized {
             0
         } else {
             (self.perm_request_map.len() + 1) * HASH_CYCLE_LEN
         }
+    }
+
+    /// Adds range-check requests emitted by the standalone BlakeG compression AIR.
+    pub(super) fn append_blakeg_range_checks(
+        &self,
+        blakeg_height: usize,
+        range: &mut RangeChecker,
+    ) {
+        debug_assert_eq!(blakeg_height % HASH_CYCLE_LEN, 0);
+        debug_assert!(!self.finalized, "range checks must be collected before finalization");
+
+        let block_count = blakeg_height / HASH_CYCLE_LEN;
+        debug_assert!(
+            block_count >= self.perm_request_map.len(),
+            "BlakeG height is too short for recorded compression requests",
+        );
+
+        for key in self.perm_request_map.keys() {
+            append_message_row_range_checks(&key_to_state(key), range);
+        }
+
+        append_zero_message_row_range_checks(block_count - self.perm_request_map.len(), range);
     }
 
     /// Estimates the controller trace length before finalization.
@@ -125,10 +162,7 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Applies a single permutation of the hash function to the provided state and records the
-    /// execution trace of this computation.
-    ///
-    /// Returns (addr, permuted_state).
+    /// Applies one packed BlakeG compression and records a full-state return.
     pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
         let addr = self.trace.next_row_addr();
 
@@ -145,6 +179,25 @@ impl Hasher {
         );
 
         (addr, permuted)
+    }
+
+    /// Applies one packed BlakeG compression and records a digest-only return.
+    pub fn bcompress(&mut self, state: HasherState) -> (Felt, HasherState) {
+        let addr = self.trace.next_row_addr();
+
+        let compressed = self.append_controller_permutation(
+            LINEAR_HASH,
+            RETURN_HASH,
+            state,
+            ZERO,
+            ZERO,
+            ONE,
+            ONE,
+            ZERO,
+            ZERO,
+        );
+
+        (addr, compressed)
     }
 
     /// Computes hash(h1, h2) for a control block and returns the result.
@@ -164,7 +217,7 @@ impl Hasher {
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
         let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
-        // Single permutation: boundary on both input and output
+        // Single compression: boundary on both input and output.
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,
@@ -197,9 +250,10 @@ impl Hasher {
 
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
-        let init_state = init_state(op_batches[0].groups(), ZERO);
-
         let num_batches = op_batches.len();
+        let n = u32::try_from(num_basic_block_hash_groups(op_batches))
+            .expect("felt length must fit in u32");
+        let init_state = init_state(op_batches[0].groups(), n);
 
         if num_batches == 1 {
             // Single batch: boundary on both input and output
@@ -314,19 +368,26 @@ impl Hasher {
     // TRACE GENERATION
     // --------------------------------------------------------------------------------------------
 
-    /// Finalizes and fills the controller and Poseidon2-permutation traces.
+    /// Finalizes and fills the controller and BlakeG-compression traces.
     ///
-    /// Finalization pads the controller region and materializes one 16-row Poseidon2 cycle
-    /// per unique input state. Remaining Poseidon2 rows are valid zero-multiplicity dummy
-    /// cycles.
+    /// Finalization pads the controller region and materializes one 64-row BlakeG block
+    /// per unique input state. Remaining BlakeG rows are valid zero-multiplicity dummy
+    /// blocks.
     pub(super) fn fill_trace(
         mut self,
         trace: &mut ChipletTraceFragment,
-        poseidon2_trace: &mut [Felt],
-    ) {
+        blakeg_trace: &mut [Felt],
+    ) -> Vec<u64> {
+        let perm_request_count = self.perm_request_map.len();
+        let controller_estimate = self.estimate_trace_len();
+        let blakeg_rows = self.blakeg_compression_trace_len();
+        profile_event(format_args!(
+            "hasher.shape controller_rows={controller_estimate} perm_requests={perm_request_count} blakeg_rows={blakeg_rows}"
+        ));
+
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
-            self.finalize_trace();
+            profile_scope("hasher.finalize_controller", || self.finalize_trace());
             debug_assert_eq!(
                 estimated_len,
                 self.trace.trace_len(),
@@ -336,8 +397,10 @@ impl Hasher {
             );
         }
         let perm_requests = core::mem::take(&mut self.perm_request_map);
-        self.trace.fill_trace(trace);
-        fill_poseidon2_permutation_trace(perm_requests, poseidon2_trace);
+        profile_scope("hasher.controller.fill_trace", || self.trace.fill_trace(trace));
+        profile_scope("hasher.blakeg_compression.fill_trace", || {
+            fill_blakeg_compression_trace(perm_requests, blakeg_trace)
+        })
     }
 
     /// Finalizes the controller trace by padding it to the chiplet alignment boundary.
@@ -351,25 +414,25 @@ impl Hasher {
         self.finalized = true;
     }
 
-    // CORE HELPER: CONTROLLER PERMUTATION
+    // CORE HELPER: CONTROLLER COMPRESSION
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a controller (input, output) pair and records the permutation request.
+    /// Appends a controller (input, output) pair and records the compression request.
     ///
     /// Writes two rows to the controller region:
-    /// - Input row: `init_selectors` (s0=1), pre-permutation `state`, `input_node_index`,
+    /// - Input row: `init_selectors` (s0=1), pre-compression `state`, `input_node_index`,
     ///   `is_boundary_input`, `input_direction_bit`.
-    /// - Output row: `final_selectors` (s0=0), post-permutation state, `output_node_index`,
+    /// - Output row: `final_selectors` (s0=0), post-compression state, `output_node_index`,
     ///   `is_boundary_output`, `output_direction_bit`.
     ///
     /// Both rows carry the current `mrupdate_id` for sibling table domain separation.
-    /// The pre-permutation state is also recorded in `perm_request_map` for deduplication.
+    /// The pre-compression state is also recorded in `perm_request_map` for deduplication.
     ///
     /// For Merkle operations, `input_node_index` is the full tree index and
     /// `output_node_index` is the shifted index (input >> 1). For non-Merkle operations,
     /// both should be ZERO.
     ///
-    /// Returns the post-permutation state.
+    /// Returns the post-compression state.
     fn append_controller_permutation(
         &mut self,
         init_selectors: Selectors,
@@ -392,7 +455,7 @@ impl Hasher {
             input_direction_bit,
         );
 
-        // Apply the permutation
+        // Apply the compression.
         let mut permuted = state;
         apply_permutation(&mut permuted);
 
@@ -406,7 +469,7 @@ impl Hasher {
             output_direction_bit,
         );
 
-        // Record this permutation request for deduplication
+        // Record this compression request for deduplication.
         self.record_perm_request(&state);
 
         permuted
@@ -476,10 +539,10 @@ impl Hasher {
         root
     }
 
-    // PERMUTATION DEDUPLICATION
+    // COMPRESSION DEDUPLICATION
     // --------------------------------------------------------------------------------------------
 
-    /// Records a permutation request for the given input state. If the same state was already
+    /// Records a compression request for the given input state. If the same state was already
     /// seen, increments the multiplicity counter.
     fn record_perm_request(&mut self, state: &HasherState) {
         let key = state_to_key(state);
@@ -492,7 +555,7 @@ impl Hasher {
     /// Attempts to replay a memoized controller trace for the given expected hash.
     ///
     /// If a memoized trace exists, re-pushes the source ops with the current `mrupdate_id`,
-    /// re-registers permutation requests from copied input rows, and returns `Some((addr,
+    /// re-registers compression requests from copied input rows, and returns `Some((addr,
     /// digest))`. Otherwise returns `None`.
     fn replay_memoized_trace(&mut self, expected_hash: Digest) -> Option<(Felt, Digest)> {
         let (op_start, op_end) = match self.get_memoized_trace(expected_hash) {
@@ -522,6 +585,170 @@ impl Hasher {
         let op_end = self.trace.next_op_index();
         self.memoized_trace_map.insert(digest_to_key(hash), (op_start, op_end));
     }
+}
+
+fn fill_blakeg_compression_trace(
+    perm_requests: BTreeMap<StateKey, u64>,
+    trace: &mut [Felt],
+) -> Vec<u64> {
+    const W: usize = NUM_BLAKEG_COMPRESSION_COLS;
+    const BLOCKS_PER_FILL_CHUNK: usize = 512;
+    debug_assert_eq!(trace.len() % W, 0, "BlakeG trace buffer is not row-aligned");
+
+    let (rows, _) = trace.as_chunks_mut::<W>();
+    debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "BlakeG height must align to blocks");
+    debug_assert!(
+        (perm_requests.len() + 1) * HASH_CYCLE_LEN <= rows.len(),
+        "BlakeG trace buffer is too short for compression requests",
+    );
+
+    let request_count = perm_requests.len();
+    let block_count = rows.len() / HASH_CYCLE_LEN;
+    profile_event(format_args!(
+        "blakeg_compression.shape rows={} blocks={} real_blocks={} cols={W}",
+        rows.len(),
+        block_count,
+        request_count,
+    ));
+
+    let requests: Vec<_> = perm_requests.into_iter().collect();
+    let real_rows_len = requests.len() * HASH_CYCLE_LEN;
+    let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
+
+    let mut counts = profile_scope("blakeg_compression.real_blocks", || {
+        real_rows
+            .par_chunks_mut(HASH_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
+            .map(|(rows_chunk, requests_chunk)| {
+                let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+                for (block_rows, (key, multiplicity)) in
+                    rows_chunk.chunks_exact_mut(HASH_CYCLE_LEN).zip(requests_chunk.iter())
+                {
+                    let state = key_to_state(key);
+                    write_blakeg_compression_block(
+                        block_rows,
+                        &state,
+                        *multiplicity,
+                        &mut local_counts,
+                    );
+                }
+                local_counts
+            })
+            .reduce(
+                || vec![0u64; BYTE_LOOKUP_COUNT_LEN],
+                |mut left, right| {
+                    for (left, right) in left.iter_mut().zip(right) {
+                        *left += right;
+                    }
+                    left
+                },
+            )
+    });
+
+    profile_scope("blakeg_compression.dummy_blocks", || {
+        if dummy_rows.is_empty() {
+            return;
+        }
+
+        let zero_state = [ZERO; STATE_WIDTH];
+        let mut dummy_block = vec![[ZERO; W]; HASH_CYCLE_LEN];
+        let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
+        write_blakeg_compression_block(&mut dummy_block, &zero_state, 0, &mut dummy_counts);
+
+        let dummy_blocks = dummy_rows.len() / HASH_CYCLE_LEN;
+        for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
+            *count += dummy_count * dummy_blocks as u64;
+        }
+
+        dummy_rows
+            .par_chunks_mut(HASH_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .for_each(|chunk| {
+                for block_rows in chunk.chunks_exact_mut(HASH_CYCLE_LEN) {
+                    block_rows.copy_from_slice(&dummy_block);
+                }
+            });
+    });
+
+    counts
+}
+
+fn append_message_row_range_checks(state: &HasherState, range: &mut RangeChecker) {
+    for felt in &state[..RATE_LEN] {
+        let value = felt.as_canonical_u64();
+        let lo = (value & 0xffff_ffff) as u32;
+        let hi = (value >> 32) as u32;
+
+        range.add_value((lo & 0xffff) as u16);
+        range.add_value((lo >> 16) as u16);
+        range.add_value((hi & 0xffff) as u16);
+        range.add_value((hi >> 16) as u16);
+    }
+}
+
+fn append_zero_message_row_range_checks(block_count: usize, range: &mut RangeChecker) {
+    if block_count == 0 {
+        return;
+    }
+
+    range.add_value_repeated(0, RATE_LEN * 4 * block_count);
+}
+
+fn num_basic_block_hash_groups(op_batches: &[OpBatch]) -> usize {
+    let Some((last, prefix)) = op_batches.split_last() else {
+        return 0;
+    };
+    prefix.len() * RATE_LEN + last.num_groups().next_power_of_two()
+}
+
+fn write_blakeg_compression_block(
+    rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
+    input_state: &HasherState,
+    multiplicity: u64,
+    and8_counts: &mut [u64],
+) {
+    let block = blakeg::unpack_block(core::array::from_fn(|i| input_state[i]));
+    let cv = Digest::new(core::array::from_fn(|i| input_state[RATE_LEN + i]));
+    let h = blakeg::unpack_word(cv);
+    let mut output_state = *input_state;
+    blakeg::compress_state(&mut output_state);
+    generate_compression_block(
+        rows,
+        0,
+        &h,
+        &block,
+        input_state,
+        &output_state,
+        multiplicity,
+        and8_counts,
+    );
+}
+
+#[cfg(feature = "std")]
+fn profile_event(args: core::fmt::Arguments<'_>) {
+    if std::env::var_os("MIDEN_TRACE_PROFILE").is_some() {
+        std::eprintln!("trace_profile {args}");
+    }
+}
+
+#[cfg(not(feature = "std"))]
+fn profile_event(_: core::fmt::Arguments<'_>) {}
+
+#[cfg(feature = "std")]
+fn profile_scope<T>(label: &str, f: impl FnOnce() -> T) -> T {
+    if std::env::var_os("MIDEN_TRACE_PROFILE").is_none() {
+        return f();
+    }
+
+    let start = Instant::now();
+    let result = f();
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
+    std::eprintln!("trace_profile {label}: {elapsed_ms:.3} ms");
+    result
+}
+
+#[cfg(not(feature = "std"))]
+fn profile_scope<T>(_: &str, f: impl FnOnce() -> T) -> T {
+    f()
 }
 
 // MERKLE PATH CONTEXT
@@ -567,37 +794,37 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 // HASHER STATE MUTATORS
 // ================================================================================================
 
-/// Initializes hasher state with the first 8 elements to be absorbed.
+/// Initializes the first BlakeG compression state for sequential hashing.
 ///
-/// State layout: [RATE0, RATE1, CAP] where:
-/// - state[0..8] = init_values (rate)
-/// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
+/// `n` is the total number of felts in the hash call.
 #[inline(always)]
-pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; STATE_WIDTH] {
-    debug_assert!(
-        padding_flag == ZERO || padding_flag == ONE,
-        "first capacity element must be 0 or 1"
-    );
+pub fn init_state(init_values: &[Felt; RATE_LEN], n: u32) -> [Felt; STATE_WIDTH] {
+    let cv = blakeg::init_chaining_word(0, n);
     let mut state = [ZERO; STATE_WIDTH];
     state[..RATE_LEN].copy_from_slice(init_values);
-    state[RATE_LEN] = padding_flag;
+    state[RATE_LEN..STATE_WIDTH].copy_from_slice(cv.as_slice());
     state
 }
 
-/// Initializes hasher state from two words with zero capacity.
+/// Initializes a domain-0 two-word compression state.
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
     init_state_from_words_with_domain(w1, w2, ZERO)
 }
 
-/// Initializes hasher state from two words with a domain value in capacity[1].
+/// Initializes a two-word compression state for the provided domain.
 #[inline(always)]
 pub fn init_state_from_words_with_domain(
     w1: &Digest,
     w2: &Digest,
     domain: Felt,
 ) -> [Felt; STATE_WIDTH] {
-    [w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], ZERO, domain, ZERO, ZERO]
+    let domain_u32 =
+        u32::try_from(domain.as_canonical_u64()).expect("hasher domain must fit in u32");
+    let cv = blakeg::two_to_one_chaining_word(domain_u32);
+    [
+        w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], cv[0], cv[1], cv[2], cv[3],
+    ]
 }
 
 /// Absorbs values into the rate portion of the state.

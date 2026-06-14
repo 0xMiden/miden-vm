@@ -78,6 +78,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let state: [LB::Var; 12] = ctrl.state;
     let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let digest: [LB::Var; 4] = array::from_fn(|i| ctrl.state[8 + i]);
 
     // --- Hasher response flags ---
     // All gated by `chiplet_active.controller`; composed with the per-row-type
@@ -111,7 +112,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // HOUT output: hs0=hs1=hs2=0 (always responds on digest). Degree 4 (no is_boundary).
     let f_hout: LB::Expr = controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
 
-    // SOUT output with is_boundary=1 only (HPERM / LOGPRECOMPILE return).
+    // SOUT output with is_boundary=1 only.
     let f_sout: LB::Expr = controller_flag * not_hs0 * not_hs1 * hs2 * is_boundary;
 
     // --- Non-hasher flags ---
@@ -198,14 +199,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         );
                     }
 
-                    // HOUT: digest = rate_0.
+                    // HOUT: digest = BlakeG chaining value.
                     g.add(
                         "hout",
                         f_hout,
                         || {
                             let addr = clk_plus_one.clone();
                             let node_index: LB::Expr = ctrl.node_index.into();
-                            let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
+                            let word: [LB::Expr; 4] = digest.map(LB::Expr::from);
                             HasherMsg {
                                 kind: BusId::HasherReturnHash,
                                 addr,
@@ -216,7 +217,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 4, u: 5 },
                     );
 
-                    // SOUT: full 12-lane state (HPERM / LOGPRECOMPILE return), node_index = 0.
+                    // SOUT: full 12-lane state, node_index = 0.
                     g.add(
                         "sout",
                         f_sout,

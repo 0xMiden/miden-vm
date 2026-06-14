@@ -1,5 +1,4 @@
 use miden::core::stark::constants
-use miden::core::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
 #!
@@ -57,22 +56,19 @@ pub proc load_and_horner_eval_ood_frames
     # => [U, Y]
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
-    ##    and constraints polynomials evaluations.
-    ##    We load the random coin state and overwrite the rate with OOD blocks; capacity carries over.
+    ##    and constraints polynomial evaluations. The three zero words are scratch slots; the
+    ##    concrete row processor overwrites the first two with each OOD block and keeps the
+    ##    third one as padding so the pointer and Horner accumulator stay at fixed positions.
+    padw padw padw
+    # => [0, 0, 0, ood_frame_ptr, alpha_ptr, 0, 0]
 
-    ### a) Load the random coin state as the initial sponge state.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    exec.random_coin::load_random_coin_state
-    # => [R0, R1, C, ood_frame_ptr, alpha_ptr, 0, 0]
-
-    ### b) Process the `current` OOD evaluations
+    ### a) Process the `current` OOD evaluations
     exec.process_row_ood_evaluations
-    # => [Y, Y, C, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
-    ### c) Save -Q^z(alpha)
+    ### b) Save -Q^z(alpha)
     swapw.3
-    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, C, Y]
+    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, Y, Y]
     movup.3 neg
     movup.3 neg
     push.0.0
@@ -84,20 +80,18 @@ pub proc load_and_horner_eval_ood_frames
     push.0.0
     movdn.3
     movdn.3
-    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, C, Y]
+    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, Y, Y]
 
     # --- Compute Q^gz(alpha) -------------------------------------------------
 
     # Load the `next` trace polynomials OOD evaluations.
     swapw.3
-    # => [Y, Y, C, ood_frame_ptr, alpha_ptr, 0, 0]
+    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, 0, 0]
     exec.process_row_ood_evaluations
-    # => [R0, R1, C, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
-    # Update the random coin state with the OOD stream digest.
-    exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    push.8 exec.constants::random_coin_output_len_ptr mem_store
+    # Remove the row-processing scratch words.
+    dropw dropw dropw
     # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
 
     # Negate Q^gz(alpha) and save it
@@ -113,13 +107,12 @@ end
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes as input a Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
-#! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
-#! into the hasher state and simultaneously computing a random linear combination using Horner
-#! evaluation.
+#! Takes scratch words, a pointer, and a Horner accumulator. The concrete verifier loads the OOD
+#! evaluations from advice, stores them at `ptr`, absorbs them into the transcript, and updates
+#! the accumulator.
 #!
-#! Inputs:  [R0, R1, C, ptr, acc0, acc1]
-#! Outputs: [R0, R1, C, ptr, acc0`, acc1`]
+#! Inputs:  [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0', acc1']
 proc process_row_ood_evaluations
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

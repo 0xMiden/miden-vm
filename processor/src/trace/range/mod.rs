@@ -56,7 +56,15 @@ impl RangeChecker {
 
     /// Adds the specified value to the trace of this range checker's lookups.
     pub fn add_value(&mut self, value: u16) {
-        self.lookups.entry(value).and_modify(|v| *v += 1).or_insert(1);
+        self.add_value_repeated(value, 1);
+    }
+
+    /// Adds `count` lookups for the specified value.
+    pub fn add_value_repeated(&mut self, value: u16, count: usize) {
+        if count == 0 {
+            return;
+        }
+        self.lookups.entry(value).and_modify(|v| *v += count).or_insert(count);
     }
 
     /// Adds range check lookups from the stack or memory to this [RangeChecker] instance.

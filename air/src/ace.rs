@@ -78,6 +78,53 @@ struct AirSubDag<EF> {
     periodic_max: usize,
 }
 
+/// Combined trace layout induced by one proof order.
+///
+/// Offsets are indexed by semantic AIR id for cheap rewrites, while `ids` preserves
+/// the proof-order sequence for digest-sensitive ACE serialization.
+struct ProofOrderLayout {
+    ids: [MidenAirId; MIDEN_AIR_COUNT],
+    offsets_by_air: [SlotOffsets; MIDEN_AIR_COUNT],
+}
+
+impl ProofOrderLayout {
+    fn new<EF>(sub_dags_by_air: &[AirSubDag<EF>], order: &ProofOrder) -> Self {
+        debug_assert_eq!(order.ids().len(), MIDEN_AIR_COUNT);
+
+        let ids = core::array::from_fn(|idx| order.ids()[idx]);
+        let mut offsets_by_air = [SlotOffsets {
+            preprocessed: 0,
+            main: 0,
+            aux: 0,
+            boundary: 0,
+        }; MIDEN_AIR_COUNT];
+        let mut preprocessed = 0usize;
+        let mut main = 0usize;
+        let mut aux = 0usize;
+        let mut boundary = 0usize;
+
+        for id in ids {
+            let air = &sub_dags_by_air[id.instance_index()];
+            debug_assert_eq!(air.id, id);
+            offsets_by_air[id.instance_index()] = SlotOffsets { preprocessed, main, aux, boundary };
+            preprocessed += air.aligned_preprocessed;
+            main += air.aligned_main;
+            aux += air.aligned_aux;
+            boundary += air.aux_values;
+        }
+
+        Self { ids, offsets_by_air }
+    }
+
+    fn ids(&self) -> impl Iterator<Item = MidenAirId> + '_ {
+        self.ids.iter().copied()
+    }
+
+    fn offset(&self, id: MidenAirId) -> SlotOffsets {
+        self.offsets_by_air[id.instance_index()]
+    }
+}
+
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
 
@@ -129,12 +176,9 @@ where
     // multi-air slot) so the symbolic eval references plain `InputKey` variants.
     let sub_config = AceConfig { is_multi_air: false, ..config };
 
-    // LMCS commits each per-AIR matrix as a stack and aligns each matrix's column
-    // count to the LMCS rate (8 for Poseidon2). The wire OOD opens carry data in
-    // *aligned* per-AIR widths concatenated across AIRs. To make the codegen layout
-    // line up with the wire format byte-for-byte, the combined layout uses
-    // ALIGNED per-AIR widths (with trailing slots being unreferenced padding). This
-    // mirrors what `verify_aligned` does internally before truncation.
+    // LMCS opens each per-AIR matrix in aligned chunks. The wire OOD data
+    // concatenates those aligned per-AIR widths, so the combined ACE layout
+    // must keep the same padding slots even when an AIR does not reference them.
     const LMCS_ALIGNMENT: usize = 8;
 
     let mut sub_dags = Vec::with_capacity(AIRS.len());
@@ -197,15 +241,15 @@ where
     // includes the multi-AIR beta coefficients and per-AIR selector slots.
     let combined_layout = match config.layout {
         miden_ace_codegen::LayoutKind::Native => {
-            InputLayout::new_multi_air_for_airs(combined_counts, order.ids().len())
+            InputLayout::new_multi_air_for_airs(combined_counts, MIDEN_AIR_COUNT)
         },
         miden_ace_codegen::LayoutKind::Masm => {
-            InputLayout::new_masm_multi_air_for_airs(combined_counts, order.ids().len())
+            InputLayout::new_masm_multi_air_for_airs(combined_counts, MIDEN_AIR_COUNT)
         },
     };
 
     let mut builder = DagBuilder::<EF>::new();
-    let offsets = slot_offsets_by_air(&sub_dags, order);
+    let proof_layout = ProofOrderLayout::new(&sub_dags, order);
     let mut acc_by_air = [None; MIDEN_AIR_COUNT];
     let mut shared_qv = None;
 
@@ -220,7 +264,7 @@ where
                     builder,
                     key,
                     air.id,
-                    offsets[air.id.instance_index()],
+                    proof_layout.offset(air.id),
                     air.periodic_max,
                     global_periodic_max,
                 )
@@ -250,7 +294,7 @@ where
             .unwrap_or_else(|| panic!("missing translated acc for {}", id.name()))
     };
 
-    let mut ordered_ids = order.ids().iter().copied();
+    let mut ordered_ids = proof_layout.ids();
     let first_id = ordered_ids.next().ok_or_else(|| AceError::InvalidInputLayout {
         message: "proof order must contain at least one AIR".into(),
     })?;
@@ -263,7 +307,7 @@ where
 
     // Step 4: combined LogUp boundary.
     let combined_boundary_config =
-        multi_air_logup_boundary_config(aux_boundary_terms(&sub_dags, &offsets));
+        multi_air_logup_boundary_config(aux_boundary_terms(&sub_dags, &proof_layout));
     let final_root = batch_logup_boundary_into_builder(
         &mut builder,
         combined_constraint,
@@ -333,43 +377,17 @@ fn validate_periodic_embedding<EF>(
     Ok(())
 }
 
-fn slot_offsets_by_air<EF>(
-    sub_dags: &[AirSubDag<EF>],
-    order: &ProofOrder,
-) -> [SlotOffsets; MIDEN_AIR_COUNT] {
-    let mut offsets = [SlotOffsets {
-        preprocessed: 0,
-        main: 0,
-        aux: 0,
-        boundary: 0,
-    }; MIDEN_AIR_COUNT];
-    let mut preprocessed = 0usize;
-    let mut main = 0usize;
-    let mut aux = 0usize;
-    let mut boundary = 0usize;
-
-    for id in order.ids().iter().copied() {
-        let air = &sub_dags[id.instance_index()];
-        debug_assert_eq!(air.id, id);
-        offsets[id.instance_index()] = SlotOffsets { preprocessed, main, aux, boundary };
-        preprocessed += air.aligned_preprocessed;
-        main += air.aligned_main;
-        aux += air.aligned_aux;
-        boundary += air.aux_values;
-    }
-
-    offsets
-}
-
 fn aux_boundary_terms<EF>(
-    sub_dags: &[AirSubDag<EF>],
-    offsets: &[SlotOffsets; MIDEN_AIR_COUNT],
+    sub_dags_by_air: &[AirSubDag<EF>],
+    layout: &ProofOrderLayout,
 ) -> Vec<AuxBoundaryTerm> {
-    let total_aux_values: usize = sub_dags.iter().map(|air| air.aux_values).sum();
+    let total_aux_values: usize = sub_dags_by_air.iter().map(|air| air.aux_values).sum();
     let mut terms = Vec::with_capacity(total_aux_values);
-    for air in sub_dags {
-        let offset = offsets[air.id.instance_index()].boundary;
-        let scale = aux_boundary_scale(air.id);
+    for id in layout.ids() {
+        let air = &sub_dags_by_air[id.instance_index()];
+        debug_assert_eq!(air.id, id);
+        let offset = layout.offset(id).boundary;
+        let scale = aux_boundary_scale(id);
         terms.extend((0..air.aux_values).map(|i| AuxBoundaryTerm { column: offset + i, scale }));
     }
     terms

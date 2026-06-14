@@ -54,7 +54,7 @@ impl InteractionLog {
         // Core has no periodic columns.
         let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
         let p2_periodic =
-            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::POSEIDON2_PERMUTATION);
+            LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::BLAKEG_COMPRESSION);
         let and8_preprocessed = MidenAir::AND8_LOOKUP
             .preprocessed_trace()
             .expect("AND8 lookup AIR declares a preprocessed table");
@@ -76,7 +76,7 @@ impl InteractionLog {
             &challenges,
         );
         let p2_fractions = build_lookup_fractions(
-            &MidenAir::POSEIDON2_PERMUTATION,
+            &MidenAir::BLAKEG_COMPRESSION,
             &p2_matrix,
             None,
             &p2_periodic,

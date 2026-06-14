@@ -1,0 +1,20 @@
+#! BlakeG compression helpers used by Eidos.
+#!
+#! State layout is `[BLOCK_LO, BLOCK_HI, CV]`, three words on the stack.
+
+#! Performs one BlakeG compression.
+#!
+#! Input:  [BLOCK_LO, BLOCK_HI, CV, ...]
+#! Output: [BLOCK_LO, BLOCK_HI, DIGEST, ...]
+pub proc compress
+    bcompress
+end
+
+#! Extracts the digest from a post-compression state.
+#!
+#! Input:  [BLOCK_LO, BLOCK_HI, DIGEST, ...]
+#! Output: [DIGEST, ...]
+pub proc digest
+    dropw
+    dropw
+end

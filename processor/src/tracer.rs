@@ -134,10 +134,18 @@ pub trait Tracer {
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records the result of a call to `Hasher::permute()`.
-    ///
-    /// Called by: `HPERM`, `LOG_PRECOMPILE`.
+    /// Records the result of a full-state hasher permutation.
     fn record_hasher_permute(
+        &mut self,
+        _input_state: [Felt; STATE_WIDTH],
+        _output_state: [Felt; STATE_WIDTH],
+    ) {
+    }
+
+    /// Records the result of a block-preserving BlakeG compression.
+    ///
+    /// Called by: `BCOMPRESS`, `LOG_PRECOMPILE`.
+    fn record_hasher_bcompress(
         &mut self,
         _input_state: [Felt; STATE_WIDTH],
         _output_state: [Felt; STATE_WIDTH],
@@ -442,11 +450,10 @@ pub enum OperationHelperRegisters {
     /// The helper registers hold the four 16-bit limbs of `second` and `first` (used for range
     /// checking).
     U32Assert2 { first: Felt, second: Felt },
-    /// Helper for the `HPERM` operation, which applies a Poseidon2 permutation to the top 12
-    /// stack elements.
+    /// Helper for the `BCOMPRESS` operation.
     ///
-    /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
-    HPerm { addr: Felt },
+    /// - `addr`: the address in the hasher chiplet where the compression is recorded.
+    BCompress { addr: Felt },
     /// Helper for Merkle path operations (`MPVERIFY` and `MRUPDATE`), which verify or update a
     /// node in a Merkle tree.
     ///
@@ -478,11 +485,11 @@ pub enum OperationHelperRegisters {
         acc_tmp: QuadFelt,
     },
     /// Helper for the `LOG_PRECOMPILE` operation, which folds the per-call statement word into
-    /// the rolling precompile-transcript state via a Poseidon2 permutation.
+    /// the rolling precompile-transcript state via the VM hasher.
     ///
-    /// - `addr`: the address in the hasher chiplet where the permutation is recorded.
+    /// - `addr`: the address in the hasher chiplet where the compression is recorded.
     /// - `state_prev`: the previous transcript state word, provided non-deterministically and used
-    ///   as the rate0 input to the permutation.
+    ///   as the rate0 input to the compression.
     LogPrecompile { addr: Felt, state_prev: Word },
     /// No helper registers are needed for this operation. All helper columns are set to ZERO.
     Empty,
@@ -611,7 +618,7 @@ impl OperationHelperRegisters {
                     ZERO,
                 ]
             },
-            Self::HPerm { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::BCompress { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
             Self::MerklePath { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
             Self::HornerEvalBase { alpha, tmp0, tmp1 } => [
                 alpha.as_basis_coefficients_slice()[0],

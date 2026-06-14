@@ -1,4 +1,3 @@
-use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::random_coin
 use miden::core::stark::constants
 
@@ -34,14 +33,16 @@ end
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
 proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
-        adv_pipe exec.poseidon2::permute
+        adv_pipe
+        exec.random_coin::eidos_observe_piped_words
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
 proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
-        adv_pipe exec.poseidon2::permute
+        adv_pipe
+        exec.random_coin::eidos_observe_piped_words
     end
 end
 
@@ -210,36 +211,25 @@ pub proc load_and_verify_remainder
     eq
     if.true
         # Remainder polynomial degree less than 64
-        # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # Keep three dummy words above the pointer for `adv_pipe`; each piped block is
+        # observed into Eidos by the loader.
+        padw padw padw
+        # => [Y, Y, Y, remainder_poly_ptr, remainder_size, y, y]
 
-        # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1_half
 
-        # Update the random coin state with the remainder polynomial digest.
-        exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        dropw dropw dropw
 
     else
         # Remainder polynomial degree less than 128
-        # Load the random coin state as the initial sponge state.
-        push.0 exec.constants::random_coin_output_len_ptr mem_store
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        exec.random_coin::load_random_coin_state
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
+        # Keep three dummy words above the pointer for `adv_pipe`; each piped block is
+        # observed into Eidos by the loader.
+        padw padw padw
+        # => [Y, Y, Y, remainder_poly_ptr, remainder_size, y, y]
 
-        # adv_load remainder polynomial
         exec.load_fri_remainder_poly_max_degree_plus_1
-        # => [R0, R1, C, remainder_poly_ptr, remainder_size, y, y]
 
-        # Update the random coin state with the remainder polynomial digest.
-        exec.random_coin::store_random_coin_state
-        push.0 exec.constants::random_coin_input_len_ptr mem_store
-        push.8 exec.constants::random_coin_output_len_ptr mem_store
+        dropw dropw dropw
 
     end
     dropw dropw

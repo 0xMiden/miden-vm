@@ -1,16 +1,15 @@
-//! Byte-AND lookup table AIR.
+//! Byte-pair lookup table AIR.
 //!
-//! The fixed preprocessed trace enumerates every `(a, b, a & b)` byte tuple. The dynamic main
-//! trace carries one multiplicity column. Consumers balance this table by removing the same tuple
-//! from the `And8Lookup` bus.
+//! The fixed preprocessed trace enumerates one row per byte pair. The row serves
+//! nine semantic buses: ordinary `(a, b, a & b)` plus one BlakeG
+//! rotation-contribution bus for each `(rotation, byte-position)` pair. The
+//! dynamic main trace carries one multiplicity column per bus.
 
-use miden_core::utils::RowMajorMatrix;
-
-use crate::Felt;
+use miden_core::{Felt, utils::RowMajorMatrix};
 
 pub mod columns;
 
-/// Build the fixed byte-AND table trace.
+/// Builds the fixed byte-pair table used by the AND8 lookup AIR.
 pub fn preprocessed_trace() -> RowMajorMatrix<Felt> {
-    columns::preprocessed_trace()
+    columns::And8LookupPreprocessedCols::<Felt>::preprocessed_trace()
 }

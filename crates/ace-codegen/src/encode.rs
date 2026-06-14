@@ -9,7 +9,7 @@
 //! The encoded stream concatenates constants (EF) followed by operations
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
-use miden_core::{Felt, Word, crypto::hash::Poseidon2};
+use miden_core::{Felt, Word, crypto::hash::Eidos};
 use miden_crypto::field::ExtensionField;
 
 use crate::{
@@ -84,9 +84,9 @@ impl EncodedCircuit {
         self.instructions.len()
     }
 
-    /// Poseidon2 digest of the instruction stream.
+    /// Eidos digest of the instruction stream.
     pub fn circuit_hash(&self) -> Word {
-        Poseidon2::hash_elements(self.instructions())
+        Eidos::hash_elements(self.instructions())
     }
 }
 

@@ -136,8 +136,7 @@ pub struct FastProcessor {
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
-    /// Poseidon2 sponge).
+    /// Transcript used to record commitments via `log_precompile`.
     pc_transcript: PrecompileTranscript,
 }
 

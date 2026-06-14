@@ -5,10 +5,10 @@ use super::{
     reserve_allocation,
 };
 use crate::{
-    Felt,
     chiplets::hasher,
     mast::{
         CallNode, DebugInfo, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
+        node::hash_op_batches,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
@@ -313,9 +313,7 @@ fn recompute_hash_table(
         let computed = match entry {
             MastNodeEntry::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let op_groups: Vec<Felt> =
-                    op_batches.iter().flat_map(|batch| *batch.groups()).collect();
-                hasher::hash_elements(&op_groups)
+                hash_op_batches(&op_batches)
             },
             MastNodeEntry::Join { left_child_id, right_child_id } => {
                 let left = checked_child_index(index, left_child_id, layout.node_count)?;

@@ -1,7 +1,6 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::stark::public_inputs
-use miden::core::crypto::hashes::poseidon2
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
 # =================================================================================================
@@ -225,57 +224,27 @@ proc absorb_public_inputs
     # `load_kernel_digests` filled scratch[KERNEL_FELTS_OFFSET..).
     exec.constants::tmp3 mem_load mul.4 exec.constants::absorb_scratch_ptr add.2 mem_store
 
-    # First block: [preprocessed_commitment, statement_descriptor].
-    exec.constants::preprocessed_trace_com_ptr mem_loadw_le
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
-    exec.constants::absorb_scratch_ptr mem_loadw_le
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
-    exec.random_coin::observe_felt
+    # First observe the trusted setup commitment, then the statement descriptor.
+    padw exec.constants::preprocessed_trace_com_ptr mem_loadw_le
+    exec.random_coin::eidos_observe_word
+
+    padw exec.constants::absorb_scratch_ptr mem_loadw_le
+    exec.random_coin::eidos_observe_word
 
     # Remaining stream:
     #   [FLPI..., kernel_felts...]
-    # L = NUM_FIXED_LEN_PUBLIC_INPUTS + 4 * num_kernel_proc_digests.
-    # Store scratch_end in tmp1 and keep nfb = L / 8 full blocks on the stack.
-    push.KERNEL_FELTS_OFFSET exec.constants::tmp3 mem_load mul.4 add
-    dup exec.constants::absorb_scratch_ptr add exec.constants::tmp1 mem_store
-    push.STATEMENT_DESCRIPTOR_LEN sub
-    u32divmod.8 drop
-    # => [nfb]
-
-    # Absorb full 8-felt blocks with the sponge state on the stack.
-    exec.random_coin::load_random_coin_state
-    exec.constants::absorb_scratch_ptr add.STATEMENT_DESCRIPTOR_LEN movdn.12
-    # => [R1, R2, C, ptr, nfb]
-    movup.13 dup push.0 neq
+    # L = NUM_FIXED_LEN_PUBLIC_INPUTS + 4 * num_kernel_proc_digests, which is word-aligned.
+    push.NUM_FIXED_LEN_PUBLIC_INPUTS exec.constants::tmp3 mem_load mul.4 add
+    u32divmod.4 drop
+    exec.constants::absorb_scratch_ptr add.STATEMENT_DESCRIPTOR_LEN
+    # => [src, num_words]
+    dup.1 push.0 neq
     while.true
-        sub.1 movdn.13
-        # => [R1, R2, C, ptr, nfb - 1]
-        mem_stream
-        exec.poseidon2::permute
-        movup.13 dup push.0 neq
-    end
-    drop
-    # => [R1, R2, C, ptr_final]
-
-    # Store the sponge state and buffer the trailing partial block, if any.
-    movup.12 exec.constants::tmp4 mem_store
-    exec.random_coin::store_random_coin_state
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-
-    exec.constants::tmp4 mem_load
-    exec.constants::tmp1 mem_load
-    swap
-    # => [src, scratch_end]
-    dup.1 dup.1 neq
-    while.true
-        dup mem_load exec.random_coin::observe_felt
-        add.1
-        dup.1 dup.1 neq
+        padw dup.4 mem_loadw_le
+        exec.random_coin::eidos_observe_word
+        add.4
+        swap sub.1 swap
+        dup.1 push.0 neq
     end
     drop drop
 end
@@ -288,7 +257,7 @@ proc observe_miden_air_shape
     push.4 exec.random_coin::observe_felt
     exec.constants::get_core_trace_length_log exec.random_coin::observe_felt
     exec.constants::get_chiplets_trace_length_log exec.random_coin::observe_felt
-    exec.constants::get_poseidon2_permutation_trace_length_log exec.random_coin::observe_felt
+    exec.constants::get_blakeg_compression_trace_length_log exec.random_coin::observe_felt
     exec.constants::get_and8_lookup_trace_length_log exec.random_coin::observe_felt
 end
 

@@ -283,6 +283,42 @@ pub trait LookupGroup {
         deg: Deg,
     );
 
+    /// Open an ungated batch of two pre-encoded linear denominators.
+    ///
+    /// This is the selected-slot pattern used by the BlakeG AIR: row selection
+    /// lives in the two multiplicities, and the batch contributes
+    /// `(m0 * D1 + m1 * D0) / (D0 * D1)`.
+    fn selected_batch2_encoded(
+        &mut self,
+        name: &'static str,
+        slot0_name: &'static str,
+        slot0_multiplicity: Self::Expr,
+        slot0_encoded: impl FnOnce() -> Self::ExprEF,
+        slot1_name: &'static str,
+        slot1_multiplicity: Self::Expr,
+        slot1_encoded: impl FnOnce() -> Self::ExprEF,
+    ) {
+        self.batch(
+            name,
+            Self::Expr::ONE,
+            |batch| {
+                batch.insert_encoded(
+                    slot0_name,
+                    slot0_multiplicity,
+                    slot0_encoded,
+                    Deg { v: 1, u: 1 },
+                );
+                batch.insert_encoded(
+                    slot1_name,
+                    slot1_multiplicity,
+                    slot1_encoded,
+                    Deg { v: 1, u: 1 },
+                );
+            },
+            Deg { v: 2, u: 2 },
+        );
+    }
+
     // ---- encoding primitives (cached-encoding path only) ----
 
     /// Precomputed powers `[beta^0, beta^1, ..., beta^(W-1)]`, where

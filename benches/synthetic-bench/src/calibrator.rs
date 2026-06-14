@@ -47,7 +47,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let totals = TraceTotals {
         core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
-        poseidon2_permutation_rows: summary.poseidon2_permutation_trace_len() as u64,
+        poseidon2_permutation_rows: summary.blakeg_compression_trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };
 

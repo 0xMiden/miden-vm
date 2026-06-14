@@ -36,16 +36,16 @@ fn hasher_trace_len(controller_rows: usize) -> usize {
 #[test]
 fn hasher_chiplet_trace() {
     // --- single hasher permutation with no stack manipulation ---
-    // The program is a single basic block containing HPerm.
+    // The program is a single basic block containing BCompress.
     // This produces:
     //   - 1 span hash (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows
-    //   - 1 HPERM (RETURN_STATE input + RETURN_STATE output) = 2 controller rows
+    //   - 1 BCOMPRESS (RETURN_STATE input + RETURN_STATE output) = 2 controller rows
     // Total: 4 controller rows padded to the chiplet alignment boundary.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
-    let operations = vec![Operation::HPerm];
+    let operations = vec![Operation::BCompress];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + HPerm
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + BCompress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -89,18 +89,23 @@ fn memory_chiplet_trace() {
 #[test]
 fn stacked_chiplet_trace() {
     // --- operations in hasher, bitwise, and memory processors ---
-    // Operations: U32xor, Push(0), MStoreW, HPerm
+    // Operations: U32xor, Push(0), MStoreW, BCompress
     // This produces:
     //   - 1 span hash (2 controller rows) for the basic block
-    //   - 1 HPerm (2 controller rows)
+    //   - 1 BCompress (2 controller rows)
     // Total hasher: 4 controller rows padded to the chiplet alignment boundary.
     // Then: 8 bitwise rows (U32xor), then 1 memory row (MStoreW)
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
-    let ops = vec![Operation::U32xor, Operation::Push(ZERO), Operation::MStoreW, Operation::HPerm];
+    let ops = vec![
+        Operation::U32xor,
+        Operation::Push(ZERO),
+        Operation::MStoreW,
+        Operation::BCompress,
+    ];
     let kernel = build_kernel();
     let (chiplets_trace, _trace_len) = build_trace(&stack, ops, kernel);
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + HPerm
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + BCompress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -229,7 +234,7 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
     // --- Check controller rows (s_perm = 0) ---
     // Controller rows come in pairs: input row (is_start varies) + output row (is_final varies).
     // For a span hash: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
-    // For HPerm: input has LINEAR_HASH selectors, output has RETURN_STATE selectors.
+    // For BCompress: input has LINEAR_HASH selectors, output has RETURN_STATE selectors.
     for row in 0..controller_rows {
         let is_input_row = row % CONTROLLER_ROWS_PER_PERMUTATION == 0;
         if is_input_row {

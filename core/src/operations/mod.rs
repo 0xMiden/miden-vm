@@ -103,7 +103,7 @@ pub mod opcodes {
     pub const U32ADD3: u8        = 0b0100_1100;
     pub const U32MADD: u8        = 0b0100_1110;
 
-    pub const HPERM: u8          = 0b0101_0000;
+    pub const BCOMPRESS: u8      = 0b0101_0000;
     pub const MPVERIFY: u8       = 0b0101_0001;
     pub const PIPE: u8           = 0b0101_0010;
     pub const MSTREAM: u8        = 0b0101_0011;
@@ -118,6 +118,7 @@ pub mod opcodes {
     pub const DYNCALL: u8        = 0b0101_1100;
     pub const EVALCIRCUIT: u8    = 0b0101_1101;
     pub const LOGPRECOMPILE: u8  = 0b0101_1110;
+    /* unused                      0b0101_1111 */
 
     pub const MRUPDATE: u8       = 0b0110_0000;
     pub const CRYPTOSTREAM: u8   = 0b0110_0100;
@@ -483,7 +484,7 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = opcodes::PIPE,
 
-    /// Encrypts data from source memory to destination memory using the Poseidon2 sponge keystream.
+    /// Encrypts data from source memory to destination memory using the current stream rate.
     ///
     /// Two consecutive words (8 elements) are loaded from source memory, each element is added
     /// to the corresponding element in the rate (top 8 stack elements), and the resulting
@@ -498,17 +499,15 @@ pub enum Operation {
     /// ```
     /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
     ///
-    /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
+    /// After this operation, `bcompress` should be applied to refresh the keystream for the next block.
     CryptoStream = opcodes::CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
-    /// Performs a Poseidon2 permutation on the top 3 words of the operand stack,
-    /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
-    /// A), and the digest output is the middle word E.
+    /// Performs a block-preserving BlakeG compression on the top 3 words of the operand stack.
     ///
     /// Stack transition:
-    /// [C, B, A, ...] -> [F, E, D, ...]
-    HPerm = opcodes::HPERM,
+    /// [block(8), cv(4), ...] -> [block(8), cv'(4), ...]
+    BCompress = opcodes::BCOMPRESS,
 
     /// Verifies that a Merkle path from the specified node resolves to the specified root. This
     /// operation can be used to prove that the prover knows a path in the specified Merkle tree
@@ -791,7 +790,7 @@ impl fmt::Display for Operation {
             Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
-            Self::HPerm => write!(f, "hperm"),
+            Self::BCompress => write!(f, "bcompress"),
             Self::MpVerify(err_code) => write!(f, "mpverify({err_code})"),
             Self::MrUpdate => write!(f, "mrupdate"),
 
@@ -891,7 +890,7 @@ impl Serializable for Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::BCompress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -985,7 +984,7 @@ impl Operation {
             | Operation::MStream
             | Operation::Pipe
             | Operation::CryptoStream
-            | Operation::HPerm
+            | Operation::BCompress
             | Operation::MrUpdate
             | Operation::FriE2F4
             | Operation::HornerBase
@@ -1077,7 +1076,7 @@ impl Deserializable for Operation {
             opcodes::U32ADD3 => Self::U32add3,
             opcodes::U32MADD => Self::U32madd,
 
-            opcodes::HPERM => Self::HPerm,
+            opcodes::BCOMPRESS => Self::BCompress,
             opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             opcodes::PIPE => Self::Pipe,
             opcodes::MSTREAM => Self::MStream,

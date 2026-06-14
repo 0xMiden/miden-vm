@@ -227,11 +227,10 @@ impl InputLayout {
 mod tests {
     use super::super::{InputCounts, InputKey, InputLayout};
 
-    const CONSTRAINTS_EVAL_INPUTS: &str =
-        include_str!("../../../../crates/lib/core/asm/sys/vm/constraints_eval_inputs.masm");
+    const STARK_UTILS: &str = include_str!("../../../../crates/lib/core/asm/stark/utils.masm");
 
     fn constraints_eval_inputs_const(name: &str) -> usize {
-        CONSTRAINTS_EVAL_INPUTS
+        STARK_UTILS
             .lines()
             .find_map(|line| {
                 let mut parts = line.split_whitespace();
@@ -352,7 +351,7 @@ mod tests {
             base_offset(InputKey::IsFirstAir(1))
         );
         assert_eq!(
-            constraints_eval_inputs_const("POSEIDON2_SELECTOR_OFFSET"),
+            constraints_eval_inputs_const("BLAKEG_COMPRESSION_SELECTOR_OFFSET"),
             base_offset(InputKey::IsFirstAir(2))
         );
         assert_eq!(
@@ -364,7 +363,7 @@ mod tests {
             base_offset(InputKey::TraceLenAir(0))
         );
         assert_eq!(
-            constraints_eval_inputs_const("POSEIDON2_AND8_TRACE_LENGTHS_OFFSET"),
+            constraints_eval_inputs_const("BLAKEG_COMPRESSION_AND8_TRACE_LENGTHS_OFFSET"),
             base_offset(InputKey::TraceLenAir(2))
         );
     }

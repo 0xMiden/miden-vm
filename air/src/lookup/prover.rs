@@ -400,7 +400,7 @@ where
             "ProverGroup::insert flag must be in {{0, 1}}; non-boolean flag would diverge \
              from the constraint path",
         );
-        if flag == F::ZERO {
+        if flag == F::ZERO || multiplicity == F::ZERO {
             return;
         }
         let v = msg().encode(self.challenges);
@@ -430,6 +430,14 @@ where
             active,
         };
         build(&mut batch)
+    }
+
+    fn beta_powers(&self) -> &[EF] {
+        &self.challenges.beta_powers
+    }
+
+    fn bus_prefix(&self, bus_id: usize) -> EF {
+        self.challenges.bus_prefix[bus_id].clone()
     }
 }
 
@@ -466,7 +474,7 @@ where
     where
         M: LookupMessage<F, EF>,
     {
-        if !self.active {
+        if !self.active || multiplicity == F::ZERO {
             return;
         }
         let v = msg.encode(self.challenges);
@@ -480,7 +488,7 @@ where
         encoded: impl FnOnce() -> EF,
         _deg: Deg,
     ) {
-        if !self.active {
+        if !self.active || multiplicity == F::ZERO {
             return;
         }
         let v = encoded();

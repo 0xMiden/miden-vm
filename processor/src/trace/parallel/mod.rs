@@ -7,7 +7,7 @@ use miden_air::{
     trace::{
         DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
         STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        and8_lookup::{AND8_TABLE_HEIGHT, NUM_AND8_LOOKUP_COLS},
+        and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
         decoder::NUM_OP_BITS,
     },
 };
@@ -55,7 +55,7 @@ mod processor;
 mod tracer;
 
 use super::{
-    chiplets::Chiplets,
+    chiplets::{self, Chiplets},
     execution_tracer::TraceGenerationContext,
     trace_state::{
         AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
@@ -77,10 +77,7 @@ mod tests;
 /// use miden_assembly::Assembler;
 /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
 ///
-/// let program = Assembler::default()
-///     .assemble_program("prg", "begin push.1 drop end")
-///     .unwrap()
-///     .unwrap_program();
+/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
 /// let mut host = DefaultHost::default();
 ///
 /// let trace_inputs = FastProcessor::new(StackInputs::default())
@@ -161,7 +158,10 @@ pub fn build_trace_with_max_len(
         max_trace_len,
     )?;
 
-    let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
+    let blakeg_compression_trace_len = chiplets.blakeg_compression_trace_len();
+    let blakeg_compression_height = pad_to_trace_length(blakeg_compression_trace_len);
+    let range_checker =
+        initialize_range_checker(range_checker_replay, &chiplets, blakeg_compression_height);
 
     let mut core_trace_data = generate_core_trace_row_major(
         core_trace_contexts,
@@ -178,13 +178,11 @@ pub fn build_trace_with_max_len(
 
     let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
-    let poseidon2_permutation_height =
-        pad_to_trace_length(chiplets.poseidon2_permutation_trace_len());
-    let and8_lookup_trace_len = AND8_TABLE_HEIGHT;
-    let and8_lookup_height = AND8_TABLE_HEIGHT;
+    let and8_lookup_trace_len = AND8_LOOKUP_TRACE_HEIGHT;
+    let and8_lookup_height = AND8_LOOKUP_TRACE_HEIGHT;
     let padded_trace_len = core_height
         .max(chiplets_height)
-        .max(poseidon2_permutation_height)
+        .max(blakeg_compression_height)
         .max(and8_lookup_height);
 
     // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
@@ -197,17 +195,19 @@ pub fn build_trace_with_max_len(
         core_trace_len,
         range_table_len,
         ChipletsLengths::new(&chiplets),
-        chiplets.poseidon2_permutation_trace_len(),
+        blakeg_compression_trace_len,
         and8_lookup_trace_len,
         padded_trace_len,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, poseidon2_permutation_trace), ()) = rayon::join(
-        || chiplets.into_traces(chiplets_height, poseidon2_permutation_height),
+    let ((chiplets_trace, blakeg_compression_trace, and8_counts), ()) = rayon::join(
+        || chiplets.into_traces(chiplets_height, blakeg_compression_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
-    let and8_lookup_trace = Felt::zero_vec(and8_lookup_height * NUM_AND8_LOOKUP_COLS);
+
+    let and8_lookup_trace = chiplets::build_and8_lookup_trace(&and8_counts);
+    debug_assert_eq!(and8_lookup_trace.len(), and8_lookup_height * NUM_AND8_LOOKUP_COLS);
 
     // The range checker occupies the two trailing columns of the core buffer.
     range_checker.write_range_into_core(
@@ -225,7 +225,7 @@ pub fn build_trace_with_max_len(
         MainTrace::from_parts(
             core_trace_data,
             chiplets_trace.trace,
-            poseidon2_permutation_trace.trace,
+            blakeg_compression_trace.trace,
             and8_lookup_trace,
             last_program_row,
         )
@@ -458,16 +458,17 @@ fn push_halt_opcode_row(
 fn initialize_range_checker(
     range_checker_replay: RangeCheckerReplay,
     chiplets: &Chiplets,
+    blakeg_compression_height: usize,
 ) -> RangeChecker {
     let mut range_checker = RangeChecker::new();
 
-    // Add all u32 range checks recorded during execution
     for values in range_checker_replay {
         range_checker.add_range_checks(&values);
     }
 
-    // Add all memory-related range checks
     chiplets.append_range_checks(&mut range_checker);
+
+    chiplets.append_blakeg_range_checks(blakeg_compression_height, &mut range_checker);
 
     range_checker
 }
@@ -486,7 +487,9 @@ fn initialize_chiplets(
     max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
     let check_chiplets_trace_len = |chiplets: &Chiplets| -> Result<(), ExecutionError> {
-        if chiplets.trace_len() > max_trace_len {
+        if chiplets.trace_len() > max_trace_len
+            || chiplets.blakeg_compression_trace_len() > max_trace_len
+        {
             return Err(ExecutionError::TraceLenExceeded(max_trace_len));
         }
         Ok(())
@@ -499,6 +502,10 @@ fn initialize_chiplets(
         match hasher_op {
             HasherOp::Permute(input_state) => {
                 let _ = chiplets.hasher.permute(input_state);
+                check_chiplets_trace_len(&chiplets)?;
+            },
+            HasherOp::BCompress(input_state) => {
+                let _ = chiplets.hasher.bcompress(input_state);
                 check_chiplets_trace_len(&chiplets)?;
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
@@ -546,7 +553,6 @@ fn initialize_chiplets(
             },
         }
     }
-
     // populate memory chiplet
     //
     // Note: care is taken to order all the accesses by clock cycle, since the memory chiplet

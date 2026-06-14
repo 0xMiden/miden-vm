@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::chiplets::hasher::{Hasher, STATE_WIDTH};
+use miden_core::chiplets::blakeg;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
@@ -21,28 +22,12 @@ mod tests;
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
-/// Performs a hash permutation operation.
-/// Applies Poseidon2 permutation to the top 12 elements of the stack.
-///
-/// Stack layout:
-/// ```text
-/// stack[0..4]   = R1 word (rate word 1)      → state[0..4]
-/// stack[4..8]   = R2 word (rate word 2)      → state[4..8]
-/// stack[8..12]  = CAP word (capacity)        → state[8..12]
-/// ```
-///
-/// The top of the stack (`get(0)`) maps to `state[0]`, giving the sponge state
-/// `[R1, R2, CAP]` where R1[0] is at the top of the stack.
+/// Reads the 12-element BlakeG state window from the top of the stack.
 #[inline(always)]
-pub(super) fn op_hperm<P: Processor, T: Tracer>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, OperationError> {
-    // Build sponge state from stack: state[i] = stack.get(i)
-    // Read first 8 elements using get_double_word, then remaining 4 elements
+fn read_hasher_state<P: Processor>(processor: &P) -> [Felt; STATE_WIDTH] {
     let double_word: [Felt; 8] = processor.stack().get_double_word(0);
     let word: Word = processor.stack().get_word(8);
-    let input_state: [Felt; STATE_WIDTH] = [
+    [
         double_word[0],
         double_word[1],
         double_word[2],
@@ -55,22 +40,27 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
         word[1],
         word[2],
         word[3],
-    ];
+    ]
+}
 
-    // Apply Poseidon2 permutation
+/// Applies one BlakeG compression and writes only the next chaining value.
+///
+/// Stack transition: `[block(8), cv(4), ...] -> [block(8), cv'(4), ...]`.
+#[inline(always)]
+pub(super) fn op_bcompress<P: Processor, T: Tracer>(
+    processor: &mut P,
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, OperationError> {
+    let input_state = read_hasher_state(processor);
     let (addr, output_state) = processor.hasher().permute(input_state)?;
 
-    // Write result back to stack (state[0] at top).
-    let r0: Word = output_state[Hasher::RATE0_RANGE].try_into().expect("r0 slice has length 4");
-    let r1: Word = output_state[Hasher::RATE1_RANGE].try_into().expect("r1 slice has length 4");
-    let cap: Word =
-        output_state[Hasher::CAPACITY_RANGE].try_into().expect("cap slice has length 4");
-    processor.stack_mut().set_word(0, &r0);
-    processor.stack_mut().set_word(4, &r1);
-    processor.stack_mut().set_word(8, &cap);
+    let cv_next: Word = output_state[Hasher::DIGEST_RANGE]
+        .try_into()
+        .expect("digest slice has length 4");
+    processor.stack_mut().set_word(8, &cv_next);
 
-    tracer.record_hasher_permute(input_state, output_state);
-    Ok(OperationHelperRegisters::HPerm { addr })
+    tracer.record_hasher_bcompress(input_state, output_state);
+    Ok(OperationHelperRegisters::BCompress { addr })
 }
 
 /// Verifies that a Merkle path from the specified node resolves to the specified root. The
@@ -452,15 +442,13 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 /// Folds a precomputed statement into the rolling precompile-transcript state.
 ///
 /// Stack transition:
-/// `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
+/// `[_, STMNT, ...] -> [STATE_NEW, STMNT, ...]`
 ///
-/// - Hasher computes `merge(STATE_PREV, STMNT) = rate0(Poseidon2([STATE_PREV, STMNT, ZERO]))`;
-///   `STATE_NEW` is the rate0 half of the output.
+/// - Hasher computes `merge(STATE_PREV, STMNT)` with the Eidos two-to-one chaining value;
+///   `STATE_NEW` is the digest word of the output.
 /// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
 ///   helper registers.
-/// - `STMNT` lives at stack[4..8] (HPERM rate1 lanes) so the chiplet bus's β⁶..β⁹ products share
-///   with HPERM.
-/// - Output is identity-mapped to `stack_next[0..12]`, also matching HPERM's output layout.
+/// - `STMNT` lives at stack[4..8] so the chiplet bus's beta^6..beta^9 products share with BCOMPRESS.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -469,24 +457,22 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     let stmnt: Word = processor.stack().get_word(4);
     let state_prev = processor.system().precompile_transcript_state();
 
-    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
+    // Hasher input: [STATE_PREV, STMNT, Eidos merge CV].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
     hasher_state[Hasher::RATE0_RANGE].copy_from_slice(state_prev.as_slice());
     hasher_state[Hasher::RATE1_RANGE].copy_from_slice(stmnt.as_slice());
+    hasher_state[Hasher::CAPACITY_RANGE]
+        .copy_from_slice(blakeg::two_to_one_chaining_word(0).as_slice());
 
     let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
-    let state_new: Word = output_state[Hasher::RATE0_RANGE].try_into().unwrap();
-    let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
-    let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
+    let state_new: Word = output_state[Hasher::DIGEST_RANGE].try_into().unwrap();
 
     processor.system_mut().set_precompile_transcript_state(state_new);
 
     processor.stack_mut().set_word(0, &state_new);
-    processor.stack_mut().set_word(4, &out_rate1);
-    processor.stack_mut().set_word(8, &out_cap);
 
-    tracer.record_hasher_permute(hasher_state, output_state);
+    tracer.record_hasher_bcompress(hasher_state, output_state);
 
     Ok(OperationHelperRegisters::LogPrecompile { addr, state_prev })
 }
@@ -494,13 +480,13 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
 // STREAM CIPHER OPERATION
 // ================================================================================================
 
-/// Encrypts data from source memory to destination memory using Poseidon2 sponge keystream.
+/// Encrypts data from source memory to destination memory using the current stream rate.
 ///
 /// This operation performs AEAD encryption by:
 /// 1. Loading 8 elements (2 words) from source memory at stack[12]
 /// 2. Adding each element to the corresponding rate element (stack[0..7])
 /// 3. Writing the resulting ciphertext to destination memory at stack[13]
-/// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next hperm)
+/// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next bcompress)
 /// 5. Preserving capacity (stack[8..11])
 /// 6. Incrementing both source and destination pointers by 8
 ///
@@ -564,7 +550,7 @@ pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
         clk,
     );
 
-    // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+    // Update stack[0..7] with ciphertext (becomes new rate for next bcompress)
     processor.stack_mut().set_word(0, &ciphertext_word1);
     processor.stack_mut().set_word(4, &ciphertext_word2);
 

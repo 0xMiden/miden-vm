@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    chiplets::hasher::{STATE_WIDTH, apply_permutation},
+    chiplets::hasher::{Hasher, apply_permutation},
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
@@ -11,7 +11,8 @@ use miden_core::{
 use proptest::prelude::*;
 
 use super::{
-    op_crypto_stream, op_horner_eval_base, op_horner_eval_ext, op_hperm, op_mpverify, op_mrupdate,
+    op_bcompress, op_crypto_stream, op_horner_eval_base, op_horner_eval_ext, op_mpverify,
+    op_mrupdate,
 };
 use crate::{
     AdviceInputs, ContextId,
@@ -30,7 +31,7 @@ const ALPHA_ADDR: u64 = 1000;
 
 proptest! {
     #[test]
-    fn test_op_hperm(
+    fn test_op_bcompress(
         // Input state: 12 elements for the hasher state (positions 0-11)
         s0 in any::<u64>(),
         s1 in any::<u64>(),
@@ -97,22 +98,18 @@ proptest! {
         };
 
         // Execute the operation
-        let _ = op_hperm(&mut processor, &mut tracer);
+        let _ = op_bcompress(&mut processor, &mut tracer);
         processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
 
-        // output_state[i] -> stack.set(i)
-        // stack_top() returns [pos15, ..., pos0] so we need to check stack[15-i]
-        for i in 0..STATE_WIDTH {
-            prop_assert_eq!(
-                stack[15 - i],
-                expected_state[i],
-                "mismatch at position {} (expected_state[{}])",
-                i,
-                i
-            );
+        // bcompress preserves the 8-felt block and writes the digest into the CV word.
+        for i in 0..8 {
+            prop_assert_eq!(stack[15 - i], stack_inputs[i], "block mismatch at position {}", i);
+        }
+        for (j, i) in Hasher::DIGEST_RANGE.enumerate() {
+            prop_assert_eq!(stack[15 - (8 + j)], expected_state[i], "CV mismatch at lane {}", j);
         }
 
         // Check that positions 12-15 are NOT affected

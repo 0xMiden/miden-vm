@@ -8,11 +8,14 @@ use std::{fs, io, println};
 
 use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
 use miden_air::{
-    MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
-    trace::and8_lookup::LOG_AND8_TABLE_HEIGHT,
+    AIRS, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
+    trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT,
 };
-use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
-use miden_crypto::stark::Preprocessed;
+use miden_core::{Felt, field::QuadFelt};
+use miden_crypto::{
+    hash::eidos::Eidos,
+    stark::{Preprocessed, air::LiftedAir},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -58,7 +61,7 @@ pub fn compute_relation_digest(commitments: &[(ProofOrder, [Felt; 4])]) -> [Felt
         input.extend_from_slice(commitment);
     }
 
-    let digest = Poseidon2::hash_elements(&input);
+    let digest = Eidos::hash_elements(&input);
     let elems = digest.as_elements();
     [elems[0], elems[1], elems[2], elems[3]]
 }
@@ -103,13 +106,20 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             ));
         }
         let adv_pipe_rows = size_in_felt / 8;
-        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+        let circuit_digest = Eidos::hash_elements(instructions);
+        let circuit_elements = circuit_digest.as_elements();
+        let circuit_commitment = [
+            circuit_elements[0],
+            circuit_elements[1],
+            circuit_elements[2],
+            circuit_elements[3],
+        ];
 
         let masm = render_constraints_eval_file(
             &order,
             num_inputs,
             num_eval_gates,
-            adv_pipe_rows,
+            circuit_commitment,
             instructions,
         );
 
@@ -146,7 +156,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     replace_masm_const(
         &mut relation_mod,
         "AND8_LOOKUP_LOG_HEIGHT",
-        &LOG_AND8_TABLE_HEIGHT.to_string(),
+        &LOG_AND8_LOOKUP_TRACE_HEIGHT.to_string(),
     );
 
     let mut air_config = read_file(AIR_CONFIG_PATH);
@@ -180,7 +190,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 }
 
 fn compute_and8_preprocessed_commitment() -> [Felt; 4] {
-    let config = config::poseidon2_config(config::pcs_params());
+    let config = config::eidos_config(config::pcs_params());
     let statement: Statement<Felt, QuadFelt, MidenMultiAir> =
         Statement::new(MidenMultiAir::new(), vec![Felt::ZERO; NUM_PUBLIC_VALUES], Vec::new())
             .expect("zero public inputs satisfy Miden statement shape");
@@ -194,16 +204,24 @@ fn render_constraints_eval_file(
     order: &ProofOrder,
     num_inputs: usize,
     num_eval_gates: usize,
-    adv_pipe_rows: usize,
+    circuit_commitment: [Felt; 4],
     instructions: &[Felt],
 ) -> String {
     let order_label = order.label();
+    assert!(
+        instructions.len().is_multiple_of(8),
+        "ACE circuit stream must be 8-felt aligned for adv_pipe"
+    );
+    let adv_pipe_rows = instructions.len() / 8;
+    let circuit_len =
+        u32::try_from(instructions.len()).expect("ACE circuit stream length must fit in u32");
+    let circuit_stream_init_cv = Eidos::init_chaining_word(0, circuit_len);
+    let max_cycle_len_log = max_periodic_cycle_len_log();
 
     let mut masm = format!(
         concat!(
-            "use miden::core::crypto::hashes::poseidon2\n",
             "use miden::core::stark::constants\n",
-            "use miden::core::sys::vm::constraints_eval_inputs\n\n",
+            "use miden::core::stark::utils\n\n",
             "# CONSTANTS\n",
             "# =================================================================================================\n\n",
             "# Number of READ variables (inputs + constants) for the constraint evaluation circuit.\n",
@@ -211,10 +229,15 @@ fn render_constraints_eval_file(
             "# Number of evaluation gates in the constraint evaluation circuit.\n",
             "const NUM_EVAL_GATES_CIRCUIT = {num_eval_gates}\n\n",
             "# Max cycle length for periodic columns.\n",
-            "const MAX_CYCLE_LEN_LOG = 4\n\n",
+            "const MAX_CYCLE_LEN_LOG = {max_cycle_len_log}\n\n",
+            "# Initial chaining value for hashing the ACE circuit stream.\n",
+            "const CIRCUIT_STREAM_INIT_CV_0 = {init_cv_0}\n",
+            "const CIRCUIT_STREAM_INIT_CV_1 = {init_cv_1}\n",
+            "const CIRCUIT_STREAM_INIT_CV_2 = {init_cv_2}\n",
+            "const CIRCUIT_STREAM_INIT_CV_3 = {init_cv_3}\n\n",
             "# ERRORS\n",
             "# =================================================================================================\n\n",
-            "const ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION = \"failed to load the circuit description for the constraints evaluation check\"\n\n",
+            "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"hashed ACE circuit stream does not match CIRCUIT_COMMITMENT\"\n\n",
             "# CONSTRAINT EVALUATION CHECKER\n",
             "# =================================================================================================\n\n",
             "#! Executes the constraints evaluation check for proof order: {order_label}.\n",
@@ -223,36 +246,56 @@ fn render_constraints_eval_file(
             "#! Outputs: []\n",
             "pub proc execute_constraint_evaluation_check()\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
-            "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n\n",
-            "    exec.load_ace_circuit_description\n\n",
+            "    exec.utils::set_up_auxiliary_inputs_ace\n\n",
+            "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",
             "    exec.constants::public_inputs_address_ptr mem_load\n",
             "    eval_circuit\n",
             "    drop drop drop\n",
             "end\n\n",
-            "#! Loads the description of this order-specific ACE circuit.\n",
-            "proc load_ace_circuit_description\n",
+            "#! Loads and authenticates this order-specific ACE circuit.\n",
+            "proc load_and_authenticate_ace_circuit\n",
             "    push.CIRCUIT_COMMITMENT\n",
+            "    # => [C]\n",
             "    adv.push_mapval\n",
+            "    # => [C]\n",
             "    exec.constants::ace_circuit_stream_ptr\n",
-            "    padw padw padw\n",
+            "    # => [ptr, C]\n",
+            "    push.CIRCUIT_STREAM_INIT_CV_3.CIRCUIT_STREAM_INIT_CV_2.CIRCUIT_STREAM_INIT_CV_1.CIRCUIT_STREAM_INIT_CV_0\n",
+            "    # => [CV, ptr, C]\n",
+            "    padw padw\n",
+            "    # => [BLOCK_SLOTS, CV, ptr, C]\n",
             "    repeat.{adv_pipe_rows}\n",
             "        adv_pipe\n",
-            "        exec.poseidon2::permute\n",
+            "        # => [BLOCK, CV, ptr_next, C]\n",
+            "        bcompress\n",
+            "        # => [BLOCK, CV_NEXT, ptr_next, C]\n",
             "    end\n",
-            "    exec.poseidon2::squeeze_digest\n",
+            "    dropw dropw\n",
+            "    # => [DIGEST, ptr_final, C]\n",
             "    movup.4 drop\n",
-            "    assert_eqw.err=ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION\n",
+            "    # => [DIGEST, C]\n",
+            "    assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH\n",
+            "    # => []\n",
             "end\n\n",
-            "# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION\n",
+            "# COMMITTED ACE CIRCUIT STREAM\n",
             "# =================================================================================================\n\n",
-            "adv_map CIRCUIT_COMMITMENT = [\n",
+            "adv_map CIRCUIT_COMMITMENT([{commitment_0}, {commitment_1}, {commitment_2}, {commitment_3}]) = [\n",
         ),
         num_inputs = num_inputs,
         num_eval_gates = num_eval_gates,
         order_label = order_label,
+        max_cycle_len_log = max_cycle_len_log,
         adv_pipe_rows = adv_pipe_rows,
+        init_cv_0 = circuit_stream_init_cv[0].as_canonical_u64(),
+        init_cv_1 = circuit_stream_init_cv[1].as_canonical_u64(),
+        init_cv_2 = circuit_stream_init_cv[2].as_canonical_u64(),
+        init_cv_3 = circuit_stream_init_cv[3].as_canonical_u64(),
+        commitment_0 = circuit_commitment[0].as_canonical_u64(),
+        commitment_1 = circuit_commitment[1].as_canonical_u64(),
+        commitment_2 = circuit_commitment[2].as_canonical_u64(),
+        commitment_3 = circuit_commitment[3].as_canonical_u64(),
     );
 
     for (i, chunk) in instructions.chunks(8).enumerate() {
@@ -266,6 +309,21 @@ fn render_constraints_eval_file(
     }
     masm.push_str("]\n");
     masm
+}
+
+fn max_periodic_cycle_len_log() -> u32 {
+    let max_len = AIRS
+        .iter()
+        .flat_map(|spec| <MidenAir as LiftedAir<Felt, QuadFelt>>::periodic_columns(&spec.air))
+        .map(|column| column.len())
+        .max()
+        .unwrap_or(1);
+
+    assert!(
+        max_len.is_power_of_two(),
+        "maximum AIR periodic cycle length must be a power of two"
+    );
+    max_len.ilog2()
 }
 
 fn render_constraints_eval_dispatcher(orders: &[OrderArtifact]) -> String {
@@ -362,23 +420,31 @@ fn check_constraints_eval_file(artifact: &OrderArtifact) -> Result<(), String> {
     let masm = read_file(&path);
     let actual_num_inputs: usize = parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", &path)?;
     let actual_num_eval: usize = parse_masm_const(&masm, "NUM_EVAL_GATES_CIRCUIT", &path)?;
-
     let proc_start = masm
-        .find("proc load_ace_circuit_description")
-        .ok_or_else(|| format!("load_ace_circuit_description proc not found in {path}"))?;
+        .find("proc load_and_authenticate_ace_circuit")
+        .ok_or_else(|| format!("load_and_authenticate_ace_circuit proc not found in {path}"))?;
     let actual_adv_pipe: usize = masm[proc_start..]
         .lines()
         .find_map(|line| line.trim().strip_prefix("repeat.").and_then(|v| v.parse::<usize>().ok()))
-        .ok_or_else(|| format!("repeat.N not found in load_ace_circuit_description of {path}"))?;
+        .ok_or_else(|| {
+            format!("repeat.N not found in load_and_authenticate_ace_circuit of {path}")
+        })?;
 
     let adv_start = masm
-        .find("adv_map CIRCUIT_COMMITMENT = [")
+        .find("adv_map CIRCUIT_COMMITMENT([")
         .ok_or_else(|| format!("adv_map CIRCUIT_COMMITMENT not found in {path}"))?;
-    let adv_end = masm[adv_start..]
+    let key_start = adv_start + "adv_map CIRCUIT_COMMITMENT([".len();
+    let key_end = masm[key_start..]
+        .find("]) = [")
+        .map(|idx| idx + key_start)
+        .ok_or_else(|| format!("adv_map CIRCUIT_COMMITMENT key terminator not found in {path}"))?;
+    let data_start = key_end + "]) = [".len();
+    let adv_end = masm[data_start..]
         .find(']')
-        .map(|idx| idx + adv_start)
+        .map(|idx| idx + data_start)
         .ok_or_else(|| format!("adv_map data block terminator not found in {path}"))?;
-    let data_str = &masm[masm[..adv_start].len() + "adv_map CIRCUIT_COMMITMENT = [".len()..adv_end];
+    let actual_commitment = parse_u64_list(&masm[key_start..key_end], &path)?;
+    let data_str = &masm[data_start..adv_end];
     let actual_data: Vec<Felt> = data_str
         .split(',')
         .map(str::trim)
@@ -389,7 +455,7 @@ fn check_constraints_eval_file(artifact: &OrderArtifact) -> Result<(), String> {
                 .map_err(|_| format!("invalid u64 in adv_map of {path}"))
         })
         .collect::<Result<_, _>>()?;
-    let actual_hash = Poseidon2::hash_elements(&actual_data);
+    let actual_hash = Eidos::hash_elements(&actual_data);
 
     let actual_hash_u64: Vec<u64> =
         actual_hash.as_elements().iter().map(Felt::as_canonical_u64).collect();
@@ -416,6 +482,9 @@ fn check_constraints_eval_file(artifact: &OrderArtifact) -> Result<(), String> {
     }
     if actual_hash_u64 != expected_hash_u64 {
         return Err(format!("Circuit data in adv_map of {path} is stale (hash mismatch)"));
+    }
+    if actual_commitment.as_slice() != expected_hash_u64.as_slice() {
+        return Err(format!("CIRCUIT_COMMITMENT adv_map key in {path} is stale"));
     }
     Ok(())
 }
@@ -474,6 +543,15 @@ where
     masm.lines()
         .find_map(|line| line.trim().strip_prefix(&prefix).and_then(|v| v.parse::<T>().ok()))
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
+}
+
+fn parse_u64_list(values: &str, file_label: &str) -> Result<Vec<u64>, String> {
+    values
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse::<u64>().map_err(|_| format!("invalid u64 in {file_label}")))
+        .collect()
 }
 
 fn replace_masm_const(content: &mut String, name: &str, new_value: &str) {

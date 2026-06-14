@@ -802,7 +802,7 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
 /// This helper reconstructs that state, applies a permutation, and returns the resulting
 /// `[RATE0',RATE1',CAP']` back in stack order.
 pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for bcompress test");
 
     // Reconstruct the internal Poseidon2 state from the initial stack:
     // stack[0..12] = [v0, ..., v11]

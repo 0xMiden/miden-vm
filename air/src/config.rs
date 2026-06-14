@@ -87,10 +87,10 @@ pub fn pcs_params() -> PcsParams {
 /// `H(PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...)`.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(15794697767175421542),
-    Felt::new_unchecked(12015852685764691680),
-    Felt::new_unchecked(3313672886670830370),
-    Felt::new_unchecked(20246485947112053),
+    Felt::new_unchecked(6170606507088258046),
+    Felt::new_unchecked(84998389207787813),
+    Felt::new_unchecked(1359221617799770188),
+    Felt::new_unchecked(2778330809271398821),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -276,7 +276,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_ace_codegen::{AceConfig, LayoutKind};
-    use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::hash::eidos::Eidos;
 
     use crate::{ProofOrder, ace};
 
@@ -302,7 +303,9 @@ mod tests {
             let circuit =
                 ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order).unwrap();
             let encoded = circuit.to_ace().unwrap();
-            let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+            let circuit_digest = Eidos::hash_elements(encoded.instructions());
+            let circuit_commitment =
+                [circuit_digest[0], circuit_digest[1], circuit_digest[2], circuit_digest[3]];
             snapshot_lines.push(format!(
                 "{}:\n  num_inputs: {}\n  num_eval_gates: {}\n  commitment: {:?}",
                 order.file_stem(),
@@ -319,7 +322,7 @@ mod tests {
                     .chain(commitment.iter().copied())
             }))
             .collect();
-        let digest = Poseidon2::hash_elements(&input);
+        let digest = Eidos::hash_elements(&input);
         let expected: Vec<u64> = digest.as_elements().iter().map(Felt::as_canonical_u64).collect();
 
         let snapshot = format!("{}\nrelation_digest: {:?}", snapshot_lines.join("\n"), expected);

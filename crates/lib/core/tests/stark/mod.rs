@@ -7,13 +7,12 @@ use miden_air::{
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Felt, WORD_SIZE,
+    advice::AdviceStackBuilder,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
-use miden_crypto::stark::{
-    Preprocessed, StarkConfig, challenger::CanObserve, symmetric::CryptographicPermutation,
-};
+use miden_crypto::stark::{Preprocessed, StarkConfig, challenger::CanObserve};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
@@ -105,7 +104,7 @@ fn stark_verifier_e2f4_with_kernel_flipped_order() {
 }
 
 #[test]
-fn stark_verifier_e2f4_exercises_multiple_order_tags() {
+fn stark_verifier_e2f4_uses_shape_order_tag_for_small_proofs() {
     let equal_height = generate_recursive_verifier_data(EXAMPLE_EQUAL_HEIGHTS, vec![], None);
     let core_heavy = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, fib_stack_inputs(), None);
 
@@ -114,7 +113,6 @@ fn stark_verifier_e2f4_exercises_multiple_order_tags() {
 
     assert_eq!(equal_height_order, expected_order_from_shape(&equal_height));
     assert_eq!(core_heavy_order, expected_order_from_shape(&core_heavy));
-    assert_ne!(equal_height_order.tag(), core_heavy_order.tag());
 }
 
 #[test]
@@ -205,7 +203,7 @@ pub fn generate_recursive_verifier_data(
         host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
-    let options = ProvingOptions::new(HashFunction::Poseidon2);
+    let options = ProvingOptions::new(HashFunction::Eidos);
 
     let (stack_outputs, proof) = prove_sync(
         &program,
@@ -326,8 +324,8 @@ fn order_tag_derivation_matches_rust_for_height_orderings() {
 
     for log_core in 6..=29 {
         for log_chiplets in 6..=29 {
-            for log_poseidon2 in 6..=29 {
-                let logs = [log_core, log_chiplets, log_poseidon2, AND8_LOOKUP_LOG_HEIGHT];
+            for log_blakeg in 6..=29 {
+                let logs = [log_core, log_chiplets, log_blakeg, AND8_LOOKUP_LOG_HEIGHT];
                 let order = ProofOrder::from_instance_log_heights(&logs.map(|log| log as u8));
                 representatives[order.tag() as usize].get_or_insert(logs);
             }
@@ -348,8 +346,8 @@ fn order_tag_derivation_matches_rust_for_height_orderings() {
 #[case::high_core_height(0, 30)]
 #[case::low_chiplets_height(1, 5)]
 #[case::high_chiplets_height(1, 30)]
-#[case::low_poseidon2_height(2, 5)]
-#[case::high_poseidon2_height(2, 30)]
+#[case::low_blakeg_height(2, 5)]
+#[case::high_blakeg_height(2, 30)]
 fn miden_air_shape_rejects_malformed_fields(#[case] index: usize, #[case] value: u64) {
     let mut shape = miden_air_shape_advice(10, 10, 10);
     shape[index] = value;
@@ -367,7 +365,7 @@ fn miden_air_shape_rejects_malformed_fields(#[case] index: usize, #[case] value:
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let log_core_trace_length = 10_u64;
     let log_chiplets_trace_length = 10_u64;
-    let log_poseidon2_trace_length = 10_u64;
+    let log_blakeg_compression_trace_length = 10_u64;
     let initial_stack = vec![];
 
     let seed = [0_u8; 32];
@@ -392,7 +390,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let mut advice_stack = miden_air_shape_advice(
         log_core_trace_length,
         log_chiplets_trace_length,
-        log_poseidon2_trace_length,
+        log_blakeg_compression_trace_length,
     )
     .to_vec();
     advice_stack.extend_from_slice(&fixed_length_public_inputs);
@@ -468,16 +466,14 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 #[case(8)]
 #[case(255)]
 fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_digests: usize) {
-    const R1_PTR: u32 = 3223322676;
-    const R2_PTR: u32 = 3223322680;
-    const C_PTR: u32 = 3223322672;
-    const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322760;
+    const RANDOM_COIN_BUFFER_LEN_PTR: u32 = 3223322760;
     const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322761;
     const ABSORB_SCRATCH_PTR: u32 = 3223324000;
+    const SQUEEZED_WORD_PTR: u32 = 1000;
 
     let log_core_trace_length = 10_u64;
     let log_chiplets_trace_length = 11_u64;
-    let log_poseidon2_trace_length = 12_u64;
+    let log_blakeg_compression_trace_length = 12_u64;
     let seed = [1_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
@@ -495,7 +491,7 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     let mut advice_stack = miden_air_shape_advice(
         log_core_trace_length,
         log_chiplets_trace_length,
-        log_poseidon2_trace_length,
+        log_blakeg_compression_trace_length,
     )
     .to_vec();
     advice_stack.extend_from_slice(&fixed_length_public_inputs);
@@ -521,13 +517,16 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
             padw adv_loadw
             exec.constants::main_trace_com_ptr mem_storew_le
             exec.random_coin::reseed_main_after_shape
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
         end
         ";
 
     let test = build_test!(source, &[], &advice_stack);
     let (output, _host) = test.execute_for_output().expect("execution failed");
 
-    let config = config::poseidon2_config(config::pcs_params());
+    let config = config::eidos_config(config::pcs_params());
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
@@ -540,7 +539,7 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     let log_heights = [
         log_core_trace_length as u8,
         log_chiplets_trace_length as u8,
-        log_poseidon2_trace_length as u8,
+        log_blakeg_compression_trace_length as u8,
         AND8_LOOKUP_LOG_HEIGHT as u8,
     ];
     let statement = Statement::<Felt, QuadFelt, MidenMultiAir>::new(
@@ -563,23 +562,15 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     for &element in &main_trace_commitment {
         challenger.observe(Felt::new_unchecked(element));
     }
-    flush_duplex(&mut challenger);
+    let expected_word = challenger.squeeze_word();
 
     let ctx = miden_processor::ContextId::root();
     let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
-    let masm_state = [
-        read(R1_PTR),
-        read(R1_PTR + 1),
-        read(R1_PTR + 2),
-        read(R1_PTR + 3),
-        read(R2_PTR),
-        read(R2_PTR + 1),
-        read(R2_PTR + 2),
-        read(R2_PTR + 3),
-        read(C_PTR),
-        read(C_PTR + 1),
-        read(C_PTR + 2),
-        read(C_PTR + 3),
+    let masm_word = [
+        read(SQUEEZED_WORD_PTR),
+        read(SQUEEZED_WORD_PTR + 1),
+        read(SQUEEZED_WORD_PTR + 2),
+        read(SQUEEZED_WORD_PTR + 3),
     ];
 
     let kernel_felts_len = 4 * num_kernel_proc_digests;
@@ -599,11 +590,291 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
         );
     }
 
-    assert_eq!(masm_state, challenger.sponge_state);
-    assert_eq!(read(RANDOM_COIN_INPUT_LEN_PTR), Felt::ZERO);
-    assert_eq!(read(RANDOM_COIN_OUTPUT_LEN_PTR), Felt::new_unchecked(8));
-    assert_eq!(challenger.input_buffer.len(), 0);
-    assert_eq!(challenger.output_buffer.len(), 8);
+    assert_eq!(masm_word, expected_word.as_elements());
+    assert_eq!(read(RANDOM_COIN_BUFFER_LEN_PTR), Felt::ZERO);
+    assert_eq!(read(RANDOM_COIN_OUTPUT_LEN_PTR), Felt::ZERO);
+}
+
+#[test]
+fn eidos_init_seed_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    let source = "
+        use miden::core::sys::vm
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            push.27 exec.constants::set_number_queries
+            push.16 exec.constants::set_query_pow_bits
+            push.12 exec.constants::set_deep_pow_bits
+            push.4 exec.constants::set_folding_pow_bits
+            exec.vm::init_miden_air_shape_state
+            exec.random_coin::init_seed
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
+        end
+        ";
+
+    let shape = miden_air_shape_advice(10, 11, 12);
+    let test = build_test!(source, &[], &shape);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let config = config::eidos_config(config::pcs_params());
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger);
+    let expected_word = challenger.squeeze_word();
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let masm_word = [
+        read(SQUEEZED_WORD_PTR),
+        read(SQUEEZED_WORD_PTR + 1),
+        read(SQUEEZED_WORD_PTR + 2),
+        read(SQUEEZED_WORD_PTR + 3),
+    ];
+
+    assert_eq!(masm_word, expected_word.as_elements());
+}
+
+#[test]
+fn eidos_relation_digest_seed_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    let source = "
+        use miden::core::sys::vm
+        use miden::core::stark::constants
+        use miden::core::stark::random_coin
+
+        begin
+            exec.vm::init_miden_air_shape_state
+            push.6225836997093344009.6615246172502583955.3539038439026260303.4361500420518448919
+            padw exec.constants::relation_digest_ptr mem_loadw_le
+            exec.random_coin::eidos_init_challenger
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
+        end
+        ";
+
+    let shape = miden_air_shape_advice(10, 11, 12);
+    let test = build_test!(source, &[], &shape);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let config = config::eidos_config(config::pcs_params());
+    let mut challenger = config.challenger();
+    let expected_word = challenger.squeeze_word();
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let masm_word = [
+        read(SQUEEZED_WORD_PTR),
+        read(SQUEEZED_WORD_PTR + 1),
+        read(SQUEEZED_WORD_PTR + 2),
+        read(SQUEEZED_WORD_PTR + 3),
+    ];
+
+    assert_eq!(masm_word, expected_word.as_elements());
+}
+
+#[test]
+fn eidos_absorb_block_matches_rust_challenger() {
+    const SQUEEZED_WORD_PTR: u32 = 1000;
+
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::stark::constants
+
+        begin
+            push.13.12.11.10 exec.constants::random_coin_cv_ptr mem_storew_le
+            dropw
+            push.8.7.6.5
+            push.4.3.2.1
+            exec.random_coin::eidos_absorb_block
+            exec.random_coin::eidos_squeeze_word
+            push.1000 mem_storew_le
+            dropw
+        end
+        ";
+
+    let test = build_test!(source, &[]);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let init_cv = miden_core::Word::new([
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+    ]);
+    let mut challenger = miden_crypto::hash::eidos::MidenEidosChallenger::from_cv(init_cv);
+    challenger.absorb_raw_block([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ]);
+    let expected_word = challenger.squeeze_word();
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let masm_word = [
+        read(SQUEEZED_WORD_PTR),
+        read(SQUEEZED_WORD_PTR + 1),
+        read(SQUEEZED_WORD_PTR + 2),
+        read(SQUEEZED_WORD_PTR + 3),
+    ];
+
+    assert_eq!(masm_word, expected_word.as_elements());
+}
+
+#[test]
+fn eidos_hash_elements_single_block_matches_masm_bcompress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, 8);
+    let init = init_cv.as_elements();
+    let source = format!(
+        "
+        begin
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            push.8.7.6.5
+            push.4.3.2.1
+            bcompress
+            dropw dropw
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        cv0 = init[0].as_canonical_u64(),
+        cv1 = init[1].as_canonical_u64(),
+        cv2 = init[2].as_canonical_u64(),
+        cv3 = init[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(&source, &[]);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let elements = (1..=8).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let masm_word = [
+        read(HASH_WORD_PTR),
+        read(HASH_WORD_PTR + 1),
+        read(HASH_WORD_PTR + 2),
+        read(HASH_WORD_PTR + 3),
+    ];
+
+    assert_eq!(masm_word, expected_word.as_elements());
+}
+
+#[test]
+fn eidos_hash_elements_adv_pipe_loop_matches_masm_bcompress_loop() {
+    const HASH_WORD_PTR: u32 = 1000;
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, elements.len() as u32);
+    let init = init_cv.as_elements();
+    let mut advice_builder = AdviceStackBuilder::new();
+    advice_builder.push_for_adv_pipe(&elements);
+    let advice_stack = advice_builder.build_vec_u64();
+
+    let source = format!(
+        "
+        begin
+            push.{STREAM_PTR}
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            padw padw
+            repeat.2
+                adv_pipe
+                bcompress
+            end
+            dropw dropw
+            movup.4 drop
+            push.{HASH_WORD_PTR} mem_storew_le
+            dropw
+        end
+        ",
+        cv0 = init[0].as_canonical_u64(),
+        cv1 = init[1].as_canonical_u64(),
+        cv2 = init[2].as_canonical_u64(),
+        cv3 = init[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(&source, &[], &advice_stack);
+    let (output, _host) = test.execute_for_output().expect("execution failed");
+
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let masm_word = [
+        read(HASH_WORD_PTR),
+        read(HASH_WORD_PTR + 1),
+        read(HASH_WORD_PTR + 2),
+        read(HASH_WORD_PTR + 3),
+    ];
+
+    assert_eq!(masm_word, expected_word.as_elements());
+}
+
+#[test]
+fn eidos_hash_elements_advice_map_loop_matches_masm_bcompress_loop() {
+    const STREAM_PTR: u32 = 1 << 16;
+
+    let elements = (1..=16).map(Felt::new_unchecked).collect::<Vec<_>>();
+    let expected_word = miden_crypto::hash::eidos::Eidos::hash_elements(&elements);
+    let key = expected_word.as_elements();
+    let map_values = elements
+        .iter()
+        .map(Felt::as_canonical_u64)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let init_cv = miden_crypto::hash::eidos::Eidos::init_chaining_word(0, elements.len() as u32);
+    let init = init_cv.as_elements();
+
+    let source = format!(
+        "
+        adv_map CIRCUIT_COMMITMENT([{key0}, {key1}, {key2}, {key3}]) = [
+            {map_values}
+        ]
+
+        begin
+            push.CIRCUIT_COMMITMENT
+            adv.push_mapval
+            push.{STREAM_PTR}
+            push.{cv3}.{cv2}.{cv1}.{cv0}
+            padw padw
+            repeat.2
+                adv_pipe
+                bcompress
+            end
+            dropw dropw
+            movup.4 drop
+            assert_eqw
+        end
+        ",
+        key0 = key[0].as_canonical_u64(),
+        key1 = key[1].as_canonical_u64(),
+        key2 = key[2].as_canonical_u64(),
+        key3 = key[3].as_canonical_u64(),
+        map_values = map_values,
+        cv0 = init[0].as_canonical_u64(),
+        cv1 = init[1].as_canonical_u64(),
+        cv2 = init[2].as_canonical_u64(),
+        cv3 = init[3].as_canonical_u64(),
+    );
+
+    let test = build_test!(&source, &[]);
+    test.execute().expect("execution failed");
 }
 
 #[test]
@@ -639,8 +910,12 @@ fn variable_length_public_inputs_rejects_too_many_kernel_proc_digests() {
 // HELPERS
 // ===============================================================================================
 
-fn miden_air_shape_advice(log_core: u64, log_chiplets: u64, log_poseidon2: u64) -> [u64; 3] {
-    [log_core, log_chiplets, log_poseidon2]
+fn miden_air_shape_advice(
+    log_core: u64,
+    log_chiplets: u64,
+    log_blakeg_compression: u64,
+) -> [u64; 3] {
+    [log_core, log_chiplets, log_blakeg_compression]
 }
 
 fn shape_init_succeeds(shape: &[u64]) -> bool {
@@ -666,13 +941,13 @@ fn masm_shape_state_from_advice(logs: [u64; 4]) -> ([u64; 4], u32) {
             exec.vm::init_miden_air_shape_state
             exec.constants::get_core_trace_length_log push.{SHAPE_TEST_OUTPUT_PTR} mem_store
             exec.constants::get_chiplets_trace_length_log push.{chiplets_ptr} mem_store
-            exec.constants::get_poseidon2_permutation_trace_length_log push.{poseidon2_ptr} mem_store
+            exec.constants::get_blakeg_compression_trace_length_log push.{blakeg_ptr} mem_store
             exec.constants::get_and8_lookup_trace_length_log push.{and8_ptr} mem_store
             exec.constants::get_order_tag push.{tag_ptr} mem_store
         end
         ",
         chiplets_ptr = SHAPE_TEST_OUTPUT_PTR + 1,
-        poseidon2_ptr = SHAPE_TEST_OUTPUT_PTR + 2,
+        blakeg_ptr = SHAPE_TEST_OUTPUT_PTR + 2,
         and8_ptr = SHAPE_TEST_OUTPUT_PTR + 3,
         tag_ptr = SHAPE_TEST_OUTPUT_PTR + 4,
     );
@@ -718,22 +993,6 @@ fn natural_kernel_digest_felts(kernel_digest_advice: &[u64]) -> Vec<Felt> {
             ]
         })
         .collect()
-}
-
-fn flush_duplex<P>(
-    challenger: &mut miden_crypto::stark::challenger::DuplexChallenger<Felt, P, 12, 8>,
-) where
-    P: CryptographicPermutation<[Felt; 12]>,
-{
-    assert!(challenger.input_buffer.len() <= 8);
-    if !challenger.input_buffer.is_empty() {
-        for (i, value) in challenger.input_buffer.drain(..).enumerate() {
-            challenger.sponge_state[i] = value;
-        }
-        challenger.permutation.permute_mut(&mut challenger.sponge_state);
-        challenger.output_buffer.clear();
-        challenger.output_buffer.extend_from_slice(&challenger.sponge_state[..8]);
-    }
 }
 
 /// Generates a vector with a specific number of kernel procedures digests given a `Rng`.

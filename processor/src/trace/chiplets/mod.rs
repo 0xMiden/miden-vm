@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{
     CHIPLETS_WIDTH,
+    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH,
         ace::ACE_CHIPLET_NUM_COLS,
@@ -9,9 +10,8 @@ use miden_air::trace::{
         hasher::{HasherState, TRACE_WIDTH as HASHER_WIDTH},
         memory::TRACE_WIDTH as MEMORY_WIDTH,
     },
-    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{field::PrimeCharacteristicRing, mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -24,6 +24,10 @@ use bitwise::Bitwise;
 
 mod hasher;
 use hasher::Hasher;
+
+pub(crate) fn build_and8_lookup_trace(and8_counts: &[u64]) -> Vec<Felt> {
+    hasher::build_and8_lookup_trace(and8_counts)
+}
 
 mod memory;
 use memory::Memory;
@@ -45,7 +49,7 @@ pub struct ChipletsTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
-pub struct Poseidon2PermutationTrace {
+pub struct BlakeGCompressionTrace {
     pub(crate) trace: Vec<Felt>,
 }
 
@@ -106,7 +110,7 @@ pub struct Poseidon2PermutationTrace {
 ///          [0] [1] [2] [3] [4]   [20]
 ///         +---+----------------------------------------------------------+---+
 ///  ctrl   | 1 |       Hash chiplet (controller rows)                     | 0 |
-///         | . |       20 columns                                         | . |
+///         | . |       19 columns                                         | . |
 ///         | 1 |       constraint degree 9                                | 0 |
 ///         +---+                                                          +---+
 ///         | 0 | 0 |                                                      |---|
@@ -172,9 +176,9 @@ impl Chiplets {
             + 1
     }
 
-    /// Returns the unpadded trace length of the standalone Poseidon2 permutation AIR.
-    pub fn poseidon2_permutation_trace_len(&self) -> usize {
-        self.hasher.poseidon2_permutation_trace_len()
+    /// Returns the unpadded trace length of the standalone BlakeG compression AIR.
+    pub fn blakeg_compression_trace_len(&self) -> usize {
+        self.hasher.blakeg_compression_trace_len()
     }
 
     /// Returns the index of the first row of `Bitwise` execution trace.
@@ -187,7 +191,7 @@ impl Chiplets {
         self.bitwise_start() + self.bitwise.trace_len()
     }
 
-    /// Returns the index of the first row of `KernelRom` execution trace.
+    /// Returns the index of the first row of `ACE` execution trace.
     pub fn ace_start(&self) -> RowIndex {
         self.memory_start() + self.memory.trace_len()
     }
@@ -205,30 +209,42 @@ impl Chiplets {
     // EXECUTION TRACE
     // --------------------------------------------------------------------------------------------
 
-    /// Adds all range checks required by the memory chiplet to the provided `RangeChecker``
+    /// Adds all range checks required by the memory chiplet to the provided `RangeChecker`
     /// instance.
     pub fn append_range_checks(&self, range_checker: &mut RangeChecker) {
         self.memory.append_range_checks(self.memory_start(), range_checker);
     }
 
-    /// Returns execution traces for `ChipletsAir` and `Poseidon2PermutationAir`.
+    /// Adds range checks emitted by the standalone BlakeG compression AIR.
+    pub fn append_blakeg_range_checks(
+        &self,
+        blakeg_height: usize,
+        range_checker: &mut RangeChecker,
+    ) {
+        self.hasher.append_blakeg_range_checks(blakeg_height, range_checker);
+    }
+
+    /// Returns execution traces for `ChipletsAir` and `BlakeGCompressionAir`.
     pub fn into_traces(
         self,
         trace_len: usize,
-        poseidon2_trace_len: usize,
-    ) -> (ChipletsTrace, Poseidon2PermutationTrace) {
+        blakeg_trace_len: usize,
+    ) -> (ChipletsTrace, BlakeGCompressionTrace, Vec<u64>) {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
         assert!(
-            self.poseidon2_permutation_trace_len() <= poseidon2_trace_len,
-            "target Poseidon2 trace length too small"
+            self.blakeg_compression_trace_len() <= blakeg_trace_len,
+            "target BlakeG trace length too small"
         );
 
-        let mut trace = vec![Felt::ZERO; CHIPLETS_WIDTH * trace_len];
-        let mut poseidon2_trace =
-            vec![Felt::ZERO; NUM_POSEIDON2_PERMUTATION_COLS * poseidon2_trace_len];
-        self.fill_trace(&mut trace, trace_len, &mut poseidon2_trace);
+        let mut trace = Felt::zero_vec(CHIPLETS_WIDTH * trace_len);
+        let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * blakeg_trace_len);
+        let and8_counts = self.fill_trace(&mut trace, trace_len, &mut blakeg_trace);
 
-        (ChipletsTrace { trace }, Poseidon2PermutationTrace { trace: poseidon2_trace })
+        (
+            ChipletsTrace { trace },
+            BlakeGCompressionTrace { trace: blakeg_trace },
+            and8_counts,
+        )
     }
 
     // HELPER METHODS
@@ -238,7 +254,12 @@ impl Chiplets {
     /// Hasher, Bitwise, Memory, ACE, and kernel ROM chiplets along with selector columns
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
-    fn fill_trace(self, trace: &mut [Felt], trace_len: usize, poseidon2_trace: &mut [Felt]) {
+    fn fill_trace(
+        self,
+        trace: &mut [Felt],
+        trace_len: usize,
+        blakeg_trace: &mut [Felt],
+    ) -> Vec<u64> {
         const W: usize = CHIPLETS_WIDTH;
         debug_assert_eq!(trace.len(), W * trace_len);
 
@@ -258,11 +279,9 @@ impl Chiplets {
         let kernel_rom_len = kernel_rom.trace_len();
 
         // Chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom and begin at columns
-        // 1, 2, 3, 4, 5; the widest (hasher) fills every data column up to `chip_clk` (the
-        // final column). Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
+        // 1, 2, 3, 4, 5. Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
         // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, and
         // padding rows are filled directly below.
-        const _: () = assert!(1 + HASHER_WIDTH == CHIPLETS_WIDTH - 1);
 
         // Carve `trace` into the per-chiplet contiguous row bands.
         let (hasher_band, rest) = trace.split_at_mut(hasher_len * W);
@@ -306,9 +325,11 @@ impl Chiplets {
             &[1, 2, 3],
         );
 
+        let mut and8_counts = Vec::new();
         rayon::scope(|s| {
+            let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
-                hasher.fill_trace(&mut hasher_fragment, poseidon2_trace);
+                *and8_counts = hasher.fill_trace(&mut hasher_fragment, blakeg_trace);
             });
             s.spawn(move |_| {
                 bitwise.fill_trace(&mut bitwise_fragment);
@@ -326,6 +347,8 @@ impl Chiplets {
                 fill_padding_rows(padding_band, padding_start);
             });
         });
+
+        and8_counts
     }
 }
 

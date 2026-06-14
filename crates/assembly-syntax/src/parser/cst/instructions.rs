@@ -162,8 +162,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
     },
     PrimitiveSpec {
-        spelling: "adv.insert_hperm",
-        build: || Instruction::SysEvent(SystemEventNode::InsertHperm),
+        spelling: "adv.insert_bcompress",
+        build: || Instruction::SysEvent(SystemEventNode::InsertBCompress),
     },
     PrimitiveSpec {
         spelling: "adv.insert_hqword",
@@ -386,6 +386,10 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Ext2Sub,
     },
     PrimitiveSpec {
+        spelling: "bcompress",
+        build: || Instruction::BCompress,
+    },
+    PrimitiveSpec {
         spelling: "fri_ext2fold4",
         build: || Instruction::FriExt2Fold4,
     },
@@ -396,10 +400,6 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         spelling: "hmerge",
         build: || Instruction::HMerge,
-    },
-    PrimitiveSpec {
-        spelling: "hperm",
-        build: || Instruction::HPerm,
     },
     PrimitiveSpec {
         spelling: "horner_eval_base",

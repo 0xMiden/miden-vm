@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::{
+    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
     chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
-    poseidon2_permutation::NUM_POSEIDON2_PERMUTATION_COLS,
 };
 
 // Chiplet-local column indices used by the hasher trace tests.
@@ -12,7 +12,7 @@ const NODE_INDEX_COL_IDX: usize = 15;
 const MRUPDATE_ID_COL_IDX: usize = 16;
 const IS_BOUNDARY_COL_IDX: usize = 17;
 const DIRECTION_BIT_COL_IDX: usize = 18;
-const S_PERM_COL_IDX: usize = 19;
+const TEST_TRACE_WIDTH: usize = NUM_BLAKEG_COMPRESSION_COLS;
 
 fn controller_len(controller_rows: usize) -> usize {
     controller_rows.next_multiple_of(CONTROLLER_TRACE_ALIGNMENT)
@@ -29,8 +29,8 @@ use miden_utils_testing::rand::rand_array;
 
 use super::{
     ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
-    MR_UPDATE_OLD, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state, get_digest, init_state,
-    init_state_from_words,
+    MR_UPDATE_OLD, MerklePath, RATE_LEN, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state,
+    get_digest, init_state, init_state_from_words,
 };
 
 // SPONGE MODE TESTS
@@ -38,9 +38,9 @@ use super::{
 
 #[test]
 fn hasher_permute() {
-    // --- test one permutation (HPERM) ---
+    // --- test one compression (BCOMPRESS) ---
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state = random_state_with_packed_cv();
 
     let (addr, final_state) = hasher.permute(init_state);
     assert_eq!(ONE, addr);
@@ -51,23 +51,23 @@ fn hasher_permute() {
     let trace = build_trace(hasher);
 
     // Controller region: 2 rows (1 pair), padded to the chiplet alignment boundary.
-    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
     let perm_start = controller_len(2);
     assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
-    // Row 0: input (LINEAR_HASH, is_boundary=1, s_perm=0)
+    // Row 0: input (LINEAR_HASH, is_boundary=1)
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
-    // Row 1: output (RETURN_STATE, is_boundary=1, s_perm=0)
+    // Row 1: output (RETURN_STATE, is_boundary=1)
     check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
 
-    check_perm_segment(&trace, perm_start, &init_state, ONE);
+    check_compression_block(&trace, perm_start, &init_state, ONE);
 }
 
 #[test]
 fn hasher_permute_two() {
     let mut hasher = Hasher::default();
-    let init_state1: HasherState = rand_array();
-    let init_state2: HasherState = rand_array();
+    let init_state1 = random_state_with_packed_cv();
+    let init_state2 = random_state_with_packed_cv();
 
     let (addr1, final_state1) = hasher.permute(init_state1);
     let (addr2, final_state2) = hasher.permute(init_state2);
@@ -82,7 +82,7 @@ fn hasher_permute_two() {
     let trace = build_trace(hasher);
 
     // Controller region: 4 rows (2 pairs), padded to the chiplet alignment boundary.
-    // Poseidon2 AIR: 2 real cycles plus one zero-multiplicity dummy cycle.
+    // Perm segment: 2 real cycles plus one zero-multiplicity dummy cycle.
     let perm_start = controller_len(4);
     assert_eq!(trace[0].len(), perm_start + 3 * HASH_CYCLE_LEN);
 
@@ -115,7 +115,7 @@ fn hasher_build_merkle_root_depth_1() {
     let path0 = tree.get_path(NodeIndex::new(1, 0).unwrap()).unwrap();
     let (_, root) = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
-    assert_eq!(root, tree.root());
+    assert_eq!(root, compute_path_root(leaves[0], &path0, 0));
 
     let trace = build_trace(hasher);
 
@@ -157,7 +157,7 @@ fn hasher_build_merkle_root_depth_3() {
     let path = tree.get_path(NodeIndex::new(3, 5).unwrap()).unwrap();
     let (_, root) = hasher.build_merkle_root(leaves[5], &path, Felt::from_u8(5));
 
-    assert_eq!(root, tree.root());
+    assert_eq!(root, compute_path_root(leaves[5], &path, 5));
 
     let trace = build_trace(hasher);
 
@@ -169,16 +169,6 @@ fn hasher_build_merkle_root_depth_3() {
     check_merkle_controller_pair(&trace, 2, MP_VERIFY, 2, false, false, ZERO, ZERO, ONE);
     // Pair 2 (rows 4-5): node_index 1 -> 0, b_2=1&1=1, b_next=0 (last step)
     check_merkle_controller_pair(&trace, 4, MP_VERIFY, 1, false, true, ZERO, ONE, ZERO);
-
-    // Capacity is zero on all tree-mode input rows
-    for row in [0, 2, 4] {
-        for cap_col in 11..15 {
-            assert_eq!(
-                trace[cap_col][row], ZERO,
-                "capacity should be zero on tree input row {row}, col {cap_col}"
-            );
-        }
-    }
 }
 
 #[test]
@@ -198,7 +188,7 @@ fn hasher_update_merkle_root() {
         Felt::new_unchecked(index),
     );
 
-    assert_eq!(update.get_old_root(), tree.root());
+    assert_eq!(update.get_old_root(), compute_path_root(leaves[index as usize], &path, index));
 
     let trace = build_trace(hasher);
 
@@ -220,64 +210,35 @@ fn hasher_update_merkle_root() {
     check_merkle_controller_pair(&trace, 6, MR_UPDATE_NEW, 0, false, true, ONE, ZERO, ZERO);
 }
 
-// COMBINED TEST-VIEW PERMUTATION CYCLE TESTS
+// COMBINED COMPRESSION-BLOCK VIEW TESTS
 // ================================================================================================
 
 #[test]
 fn perm_segment_structure() {
-    // One permutation yields one 16-row cycle with multiplicity 1.
+    // One BCOMPRESS yields one 64-row compression block with multiplicity 1.
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state = random_state_with_packed_cv();
     let (addr, result) = hasher.permute(init_state);
 
     // Verify returned address and permuted state
-    assert_eq!(addr, ONE, "first permutation should start at address 1");
-    assert_eq!(result, apply_permutation(init_state), "permuted state should match");
+    assert_eq!(addr, ONE, "first compression should start at address 1");
+    assert_eq!(result, apply_permutation(init_state), "compressed state should match");
 
     let trace = build_trace(hasher);
 
-    // The test view appends permutation cycles after the padded controller rows.
+    // The test view appends compression blocks after the padded controller rows.
     let perm_start = controller_len(2);
 
-    // The appended cycles are not chiplets rows. This test-only view marks them in the
-    // reserved column so the assertions can share the controller-width table.
-    for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[S_PERM_COL_IDX][row], ONE, "perm marker should be 1 at row {row}");
-    }
-
-    // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
-    // They are zero on external and boundary rows, but hold S-box witnesses on
-    // packed-internal rows (4-10) and the mixed int+ext row (11).
-    // Rows 0-3, 12-15: witnesses should be zero
-    for offset in [0, 1, 2, 3, 12, 13, 14, 15] {
-        let row = perm_start + offset;
-        assert_eq!(trace[0][row], ZERO, "perm row {row}: s0 should be zero");
-        assert_eq!(trace[1][row], ZERO, "perm row {row}: s1 should be zero");
-        assert_eq!(trace[2][row], ZERO, "perm row {row}: s2 should be zero");
-    }
-    // Rows 4-10: s0, s1, s2 hold witness values (non-zero for non-trivial states)
-    // Row 11: s0 holds witness, s1 and s2 are zero
-    let row_11 = perm_start + 11;
-    assert_eq!(trace[1][row_11], ZERO, "perm row {row_11}: s1 should be zero on int+ext row");
-    assert_eq!(trace[2][row_11], ZERO, "perm row {row_11}: s2 should be zero on int+ext row");
-
-    // Multiplicity in node_index column
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], ONE);
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start + HASH_CYCLE_LEN], ZERO);
-
-    // is_boundary, direction_bit, mrupdate_id all zero on perm rows
-    for row in perm_start..perm_start + HASH_CYCLE_LEN {
-        assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], ZERO);
-        assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], ZERO);
-        assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], ZERO);
-    }
+    assert_eq!(compression_multiplicity(&trace, perm_start), ONE);
+    assert_eq!(compression_multiplicity(&trace, perm_start + HASH_CYCLE_LEN), ZERO);
+    assert_eq!(compression_output_state(&trace, perm_start), apply_permutation(init_state));
 }
 
 #[test]
 fn perm_deduplication() {
-    // Two permutations with the same input state collapse to one cycle with multiplicity 2.
+    // Two identical BCOMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
-    let init_state: HasherState = rand_array();
+    let init_state = random_state_with_packed_cv();
     let (addr1, result1) = hasher.permute(init_state);
     let (addr2, result2) = hasher.permute(init_state); // same state
 
@@ -288,12 +249,12 @@ fn perm_deduplication() {
     let trace = build_trace(hasher);
 
     // Controller: 4 rows (2 pairs), padded to the chiplet alignment boundary.
-    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
     let perm_start = controller_len(4);
     assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
-    // Poseidon2 AIR multiplicity should be 2.
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    // Compression segment: multiplicity should be 2.
+    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
 }
 
 // MEMOIZATION TESTS
@@ -323,12 +284,12 @@ fn hash_memoization_control_blocks() {
     let trace = build_trace(hasher);
 
     // Both calls produce controller pairs (4 rows), but share perm requests.
-    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
     let perm_start = controller_len(4);
     assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
-    // Poseidon2 AIR has multiplicity 2 (two requests for same state).
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    // Perm segment has multiplicity 2 (two requests for same state)
+    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
 }
 
 // BASIC BLOCK MEMOIZATION TESTS
@@ -353,7 +314,7 @@ fn hash_memoization_basic_blocks_single_batch() {
     let trace = build_trace(hasher);
 
     // Single batch -> 1 controller pair per call = 4 rows total.
-    // Poseidon2 AIR: 1 real cycle plus one zero-multiplicity dummy cycle.
+    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
     let perm_start = controller_len(4);
     assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
 
@@ -362,7 +323,7 @@ fn hash_memoization_basic_blocks_single_batch() {
         &trace,
         0,
         LINEAR_HASH,
-        &init_state(batches[0].groups(), ZERO),
+        &init_state(batches[0].groups(), num_basic_block_hash_groups(&batches) as u32),
         ZERO,
         ONE,
         ZERO,
@@ -372,7 +333,10 @@ fn hash_memoization_basic_blocks_single_batch() {
         &trace,
         1,
         RETURN_HASH,
-        &apply_permutation(init_state(batches[0].groups(), ZERO)),
+        &apply_permutation(init_state(
+            batches[0].groups(),
+            num_basic_block_hash_groups(&batches) as u32,
+        )),
         ZERO,
         ONE,
         ZERO,
@@ -381,8 +345,8 @@ fn hash_memoization_basic_blocks_single_batch() {
     // Verify memoized call: rows 2-3 should match rows 0-1 in selectors and state
     check_memoized_trace(&trace, 0..2, 2..4);
 
-    // Poseidon2 AIR multiplicity should be 2 (original + memoized).
-    assert_eq!(trace[NODE_INDEX_COL_IDX][perm_start], Felt::from_u8(2));
+    // Perm segment: multiplicity should be 2 (original + memoized)
+    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
 }
 
 #[test]
@@ -425,11 +389,11 @@ fn hash_memoization_basic_blocks_multi_batch() {
     // Verify memoized call: rows 6-11 should match rows 0-5
     check_memoized_trace(&trace, 0..6, 6..12);
 
-    // Poseidon2 AIR: each of the 3 unique states should have multiplicity 2.
+    // Perm segment: each of the 3 unique states should have multiplicity 2
     for i in 0..3 {
         let cycle_start = perm_start + i * HASH_CYCLE_LEN;
         assert_eq!(
-            trace[NODE_INDEX_COL_IDX][cycle_start],
+            compression_multiplicity(&trace, cycle_start),
             Felt::from_u8(2),
             "perm cycle {i} should have multiplicity 2"
         );
@@ -532,7 +496,7 @@ fn hash_memoization_basic_blocks_check() {
     let mut mult_1_count = 0;
     for i in 0..num_perm_cycles {
         let cycle_start = perm_start + i * HASH_CYCLE_LEN;
-        let mult = trace[NODE_INDEX_COL_IDX][cycle_start];
+        let mult = compression_multiplicity(&trace, cycle_start);
         if mult == Felt::from_u8(2) {
             mult_2_count += 1;
         } else if mult == ONE {
@@ -549,34 +513,35 @@ fn hash_memoization_basic_blocks_check() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Builds a test-only view with controller rows followed by standalone permutation cycles.
-///
-/// Production chiplets keep `s_perm` zero and write permutation cycles to
-/// `Poseidon2PermutationAir`. This helper appends those cycles to a controller-width
-/// table and uses the reserved column as a marker for local tests.
+/// Builds a hasher test view with controller rows followed by standalone compression blocks.
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
     let (controller_len, perm_len) = hasher.region_lengths();
     let trace_len = controller_len + perm_len;
-    let mut band = Felt::zero_vec(TRACE_WIDTH * trace_len);
-    let mut poseidon2_trace = Felt::zero_vec(NUM_POSEIDON2_PERMUTATION_COLS * perm_len);
+    let mut band = Felt::zero_vec(TEST_TRACE_WIDTH * trace_len);
+    let mut controller_trace = Felt::zero_vec(TRACE_WIDTH * controller_len);
+    let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * perm_len);
 
     {
-        let controller_band = &mut band[..TRACE_WIDTH * controller_len];
         let mut fragment =
-            ChipletTraceFragment::row_major(controller_band, TRACE_WIDTH, 0, TRACE_WIDTH);
-        hasher.fill_trace(&mut fragment, &mut poseidon2_trace);
+            ChipletTraceFragment::row_major(&mut controller_trace, TRACE_WIDTH, 0, TRACE_WIDTH);
+        hasher.fill_trace(&mut fragment, &mut blakeg_trace);
+    }
+
+    for row in 0..controller_len {
+        let dst = row * TEST_TRACE_WIDTH;
+        let src = row * TRACE_WIDTH;
+        band[dst..dst + TRACE_WIDTH].copy_from_slice(&controller_trace[src..src + TRACE_WIDTH]);
     }
 
     for row in 0..perm_len {
-        let dst = (controller_len + row) * TRACE_WIDTH;
-        let src = row * NUM_POSEIDON2_PERMUTATION_COLS;
-        band[dst..dst + NUM_POSEIDON2_PERMUTATION_COLS]
-            .copy_from_slice(&poseidon2_trace[src..src + NUM_POSEIDON2_PERMUTATION_COLS]);
-        band[dst + S_PERM_COL_IDX] = ONE;
+        let dst = (controller_len + row) * TEST_TRACE_WIDTH;
+        let src = row * NUM_BLAKEG_COMPRESSION_COLS;
+        band[dst..dst + NUM_BLAKEG_COMPRESSION_COLS]
+            .copy_from_slice(&blakeg_trace[src..src + NUM_BLAKEG_COMPRESSION_COLS]);
     }
 
-    (0..TRACE_WIDTH)
-        .map(|c| (0..trace_len).map(|r| band[r * TRACE_WIDTH + c]).collect())
+    (0..TEST_TRACE_WIDTH)
+        .map(|c| (0..trace_len).map(|r| band[r * TEST_TRACE_WIDTH + c]).collect())
         .collect()
 }
 
@@ -605,7 +570,6 @@ fn check_controller_input(
     assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
     assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
     assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
     assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], mrupdate_id, "mrupdate_id at row {row}");
 }
 
@@ -630,7 +594,6 @@ fn check_controller_output(
     assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
     assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
     assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
-    assert_eq!(trace[S_PERM_COL_IDX][row], ZERO, "s_perm should be 0 on controller row {row}");
 }
 
 /// Checks both the input and output rows of a Merkle controller pair.
@@ -639,7 +602,7 @@ fn check_controller_output(
 /// - Input row (`input_row`): has `input_selectors`, `node_index`, `is_boundary_input` flag.
 /// - Output row (`input_row + 1`): has `node_index >> 1`, `is_boundary_output` flag.
 ///
-/// Both rows must have `s_perm=0` and the given `mrupdate_id`.
+/// Both rows must have the given `mrupdate_id`.
 fn check_merkle_controller_pair(
     trace: &[Vec<Felt>],
     input_row: usize,
@@ -655,7 +618,7 @@ fn check_merkle_controller_pair(
     let is_boundary_input_felt = if is_boundary_input { ONE } else { ZERO };
     let is_boundary_output_felt = if is_boundary_output { ONE } else { ZERO };
 
-    // Input row: selectors, node_index, is_boundary, direction_bit, s_perm=0
+    // Input row: selectors, node_index, is_boundary, direction_bit.
     assert_eq!(trace[0][input_row], input_selectors[0], "s0 at input row {input_row}");
     assert_eq!(trace[1][input_row], input_selectors[1], "s1 at input row {input_row}");
     assert_eq!(trace[2][input_row], input_selectors[2], "s2 at input row {input_row}");
@@ -672,13 +635,12 @@ fn check_merkle_controller_pair(
         trace[DIRECTION_BIT_COL_IDX][input_row], input_direction_bit,
         "direction_bit at input row {input_row}"
     );
-    assert_eq!(trace[S_PERM_COL_IDX][input_row], ZERO, "s_perm at input row {input_row}");
     assert_eq!(
         trace[MRUPDATE_ID_COL_IDX][input_row], mrupdate_id,
         "mrupdate_id at input row {input_row}"
     );
 
-    // Output row: node_index >> 1, is_boundary, direction_bit, s_perm=0
+    // Output row: node_index >> 1, is_boundary, direction_bit.
     assert_eq!(
         trace[NODE_INDEX_COL_IDX][output_row],
         Felt::new_unchecked(node_index >> 1),
@@ -692,110 +654,64 @@ fn check_merkle_controller_pair(
         trace[DIRECTION_BIT_COL_IDX][output_row], output_direction_bit,
         "direction_bit at output row {output_row}"
     );
-    assert_eq!(trace[S_PERM_COL_IDX][output_row], ZERO, "s_perm at output row {output_row}");
     assert_eq!(
         trace[MRUPDATE_ID_COL_IDX][output_row], mrupdate_id,
         "mrupdate_id at output row {output_row}"
     );
 }
 
-/// Checks a 16-row permutation cycle in the combined test view.
+/// Checks one 64-row BlakeG compression block in the combined test view.
 ///
 /// The packed schedule records the PRE-transition state on each row:
-/// - Row 0: initial state
-/// - Row 1: state after init+ext1
-/// - Rows 2-3: state after ext2, ext3
-/// - Row 4: state after ext4
-/// - Rows 5-10: state after each packed-internal triple
-/// - Row 11: state after packed-internal triple 6
-/// - Row 12: state after int22+ext5
-/// - Rows 13-14: state after ext6, ext7
-/// - Row 15: state after ext8 (= final permutation output)
-fn check_perm_segment(
+fn check_compression_block(
     trace: &[Vec<Felt>],
     start_row: usize,
     init_state: &HasherState,
     expected_multiplicity: Felt,
 ) {
-    use miden_core::chiplets::hasher::Hasher;
-
-    let mut state = *init_state;
-
-    // Row 0: initial state
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(
-            trace[STATE_COL_RANGE.start + i][start_row],
-            val,
-            "state[{i}] at perm row 0 (row {start_row})"
-        );
-    }
-    assert_eq!(trace[NODE_INDEX_COL_IDX][start_row], expected_multiplicity);
-    assert_eq!(trace[S_PERM_COL_IDX][start_row], ONE);
-
-    // Apply init+ext1, check row 1
-    Hasher::apply_matmul_external(&mut state);
-    Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
-    Hasher::apply_sbox(&mut state);
-    Hasher::apply_matmul_external(&mut state);
-    check_state_at_row(trace, start_row + 1, &state, "after init+ext1");
-
-    // Apply ext2-4, check rows 2-4
-    for r in 1..=3 {
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
-        Hasher::apply_sbox(&mut state);
-        Hasher::apply_matmul_external(&mut state);
-        check_state_at_row(trace, start_row + 1 + r, &state, &alloc::format!("after ext{}", r + 1));
-    }
-
-    // Apply 7 packed internal triples, check rows 5-11
-    for triple in 0..7_usize {
-        let base = triple * 3;
-        for k in 0..3 {
-            state[0] += Hasher::ARK_INT[base + k];
-            state[0] = state[0].exp_const_u64::<7>();
-            Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
-        }
-        check_state_at_row(
-            trace,
-            start_row + 5 + triple,
-            &state,
-            &alloc::format!("after int triple {triple}"),
-        );
-    }
-
-    // Apply int22+ext5, check row 12
-    state[0] += Hasher::ARK_INT[21];
-    state[0] = state[0].exp_const_u64::<7>();
-    Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
-    Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
-    Hasher::apply_sbox(&mut state);
-    Hasher::apply_matmul_external(&mut state);
-    check_state_at_row(trace, start_row + 12, &state, "after int22+ext5");
-
-    // Apply ext6-8, check rows 13-15
-    for r in 1..=3 {
-        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
-        Hasher::apply_sbox(&mut state);
-        Hasher::apply_matmul_external(&mut state);
-        check_state_at_row(
-            trace,
-            start_row + 12 + r,
-            &state,
-            &alloc::format!("after ext{}", r + 5),
-        );
-    }
+    assert_eq!(compression_multiplicity(trace, start_row), expected_multiplicity);
+    assert_eq!(compression_input_state(trace, start_row), *init_state);
+    assert_eq!(compression_output_state(trace, start_row), apply_permutation(*init_state));
 }
 
-/// Helper to check the hasher state at a specific trace row.
-fn check_state_at_row(trace: &[Vec<Felt>], row: usize, state: &HasherState, label: &str) {
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row} ({label})");
-    }
+fn compression_multiplicity(trace: &[Vec<Felt>], start_row: usize) -> Felt {
+    trace[super::blakeg_trace::IFACE_MULTIPLICITY_COL]
+        [start_row + super::blakeg_trace::IFACE_INPUT_ROW]
+}
+
+fn compression_input_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState {
+    core::array::from_fn(|i| trace[i][start_row + super::blakeg_trace::IFACE_INPUT_ROW])
+}
+
+fn compression_output_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState {
+    core::array::from_fn(|i| trace[i][start_row + super::blakeg_trace::IFACE_OUTPUT_ROW])
 }
 
 fn apply_permutation(mut state: HasherState) -> HasherState {
     hasher::apply_permutation(&mut state);
     state
+}
+
+fn random_state_with_packed_cv() -> HasherState {
+    let mut state: HasherState = rand_array();
+    for value in &mut state[RATE_LEN..] {
+        *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
+    }
+    state
+}
+
+fn compute_path_root(value: Digest, path: &MerklePath, mut index: u64) -> Digest {
+    let mut root = value;
+    for &sibling in path.iter() {
+        let state = match index & 1 {
+            0 => init_state_from_words(&root, &sibling),
+            1 => init_state_from_words(&sibling, &root),
+            _ => unreachable!(),
+        };
+        root = get_digest(&apply_permutation(state));
+        index >>= 1;
+    }
+    root
 }
 
 fn init_leaves(values: &[u64]) -> Vec<Digest> {
@@ -849,12 +765,6 @@ fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Ran
             trace[DIRECTION_BIT_COL_IDX][orig_row], trace[DIRECTION_BIT_COL_IDX][copy_row],
             "direction_bit mismatch: original row {orig_row} vs copied row {copy_row}"
         );
-
-        // s_perm should be 0 on all controller rows
-        assert_eq!(
-            trace[S_PERM_COL_IDX][copy_row], ZERO,
-            "s_perm should be 0 on copied controller row {copy_row}"
-        );
     }
 }
 
@@ -899,7 +809,7 @@ fn make_multi_batch(n: usize) -> Vec<OpBatch> {
 fn compute_basic_block_hash(batches: &[OpBatch]) -> Digest {
     assert!(!batches.is_empty());
 
-    let mut state = init_state(batches[0].groups(), ZERO);
+    let mut state = init_state(batches[0].groups(), num_basic_block_hash_groups(batches) as u32);
     hasher::apply_permutation(&mut state);
 
     for batch in batches.iter().skip(1) {
@@ -908,4 +818,11 @@ fn compute_basic_block_hash(batches: &[OpBatch]) -> Digest {
     }
 
     get_digest(&state)
+}
+
+fn num_basic_block_hash_groups(batches: &[OpBatch]) -> usize {
+    let Some((last, prefix)) = batches.split_last() else {
+        return 0;
+    };
+    prefix.len() * RATE_LEN + last.num_groups().next_power_of_two()
 }

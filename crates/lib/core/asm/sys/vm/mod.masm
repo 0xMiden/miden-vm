@@ -25,17 +25,17 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # Each circuit commitment covers one order-specific encoded ACE circuit. The digest
 # input is:
 #   [PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...]
-const RELATION_DIGEST_0 = 15794697767175421542
-const RELATION_DIGEST_1 = 12015852685764691680
-const RELATION_DIGEST_2 = 3313672886670830370
-const RELATION_DIGEST_3 = 20246485947112053
+const RELATION_DIGEST_0 = 6170606507088258046
+const RELATION_DIGEST_1 = 84998389207787813
+const RELATION_DIGEST_2 = 1359221617799770188
+const RELATION_DIGEST_3 = 2778330809271398821
 
 # Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
 # This is trusted verifier setup, not proof data or advice.
-const AND8_PREPROCESSED_TRACE_COM_0 = 4797261585136045022
-const AND8_PREPROCESSED_TRACE_COM_1 = 818188170594688894
-const AND8_PREPROCESSED_TRACE_COM_2 = 3033843902608274537
-const AND8_PREPROCESSED_TRACE_COM_3 = 12330571946036665054
+const AND8_PREPROCESSED_TRACE_COM_0 = 8101824786889297799
+const AND8_PREPROCESSED_TRACE_COM_1 = 5557459202643843712
+const AND8_PREPROCESSED_TRACE_COM_2 = 8609469204800341145
+const AND8_PREPROCESSED_TRACE_COM_3 = 5780773595731865481
 
 const AND8_LOOKUP_LOG_HEIGHT = 16
 
@@ -84,7 +84,7 @@ end
 #! The shape is part of the VM-specific recursive verifier wrapper, not the
 #! generic STARK verifier. Advice supplies the dynamic AIR heights in fixed instance order:
 #!
-#!   [log_core, log_chiplets, log_poseidon2]
+#!   [log_core, log_chiplets, log_blakeg_compression]
 #!
 #! The And8Lookup height is fixed verifier setup and is stored from `AND8_LOOKUP_LOG_HEIGHT`.
 #!
@@ -101,7 +101,7 @@ end
 #!   AIR_SHAPE_PTR
 #!   CORE_TRACE_LENGTH_LOG_PTR
 #!   CHIPLETS_TRACE_LENGTH_LOG_PTR
-#!   POSEIDON2_PERMUTATION_TRACE_LENGTH_LOG_PTR
+#!   BLAKEG_COMPRESSION_TRACE_LENGTH_LOG_PTR
 #!   AND8_LOOKUP_TRACE_LENGTH_LOG_PTR
 #!   TRACE_LENGTH_LOG_PTR
 #!   ORDER_TAG_PTR
@@ -119,25 +119,25 @@ end
 
 #! Loads the Miden AIR shape into memory and leaves the shape word on the stack.
 #!
-#! Output: [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+#! Output: [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup, ...]
 proc load_miden_air_shape_word_from_advice
     adv_push
     adv_push
     adv_push
     push.AND8_LOOKUP_LOG_HEIGHT
-    # => [log_and8_lookup, log_poseidon2, log_chiplets, log_core, ...]
+    # => [log_and8_lookup, log_blakeg_compression, log_chiplets, log_core, ...]
     reversew
-    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+    # => [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup, ...]
     exec.constants::air_shape_ptr mem_storew_le
-    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+    # => [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup, ...]
 end
 
 #! Validates the shape word left by `load_miden_air_shape_word_from_advice`.
 #!
-#! Input:  [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+#! Input:  [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup, ...]
 #! Output: [...]
 proc validate_miden_air_shape_word
-    # => [log_core, log_chiplets, log_poseidon2, log_and8_lookup, ...]
+    # => [log_core, log_chiplets, log_blakeg_compression, log_and8_lookup, ...]
     exec.assert_shape_log
     exec.assert_shape_log
     exec.assert_shape_log
@@ -164,7 +164,7 @@ proc derive_miden_air_cached_state
 
     exec.constants::air_shape_ptr add.2 mem_load
     dup
-    exec.constants::set_poseidon2_permutation_trace_length_log
+    exec.constants::set_blakeg_compression_trace_length_log
 
     exec.constants::air_shape_ptr add.3 mem_load
     dup
@@ -181,38 +181,38 @@ end
 
 #! Derives the proof-order tag from the Miden AIR log heights cached in memory.
 #!
-#! Tags are Lehmer ranks over instance order `[Core, Chiplets, Poseidon2Permutation, And8Lookup]`.
+#! Tags are Lehmer ranks over instance order `[Core, Chiplets, BlakeGCompression, And8Lookup]`.
 proc derive_order_tag
     # Compute each AIR's sorted position under `(log_height, instance_index)`.
     #
     # For instance ids i < j, `i` precedes `j` iff `height_i <= height_j`.
     # The position of id i is the number of other ids that precede it.
 
-    # pos(core) = !core<=chiplets + !core<=poseidon2 + !core<=and8
+    # pos(core) = !core<=chiplets + !core<=blakeg + !core<=and8
     exec.core_le_chiplets push.0 eq
-    exec.core_le_poseidon2_permutation push.0 eq add
+    exec.core_le_blakeg_compression push.0 eq add
     exec.core_le_and8_lookup push.0 eq add
     dup exec.constants::tmp2 add push.0 swap mem_store
     drop
 
-    # pos(chiplets) = core<=chiplets + !chiplets<=poseidon2 + !chiplets<=and8
+    # pos(chiplets) = core<=chiplets + !chiplets<=blakeg + !chiplets<=and8
     exec.core_le_chiplets
-    exec.chiplets_le_poseidon2_permutation push.0 eq add
+    exec.chiplets_le_blakeg_compression push.0 eq add
     exec.chiplets_le_and8_lookup push.0 eq add
     dup exec.constants::tmp2 add push.1 swap mem_store
     drop
 
-    # pos(poseidon2) = core<=poseidon2 + chiplets<=poseidon2 + !poseidon2<=and8
-    exec.core_le_poseidon2_permutation
-    exec.chiplets_le_poseidon2_permutation add
-    exec.poseidon2_permutation_le_and8_lookup push.0 eq add
+    # pos(blakeg) = core<=blakeg + chiplets<=blakeg + !blakeg<=and8
+    exec.core_le_blakeg_compression
+    exec.chiplets_le_blakeg_compression add
+    exec.blakeg_compression_le_and8_lookup push.0 eq add
     dup exec.constants::tmp2 add push.2 swap mem_store
     drop
 
     # pos(and8) = core<=and8 + chiplets<=and8 + poseidon2<=and8
     exec.core_le_and8_lookup
     exec.chiplets_le_and8_lookup add
-    exec.poseidon2_permutation_le_and8_lookup add
+    exec.blakeg_compression_le_and8_lookup add
     dup exec.constants::tmp2 add push.3 swap mem_store
     drop
 
@@ -247,9 +247,9 @@ proc core_le_chiplets
     u32lte
 end
 
-proc core_le_poseidon2_permutation
+proc core_le_blakeg_compression
     exec.constants::get_core_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.constants::get_blakeg_compression_trace_length_log
     u32lte
 end
 
@@ -259,9 +259,9 @@ proc core_le_and8_lookup
     u32lte
 end
 
-proc chiplets_le_poseidon2_permutation
+proc chiplets_le_blakeg_compression
     exec.constants::get_chiplets_trace_length_log
-    exec.constants::get_poseidon2_permutation_trace_length_log
+    exec.constants::get_blakeg_compression_trace_length_log
     u32lte
 end
 
@@ -271,8 +271,8 @@ proc chiplets_le_and8_lookup
     u32lte
 end
 
-proc poseidon2_permutation_le_and8_lookup
-    exec.constants::get_poseidon2_permutation_trace_length_log
+proc blakeg_compression_le_and8_lookup
+    exec.constants::get_blakeg_compression_trace_length_log
     exec.constants::get_and8_lookup_trace_length_log
     u32lte
 end
@@ -299,7 +299,7 @@ end
 #!
 #! - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
 #!   well as the program and the kernel procedures digests.
-#! - The proof uses four AIRs: Core, Chiplets, Poseidon2Permutation, and And8Lookup. Main and auxiliary
+#! - The proof uses four AIRs: Core, Chiplets, BlakeGCompression, and And8Lookup. Main and auxiliary
 #!   leaves are concatenated in proof order after LMCS alignment.
 #!
 #! Inputs:  []
