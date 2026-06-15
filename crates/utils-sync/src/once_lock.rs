@@ -103,3 +103,40 @@ impl<T: fmt::Debug> fmt::Debug for OnceLockCompat<T> {
         self.inner.fmt(f)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_is_empty() {
+        let lock: OnceLockCompat<u32> = OnceLockCompat::new();
+        assert!(lock.get().is_none());
+    }
+
+    #[test]
+    fn get_or_init_initializes() {
+        let lock: OnceLockCompat<u32> = OnceLockCompat::new();
+        let val = lock.get_or_init(|| 42);
+        assert_eq!(*val, 42);
+        assert_eq!(*lock.get().unwrap(), 42);
+    }
+
+    #[test]
+    fn reset_clears_value() {
+        let mut lock: OnceLockCompat<u32> = OnceLockCompat::new();
+        lock.get_or_init(|| 42);
+        assert!(lock.get().is_some());
+        lock.reset();
+        assert!(lock.get().is_none());
+    }
+
+    #[test]
+    fn get_or_init_after_reset() {
+        let mut lock: OnceLockCompat<u32> = OnceLockCompat::new();
+        lock.get_or_init(|| 1);
+        lock.reset();
+        let val = lock.get_or_init(|| 2);
+        assert_eq!(*val, 2);
+    }
+}
