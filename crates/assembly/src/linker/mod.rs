@@ -645,7 +645,7 @@ impl Linker {
                                 let context = SymbolResolutionContext {
                                     span: invoke.span(),
                                     module: module_index,
-                                    kind: None,
+                                    kind: Some(invoke.kind),
                                 };
                                 if let Some(callee) = resolver
                                     .resolve_invoke_target(&context, &invoke.target)?

@@ -240,7 +240,25 @@ impl NamespaceGraph {
                     path: item_path(linker, item),
                 })
             },
-            (ImportKind::Item, ResolvedUse::Item(_)) => Ok(()),
+            (ImportKind::Item, ResolvedUse::Item(item)) => {
+                // Reject re-export of kernel syscalls from any module other than the root kernel
+                // module itself
+                if import.visibility().is_public()
+                    && linker[item.module].path().is_kernel_path()
+                    && linker[item].is_procedure()
+                    && import.owner != item.module
+                {
+                    let span = import.span();
+                    let source_file = source_file(linker.source_manager.as_ref(), span);
+                    Err(LinkerError::InvalidReExportOfKernelSyscall {
+                        span,
+                        source_file,
+                        path: import.target().inner().clone(),
+                    })
+                } else {
+                    Ok(())
+                }
+            },
             (ImportKind::Item, ResolvedUse::Module(id)) => {
                 Err(LinkerError::InvalidItemImportTarget {
                     span: import.span(),

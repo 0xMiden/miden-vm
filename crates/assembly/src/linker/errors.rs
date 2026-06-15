@@ -133,6 +133,17 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         path: Arc<Path>,
     },
+    #[error("invalid re-export of kernel syscall '{path}'")]
+    #[diagnostic(help(
+        "re-export of kernel procedures is not permitted, except from the kernel root"
+    ))]
+    InvalidReExportOfKernelSyscall {
+        #[label("this import attempts to re-export a kernel syscall")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
+    },
     #[error("import re-export cycle involving '{path}'")]
     #[diagnostic(help("public item re-exports must not form cycles"))]
     ImportReExportCycle {

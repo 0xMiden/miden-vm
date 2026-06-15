@@ -350,10 +350,8 @@ impl<'a> SymbolResolver<'a> {
         {
             // Root kernel attached via `with_kernel` is stored as ModuleKind::Library (MAST);
             // `kernel_index` identifies it. AST kernel modules use ModuleKind::Kernel.
-            let target_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == gid.module)
-                || self.graph[gid.module].kind().is_kernel();
-            let caller_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == context.module)
-                || self.graph[context.module].kind().is_kernel();
+            let target_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == gid.module);
+            let caller_is_kernel = self.graph.kernel_index.is_some_and(|ki| ki == context.module);
             if target_is_kernel && !caller_is_kernel {
                 return Err(LinkerError::KernelProcNotSyscall {
                     span: context.span,

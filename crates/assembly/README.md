@@ -138,7 +138,7 @@ and by default this kernel is empty, and so no `syscall` instructions are
 allowed.
 
 You can provide a kernel in one of two ways: a precompiled kernel package,
-or by assembling a kernel module from source, as shown below:
+or by assembling a kernel from source, as shown below:
 
 ```rust
 # use miden_assembly::{
@@ -155,20 +155,33 @@ or by assembling a kernel module from source, as shown below:
 let mut parser = Module::parser(Some(ModuleKind::Kernel));
 let kernel = parser.parse_str(
     Some(Path::KERNEL),
-    "pub proc foo add end",
+    "pub mod sub\n\npub proc foo add end",
+    source_manager.clone(),
+).unwrap();
+let submodule = parser.parse_str(
+    Some(Path::new("::$kernel::sub")),
+    "pub proc bar push.1 end",
     source_manager.clone(),
 ).unwrap();
 
 let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel("my-kernel", kernel, None)
+    .assemble_kernel("my-kernel", kernel, [submodule])
     .unwrap();
 
 // Create assembler with the kernel
 let assembler = Assembler::with_kernel(source_manager, kernel_lib.into()).unwrap();
 ```
 
+> **Note:** Kernel submodules are library modules, i.e. they do not define
+> syscalls, and they must use `syscall` to invoke procedures exported from the
+> kernel root just like any other module. Kernel submodules are permitted to
+> use the `caller` instruction, so that kernelspace code can be broken out
+> into submodules - but such functions should _not_ be exported from the kernel,
+> i.e. they should be defined in private submodules of the kernel, so that
+> userspace code cannot call procedures that will break in non-kernel contexts.
+
 Programs compiled by this assembler will be able to make calls to the
-`foo` procedure by executing the `syscall` instruction, like so:
+`foo` procedure by executing the `syscall` instruction, as shown below:
 
 ```rust
 # use miden_assembly::{
@@ -209,8 +222,9 @@ end
 > to the compiled procedure.
 >
 > These options are also available to `syscall`, with the caveat that whatever
-> method is used, it _must_ resolve to a procedure in the kernel specified to
-> the assembler, or compilation will fail with an error.
+> method is used, it _must_ resolve to a procedure in the root kernel module 
+> of the kernel package given to the assembler, or compilation will fail with 
+> an error.
 
 ## Putting it all together
 

@@ -4491,7 +4491,7 @@ fn regression_empty_kernel_with_submodule_is_rejected() {
 }
 
 #[test]
-fn regression_reexport_procedure_from_kernel_submodule_is_rejected() {
+fn regression_empty_kernel_with_nonempty_submodule_is_rejected() {
     let context = TestContext::default();
 
     // A kernel module with no exported procedures should be rejected.
@@ -4500,6 +4500,57 @@ fn regression_reexport_procedure_from_kernel_submodule_is_rejected() {
         .parse_kernel(source_file!(&context, kernel_masm))
         .expect_err("expected sema to reject re-export from kernel module");
     assert_diagnostic!(err, "invalid re-exported procedure");
+}
+
+#[test]
+fn regression_reexport_of_kernel_procedure_from_kernel_submodule_is_rejected() {
+    let context = TestContext::default();
+
+    let kernel_masm = "pub mod sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n";
+    let submodule_masm =
+        "namespace $kernel::sub\n\npub use {root} from $kernel\n\npub proc foo push.1 end\n";
+    let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
+    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
+    let err = Assembler::new(context.source_manager())
+        .assemble_kernel("kernel", kernel_module, [submodule])
+        .expect_err("expected kernel submodule re-exporting kernel syscall to be rejected");
+    assert_diagnostic!(err, "invalid re-export of kernel syscall");
+}
+
+#[test]
+fn regression_exec_of_kernel_procedure_is_rejected() {
+    let context = TestContext::default();
+
+    // The root kernel module is allowed to exec other syscalls, as shown here, but submodules
+    // are not allowed to do this, as procedures exported from submodules are not required to be
+    // invoked with `syscall`, so we must enforce the syscall constraint on all modules other than
+    // the kernel module itself
+    let kernel_masm = "pub mod sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n\npub proc other exec.root end";
+    let submodule_masm = "namespace $kernel::sub\n\npub proc foo exec.$kernel::root end\n";
+    let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
+    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
+    let err = Assembler::new(context.source_manager())
+        .assemble_kernel("kernel", kernel_module, [submodule])
+        .expect_err("expected assembler to reject exec of syscall from within kernel submodule");
+    assert_diagnostic!(err, "kernel procedure '::$kernel::root' can only be invoked via syscall");
+}
+
+#[test]
+fn regression_syscall_of_kernel_submodule_procedure_is_rejected() {
+    let context = TestContext::default();
+
+    let kernel_masm = "pub mod sub\n\npub const FOO = 1\n\npub proc root push.FOO end\n";
+    let submodule_masm = "namespace $kernel::sub\n\npub proc foo syscall.root end\n";
+    let program_masm = "begin syscall.::$kernel::sub::foo end\n";
+    let kernel_module = context.parse_kernel(source_file!(&context, kernel_masm)).unwrap();
+    let submodule = context.parse_module(source_file!(&context, submodule_masm)).unwrap();
+    let _kernel = Assembler::new(context.source_manager())
+        .assemble_kernel("kernel", kernel_module, [submodule])
+        .expect("expected valid kernel");
+    let err = context
+        .parse_module(source_file!(&context, program_masm))
+        .expect_err("expected sema to reject syscall of non-syscall procedure");
+    assert_diagnostic!(err, "invalid syscall: callee must be resolvable to kernel module");
 }
 
 /// Reproduces issue #3035: a MAST with padded basic blocks grows when debug info is cleared and the
