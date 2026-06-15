@@ -294,7 +294,7 @@ proc get_multi_leaf_value
     exec.assert_unique_multi_leaf_keys
     # => [start_ptr, end_ptr, K, R]
 
-    # (4 cycles)
+    # (5 cycles)
     drop movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
