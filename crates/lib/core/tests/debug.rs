@@ -14,7 +14,7 @@ use miden_core::{Felt, Word};
 use miden_core_lib::{
     CoreLibrary,
     handlers::debug::{
-        DebugPrinter, PRINT_ADV_MAP_ALL_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
+        DebugPrinter, PRINT_ADV_MAP_EVENT_NAME, PRINT_ADV_MAP_ITEM_EVENT_NAME,
         PRINT_ADV_STACK_EVENT_NAME, PRINT_MEM_ALL_EVENT_NAME, PRINT_MEM_EVENT_NAME,
         PRINT_STACK_EVENT_NAME, advice_debug_handlers, debug_handlers, noop_debug_handlers,
     },
@@ -48,7 +48,7 @@ fn debug_handlers_with_writer(writer: SharedBuf) -> Vec<(EventName, Arc<dyn Even
         (PRINT_MEM_EVENT_NAME, printer.clone()),
         (PRINT_MEM_ALL_EVENT_NAME, printer.clone()),
         (PRINT_ADV_STACK_EVENT_NAME, printer.clone()),
-        (PRINT_ADV_MAP_ALL_EVENT_NAME, printer.clone()),
+        (PRINT_ADV_MAP_EVENT_NAME, printer.clone()),
         (PRINT_ADV_MAP_ITEM_EVENT_NAME, printer),
     ]
 }
@@ -152,6 +152,80 @@ fn print_mem_outputs_range() {
 }
 
 #[test]
+fn print_mem_reports_empty_range() {
+    // An explicit empty range (`start == end`) hits the empty branch and must not panic; this
+    // guards the `start == end == 0` underflow path when converting to the inclusive range.
+    let source = "
+    use miden::core::debug
+    begin
+        push.0 push.0   # [start=0, end=0]
+        exec.debug::print_mem
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("range is empty"), "expected empty-range message; got:\n{out}");
+}
+
+#[test]
+fn print_mem_addr_outputs_procedure_local() {
+    // Exercises the intended use case: `locaddr` turns a procedure local into an absolute
+    // address that `print_mem_addr` can print.
+    let source = "
+    use miden::core::debug
+    @locals(1)
+    proc with_local
+        push.42 loc_store.0
+        locaddr.0
+        exec.debug::print_mem_addr
+    end
+    begin
+        exec.with_local
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value; got:\n{out}");
+}
+
+#[test]
+fn print_mem_addr_reports_uninitialized_cell() {
+    let source = "
+    use miden::core::debug
+    begin
+        push.100
+        exec.debug::print_mem_addr
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("0x00000064: EMPTY"), "expected EMPTY cell; got:\n{out}");
+}
+
+#[test]
+fn print_mem_shows_uninitialized_cells_as_empty() {
+    // Every address in an explicit range is enumerated, with uninitialized cells shown as EMPTY,
+    // so gaps in the range don't silently disappear.
+    let source = "
+    use miden::core::debug
+    begin
+        push.42 push.100 mem_store
+        push.110 push.100   # [start=100, end=110)
+        exec.debug::print_mem
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("0x00000064: 42"), "missing stored value; got:\n{out}");
+    // The `mem_store` initialized the whole word at addresses 100..104; the rest of the requested
+    // range is untouched and must still be listed, as EMPTY.
+    for addr in 104..110u32 {
+        assert!(
+            out.contains(&format!("{addr:#010x}: EMPTY")),
+            "missing EMPTY cell at {addr}; got:\n{out}"
+        );
+    }
+}
+
+#[test]
 fn print_mem_all_outputs_memory() {
     let source = "
     use miden::core::debug
@@ -163,6 +237,40 @@ fn print_mem_all_outputs_memory() {
     let out = run_and_capture(source, AdviceInputs::default());
     assert!(out.contains("Memory state"), "missing header; got:\n{out}");
     assert!(out.contains(": 7"), "missing stored value; got:\n{out}");
+}
+
+#[test]
+fn print_mem_addr_prints_max_u32_cell() {
+    // Regression: `print_mem_addr` builds the range `[addr, addr+1)`. At `addr == u32::MAX` the
+    // exclusive end is `2^32`, which used to be rejected and aborted execution. It must now print
+    // the cell.
+    let source = "
+    use miden::core::debug
+    begin
+        push.42 push.4294967295 mem_store
+        push.4294967295
+        exec.debug::print_mem_addr
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value at u32::MAX; got:\n{out}");
+}
+
+#[test]
+fn print_mem_all_includes_max_u32_cell() {
+    // Regression: `print_mem_all` lists every initialized cell, so the cell at `u32::MAX` is no
+    // longer silently excluded.
+    let source = "
+    use miden::core::debug
+    begin
+        push.42 push.4294967295 mem_store
+        exec.debug::print_mem_all
+    end
+    ";
+    let out = run_and_capture(source, AdviceInputs::default());
+    assert!(out.contains("Memory state"), "missing header; got:\n{out}");
+    assert!(out.contains("42"), "missing memory value at u32::MAX; got:\n{out}");
 }
 
 #[test]
@@ -207,6 +315,8 @@ fn print_mem_rejects_out_of_bounds_range_end() {
 
 #[test]
 fn print_mem_rejects_oversized_range() {
+    // An explicit range wider than the 1024-address cap is rejected, catching a caller that passes
+    // a huge range by accident. Use `print_mem_all` to print the entire memory.
     let source = "
     use miden::core::debug
     begin
@@ -241,6 +351,51 @@ fn print_mem_rejects_oversized_range() {
         },
         Err(err) => panic!("unexpected error type: {err:?}"),
         Ok(_) => panic!("oversized print_mem range should fail"),
+    }
+}
+
+#[test]
+fn print_mem_rejects_full_range() {
+    // The cap has no exemption: the full `[0, 2^32)` range is rejected like any other oversized
+    // range, so `print_mem` can't be used to bypass the documented 1024-address limit. Printing
+    // the entire memory is `print_mem_all`'s job (it uses a dedicated event).
+    let source = "
+    use miden::core::debug
+    begin
+        push.4294967296 push.0
+        exec.debug::print_mem
+    end
+    ";
+
+    let core_lib = CoreLibrary::default();
+    let assembler = Assembler::default()
+        .with_package(core_lib.package(), Linkage::Dynamic)
+        .expect("failed to load core library");
+    let program = assembler
+        .assemble_program("program", source)
+        .expect("failed to assemble program")
+        .unwrap_program();
+    let host_lib = HostLibrary {
+        mast_forest: core_lib.mast_forest().clone(),
+        handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
+    };
+    let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
+
+    match execute_sync(
+        &program,
+        StackInputs::default(),
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+    ) {
+        Err(ExecutionError::EventError { error, .. }) => {
+            assert_eq!(
+                error.to_string(),
+                "print_mem range length 4294967296 exceeds maximum of 1024"
+            );
+        },
+        Err(err) => panic!("unexpected error type: {err:?}"),
+        Ok(_) => panic!("full-range print_mem should fail"),
     }
 }
 
@@ -392,7 +547,7 @@ fn default_core_handlers_include_debug_printers() {
 
     for debug_event in [
         PRINT_ADV_STACK_EVENT_NAME,
-        PRINT_ADV_MAP_ALL_EVENT_NAME,
+        PRINT_ADV_MAP_EVENT_NAME,
         PRINT_ADV_MAP_ITEM_EVENT_NAME,
     ] {
         assert!(
@@ -449,7 +604,7 @@ fn debug_handlers_include_all_core_debug_events() {
         PRINT_MEM_EVENT_NAME,
         PRINT_MEM_ALL_EVENT_NAME,
         PRINT_ADV_STACK_EVENT_NAME,
-        PRINT_ADV_MAP_ALL_EVENT_NAME,
+        PRINT_ADV_MAP_EVENT_NAME,
         PRINT_ADV_MAP_ITEM_EVENT_NAME,
     ] {
         assert!(
@@ -518,6 +673,20 @@ fn print_mem_consumes_range_args() {
     begin
         push.8 push.0   # [start=0, end=8, ...]
         exec.debug::print_mem
+    end
+    ";
+    let (_, output) = run(source, AdviceInputs::default());
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(0)));
+}
+
+#[test]
+fn print_mem_addr_consumes_addr_arg() {
+    // Pushes exactly one address arg; clean termination proves it is consumed.
+    let source = "
+    use miden::core::debug
+    begin
+        push.0   # [addr=0, ...]
+        exec.debug::print_mem_addr
     end
     ";
     let (_, output) = run(source, AdviceInputs::default());

@@ -220,6 +220,8 @@ impl<'a> ProcessorState<'a> {
 
     /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
     /// without modifying the state of the stack), and verifies that memory range is valid.
+    ///
+    /// The range is half-open `[start, end)`; both `start` and `end` must be `<= u32::MAX`.
     pub fn get_mem_addr_range(
         &self,
         start_idx: usize,
