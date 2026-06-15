@@ -1298,7 +1298,7 @@ mod tests {
             panic!("expected struct type expression");
         };
         assert_eq!(
-            actual.name.as_ref().map(|name| name.as_str()),
+            actual.name.as_ref().map(Ident::as_str),
             Some("miden:base/core-types@1.0.0/account-id"),
         );
         assert_eq!(*actual.repr, TypeRepr::BigEndian);
