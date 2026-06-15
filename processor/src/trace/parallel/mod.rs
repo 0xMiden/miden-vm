@@ -555,8 +555,8 @@ fn initialize_chiplets(
                 chiplets.bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
                 check_chiplets_trace_len(&chiplets)?;
             },
-            BitwiseReplayEntry::AeadStreamAnd8(entry) => {
-                chiplets.bitwise.aead_stream_and8(
+            BitwiseReplayEntry::AeadStream(entry) => {
+                chiplets.bitwise.aead_stream(
                     entry.ctx,
                     entry.clk,
                     entry.src_ptr,

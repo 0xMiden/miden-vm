@@ -89,7 +89,7 @@ pub struct StreamModeFlags<E> {
     /// Normal `u32and`/`u32xor` rows.
     pub normal_bitwise: E,
     /// AEAD stream rows.
-    pub aead_stream_and8: E,
+    pub aead_stream: E,
 }
 
 // ENTRY POINT
@@ -269,7 +269,7 @@ where
         },
         stream_mode: StreamModeFlags {
             normal_bitwise,
-            aead_stream_and8: aead_stream_active,
+            aead_stream: aead_stream_active,
         },
         memory: ChipletFlags {
             is_active: is_memory,

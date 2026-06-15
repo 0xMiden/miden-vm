@@ -13,7 +13,7 @@ use crate::{
     ChipletCols, MidenAirBuilder,
     constraints::{
         chiplets::{
-            columns::{AeadStreamAnd8Cols, PeriodicCols},
+            columns::{AeadStreamCols, PeriodicCols},
             selectors::ChipletSelectors,
         },
         constants::{TWO_POW_16, TWO_POW_32, TWO_POW_32_MINUS_1},
@@ -25,7 +25,7 @@ use crate::{
 // ================================================================================================
 
 /// Enforce stream-row phase alignment, u32-XOR recomposition, canonical splits, and carries.
-pub fn enforce_aead_stream_and8_constraints<AB>(
+pub fn enforce_aead_stream_constraints<AB>(
     builder: &mut AB,
     local: &ChipletCols<AB::Var>,
     next: &ChipletCols<AB::Var>,
@@ -34,7 +34,7 @@ pub fn enforce_aead_stream_and8_constraints<AB>(
     AB: MidenAirBuilder,
 {
     let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
-    let phase = periodic.aead_stream_and8;
+    let phase = periodic.aead_stream;
 
     let phases: [AB::Expr; 8] = [
         phase.r0.into(),
@@ -47,9 +47,9 @@ pub fn enforce_aead_stream_and8_constraints<AB>(
         phase.r7.into(),
     ];
 
-    let cols = local.aead_stream_and8();
-    let cols_next = next.aead_stream_and8();
-    let stream = selectors.stream_mode.aead_stream_and8.clone();
+    let cols = local.aead_stream();
+    let cols_next = next.aead_stream();
+    let stream = selectors.stream_mode.aead_stream.clone();
     let stream_next: AB::Expr = next.aead_stream_active.into();
 
     enforce_phase_alignment(builder, selectors, stream.clone(), stream_next, phases[7].clone());
@@ -82,8 +82,8 @@ fn enforce_phase_alignment<AB>(
 
 fn enforce_carry_constraints<AB>(
     builder: &mut AB,
-    cols: &AeadStreamAnd8Cols<AB::Var>,
-    cols_next: &AeadStreamAnd8Cols<AB::Var>,
+    cols: &AeadStreamCols<AB::Var>,
+    cols_next: &AeadStreamCols<AB::Var>,
     stream: AB::Expr,
     r: &[AB::Expr; 8],
 ) where
@@ -101,8 +101,8 @@ fn enforce_carry_constraints<AB>(
 fn carry_read_to_high_first<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamAnd8Cols<AB::Var>,
-    cols_next: &AeadStreamAnd8Cols<AB::Var>,
+    cols: &AeadStreamCols<AB::Var>,
+    cols_next: &AeadStreamCols<AB::Var>,
     plaintext_offset: usize,
 ) where
     AB: MidenAirBuilder,
@@ -129,8 +129,8 @@ fn carry_read_to_high_first<AB>(
 fn carry_high_first_to_low_second<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamAnd8Cols<AB::Var>,
-    cols_next: &AeadStreamAnd8Cols<AB::Var>,
+    cols: &AeadStreamCols<AB::Var>,
+    cols_next: &AeadStreamCols<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -149,8 +149,8 @@ fn carry_high_first_to_low_second<AB>(
 fn carry_low_second_to_high_second<AB>(
     builder: &mut AB,
     gate: AB::Expr,
-    cols: &AeadStreamAnd8Cols<AB::Var>,
-    cols_next: &AeadStreamAnd8Cols<AB::Var>,
+    cols: &AeadStreamCols<AB::Var>,
+    cols_next: &AeadStreamCols<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {

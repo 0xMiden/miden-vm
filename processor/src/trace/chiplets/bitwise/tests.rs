@@ -205,7 +205,7 @@ fn bitwise_multiple() {
 }
 
 #[test]
-fn aead_stream_and8_trace() {
+fn aead_stream_trace() {
     let mut bitwise = Bitwise::new();
 
     let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
@@ -225,11 +225,10 @@ fn aead_stream_and8_trace() {
     let src_ptr = Felt::from_u32(100);
     let dst_ptr = Felt::from_u32(200);
     let lane_base = Felt::from_u32(40);
-    bitwise
-        .aead_stream_and8(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext);
+    bitwise.aead_stream(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext);
 
     let (trace, and8_counts) =
-        build_trace_with_width_and_counts(bitwise, 8, super::AEAD_STREAM_AND8_FRAGMENT_WIDTH);
+        build_trace_with_width_and_counts(bitwise, 8, super::AEAD_STREAM_FRAGMENT_WIDTH);
     assert_eq!(and8_counts.iter().sum::<u64>(), 32);
 
     for row in 0..8 {

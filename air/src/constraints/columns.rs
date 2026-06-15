@@ -12,9 +12,9 @@ use core::{
 
 use super::{
     chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, AeadStreamAnd8Cols, AeadStreamAnd8HighFirstCols,
-        AeadStreamAnd8HighSecondCols, AeadStreamAnd8LowSecondCols, AeadStreamAnd8ReadCols,
-        BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+        AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
+        ControllerCols, KernelRomCols, MemoryCols,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
@@ -122,7 +122,7 @@ impl<T> ChipletCols<T> {
     }
 
     /// Returns a typed borrow of the AEAD stream columns (chiplets\[2..22\]).
-    pub fn aead_stream_and8(&self) -> &AeadStreamAnd8Cols<T> {
+    pub fn aead_stream(&self) -> &AeadStreamCols<T> {
         self.chiplets[2..22].borrow()
     }
 
@@ -217,14 +217,11 @@ pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
 pub const NUM_STACK_COLS: usize = size_of::<StackCols<u8>>();
 pub const NUM_RANGE_COLS: usize = size_of::<RangeCols<u8>>();
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
-pub const NUM_AEAD_STREAM_AND8_COLS: usize = size_of::<AeadStreamAnd8Cols<u8>>();
-pub const NUM_AEAD_STREAM_AND8_READ_COLS: usize = size_of::<AeadStreamAnd8ReadCols<u8>>();
-pub const NUM_AEAD_STREAM_AND8_HIGH_FIRST_COLS: usize =
-    size_of::<AeadStreamAnd8HighFirstCols<u8>>();
-pub const NUM_AEAD_STREAM_AND8_LOW_SECOND_COLS: usize =
-    size_of::<AeadStreamAnd8LowSecondCols<u8>>();
-pub const NUM_AEAD_STREAM_AND8_HIGH_SECOND_COLS: usize =
-    size_of::<AeadStreamAnd8HighSecondCols<u8>>();
+pub const NUM_AEAD_STREAM_COLS: usize = size_of::<AeadStreamCols<u8>>();
+pub const NUM_AEAD_STREAM_READ_COLS: usize = size_of::<AeadStreamReadCols<u8>>();
+pub const NUM_AEAD_STREAM_HIGH_FIRST_COLS: usize = size_of::<AeadStreamHighFirstCols<u8>>();
+pub const NUM_AEAD_STREAM_LOW_SECOND_COLS: usize = size_of::<AeadStreamLowSecondCols<u8>>();
+pub const NUM_AEAD_STREAM_HIGH_SECOND_COLS: usize = size_of::<AeadStreamHighSecondCols<u8>>();
 pub const NUM_MEMORY_COLS: usize = size_of::<MemoryCols<u8>>();
 pub const NUM_ACE_COLS: usize = size_of::<AceCols<u8>>();
 pub const NUM_ACE_READ_COLS: usize = size_of::<AceReadCols<u8>>();
@@ -236,11 +233,11 @@ const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
 const _: () = assert!(NUM_RANGE_COLS == 2);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
-const _: () = assert!(NUM_AEAD_STREAM_AND8_COLS == 20);
-const _: () = assert!(NUM_AEAD_STREAM_AND8_READ_COLS == 20);
-const _: () = assert!(NUM_AEAD_STREAM_AND8_HIGH_FIRST_COLS == 20);
-const _: () = assert!(NUM_AEAD_STREAM_AND8_LOW_SECOND_COLS == 20);
-const _: () = assert!(NUM_AEAD_STREAM_AND8_HIGH_SECOND_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_READ_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_HIGH_FIRST_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_LOW_SECOND_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_HIGH_SECOND_COLS == 20);
 const _: () = assert!(NUM_MEMORY_COLS == 15);
 const _: () = assert!(NUM_ACE_COLS == 16);
 const _: () = assert!(NUM_ACE_READ_COLS == 4);
@@ -381,28 +378,28 @@ mod tests {
     }
 
     #[test]
-    fn aead_stream_and8_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8Cols));
+    fn aead_stream_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamCols));
     }
 
     #[test]
-    fn aead_stream_and8_read_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8ReadCols));
+    fn aead_stream_read_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamReadCols));
     }
 
     #[test]
-    fn aead_stream_and8_high_first_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8HighFirstCols));
+    fn aead_stream_high_first_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamHighFirstCols));
     }
 
     #[test]
-    fn aead_stream_and8_low_second_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8LowSecondCols));
+    fn aead_stream_low_second_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamLowSecondCols));
     }
 
     #[test]
-    fn aead_stream_and8_high_second_col_map_layout() {
-        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8HighSecondCols));
+    fn aead_stream_high_second_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamHighSecondCols));
     }
 
     #[test]

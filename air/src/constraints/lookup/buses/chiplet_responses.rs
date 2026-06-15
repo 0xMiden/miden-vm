@@ -58,14 +58,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
         (
             periodic.bitwise.k_transition.into(),
             [
-                periodic.aead_stream_and8.r0.into(),
-                periodic.aead_stream_and8.r1.into(),
-                periodic.aead_stream_and8.r2.into(),
-                periodic.aead_stream_and8.r3.into(),
-                periodic.aead_stream_and8.r4.into(),
-                periodic.aead_stream_and8.r5.into(),
-                periodic.aead_stream_and8.r6.into(),
-                periodic.aead_stream_and8.r7.into(),
+                periodic.aead_stream.r0.into(),
+                periodic.aead_stream.r1.into(),
+                periodic.aead_stream.r2.into(),
+                periodic.aead_stream.r3.into(),
+                periodic.aead_stream.r4.into(),
+                periodic.aead_stream.r5.into(),
+                periodic.aead_stream.r6.into(),
+                periodic.aead_stream.r7.into(),
             ],
         )
     };
@@ -74,7 +74,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let ctrl = local.controller();
     let ctrl_next = next.controller();
     let bw = local.bitwise();
-    let stream = local.aead_stream_and8();
+    let stream = local.aead_stream();
     let mem = local.memory();
     let ace = local.ace();
     let krom = local.kernel_rom();
@@ -276,7 +276,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 };
                                 for idx in 0..4 {
                                     b.remove(
-                                        "aead_stream_and8_byte",
+                                        "aead_stream_byte",
                                         And8Msg::new(
                                             bytes[idx].into(),
                                             bytes[4 + idx].into(),
@@ -289,14 +289,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             Deg { v: 3, u: 4 },
                         );
                     };
-                    remove_stream_row("aead_stream_and8_row0", 0);
-                    remove_stream_row("aead_stream_and8_row1", 1);
-                    remove_stream_row("aead_stream_and8_row2", 2);
-                    remove_stream_row("aead_stream_and8_row3", 3);
-                    remove_stream_row("aead_stream_and8_row4", 4);
-                    remove_stream_row("aead_stream_and8_row5", 5);
-                    remove_stream_row("aead_stream_and8_row6", 6);
-                    remove_stream_row("aead_stream_and8_row7", 7);
+                    remove_stream_row("aead_stream_row0", 0);
+                    remove_stream_row("aead_stream_row1", 1);
+                    remove_stream_row("aead_stream_row2", 2);
+                    remove_stream_row("aead_stream_row3", 3);
+                    remove_stream_row("aead_stream_row4", 4);
+                    remove_stream_row("aead_stream_row5", 5);
+                    remove_stream_row("aead_stream_row6", 6);
+                    remove_stream_row("aead_stream_row7", 7);
 
                     // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
                     g.add(

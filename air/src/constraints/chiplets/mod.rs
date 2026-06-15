@@ -12,7 +12,7 @@
 //! through [`crate::ChipletsAir`]'s `LookupAir` impl from `ChipletsAir::eval`.
 
 pub mod ace;
-pub mod aead_stream_and8;
+pub mod aead_stream;
 pub mod bitwise;
 pub mod columns;
 pub mod hasher_control;
@@ -48,7 +48,7 @@ pub fn enforce_main<AB>(
 
     hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
 
-    aead_stream_and8::enforce_aead_stream_and8_constraints(builder, local, next, selectors);
+    aead_stream::enforce_aead_stream_constraints(builder, local, next, selectors);
     bitwise::enforce_bitwise_constraints(
         builder,
         local,

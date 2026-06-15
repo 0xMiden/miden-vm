@@ -1,17 +1,19 @@
 ---
 source: air/src/constraints/columns.rs
-expression: col_map!(AeadStreamAnd8HighFirstCols)
+expression: col_map!(AeadStreamReadCols)
 ---
-AeadStreamAnd8HighFirstCols {
+AeadStreamReadCols {
     ctx: 0,
     clk: 1,
     src_ptr: 2,
     lane_base: 3,
-    next_plaintext: 4,
-    c_prev0: 5,
-    hi_quotient: 6,
-    bytes: [
+    plaintext: [
+        4,
+        5,
+        6,
         7,
+    ],
+    bytes: [
         8,
         9,
         10,
@@ -23,6 +25,6 @@ AeadStreamAnd8HighFirstCols {
         16,
         17,
         18,
+        19,
     ],
-    spare: 19,
 }

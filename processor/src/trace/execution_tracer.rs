@@ -894,7 +894,7 @@ impl Tracer for ExecutionTracer {
         let trace_ctx = Felt::new_unchecked(u32::from(ctx) as u64);
         let trace_clk = Felt::from(clk);
         self.bitwise
-            .record_aead_stream_and8(crate::trace::trace_state::AeadStreamReplayEntry {
+            .record_aead_stream(crate::trace::trace_state::AeadStreamReplayEntry {
                 ctx: trace_ctx,
                 clk: trace_clk,
                 src_ptr: src_addr,
@@ -905,7 +905,7 @@ impl Tracer for ExecutionTracer {
                 ciphertext: ciphertext[..8].try_into().expect("low ciphertext chunk has 8 lanes"),
             });
         self.bitwise
-            .record_aead_stream_and8(crate::trace::trace_state::AeadStreamReplayEntry {
+            .record_aead_stream(crate::trace::trace_state::AeadStreamReplayEntry {
                 ctx: trace_ctx,
                 clk: trace_clk,
                 src_ptr: src_addr + PTR_OFFSET_WORD,

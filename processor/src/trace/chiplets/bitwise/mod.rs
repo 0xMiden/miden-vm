@@ -2,7 +2,7 @@ use alloc::{vec, vec::Vec};
 use core::{borrow::BorrowMut, mem::size_of};
 
 use miden_air::{
-    AeadStreamAnd8Cols, BitwiseCols,
+    AeadStreamCols, BitwiseCols,
     trace::{
         and8_lookup::{
             BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_PAIR_ROWS, byte_lookup_result,
@@ -22,11 +22,11 @@ mod tests;
 
 /// Initial capacity, in ops.
 const INIT_OPS_CAPACITY: usize = 128;
-const AEAD_STREAM_AND8_CYCLE_LEN: usize = 8;
-const AEAD_STREAM_AND8_WIDTH: usize = size_of::<AeadStreamAnd8Cols<u8>>();
-const STREAM_MODE_OFFSET: usize = AEAD_STREAM_AND8_WIDTH;
+const AEAD_STREAM_CYCLE_LEN: usize = 8;
+const AEAD_STREAM_WIDTH: usize = size_of::<AeadStreamCols<u8>>();
+const STREAM_MODE_OFFSET: usize = AEAD_STREAM_WIDTH;
 const AEAD_STREAM_ACTIVE_OFFSET: usize = STREAM_MODE_OFFSET + 1;
-pub(crate) const AEAD_STREAM_AND8_FRAGMENT_WIDTH: usize = AEAD_STREAM_ACTIVE_OFFSET + 1;
+pub(crate) const AEAD_STREAM_FRAGMENT_WIDTH: usize = AEAD_STREAM_ACTIVE_OFFSET + 1;
 
 // BITWISE OPERATION
 // ================================================================================================
@@ -77,14 +77,14 @@ struct AeadStreamOp {
 #[derive(Debug, Clone, Copy)]
 enum Entry {
     Bitwise(BitwiseOp),
-    AeadStreamAnd8(AeadStreamOp),
+    AeadStream(AeadStreamOp),
 }
 
 impl Entry {
     fn row_count(self) -> usize {
         match self {
             Self::Bitwise(_) => OP_CYCLE_LEN,
-            Self::AeadStreamAnd8(_) => AEAD_STREAM_AND8_CYCLE_LEN,
+            Self::AeadStream(_) => AEAD_STREAM_CYCLE_LEN,
         }
     }
 }
@@ -172,7 +172,7 @@ impl Bitwise {
     }
 
     /// Records one 8-row AEAD stream entry.
-    pub(crate) fn aead_stream_and8(
+    pub(crate) fn aead_stream(
         &mut self,
         ctx: Felt,
         clk: Felt,
@@ -183,7 +183,7 @@ impl Bitwise {
         keystream: [Felt; 8],
         ciphertext: [Felt; 8],
     ) {
-        self.entries.push(Entry::AeadStreamAnd8(AeadStreamOp {
+        self.entries.push(Entry::AeadStream(AeadStreamOp {
             ctx,
             clk,
             src_ptr,
@@ -204,9 +204,9 @@ impl Bitwise {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert!(trace.width() >= TRACE_WIDTH, "inconsistent trace widths");
         let has_stream_rows =
-            self.entries.iter().any(|entry| matches!(entry, Entry::AeadStreamAnd8(_)));
+            self.entries.iter().any(|entry| matches!(entry, Entry::AeadStream(_)));
         debug_assert!(
-            !has_stream_rows || trace.width() >= AEAD_STREAM_AND8_FRAGMENT_WIDTH,
+            !has_stream_rows || trace.width() >= AEAD_STREAM_FRAGMENT_WIDTH,
             "trace fragment too narrow for AEAD stream rows",
         );
 
@@ -219,8 +219,8 @@ impl Bitwise {
             let mut chunk = vec![ZERO; row_width * row_count];
             match entry {
                 Entry::Bitwise(op) => fill_bitwise_chunk(&mut chunk, row_width, op),
-                Entry::AeadStreamAnd8(op) => {
-                    fill_aead_stream_and8_chunk(&mut chunk, row_width, op, &mut and8_counts);
+                Entry::AeadStream(op) => {
+                    fill_aead_stream_chunk(&mut chunk, row_width, op, &mut and8_counts);
                 },
             }
             trace.copy_rows_into(row_offset, &chunk);
@@ -287,13 +287,13 @@ fn fill_bitwise_chunk(chunk: &mut [Felt], row_width: usize, BitwiseOp { op, a, b
     }
 }
 
-fn fill_aead_stream_and8_chunk(
+fn fill_aead_stream_chunk(
     chunk: &mut [Felt],
     row_width: usize,
     op: AeadStreamOp,
     and8_counts: &mut [u64],
 ) {
-    debug_assert_eq!(chunk.len(), row_width * AEAD_STREAM_AND8_CYCLE_LEN);
+    debug_assert_eq!(chunk.len(), row_width * AEAD_STREAM_CYCLE_LEN);
 
     let plaintext = op.plaintext;
     let limbs = plaintext.map(blakeg::unpack);
@@ -317,7 +317,7 @@ fn fill_aead_stream_and8_chunk(
         count_and8_witness(and8_counts, witness.bytes);
     }
 
-    for row_idx in 0..AEAD_STREAM_AND8_CYCLE_LEN {
+    for row_idx in 0..AEAD_STREAM_CYCLE_LEN {
         let row = &mut chunk[row_idx * row_width..(row_idx + 1) * row_width];
         row[STREAM_MODE_OFFSET] = ONE;
         row[AEAD_STREAM_ACTIVE_OFFSET] = ONE;
@@ -361,7 +361,7 @@ fn fill_stream_word_pair(
 
     {
         let row = &mut chunk[0..row_width];
-        let cols: &mut AeadStreamAnd8Cols<Felt> = row[..AEAD_STREAM_AND8_WIDTH].borrow_mut();
+        let cols: &mut AeadStreamCols<Felt> = row[..AEAD_STREAM_WIDTH].borrow_mut();
         let cols = cols.read_mut();
         cols.ctx = op.ctx;
         cols.clk = op.clk;
@@ -373,7 +373,7 @@ fn fill_stream_word_pair(
 
     {
         let row = &mut chunk[row_width..2 * row_width];
-        let cols: &mut AeadStreamAnd8Cols<Felt> = row[..AEAD_STREAM_AND8_WIDTH].borrow_mut();
+        let cols: &mut AeadStreamCols<Felt> = row[..AEAD_STREAM_WIDTH].borrow_mut();
         let cols = cols.high_first_mut();
         cols.ctx = op.ctx;
         cols.clk = op.clk;
@@ -387,7 +387,7 @@ fn fill_stream_word_pair(
 
     {
         let row = &mut chunk[2 * row_width..3 * row_width];
-        let cols: &mut AeadStreamAnd8Cols<Felt> = row[..AEAD_STREAM_AND8_WIDTH].borrow_mut();
+        let cols: &mut AeadStreamCols<Felt> = row[..AEAD_STREAM_WIDTH].borrow_mut();
         let cols = cols.low_second_mut();
         cols.ctx = op.ctx;
         cols.clk = op.clk;
@@ -402,7 +402,7 @@ fn fill_stream_word_pair(
 
     {
         let row = &mut chunk[3 * row_width..4 * row_width];
-        let cols: &mut AeadStreamAnd8Cols<Felt> = row[..AEAD_STREAM_AND8_WIDTH].borrow_mut();
+        let cols: &mut AeadStreamCols<Felt> = row[..AEAD_STREAM_WIDTH].borrow_mut();
         let cols = cols.high_second_mut();
         cols.ctx = op.ctx;
         cols.clk = op.clk;

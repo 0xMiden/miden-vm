@@ -139,48 +139,48 @@ pub struct BitwiseCols<T> {
 /// row-specific overlays define the remaining cells.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct AeadStreamAnd8Cols<T> {
+pub struct AeadStreamCols<T> {
     pub payload: [T; 20],
 }
 
-impl<T> AeadStreamAnd8Cols<T> {
+impl<T> AeadStreamCols<T> {
     /// Plaintext-read + low-limb rows (`r0`, `r4`).
-    pub fn read(&self) -> &AeadStreamAnd8ReadCols<T> {
+    pub fn read(&self) -> &AeadStreamReadCols<T> {
         self.payload.as_slice().borrow()
     }
 
     /// Mutable plaintext-read + low-limb rows (`r0`, `r4`).
-    pub fn read_mut(&mut self) -> &mut AeadStreamAnd8ReadCols<T> {
+    pub fn read_mut(&mut self) -> &mut AeadStreamReadCols<T> {
         self.payload.as_mut_slice().borrow_mut()
     }
 
     /// High-limb rows of the first felt in a pair (`r1`, `r5`).
-    pub fn high_first(&self) -> &AeadStreamAnd8HighFirstCols<T> {
+    pub fn high_first(&self) -> &AeadStreamHighFirstCols<T> {
         self.payload.as_slice().borrow()
     }
 
     /// Mutable high-limb rows of the first felt in a pair (`r1`, `r5`).
-    pub fn high_first_mut(&mut self) -> &mut AeadStreamAnd8HighFirstCols<T> {
+    pub fn high_first_mut(&mut self) -> &mut AeadStreamHighFirstCols<T> {
         self.payload.as_mut_slice().borrow_mut()
     }
 
     /// Low-limb rows of the second felt in a pair (`r2`, `r6`).
-    pub fn low_second(&self) -> &AeadStreamAnd8LowSecondCols<T> {
+    pub fn low_second(&self) -> &AeadStreamLowSecondCols<T> {
         self.payload.as_slice().borrow()
     }
 
     /// Mutable low-limb rows of the second felt in a pair (`r2`, `r6`).
-    pub fn low_second_mut(&mut self) -> &mut AeadStreamAnd8LowSecondCols<T> {
+    pub fn low_second_mut(&mut self) -> &mut AeadStreamLowSecondCols<T> {
         self.payload.as_mut_slice().borrow_mut()
     }
 
     /// High-limb rows of the second felt in a pair (`r3`, `r7`).
-    pub fn high_second(&self) -> &AeadStreamAnd8HighSecondCols<T> {
+    pub fn high_second(&self) -> &AeadStreamHighSecondCols<T> {
         self.payload.as_slice().borrow()
     }
 
     /// Mutable high-limb rows of the second felt in a pair (`r3`, `r7`).
-    pub fn high_second_mut(&mut self) -> &mut AeadStreamAnd8HighSecondCols<T> {
+    pub fn high_second_mut(&mut self) -> &mut AeadStreamHighSecondCols<T> {
         self.payload.as_mut_slice().borrow_mut()
     }
 }
@@ -188,7 +188,7 @@ impl<T> AeadStreamAnd8Cols<T> {
 /// AEAD stream rows `r0` and `r4`.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct AeadStreamAnd8ReadCols<T> {
+pub struct AeadStreamReadCols<T> {
     pub ctx: T,
     pub clk: T,
     pub src_ptr: T,
@@ -200,7 +200,7 @@ pub struct AeadStreamAnd8ReadCols<T> {
 /// AEAD stream rows `r1` and `r5`.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct AeadStreamAnd8HighFirstCols<T> {
+pub struct AeadStreamHighFirstCols<T> {
     pub ctx: T,
     pub clk: T,
     pub src_ptr: T,
@@ -215,7 +215,7 @@ pub struct AeadStreamAnd8HighFirstCols<T> {
 /// AEAD stream rows `r2` and `r6`.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct AeadStreamAnd8LowSecondCols<T> {
+pub struct AeadStreamLowSecondCols<T> {
     pub ctx: T,
     pub clk: T,
     pub src_ptr: T,
@@ -230,7 +230,7 @@ pub struct AeadStreamAnd8LowSecondCols<T> {
 /// AEAD stream rows `r3` and `r7`.
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct AeadStreamAnd8HighSecondCols<T> {
+pub struct AeadStreamHighSecondCols<T> {
     pub ctx: T,
     pub clk: T,
     pub dst_ptr: T,
@@ -458,7 +458,7 @@ pub struct PeriodicCols<T> {
     /// Bitwise periodic columns.
     pub bitwise: BitwisePeriodicCols<T>,
     /// AEAD stream phase columns.
-    pub aead_stream_and8: AeadStreamAnd8PeriodicCols<T>,
+    pub aead_stream: AeadStreamPeriodicCols<T>,
 }
 
 /// Bitwise chiplet periodic columns (2 columns, period = 8 rows).
@@ -474,7 +474,7 @@ pub struct BitwisePeriodicCols<T> {
 /// AEAD stream periodic columns (8 columns, period = 8 rows).
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct AeadStreamAnd8PeriodicCols<T> {
+pub struct AeadStreamPeriodicCols<T> {
     pub r0: T,
     pub r1: T,
     pub r2: T,
@@ -519,7 +519,7 @@ impl BitwisePeriodicCols<Vec<Felt>> {
 }
 
 #[allow(clippy::new_without_default)]
-impl AeadStreamAnd8PeriodicCols<Vec<Felt>> {
+impl AeadStreamPeriodicCols<Vec<Felt>> {
     /// Generate one-hot phase selectors for the 8-row AEAD stream schedule.
     pub fn new() -> Self {
         let phases: [Vec<Felt>; 8] = core::array::from_fn(|phase| {
@@ -545,8 +545,8 @@ impl PeriodicCols<Vec<Felt>> {
     /// Generate all chiplet periodic columns as a flat `Vec<Vec<Felt>>`.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
         let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
-        let AeadStreamAnd8PeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
-            AeadStreamAnd8PeriodicCols::new();
+        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
+            AeadStreamPeriodicCols::new();
 
         vec![k_first, k_transition, r0, r1, r2, r3, r4, r5, r6, r7]
     }
@@ -567,15 +567,15 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
 const _: () = {
     assert!(size_of::<PeriodicCols<u8>>() == 10);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
-    assert!(size_of::<AeadStreamAnd8PeriodicCols<u8>>() == 8);
+    assert!(size_of::<AeadStreamPeriodicCols<u8>>() == 8);
 
     assert!(size_of::<ControllerCols<u8>>() == 19);
     assert!(size_of::<BitwiseCols<u8>>() == 13);
-    assert!(size_of::<AeadStreamAnd8Cols<u8>>() == 20);
-    assert!(size_of::<AeadStreamAnd8ReadCols<u8>>() == 20);
-    assert!(size_of::<AeadStreamAnd8HighFirstCols<u8>>() == 20);
-    assert!(size_of::<AeadStreamAnd8LowSecondCols<u8>>() == 20);
-    assert!(size_of::<AeadStreamAnd8HighSecondCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamReadCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamHighFirstCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamLowSecondCols<u8>>() == 20);
+    assert!(size_of::<AeadStreamHighSecondCols<u8>>() == 20);
 };
 
 // BORROW IMPLS
@@ -587,11 +587,11 @@ const _: () = {
 
 impl_borrow_for_chiplet_cols!(ControllerCols);
 impl_borrow_for_chiplet_cols!(BitwiseCols);
-impl_borrow_for_chiplet_cols!(AeadStreamAnd8Cols);
-impl_borrow_for_chiplet_cols!(AeadStreamAnd8ReadCols);
-impl_borrow_for_chiplet_cols!(AeadStreamAnd8HighFirstCols);
-impl_borrow_for_chiplet_cols!(AeadStreamAnd8LowSecondCols);
-impl_borrow_for_chiplet_cols!(AeadStreamAnd8HighSecondCols);
+impl_borrow_for_chiplet_cols!(AeadStreamCols);
+impl_borrow_for_chiplet_cols!(AeadStreamReadCols);
+impl_borrow_for_chiplet_cols!(AeadStreamHighFirstCols);
+impl_borrow_for_chiplet_cols!(AeadStreamLowSecondCols);
+impl_borrow_for_chiplet_cols!(AeadStreamHighSecondCols);
 impl_borrow_for_chiplet_cols!(MemoryCols);
 impl_borrow_for_chiplet_cols!(AceCols);
 impl_borrow_for_chiplet_cols!(AceReadCols);
@@ -613,9 +613,9 @@ mod tests {
     }
 
     #[test]
-    fn aead_stream_and8_phase_columns_are_one_hot() {
-        let AeadStreamAnd8PeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
-            AeadStreamAnd8PeriodicCols::new();
+    fn aead_stream_phase_columns_are_one_hot() {
+        let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
+            AeadStreamPeriodicCols::new();
 
         for (phase, col) in [r0, r1, r2, r3, r4, r5, r6, r7].into_iter().enumerate() {
             assert_eq!(col[phase], Felt::ONE);

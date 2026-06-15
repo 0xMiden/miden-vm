@@ -79,14 +79,14 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let aead_phase: [LB::Expr; 8] = {
         let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
         [
-            periodic.aead_stream_and8.r0.into(),
-            periodic.aead_stream_and8.r1.into(),
-            periodic.aead_stream_and8.r2.into(),
-            periodic.aead_stream_and8.r3.into(),
-            periodic.aead_stream_and8.r4.into(),
-            periodic.aead_stream_and8.r5.into(),
-            periodic.aead_stream_and8.r6.into(),
-            periodic.aead_stream_and8.r7.into(),
+            periodic.aead_stream.r0.into(),
+            periodic.aead_stream.r1.into(),
+            periodic.aead_stream.r2.into(),
+            periodic.aead_stream.r3.into(),
+            periodic.aead_stream.r4.into(),
+            periodic.aead_stream.r5.into(),
+            periodic.aead_stream.r6.into(),
+            periodic.aead_stream.r7.into(),
         ]
     };
 
@@ -141,7 +141,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_id_1 = ace.id_1;
     let ace_id_2 = ace.eval().id_2;
     let ace_eval_op = ace.eval_op;
-    let stream = local.aead_stream_and8();
+    let stream = local.aead_stream();
     let stream_gate: LB::Expr = local.aead_stream_active.into();
 
     // --- Memory-side range-check setup ---

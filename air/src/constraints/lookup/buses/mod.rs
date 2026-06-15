@@ -83,7 +83,7 @@ where
     /// - virtual `s0 = 1 - s_ctrl`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`
-    /// - `normal_bitwise = is_bitwise - aead_stream_and8`
+    /// - `normal_bitwise = is_bitwise - aead_stream`
     /// - `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom = s0123 - s01234`
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
@@ -95,7 +95,7 @@ where
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();
         let s4: E = local.chiplets[4].into();
-        let aead_stream_and8: E = local.aead_stream_active.into();
+        let aead_stream: E = local.aead_stream_active.into();
 
         // Virtual non-hasher selector and prefix products.
         let s0 = E::ONE - s_ctrl.clone();
@@ -105,7 +105,7 @@ where
         let s01234 = s0123.clone() * s4;
 
         // Active flags via the subtraction trick.
-        let bitwise = s0 - s01.clone() - aead_stream_and8.clone();
+        let bitwise = s0 - s01.clone() - aead_stream.clone();
         let memory = s01 - s012.clone();
         let ace = s012 - s0123.clone();
         let kernel_rom = s0123 - s01234;

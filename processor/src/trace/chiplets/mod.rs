@@ -20,7 +20,7 @@ use crate::{
 };
 
 mod bitwise;
-use bitwise::{AEAD_STREAM_AND8_FRAGMENT_WIDTH, Bitwise};
+use bitwise::{AEAD_STREAM_FRAGMENT_WIDTH, Bitwise};
 
 mod hasher;
 use hasher::Hasher;
@@ -265,7 +265,7 @@ impl Chiplets {
 
         let mut hasher_fragment =
             ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
-        let bitwise_width = BITWISE_WIDTH.max(AEAD_STREAM_AND8_FRAGMENT_WIDTH);
+        let bitwise_width = BITWISE_WIDTH.max(AEAD_STREAM_FRAGMENT_WIDTH);
         let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
             bitwise_band,
             W,

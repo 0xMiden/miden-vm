@@ -38,9 +38,9 @@ pub use constraints::{
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
     blakeg_compression::{BlakeGCompressionCols, NUM_BLAKEG_COMPRESSION_COLS},
     chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, AeadStreamAnd8Cols, AeadStreamAnd8HighFirstCols,
-        AeadStreamAnd8HighSecondCols, AeadStreamAnd8LowSecondCols, AeadStreamAnd8ReadCols,
-        BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
+        AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,
+        ControllerCols, KernelRomCols, MemoryCols,
     },
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,

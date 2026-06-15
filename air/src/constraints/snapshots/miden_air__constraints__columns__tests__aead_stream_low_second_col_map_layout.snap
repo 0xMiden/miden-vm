@@ -1,8 +1,8 @@
 ---
 source: air/src/constraints/columns.rs
-expression: col_map!(AeadStreamAnd8LowSecondCols)
+expression: col_map!(AeadStreamLowSecondCols)
 ---
-AeadStreamAnd8LowSecondCols {
+AeadStreamLowSecondCols {
     ctx: 0,
     clk: 1,
     src_ptr: 2,

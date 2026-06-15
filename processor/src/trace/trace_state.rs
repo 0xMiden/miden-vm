@@ -760,7 +760,7 @@ pub struct AeadStreamReplayEntry {
 #[derive(Debug)]
 pub enum BitwiseReplayEntry {
     U32(BitwiseOp, Felt, Felt),
-    AeadStreamAnd8(AeadStreamReplayEntry),
+    AeadStream(AeadStreamReplayEntry),
 }
 
 /// Replay data for bitwise operations.
@@ -784,8 +784,8 @@ impl BitwiseReplay {
     }
 
     /// Records one 8-row AEAD stream entry.
-    pub fn record_aead_stream_and8(&mut self, entry: AeadStreamReplayEntry) {
-        self.entries.push_back(BitwiseReplayEntry::AeadStreamAnd8(entry));
+    pub fn record_aead_stream(&mut self, entry: AeadStreamReplayEntry) {
+        self.entries.push_back(BitwiseReplayEntry::AeadStream(entry));
     }
 }
 

@@ -56,7 +56,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        chiplets::columns::{AeadStreamAnd8Cols, PeriodicCols},
+        chiplets::columns::{AeadStreamCols, PeriodicCols},
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
@@ -92,14 +92,14 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let aead_phase: [LB::Expr; 8] = {
         let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
         [
-            periodic.aead_stream_and8.r0.into(),
-            periodic.aead_stream_and8.r1.into(),
-            periodic.aead_stream_and8.r2.into(),
-            periodic.aead_stream_and8.r3.into(),
-            periodic.aead_stream_and8.r4.into(),
-            periodic.aead_stream_and8.r5.into(),
-            periodic.aead_stream_and8.r6.into(),
-            periodic.aead_stream_and8.r7.into(),
+            periodic.aead_stream.r0.into(),
+            periodic.aead_stream.r1.into(),
+            periodic.aead_stream.r2.into(),
+            periodic.aead_stream.r3.into(),
+            periodic.aead_stream.r4.into(),
+            periodic.aead_stream.r5.into(),
+            periodic.aead_stream.r6.into(),
+            periodic.aead_stream.r7.into(),
         ]
     };
 
@@ -142,8 +142,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
     let ctrl_state_next: [LB::Var; 12] = array::from_fn(|i| ctrl_next.state[i]);
-    let stream = local.aead_stream_and8();
-    let stream_next = next.aead_stream_and8();
+    let stream = local.aead_stream();
+    let stream_next = next.aead_stream();
     let stream_gate: LB::Expr = local.aead_stream_active.into();
 
     builder.next_column(
@@ -278,8 +278,8 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 }
 
 fn aead_stream_pair_msg<LB>(
-    stream: &AeadStreamAnd8Cols<LB::Var>,
-    stream_next: &AeadStreamAnd8Cols<LB::Var>,
+    stream: &AeadStreamCols<LB::Var>,
+    stream_next: &AeadStreamCols<LB::Var>,
     phase_idx: usize,
     first_lane_offset: u16,
 ) -> AeadBlakeGOutputPairMsg<LB::Expr>
@@ -318,7 +318,7 @@ where
 }
 
 fn aead_stream_request_msg<LB>(
-    stream: &AeadStreamAnd8Cols<LB::Var>,
+    stream: &AeadStreamCols<LB::Var>,
     second_half_offset: u16,
 ) -> AeadStreamRequestMsg<LB::Expr>
 where
