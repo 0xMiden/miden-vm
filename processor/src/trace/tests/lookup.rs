@@ -110,6 +110,12 @@ fn lookup_global_balance_closes_for_tiny_span() {
 }
 
 #[test]
+fn lookup_global_balance_closes_for_bcompress() {
+    let trace = build_trace_from_ops(vec![Operation::BCompress], &[1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_global_lookup_balance(&trace);
+}
+
+#[test]
 fn lookup_global_balance_closes_for_fibonacci_span() {
     let mut ops = Vec::new();
     for _ in 0..149 {
@@ -121,7 +127,7 @@ fn lookup_global_balance_closes_for_fibonacci_span() {
 
 #[test]
 fn blakeg_lookup_row_shape_matches_expected_interactions() {
-    const BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK: u64 = 968;
+    const BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK: u64 = 964;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, blakeg_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
@@ -193,15 +199,15 @@ fn expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row: usize) ->
         2..=54 if cycle_row % 2 == 0 => 20,
         // B/D rows use one fused byte-pair lookup per rotated byte.
         3..=55 if cycle_row % 2 == 1 => 16,
-        // Footer rows use byte-pair folds for the compression output and H-word masking.
-        56..=59 => 19,
+        // Footer rows use byte-pair folds for the compression output.
+        56..=59 => 18,
         // The two message rows receive the full message schedule and range-check the
         // non-routed message limbs. M1 routes four more limb checks to I than M0.
         // The canonicality rem-limb checks have been replaced by an inverse zero-test.
         60 => 20,
         61 => 16,
         // Interface row: four paired input-word sends, twelve routed message-row range checks,
-        // and two nonzero interface-link slots.
+        // and one compression-link slot.
         62 => 18,
         // Output row: no routed lookup traffic.
         63 => 0,
@@ -233,7 +239,7 @@ fn blakeg_degree3_annex_interactions_at_cycle_row(cycle_row: usize) -> usize {
 #[test]
 fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const CURRENT_DENOMINATORS_PER_BLOCK: usize = 1142;
+    const CURRENT_DENOMINATORS_PER_BLOCK: usize = 1138;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, blakeg_matrix, _) = trace.main_trace().to_air_matrices();

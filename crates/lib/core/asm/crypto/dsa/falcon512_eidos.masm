@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::math::u64
 
 # CONSTANTS
@@ -11,7 +11,9 @@ const M_DOUBLE = 24578
 const M_SQUARE = 151019521
 const SQUARE_NORM_BOUND = 34034726
 const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
-const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div")
+const FALCON_H2P_DOMAIN = 0x0fa1c001
+const FALCON_PRODUCT_DOMAIN = 0x0fa1c002
+const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_eidos::falcon_div")
 
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================
@@ -87,50 +89,66 @@ end
 # =============================================================================================
 
 #! Takes as input a message digest, a nonce of size 40 bytes represented as 8 field elements
-#! and a pointer. The procedure absorbs MSG and NONCE into a fresh Poseidon2 state and squeezes the
+#! and a pointer. The procedure absorbs MSG and NONCE into a fresh Eidos state and squeezes the
 #! coefficients of a polynomial c representing the hash-to-point of (MSG || NONCE). The coefficients
 #! are then saved in the memory region [c_ptr, c_ptr + 512).
 #! This implementation of the `hash_to_point` procedure avoids the rejection-sampling step
 #! required in the per-the-spec algorithm by using the observation on page 31 in
 #! https://falcon-sign.info/falcon.pdf
 #!
-#! Input: [c_ptr, MSG, NONCE1, NONCE0, ...]
+#! Input: [c_ptr, MSG, NONCE0, NONCE1, ...]
 #! Output: [...]
 #!
-#! Cycles: ~1430
+#! Cycles: ~1500
 @locals(8)
 pub proc hash_to_point
+    padw loc_storew_le.0 dropw
+    # => [c_ptr, MSG, NONCE0, NONCE1, ...]
+
     # Move pointer out of the way
     movdn.12
 
     # Store MSG for later absorption
     loc_storew_le.4 dropw
+    # => [NONCE0, NONCE1, c_ptr, ...]
 
-    # Absorb the nonce
-    padw movdnw.2
-    exec.poseidon2::permute
+    # Absorb the nonce under the Falcon hash-to-point domain.
+    push.FALCON_H2P_DOMAIN push.0 exec.eidos::init_chaining_word_in_domain
+    movdnw.2
+    # => [NONCE0, NONCE1, C, c_ptr, ...]
+    exec.eidos::compress
+    # => [NONCE0, NONCE1, C, c_ptr, ...]
 
     # Absorb the message
+    dropw dropw
+    padw
     loc_loadw_le.4
-    exec.poseidon2::permute
+    padw swapw
+    # => [MSG, 0, C, c_ptr, ...]
+    exec.eidos::compress
+    # => [MSG, 0, C, c_ptr, ...]
 
-    # Squeeze the coefficients and save them
-    repeat.63
-        dup.12
+    # Squeeze four coefficients per BlakeG compression.
+    dropw dropw
+    padw padw
+    # => [0, 0, C, c_ptr, ...]
+    repeat.128
+        exec.eidos::compress
+        # => [0, 0, C, c_ptr, ...]
+
+        swapw.2 movup.12 dup add.4 movdn.13
+        # => [c_ptr, C, 0, 0, c_ptr + 4, ...]
+
         mem_storew_le
-        swapw
-        dup.12 add.8 swap.13 add.4
-        mem_storew_le
-        swapw
-        exec.poseidon2::permute
+        swapw.2
+        # => [0, 0, C, c_ptr + 4, ...]
+
+        loc_loadw_le.0 swapw loc_loadw_le.0
+        # => [0, 0, C, c_ptr + 4, ...]
     end
 
-    # Save the last remaining coefficients
-    dup.12 mem_storew_le dropw
-    movup.8 add.4 mem_storew_le dropw
-
     # Clean up the stack
-    dropw
+    dropw dropw dropw drop
 end
 
 
@@ -180,9 +198,11 @@ pub proc load_h_s2_and_product
     loc_storew_le.0
     # => [PK, ptr, tau_inv_ptr, acc0, acc1, ...]
 
-    ## c) Prepare the capacity portion of the state of the hasher
-    padw swapw
-    # => [Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...], where Y is a "garbage" word
+    ## c) Prepare the public-key commitment state.
+    dropw
+    push.512 exec.eidos::init_chaining_word
+    padw
+    # => [Y, C, ptr, tau_inv_ptr, acc0, acc1, ...], where Y is a "garbage" word
 
     ## d) Load the evaluation point tau from the advice tape, compute its inverse and save both
     ## Note that we will evaluate the polynomials at `tau_inv = tau^{-1}` as we are loading the coefficients
@@ -195,9 +215,9 @@ pub proc load_h_s2_and_product
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
     adv_push adv_push
     # => [tau0, tau1, ...]
-    dup.1 dup.1 ext2inv         # duplicate tau, compute inverse → [tau_inv0, tau_inv1, tau0, tau1, ...]
+    dup.1 dup.1 ext2inv         # duplicate tau, compute inverse -> [tau_inv0, tau_inv1, tau0, tau1, ...]
     loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for Horner
-    # => [tau_inv0, tau_inv1, tau0, tau1, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
+    # => [tau_inv0, tau_inv1, tau0, tau1, Y, C, ptr, tau_inv_ptr, acc0, acc1, ...]
 
     # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
     repeat.64
@@ -223,22 +243,31 @@ pub proc load_h_s2_and_product
 
         horner_eval_base
 
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
-    # => [Y, D, C, ptr, tau_inv_ptr, acc0, acc1, ...] where D is the digest expected to be PK
+    # => [Y0, Y1, C, ptr, tau_inv_ptr, acc0, acc1, ...] where C is the digest expected to be PK
 
-    # 3) Load PK, the saved claimed hash of h, and compare hashes
-    swapw loc_loadw_le.0
-    assert_eqw
+    # 3) Load PK, the saved claimed hash of h, and compare hashes.
+    dropw dropw
+    dupw
+    padw loc_loadw_le.0
+    assert_eqw.err="comparison failed: public key"
     # => [C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
 
-    # 4) Load s2 and evaluate at tau_inv
+    # 4) Start the Falcon product transcript with the public-key commitment.
+    padw
+    swapw
+    push.FALCON_PRODUCT_DOMAIN
+    exec.eidos::merge_in_domain
+    padw padw
+    # => [Y, Y, C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
+
+    # 5) Load s2 and evaluate at tau_inv
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
-    push.0 movdn.6
-    push.0 movdn.6
-    padw padw
-    # => [0, 0, 0, 0, 0, 0, 0, 0, C, ptr, tau_inv_ptr, 0, 0, h(tau)_0, h(tau)_1, ...]
+    push.0 movdn.14
+    push.0 movdn.14
+    # => [C, 0, C', ptr, tau_inv_ptr, 0, 0, h(tau)_0, h(tau)_1, ...]
 
     ## b) Load and evaluate s2 at tau_inv
     repeat.64
@@ -263,11 +292,11 @@ pub proc load_h_s2_and_product
         push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
 
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
     # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
-    # 5) Load claimed h * s2 in Z_Q[x]
+    # 6) Load claimed h * s2 in Z_Q[x]
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.14
@@ -277,19 +306,19 @@ pub proc load_h_s2_and_product
     repeat.128
         adv_pipe
         horner_eval_base
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
-    # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
+    # => [Y0, Y1, C, ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
-    # 6) Check that the challenge we computed the evaluations with is the correct one
+    # 7) Check that the challenge we computed the evaluations with is the correct one
 
     ## a) Clean up the stack
-    swapw.2 dropw
+    dropw dropw
     # => [C, tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between
     ##    the two challenges
-    loc_loadw_le.4              # load [tau_inv0, tau_inv1, tau0, tau1] from local memory
+    padw loc_loadw_le.4         # load [tau_inv0, tau_inv1, tau0, tau1] from local memory
     # => [tau_inv0, tau_inv1, tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
 
     drop drop                   # drop tau_inv, keep tau for comparison and later ext2mul
@@ -305,7 +334,7 @@ pub proc load_h_s2_and_product
     dropw                       # drop D[2], D[3], ptr, tau_inv_ptr
     # => [tau0, tau1, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
-    # 7) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+    # 8) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
 
     ## a) Compute the left hand side of the equation
     ext2mul
@@ -379,7 +408,8 @@ end
 #!
 #! 1. M is much smaller than the Miden prime Q. Precisely, M * 2^50 < Q
 #! 2. The coefficients of the product polynomial, u and w, are strictly less than J := 512 * M^2.
-#! 3. The coefficients of c are at most M - 1.
+#! 3. The coefficients of c are raw hash outputs. Reducing them here gives the same result as
+#!    reducing them when hash-to-point stores c.
 #!
 #! This means that we can substitute (v - (u + (- w % M) % M) % M) with  v + w + J - u
 #! (note J % M = 0) without risking Q-underflow but we can still overflow.
@@ -680,7 +710,7 @@ end
 # =============================================================================================
 
 #! Moves the signature from the advice map to the advice stack, where the signature is stored in
-#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the Poseidon2 hash. The signature is
+#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the VM-native hash. The signature is
 #! expected to be stored in reverse order, so that it gets pushed on the advice stack in the
 #! correct order.
 #!

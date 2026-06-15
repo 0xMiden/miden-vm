@@ -1908,6 +1908,7 @@ name = "miden-vm-synthetic-bench"
 version = "0.24.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "miden-air",
  "miden-processor",
  "miden-vm",
  "serde",

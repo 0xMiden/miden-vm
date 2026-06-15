@@ -76,11 +76,11 @@ pub const CONTROLLER_TRACE_ALIGNMENT: usize = 16;
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 4;
 
 /// Number of controller rows per compression request (one input + one output).
-pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
+pub const CONTROLLER_ROWS_PER_HASHER_OP: usize = 2;
 
-/// Felt version of [CONTROLLER_ROWS_PER_PERMUTATION] for address arithmetic.
-pub const CONTROLLER_ROWS_PER_PERM_FELT: Felt =
-    Felt::new_unchecked(CONTROLLER_ROWS_PER_PERMUTATION as u64);
+/// Felt version of [CONTROLLER_ROWS_PER_HASHER_OP] for address arithmetic.
+pub const CONTROLLER_ROWS_PER_HASHER_OP_FELT: Felt =
+    Felt::new_unchecked(CONTROLLER_ROWS_PER_HASHER_OP as u64);
 
 // --- Transition selectors -----------------------------------------------------------------------
 

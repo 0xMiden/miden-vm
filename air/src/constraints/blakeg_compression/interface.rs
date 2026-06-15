@@ -9,12 +9,12 @@
 //!   routed M0 limbs and R[0..3] computed on M0.
 //! - Row 62: I (input interface). Carries HIN-pair slots, routed M-row
 //!   ranges, R[0..7], C[0..3], D[0..3], multiplicity, and tail labels.
-//! - Row 63: O (output interface, last compression-block row). C[0..3] at 0..3,
-//!   zeros at 4..7, D[0..3] at 8..11, multiplicity at col 12. No bus interactions.
+//! - Row 63: O (output interface, last compression-block row). The VM-visible output state
+//!   `block[8] || cv'[4]`, with multiplicity at col 12. No bus interactions.
 //!
 //! This module enforces:
 //! - The packing identity `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]`.
-//! - I -> O forwarding of `C`, zero middle lanes, `D`, and `multiplicity`.
+//! - I -> O forwarding of `R`, `D`, and `multiplicity`.
 //! - M0 -> M1 forwarding of routed limbs, C/D, and tail labels.
 //! - M1 -> I forwarding of routed limbs, R[0..3], C/D, and tail labels.
 //! - 16-bit limb reconstruction of `m[k]` on M0 and M1.
@@ -58,10 +58,9 @@ pub fn enforce_iface_in_c_h_consistency<AB>(
     }
 }
 
-/// I -> O: forward the VM-visible output state `[C, 0, D]` and the multiplicity.
+/// I -> O: forward the VM-visible output state `[R, D]` and the multiplicity.
 ///
-/// O does not redo any work; it just exposes the committed digest in the
-/// shape the bus expects.
+/// `R` is the 8-felt block. `D` is the new 4-felt chaining value.
 pub fn enforce_iface_in_to_out<AB>(
     builder: &mut AB,
     local: &[AB::Var],
@@ -72,15 +71,11 @@ pub fn enforce_iface_in_to_out<AB>(
 {
     let is_iface_in = sel.is_iface_in();
     let builder = &mut builder.when(is_iface_in);
-    // I.C[t] -> O[0..3].
-    for t in 0..4 {
-        let i_c: AB::Expr = local[IFACE_C_BASE_COL + t].clone().into();
-        let o_c: AB::Expr = next[t].clone().into();
-        builder.assert_zero(i_c - o_c);
-    }
-    // O[4..7] are zero.
-    for k in 4..8 {
-        builder.assert_zero(Into::<AB::Expr>::into(next[k].clone()));
+    // I.R[k] -> O[0..8].
+    for k in 0..8 {
+        let i_r: AB::Expr = local[IFACE_R_BASE_COL + k].clone().into();
+        let o_r: AB::Expr = next[k].clone().into();
+        builder.assert_zero(i_r - o_r);
     }
     // I.D[t] -> O[8..11].
     for t in 0..4 {

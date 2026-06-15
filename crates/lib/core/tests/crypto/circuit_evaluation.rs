@@ -88,7 +88,7 @@ fn circuit_evaluation_prove_verify() {
 fn multi_air_eval_circuit_masm() {
     // Exercises the combined Miden multi-AIR circuit. If this test
     // passes, the codegen + MASM ACE chip are consistent for the multi-AIR shape; any
-    // failure in the recursive verifier (`test_poseidon2_prove_verify`) is then in the
+    // failure in the recursive verifier is then in the
     // input plumbing (memory layout, advice ordering, transcript binding), not in the
     // circuit.
     let config = AceConfig {

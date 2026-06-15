@@ -21,7 +21,7 @@ use miden_air::{
     logup::{HasherMsg, SiblingBit, SiblingMsg},
     trace::{
         MainTrace,
-        chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
+        chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP_FELT,
         log_precompile::{
             HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STATE_NEW_RANGE, STACK_STMNT_RANGE,
         },
@@ -119,7 +119,7 @@ fn span_end_hasher_bus() {
             exp.remove(row, &HasherMsg::control_block(addr_next, &rate, 0));
             request_count += 1;
         } else if op == opcodes::END as u64 {
-            let parent = main.addr(idx) + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+            let parent = main.addr(idx) + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
             let h = rate_from_hasher_state(main, idx);
             let digest: [Felt; 4] = [h[0], h[1], h[2], h[3]];
             exp.remove(row, &HasherMsg::return_hash(parent, digest));
@@ -280,12 +280,12 @@ fn bcompress_hasher_bus() {
         exp.remove(row, &HasherMsg::linear_hash_init(helper0, stk_state));
         exp.remove(
             row,
-            &HasherMsg::return_hash(helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE, cv_next),
+            &HasherMsg::return_hash(helper0 + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE, cv_next),
         );
         request_count += 2;
     }
     let bcompress_helper0 = bcompress_helper0.expect("program should contain a BCOMPRESS row");
-    let bcompress_return_addr = bcompress_helper0 + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+    let bcompress_return_addr = bcompress_helper0 + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
     let mut hout_count = 0usize;
@@ -359,12 +359,12 @@ fn logprecompile_hasher_bus() {
         exp.remove(row, &HasherMsg::linear_hash_init(log_addr, input_state));
         exp.remove(
             row,
-            &HasherMsg::return_hash(log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE, state_new),
+            &HasherMsg::return_hash(log_addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE, state_new),
         );
         request_count += 2;
     }
     let log_addr = logprecompile_addr.expect("program should contain a LOGPRECOMPILE row");
-    let log_return_addr = log_addr + CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+    let log_return_addr = log_addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
     let mut hout_count = 0usize;
@@ -436,7 +436,7 @@ fn mpverify_hasher_bus() {
         let leaf_word: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, idx));
         let old_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(6 + i, idx));
 
-        let return_addr = helper0 + mp_depth * CONTROLLER_ROWS_PER_PERM_FELT - ONE;
+        let return_addr = helper0 + mp_depth * CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
         exp.remove(row, &HasherMsg::merkle_verify_init(helper0, mp_index, leaf_word));
         exp.remove(row, &HasherMsg::return_hash(return_addr, old_root));
         request_count += 2;
@@ -521,10 +521,10 @@ fn mrupdate_hasher_bus() {
         let new_leaf: [Felt; 4] = core::array::from_fn(|i| main.stack_element(10 + i, idx));
         let new_root: [Felt; 4] = core::array::from_fn(|i| main.stack_element(i, next));
 
-        let old_return = helper0 + mr_depth * CONTROLLER_ROWS_PER_PERM_FELT - ONE;
-        let new_init = helper0 + mr_depth * CONTROLLER_ROWS_PER_PERM_FELT;
+        let old_return = helper0 + mr_depth * CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
+        let new_init = helper0 + mr_depth * CONTROLLER_ROWS_PER_HASHER_OP_FELT;
         let new_return = helper0
-            + mr_depth * (CONTROLLER_ROWS_PER_PERM_FELT + CONTROLLER_ROWS_PER_PERM_FELT)
+            + mr_depth * (CONTROLLER_ROWS_PER_HASHER_OP_FELT + CONTROLLER_ROWS_PER_HASHER_OP_FELT)
             - ONE;
 
         exp.remove(row, &HasherMsg::merkle_old_init(helper0, mr_index, old_leaf));

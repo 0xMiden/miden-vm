@@ -1,4 +1,4 @@
-use super::{Felt, TRUNCATE_STACK_PROC, ToElements, apply_permutation, build_op_test, build_test};
+use super::{Felt, TRUNCATE_STACK_PROC, ToElements, build_op_test, build_test, compress_state};
 
 // LOADING SINGLE ELEMENT ONTO THE STACK (MLOAD)
 // ================================================================================================
@@ -266,7 +266,7 @@ fn mem_stream() {
 }
 
 #[test]
-fn mem_stream_with_hperm() {
+fn mem_stream_with_bcompress() {
     let source = format!(
         "
         {TRUNCATE_STACK_PROC}
@@ -279,7 +279,7 @@ fn mem_stream_with_hperm() {
             mem_storew_le
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
-            mem_stream hperm
+            mem_stream bcompress
 
             exec.truncate_stack
         end"
@@ -290,8 +290,8 @@ fn mem_stream_with_hperm() {
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
-    // apply a hash permutation to the state
-    apply_permutation(&mut state);
+    // Apply one BlakeG compression to the state.
+    compress_state(&mut state);
 
     // Hasher state order matches stack order
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();

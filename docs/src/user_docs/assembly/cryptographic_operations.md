@@ -7,13 +7,13 @@ sidebar_position: 9
 Miden assembly provides a set of instructions for performing common cryptographic operations. These instructions are listed in the table below.
 
 ### Hashing and Merkle trees
-[Poseidon2](https://eprint.iacr.org/2023/323) is the native hash function of Miden VM. The parameters of the hash function were chosen to provide 128-bit security level against preimage and collision attacks. The function operates over a 12-element state (rate 8, capacity 4). Internally, the hasher chiplet tracks the permutation as 31 Poseidon2 step transitions packed into a 16-row cycle, but the VM exposes it as a single-cycle `hperm` operation for efficient hashing.
+Eidos, built on BlakeG compression, is the native hash function of Miden VM. The VM exposes BlakeG compression directly as the single-cycle `bcompress` operation; higher-level `hash` and `hmerge` instructions use Eidos framing over that compression primitive.
 
 | Instruction                      | Stack_input        | Stack_output      | Notes                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| hash <br /> - *(19 cycles)*        | [A, ...]           | [B, ...]          | $\{B\} \leftarrow hash(A)$ <br /> where, $hash()$ computes a 1-to-1 Poseidon2 hash.                                                                                                                                                                                                                                                         |
-| hperm  <br /> - *(1 cycle)*        | [R0, R1, C, ...]   | [R0', R1', C', ...]| $\{R0', R1', C'\} \leftarrow permute(R0, R1, C)$ <br /> Performs a Poseidon2 permutation on the top 3 words of the operand stack, where the top 2 words are the rate (R0 on top, R1 second), and the third word is the capacity (C). The digest is in R0' after permutation.                                                                         |
-| hmerge  <br /> - *(16 cycles)*     | [A, B, ...]        | [C, ...]          | $C \leftarrow hash(A,B)$ <br /> where, $hash()$ computes a 2-to-1 Poseidon2 hash.                                                                                                                                                                                                                                                           |
+| hash <br /> - *(19 cycles)*        | [A, ...]           | [B, ...]          | $\{B\} \leftarrow hash(A)$ <br /> where, $hash()$ computes a 1-to-1 Eidos hash.                                                                                                                                                                                                                                                         |
+| bcompress <br /> - *(1 cycle)*     | [R0, R1, C, ...]   | [R0, R1, C', ...] | $\{C'\} \leftarrow BlakeG(C, R0 \|\| R1)$ <br /> Performs one BlakeG compression on the top 3 words of the operand stack. The two rate words are preserved and the chaining word is updated.                                                                         |
+| hmerge  <br /> - *(16 cycles)*     | [A, B, ...]        | [C, ...]          | $C \leftarrow hash(A,B)$ <br /> where, $hash()$ computes a 2-to-1 Eidos hash.                                                                                                                                                                                                                                                           |
 | mtree_get  <br /> - *(10 cycles)*  | [d, i, R, ...]     | [V, R, ...]       | Fetches the node value from the advice provider and runs a verification equivalent to `mtree_verify`, returning the value if succeeded.                                                                                                                                                                                                                |
 | mtree_set <br /> - *(30 cycles)*   | [d, i, R, V', ...] | [V, R', ...]      | Updates a node in the Merkle tree with root $R$ at depth $d$ and index $i$ to value $V'$. $R'$ is the Merkle root of the resulting tree and $V$ is old value of the node. Merkle tree with root $R$ must be present in the advice provider, otherwise execution fails. At the end of the operation the advice provider will contain both Merkle trees. |
 | mtree_merge <br /> - *(16 cycles)* | [L, R, ...]        | [M, ...]          | Merges two Merkle trees with the provided roots L (left), R (right) into a new Merkle tree with root M (merged). The input trees are retained in the advice provider.                                                                                                                                                                                  |
@@ -26,70 +26,50 @@ mtree_verify.err=MY_CONSTANT
 ```
 If the error code is omitted, the default value of $0$ is assumed.
 
-#### Differences between `hash`, `hperm`, and `hmerge`
+#### Differences between `hash`, `bcompress`, and `hmerge`
 
-- **hash**: 1-to-1 hashing, takes 4 elements (1 word), applies the Poseidon2 permutation to it, and returns a 4-element digest. This is equivalent to invoking `miden_crypto::hash::poseidon2::Poseidon2::hash_elements()` function with elements of a single word.
-- **hmerge**: 2-to-1 hashing, takes 8 elements (2 words), applies the Poseidon2 permutation to them, and returns a 4-element digest. This is frequently used to hash two digests (e.g., for Merkle trees), but could also be used to hash an arbitrary sequence of 8 elements. This is equivalent to `miden_crypto::hash::poseidon2::Poseidon2::merge()` function.
-- **hperm**: Applies the Poseidon2 permutation to 12 stack elements (8 rate + 4 capacity), returns all 12 elements (the full sponge state). Used for intermediate operations or manual sponge state management. This is equivalent to `miden_crypto::hash::poseidon2::Poseidon2::apply_permutation()` Rust function.
+- **hash**: 1-to-1 hashing, takes 4 elements (1 word), and returns a 4-element Eidos digest.
+- **hmerge**: 2-to-1 hashing, takes 8 elements (2 words), and returns a 4-element Eidos digest. This is frequently used to hash two digests, for example in Merkle trees.
+- **bcompress**: Applies one BlakeG compression to a 12-element stack window. The top 8 elements are the block and the next 4 elements are the chaining word.
 
-#### `hperm` operation semantics
+#### `bcompress` operation semantics
 
-As mentioned above, `hperm` instruction applies a single Poseidon2 permutation to the top 12 stack elements. This allows us to manually define the state of the sponge and incrementally absorb data into it. The sponge state consists of two parts:
+The `bcompress` instruction applies one BlakeG compression to the top 12 stack elements. The state consists of two parts:
 
-- `RATE` - two words specifying the data to be absorbed into the sponge.
-- `CAPACITY` - a single word that maintains the state of the sponge across permutations.
+- `BLOCK` - two words specifying the data to be compressed.
+- `CV` - a single word chaining value.
 
-The `hperm` instruction expects the sponge state to be on the stack as follows:
+The `bcompress` instruction expects the state to be on the stack as follows:
 
 ```
 [R0, R1, C, ...]
 ```
-Where R0 (first rate word) is on top, R1 (second rate word) is second, and C (capacity) is third. After permutation, the digest is in R0'.
+Where R0 and R1 are the block words and C is the chaining word. After compression, R0 and R1 are preserved and C is replaced by the new chaining word.
 
-We use a padding rule different from the Poseidon2 specification, following [this paper](https://eprint.iacr.org/2024/911.pdf). Under this rule, initialize the capacity as follows:
-
-- The first capacity element (i.e., `stack[8]`, the first element of word C) should be initialized to $n \mod 8$ where $n$ is the number of elements to be hashed across all permutations. For example, if we need to hash $100$ elements, the first capacity element must be initialized to $4$.
-- All other capacity elements must be initialized to zeros.
-
-The above rule is convenient as when the number of elements is divisible by $8$, all capacity elements should be initialized to zeros.
-
-Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack and pad the remaining elements with zeros. For example, if we wanted to hash 3 elements (e.g., `a`, `b`, `c`), we would arrange the stack as follows before executing the `hperm` instruction:
+For efficient hashing of long sequences of elements, `bcompress` can be paired with `mem_stream` or `adv_pipe`. For example, the following compresses 24 elements from memory:
 
 ```
-[R0, R1, C] = [[a, b, c, 0], [0, 0, 0, 0], [3, 0, 0, 0]]
-```
-
-If we have more than $8$ elements to absorb, we need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
-
-Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking R0' (the first rate word after permutation). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::poseidon2::squeeze_digest`.
-
-For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following will absorb 24 elements from memory and compute their hash:
-
-```
-# initialize the state of the sponge
+# initialize the compression state
 padw padw padw
 
-# absorb 24 elements from the memory into the sponge state;
-# here, we assume that the memory address of the data was already in stack[12] element
+# compress 24 elements from memory; the memory address is in stack[12]
 mem_stream
-hperm
+bcompress
 mem_stream
-hperm
+bcompress
 mem_stream
-hperm
+bcompress
 
-# get the result of the hash
-exec.::miden::core::crypto::hashes::poseidon2::squeeze_digest
+# get the chaining word
+exec.::miden::core::crypto::hashes::eidos::digest
 ```
 
-For more examples of how `hperm` instruction is used, please see `miden::core::crypto::hashes::poseidon2` module in the core library.
+For more examples of how Eidos hashing is built from `bcompress`, see `miden::core::crypto::hashes::eidos`.
 
 #### `hash` and `hmerge` implementations
 
-Both `hash` and `hmerge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
+Both `hash` and `hmerge` instructions are macro-instructions implemented using `bcompress` and stack manipulation.
 
-- `hash`: `padw push.0.0.0.4 swapw.2 hperm dropw swapw dropw`.
-- `hmerge`: `padw swapw.2 swapw hperm dropw swapw dropw`.
 
 ### Circuits and polynomials
 
@@ -100,8 +80,8 @@ The following instructions are designed mainly for use in recursive verification
 | eval_circuit <br /> - *(1 cycle)*     | [ptr, n_read, n_eval, ...]                                                                        | [ptr, n_read, n_eval, ...]                                                                          | Evaluates an arithmetic circuit, and checks that its output is equal to zero. `ptr` specifies the memory address at which the circuit description is stored with the number of input extension field elements specified by `n_read` and the number of evaluation gates, encoded as base field elements, specified by `n_eval`. |
 | horner_eval_base <br /> - *(1 cycle)* | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1, acc0, ...]          | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1', acc0', ...]          | Performs 8 steps of the Horner evaluation method to update the accumulator using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((((((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3) * alpha + c4) * alpha + c5) * alpha + c6) * alpha + c7`.                                          |
 | horner_eval_ext <br /> - *(1 cycle)*  | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1, acc0, ...] | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1', acc0', ...] | Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over the quadratic extension field using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3` where coefficients are extension field elements `c0 = (c0_1, c0_0)`, `c1 = (c1_1, c1_0)`, `c2 = (c2_1, c2_0)`, `c3 = (c3_1, c3_0)`.                                                                                        |
-| log_precompile <br /> - *(1 cycle)*   | [COMM, TAG, PAD, ...]                                                                                 | [R0, R1, CAP_NEXT, ...]                                                                               | Absorbs words `TAG` and `COMM` into the precompile sponge.<br />The hasher computes `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])` and updates the processor's precompile sponge capacity. The `PAD` word on the stack is required as scratch space for the capacity input.<br />The top 3 stack words are replaced with `[R0, R1, CAP_NEXT]`, and callers typically drop them right away.                   |
-| crypto_stream <br /> - *(1 cycle)*    | [rate(8), cap(4), src_ptr, dst_ptr, ...]                                                          | [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]                                                  | Performs one Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces the rate on the stack with the ciphertext, preserves capacity, and increments both pointers by 8. Used as the primitive underlying `miden::core::crypto::aead`. |
+| log_precompile <br /> - *(1 cycle)*   | [COMM, TAG, PAD, ...]                                                                                 | [R0, R1, CAP_NEXT, ...]                                                                               | Absorbs words `TAG` and `COMM` into the precompile transcript.<br />The hasher computes `[R0, R1, CAP_NEXT] = BlakeG(CAP_PREV, COMM \|\| TAG)` and updates the processor's precompile transcript state. The `PAD` word on the stack is required as scratch space for the chaining-word input.<br />The top 3 stack words are replaced with `[R0, R1, CAP_NEXT]`, and callers typically drop them right away.                   |
+| crypto_stream <br /> - *(1 cycle)*    | [rate(8), cap(4), src_ptr, dst_ptr, ...]                                                          | [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]                                                  | Performs one native-hash keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces the rate on the stack with the ciphertext, preserves capacity, and increments both pointers by 8. Used as the primitive underlying `miden::core::crypto::aead`. |
 
 
 ### FRI folding

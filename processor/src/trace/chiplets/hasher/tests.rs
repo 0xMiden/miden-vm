@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::{
-    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
+    blakeg_compression::{IFACE_C_BASE_COL, IFACE_R_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS},
     chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
 };
 
@@ -37,34 +37,34 @@ use super::{
 // ================================================================================================
 
 #[test]
-fn hasher_permute() {
-    // --- test one compression (BCOMPRESS) ---
+fn hasher_compress_return_state() {
+    // --- test one controller compression returning the full state ---
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
 
     let (addr, final_state) = hasher.permute(init_state);
     assert_eq!(ONE, addr);
 
-    let expected_state = apply_permutation(init_state);
+    let expected_state = compress_state(init_state);
     assert_eq!(expected_state, final_state);
 
     let trace = build_trace(hasher);
 
     // Controller region: 2 rows (1 pair), padded to the chiplet alignment boundary.
-    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(2);
-    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
+    // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(2);
+    assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
     // Row 0: input (LINEAR_HASH, is_boundary=1)
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
     // Row 1: output (RETURN_STATE, is_boundary=1)
     check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
 
-    check_compression_block(&trace, perm_start, &init_state, ONE);
+    check_compression_block(&trace, compression_start, &init_state, ONE);
 }
 
 #[test]
-fn hasher_permute_two() {
+fn hasher_compress_return_state_two() {
     let mut hasher = Hasher::default();
     let init_state1 = random_state_with_packed_cv();
     let init_state2 = random_state_with_packed_cv();
@@ -76,15 +76,15 @@ fn hasher_permute_two() {
     assert_eq!(ONE, addr1);
     assert_eq!(Felt::from_u8(3), addr2);
 
-    assert_eq!(apply_permutation(init_state1), final_state1);
-    assert_eq!(apply_permutation(init_state2), final_state2);
+    assert_eq!(compress_state(init_state1), final_state1);
+    assert_eq!(compress_state(init_state2), final_state2);
 
     let trace = build_trace(hasher);
 
     // Controller region: 4 rows (2 pairs), padded to the chiplet alignment boundary.
-    // Perm segment: 2 real cycles plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(4);
-    assert_eq!(trace[0].len(), perm_start + 3 * HASH_CYCLE_LEN);
+    // Compression segment: 2 real cycles plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(4);
+    assert_eq!(trace[0].len(), compression_start + 3 * HASH_CYCLE_LEN);
 
     // Pair 1
     check_controller_input(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO);
@@ -123,15 +123,7 @@ fn hasher_build_merkle_root_depth_1() {
     let init_state = init_state_from_words(&leaves[0], &path0[0]);
     check_controller_input(&trace, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO);
     // Row 1: output (RETURN_HASH, is_boundary=1, node_index=0)
-    check_controller_output(
-        &trace,
-        1,
-        RETURN_HASH,
-        &apply_permutation(init_state),
-        ZERO,
-        ONE,
-        ZERO,
-    );
+    check_controller_output(&trace, 1, RETURN_HASH, &compress_state(init_state), ZERO, ONE, ZERO);
 }
 
 /// Merkle tree with 8 leaves (depth 3):
@@ -214,28 +206,28 @@ fn hasher_update_merkle_root() {
 // ================================================================================================
 
 #[test]
-fn perm_segment_structure() {
+fn compression_segment_structure() {
     // One BCOMPRESS yields one 64-row compression block with multiplicity 1.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
     let (addr, result) = hasher.permute(init_state);
 
-    // Verify returned address and permuted state
+    // Verify returned address and compressed state
     assert_eq!(addr, ONE, "first compression should start at address 1");
-    assert_eq!(result, apply_permutation(init_state), "compressed state should match");
+    assert_eq!(result, compress_state(init_state), "compressed state should match");
 
     let trace = build_trace(hasher);
 
     // The test view appends compression blocks after the padded controller rows.
-    let perm_start = controller_len(2);
+    let compression_start = controller_len(2);
 
-    assert_eq!(compression_multiplicity(&trace, perm_start), ONE);
-    assert_eq!(compression_multiplicity(&trace, perm_start + HASH_CYCLE_LEN), ZERO);
-    assert_eq!(compression_output_state(&trace, perm_start), apply_permutation(init_state));
+    assert_eq!(compression_multiplicity(&trace, compression_start), ONE);
+    assert_eq!(compression_multiplicity(&trace, compression_start + HASH_CYCLE_LEN), ZERO);
+    assert_eq!(compression_output_state(&trace, compression_start), compress_state(init_state));
 }
 
 #[test]
-fn perm_deduplication() {
+fn compression_deduplication() {
     // Two identical BCOMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
@@ -249,12 +241,12 @@ fn perm_deduplication() {
     let trace = build_trace(hasher);
 
     // Controller: 4 rows (2 pairs), padded to the chiplet alignment boundary.
-    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(4);
-    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
+    // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(4);
+    assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
     // Compression segment: multiplicity should be 2.
-    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
+    assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
 }
 
 // MEMOIZATION TESTS
@@ -268,8 +260,8 @@ fn hash_memoization_control_blocks() {
 
     // Compute the expected hash
     let state = super::init_state_from_words_with_domain(&h1, &h2, domain);
-    let permuted = apply_permutation(state);
-    let expected_hash: Digest = get_digest(&permuted);
+    let compressed = compress_state(state);
+    let expected_hash: Digest = get_digest(&compressed);
 
     let mut hasher = Hasher::default();
 
@@ -283,13 +275,13 @@ fn hash_memoization_control_blocks() {
 
     let trace = build_trace(hasher);
 
-    // Both calls produce controller pairs (4 rows), but share perm requests.
-    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(4);
-    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
+    // Both calls produce controller pairs (4 rows), but share compression requests.
+    // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(4);
+    assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
-    // Perm segment has multiplicity 2 (two requests for same state)
-    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
+    // Compression segment has multiplicity 2 (two requests for same state)
+    assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
 }
 
 // BASIC BLOCK MEMOIZATION TESTS
@@ -298,7 +290,8 @@ fn hash_memoization_control_blocks() {
 #[test]
 fn hash_memoization_basic_blocks_single_batch() {
     // Test that hashing the same single-batch basic block twice uses memoization:
-    // the second call copies the controller rows and reuses the perm cycle (multiplicity 2).
+    // the second call copies the controller rows and reuses the compression cycle
+    // (multiplicity 2).
     let mut hasher = Hasher::default();
 
     let batches = make_single_batch();
@@ -314,9 +307,9 @@ fn hash_memoization_basic_blocks_single_batch() {
     let trace = build_trace(hasher);
 
     // Single batch -> 1 controller pair per call = 4 rows total.
-    // Perm segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(4);
-    assert_eq!(trace[0].len(), perm_start + 2 * HASH_CYCLE_LEN);
+    // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(4);
+    assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-1
     check_controller_input(
@@ -333,7 +326,7 @@ fn hash_memoization_basic_blocks_single_batch() {
         &trace,
         1,
         RETURN_HASH,
-        &apply_permutation(init_state(
+        &compress_state(init_state(
             batches[0].groups(),
             num_basic_block_hash_groups(&batches) as u32,
         )),
@@ -345,14 +338,15 @@ fn hash_memoization_basic_blocks_single_batch() {
     // Verify memoized call: rows 2-3 should match rows 0-1 in selectors and state
     check_memoized_trace(&trace, 0..2, 2..4);
 
-    // Perm segment: multiplicity should be 2 (original + memoized)
-    assert_eq!(compression_multiplicity(&trace, perm_start), Felt::from_u8(2));
+    // Compression segment: multiplicity should be 2 (original + memoized)
+    assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
 }
 
 #[test]
 fn hash_memoization_basic_blocks_multi_batch() {
     // Test memoization of a multi-batch basic block (3 batches).
-    // The second call should copy all 3 controller pairs and re-register all 3 perm requests.
+    // The second call should copy all 3 controller pairs and re-register all 3 compression
+    // requests.
     let mut hasher = Hasher::default();
 
     let batches = make_multi_batch(3);
@@ -368,9 +362,9 @@ fn hash_memoization_basic_blocks_multi_batch() {
     let trace = build_trace(hasher);
 
     // 3 batches -> 3 controller pairs per call = 12 rows total.
-    // 3 real perm states plus one zero-multiplicity dummy cycle.
-    let perm_start = controller_len(12);
-    assert_eq!(trace[0].len(), perm_start + 4 * HASH_CYCLE_LEN);
+    // 3 real compression states plus one zero-multiplicity dummy cycle.
+    let compression_start = controller_len(12);
+    assert_eq!(trace[0].len(), compression_start + 4 * HASH_CYCLE_LEN);
 
     // Verify first call: rows 0-5 (3 pairs)
     // Row 0: first batch input, is_boundary=1 (start)
@@ -389,13 +383,13 @@ fn hash_memoization_basic_blocks_multi_batch() {
     // Verify memoized call: rows 6-11 should match rows 0-5
     check_memoized_trace(&trace, 0..6, 6..12);
 
-    // Perm segment: each of the 3 unique states should have multiplicity 2
+    // Compression segment: each of the 3 unique states should have multiplicity 2
     for i in 0..3 {
-        let cycle_start = perm_start + i * HASH_CYCLE_LEN;
+        let cycle_start = compression_start + i * HASH_CYCLE_LEN;
         assert_eq!(
             compression_multiplicity(&trace, cycle_start),
             Felt::from_u8(2),
-            "perm cycle {i} should have multiplicity 2"
+            "compression cycle {i} should have multiplicity 2"
         );
     }
 }
@@ -411,7 +405,7 @@ fn hash_memoization_basic_blocks_check() {
     //     BB1   Loop_body
     //
     // BB1 and BB2 are identical 2-batch basic blocks. When BB2 is hashed,
-    // it should be memoized from BB1's trace, so BB1's perm states get multiplicity 2.
+    // it should be memoized from BB1's trace, so BB1's compression states get multiplicity 2.
     //
     // Expected controller row layout:
     // Rows 0-3:   BB1 (2 batches = 2 pairs)
@@ -439,8 +433,8 @@ fn hash_memoization_basic_blocks_check() {
     // Hash Join2 = hash(BB1, Loop)
     let join2_state =
         super::init_state_from_words_with_domain(&bb1_digest, &loop_digest, Felt::from_u8(7));
-    let join2_permuted = apply_permutation(join2_state);
-    let join2_hash = get_digest(&join2_permuted);
+    let join2_compressed = compress_state(join2_state);
+    let join2_hash = get_digest(&join2_compressed);
     let (_join2_addr, join2_digest) =
         hasher.hash_control_block(bb1_digest, loop_digest, Felt::from_u8(7), join2_hash);
     assert_eq!(join2_digest, join2_hash);
@@ -453,8 +447,8 @@ fn hash_memoization_basic_blocks_check() {
     // Hash Join1 = hash(Join2, BB2)
     let join1_state =
         super::init_state_from_words_with_domain(&join2_digest, &bb2_digest, Felt::from_u8(7));
-    let join1_permuted = apply_permutation(join1_state);
-    let join1_hash = get_digest(&join1_permuted);
+    let join1_compressed = compress_state(join1_state);
+    let join1_hash = get_digest(&join1_compressed);
     let (_join1_addr, join1_digest) =
         hasher.hash_control_block(join2_digest, bb2_digest, Felt::from_u8(7), join1_hash);
     assert_eq!(join1_digest, join1_hash);
@@ -471,31 +465,34 @@ fn hash_memoization_basic_blocks_check() {
     let bb2_start = bb2_addr.as_canonical_u64() as usize - 1;
     check_memoized_trace(&trace, bb1_start..bb1_start + 4, bb2_start..bb2_start + 4);
 
-    // Verify perm multiplicities: BB1's 2 perm states should each have multiplicity 2
-    // (original from BB1 + memoized from BB2). The loop body's perm state and the two
-    // join perm states should each have multiplicity 1.
+    // Verify compression multiplicities: BB1's 2 compression states should each have
+    // multiplicity 2 (original from BB1 + memoized from BB2). The loop body's compression
+    // state and the two join compression states should each have multiplicity 1.
     let controller_rows: usize = 14; // 4 + 2 + 2 + 4 + 2
     let controller_padded_len = controller_len(controller_rows);
 
-    // Count unique perm states: BB1 has 2 unique states (2 batches), loop body has 1,
+    // Count unique compression states: BB1 has 2 unique states (2 batches), loop body has 1,
     // join2 has 1, join1 has 1 = 5 unique states total (unless some coincide, which is
     // astronomically unlikely with random groups).
     // BB2 is memoized so its 2 states are the same as BB1's.
-    // Total perm cycles: at most 5 (could be less if join states happen to match).
+    // Total compression cycles: at most 5 (could be less if join states happen to match).
 
     // Verify that the appended cycles have correct multiplicities.
-    let perm_start = controller_padded_len;
+    let compression_start = controller_padded_len;
     let total_len = trace[0].len();
-    let num_perm_cycles = (total_len - perm_start) / HASH_CYCLE_LEN;
+    let num_compression_cycles = (total_len - compression_start) / HASH_CYCLE_LEN;
 
-    // We should have at least 5 perm cycles (2 from BB + 1 loop + 2 joins)
-    assert!(num_perm_cycles >= 5, "expected at least 5 perm cycles, got {num_perm_cycles}");
+    // We should have at least 5 compression cycles (2 from BB + 1 loop + 2 joins)
+    assert!(
+        num_compression_cycles >= 5,
+        "expected at least 5 compression cycles, got {num_compression_cycles}"
+    );
 
-    // Count how many perm cycles have multiplicity 2 vs 1
+    // Count how many compression cycles have multiplicity 2 vs 1
     let mut mult_2_count = 0;
     let mut mult_1_count = 0;
-    for i in 0..num_perm_cycles {
-        let cycle_start = perm_start + i * HASH_CYCLE_LEN;
+    for i in 0..num_compression_cycles {
+        let cycle_start = compression_start + i * HASH_CYCLE_LEN;
         let mult = compression_multiplicity(&trace, cycle_start);
         if mult == Felt::from_u8(2) {
             mult_2_count += 1;
@@ -504,10 +501,13 @@ fn hash_memoization_basic_blocks_check() {
         }
     }
 
-    // BB1's 2 perm states should have multiplicity 2 (from BB1 + BB2 memoized)
-    assert_eq!(mult_2_count, 2, "expected 2 perm cycles with multiplicity 2 (BB1's states)");
+    // BB1's 2 compression states should have multiplicity 2 (from BB1 + BB2 memoized)
+    assert_eq!(
+        mult_2_count, 2,
+        "expected 2 compression cycles with multiplicity 2 (BB1's states)"
+    );
     // The remaining states (loop body, join2, join1) should have multiplicity 1
-    assert_eq!(mult_1_count, 3, "expected 3 perm cycles with multiplicity 1");
+    assert_eq!(mult_1_count, 3, "expected 3 compression cycles with multiplicity 1");
 }
 
 // HELPER FUNCTIONS
@@ -515,11 +515,11 @@ fn hash_memoization_basic_blocks_check() {
 
 /// Builds a hasher test view with controller rows followed by standalone compression blocks.
 fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
-    let (controller_len, perm_len) = hasher.region_lengths();
-    let trace_len = controller_len + perm_len;
+    let (controller_len, compression_len) = hasher.region_lengths();
+    let trace_len = controller_len + compression_len;
     let mut band = Felt::zero_vec(TEST_TRACE_WIDTH * trace_len);
     let mut controller_trace = Felt::zero_vec(TRACE_WIDTH * controller_len);
-    let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * perm_len);
+    let mut blakeg_trace = Felt::zero_vec(NUM_BLAKEG_COMPRESSION_COLS * compression_len);
 
     {
         let mut fragment =
@@ -533,7 +533,7 @@ fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
         band[dst..dst + TRACE_WIDTH].copy_from_slice(&controller_trace[src..src + TRACE_WIDTH]);
     }
 
-    for row in 0..perm_len {
+    for row in 0..compression_len {
         let dst = (controller_len + row) * TEST_TRACE_WIDTH;
         let src = row * NUM_BLAKEG_COMPRESSION_COLS;
         band[dst..dst + NUM_BLAKEG_COMPRESSION_COLS]
@@ -671,7 +671,7 @@ fn check_compression_block(
 ) {
     assert_eq!(compression_multiplicity(trace, start_row), expected_multiplicity);
     assert_eq!(compression_input_state(trace, start_row), *init_state);
-    assert_eq!(compression_output_state(trace, start_row), apply_permutation(*init_state));
+    assert_eq!(compression_output_state(trace, start_row), compress_state(*init_state));
 }
 
 fn compression_multiplicity(trace: &[Vec<Felt>], start_row: usize) -> Felt {
@@ -680,15 +680,22 @@ fn compression_multiplicity(trace: &[Vec<Felt>], start_row: usize) -> Felt {
 }
 
 fn compression_input_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState {
-    core::array::from_fn(|i| trace[i][start_row + super::blakeg_trace::IFACE_INPUT_ROW])
+    let row = start_row + super::blakeg_trace::IFACE_INPUT_ROW;
+    core::array::from_fn(|i| {
+        if i < RATE_LEN {
+            trace[IFACE_R_BASE_COL + i][row]
+        } else {
+            trace[IFACE_C_BASE_COL + i - RATE_LEN][row]
+        }
+    })
 }
 
 fn compression_output_state(trace: &[Vec<Felt>], start_row: usize) -> HasherState {
     core::array::from_fn(|i| trace[i][start_row + super::blakeg_trace::IFACE_OUTPUT_ROW])
 }
 
-fn apply_permutation(mut state: HasherState) -> HasherState {
-    hasher::apply_permutation(&mut state);
+fn compress_state(mut state: HasherState) -> HasherState {
+    hasher::compress_state(&mut state);
     state
 }
 
@@ -708,7 +715,7 @@ fn compute_path_root(value: Digest, path: &MerklePath, mut index: u64) -> Digest
             1 => init_state_from_words(&sibling, &root),
             _ => unreachable!(),
         };
-        root = get_digest(&apply_permutation(state));
+        root = get_digest(&compress_state(state));
         index >>= 1;
     }
     root
@@ -810,11 +817,11 @@ fn compute_basic_block_hash(batches: &[OpBatch]) -> Digest {
     assert!(!batches.is_empty());
 
     let mut state = init_state(batches[0].groups(), num_basic_block_hash_groups(batches) as u32);
-    hasher::apply_permutation(&mut state);
+    hasher::compress_state(&mut state);
 
     for batch in batches.iter().skip(1) {
         absorb_into_state(&mut state, batch.groups());
-        hasher::apply_permutation(&mut state);
+        hasher::compress_state(&mut state);
     }
 
     get_digest(&state)

@@ -1,15 +1,35 @@
 use miden_utils_testing::{
     TRUNCATE_STACK_PROC, Word, build_op_test, build_test,
-    crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
+    crypto::{Eidos, MerkleStore, MerkleTree, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
 
 #[test]
-fn hperm() {
-    let asm_op = "hperm";
+fn bcompress() {
+    let asm_op = "bcompress";
     let pub_inputs = rand_vector::<u64>(8);
 
     build_op_test!(asm_op, &pub_inputs).check_constraints();
+}
+
+#[test]
+fn bcompress_accepts_unmasked_input_cv() {
+    let stack_inputs = [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        0x8000_0000_0000_0001,
+        0x8000_0001_0000_0002,
+        0x8000_0002_0000_0003,
+        0x8000_0003_0000_0004,
+    ];
+
+    build_op_test!("bcompress", &stack_inputs).check_constraints();
 }
 
 #[test]
@@ -82,7 +102,7 @@ fn mtree_merge() {
     let tree_b = MerkleTree::new(leaves_b).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
-    let root_merged = Poseidon2::merge(&[root_a, root_b]);
+    let root_merged = Eidos::merge(&[root_a, root_b]);
     let mut store = MerkleStore::default();
     store.extend(tree_a.inner_nodes());
     store.extend(tree_b.inner_nodes());

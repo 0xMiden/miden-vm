@@ -229,7 +229,7 @@ impl ChipletsAir {
 
 /// Standalone BlakeG compression AIR.
 ///
-/// Executes hasher-compute requests emitted through the perm-link bus.
+/// Executes hasher-compute requests emitted through the compression-link bus.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct BlakeGCompressionAir;
 

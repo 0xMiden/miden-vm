@@ -210,7 +210,7 @@ _Insert into Advice Map:_
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
 | `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
 | `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
-| `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
+| `adv.insert_bcompress` | `[R0, R1, C, ...]`  | `[R0, R1, C, ...]`   | `K <- BlakeG(C, R0 \|\| R1)`. `advice_map[K] <- [R0,R1]`.                                  |
 
 ### Random Access Memory
 
@@ -243,20 +243,20 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ to
 
 ## Cryptographic Operations
 
-Common cryptographic operations, including hashing and Merkle tree manipulations using Poseidon2.
+Common cryptographic operations, including hashing and Merkle tree manipulations using Eidos.
 
 ### Hashing and Merkle Trees
 
 | Instruction    | Stack Input          | Stack Output     | Cycles | Notes                                                                                                                                                                                                 |
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hash`         | `[A, ...]`           | `[B, ...]`       | 19     | `B ← hash(A)`. 1-to-1 Poseidon2 hash.                                                                                                                                                    |
-| `hperm`        | `[R0, R1, C, ...]`   | `[R0', R1', C', ...]` | 1      | Poseidon2 permutation. `R0,R1`=rate (R0 on top), `C`=capacity, `R0'`=digest.                                                                                                   |
-| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Poseidon2 hash.                                                                                                                                                  |
+| `hash`         | `[A, ...]`           | `[B, ...]`       | 19     | `B <- hash(A)`. 1-to-1 Eidos hash.                                                                                                                                                    |
+| `bcompress`    | `[R0, R1, C, ...]`   | `[R0, R1, C', ...]` | 1      | BlakeG compression. `R0,R1` are the block words and `C` is the chaining word.                                                                                                   |
+| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C <- hash(A,B)`. 2-to-1 Eidos hash.                                                                                                                                                  |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
-| `crypto_stream` | `[rate(8), cap(4), src_ptr, dst_ptr, ...]` | `[ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]` | 1 | Poseidon2-sponge keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces rate on stack with ciphertext, preserves capacity, increments both pointers by 8. Primitive used by `miden::core::crypto::aead`. |
+| `crypto_stream` | `[rate(8), cap(4), src_ptr, dst_ptr, ...]` | `[ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]` | 1 | AEAD keystream step against memory: loads two words from `src_ptr`, adds the rate (top 8 stack elements) element-wise to produce ciphertext, writes ciphertext to `dst_ptr`, replaces rate on stack with ciphertext, preserves capacity, increments both pointers by 8. Primitive used by `miden::core::crypto::aead`. |
 
 ## Flow Control Operations
 
@@ -327,7 +327,7 @@ Instructions for communicating with the host through events.
 | ------------------ | ----------------- | ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Note that event IDs in the range `0..256` are reserved for system events.     |
-| `log_precompile`   | `[_, STMNT, _, ...]` | `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds a precomputed precompile statement into the rolling transcript. Reads the per-call statement word `STMNT` from `stack[4..8]` (the HPERM rate1 slots), applies the Poseidon2 permutation `Permute(STATE_PREV, STMNT, ZERO)` (with `STATE_PREV` supplied non-deterministically via helper registers), and writes the permutation output back via the identity lane→slot mapping (matching HPERM): `STATE_NEW` (= output `rate0`) at `stack[0..4]`, then `rate1` and `capacity` halves at `stack[4..8]` and `stack[8..12]`. Callers normally drop all three words immediately. See "Precompile flow" for initialization details. |
+| `log_precompile`   | `[_, STMNT, _, ...]` | `[STATE_NEW, OUT_RATE1, OUT_CAP, ...]` | 1      | Folds a precomputed precompile statement into the rolling transcript. Reads the per-call statement word `STMNT` from `stack[4..8]`, applies BlakeG compression with the previous transcript state as chaining word, and writes the compression output back to the top three words. Callers normally drop all three words immediately. See "Precompile flow" for initialization details. |
 
 ## Debugging Operations
 

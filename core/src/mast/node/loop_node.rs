@@ -93,7 +93,7 @@ impl MastNodeExt for LoopNode {
     /// the domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_crypto::{Word, hash::eidos::Eidos as Hasher};
     /// # let body_digest = Word::default();
     /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
     /// ```

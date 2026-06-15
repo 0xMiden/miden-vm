@@ -1,8 +1,8 @@
-#! AEAD (Authenticated Encryption with Associated Data) implementation using Poseidon2 hash.
+#! AEAD (Authenticated Encryption with Associated Data) implementation using the VM-native hash.
 #!
 #! This implementation uses the `crypto_stream` instruction for optimal performance.
 #! The scheme follows the MonkeySpongeWrap construction:
-#! 1. Initialize Poseidon2 sponge state with key and nonce
+#! 1. Initialize the AEAD state with key and nonce
 #! 2. Absorb associated data padding (currently [1,0,0,0,0,0,0,0])
 #! 3. Process plaintext blocks using `crypto_stream` + `bcompress`
 #! 4. Generate authentication tag from final sponge state
@@ -10,7 +10,7 @@
 #! Note: Associated data (AD) is currently NOT supported. Only empty AD is handled,
 #! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 
 # Constants
 # ================================================================================================
@@ -22,8 +22,8 @@ const AEAD_DECRYPT_EVENT=event("miden::core::crypto::aead::decrypt")
 
 #! Initializes the AEAD state with a key and nonce.
 #!
-#! This procedure sets up the initial Poseidon2 state for AEAD operations. The key and nonce
-#! are absorbed into the capacity and rate portions of the sponge.
+#! This procedure sets up the initial AEAD state. The key and nonce are absorbed into the
+#! capacity and rate portions of the state.
 #!
 #! Input: [key(4), nonce(4), ...]
 #! Output: [rate(8), capacity(4), ...]
@@ -43,7 +43,7 @@ proc init_state
     movdnw.2
     # => [key(4), nonce(4), cap(4), ...]
 
-    # Apply initial permutation to mix key and nonce
+    # Compress once to mix key and nonce.
     bcompress
     # => [rate(8), capacity(4), ...]
 end
@@ -168,7 +168,7 @@ pub proc encrypt
         movdn.14
         # => [rate(8), capacity(4), src_ptr, dst_ptr, num_blocks-1, ...]
 
-        # Apply permutation to refresh keystream
+        # Compress once to refresh the keystream.
         bcompress
         # => [rate'(8), capacity'(4), src_ptr, dst_ptr, num_blocks-1, ...]
 
@@ -185,7 +185,7 @@ pub proc encrypt
     drop
     # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
-    # apply permutation to refresh keystream for the final padded block
+    # Compress once to refresh the keystream for the final padded block.
     bcompress
     # => [rate'(8), capacity'(4), src_ptr_final, dst_ptr_final, ...]
 
@@ -208,12 +208,12 @@ pub proc encrypt
     # => [encrypted_padding(8), capacity'(4), src_ptr_final, dst_ptr_final, ...]
 
     # Generate authentication tag from current sponge state
-    # Apply final permutation
+    # Compress once to derive the authentication tag.
     bcompress
     # => [rate_final(8), capacity_final(4), src_ptr_final, dst_ptr_final, ...]
 
-    # Extract the authentication tag (first word of rate) using poseidon2::squeeze_digest
-    exec.poseidon2::squeeze_digest
+    # Extract the authentication tag from the final chaining word.
+    exec.eidos::digest
     # => [tag(4), src_ptr_final, dst_ptr_final, ...]
 
     # Clean up stack - remove the two pointers
@@ -417,7 +417,7 @@ pub proc decrypt
     bcompress
     # => [rate_final(8), capacity_final(4), dst_ptr_final, src_ptr_final, tag_ptr, ...]
 
-    exec.poseidon2::squeeze_digest
+    exec.eidos::digest
     # => [computed_tag(4), dst_ptr_final, src_ptr_final, tag_ptr, ...]
 
     movup.4 drop movup.4 drop

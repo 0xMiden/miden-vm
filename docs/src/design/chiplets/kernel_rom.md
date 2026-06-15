@@ -29,8 +29,8 @@ Column meanings:
 ## Main-trace constraints
 
 The kernel ROM chiplet has **no main-trace shape constraints** under the all-LogUp layout.
-Earlier designs carried a binary "first-row-of-block" selector, a digest-contiguity rule, and an entry-row anchor to shape the trace for a permutation argument.
-LogUp replaces those with multiset equality under a random challenge $\alpha$, so any prover assignment to $(m, r_0, \ldots, r_3)$ that balances the chiplets bus is sound; no extra shape constraints are required.
+The chiplets bus relation provides the required binding: any prover assignment to $(m, r_0, \ldots, r_3)$ must balance against the public kernel digest list and the decoder's `SYSCALL` requests.
+No additional row-shape constraints are required.
 
 ## Chiplets bus constraints
 

@@ -111,7 +111,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_poseidon2};
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_eidos};
     }
 }
 

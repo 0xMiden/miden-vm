@@ -4,7 +4,7 @@ use miden_processor::{
     trace::RowIndex,
 };
 use miden_utils_testing::{
-    AdviceStackBuilder, build_expected_hash, build_expected_perm, felt_slice_to_ints,
+    AdviceStackBuilder, build_expected_bcompress, build_expected_hash, felt_slice_to_ints,
 };
 
 #[test]
@@ -234,8 +234,22 @@ fn test_pipe_double_words_to_memory() {
 
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
-    let mut expected_stack =
-        felt_slice_to_ints(&build_expected_perm(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]));
+    let compressed = build_expected_bcompress(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]);
+    let expected_state = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+        compressed[8],
+        compressed[9],
+        compressed[10],
+        compressed[11],
+    ];
+    let mut expected_stack = felt_slice_to_ints(&expected_state);
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,
@@ -250,14 +264,14 @@ fn test_pipe_words_to_memory() {
     let one_word = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::poseidon2
+        use miden::core::crypto::hashes::eidos
 
         begin
             push.{mem_addr} # target address
             push.1  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.poseidon2::squeeze_digest
+            exec.eidos::digest
 
             # truncate stack
             swapdw dropw dropw
@@ -277,14 +291,14 @@ fn test_pipe_words_to_memory() {
     let three_words = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::poseidon2
+        use miden::core::crypto::hashes::eidos
 
         begin
             push.{mem_addr} # target address
             push.3  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.poseidon2::squeeze_digest
+            exec.eidos::digest
 
             # truncate stack
             swapdw dropw dropw

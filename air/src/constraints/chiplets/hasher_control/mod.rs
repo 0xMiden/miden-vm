@@ -3,14 +3,14 @@
 //! The hasher uses a dispatch/compute split architecture: the **controller** (this module)
 //! records compression requests as compact (input, output) row pairs and responds to the
 //! chiplets bus; `BlakeGCompressionAir` executes the actual cycles.
-//! A LogUp perm-link bus binds the two regions.
+//! A LogUp compression-link bus binds the two regions.
 //!
 //! The controller is active when `s_ctrl = chiplets[0] = 1`, which covers ALL controller
 //! rows (input, output, and padding).
 //!
 //! ## Sub-modules
 //!
-//! - [`flags`]: Pure row-kind [`ControllerFlags`](flags::ControllerFlags) — compositions of `(s0,
+//! - [`flags`]: Pure row-kind [`ControllerFlags`](flags::ControllerFlags): compositions of `(s0,
 //!   s1, s2)` on current and next rows. Contains no chiplet-level scope; combined with
 //!   [`ChipletFlags`] at each call site.
 //!
@@ -18,21 +18,21 @@
 //!
 //! Constraints are organized in the order an operation walks through them:
 //!
-//! 1. **Trace skeleton** — first-row boundary, selector booleanity, adjacency/stability rules that
+//! 1. **Trace skeleton** - first-row boundary, selector booleanity, adjacency/stability rules that
 //!    don't depend on the operation kind. These are the trace-layout invariants.
-//! 2. **Operation start** — input is_boundary booleanity and the input→output adjacency law that
+//! 2. **Operation start** - input is_boundary booleanity and the input -> output adjacency law that
 //!    every operation hits on its first row.
-//! 3. **Hash-state operations** (LINEAR_HASH / 2-to-1 / BCOMPRESS) — input state
+//! 3. **Hash-state operations** (LINEAR_HASH / 2-to-1 / BCOMPRESS) - input state
 //!    pinning plus the respan chaining-value preservation that glues multi-batch spans.
-//! 4. **Merkle operations** (MP / MV / MU) — per-level input state, cross-level transitions (index
+//! 4. **Merkle operations** (MP / MV / MU) - per-level input state, cross-level transitions (index
 //!    continuity, direction bit propagation, digest routing), and the MRUPDATE domain-separator
 //!    progression.
-//! 5. **Operation end** — output is_boundary booleanity and the HOUT / SOUT return-value
+//! 5. **Operation end** - output is_boundary booleanity and the HOUT / SOUT return-value
 //!    constraints.
 //!
 //! Every constraint takes both a [`ChipletFlags`] (scope: active / transition) and a
 //! [`ControllerFlags`] (row-kind: input/output/...), combined by multiplication at each
-//! gate site. With one exception — the sub-selector booleanity assertion below — no raw
+//! gate site. With one exception - the sub-selector booleanity assertion below - no raw
 //! `cols.s0 / cols.s1 / cols.s2` columns are referenced in constraint gates.
 
 pub mod flags;
@@ -93,7 +93,7 @@ pub fn enforce_controller_constraints<AB>(
     // the active chiplet and are unconstrained here.
     //
     // NOTE: these are the only direct references to the raw `s0/s1/s2` columns
-    // in the controller constraint body — booleanity is inherent to the columns
+    // in the controller constraint body: booleanity is inherent to the columns
     // themselves and cannot be expressed through a composed row-kind flag.
     builder
         .when(chiplet.is_active.clone())
@@ -102,13 +102,13 @@ pub fn enforce_controller_constraints<AB>(
     // --- is_boundary booleanity on all controller rows ---
     // `is_boundary = 1` marks the first row of a new operation (linear-hash start or Merkle path
     // level 0); `is_boundary = 0` elsewhere. Hoisted to
-    // `when(is_active)` because input ∪ output ∪ padding covers every ctrl row
-    // — padding forces it to 0 (§1 below) and input/output use it as a bit.
+    // `when(is_active)` because input, output, and padding cover every ctrl row:
+    // padding forces it to 0 (section 1 below) and input/output use it as a bit.
     builder.when(chiplet.is_active.clone()).assert_bool(cols.is_boundary);
 
     // --- Output non-adjacency ---
     // An output row cannot be followed by another output row. Combined with the
-    // input→output adjacency law (§2 below), this guarantees strictly alternating
+    // input -> output adjacency law (section 2 below), this guarantees strictly alternating
     // (input, output) pairs for every operation.
     //
     // Gated on `is_transition` so `cols_next.*` columns are read only when the
@@ -152,7 +152,7 @@ pub fn enforce_controller_constraints<AB>(
     // --- No input row at the controller boundary ---
     // An input row cannot be the last controller row. Without this, the
     // adjacency rule below (which relies on `s_ctrl'` so that `s0'/s1'` are
-    // binary on the next row) would have a hole at the ctrl→perm transition.
+    // binary on the next row) would not apply at the end of the controller region.
     // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly on that boundary.
     builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
 
@@ -167,8 +167,8 @@ pub fn enforce_controller_constraints<AB>(
         .when(rows.is_output.clone())
         .assert_one(cols.is_boundary);
 
-    // --- Input→output adjacency on ctrl→ctrl transitions ---
-    // On a ctrl→ctrl transition from an input row, the next row must be an
+    // --- Input -> output adjacency on controller transitions ---
+    // On a controller-to-controller transition from an input row, the next row must be an
     // output row. `is_transition` carries the `s_ctrl'` factor, so on this
     // gate `cols_next.s0/s1` are boolean and `(1 - s0')(1 - s1') = 1` really
     // does force both to 0. Combined with the `is_last` guard above, every
@@ -178,13 +178,30 @@ pub fn enforce_controller_constraints<AB>(
         .when(rows.is_input.clone())
         .assert_one(rows.is_output_next.clone());
 
+    // BlakeG preserves the 8-felt block and updates only the chaining value. The compression-link
+    // lookup binds `[block, cv_in, cv_out]`; this local constraint binds the controller output
+    // row's block lanes to the input row.
+    {
+        let gate =
+            chiplet.is_transition.clone() * rows.is_input.clone() * rows.is_output_next.clone();
+        let builder = &mut builder.when(gate);
+        let rate0 = cols.rate0();
+        let rate1 = cols.rate1();
+        let rate0_next = cols_next.rate0();
+        let rate1_next = cols_next.rate1();
+        for i in 0..4 {
+            builder.assert_eq(rate0_next[i], rate0[i]);
+            builder.assert_eq(rate1_next[i], rate1[i]);
+        }
+    }
+
     // =====================================================================
     // 3. HASH-STATE OPERATIONS (LINEAR_HASH / 2-to-1 / BCOMPRESS)
     //
     // Hash-state operations process block data in possibly multi-batch spans.
     // The chaining-value lanes are set on the first input (is_boundary = 1) and carried through
     // RESPAN continuations by the preservation constraint below.
-    // These operations have no tree position. One-shot full-state returns preserve
+    // These operations have no tree position. Their input and response rows keep
     // `direction_bit = 0`; RESPAN continuations keep it zero as well.
     // =====================================================================
 
@@ -211,7 +228,7 @@ pub fn enforce_controller_constraints<AB>(
         .when(Into::<AB::Expr>::into(cols.is_boundary).not())
         .assert_zero(cols.direction_bit);
 
-    // Preserve the reserved zero bit from one-shot hash input to its full-state return row.
+    // Preserve the reserved zero bit from one-shot hash input to its response row.
     builder
         .when(chiplet.is_transition.clone())
         .when(rows.is_hash_input.clone())
@@ -306,7 +323,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Direction bit forward propagation + digest routing ---
     //
-    // **Forward propagation.** On non-final output → next-input Merkle boundaries,
+    // **Forward propagation.** On non-final output -> next-input Merkle boundaries,
     // the `direction_bit` on the output must equal the `direction_bit` on the next
     // input row. This makes `b_{i+1}` (the next step's direction bit) available on
     // the output row so the digest can be routed to the correct rate half.
@@ -350,7 +367,7 @@ pub fn enforce_controller_constraints<AB>(
     }
 
     // --- MRUPDATE domain separator (mrupdate_id progression) ---
-    // On controller→controller transitions:
+    // On controller-to-controller transitions:
     //   mrupdate_id_next = mrupdate_id + is_mv_input_next * is_boundary_next
     // i.e. the domain separator ticks forward exactly when the next row is an
     // MV boundary input (the start of an old-path MRUPDATE leg). This separates

@@ -1,6 +1,38 @@
-#! BlakeG compression helpers used by Eidos.
+# ===== EIDOS HASH PROCEDURES ===================================================================
+
+#! Eidos hash helpers built on the VM-native BlakeG compression operation.
 #!
-#! State layout is `[BLOCK_LO, BLOCK_HI, CV]`, three words on the stack.
+#! Procedures which operate on a three-word state use the layout `[R0, R1, C]`.
+#! After `bcompress`, `C` contains the new digest.
+
+const EIDOS_INIT_CV_0 = 4280581858871862887
+const EIDOS_INIT_CV_1 = 2688637133034287986
+const EIDOS_INIT_CV_2 = 1947077364412317696
+const EIDOS_INIT_CV_3_BASE = 6620516959492505600
+
+#! Constructs `Eidos::init_chaining_word(0, n)`.
+#!
+#! Input:  [n, ...]
+#! Output: [CV, ...]
+pub proc init_chaining_word
+    push.EIDOS_INIT_CV_3_BASE add
+    push.EIDOS_INIT_CV_2.EIDOS_INIT_CV_1.EIDOS_INIT_CV_0
+end
+
+#! Constructs `Eidos::init_chaining_word(domain, n)`.
+#!
+#! Input:  [n, domain, ...]
+#! Output: [CV, ...]
+pub proc init_chaining_word_in_domain
+    push.EIDOS_INIT_CV_3_BASE add
+    # => [cv3, domain, ...]
+
+    swap push.EIDOS_INIT_CV_2 add
+    # => [cv2, cv3, ...]
+
+    push.EIDOS_INIT_CV_1.EIDOS_INIT_CV_0
+    # => [CV, ...]
+end
 
 #! Performs one BlakeG compression.
 #!
@@ -17,4 +49,457 @@ end
 pub proc digest
     dropw
     dropw
+end
+
+#! Prepares the top of the stack with the hasher initial state.
+#!
+#! This procedure does not handle padding, so the caller must
+#! consume an amount of data which is a multiple of the rate (2 words).
+#!
+#! Input: []
+#! Output: [R0, R1, C, ...]
+#!
+#! Where R0, R1, C are three zero words representing the initial VM hasher state
+#! (R0 on top of stack).
+#!
+#! Cycles: 12
+pub proc init_no_padding
+    padw padw padw
+end
+
+#! Copies the digest to the top of the stack.
+#!
+#! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
+#! execution.
+#!
+#! Input: [R0, R1, C, ...]
+#! Output: [DIGEST, R0, R1, C, ...]
+#!
+#! Where:
+#! - `R0` is the first rate word (positions 0-3, on top of stack).
+#! - `R1` is the second rate word (positions 4-7).
+#! - `C` is the capacity word / digest (positions 8-11).
+pub proc copy_digest
+    dupw.2
+end
+
+#! Hashes the memory `start_addr` to `end_addr` given a three-word VM hasher state.
+#!
+#! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
+#! will enter an infinite loop.
+#!
+#! Input: [R0, R1, C, start_addr, end_addr, ...]
+#! Output: [R0', R1', C', end_addr, end_addr ...]
+#!
+#! Where:
+#! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
+#! - `R1` is the second rate word (positions 4-7).
+#! - `C` is the capacity word (positions 8-11).
+#!
+#! Cycles: 4 + 3 * words, where `words` is `end_addr - start_addr`.
+pub proc absorb_double_words_from_memory
+    dup.13 dup.13 neq  # (4 cycles )
+    while.true
+        mem_stream exec.compress # (2 cycles)
+        dup.13 dup.13 neq  # (4 cycles )
+    end
+end
+
+#! Hashes an aligned range of double words.
+#!
+#! The range is committed using the same Eidos framing as `hash_words`: the input length is bound
+#! into the initial chaining word. This helper is kept for callers whose data is naturally stored
+#! as 8-Felt records.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [HASH, ...]
+pub proc hash_double_words
+    # enforce `start_addr <= end_addr`
+    dup.1 dup.1 u32assert2
+    u32gte assert.err="start address should be less or equal to the end address"
+    # => [start_addr, end_addr, ...]
+
+    exec.hash_words
+end
+
+#! Hashes the word-aligned memory range `[start_addr, end_addr)` with a domain identifier.
+#!
+#! Requires `start_addr <= end_addr`, `end_addr` is not inclusive.
+#! Requires `start_addr` and `end_addr` to be word-aligned.
+#!
+#! Input: [domain, start_addr, end_addr, ...]
+#! Output: [H, ...]
+#!
+#! Cycles:
+#! - even words: 54 cycles + 3 * words
+#! - odd words: 66 cycles + 3 * words
+#! where `words` is `(end_addr - start_addr) / 4`.
+pub proc hash_words_with_domain
+    movdn.2
+    # => [start_addr, end_addr, domain, ...]
+
+    dup.1 dup.1 u32assert2 u32gte assert
+    # => [start_addr, end_addr, domain, ...]
+
+    dup.1 dup.1 sub
+    # => [num_elements, start_addr, end_addr, domain, ...]
+
+    movup.2 drop swap
+    # => [start_addr, num_elements, domain, ...]
+
+    exec.hash_elements_with_domain
+end
+
+#! Hashes the word-aligned memory range `[start_addr, end_addr)`.
+#!
+#! Equivalent to `hash_words_with_domain` with `domain = 0`.
+#!
+#! Requires `start_addr <= end_addr`, `end_addr` is not inclusive.
+#! Requires `start_addr` and `end_addr` to be word-aligned.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [H, ...]
+#!
+#! Cycles:
+#! - even words: 55 cycles + 3 * words
+#! - odd words: 67 cycles + 3 * words
+#! where `words` is `(end_addr - start_addr) / 4`.
+pub proc hash_words
+    push.0
+    # => [domain=0, start_addr, end_addr, ...]
+
+    exec.hash_words_with_domain
+end
+
+#! Initializes the hasher state required for the `hash_elements_with_state` procedure.
+#!
+#! Inputs:  [ptr, num_elements, domain]
+#! Outputs: [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+#!
+#! Where:
+#! - ptr is the memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - R0, R1, C are three words representing the hasher state (R0 on top).
+#! - end_pairs_addr is the memory address at which the pairs of words end.
+#! - num_elements%8 is the number of elements that did not fit into word pairs and should be
+#!   hashed separately.
+pub proc prepare_hasher_state
+    # move number of inputs to the top of the stack
+    swap
+    # => [num_elements, ptr, domain]
+
+    dup
+    # => [num_elements, num_elements, ptr, domain]
+
+    # get the number of double words
+    u32divmod.8
+    swap
+    # => [num_elements/8, num_elements%8, num_elements, ptr, domain]
+
+    # get the end address for absorb_double_words_from_memory procedure (end address for pairs of
+    # words)
+    mul.8 dup.3 add movup.3
+    # => [ptr, end_pairs_addr, num_elements%8, num_elements, domain]
+
+    movup.4 movup.4 exec.init_chaining_word_in_domain
+    # => [C, ptr, end_pairs_addr, num_elements%8]
+
+    # prepare the three-word VM hasher state
+    padw padw
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+end
+
+proc prepare_padded_hasher_state
+    # move the unpadded length to the top of the stack
+    swap
+    # => [num_elements, ptr, padded_len]
+
+    dup
+    # => [num_elements, num_elements, ptr, padded_len]
+
+    u32divmod.8
+    swap
+    # => [num_elements/8, num_elements%8, num_elements, ptr, padded_len]
+
+    mul.8 dup.3 add movup.3
+    # => [ptr, end_pairs_addr, num_elements%8, num_elements, padded_len]
+
+    movup.4 movup.4 drop
+    # => [padded_len, ptr, end_pairs_addr, num_elements%8]
+
+    exec.init_chaining_word
+    # => [C, ptr, end_pairs_addr, num_elements%8]
+
+    padw padw
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+end
+
+#! Computes hash of Felt values starting at the specified memory address using the provided hasher
+#! state.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
+#! procedure.
+#!
+#! Inputs:  [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - R0, R1, C are three words representing the hasher state (R0 on top).
+#! - end_pairs_addr is the memory address at which the pairs of words end.
+#! - num_elements%8 is the number of elements that did not fit into word pairs and should be
+#!   hashed separately.
+#! - HASH is the resulting hash of the provided memory values.
+pub proc hash_elements_with_state
+    # hash every pair of words
+    exec.absorb_double_words_from_memory
+    # => [A, B, C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
+
+    # hash remaining input values if there are any left
+    # if num_elements%8 is ZERO and there are no elements to hash
+    dup.14 eq.0
+    if.true
+        # clean the stack
+        exec.digest
+        swapw drop drop drop movdn.4
+        # => [HASH]
+    else
+        # load the remaining double word
+        mem_stream
+        # => [A, B, C', ptr'+2, end_pairs_addr, num_elements%8]
+
+        # clean the stack
+        movup.12 drop movup.12 drop
+        # => [A, B, C', num_elements%8]
+
+        # get the number of elements we need to drop
+        # notice that drop_counter could be any number from 1 to 7
+        push.8 movup.13 sub movdn.12
+        # => [A, B, C', drop_counter]
+        # => [a0, a1, a2, a3, b0, b1, b2, b3, C', drop_counter]
+
+        ### 0th value ########################################################
+
+        # we need to drop the last value anyway, since number of values is not divisible by 8
+        # push the padding 0 on to the stack
+        movup.7 drop push.0
+        # => [0, a0, a1, a2, a3, b0, b1, b2, C', drop_counter]
+
+        ### 1st value ########################################################
+
+        # bring b2 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+
+        # push latch variable onto the stack; this will be the control for the cdrop instruction
+        push.0
+        # => [latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+
+        # get the flag whether the drop counter is equal 1
+        dup.14 eq.1
+        # => [drop_counter==1, latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+
+        # update the latch: if drop_counter == 1, latch will become 1
+        or
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
+
+        # save the latch value
+        dup movdn.14
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
+
+        # if latch == 1, keep 0; otherwise keep b2
+        cdrop
+        # => [b2_or_0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
+
+        ### 2nd value ########################################################
+
+        # bring b1 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+
+        # update latch: if drop_counter == 2, latch becomes 1
+        movup.13 dup.14 eq.2 or
+        dup movdn.14
+        # => [latch', b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+
+        cdrop
+        # => [b1_or_0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+
+        ### 3rd value ########################################################
+
+        # bring b0 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b0, 0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
+
+        movup.13 dup.14 eq.3 or
+        dup movdn.14
+        cdrop
+        # => [b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
+
+        ### 4th value ########################################################
+
+        # bring a3 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a3, 0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
+
+        movup.13 dup.14 eq.4 or
+        dup movdn.14
+        cdrop
+        # => [a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
+
+        ### 5th value ########################################################
+
+        # bring a2 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a2, 0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
+
+        movup.13 dup.14 eq.5 or
+        dup movdn.14
+        cdrop
+        # => [a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
+
+        ### 6th value ########################################################
+
+        # bring a1 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a1, 0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C', latch', drop_counter]
+
+        movup.13 movup.14 eq.6 or
+        cdrop
+        # => [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
+        # Notice that we don't need to check a0: entering the else branch means that
+        # we have number of elements not divisible by 8, so we will have at least one
+        # element to hash here (which is a0).
+
+        # Reorder to get [A, B, C'] format for compression.
+        # Current: [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
+        # Need:    [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
+        movup.7
+        # => [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
+
+        exec.compress
+        # => [A', B', C']
+
+        exec.digest
+        # => [HASH]
+    end
+end
+
+#! Computes hash of Felt values starting at the specified memory address.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values with `compress`
+#! procedure.
+#!
+#! Inputs:  [ptr, num_elements, domain]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - domain is the domain identifier mixed into the initial chaining word.
+#! - HASH is the resulting hash of the provided memory values.
+#!
+#! Cycles:
+#! - If number of elements divides by 8: 52 cycles + 3 * words
+#! - Else: 185 cycles + 3 * words
+#! where `words` is the number of quads of input values.
+pub proc hash_elements_with_domain
+    dup.1 eq.0
+    if.true
+        drop drop
+        # => [domain, ...]
+
+        push.0 exec.init_chaining_word_in_domain
+        # => [C, ...]
+
+        padw padw
+        bcompress
+        exec.digest
+    else
+        exec.prepare_hasher_state
+        # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+
+        exec.hash_elements_with_state
+        # => [HASH]
+    end
+end
+
+pub proc hash_elements
+    push.0 movdn.2
+    # => [ptr, num_elements, domain=0]
+
+    exec.hash_elements_with_domain
+end
+
+#! Hashes Felt values after padding the logical input length to a full 8-Felt block.
+#!
+#! This is not a hasher-internal padding rule. It changes the committed stream from
+#! `elements[..num_elements]` to `elements[..padded_len]`, where
+#! `padded_len = ceil(num_elements / 8) * 8`. The padding zeros are synthesized by this helper;
+#! callers do not need to store them in memory.
+#!
+#! Inputs:  [ptr, num_elements]
+#! Outputs: [HASH]
+pub proc pad_and_hash_elements
+    dup.1 add.7 u32divmod.8 drop mul.8 movdn.2
+    # => [ptr, num_elements, padded_len]
+
+    exec.prepare_padded_hasher_state
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
+
+    exec.hash_elements_with_state
+end
+
+#! Computes the VM-native hash of a single word (256-bit input).
+#!
+#! Inputs:  [A]
+#! Outputs: [B]
+#!
+#! Where:
+#! - A is the word to be hashed.
+#! - B is the resulting hash.
+#!
+#! Cycles: 19
+pub proc hash
+    hash
+end
+
+#! Merges two words (256-bit digests) via the VM-native hash.
+#!
+#! Inputs:  [A, B]
+#! Outputs: [C]
+#!
+#! Where:
+#! - A and B are the words to be merged.
+#! - C is the resulting hash.
+#!
+#! Cycles: 16
+pub proc merge
+    hmerge
+end
+
+#! Merges two words (256-bit digests) via the VM-native hash with a domain identifier.
+#!
+#! Inputs:  [domain, A, B, ...]
+#! Outputs: [C, ...]
+#!
+#! Where:
+#! - A and B are the words to be merged (A corresponds to the first rate word).
+#! - C is `hash_elements_in_domain(A || B, domain)`.
+#!
+#! Cycles: 16
+pub proc merge_in_domain
+    movdn.8
+    # => [A, B, domain, ...]
+
+    movup.8 push.8 exec.init_chaining_word_in_domain movdnw.2
+    # => [A, B, CV, ...]
+
+    bcompress
+    exec.digest
 end

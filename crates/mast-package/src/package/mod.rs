@@ -26,7 +26,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Word,
     advice::AdviceMap,
-    crypto::hash::Poseidon2,
+    chiplets::hasher::Hasher as VmHasher,
     mast::{MastForest, MastNodeId},
     program::Kernel,
     serde::{ByteWriter, Deserializable, Serializable},
@@ -190,7 +190,7 @@ impl Package {
     pub fn content_digest(&self) -> Word {
         let mut bytes = Vec::new();
         self.write_content_digest_preimage(&mut bytes, None);
-        Poseidon2::hash(&bytes)
+        VmHasher::hash(&bytes)
     }
 
     fn write_content_digest_preimage<W: ByteWriter>(

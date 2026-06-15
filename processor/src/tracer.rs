@@ -134,14 +134,6 @@ pub trait Tracer {
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Records the result of a full-state hasher permutation.
-    fn record_hasher_permute(
-        &mut self,
-        _input_state: [Felt; STATE_WIDTH],
-        _output_state: [Felt; STATE_WIDTH],
-    ) {
-    }
-
     /// Records the result of a block-preserving BlakeG compression.
     ///
     /// Called by: `BCOMPRESS`, `LOG_PRECOMPILE`.

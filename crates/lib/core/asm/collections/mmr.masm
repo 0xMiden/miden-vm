@@ -1,5 +1,5 @@
 use miden::core::mem
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::math::u64
 
 #! Loads the leaf at the absolute `pos` in the MMR.
@@ -127,7 +127,6 @@ end
 #!  - mmr_ptr: the memory location where the MMR data will be written to,
 #!    starting with the MMR forest (its total leaves count) followed by its peaks.
 #!    The address is expected to be word-aligned.
-#!
 #! Cycles: 162 + 9 * extra_peak_pair cycles
 #!    where `extra_peak` is the number of peak pairs in addition to the first
 #!    16, i.e. `round_up((num_of_peaks - 16) / 2)`
@@ -151,32 +150,33 @@ pub proc unpack
   exec.num_peaks_to_message_size
   # => [state_size, HASH, mmr_ptr, ...]
 
-  # compute the end address including the padding data and forest (3 cycles)
-  dup.5 add add.4
-  # => [mmt_ptr_end, HASH, mmr_ptr, ...]
+  # Compute the peak range and initialize Eidos with the padded peak length.
+  dup
+  dup.6 add add.4
+  movup.6 add.4
+  movup.2 exec.eidos::init_chaining_word
+  # => [C, mmr_ptr+4, mmt_ptr_end, HASH, ...]
 
-  # update the mmr_ptr to account for the size (2 cycles)
-  movup.5 add.4
-  # => [mmr_ptr+4, mmt_ptr_end, HASH, ...]
+  padw padw
+  # => [R0, R1, C, mmr_ptr+4, mmt_ptr_end, HASH, ...]
 
-  # hash the first 16 words (28 cycles)
-  padw padw padw
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
-  adv_pipe exec.poseidon2::permute
+  # hash the first 16 words
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
+  adv_pipe exec.eidos::compress
   # => [R0, R1, C, mmr_ptr+68, mmt_ptr_end, HASH, ...]
 
-  # handle MMR with more than 16 elements (10 + 9 * words cycles)
+  # handle MMR with more than 16 elements
   exec.mem::pipe_double_words_to_memory
-  # => [R0, R1, C, mmr_ptr+17, HASH, ...]
+  # => [R0, R1, C, mmt_ptr_end, HASH, ...]
 
-  # drop anything but the digest (R1) (11 cycles)
-  exec.poseidon2::squeeze_digest movup.4 drop
+  # drop anything but the digest
+  exec.eidos::digest movup.4 drop
   # => [DIGEST, HASH, ...]
 
   # assert on the resulting hash (11 cycles)
@@ -205,13 +205,14 @@ pub proc pack
   dup.1 add.4 swap dup.1 add swap
   # => [peaks_start, peaks_end, mmr_ptr, ...]
 
-  # hash the memory contents (25 + 3 * num_peaks)
-  padw padw padw
-  exec.poseidon2::absorb_double_words_from_memory
-  exec.poseidon2::squeeze_digest
+  # Hash the padded peaks and keep the end pointer for adv.insert_mem.
+  dup.1 dup.1 sub
+  exec.eidos::init_chaining_word
+  padw padw
+  exec.eidos::absorb_double_words_from_memory
+  exec.eidos::digest
   # => [HASH, peaks_end, peaks_end, mmr_ptr, ...]
 
-  # prepare stack for adv.insert_mem (4 cycles)
   movup.4 drop movup.4 movdn.5
   # => [HASH, mmr_ptr, peaks_end, ...]
 

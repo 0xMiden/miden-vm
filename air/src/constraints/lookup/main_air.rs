@@ -1,6 +1,6 @@
 //! Main-trace LogUp lookup AIR.
 //!
-//! Owns the main-trace side of the Miden VM's LogUp argument: four permutation columns, one
+//! Owns the main-trace side of the Miden VM's LogUp argument: four lookup columns, one
 //! per `emit_*` function in [`super::buses`]. This module wires them together via a single
 //! [`MainBusContext`] that carries the two-row window plus a shared [`OpFlags`] instance.
 //!
@@ -110,7 +110,7 @@ where
 
 /// LogUp lookup argument over the main trace.
 ///
-/// Zero-sized. Emits four permutation columns: the first packs block-stack + u32 range
+/// Zero-sized. Emits four lookup columns: the first packs block-stack + u32 range
 /// checks + log-precompile capacity + range-table response; the second unions block-hash
 /// queue and op-group table; the third hosts the decoder's chiplet requests; the fourth
 /// hosts the stack overflow table. The chiplet-trace half of the argument lives in

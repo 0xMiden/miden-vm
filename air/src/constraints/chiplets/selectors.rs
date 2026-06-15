@@ -114,8 +114,7 @@ where
     let s_ctrl: AB::Expr = sel[0].into();
     let s_ctrl_next: AB::Expr = sel_next[0].into();
 
-    // Reserved selector slot. Poseidon2 lives in its own AIR, so this column is zero
-    // on every chiplets row.
+    // Reserved selector slot. This column is zero on every chiplets row.
     let s_perm: AB::Expr = sel[1].into();
 
     // s1..s4: remaining chiplet selectors.

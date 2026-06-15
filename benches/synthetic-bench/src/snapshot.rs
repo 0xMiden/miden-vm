@@ -4,17 +4,19 @@
 //! scenario keys to entries; only the `trace` section of each entry is consumed.
 //!
 //! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
-//! `poseidon2_permutation_rows`, `range_rows`). `shape` (nested under `trace`) is an advisory
-//! per-chiplet breakdown used by the solver. The loader checks
-//! `trace.chiplets_rows == shape.chiplets_sum()`.
+//! `blakeg_compression_rows`, `and8_lookup_rows`, `range_rows`). `shape` (nested under `trace`) is
+//! an advisory per-chiplet breakdown used by the solver. The loader checks `trace.chiplets_rows ==
+//! shape.chiplets_sum()`.
 
 use std::{collections::BTreeMap, path::Path};
 
+use miden_air::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
 use serde::Deserialize;
 
 /// Mirrors `miden_air::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum padded
 /// length changes.
 const MIN_TRACE_LEN: u64 = 64;
+pub const DEFAULT_AND8_LOOKUP_ROWS: u64 = AND8_LOOKUP_TRACE_HEIGHT as u64;
 
 /// A single scenario's trace snapshot, extracted from a producer JSON file.
 ///
@@ -39,8 +41,10 @@ pub struct TraceTotals {
     /// Total chiplets trace length, matching `ChipletsLengths::trace_len` in the processor (sum of
     /// per-chiplet lengths + 1 mandatory padding row).
     pub chiplets_rows: u64,
-    /// Standalone Poseidon2-permutation AIR length.
-    pub poseidon2_permutation_rows: u64,
+    /// Standalone BlakeG-compression AIR length.
+    pub blakeg_compression_rows: u64,
+    /// Fixed byte-pair lookup-table AIR length.
+    pub and8_lookup_rows: u64,
     /// Range-checker trace length. Derived from memory + bitwise activity; not independently
     /// targeted but tracked so the verifier can warn if it ever dominates.
     pub range_rows: u64,
@@ -84,9 +88,14 @@ impl TraceTotals {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
-    /// Padded power-of-two bracket for the Poseidon2-permutation AIR.
-    pub fn padded_poseidon2_permutation(&self) -> u64 {
-        self.poseidon2_permutation_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    /// Padded power-of-two bracket for the BlakeG-compression AIR.
+    pub fn padded_blakeg_compression(&self) -> u64 {
+        self.blakeg_compression_rows.next_power_of_two().max(MIN_TRACE_LEN)
+    }
+
+    /// Padded power-of-two bracket for the fixed byte-pair lookup table.
+    pub fn padded_and8_lookup(&self) -> u64 {
+        self.and8_lookup_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Single global padded length as reported by the processor's
@@ -96,7 +105,8 @@ impl TraceTotals {
         self.core_rows
             .max(self.range_rows)
             .max(self.chiplets_rows)
-            .max(self.poseidon2_permutation_rows)
+            .max(self.blakeg_compression_rows)
+            .max(self.and8_lookup_rows)
             .next_power_of_two()
             .max(MIN_TRACE_LEN)
     }
@@ -105,7 +115,8 @@ impl TraceTotals {
     pub fn range_dominates(&self) -> bool {
         self.range_rows > self.core_rows
             && self.range_rows > self.chiplets_rows
-            && self.range_rows > self.poseidon2_permutation_rows
+            && self.range_rows > self.blakeg_compression_rows
+            && self.range_rows > self.and8_lookup_rows
     }
 }
 
@@ -156,7 +167,8 @@ impl TraceSnapshot {
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
-                poseidon2_permutation_rows: entry.trace.poseidon2_permutation_rows,
+                blakeg_compression_rows: entry.trace.blakeg_compression_rows,
+                and8_lookup_rows: entry.trace.and8_lookup_rows.unwrap_or(DEFAULT_AND8_LOOKUP_ROWS),
                 range_rows: entry.trace.range_rows,
             };
             let shape = entry.trace.chiplets_shape;
@@ -190,8 +202,10 @@ struct RawScenarioEntry {
 struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
+    #[serde(default, alias = "poseidon2_permutation_rows")]
+    blakeg_compression_rows: u64,
     #[serde(default)]
-    poseidon2_permutation_rows: u64,
+    and8_lookup_rows: Option<u64>,
     range_rows: u64,
     chiplets_shape: TraceBreakdown,
 }
@@ -292,7 +306,8 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1000,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: 700,
+            blakeg_compression_rows: 700,
+            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
             range_rows: 100,
         };
         (totals, breakdown)
@@ -310,14 +325,15 @@ mod tests {
     #[test]
     fn padded_totals_match_processor_formula() {
         let (t, _) = sample_shape();
-        // max(1000, 100, 651, 700) = 1000 → next pow2 = 1024
-        assert_eq!(t.padded_total(), 1024);
-        // core + range: max(1000, 100) = 1000 → 1024
+        // The fixed AND8 table dominates this small sample.
+        assert_eq!(t.padded_total(), DEFAULT_AND8_LOOKUP_ROWS);
+        // core + range: max(1000, 100) = 1000 -> 1024
         assert_eq!(t.padded_core_side(), 1024);
-        // chiplets alone: 651 → 1024
+        // chiplets alone: 651 -> 1024
         assert_eq!(t.padded_chiplets(), 1024);
-        // Poseidon2 alone: 700 → 1024
-        assert_eq!(t.padded_poseidon2_permutation(), 1024);
+        // BlakeG alone: 700 -> 1024
+        assert_eq!(t.padded_blakeg_compression(), 1024);
+        assert_eq!(t.padded_and8_lookup(), DEFAULT_AND8_LOOKUP_ROWS);
     }
 
     #[test]
@@ -325,13 +341,14 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 1,
             chiplets_rows: 1,
-            poseidon2_permutation_rows: 1,
+            blakeg_compression_rows: 1,
+            and8_lookup_rows: 1,
             range_rows: 0,
         };
         assert_eq!(totals.padded_total(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_core_side(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_chiplets(), MIN_TRACE_LEN);
-        assert_eq!(totals.padded_poseidon2_permutation(), MIN_TRACE_LEN);
+        assert_eq!(totals.padded_blakeg_compression(), MIN_TRACE_LEN);
     }
 
     #[test]
@@ -339,14 +356,16 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 100,
             chiplets_rows: 200,
-            poseidon2_permutation_rows: 300,
+            blakeg_compression_rows: 300,
+            and8_lookup_rows: 400,
             range_rows: 500,
         };
         assert!(totals.range_dominates());
         let totals = TraceTotals {
             core_rows: 500,
             chiplets_rows: 200,
-            poseidon2_permutation_rows: 300,
+            blakeg_compression_rows: 300,
+            and8_lookup_rows: 400,
             range_rows: 100,
         };
         assert!(!totals.range_dominates());
@@ -438,7 +457,8 @@ mod tests {
         let (_, snap) = &scenarios[0];
         assert_eq!(snap.shape.kernel_rom_rows, 0);
         assert_eq!(snap.shape.ace_rows, 0);
-        assert_eq!(snap.trace.poseidon2_permutation_rows, 0);
+        assert_eq!(snap.trace.blakeg_compression_rows, 0);
+        assert_eq!(snap.trace.and8_lookup_rows, DEFAULT_AND8_LOOKUP_ROWS);
     }
 
     #[test]

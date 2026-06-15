@@ -497,7 +497,7 @@ fn remove_nodes(
 }
 
 fn empty_mast_forest_commitment() -> Word {
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&[])
+    crate::chiplets::hasher::Hasher::merge_many(&[])
 }
 
 fn compute_nodes_commitment(
@@ -506,7 +506,7 @@ fn compute_nodes_commitment(
 ) -> Word {
     let mut digests: Vec<Word> = node_ids.iter().map(|&id| nodes[id].digest()).collect();
     digests.sort_unstable();
-    miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+    crate::chiplets::hasher::Hasher::merge_many(&digests)
 }
 
 // ------------------------------------------------------------------------------------------------

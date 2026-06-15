@@ -6,7 +6,7 @@ use miden_air::trace::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
         NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
-        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, CONTROLLER_TRACE_ALIGNMENT, LINEAR_HASH},
+        hasher::{CONTROLLER_ROWS_PER_HASHER_OP, CONTROLLER_TRACE_ALIGNMENT, LINEAR_HASH},
         memory,
     },
 };
@@ -35,17 +35,17 @@ fn hasher_trace_len(controller_rows: usize) -> usize {
 
 #[test]
 fn hasher_chiplet_trace() {
-    // --- single hasher permutation with no stack manipulation ---
+    // --- single hasher compression with no stack manipulation ---
     // The program is a single basic block containing BCompress.
     // This produces:
     //   - 1 span hash (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows
-    //   - 1 BCOMPRESS (RETURN_STATE input + RETURN_STATE output) = 2 controller rows
+    //   - 1 BCOMPRESS (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows
     // Total: 4 controller rows padded to the chiplet alignment boundary.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
     let operations = vec![Operation::BCompress];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + BCompress
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + BCompress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -60,7 +60,7 @@ fn bitwise_chiplet_trace() {
     let operations = vec![Operation::U32xor];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION; // span hash only
+    let controller_rows = CONTROLLER_ROWS_PER_HASHER_OP; // span hash only
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -78,7 +78,7 @@ fn memory_chiplet_trace() {
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION;
+    let controller_rows = CONTROLLER_ROWS_PER_HASHER_OP;
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -105,7 +105,7 @@ fn stacked_chiplet_trace() {
     let kernel = build_kernel();
     let (chiplets_trace, _trace_len) = build_trace(&stack, ops, kernel);
 
-    let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + BCompress
+    let controller_rows = 2 * CONTROLLER_ROWS_PER_HASHER_OP; // span hash + BCompress
     let hasher_len = hasher_trace_len(controller_rows);
     assert_eq!(hasher_len, CONTROLLER_TRACE_ALIGNMENT);
 
@@ -234,9 +234,9 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
     // --- Check controller rows (s_perm = 0) ---
     // Controller rows come in pairs: input row (is_start varies) + output row (is_final varies).
     // For a span hash: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
-    // For BCompress: input has LINEAR_HASH selectors, output has RETURN_STATE selectors.
+    // For BCompress: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
     for row in 0..controller_rows {
-        let is_input_row = row % CONTROLLER_ROWS_PER_PERMUTATION == 0;
+        let is_input_row = row % CONTROLLER_ROWS_PER_HASHER_OP == 0;
         if is_input_row {
             // Input rows have s0=1 (LINEAR_HASH[0])
             assert_eq!(
@@ -266,7 +266,7 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
         // Non-selector hasher columns should be zero on padding rows.
         // Hasher state columns (indices 4..16 in chiplets trace = hasher cols 3..15).
         // The trailing column (chip_clk, CHIPLETS_WIDTH - 1) is the chiplet-trace row counter
-        // and is non-zero on every row by design — see `air/src/constraints/chiplets/chip_clk.rs`.
+        // and is non-zero on every row by design; see `air/src/constraints/chiplets/chip_clk.rs`.
         for col in 4..CHIPLETS_WIDTH - 1 {
             assert_eq!(trace[col][row], ZERO, "padding row {row}, col {col} should be zero");
         }
@@ -292,7 +292,7 @@ fn validate_bitwise_trace(trace: &ChipletsTrace, start: usize, end: usize) {
         // Internal bitwise operation selector (XOR)
         assert_eq!(BITWISE_XOR, trace[NUM_BITWISE_SELECTORS][row], "bitwise op at row {row}");
 
-        // Columns beyond bitwise trace should be zero (chip_clk excluded — see chip_clk.rs).
+        // Columns beyond bitwise trace should be zero (chip_clk excluded; see chip_clk.rs).
         for col in bitwise_used_cols..CHIPLETS_WIDTH - 1 {
             assert_eq!(
                 trace[col][row], ZERO,
@@ -318,7 +318,7 @@ fn validate_memory_trace(trace: &ChipletsTrace, start: usize, end: usize) {
         assert_eq!(ONE, trace[1][row], "memory s1 at row {row}");
         assert_eq!(ZERO, trace[2][row], "memory s2 at row {row}");
 
-        // Columns beyond memory trace should be zero (chip_clk excluded — see chip_clk.rs).
+        // Columns beyond memory trace should be zero (chip_clk excluded; see chip_clk.rs).
         for col in memory_used_cols..CHIPLETS_WIDTH - 1 {
             assert_eq!(
                 trace[col][row], ZERO,
@@ -347,7 +347,7 @@ fn validate_kernel_rom_trace(trace: &ChipletsTrace, start: usize, end: usize) {
         assert_eq!(ONE, trace[3][row], "kernel_rom s3 at row {row}");
         assert_eq!(ZERO, trace[4][row], "kernel_rom s4 at row {row}");
 
-        // Columns beyond kernel ROM trace should be zero (chip_clk excluded — see chip_clk.rs).
+        // Columns beyond kernel ROM trace should be zero (chip_clk excluded; see chip_clk.rs).
         for col in kernel_rom_used_cols..CHIPLETS_WIDTH - 1 {
             assert_eq!(
                 trace[col][row], ZERO,

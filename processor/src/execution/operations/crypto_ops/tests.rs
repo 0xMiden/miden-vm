@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, Word, ZERO,
-    chiplets::hasher::{Hasher, apply_permutation},
+    chiplets::hasher::{Hasher, compress_state},
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
@@ -92,7 +92,7 @@ proptest! {
                 felt(s10),
                 felt(s11),
             ];
-            apply_permutation(&mut expected_state);
+            compress_state(&mut expected_state);
 
             expected_state
         };

@@ -30,7 +30,7 @@ pub use miden_core::{
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
-    chiplets::hasher::apply_permutation,
+    chiplets::hasher::compress_state,
     events::{EventName, SystemEvent},
 };
 use miden_mast_package::Package;
@@ -797,14 +797,13 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
     prop::collection::vec(any::<T>(), 4)
 }
 
-/// Given a hasher state, perform one permutation.
+/// Computes one expected BCOMPRESS state transition.
 ///
-/// This helper reconstructs that state, applies a permutation, and returns the resulting
-/// `[RATE0',RATE1',CAP']` back in stack order.
-pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
+/// The block lanes are preserved and the chaining-value lanes are replaced with the BlakeG output.
+pub fn build_expected_bcompress(values: &[u64]) -> [Felt; STATE_WIDTH] {
     assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for bcompress test");
 
-    // Reconstruct the internal Poseidon2 state from the initial stack:
+    // Reconstruct the internal VM hasher state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
     // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
     let mut state = [ZERO; STATE_WIDTH];
@@ -812,8 +811,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
         state[i] = Felt::new_unchecked(values[i]);
     }
 
-    // Apply the permutation
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
     // Map internal state back to stack layout [RATE0', RATE1', CAP']
     let mut out = [ZERO; STATE_WIDTH];

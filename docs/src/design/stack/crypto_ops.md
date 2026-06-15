@@ -10,24 +10,24 @@ Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chip
 
 Thus, to describe AIR constraints for the cryptographic operations, we need to define how to compute these input and output values within the stack. We do this in the following sections.
 
-## HPERM
-The `HPERM` operation applies a Poseidon2 permutation to the top $12$ elements of the stack. The stack is arranged in LE state order `[RATE0, RATE1, CAPACITY]`, with $s_0$ at the top and mapping to the first rate lane. The diagram below illustrates this graphically.
+## BCOMPRESS
+The `BCOMPRESS` operation applies one BlakeG compression to the top $12$ elements of the stack. The stack is arranged as `[BLOCK0, BLOCK1, CV]`, with $s_0$ at the top and mapping to the first block lane. The diagram below illustrates this graphically.
 
-![hperm](../../img/design/stack/crypto_ops/HPERM.png)
+![bcompress](../../img/design/stack/crypto_ops/BCOMPRESS.png)
 
 In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
 
-For the `HPERM` operation, we define input and output values as follows:
+For the `BCOMPRESS` operation, we define input and output values as follows:
 
 $$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j)
+v_{input} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_LINEAR\_HASH} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j)
 $$
 
 $$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j')
+v_{output} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_RETURN\_HASH} + \alpha_2 \cdot (h_0 + 1) + \sum_{j=0}^{3} (\alpha_{j+4} \cdot s'_{8+j})
 $$
 
-In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Poseidon2 permutation computation the index column is expected to be set to $0$.
+In the above, $\mathsf{HASHER\_LINEAR\_HASH}$ and $\mathsf{HASHER\_RETURN\_HASH}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a compression and reading the returned chaining word respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because this computation does not use the index column.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
@@ -35,9 +35,11 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/permutation split design these rows are consecutive, so their addresses differ by exactly $1$.
+The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/compression split design these rows are consecutive, so their addresses differ by exactly $1$.
 
 The effect of this operation on the rest of the stack is:
+* **No change** in positions $0..8$.
+* **The output chaining word** is written to positions $8..12$.
 * **No change** starting from position $12$.
 
 ## MPVERIFY
@@ -385,17 +387,17 @@ $$
 ## LOG_PRECOMPILE
 
 The `log_precompile` operation folds a precomputed per-call statement word `STMNT` into the
-rolling precompile-transcript state. The transcript is a linear hash tree over Poseidon2:
-`STATE_NEW = Poseidon2::merge(STATE_PREV, STMNT)`. Initialization and boundary enforcement are
+rolling precompile-transcript state. The transcript is a linear hash tree over the native VM hash:
+`STATE_NEW = hash(STATE_PREV, STMNT)`. Initialization and boundary enforcement are
 handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a
 high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
 The stack is expected to be arranged as `[_, STMNT, _, ...]`, where `STMNT` sits at offsets
-4..8 (the HPERM rate1 slots). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
+4..8 (the second BCOMPRESS block word). Stack slots 0..4 and 8..12 are unreferenced by any constraint on
 opcode entry. Callers normally produce `STMNT` via the `sys::log_precompile_request` helper,
-which computes `STMNT = Poseidon2::merge(COMM, TAG)` from the user-provided commitment halves
+which computes `STMNT = hmerge(COMM, TAG)` from the user-provided commitment halves
 and seats it at stack[4..8] before invoking the opcode (see
 [Precompiles](./precompiles.md#core-data) for the commitment model).
 
@@ -404,7 +406,8 @@ with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑dete
 helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[STATE_NEW, OUT_RATE1, OUT_CAP] = Poseidon2([STATE_PREV, STMNT, ZERO])`,
+The operation evaluates a BlakeG compression with block `[ZERO, STMNT]` and chaining word
+`STATE_PREV`,
 with the following stack transition:
 
 ```
@@ -412,11 +415,9 @@ Before:  [_,         STMNT,      _,       ...]
 After:   [STATE_NEW, OUT_RATE1,  OUT_CAP, ...]
 ```
 
-`STMNT` placement on rate1 lets the chiplet bus's β⁶..β⁹ products coincide with HPERM's rate1
-products, so they share gates after circuit memoization. The output uses the identity HPERM
-lane→slot mapping: `rate0_out -> stack[0..4]` (= `STATE_NEW`), `rate1_out -> stack[4..8]`,
-`cap_out -> stack[8..12]`. `OUT_RATE1` and `OUT_CAP` are unused and are typically dropped by
-the caller immediately.
+`STMNT` placement on the second block word lets the chiplet bus's β⁶..β⁹ products coincide with
+BCOMPRESS's second-block products, so they share gates after circuit memoization. `OUT_RATE1` and
+`OUT_CAP` are unused and are typically dropped by the caller immediately.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
@@ -430,7 +431,7 @@ transcript state internally between invocations.
 #### Hasher chiplet
 
 The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting
-permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
+compression. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The
 elements appearing on the bus are:
 
 $$
@@ -442,22 +443,18 @@ $$
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message reduces the Poseidon2 state in the canonical order
-`[STATE_PREV, STMNT, ZERO]`:
+The input message records the BlakeG compression input `[ZERO, STMNT, STATE_PREV]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_LINEAR\_HASH} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
 $$
 
-One controller row later, the `op_retstate` response provides the permuted state
-`[STATE_NEW, OUT_RATE1, OUT_CAP]`. Denote the stack after the instruction by $s'_i$; the top
-twelve elements are `[STATE_NEW, OUT_RATE1, OUT_CAP]`. Thus
+One controller row later, the `HASHER_RETURN_HASH` response provides the new transcript state. Denote the
+stack after the instruction by $s'_i$; the new state is in the top word:
 
 $$
 \begin{aligned}
-\mathsf{STATE}^{\text{new}}_i &= s'_{i},\\
-\mathsf{OUT\_RATE1}_i         &= s'_{4+i},\\
-\mathsf{OUT\_CAP}_i           &= s'_{8+i},
+\mathsf{STATE}^{\text{new}}_i &= s'_{i},
 \end{aligned}
 \qquad i \in \{0,1,2,3\},
 $$
@@ -465,7 +462,7 @@ $$
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{new}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{OUT\_RATE1}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{OUT\_CAP}_i.
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_RETURN\_HASH} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{new}}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -475,12 +472,11 @@ b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
 The above constraint enforces that the specified input and output controller rows must be present
-in the trace of the hash chiplet. In the controller/permutation split design these two controller
+in the trace of the hash chiplet. In the controller/compression split design these two controller
 rows are consecutive, so their addresses differ by exactly 1.
 
-Given the similarity with the `HPERM` opcode which sends the same message, albeit from different
-variables in the trace, it should be possible to combine the bus constraint in a way that avoids
-increasing the degree of the overall bus expression.
+The BCOMPRESS and `log_precompile` messages share the same hasher-controller shape, so their
+bus constraints can share gates after circuit memoization.
 
 ### Transcript-state Initialization
 

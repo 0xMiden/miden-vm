@@ -6,7 +6,7 @@ use miden_utils_testing::build_test;
 #[cfg(feature = "arbitrary")]
 use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, build_expected_hash, build_expected_perm, build_op_test,
+    Felt, build_expected_bcompress, build_expected_hash, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
 };
 
@@ -38,7 +38,7 @@ proptest! {
 #[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
-    fn hperm_proptest(
+    fn bcompress_proptest(
         v0 in any::<u64>(),
         v1 in any::<u64>(),
         v2 in any::<u64>(),
@@ -48,13 +48,13 @@ proptest! {
         v6 in any::<u64>(),
         v7 in any::<u64>(),
     ) {
-        let asm_op = "hperm";
+        let asm_op = "bcompress";
 
         // --- test hashing 8 random values -----------------------------------------------------------
         let mut values = vec![v0, v1, v2, v3, v4, v5, v6, v7];
         let capacity: Vec<u64> = vec![0, 0, 0, 0];
         values.extend_from_slice(&capacity);
-        let expected = build_expected_perm(&values);
+        let expected = build_expected_bcompress(&values);
 
         let test = build_op_test!(asm_op, &values);
         let last_state = test.get_last_stack_state();
@@ -64,8 +64,8 @@ proptest! {
 }
 
 #[test]
-fn hperm() {
-    let asm_op = "hperm";
+fn bcompress() {
+    let asm_op = "bcompress";
 
     // --- test hashing # of values that's not a multiple of the rate: [ONE, ONE] -----------------
     #[rustfmt::skip]
@@ -74,7 +74,7 @@ fn hperm() {
         1, 1,            // data: [ONE, ONE]
         1, 0, 0, 0, 0, 0 // padding: ONE followed by the necessary ZEROs
     ];
-    let expected = build_expected_perm(&values);
+    let expected = build_expected_bcompress(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();

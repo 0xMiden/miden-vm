@@ -89,7 +89,7 @@ fn reference_source(setup: &str) -> String {
         r#"
     use miden::core::stark::random_coin
     use miden::core::stark::constants
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     #! Sample a felt, permuting first if the output buffer is empty.
     proc sample_felt_safe
@@ -97,7 +97,7 @@ fn reference_source(setup: &str) -> String {
         push.0 eq
         if.true
             exec.random_coin::load_random_coin_state
-            exec.poseidon2::permute
+            exec.eidos::compress
             exec.random_coin::store_random_coin_state
             push.8 push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
         end

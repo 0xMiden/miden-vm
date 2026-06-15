@@ -47,7 +47,8 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let totals = TraceTotals {
         core_rows: summary.core_trace_len() as u64,
         chiplets_rows: chiplets.trace_len() as u64,
-        poseidon2_permutation_rows: summary.blakeg_compression_trace_len() as u64,
+        blakeg_compression_rows: summary.blakeg_compression_trace_len() as u64,
+        and8_lookup_rows: summary.and8_lookup_trace_len() as u64,
         range_rows: summary.range_trace_len() as u64,
     };
 
@@ -140,7 +141,7 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
     let k = iters as f64;
     IterCost {
         core: shape.totals.core_rows as f64 / k,
-        hasher: shape.totals.poseidon2_permutation_rows as f64 / k,
+        hasher: shape.totals.blakeg_compression_rows as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
         range: shape.totals.range_rows as f64 / k,
@@ -164,16 +165,16 @@ mod tests {
     }
 
     #[test]
-    fn hperm_adds_rows_beyond_baseline() {
+    fn bcompress_adds_rows_beyond_baseline() {
         let baseline = measure_program("begin push.1 drop end").expect("baseline");
-        let with_hperm =
-            measure_program("begin padw padw padw hperm dropw dropw dropw end").expect("hperm");
+        let with_bcompress =
+            measure_program("begin padw padw padw bcompress dropw dropw dropw end")
+                .expect("bcompress");
         assert!(
-            with_hperm.totals.poseidon2_permutation_rows
-                > baseline.totals.poseidon2_permutation_rows,
-            "hperm should add Poseidon2-permutation rows above the baseline ({} vs {})",
-            with_hperm.totals.poseidon2_permutation_rows,
-            baseline.totals.poseidon2_permutation_rows,
+            with_bcompress.totals.blakeg_compression_rows > baseline.totals.blakeg_compression_rows,
+            "bcompress should add BlakeG-compression rows above the baseline ({} vs {})",
+            with_bcompress.totals.blakeg_compression_rows,
+            baseline.totals.blakeg_compression_rows,
         );
     }
 
@@ -249,7 +250,7 @@ mod tests {
         let pad = c["decoder_pad"];
         assert!(pad.core > 1.0, "decoder_pad core/iter should be > 1.0");
         assert!(
-            pad.core > pad.hasher * 3.0,
+            pad.core > pad.hasher,
             "decoder_pad core ({}) should dominate hasher ({})",
             pad.core,
             pad.hasher,

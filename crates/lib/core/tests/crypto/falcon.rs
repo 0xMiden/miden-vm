@@ -4,11 +4,16 @@ use miden_air::Felt;
 use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
+    crypto::dsa::falcon512_eidos::Nonce,
+    crypto::hash::Eidos,
     events::EventName,
     field::PrimeField64,
     serde::{Deserializable, Serializable},
 };
-use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
+use miden_core_lib::{
+    CoreLibrary,
+    dsa::falcon512_eidos::{self, product_check_digest},
+};
 use miden_processor::{
     DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation},
@@ -21,8 +26,8 @@ use miden_utils_testing::proptest::proptest;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
-        MerkleStore, Poseidon2,
-        falcon512_poseidon2::{Polynomial, SecretKey},
+        MerkleStore,
+        falcon512_eidos::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
     rand::random_word,
@@ -32,21 +37,22 @@ use rand::{Rng, RngExt, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
-/// Modulus used for Falcon512-Poseidon2.
+/// Modulus used for Falcon512.
 const M: u64 = 12289;
 const Q: u64 = (M - 1) / 2;
 const N: usize = 512;
 const J: u64 = (N * M as usize * M as usize) as u64;
+const FALCON_H2P_DOMAIN: u32 = 0x0fa1_c001;
 
 const PROBABILISTIC_PRODUCT_SOURCE: &str = "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
         #=> [PK, ...]
         push.0
         #=> [h_ptr, PK, ...]
 
-        exec.falcon512_poseidon2::load_h_s2_and_product
+        exec.falcon512_eidos::load_h_s2_and_product
         #=> [...]
     end
     ";
@@ -85,10 +91,10 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
 
     // Reconstruct SecretKey from bytes
     let sk = SecretKey::read_from_bytes(&sk_bytes)
-        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
+        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Falcon512" })?;
 
-    let signature_result = falcon512_poseidon2::sign(&sk, msg)
-        .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
+    let signature_result = falcon512_eidos::sign(&sk, msg)
+        .ok_or(FalconError::MalformedSignatureKey { key_type: "Falcon512" })?;
 
     Ok(vec![AdviceMutation::extend_stack(signature_result)])
 }
@@ -107,10 +113,10 @@ pub enum FalconError {
 #[test]
 fn test_falcon512_norm_sq() {
     let source = "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
-        exec.falcon512_poseidon2::norm_sq
+        exec.falcon512_eidos::norm_sq
     end
     ";
 
@@ -127,10 +133,10 @@ fn test_falcon512_norm_sq() {
 #[test]
 fn test_falcon512_diff_mod_m() {
     let source = "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
-        exec.falcon512_poseidon2::diff_mod_M
+        exec.falcon512_eidos::diff_mod_M
     end
     ";
     let v = Felt::ORDER_U64 - 1;
@@ -171,10 +177,10 @@ proptest! {
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
-        exec.falcon512_poseidon2::diff_mod_M
+        exec.falcon512_eidos::diff_mod_M
     end
     ";
 
@@ -191,6 +197,246 @@ proptest! {
     test1.prop_expect_stack(&[simplified_answer as u64])?;
     }
 
+}
+
+#[test]
+fn falcon_public_key_hash_loop_matches_eidos() {
+    const HASH_WORD_PTR: u32 = 1000;
+
+    let h = Polynomial::new((0..N).map(|i| Felt::new_unchecked((i % M as usize) as u64)).collect());
+    let elements = to_elements(h);
+    let expected = Eidos::hash_elements(&elements);
+
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&[Felt::new_unchecked(11), Felt::new_unchecked(7)]);
+    builder.push_elements(elements.iter().copied());
+    let advice_stack = builder.build_vec_u64();
+
+    let source = format!(
+        "
+    use miden::core::crypto::hashes::eidos
+
+    @locals(8)
+    proc hash_h
+        push.0.0
+        locaddr.4
+        movup.3
+
+        push.512 exec.eidos::init_chaining_word
+        padw
+
+        adv_push adv_push
+        dup.1 dup.1 ext2inv
+        loc_storew_le.4
+
+        repeat.64
+            adv_pipe
+            horner_eval_base
+            exec.eidos::compress
+        end
+
+        dropw dropw
+        push.{HASH_WORD_PTR} mem_storew_le
+        dropw drop drop drop drop
+    end
+
+    begin
+        push.0
+        exec.hash_h
+    end
+    "
+    );
+
+    let (output, _host) = build_test!(&source, &[], &advice_stack)
+        .execute_for_output()
+        .expect("execution failed");
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let actual: Word = [
+        read(HASH_WORD_PTR),
+        read(HASH_WORD_PTR + 1),
+        read(HASH_WORD_PTR + 2),
+        read(HASH_WORD_PTR + 3),
+    ]
+    .into();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn falcon_product_transcript_loop_matches_host() {
+    const HASH_WORD_PTR: u32 = 1000;
+
+    let h = Polynomial::new((0..N).map(|i| Felt::new_unchecked((i % M as usize) as u64)).collect());
+    let s2 = Polynomial::new(
+        (0..N).map(|i| Felt::new_unchecked(((i + 3) % M as usize) as u64)).collect(),
+    );
+    let pi = mul_modulo_p(h.clone(), s2.clone());
+    let h_hash = Eidos::hash_elements(&to_elements(h));
+    let s2_elements = to_elements(s2);
+    let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
+    let expected = product_check_digest(h_hash, &s2_elements, &pi_elements);
+
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_elements(s2_elements.iter().copied().chain(pi_elements.iter().copied()));
+    let advice_stack = builder.build_vec_u64();
+
+    let source = format!(
+        "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        padw
+        swapw
+        push.262258690
+        exec.eidos::merge_in_domain
+        padw padw
+
+        repeat.64
+            adv_pipe
+            exec.eidos::compress
+        end
+
+        repeat.128
+            adv_pipe
+            exec.eidos::compress
+        end
+
+        dropw dropw
+        push.{HASH_WORD_PTR} mem_storew_le
+        dropw drop
+    end
+    "
+    );
+
+    let mut stack = stack_from_words(&[h_hash]);
+    stack.push(0);
+    let (output, _host) = build_test!(&source, &stack, &advice_stack)
+        .execute_for_output()
+        .expect("execution failed");
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let actual: Word = [
+        read(HASH_WORD_PTR),
+        read(HASH_WORD_PTR + 1),
+        read(HASH_WORD_PTR + 2),
+        read(HASH_WORD_PTR + 3),
+    ]
+    .into();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn eidos_merge_in_domain_matches_masm() {
+    const HASH_WORD_PTR: u32 = 1000;
+    const FALCON_PRODUCT_DOMAIN: u64 = 0x0fa1_c002;
+
+    let left = [
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]
+    .into();
+    let right = Word::default();
+    let expected =
+        Eidos::merge_in_domain(&[left, right], Felt::new_unchecked(FALCON_PRODUCT_DOMAIN));
+
+    let source = format!(
+        "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        push.{FALCON_PRODUCT_DOMAIN}
+        exec.eidos::merge_in_domain
+        push.{HASH_WORD_PTR} mem_storew_le
+        dropw
+    end
+    "
+    );
+
+    let stack = stack_from_words(&[left, right]);
+    let (output, _host) = build_test!(&source, &stack).execute_for_output().unwrap();
+
+    let ctx = miden_processor::ContextId::root();
+    let read = |addr| output.memory.read_element(ctx, Felt::from_u32(addr)).expect("memory read");
+    let actual: Word = [
+        read(HASH_WORD_PTR),
+        read(HASH_WORD_PTR + 1),
+        read(HASH_WORD_PTR + 2),
+        read(HASH_WORD_PTR + 3),
+    ]
+    .into();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn falcon_hash_to_point_loop_matches_eidos() {
+    const C_PTR: u32 = 1000;
+
+    let message: Word = [
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(21),
+        Felt::new_unchecked(34),
+        Felt::new_unchecked(55),
+    ]
+    .into();
+    let nonce = Nonce::deterministic();
+    let nonce_elements = nonce.to_elements();
+
+    let mut cv = Eidos::init_chaining_word(FALCON_H2P_DOMAIN, 0);
+    cv = Eidos::compress_block(cv, nonce_elements);
+
+    let mut message_block = [ZERO; 8];
+    message_block[..Word::NUM_ELEMENTS].copy_from_slice(message.as_slice());
+    cv = Eidos::compress_block(cv, message_block);
+
+    let squeeze_block = [ZERO; 8];
+    let mut expected = Vec::with_capacity(N);
+    for _ in 0..128 {
+        cv = Eidos::compress_block(cv, squeeze_block);
+        expected.extend_from_slice(cv.as_slice());
+    }
+
+    let source = format!(
+        "
+    use miden::core::crypto::dsa::falcon512_eidos
+
+    @locals(2560)
+    proc run_hash_to_point
+        locaddr.2048
+        exec.falcon512_eidos::hash_to_point
+
+        padw
+        loc_loadw_le.2048
+        push.{C_PTR}
+        mem_storew_le
+        dropw
+    end
+
+    begin
+        exec.run_hash_to_point
+    end
+    "
+    );
+
+    let mut op_stack = stack_from_words(&[message]);
+    op_stack.extend(nonce_elements.iter().map(Felt::as_canonical_u64));
+    let (output, _host) =
+        build_test!(&source, &op_stack).execute_for_output().expect("execution failed");
+
+    let ctx = miden_processor::ContextId::root();
+    for (idx, expected) in expected.iter().take(4).enumerate() {
+        let actual = output
+            .memory
+            .read_element(ctx, Felt::from_u32(C_PTR + idx as u32))
+            .expect("memory read");
+        assert_eq!(actual, *expected, "coefficient {idx}");
+    }
 }
 
 #[test]
@@ -263,20 +509,20 @@ fn test_move_sig_to_adv_stack() {
     let message = random_word();
 
     let source = "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
-        exec.falcon512_poseidon2::move_sig_from_map_to_adv_stack
-        exec.falcon512_poseidon2::verify
+        exec.falcon512_eidos::move_sig_from_map_to_adv_stack
+        exec.falcon512_eidos::verify
     end
     ";
 
     let public_key = secret_key.public_key().to_commitment();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
-        let sig_key = Poseidon2::merge(&[public_key, message]);
+        let sig_key = Eidos::merge(&[public_key, message]);
         let signature =
-            falcon512_poseidon2::sign(&secret_key, message).expect("failed to sign message");
+            falcon512_eidos::sign(&secret_key, message).expect("failed to sign message");
 
         vec![(sig_key, signature)]
     };
@@ -308,10 +554,10 @@ fn falcon_execution() {
 fn test_mod_12289_simple() {
     // Simple test to debug mod_12289 with a known input
     let source = "
-        use miden::core::crypto::dsa::falcon512_poseidon2
+        use miden::core::crypto::dsa::falcon512_eidos
 
         begin
-            exec.falcon512_poseidon2::mod_12289
+            exec.falcon512_eidos::mod_12289
         end
     ";
 
@@ -327,10 +573,10 @@ fn test_mod_12289_simple() {
 fn test_mod_12289_larger_value() {
     // Test with a larger value that requires the higher 32 bits
     let source = "
-        use miden::core::crypto::dsa::falcon512_poseidon2
+        use miden::core::crypto::dsa::falcon512_eidos
 
         begin
-            exec.falcon512_poseidon2::mod_12289
+            exec.falcon512_eidos::mod_12289
         end
     ";
 
@@ -353,7 +599,7 @@ fn test_mod_12289_larger_value() {
 #[case(0xffff_ffff, 0xffff_fffe)]
 fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
     const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
     // M^(-1) mod 2^64. For any a, q = a * M_INV (mod 2^64) satisfies M*q ≡ a (mod 2^64).
     const M_INV: u64 = 15010777177727684609;
@@ -376,9 +622,9 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     }
 
     let source = "
-        use miden::core::crypto::dsa::falcon512_poseidon2
+        use miden::core::crypto::dsa::falcon512_eidos
         begin
-            exec.falcon512_poseidon2::mod_12289
+            exec.falcon512_eidos::mod_12289
         end
     ";
 
@@ -409,7 +655,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 #[test]
 fn test_mod_12289_rejects_forged_addition_overflow() {
     const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
     // Largest q such that M * q fits into 64 bits. This guarantees quotient-overflow checks pass.
     const FORGED_Q: u64 = u64::MAX / M;
@@ -428,9 +674,9 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     }
 
     let source = "
-        use miden::core::crypto::dsa::falcon512_poseidon2
+        use miden::core::crypto::dsa::falcon512_eidos
         begin
-            exec.falcon512_poseidon2::mod_12289
+            exec.falcon512_eidos::mod_12289
         end
     ";
 
@@ -456,7 +702,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 #[test]
 fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+        EventName::new("miden::core::crypto::dsa::falcon512_eidos::falcon_div");
 
     #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
@@ -475,9 +721,9 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     }
 
     let source = "
-        use miden::core::crypto::dsa::falcon512_poseidon2
+        use miden::core::crypto::dsa::falcon512_eidos
         begin
-            exec.falcon512_poseidon2::mod_12289
+            exec.falcon512_eidos::mod_12289
         end
     ";
 
@@ -533,11 +779,11 @@ fn generate_test(
 ) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
     let source = format!(
         "
-    use miden::core::crypto::dsa::falcon512_poseidon2
+    use miden::core::crypto::dsa::falcon512_eidos
 
     begin
         emit.event(\"{EVENT_FALCON_SIG_TO_STACK}\")
-        exec.falcon512_poseidon2::verify
+        exec.falcon512_eidos::verify
     end
     "
     );
@@ -598,19 +844,23 @@ fn generate_data_probabilistic_product_test(
 ) -> (Vec<u64>, Vec<u64>) {
     let mut rng = rng();
     let pi = mul_modulo_p(h.clone(), s2.clone());
-    // lay the polynomials in order h then s2 then pi = h * s2
-    let mut polynomials = if test_failure {
+    let s2_elements = to_elements(s2);
+    let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
+    let h_elements = if test_failure {
         to_elements(Polynomial::new(random_coefficients_with_rng(&mut rng)))
     } else {
         to_elements(h.clone())
     };
 
-    polynomials.extend(to_elements(s2));
-    polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
+    // lay the polynomials in order h then s2 then pi = h * s2
+    let mut polynomials = h_elements.clone();
+    polynomials.extend_from_slice(&s2_elements);
+    polynomials.extend_from_slice(&pi_elements);
 
     // get the challenge point and push it to the advice stack
     // Two sequential `adv_push` ops will place tau0 on top, tau1 at position 1.
-    let digest_polynomials = Poseidon2::hash_elements(&polynomials[..]);
+    let h_hash = Eidos::hash_elements(&h_elements);
+    let digest_polynomials = product_check_digest(h_hash, &s2_elements, &pi_elements);
     let tau0 = digest_polynomials[0];
     let tau1 = digest_polynomials[1];
     let mut builder = AdviceStackBuilder::new();
@@ -619,7 +869,6 @@ fn generate_data_probabilistic_product_test(
     let advice_stack = builder.build_vec_u64();
 
     // compute hash of h and place it on the stack.
-    let h_hash = Poseidon2::hash_elements(&to_elements(h));
     let operand_stack = stack_from_words(&[h_hash]);
 
     (operand_stack, advice_stack)

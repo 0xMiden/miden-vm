@@ -80,9 +80,9 @@ pub enum BusId {
     RangeCheck = 21,
     /// ACE wiring bus (LogUp).
     AceWiring = 22,
-    /// Hasher perm-link input bus: pairs controller-input rows with perm-cycle row 0.
+    /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
     HasherPermLinkInput = 23,
-    /// Hasher perm-link output bus: pairs controller-output rows with perm-cycle row 15.
+    /// Reserved to keep following bus ids stable.
     HasherPermLinkOutput = 24,
     /// Byte-pair lookup table: ordinary `[a, b, a & b]` for byte-sized operands.
     And8Lookup = 25,
@@ -546,19 +546,17 @@ pub struct StackOverflowMsg<E> {
     pub prev: E,
 }
 
-// HASHER PERM-LINK MESSAGE
+// HASHER COMPRESSION-LINK MESSAGE
 // ================================================================================================
 
-/// Hasher perm-link message (12 elements): `state[0..12]`.
+/// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
 ///
-/// Binds hasher controller rows to BlakeG compression rows. The `Input` variant pairs a
-/// controller-input row with perm-cycle row 0 on `BusId::HasherPermLinkInput`; the `Output`
-/// variant pairs a controller-output row with perm-cycle row 15 on
-/// `BusId::HasherPermLinkOutput`.
+/// Binds a hasher controller input/output pair to one BlakeG compression block.
 #[derive(Clone, Debug)]
-pub enum HasherPermLinkMsg<E> {
-    Input { state: [E; 12] },
-    Output { state: [E; 12] },
+pub struct HasherPermLinkMsg<E> {
+    pub block: [E; 8],
+    pub cv_in: [E; 4],
+    pub cv_out: [E; 4],
 }
 
 // BYTE-PAIR LOOKUP MESSAGE
@@ -1010,11 +1008,16 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        let (bus, state) = match self {
-            Self::Input { state } => (BusId::HasherPermLinkInput, state),
-            Self::Output { state } => (BusId::HasherPermLinkOutput, state),
-        };
-        challenges.encode(bus as usize, state.clone())
+        let payload: [E; 16] = core::array::from_fn(|i| {
+            if i < 8 {
+                self.block[i].clone()
+            } else if i < 12 {
+                self.cv_in[i - 8].clone()
+            } else {
+                self.cv_out[i - 12].clone()
+            }
+        });
+        challenges.encode(BusId::HasherPermLinkInput as usize, payload)
     }
 }
 

@@ -20,7 +20,8 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::{
-    FOOTER_H_ODD_TOP_BYTE_COL, FOOTER_OUT_MASKED_TOP_BIT_COL, FOOTER_OUT_ODD_TOP_BYTE_COL,
+    FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
+    FOOTER_OUT_ODD_TOP_BYTE_COL,
 };
 
 // ===================================================================
@@ -474,9 +475,14 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(3 * (12 + j) + 2)
     }
 
-    /// Duplicated `H_odd[3]` field used by the H top-bit lookup.
-    pub fn h_odd_top_byte(&self) -> AB::Expr {
-        self.col(FOOTER_H_ODD_TOP_BYTE_COL)
+    /// Inverse-or-zero witness for the input-CV canonicality check.
+    pub fn h_canon_inv(&self) -> AB::Expr {
+        self.col(FOOTER_H_CANON_INV_COL)
+    }
+
+    /// Zero flag for the input-CV canonicality check.
+    pub fn h_canon_z(&self) -> AB::Expr {
+        self.col(FOOTER_H_CANON_Z_COL)
     }
 
     /// Duplicated `Out_odd[3]` field used by the output top-bit lookup.

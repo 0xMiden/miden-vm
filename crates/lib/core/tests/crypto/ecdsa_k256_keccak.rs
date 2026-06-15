@@ -7,6 +7,7 @@
 
 use miden_core::{
     Felt, Word,
+    chiplets::hasher::Hasher as VmHasher,
     events::EventName,
     field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
@@ -17,7 +18,7 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SigningKey as SecretKey, hash::poseidon2::Poseidon2};
+use miden_crypto::dsa::ecdsa_k256_keccak::SigningKey as SecretKey;
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
@@ -169,7 +170,7 @@ impl EventHandler for EcdsaSignatureHandler {
         let pk_commitment = {
             let pk = secret_key.public_key();
             let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
-            Poseidon2::hash_elements(&pk_felts)
+            VmHasher::hash_elements(&pk_felts)
         };
         assert_eq!(
             provided_pk_commitment, pk_commitment,
@@ -199,7 +200,7 @@ fn test_ecdsa_verify_bis_wrapper() {
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
-        Poseidon2::hash_elements(&pk_felts)
+        VmHasher::hash_elements(&pk_felts)
     };
 
     let source = format!(

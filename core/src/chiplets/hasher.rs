@@ -23,8 +23,18 @@ impl Hasher {
     }
 
     #[inline(always)]
+    pub fn merge_many(values: &[Digest]) -> Digest {
+        merge_many(values)
+    }
+
+    #[inline(always)]
     pub fn merge_in_domain(values: &[Digest; 2], domain: Felt) -> Digest {
         merge_in_domain(values, domain)
+    }
+
+    #[inline(always)]
+    pub fn hash(bytes: &[u8]) -> Digest {
+        hash(bytes)
     }
 
     #[inline(always)]
@@ -33,8 +43,8 @@ impl Hasher {
     }
 
     #[inline(always)]
-    pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
-        apply_permutation(state)
+    pub fn compress_state(state: &mut [Felt; STATE_WIDTH]) {
+        compress_state(state)
     }
 }
 
@@ -53,8 +63,18 @@ pub fn merge(values: &[Digest; 2]) -> Digest {
 }
 
 #[inline(always)]
+pub fn merge_many(values: &[Digest]) -> Digest {
+    blakeg::merge_many(values)
+}
+
+#[inline(always)]
 pub fn merge_in_domain(values: &[Digest; 2], domain: Felt) -> Digest {
     blakeg::merge_in_domain(values, domain)
+}
+
+#[inline(always)]
+pub fn hash(bytes: &[u8]) -> Digest {
+    blakeg::hash(bytes)
 }
 
 #[inline(always)]
@@ -64,7 +84,7 @@ pub fn hash_elements(elements: &[Felt]) -> Digest {
 
 /// Apply one BlakeG compression to the VM 12-Felt state window.
 #[inline(always)]
-pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
+pub fn compress_state(state: &mut [Felt; STATE_WIDTH]) {
     blakeg::compress_state(state);
 }
 
@@ -73,7 +93,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn apply_permutation_uses_blakeg_state_contract() {
+    fn compress_state_uses_blakeg_state_contract() {
         let left = Digest::new([
             Felt::new_unchecked(1),
             Felt::new_unchecked(2),
@@ -92,10 +112,10 @@ mod tests {
             cv[1], cv[2], cv[3],
         ];
 
-        apply_permutation(&mut state);
+        compress_state(&mut state);
 
-        assert_eq!(&state[..4], cv.as_slice());
-        assert_eq!(&state[4..8], &[Felt::ZERO; 4]);
+        assert_eq!(&state[..4], left.as_slice());
+        assert_eq!(&state[4..8], right.as_slice());
         assert_eq!(Digest::new(state[8..12].try_into().unwrap()), merge(&[left, right]));
     }
 }

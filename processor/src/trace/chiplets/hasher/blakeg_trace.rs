@@ -27,8 +27,8 @@ use miden_air::trace::{
     },
     blakeg_compression::{
         AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
-        FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_TOP_BYTE_COL, FOOTER_H_ODD_WORD_COL,
-        FOOTER_H_TOP_MASK_COL, FOOTER_H_TOP_ZERO_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
+        FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_SPARE_COL, FOOTER_H_CANON_Z_COL,
+        FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_WORD_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
         FOOTER_OUT_ODD_TOP_BYTE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_ROW_INDEX_COL,
         FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL, IFACE_D_BASE_COL,
         IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
@@ -290,6 +290,16 @@ fn generate_footer_rows(
     let mut c_accum = [0u64; 4];
     let mut d_accum = [0u64; 4];
     let raw_out: [u64; 8] = core::array::from_fn(|i| (v[i] ^ v[i + 8]) as u64);
+    let mut h_canon_inv: [Felt; 4] =
+        core::array::from_fn(|t| Felt::from_u32(h_in[2 * t + 1]) - Felt::from_u32(u32::MAX));
+    let h_canon_z: [Felt; 4] = core::array::from_fn(|t| {
+        if h_in[2 * t + 1] == u32::MAX {
+            Felt::ONE
+        } else {
+            Felt::ZERO
+        }
+    });
+    batch_inversion_allow_zeros(&mut h_canon_inv);
 
     for t in 0..4 {
         let row = footer_start + t;
@@ -347,8 +357,6 @@ fn generate_footer_rows(
             FOOTER_TOP_BIT_MASK,
             (mask_bit as u8) * FOOTER_TOP_BIT_MASK,
         );
-        count_and8(and8_counts, h_odd_bytes[3], FOOTER_TOP_BIT_MASK, 0);
-
         let mut w = RowWriter::new(rows, row);
         for j in 0..4 {
             let high_even = footer_slot_base(j);
@@ -372,9 +380,9 @@ fn generate_footer_rows(
             w.set_col(output_odd + 2, and1_odd[j] as u64);
         }
 
-        w.set_col(FOOTER_H_ODD_TOP_BYTE_COL, h_odd_bytes[3] as u64);
-        w.set_col(FOOTER_H_TOP_MASK_COL, FOOTER_TOP_BIT_MASK as u64);
-        w.set_col(FOOTER_H_TOP_ZERO_COL, 0);
+        w.set_abs(FOOTER_H_CANON_INV_COL, h_canon_inv[t]);
+        w.set_abs(FOOTER_H_CANON_Z_COL, h_canon_z[t]);
+        w.set_col(FOOTER_H_CANON_SPARE_COL, 0);
         w.set_col(FOOTER_OUT_ODD_TOP_BYTE_COL, out_odd_bytes[3] as u64);
         w.set_col(FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK as u64);
         w.set_col(FOOTER_OUT_MASKED_TOP_BIT_COL, mask_bit * FOOTER_TOP_BIT_MASK as u64);
@@ -434,12 +442,9 @@ fn generate_interface_rows(
     }
     rows[row_i][IFACE_MULTIPLICITY_COL] = Felt::new_unchecked(multiplicity);
 
-    // Row O: C[0..3], ZERO[0..3], D[0..3], multiplicity
-    for k in 0..4 {
-        rows[row_o][k] = Felt::new_unchecked(c_accum[k]);
-    }
-    for k in 0..4 {
-        rows[row_o][4 + k] = Felt::ZERO;
+    // Row O: block[0..8], D[0..3], multiplicity.
+    for k in 0..8 {
+        rows[row_o][k] = input_state[k];
     }
     for k in 0..4 {
         rows[row_o][8 + k] = Felt::new_unchecked(d_accum[k]);
@@ -634,13 +639,12 @@ pub fn generate_compression_block(
             &output_state[8..12],
             "output_state digest mismatch at block starting row {start_row}"
         );
+        debug_assert_eq!(
+            &input_state[..8],
+            &output_state[..8],
+            "output_state block lanes must be preserved at block starting row {start_row}"
+        );
         for t in 0..4 {
-            let expected_c = output_state[t].as_canonical_u64();
-            debug_assert_eq!(
-                c_accum[t], expected_c,
-                "C[{t}] accumulator mismatch at block starting row {start_row}: got {}, expected {}",
-                c_accum[t], expected_c
-            );
             let expected = output_state[8 + t].as_canonical_u64();
             debug_assert_eq!(
                 d_accum[t], expected,

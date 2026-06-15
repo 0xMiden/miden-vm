@@ -943,8 +943,6 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // ------ Degree 5 operations  ----------------------------------------------------------------
 
     op_flag_getters!(degree5_op_flags,
-        /// Operation Flag of BCOMPRESS operation.
-        bcompress => opcodes::BCOMPRESS,
         /// Operation Flag of MPVERIFY operation.
         #[expect(dead_code)]
         mpverify => opcodes::MPVERIFY,

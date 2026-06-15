@@ -132,7 +132,7 @@ impl MastNodeExt for JoinNode {
     /// defined by [Self::DOMAIN] - i.e.,:
     /// ```
     /// # use miden_core::mast::JoinNode;
-    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
+    /// # use miden_crypto::{Word, hash::eidos::Eidos as Hasher};
     /// # let first_child_digest = Word::default();
     /// # let second_child_digest = Word::default();
     /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);

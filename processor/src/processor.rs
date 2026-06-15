@@ -325,15 +325,11 @@ pub(crate) trait MemoryInterface {
 
 /// Trait representing the hasher subsystem of the processor.
 pub(crate) trait HasherInterface {
-    /// Applies a single permutation of the hash function to the provided state and records the
-    /// execution trace of this computation.
+    /// Applies one BCOMPRESS request and records the digest-only hasher response.
     ///
-    /// The returned tuple contains the hasher state after the permutation and the row address of
-    /// the execution trace at which the permutation started.
-    ///
-    /// The address is only needed for operation helpers in trace generation, and thus an
-    /// implementation might choose to return a default/invalid address if it is not needed.
-    fn permute(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
+    /// The returned state has the 12-lane BlakeG shape. The hasher chiplet response carries the
+    /// new 4-felt chaining value from `state[8..12]`.
+    fn bcompress(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.

@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 
 # ===== MEMORY FUNCTIONS ==========================================================================
 
@@ -131,7 +131,7 @@ pub proc memcopy_elements
     drop drop drop
 end
 
-#! Copies an even number of words from the advice_stack to memory, computing their permutation.
+#! Copies an even number of words from the advice stack to memory, updating the Eidos state.
 #!
 #! Inputs:  [R0, R1, C, write_ptr, end_ptr]
 #! Outputs: [R0', R1', C', write_ptr]
@@ -152,7 +152,7 @@ pub proc pipe_double_words_to_memory
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, R0, R1, C, write_ptr, end_ptr, ...]
   while.true
-    adv_pipe exec.poseidon2::permute # (2 cycles)
+    adv_pipe exec.eidos::compress # (2 cycles)
     # => [R0', R1', C', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq # (4 cycles)
@@ -163,7 +163,7 @@ pub proc pipe_double_words_to_memory
   # [R0', R1', C', write_ptr', ...]
 end
 
-#! Copies an arbitrary number of words from the advice stack to memory, computing their permutation.
+#! Copies an arbitrary number of words from the advice stack to memory, updating the Eidos state.
 #!
 #! Inputs:  [num_words, write_ptr]
 #! Outputs: [R0, R1, C, write_ptr']
@@ -172,7 +172,7 @@ end
 #! - num_words is the number of words which will be copied to the memory.
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
-#! - R0, R1, C are the final Poseidon2 hasher state (R0 on top).
+#! - R0, R1, C are the final VM hasher state (R0 on top).
 #!
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
@@ -186,18 +186,11 @@ pub proc pipe_words_to_memory
   dup movdn.3
   # => [is_odd, num_words, write_ptr, needs_padding, ...]
 
-  # compute `end_ptr` with an even number of words (7 cycles)
-  sub mul.4 dup.1 add swap
-  # => [write_ptr, end_ptr, needs_padding, ...]
-
-  # Prepare the capacity word. We use the padding rule which sets the first capacity
-  # element to `len % 8` where `len` is the length of the hashed sequence. Since `len % 8`
-  # is either equal to 0 or 4,  this is determined by the `needs_padding` flag multiplied
-  # by 4. (7 cycles)
-  dup.2 mul.4 push.0.0.0
-  movup.3
+  # Compute `end_ptr` for the even-word prefix and initialize Eidos with the full Felt length.
+  dup.1 mul.4 movdn.2
+  sub mul.4 dup.2 add movup.2
+  movup.2 exec.eidos::init_chaining_word
   # => [C, write_ptr, end_ptr, needs_padding, ...]
-  # (C is the capacity word)
 
   # set initial hasher state (8 cycles)
   padw padw
@@ -213,7 +206,7 @@ pub proc pipe_words_to_memory
 
   # if(needs_padding) (17 cycles)
   if.true
-    # Poseidon2 uses overwrite mode, drop R1. (4 cycles)
+    # The VM hasher uses overwrite mode, so the first rate word stays on stack.
     swapw dropw
     # => [R0, C, write_ptr, ...]
 
@@ -238,8 +231,8 @@ pub proc pipe_words_to_memory
     padw swapw
     # => [R0', R1, C, write_ptr+4, ...]
 
-    # Run Poseidon2 permutation (1 cycles)
-    exec.poseidon2::permute
+    # Run one VM hasher compression step.
+    exec.eidos::compress
     # => [R0'', R1', C', write_ptr+4, ...]
   end
 end
@@ -266,7 +259,7 @@ pub proc pipe_preimage_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave only the digest on the stack
-  exec.poseidon2::squeeze_digest
+  exec.eidos::digest
   # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Save the write_ptr (2 cycles)
@@ -290,21 +283,21 @@ end
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - COMMITMENT is the commitment that the one calculated during this procedure will be compared
 #!   with.
-#!
 #! Total cycles: 56 + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
   # => [num_words, write_ptr, COMMITMENT, ...]
 
-  # Compute and move end_ptr (5 cycles)
-  mul.4 dup.1 add swap
-  # => [write_ptr, end_ptr, COMMITMENT, ...]
+  # Compute end_ptr and initialize the Eidos CV with the committed Felt length.
+  dup mul.4 dup dup.3 add
+  movup.2 drop movup.2
+  # => [write_ptr, end_ptr, num_elements, COMMITMENT, ...]
 
-  # Setup the initial hasher state [R0, R1, C] with empty capacity.
-  #
-  # (12 cycles).
-  exec.poseidon2::init_no_padding
+  movup.2 exec.eidos::init_chaining_word
+  # => [C, write_ptr, end_ptr, COMMITMENT, ...]
+
+  padw padw
   # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
@@ -313,7 +306,7 @@ pub proc pipe_double_words_preimage_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack (9 cycles).
-  exec.poseidon2::squeeze_digest
+  exec.eidos::digest
   # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).
@@ -326,19 +319,17 @@ end
 #! Moves an even number of words from the advice stack to memory and asserts that their
 #! domain-tagged sequential hash matches a given commitment.
 #!
-#! Like `pipe_double_words_preimage_to_memory`, but initializes the Poseidon2 capacity word to
-#! `[0, domain, 0, 0]`.
+#! Like `pipe_double_words_preimage_to_memory`, but binds a domain identifier into the Eidos CV.
 #!
 #! Inputs:  [domain, num_words, write_ptr, COMMITMENT]
 #! Outputs: [write_ptr']
 #!
 #! Where:
-#! - domain is the domain identifier placed into the second element of the capacity word.
+#! - domain is the domain identifier included in the Eidos chaining word.
 #! - num_words is the number of words which will be copied to the memory (must be even).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
 #! - COMMITMENT is the domain-tagged digest that the preimage must hash to.
-#!
 #! Total cycles: 57 + 3 * num_words
 pub proc pipe_double_words_preimage_to_memory_with_domain
   # Bring `num_words` to the top so we can check and consume it below (1 cycle).
@@ -349,16 +340,15 @@ pub proc pipe_double_words_preimage_to_memory_with_domain
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory_with_domain: num_words must be even"
   # => [num_words, domain, write_ptr, COMMITMENT, ...]
 
-  # Compute end_ptr = write_ptr + num_words * 4 and reorder the stack (5 cycles).
-  mul.4 dup.2 add movup.2
-  # => [write_ptr, end_ptr, domain, COMMITMENT, ...]
+  # Compute end_ptr and initialize the Eidos CV with the committed Felt length.
+  dup mul.4 dup dup.4 add
+  movup.2 drop movup.3
+  # => [write_ptr, end_ptr, num_elements, domain, COMMITMENT, ...]
 
-  # Build the capacity word `[0, domain, 0, 0]` on top of the stack (4 cycles).
-  push.0.0 movup.4 push.0
-  # => [C=[0, domain, 0, 0], write_ptr, end_ptr, COMMITMENT, ...]
+  movup.3 movup.3 exec.eidos::init_chaining_word_in_domain
+  # => [C, write_ptr, end_ptr, COMMITMENT, ...]
 
-  # Fill in R0 and R1 with zeros (8 cycles).
-  exec.poseidon2::init_with_capacity
+  padw padw
   # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
@@ -366,7 +356,7 @@ pub proc pipe_double_words_preimage_to_memory_with_domain
   # => [R0', R1', C', write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack (9 cycles).
-  exec.poseidon2::squeeze_digest
+  exec.eidos::digest
   # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).

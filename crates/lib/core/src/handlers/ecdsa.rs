@@ -14,9 +14,8 @@
 //! ### Precompile Verifier (Verification-Time)
 //! During verification, the [`PrecompileVerifier`] receives the stored request data (public key,
 //! digest, signature), re-performs the ECDSA verification, and generates a commitment
-//! `P2(P2(P2(pk) || P2(digest)) || P2(sig))`, where P2 stands for Poseidon2, with a tag containing
-//! the verification result that validates the computation was performed correctly. Here `pk`,
-//! `digest`, and `sig` are hashed as u32‑packed field elements before being merged.
+//! a VM-hash commitment to the public key, digest, and signature, with a tag containing the
+//! verification result. Each component is hashed as u32-packed field elements before being merged.
 //!
 //! ### Commitment Tag Format
 //! Each request is tagged as `[event_id, result, 0, 0]` where `result` is 1 for valid signatures
@@ -34,6 +33,7 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::{
     Felt,
+    chiplets::hasher::Hasher as VmHasher,
     events::EventName,
     field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
@@ -43,7 +43,6 @@ use miden_core::{
 use miden_crypto::{
     ZERO,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
-    hash::poseidon2::Poseidon2,
 };
 use miden_processor::{
     ProcessorState,
@@ -127,9 +126,9 @@ impl PrecompileVerifier for EcdsaPrecompile {
     ///
     /// Receives the serialized request data (public key || digest || signature) stored during
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
-    /// generates a commitment `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
-    /// `[event_id, result, 0, 0]` that validates against the execution trace. Each of `pk`,
-    /// `digest`, and `sig` is first converted to u32‑packed field elements before hashing.
+    /// generates a VM-hash commitment with tag `[event_id, result, 0, 0]` that validates against
+    /// the execution trace. Each of `pk`, `digest`, and `sig` is first converted to u32-packed
+    /// field elements before hashing.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let request = EcdsaRequest::read_from_bytes(calldata)?;
         Ok(request.as_precompile_commitment())
@@ -196,9 +195,9 @@ impl EcdsaRequest {
 
     /// Computes the precompile commitment for this request.
     ///
-    /// The commitment is `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
-    /// `[event_id, result, 0, 0]`, where `result` is 1 for valid signatures and 0 for
-    /// invalid ones. Each component is hashed over u32‑packed field elements.
+    /// The commitment is a VM-hash commitment with tag `[event_id, result, 0, 0]`, where `result`
+    /// is 1 for valid signatures and 0 for invalid ones. Each component is hashed over u32-packed
+    /// field elements.
     ///
     /// This is called by the [`PrecompileVerifier`] at verification time and must match
     /// the commitment generated during execution.
@@ -210,19 +209,19 @@ impl EcdsaRequest {
         // Convert serialized bytes to field elements and hash
         let pk_comm = {
             let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
-            Poseidon2::hash_elements(&felts)
+            VmHasher::hash_elements(&felts)
         };
         let digest_comm = {
-            // `digest` is a 32‑byte array; hash its u32‑packed representation
+            // `digest` is a 32-byte array; hash its u32-packed representation.
             let felts = bytes_to_packed_u32_elements(&self.digest);
-            Poseidon2::hash_elements(&felts)
+            VmHasher::hash_elements(&felts)
         };
         let sig_comm = {
             let felts = bytes_to_packed_u32_elements(&self.sig.to_bytes());
-            Poseidon2::hash_elements(&felts)
+            VmHasher::hash_elements(&felts)
         };
 
-        let commitment = Poseidon2::merge(&[Poseidon2::merge(&[pk_comm, digest_comm]), sig_comm]);
+        let commitment = VmHasher::merge(&[VmHasher::merge(&[pk_comm, digest_comm]), sig_comm]);
 
         PrecompileCommitment::new(tag, commitment)
     }

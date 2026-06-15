@@ -388,7 +388,7 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 
 #[cfg(test)]
 mod tests {
-    use miden_core::crypto::hash::Poseidon2;
+    use miden_core::crypto::hash::Eidos;
     use miden_debug_types::Span;
 
     use crate::{
@@ -427,11 +427,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Poseidon2::hash(b"miden::core::math::u64::add");
+        let digest = Eidos::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x23796e2a4ee91a63c116e11dbbc2ea599461766d1fb7b6599ca387cab2c3e64c",
+            "exec.0x8cd43ab66384a41d34b3f23398a35c1e9b1d1284ba831e7f858102ffdd16bc0d",
             instruction
         );
     }

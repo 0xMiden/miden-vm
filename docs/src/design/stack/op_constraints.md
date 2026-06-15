@@ -184,7 +184,7 @@ This group contains operations which require constraints with degree up to $3$. 
 
 | Operation     | Opcode value | Binary encoding |            Operation group             | Flag degree |
 |---------------|:------------:|:---------------:|:--------------------------------------:|:-----------:|
-| `HPERM`       |     $80$     |   `101_0000`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
+| `BCOMPRESS`   |     $80$     |   `101_0000`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `MPVERIFY`    |     $81$     |   `101_0001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `PIPE`        |     $82$     |   `101_0010`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `MSTREAM`     |     $83$     |   `101_0011`    |         [I/O ops](./io_ops.md)         |     $5$     |

@@ -52,7 +52,7 @@ pub(super) fn op_bcompress<P: Processor, T: Tracer>(
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let input_state = read_hasher_state(processor);
-    let (addr, output_state) = processor.hasher().permute(input_state)?;
+    let (addr, output_state) = processor.hasher().bcompress(input_state)?;
 
     let cv_next: Word = output_state[Hasher::DIGEST_RANGE]
         .try_into()
@@ -464,7 +464,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     hasher_state[Hasher::CAPACITY_RANGE]
         .copy_from_slice(blakeg::two_to_one_chaining_word(0).as_slice());
 
-    let (addr, output_state) = processor.hasher().permute(hasher_state)?;
+    let (addr, output_state) = processor.hasher().bcompress(hasher_state)?;
 
     let state_new: Word = output_state[Hasher::DIGEST_RANGE].try_into().unwrap();
 

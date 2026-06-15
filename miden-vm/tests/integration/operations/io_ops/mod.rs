@@ -1,4 +1,4 @@
-use miden_core::chiplets::hasher::apply_permutation;
+use miden_core::chiplets::hasher::compress_state;
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
@@ -17,7 +17,7 @@ fn mem_stream_pipe() {
     let source = "
         begin
             # pipe elements from advice to memory and hash them on the stack
-            adv_pipe hperm
+            adv_pipe bcompress
 
             # keep only the output elements from the adv_pipe hash
             dropw
@@ -31,8 +31,8 @@ fn mem_stream_pipe() {
                 push.0
             end
 
-            # use mem_stream and hperm to put the elements from memory on the stack and hash them
-            mem_stream hperm
+            # use mem_stream and bcompress to put the elements from memory on the stack and hash them
+            mem_stream bcompress
 
             # keep only the output elements from the mem_stream hash
             dropw
@@ -67,7 +67,7 @@ fn mem_stream_pipe() {
     // state = [rate1_0-3, rate2_4-7, capacity_8-11]
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0].to_elements().try_into().unwrap();
-    apply_permutation(&mut state);
+    compress_state(&mut state);
 
     // The MASM code keeps state[4..8] (rate word 2) after the stack manipulation:
     // dropw swapw dropw movup.4 drop

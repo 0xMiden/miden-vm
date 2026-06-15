@@ -34,10 +34,10 @@
 //! circuits; when these constraints change, the recursive artifacts must be
 //! regenerated with the constraints tool.
 //!
-//! # LogUp constraints (HIN / MSG / perm-link)
+//! # LogUp constraints (HIN / MSG / compression link)
 //!
 //! Bus-side constraints are enforced by the lookup AIR wiring, not in this module. This includes
-//! HIN / MSG / perm-link interactions and the AND8 lookups used by the byte-XOR identities.
+//! HIN / MSG / compression-link interactions and the AND8 lookups used by the byte-XOR identities.
 
 pub mod boundary;
 pub mod footer;
@@ -89,14 +89,14 @@ pub const FOOTER_H_EVEN_WORD_COL: usize = 55;
 /// Footer HIN-pair odd H word field.
 pub const FOOTER_H_ODD_WORD_COL: usize = 56;
 
-/// Footer top-bit lookup field for `H_odd[3]`.
-pub const FOOTER_H_ODD_TOP_BYTE_COL: usize = 48;
+/// Footer inverse witness for canonical input chaining-value packing.
+pub const FOOTER_H_CANON_INV_COL: usize = 48;
 
-/// Footer top-bit lookup mask field for `H_odd[3]`.
-pub const FOOTER_H_TOP_MASK_COL: usize = 49;
+/// Footer zero flag for canonical input chaining-value packing.
+pub const FOOTER_H_CANON_Z_COL: usize = 49;
 
-/// Footer top-bit lookup zero-result field for `H_odd[3] & 128`.
-pub const FOOTER_H_TOP_ZERO_COL: usize = 50;
+/// Footer spare column beside the input-CV canonicality witnesses.
+pub const FOOTER_H_CANON_SPARE_COL: usize = 50;
 
 /// Footer top-bit lookup field for `Out_odd[3]`.
 pub const FOOTER_OUT_ODD_TOP_BYTE_COL: usize = 51;
@@ -320,13 +320,14 @@ pub fn enforce_blakeg_constraints<AB>(
 
     // 4. Footer body: W continuity, accumulator continuity, zero-init,
     //    Vlo/Vhi binding, output byte-XOR identity, C/D definitions,
-    //    mask_bit Boolean.
+    //    input-CV canonicality, and mask_bit Boolean.
     footer::enforce_footer_w_continuity(builder, local, next, &sel);
     footer::enforce_footer_accumulator_continuity(builder, local, next, &sel);
     footer::enforce_footer_tail_label_continuity(builder, local, next, &sel);
     local_checks::enforce_footer_accumulator_zero_init(builder, local, &sel);
     footer::enforce_footer_vlo_vhi_decomposition(builder, &footer_local, local, &sel);
     footer::enforce_footer_c_definition(builder, &footer_local, &sel);
+    footer::enforce_footer_c_canonicality(builder, &footer_local, &sel);
     footer::enforce_footer_d_definition(builder, &footer_local, &sel);
     local_checks::enforce_footer_mask_bit_boolean(builder, &footer_local, &sel);
 

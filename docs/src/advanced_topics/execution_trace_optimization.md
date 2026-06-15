@@ -13,7 +13,7 @@ When we refer to "number of cycles" in most Miden VM documentation, we're specif
 - **Stack rows**: One row per VM operation (what `clk` outputs). This corresponds to the System, Program decoder and Operand Stack set of columns from the [execution trace diagram](../design/index.md#execution-trace)
 - **Range checker rows**: Added for all u32 and memory operations (no more, no less)
 - **Chiplet rows**: Added when opcodes call specialized chiplets:
-  - `hperm` calls the hasher chiplet
+  - `bcompress` calls the BlakeG compression AIR
   - `and`, `or` (and other bitwise ops) call the bitwise chiplet
   - memory operations call the memory chiplet
   - syscalls call the kernel ROM chiplet

@@ -9,7 +9,7 @@ The Chiplets module contains specialized components dedicated to accelerating co
 
 Currently, Miden VM relies on 5 chiplets:
 
-- The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), used to compute Poseidon2 hashes both for sequential hashing and for Merkle tree hashing.
+- The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), used to compute native VM hashes both for sequential hashing and for Merkle tree hashing.
 - The [Bitwise Chiplet](./bitwise.md), used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
 - The [Memory Chiplet](./memory.md), used to support random-access memory in the VM.
 - The [Arithmetic Circuit Evaluation (ACE)](./ace.md), used to ensure that arithmetic circuits evaluate to zero.
@@ -58,7 +58,7 @@ This is true for any transition constraints that are applied at every row and se
 
 This requires the following adjustments for each chiplet.
 
-**In the hash chiplet:** controller constraints explicitly confine the controller boundary. Poseidon2 permutation steps are proved by `Poseidon2PermutationAir`.
+**In the hash chiplet:** controller constraints explicitly confine the controller boundary. BlakeG compression steps are proved by `BlakeGCompressionAir`.
 
 **In the bitwise chiplet:** there is no conflict, and therefore no change, since all constraints are periodic.
 

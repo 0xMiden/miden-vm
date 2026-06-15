@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 use miden::core::collections::sorted_array
 use miden::core::mem
 use miden::core::word
@@ -15,8 +15,8 @@ const LEAF_DEPTH = 64
 const MAX_LEAF_SIZE = 8192
 
 # Domain identifier used when hashing SMT leaves. Matches `SmtLeaf::LEAF_DOMAIN` in miden-crypto
-# and is mixed into the Poseidon2 capacity word to domain-separate leaf hashes from ordinary
-# inner Merkle nodes.
+# and is mixed into the Eidos chaining word to domain-separate leaf hashes from ordinary inner
+# Merkle nodes.
 const LEAF_DOMAIN = 0x13af
 
 # EXPORTS
@@ -107,7 +107,7 @@ pub proc get
 
             # Hash leaf preimage with domain separation and ensure that it equals node value
             # (28 cycles)
-            push.LEAF_DOMAIN exec.poseidon2::merge_in_domain assert_eqw
+            push.LEAF_DOMAIN exec.eidos::merge_in_domain assert_eqw
             # => [V, R]
         else
             # => [leaf_size, NV, K, R]
@@ -201,7 +201,7 @@ pub proc set
             # hash_in_domain(K_l, V_l, LEAF_DOMAIN) == NV.
             adv_pushw adv_pushw
             # => [V_l, K_l, NV, V, K, R]
-            dupw dupw.2 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+            dupw dupw.2 push.LEAF_DOMAIN exec.eidos::merge_in_domain
             # => [hash_in_domain(K_l, V_l, LEAF_DOMAIN), V_l, K_l, NV, V, K, R]
             movupw.3 assert_eqw.err="invalid single-leaf preimage: hash does not match node value"
             # => [V_l, K_l, V, K, R]
@@ -367,7 +367,7 @@ proc set_empty_leaf
 
         # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
         # (21 cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        dupw.1 push.LEAF_DOMAIN exec.eidos::merge_in_domain
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
@@ -451,7 +451,7 @@ proc insert_single_leaf
 
         # Compute hash_in_domain([K, V], LEAF_DOMAIN); the new node value (NV)
         # (X cycles)
-        dupw.1 push.LEAF_DOMAIN exec.poseidon2::merge_in_domain
+        dupw.1 push.LEAF_DOMAIN exec.eidos::merge_in_domain
         # => [NV, K, V_l, R]
 
         # Prepare stack to update Merkle store
@@ -1072,7 +1072,7 @@ proc hash_and_insert_mem
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    push.LEAF_DOMAIN exec.poseidon2::hash_words_with_domain
+    push.LEAF_DOMAIN exec.eidos::hash_words_with_domain
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem

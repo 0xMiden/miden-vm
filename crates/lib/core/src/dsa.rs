@@ -6,7 +6,7 @@
 //! Each submodule corresponds to a specific signature scheme:
 //! - [`ecdsa_k256_keccak`]: ECDSA over secp256k1 with Keccak256 hashing
 //! - [`eddsa_ed25519`]: EdDSA over Ed25519 with SHA-512 hashing
-//! - [`falcon512_poseidon2`]: Falcon-512 with Poseidon2 hashing
+//! - [`falcon512_eidos`]: Falcon-512 with the native VM hash
 
 // ECDSA K256 KECCAK
 // ================================================================================================
@@ -97,27 +97,29 @@ pub mod eddsa_ed25519 {
     }
 }
 
-// FALCON 512 POSEIDON2
+// FALCON 512
 // ================================================================================================
 
-/// Falcon-512 with Poseidon2 hashing signature helpers.
+/// Falcon-512 signature helpers.
 ///
 /// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::falcon512_poseidon2::verify` MASM procedure.
-pub mod falcon512_poseidon2 {
+/// `miden::core::crypto::dsa::falcon512_eidos::verify` MASM procedure.
+pub mod falcon512_eidos {
     extern crate alloc;
 
     use alloc::vec::Vec;
 
     // Re-export signature type for users
-    pub use miden_core::crypto::dsa::falcon512_poseidon2::{PublicKey, SecretKey, Signature};
+    pub use miden_core::crypto::dsa::falcon512_eidos::{PublicKey, SecretKey, Signature};
     use miden_core::{
         Felt, Word,
-        crypto::{dsa::falcon512_poseidon2::Polynomial, hash::Poseidon2},
+        crypto::{dsa::falcon512_eidos::Polynomial, hash::Eidos},
     };
 
+    const FALCON_PRODUCT_DOMAIN: u32 = 0x0fa1_c002;
+
     /// Signs the provided message with the provided secret key and returns the resulting signature
-    /// encoded in the format required by the `falcon512_poseidon2::verify` procedure, or `None` if
+    /// encoded in the format required by the `falcon512_eidos::verify` procedure, or `None` if
     /// the secret key is malformed due to either incorrect length or failed decoding.
     ///
     /// This is equivalent to calling [`encode_signature`] on the result of signing the message.
@@ -129,7 +131,7 @@ pub mod falcon512_poseidon2 {
     }
 
     /// Encodes the provided Falcon public key and signature into a vector of field elements in the
-    /// format expected by `miden::core::crypto::dsa::falcon512_poseidon2::verify` procedure.
+    /// format expected by `miden::core::crypto::dsa::falcon512_eidos::verify` procedure.
     ///
     /// The encoding format is (in reverse order on the advice stack):
     ///
@@ -143,7 +145,7 @@ pub mod falcon512_poseidon2 {
     /// 5. The nonce represented as 8 field elements.
     ///
     /// The result can be streamed straight to the advice provider before invoking
-    /// `falcon512_poseidon2::verify`.
+    /// `falcon512_eidos::verify`.
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         use alloc::vec;
 
@@ -166,10 +168,14 @@ pub mod falcon512_poseidon2 {
         // Finally, we push the nonce needed for the hash-to-point algorithm.
 
         let mut polynomials = pk.to_elements();
-        polynomials.extend(s2.to_elements());
-        polynomials.extend(pi.iter().map(|a| Felt::new_unchecked(*a)));
+        let s2_elements = s2.to_elements();
+        let pi_elements = pi.iter().map(|a| Felt::new_unchecked(*a)).collect::<Vec<_>>();
 
-        let digest_polynomials = Poseidon2::hash_elements(&polynomials);
+        polynomials.extend_from_slice(&s2_elements);
+        polynomials.extend_from_slice(&pi_elements);
+
+        let digest_polynomials =
+            product_check_digest(pk.to_commitment(), &s2_elements, &pi_elements);
         let challenge = (digest_polynomials[0], digest_polynomials[1]);
 
         // Push [tau1, tau0] so that after extend_stack reversal + two `adv_push` ops,
@@ -179,5 +185,25 @@ pub mod falcon512_poseidon2 {
         result.extend_from_slice(&nonce.to_elements());
 
         result
+    }
+
+    /// Computes the Falcon product-check transcript digest.
+    ///
+    /// The transcript binds the public-key commitment, the signature polynomial, and the claimed
+    /// product. The verifier recomputes the public-key commitment separately from the expanded key.
+    pub fn product_check_digest(public_key: Word, s2: &[Felt], product: &[Felt]) -> Word {
+        assert_eq!(s2.len() % 8, 0, "s2 must be split into full Eidos blocks");
+        assert_eq!(product.len() % 8, 0, "product must be split into full Eidos blocks");
+
+        let mut cv = Eidos::merge_in_domain(
+            &[public_key, Word::default()],
+            Felt::new_unchecked(FALCON_PRODUCT_DOMAIN as u64),
+        );
+
+        for chunk in s2.chunks(8).chain(product.chunks(8)) {
+            cv = Eidos::compress_block(cv, chunk.try_into().expect("chunk length checked above"));
+        }
+
+        cv
     }
 }

@@ -29,7 +29,7 @@ stale calibration constants checked into the repo.
    divide the resulting per-component row counts by `K` to learn how
    many core/hasher/memory/... rows a single iteration costs *on this
    VM*. Running this on every bench invocation is what keeps the
-   bench honest across VM changes: if `hperm` gets cheaper tomorrow,
+   bench honest across VM changes: if `bcompress` gets cheaper tomorrow,
    tomorrow's iteration count grows to compensate, and the target
    bracket is still hit.
 
@@ -62,7 +62,7 @@ Five patterns cover every component the solver targets:
 
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
-| `hasher`      | `hperm`                                      | Poseidon2 hasher chiplet      |
+| `hasher`      | `bcompress`                                  | BlakeG compression AIR        |
 | `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
 | `u32arith`    | `u32assert2 push.65537 add swap push.65537 add swap` | range chiplet |
 | `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |

@@ -1,10 +1,10 @@
 use miden_core::WORD_SIZE;
+use miden_crypto::hash::eidos::Eidos;
 use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
     crypto::{
-        MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, Poseidon2, init_merkle_leaf,
-        init_merkle_leaves,
+        MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
     felt_slice_to_ints, hash_elements,
 };
@@ -625,7 +625,7 @@ fn test_mmr_add_then_mtree_get() {
     let tree_b = MerkleTree::new(leaves_b).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
-    let merged_root = Poseidon2::merge(&[root_a, root_b]);
+    let merged_root = Eidos::merge(&[root_a, root_b]);
 
     let mut store = MerkleStore::default();
     store.extend(tree_a.inner_nodes());

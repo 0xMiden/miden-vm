@@ -1,5 +1,5 @@
 use miden::core::sys
-use miden::core::crypto::hashes::poseidon2
+use miden::core::crypto::hashes::eidos
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -47,27 +47,28 @@ proc hash_bytes_impl
     dup.1 add.3 u32shr.2 swap
     # => [ptr, len_u32, len_bytes, ...]
 
-    # Load digest from advice stack (16 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..16])
+    # Load digest from advice stack (16 u32 limbs) and write to digest_ptr = locaddr.0 while
+    # computing COMM_DIGEST = hash_elements(DIGEST[0..16]).
     locaddr.0
-    exec.poseidon2::init_no_padding
+    push.16 exec.eidos::init_chaining_word
+    padw padw
     # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
     repeat.2
         adv_pipe
-        exec.poseidon2::permute
+        exec.eidos::compress
     end
-    exec.poseidon2::squeeze_digest
+    exec.eidos::digest
     # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
 
     movup.4 drop
     # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
 
-    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
-    movup.5 movup.5 exec.poseidon2::hash_elements
+    # Compute COMM_INPUT = hash_elements(ptr, len_u32)
+    movup.5 movup.5 exec.eidos::hash_elements
     # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
 
     # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.poseidon2::merge
+    exec.eidos::merge
     # => [COMM, len_bytes, ...]
 
     # Prepare TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0]

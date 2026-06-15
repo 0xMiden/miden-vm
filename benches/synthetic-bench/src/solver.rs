@@ -69,7 +69,7 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
     let component_target = |c: Component| -> f64 {
         match c {
             Component::Core => target.totals.core_rows as f64,
-            Component::Hasher => target.totals.poseidon2_permutation_rows as f64,
+            Component::Hasher => target.totals.blakeg_compression_rows as f64,
             Component::Bitwise => target.breakdown.bitwise_rows as f64,
             Component::Memory => target.breakdown.memory_target() as f64,
             Component::Range => target.totals.range_rows as f64,
@@ -134,7 +134,7 @@ mod tests {
     fn shape_of(
         core_rows: u64,
         range_rows: u64,
-        poseidon2: u64,
+        blakeg_compression: u64,
         bitwise: u64,
         memory: u64,
     ) -> TraceShape {
@@ -148,59 +148,63 @@ mod tests {
         let totals = TraceTotals {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: poseidon2,
+            blakeg_compression_rows: blakeg_compression,
+            and8_lookup_rows: crate::snapshot::DEFAULT_AND8_LOOKUP_ROWS,
             range_rows,
         };
         TraceShape::new(totals, breakdown)
     }
 
     fn low_hasher_target() -> TraceShape {
-        // core/hasher ratio of ~8, well below the intrinsic core/4 floor. Memory kept modest
-        // (ratio core/memory ~30) so the test exercises the hasher-feasibility path without making
-        // it infeasible via memory overshoot into core.
-        shape_of(68900, 40000, 8200, 0, 2300)
+        // The core target is in the 2^18 bracket. Its baseline BlakeG leakage already exceeds the
+        // requested hasher rows, so the solver should not add explicit bcompress work.
+        shape_of(131100, 40000, 8200, 0, 2300)
     }
 
     fn high_hasher_target() -> TraceShape {
-        // main/hasher ratio of ~2, above the intrinsic main/4 floor.
-        shape_of(16000, 0, 8000, 0, 0)
+        // Hasher rows exceed the baseline leakage from the core target, so explicit bcompress work
+        // is required.
+        shape_of(16000, 0, 20000, 0, 0)
     }
 
     #[test]
-    fn low_hasher_target_does_not_add_hperm() {
+    fn low_hasher_target_does_not_add_bcompress() {
         let cal = calibrate().expect("calibrate");
         let plan = solve(&cal, &low_hasher_target());
         assert_eq!(
             plan.iters("hasher"),
             0,
-            "when the decoder (via memory + pad) already overshoots the hasher target, no hperm iterations should be added",
+            "when the decoder (via memory + pad) already overshoots the hasher target, no bcompress iterations should be added",
         );
         assert!(plan.iters("memory") > 0);
     }
 
     #[test]
-    fn high_hasher_target_requires_hperm() {
+    fn high_hasher_target_requires_bcompress() {
         let cal = calibrate().expect("calibrate");
         let plan = solve(&cal, &high_hasher_target());
         assert!(
             plan.iters("hasher") > 0,
-            "a hasher target above the main/4 floor should require hperm iterations",
+            "a hasher target above the main/4 floor should require bcompress iterations",
         );
     }
 
     #[test]
     fn emitted_program_matches_padded_bracket() {
         let cal = calibrate().expect("calibrate");
-        let target = low_hasher_target();
+        let target = shape_of(131100, 40000, 300000, 0, 2300);
         let plan = solve(&cal, &target);
         let source = emit(&plan);
         let actual = measure_program(&source).expect("measure emitted program");
         assert_eq!(
             actual.totals.padded_total(),
             target.totals.padded_total(),
-            "padded trace length must match target bracket (got {} vs {})",
+            "padded trace length must match target bracket (got {} vs {}); plan={:?}, actual={:?}, target={:?}",
             actual.totals.padded_total(),
             target.totals.padded_total(),
+            plan,
+            actual,
+            target,
         );
     }
 

@@ -44,9 +44,9 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ## Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. One downside of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
 
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+The historical benchmarks below execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |

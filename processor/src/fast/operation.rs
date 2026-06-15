@@ -6,7 +6,7 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    chiplets::hasher::apply_permutation,
+    chiplets::hasher::compress_state,
     crypto::merkle::MerklePath,
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
     program::MIN_STACK_DEPTH,
@@ -70,11 +70,11 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn permute(
+    fn bcompress(
         &mut self,
         mut input_state: HasherState,
     ) -> Result<(Felt, HasherState), OperationError> {
-        apply_permutation(&mut input_state);
+        compress_state(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))

@@ -133,7 +133,7 @@ These registers have the following meanings:
 
 To compute hashes of program blocks, the decoder relies on the [hash chiplet](../chiplets/hasher.md). Specifically, the decoder needs to perform two types of hashing operations:
 
-1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements and get back $4$ field elements representing the result. In the controller/permutation split hasher design, this is represented by one controller pair plus one packed 16-row permutation cycle for the corresponding input state.
+1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements and get back $4$ field elements representing the result. In the controller/compression split hasher design, this is represented by one controller pair plus one BlakeG compression block for the corresponding input state.
 2. A sequential hash of $n$ elements. This requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. At the controller level, each absorbed batch contributes one `(input, output)` controller pair, so the controller addresses for successive batches advance by $2$.
 
 To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/index.md#chiplets-bus) column $b_{chip}$ as described below.
@@ -147,7 +147,7 @@ $$
 $$
 
 where:
-* $m_{bp}$ is a label indicating beginning of a new permutation. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
+* $m_{bp}$ is a label indicating the start of a hash-chiplet request. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
 * $r$ is the address of the row at which the hashing begins.
 * Some $\alpha$ values are skipped in the above (e.g., $\alpha_3$) because of the specifics of how auxiliary hasher table rows are reduced to field elements (described [here](../chiplets/hasher.md#multiset-check-constraints)). For example, $\alpha_3$ is used as a coefficient for node index values during Merkle path computations in the hasher, and thus, is not relevant in this case. The capacity lanes (state indices $8..11$, coefficients $\alpha_{12..15}$) are zero for these messages, so those terms drop out.
 

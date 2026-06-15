@@ -1,14 +1,14 @@
 //! Chiplet-trace LogUp lookup AIR.
 //!
-//! Owns the chiplet-trace side of the Miden VM's LogUp argument: three permutation
-//! columns, one per `emit_*` function in [`super::buses`]. This module wires them together
+//! Owns the chiplet-trace side of the Miden VM's LogUp argument: three lookup columns, one
+//! per `emit_*` function in [`super::buses`]. This module wires them together
 //! via a single [`ChipletBusContext`] that carries the two-row window plus a shared
 //! [`ChipletActiveFlags`] snapshot.
 //!
 //! Columns (in emission order):
 //! - chiplet responses (memory / bitwise / hasher replies).
 //! - hash-kernel virtual table.
-//! - shared wiring column: ACE wiring + hasher perm-link.
+//! - shared wiring column: ACE wiring + hasher compression link.
 //!
 //! The [`ChipletLookupBuilder`] extension trait mirrors [`super::main_air::MainLookupBuilder`]:
 //! it exposes a single construction hook so the prover path can eventually skip the dead

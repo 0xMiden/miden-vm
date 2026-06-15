@@ -1,17 +1,41 @@
+use miden_core::{Felt, Word};
+use miden_crypto::hash::eidos::Eidos;
 use miden_processor::{ExecutionError, ZERO, operation::OperationError};
-use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
+use miden_utils_testing::{build_expected_hash, expect_exec_error_matches};
+
+fn raw_absorb_double_words(values: &[u64]) -> Vec<u64> {
+    assert_eq!(values.len() % 8, 0);
+
+    let mut cv = Word::default();
+    let mut last_block = [Felt::ZERO; 8];
+
+    for chunk in values.chunks_exact(8) {
+        last_block = core::array::from_fn(|i| Felt::new_unchecked(chunk[i]));
+        cv = Eidos::compress_block(cv, last_block);
+    }
+
+    last_block
+        .into_iter()
+        .chain(cv.as_slice().iter().copied())
+        .map(|felt| felt.as_canonical_u64())
+        .collect()
+}
+
+fn raw_absorb_digest(values: &[u64]) -> Vec<u64> {
+    raw_absorb_double_words(values)[8..12].to_vec()
+}
 
 #[test]
 fn test_invalid_end_addr() {
     // end_addr can not be smaller than start_addr
     let empty_range = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0999 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
     end
     ";
     let test = build_test!(empty_range, &[]);
@@ -25,13 +49,13 @@ fn test_invalid_end_addr() {
 #[test]
 fn test_invalid_end_addr_has_message() {
     let source = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0999 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_double_words
+        exec.eidos::hash_double_words
     end
     ";
     let test = build_test!(source, &[]);
@@ -42,15 +66,17 @@ fn test_invalid_end_addr_has_message() {
 fn test_hash_empty() {
     // computes the hash for 8 consecutive zeros using mem_stream directly
     let two_zeros_mem_stream = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         # mem_stream state
-        push.1000 padw padw padw
+        push.1000
+        push.8 exec.eidos::init_chaining_word
+        padw padw
         mem_stream bcompress
 
         # drop everything except the hash
-        exec.poseidon2::squeeze_digest movup.4 drop
+        exec.eidos::digest movup.4 drop
 
         # truncate stack
         swapw dropw
@@ -66,13 +92,13 @@ fn test_hash_empty() {
 
     // checks the hash compute from 8 zero elements is the same when using hash_words
     let two_zeros = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1008 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
         # truncate stack
         swapw dropw
     end
@@ -85,18 +111,20 @@ fn test_hash_empty() {
 fn test_single_iteration() {
     // computes the hash of 1 using mem_stream
     let one_memstream = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         # insert 1 to memory
         push.1.1000 mem_store
 
         # mem_stream state
-        push.1000 padw padw padw
+        push.1000
+        push.8 exec.eidos::init_chaining_word
+        padw padw
         mem_stream bcompress
 
         # drop everything except the hash
-        exec.poseidon2::squeeze_digest movup.4 drop
+        exec.eidos::digest movup.4 drop
 
         # truncate stack
         swapw dropw
@@ -114,7 +142,7 @@ fn test_single_iteration() {
     // Note: This is testing the hashing of two words, so no padding is added
     // here
     let one_element = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         # insert 1 to memory
@@ -123,7 +151,7 @@ fn test_single_iteration() {
         push.1008 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
 
         # truncate stack
         swapw dropw
@@ -146,7 +174,7 @@ fn test_hash_one_word() {
 
     // checks the hash of 1 is the same when using hash_words
     let one_element = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1.1000 mem_store # push data to memory
@@ -154,7 +182,7 @@ fn test_hash_one_word() {
         push.1004 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
 
         # truncate stack
         swapw dropw
@@ -169,7 +197,7 @@ fn test_hash_even_words() {
     // checks the hash of two words
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
     let even_words = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0.1.0.0.1000 mem_storew_le dropw
@@ -178,7 +206,7 @@ fn test_hash_even_words() {
         push.1008 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
 
         # truncate stack
         swapw dropw
@@ -201,7 +229,7 @@ fn test_hash_odd_words() {
     // The hash_words procedure adds padding for odd word counts, so we use
     // hardcoded expected values (same as reference).
     let odd_words = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0.1.0.0.1000 mem_storew_le dropw
@@ -211,7 +239,7 @@ fn test_hash_odd_words() {
         push.1012 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
 
         # truncate stack
         swapw dropw
@@ -232,7 +260,7 @@ fn test_absorb_double_words_from_memory() {
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
     let even_words = "
     use miden::core::sys
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0.0.0.1.1000 mem_storew_le dropw
@@ -241,7 +269,7 @@ fn test_absorb_double_words_from_memory() {
         push.1008      # end address
         push.1000      # start address
         padw padw padw # hasher state
-        exec.poseidon2::absorb_double_words_from_memory
+        exec.eidos::absorb_double_words_from_memory
 
         # truncate stack
         exec.sys::truncate_stack
@@ -250,11 +278,10 @@ fn test_absorb_double_words_from_memory() {
 
     // push.0.0.0.1 stores [1, 0, 0, 0], push.0.0.1.0 stores [0, 1, 0, 0]
     #[rustfmt::skip]
-    let mut even_hash: Vec<u64> = build_expected_perm(&[
+    let mut even_hash = raw_absorb_double_words(&[
         1, 0, 0, 0, // first word of the rate
         0, 1, 0, 0, // second word of the rate
-        0, 0, 0, 0, // capacity, no padding required
-    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
+    ]);
 
     // start and end addr
     even_hash.push(1008);
@@ -269,7 +296,7 @@ fn test_hash_double_words() {
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
     let double_words = "
     use miden::core::sys
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         # store four words (two double words) in memory
@@ -282,7 +309,7 @@ fn test_hash_double_words() {
         push.1000      # start address
         # => [start_addr, end_addr]
 
-        exec.poseidon2::hash_double_words
+        exec.eidos::hash_double_words
         # => [HASH]
 
         # truncate stack
@@ -306,17 +333,19 @@ fn test_hash_double_words() {
     // test the corner case when the end pointer equals to the start pointer
     let empty_double_words = r#"
     use miden::core::sys
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1000.1000 # start and end addresses
         # => [start_addr, end_addr]
 
-        exec.poseidon2::hash_double_words
+        exec.eidos::hash_double_words
         # => [HASH]
 
-        # assert that the resulting hash is equal to the empty word
-        dupw padw assert_eqw.err="resulting hash should be equal to the empty word"
+        # assert that the resulting hash is equal to the framed empty hash
+        dupw
+        push.0.1000 exec.eidos::hash_elements
+        assert_eqw.err="resulting hash should be equal to the empty hash"
 
         # truncate stack
         exec.sys::truncate_stack
@@ -324,14 +353,16 @@ fn test_hash_double_words() {
     end
     "#;
 
-    build_test!(empty_double_words, &[]).expect_stack(&[0u64; 4]);
+    let empty_hash: Vec<u64> =
+        build_expected_hash(&[]).into_iter().map(|e| e.as_canonical_u64()).collect();
+    build_test!(empty_double_words, &[]).expect_stack(&empty_hash);
 }
 
 #[test]
-fn test_squeeze_digest() {
+fn test_digest() {
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
     let even_words = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0.0.0.1.1000 mem_storew_le dropw
@@ -342,9 +373,9 @@ fn test_squeeze_digest() {
         push.1016      # end address
         push.1000      # start address
         padw padw padw # hasher state
-        exec.poseidon2::absorb_double_words_from_memory
+        exec.eidos::absorb_double_words_from_memory
 
-        exec.poseidon2::squeeze_digest
+        exec.eidos::digest
 
         # truncate stack
         swapdw dropw dropw
@@ -353,12 +384,12 @@ fn test_squeeze_digest() {
 
     // Same input as test_hash_double_words: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
     #[rustfmt::skip]
-    let mut even_hash: Vec<u64> = build_expected_hash(&[
+    let mut even_hash = raw_absorb_digest(&[
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
         0, 0, 0, 1,
-    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
+    ]);
 
     // start and end addr
     even_hash.push(1016);
@@ -372,7 +403,7 @@ fn test_copy_digest() {
     // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
     let copy_digest = r#"
     use miden::core::sys
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1.0.0.0.1000 mem_storew_le dropw
@@ -381,49 +412,63 @@ fn test_copy_digest() {
         push.1008      # end address
         push.1000      # start address
         padw padw padw # hasher state
-        exec.poseidon2::absorb_double_words_from_memory
+        exec.eidos::absorb_double_words_from_memory
         # => [A, B, C, end_ptr, end_ptr]  (sponge state [R0, R1, CAP] with R0=A on top)
 
         # drop the pointers
         movup.12 drop movup.12 drop
         # => [A, B, C]
 
-        # copy the result of the permutation (first word / digest, A)
-        exec.poseidon2::copy_digest
-        # => [A, A, B, C]
-
-        # assert that the copied word is equal to the first word in the hasher state
-        dupw.1 dupw.1 assert_eqw.err="copied word should be equal to the first word in the hasher state"
-        # => [A, A, B, C]
+        # copy the digest/capacity word
+        exec.eidos::copy_digest
+        # => [C, A, B, C]
 
         # truncate stack
         exec.sys::truncate_stack
     end
     "#;
 
-    // push.1.0.0.0 stores [0, 0, 0, 1], push.0.1.0.0 stores [0, 0, 1, 0]
-    #[rustfmt::skip]
-    let mut resulting_stack: Vec<u64> = build_expected_perm(&[
+    let state = raw_absorb_double_words(&[
         0, 0, 0, 1, // first word of the rate
         0, 0, 1, 0, // second word of the rate
-        0, 0, 0, 0, // capacity, no padding required
-    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
-
-    // push the permutation result (digest at R0, positions 0..4) on the top of the resulting stack
-    resulting_stack[0..4]
-        .to_vec()
-        .iter()
-        .rev()
-        .for_each(|hash_element| resulting_stack.insert(0, *hash_element));
+    ]);
+    let mut resulting_stack = state[8..12].to_vec();
+    resulting_stack.extend(state);
 
     build_test!(copy_digest, &[]).expect_stack(&resulting_stack);
+}
+
+#[test]
+fn test_pad_and_hash_elements_synthesizes_zero_tail() {
+    let source = "
+    use miden::core::crypto::hashes::eidos
+
+    begin
+        push.4.3.2.1.1000 mem_storew_le dropw
+        push.88.77.66.5.1004 mem_storew_le dropw
+
+        push.5.1000
+        exec.eidos::pad_and_hash_elements
+
+        # truncate stack
+        swapdw dropw dropw
+    end
+    ";
+
+    #[rustfmt::skip]
+    let expected: Vec<u64> = build_expected_hash(&[
+        1, 2, 3, 4,
+        5, 0, 0, 0,
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
+
+    build_test!(source, &[]).expect_stack(&expected);
 }
 
 #[test]
 fn test_hash_elements() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.4.3.2.1.1000 mem_storew_le dropw
@@ -432,7 +477,7 @@ fn test_hash_elements() {
 
         push.5.1000
 
-        exec.poseidon2::hash_elements
+        exec.eidos::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -449,7 +494,7 @@ fn test_hash_elements() {
 
     // hash exactly 8 elements
     let compute_inputs_hash_8 = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.4.3.2.1.1000 mem_storew_le dropw
@@ -458,7 +503,7 @@ fn test_hash_elements() {
 
         push.8.1000
 
-        exec.poseidon2::hash_elements
+        exec.eidos::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -475,7 +520,7 @@ fn test_hash_elements() {
 
     // hash more than 8 elements
     let compute_inputs_hash_15 = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.4.3.2.1.1000 mem_storew_le dropw
@@ -486,7 +531,7 @@ fn test_hash_elements() {
 
         push.15.1000
 
-        exec.poseidon2::hash_elements
+        exec.eidos::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -510,14 +555,14 @@ fn test_hash_elements_empty() {
     // absorb_double_words_from_memory
     let source = "
     use miden::core::sys
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1000      # end address
         push.1000      # start address
         padw padw padw # hasher state
 
-        exec.poseidon2::absorb_double_words_from_memory
+        exec.eidos::absorb_double_words_from_memory
 
         # truncate stack
         exec.sys::truncate_stack
@@ -532,48 +577,50 @@ fn test_hash_elements_empty() {
 
     // hash_words
     let source = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.1000 # end address
         push.1000 # start address
 
-        exec.poseidon2::hash_words
+        exec.eidos::hash_words
 
         # truncate stack
         swapw dropw
     end
     ";
 
-    build_test!(source, &[]).expect_stack(&[0; 4]);
+    let empty_hash: Vec<u64> =
+        build_expected_hash(&[]).into_iter().map(|e| e.as_canonical_u64()).collect();
+    build_test!(source, &[]).expect_stack(&empty_hash);
 
     // hash_elements
     let source = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
         push.0    # number of elements to hash
         push.1000 # start address
 
-        exec.poseidon2::hash_elements
+        exec.eidos::hash_elements
 
         # truncate stack
         swapw dropw
     end
     ";
 
-    build_test!(source, &[]).expect_stack(&[0; 16]);
+    build_test!(source, &[]).expect_stack(&empty_hash);
 }
 
 #[test]
-fn test_poseidon2_hash_function() {
+fn test_eidos_hash_function() {
     // Test that the public hash function works - it should execute without error
     // and produce a valid 4-element digest from 8-element input
     let source = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
-        exec.poseidon2::hash
+        exec.eidos::hash
         swapw dropw
     end
     ";
@@ -588,14 +635,14 @@ fn test_poseidon2_hash_function() {
 }
 
 #[test]
-fn test_poseidon2_merge_function() {
+fn test_eidos_merge_function() {
     // Test that the public merge function works - it should execute without error
     // and produce a valid 4-element digest from two 4-element digests
     let source = "
-    use miden::core::crypto::hashes::poseidon2
+    use miden::core::crypto::hashes::eidos
 
     begin
-        exec.poseidon2::merge
+        exec.eidos::merge
         swapw dropw
     end
     ";

@@ -10,6 +10,7 @@ use core::convert::TryFrom;
 
 use miden_core::{
     Felt, Word,
+    chiplets::hasher::Hasher as VmHasher,
     events::EventName,
     field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
@@ -22,7 +23,7 @@ use miden_core_lib::{
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, Signature, SigningKey as SecretKey},
-    hash::{poseidon2::Poseidon2, sha2::Sha512},
+    hash::sha2::Sha512,
 };
 use miden_processor::{
     ProcessorState,
@@ -166,7 +167,7 @@ fn test_eddsa_verify_with_message() {
 
     // Compute public key commitment
     let pk_felts = bytes_to_packed_u32_elements(&secret_key.public_key().to_bytes());
-    let pk_commitment = Poseidon2::hash_elements(&pk_felts);
+    let pk_commitment = VmHasher::hash_elements(&pk_felts);
 
     let advice: Vec<_> =
         eddsa_sign(&secret_key, message).iter().map(Felt::as_canonical_u64).collect();
@@ -219,7 +220,7 @@ impl EventHandler for EddsaSignatureHandler {
         let pk_commitment = {
             let pk = secret_key.public_key();
             let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
-            Poseidon2::hash_elements(&pk_felts)
+            VmHasher::hash_elements(&pk_felts)
         };
         assert_eq!(
             provided_pk_commitment, pk_commitment,
@@ -249,7 +250,7 @@ fn test_eddsa_verify_high_level_wrapper() {
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
-        Poseidon2::hash_elements(&pk_felts)
+        VmHasher::hash_elements(&pk_felts)
     };
 
     let source = format!(

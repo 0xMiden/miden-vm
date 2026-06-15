@@ -30,33 +30,36 @@ const NARROW_SLOT_COUNT: usize = 2 * NARROW_BATCH_COLUMNS;
 const BYTE_SLOT_LAST: usize = 19;
 const BYTE_COMMON_SLOT_LAST: usize = 13;
 const BYTE_M0_SLOT_LAST: usize = 15;
-const BYTE_M0_FORWARD_HIN_SLOT_LAST: usize = 17;
+const M0_ROUTE_OR_FIRST_B_HIN_SLOT: usize = 16;
+const FOOTER_OUT_MASK_SLOT: usize = 17;
 const AC_FOOTER_HIN_SLOT: usize = 18;
 const AC_ONLY_SLOT: usize = 19;
-const INTERFACE_STATE_WIDTH: usize = 12;
 const COMPACT_PAIR_BASE_COL: usize = AC_A_BASE_COL;
 const COMPACT_M0_PAIR_INDEX_BASE: usize = 6;
 const COMPACT_M1_PAIR_INDEX_BASE: usize = 14;
 const WORD_BYTE_COUNT: usize = 4;
 
-const ACTIVITY_GROUP_COUNT: usize = 5;
 const ACTIVITY_COMMON_BYTE: usize = 0;
 const ACTIVITY_M0_BYTE: usize = 1;
-const ACTIVITY_M0_FORWARD_HIN_BYTE: usize = 2;
-const ACTIVITY_AC_FOOTER_HIN: usize = 3;
-const ACTIVITY_AC_ONLY: usize = 4;
+const ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN: usize = 2;
+const ACTIVITY_FOOTER_OUT_MASK: usize = 3;
+const ACTIVITY_AC_FOOTER_HIN: usize = 4;
+const ACTIVITY_AC_ONLY: usize = 5;
+const ACTIVITY_GROUP_COUNT: usize = 6;
 
-const MULTIPLICITY_GROUP_COUNT: usize = 7;
 const MULTIPLICITY_INPUT_WORD_BYTE: usize = 0;
 const MULTIPLICITY_LOW_MESSAGE_BYTE: usize = 1;
 const MULTIPLICITY_COMMON_BYTE: usize = 2;
 const MULTIPLICITY_M0_BYTE: usize = 3;
-const MULTIPLICITY_M0_FORWARD_HIN_BYTE: usize = 4;
-const MULTIPLICITY_AC_FOOTER_HIN: usize = 5;
-const MULTIPLICITY_AC_ONLY: usize = 6;
+const MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN: usize = 4;
+const MULTIPLICITY_FOOTER_OUT_MASK: usize = 5;
+const MULTIPLICITY_AC_FOOTER_HIN: usize = 6;
+const MULTIPLICITY_AC_ONLY: usize = 7;
+const MULTIPLICITY_GROUP_COUNT: usize = 8;
 
 const BATCH_2: Deg = Deg { v: 2, u: 2 };
-const SINGLETON_ANNEX: Deg = Deg { v: 2, u: 2 };
+const ANNEX0: Deg = Deg { v: 1, u: 2 };
+const ANNEX1: Deg = Deg { v: 2, u: 2 };
 
 const _: () = assert!(BLAKEG_COMPRESSION_COLUMN_SHAPE.len() == ANNEX1_COLUMN + 1);
 
@@ -64,7 +67,8 @@ const _: () = assert!(BLAKEG_COMPRESSION_COLUMN_SHAPE.len() == ANNEX1_COLUMN + 1
 fn column_deg(aux_col: usize) -> Deg {
     match aux_col {
         0..=LAST_NARROW_BATCH_COLUMN => BATCH_2,
-        ANNEX0_COLUMN | ANNEX1_COLUMN => SINGLETON_ANNEX,
+        ANNEX0_COLUMN => ANNEX0,
+        ANNEX1_COLUMN => ANNEX1,
         _ => unreachable!("BlakeG lookup aux column out of range"),
     }
 }
@@ -190,7 +194,10 @@ where
             ACTIVITY_M0_BYTE => {
                 byte_lookup_rows.clone() + is_b.clone() + is_d.clone() + m0_or_iface_rows.clone()
             },
-            ACTIVITY_M0_FORWARD_HIN_BYTE => {
+            ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN => {
+                is_ac.clone() + is_msg_row0.clone() + is_first_b.clone()
+            },
+            ACTIVITY_FOOTER_OUT_MASK => {
                 byte_lookup_rows.clone() + is_msg_row0.clone() + is_first_b.clone()
             },
             ACTIVITY_AC_FOOTER_HIN => is_ac.clone() + is_footer.clone(),
@@ -234,7 +241,12 @@ where
                     + scale_expr(is_msg_row0.clone(), -1)
                     + scale_expr(is_iface_in.clone(), -1)
             },
-            MULTIPLICITY_M0_FORWARD_HIN_BYTE => {
+            MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN => {
+                is_ac.clone()
+                    + scale_expr(is_msg_row0.clone(), -1)
+                    + scale_expr(is_first_b.clone(), -1)
+            },
+            MULTIPLICITY_FOOTER_OUT_MASK => {
                 is_ac.clone()
                     + scale_expr(is_footer.clone(), -1)
                     + scale_expr(is_msg_row0.clone(), -1)
@@ -270,7 +282,8 @@ fn slot_activity_group(slot: usize) -> Option<usize> {
     match slot {
         0..=BYTE_COMMON_SLOT_LAST => Some(ACTIVITY_COMMON_BYTE),
         14..=BYTE_M0_SLOT_LAST => Some(ACTIVITY_M0_BYTE),
-        16..=BYTE_M0_FORWARD_HIN_SLOT_LAST => Some(ACTIVITY_M0_FORWARD_HIN_BYTE),
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT => Some(ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN),
+        FOOTER_OUT_MASK_SLOT => Some(ACTIVITY_FOOTER_OUT_MASK),
         AC_FOOTER_HIN_SLOT => Some(ACTIVITY_AC_FOOTER_HIN),
         AC_ONLY_SLOT => Some(ACTIVITY_AC_ONLY),
         _ => unreachable_narrow_slot(slot),
@@ -284,7 +297,8 @@ fn slot_multiplicity_group(slot: usize) -> Option<usize> {
         4..=5 => Some(MULTIPLICITY_LOW_MESSAGE_BYTE),
         6..=BYTE_COMMON_SLOT_LAST => Some(MULTIPLICITY_COMMON_BYTE),
         14..=BYTE_M0_SLOT_LAST => Some(MULTIPLICITY_M0_BYTE),
-        16..=BYTE_M0_FORWARD_HIN_SLOT_LAST => Some(MULTIPLICITY_M0_FORWARD_HIN_BYTE),
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT => Some(MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN),
+        FOOTER_OUT_MASK_SLOT => Some(MULTIPLICITY_FOOTER_OUT_MASK),
         AC_FOOTER_HIN_SLOT => Some(MULTIPLICITY_AC_FOOTER_HIN),
         AC_ONLY_SLOT => Some(MULTIPLICITY_AC_ONLY),
         _ => unreachable_narrow_slot(slot),
@@ -386,7 +400,12 @@ where
             add_byte_slot_buses::<LB, G>(&mut encoded, group, slot, selectors);
             add_bus(&mut encoded, group, BusId::RangeCheck, selectors.m0_or_iface_rows.clone());
         },
-        16..=BYTE_M0_FORWARD_HIN_SLOT_LAST => {
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT => {
+            add_bus(&mut encoded, group, BusId::BlakeGMessageWord, selectors.is_ac.clone());
+            add_bus(&mut encoded, group, BusId::RangeCheck, selectors.is_msg_row0.clone());
+            add_bus(&mut encoded, group, BusId::BlakeGInputWord, selectors.is_first_b.clone());
+        },
+        FOOTER_OUT_MASK_SLOT => {
             add_bus(&mut encoded, group, BusId::BlakeGMessageWord, selectors.is_ac.clone());
             add_bus(&mut encoded, group, BusId::And8Lookup, selectors.is_footer.clone());
             add_bus(&mut encoded, group, BusId::RangeCheck, selectors.is_msg_row0.clone());
@@ -514,32 +533,6 @@ fn emit_selected_slot_pair_batch<LB, G>(
     );
 }
 
-fn interface_state_out<LB: BlakeGCompressionLookupBuilder>(
-    local: &BlakeGCompressionCols<LB::Var>,
-) -> [LB::Expr; INTERFACE_STATE_WIDTH] {
-    core::array::from_fn(|i| {
-        if i < 4 {
-            c::<LB>(local, IFACE_C_BASE_COL + i)
-        } else if i < 8 {
-            LB::Expr::ZERO
-        } else {
-            c::<LB>(local, IFACE_D_BASE_COL + (i - 8))
-        }
-    })
-}
-
-fn interface_state_in<LB: BlakeGCompressionLookupBuilder>(
-    local: &BlakeGCompressionCols<LB::Var>,
-) -> [LB::Expr; INTERFACE_STATE_WIDTH] {
-    core::array::from_fn(|i| {
-        if i < 8 {
-            c::<LB>(local, IFACE_R_BASE_COL + i)
-        } else {
-            c::<LB>(local, IFACE_C_BASE_COL + (i - 8))
-        }
-    })
-}
-
 fn compact_message_word<LB: BlakeGCompressionLookupBuilder>(
     local: &BlakeGCompressionCols<LB::Var>,
     index: usize,
@@ -548,6 +541,16 @@ fn compact_message_word<LB: BlakeGCompressionLookupBuilder>(
     BlakeGWordMsg {
         index: expr::<LB>(index as u64),
         word: c::<LB>(local, COMPACT_PAIR_BASE_COL + 2 * pair_offset),
+    }
+}
+
+fn compression_link_msg<LB: BlakeGCompressionLookupBuilder>(
+    local: &BlakeGCompressionCols<LB::Var>,
+) -> HasherPermLinkMsg<LB::Expr> {
+    HasherPermLinkMsg {
+        block: core::array::from_fn(|i| c::<LB>(local, IFACE_R_BASE_COL + i)),
+        cv_in: core::array::from_fn(|i| c::<LB>(local, IFACE_C_BASE_COL + i)),
+        cv_out: core::array::from_fn(|i| c::<LB>(local, IFACE_D_BASE_COL + i)),
     }
 }
 
@@ -580,17 +583,6 @@ fn emit_annex0<LB, G>(
         selectors.is_msg_row1.clone(),
         -7,
         compact_message_word::<LB>(local, COMPACT_M1_PAIR_INDEX_BASE, 0),
-    );
-
-    let iface_gate = selectors.is_iface_in.clone();
-    let mult = LB::Expr::ZERO - c::<LB>(local, IFACE_MULTIPLICITY_COL);
-    let state_out = interface_state_out::<LB>(local);
-    group.insert(
-        "perm_output",
-        iface_gate,
-        mult,
-        || HasherPermLinkMsg::Output { state: state_out },
-        SINGLETON_ANNEX,
     );
 }
 
@@ -625,14 +617,12 @@ fn emit_annex1<LB, G>(
         compact_message_word::<LB>(local, COMPACT_M1_PAIR_INDEX_BASE + 1, 1),
     );
 
-    let iface = selectors.is_iface_in.clone();
-    let state_in = interface_state_in::<LB>(local);
-    let mult = LB::Expr::ZERO - c::<LB>(local, IFACE_MULTIPLICITY_COL);
+    let mult = -c::<LB>(local, IFACE_MULTIPLICITY_COL);
     group.insert(
-        "interface_input",
-        iface,
+        "compression_link",
+        selectors.is_iface_in.clone(),
         mult,
-        || HasherPermLinkMsg::Input { state: state_in },
-        SINGLETON_ANNEX,
+        || compression_link_msg::<LB>(local),
+        ANNEX1,
     );
 }

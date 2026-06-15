@@ -72,8 +72,18 @@ pub fn merge(values: &[Word; 2]) -> Word {
 }
 
 #[inline]
+pub fn merge_many(values: &[Word]) -> Word {
+    Eidos::merge_many(values)
+}
+
+#[inline]
 pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
     Eidos::merge_in_domain(values, domain)
+}
+
+#[inline]
+pub fn hash(bytes: &[u8]) -> Word {
+    Eidos::hash(bytes)
 }
 
 #[inline]
@@ -93,8 +103,7 @@ pub fn hash_elements(elements: &[Felt]) -> Word {
 /// The output window is:
 ///
 /// ```text
-/// state[0..4]   = cv
-/// state[4..8]   = 0
+/// state[0..8]   = block
 /// state[8..12]  = BlakeG(cv, block)
 /// ```
 pub fn compress_state(state: &mut [Felt; STATE_WIDTH]) -> [u32; STATE_WORDS] {
@@ -103,8 +112,6 @@ pub fn compress_state(state: &mut [Felt; STATE_WIDTH]) -> [u32; STATE_WORDS] {
     let cv_new_word = Eidos::compress_block(cv_word, block);
     let cv_new = unpack_word(cv_new_word);
 
-    state[..DIGEST_WIDTH].copy_from_slice(cv_word.as_slice());
-    state[DIGEST_WIDTH..RATE_WIDTH].fill(Felt::ZERO);
     state[RATE_WIDTH..STATE_WIDTH].copy_from_slice(cv_new_word.as_slice());
 
     cv_new
@@ -136,7 +143,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compress_state_preserves_input_cv_and_writes_new_cv() {
+    fn compress_state_preserves_block_and_writes_new_cv() {
         let block = [
             Felt::new_unchecked(0x0000_0002_0000_0001),
             Felt::new_unchecked(0x0000_0004_0000_0003),
@@ -163,8 +170,7 @@ mod tests {
         let actual_cv = compress_state(&mut state);
 
         assert_eq!(actual_cv, expected_cv);
-        assert_eq!(&state[..DIGEST_WIDTH], cv_word.as_slice());
-        assert_eq!(&state[DIGEST_WIDTH..RATE_WIDTH], &[Felt::ZERO; DIGEST_WIDTH]);
+        assert_eq!(&state[..RATE_WIDTH], &block);
         assert_eq!(&state[RATE_WIDTH..STATE_WIDTH], expected_cv_word.as_slice());
     }
 

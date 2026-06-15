@@ -3,7 +3,7 @@ use alloc::{string::String, sync::Arc};
 use miden_air::{
     MidenAir,
     lookup::build_logup_aux_trace,
-    trace::{RowIndex, chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION},
+    trace::{RowIndex, chiplets::hasher::CONTROLLER_ROWS_PER_HASHER_OP},
 };
 use miden_core::{
     Felt, Word,
@@ -1242,7 +1242,7 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     // Inject enough hasher operations so the chiplets trace exceeds core_trace_rows.
     // BlakeG compression cycles live in their own AIR; each replayed BCOMPRESS contributes one
     // input/output pair to the chiplets trace.
-    let num_compressions = core_trace_rows / CONTROLLER_ROWS_PER_PERMUTATION + 1;
+    let num_compressions = core_trace_rows / CONTROLLER_ROWS_PER_HASHER_OP + 1;
     for _ in 0..num_compressions {
         trace_inputs
             .trace_generation_context_mut()

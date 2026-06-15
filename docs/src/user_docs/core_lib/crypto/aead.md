@@ -5,12 +5,12 @@ sidebar_position: 2
 
 # Authenticated Encryption
 
-Module `miden::core::crypto::aead` provides authenticated encryption with associated data (AEAD) using Poseidon2 hash. This implementation follows the MonkeySpongeWrap construction and uses the `crypto_stream` instruction for optimal performance.
+Module `miden::core::crypto::aead` provides authenticated encryption with associated data (AEAD) using the native hash. This implementation follows the MonkeySpongeWrap construction and uses the `crypto_stream` instruction for optimal performance.
 
 The encryption scheme works as follows:
-1. Initialize Poseidon2 sponge state with key and nonce
+1. Initialize the native hash state with key and nonce
 2. Absorb associated data padding (currently only empty AD is supported)
-3. Process plaintext blocks using `crypto_stream` + `hperm`
+3. Process plaintext blocks using `crypto_stream` + `bcompress`
 4. Generate authentication tag from final sponge state
 
 :::note

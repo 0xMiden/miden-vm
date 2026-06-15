@@ -899,10 +899,10 @@ impl BlockAddressReplay {
 /// trace generation.
 #[derive(Debug, Default)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher operations from permutation operations (BCompress).
+    /// Recorded hasher operations from BCompress requests.
     ///
     /// Each entry contains (address, output_state)
-    permutation_operations: VecDeque<(Felt, [Felt; 12])>,
+    compression_operations: VecDeque<(Felt, [Felt; 12])>,
 
     /// Recorded hasher operations from Merkle path verification operations.
     ///
@@ -919,10 +919,9 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records a `Hasher::permute` operation with its address and result (after applying the
-    /// permutation)
+    /// Records a `Hasher::permute` operation with its address and compressed state.
     pub fn record_permute(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
-        self.permutation_operations.push_back((addr, hashed_state));
+        self.compression_operations.push_back((addr, hashed_state));
     }
 
     /// Records a Merkle path verification with its address and computed root
@@ -938,11 +937,11 @@ impl HasherResponseReplay {
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
 
-    /// Replays a `Hasher::permute` operation, returning its address and result
+    /// Replays a `Hasher::permute` operation, returning its address and compressed state.
     pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
-        self.permutation_operations
+        self.compression_operations
             .pop_front()
-            .ok_or(OperationError::Internal("no permutation operations recorded"))
+            .ok_or(OperationError::Internal("no compression operations recorded"))
     }
 
     /// Replays a Merkle path verification, returning the pre-recorded address and computed root
@@ -961,7 +960,7 @@ impl HasherResponseReplay {
 }
 
 impl HasherInterface for HasherResponseReplay {
-    fn permute(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
+    fn bcompress(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
         self.replay_permute()
     }
 

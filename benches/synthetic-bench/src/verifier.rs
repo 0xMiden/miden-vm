@@ -5,7 +5,8 @@
 //!   bracket, `next_pow2(max(core_rows, range_rows))`. If a future AIR split gives range its own
 //!   segment, this check can be revised to assert separate brackets.
 //! - `padded_chiplets(actual) == padded_chiplets(target)`
-//! - `padded_poseidon2_permutation(actual) == padded_poseidon2_permutation(target)`
+//! - `padded_blakeg_compression(actual) == padded_blakeg_compression(target)`
+//! - `padded_and8_lookup(actual) == padded_and8_lookup(target)`
 //!
 //! Soft reporting:
 //! - unpadded totals (`core_rows`, `chiplets_rows`) within [`PER_COMPONENT_TOLERANCE`]
@@ -64,10 +65,16 @@ impl VerificationReport {
                 DeltaStatus::Enforced,
             ),
             (
-                "poseidon2_permutation_rows",
-                target.totals.poseidon2_permutation_rows,
-                actual.totals.poseidon2_permutation_rows,
+                "blakeg_compression_rows",
+                target.totals.blakeg_compression_rows,
+                actual.totals.blakeg_compression_rows,
                 DeltaStatus::Enforced,
+            ),
+            (
+                "and8_lookup_rows",
+                target.totals.and8_lookup_rows,
+                actual.totals.and8_lookup_rows,
+                DeltaStatus::Informational,
             ),
             (
                 // range_rows is derived, not independently driven.
@@ -109,8 +116,9 @@ impl VerificationReport {
     pub fn brackets_match(&self) -> bool {
         self.target.totals.padded_core_side() == self.actual.totals.padded_core_side()
             && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
-            && self.target.totals.padded_poseidon2_permutation()
-                == self.actual.totals.padded_poseidon2_permutation()
+            && self.target.totals.padded_blakeg_compression()
+                == self.actual.totals.padded_blakeg_compression()
+            && self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup()
     }
 
     /// True if `range_rows` is the largest unpadded component in either side, which means snippet
@@ -153,9 +161,15 @@ impl Display for VerificationReport {
         )?;
         write_bracket_row(
             f,
-            "padded_poseidon2",
-            self.target.totals.padded_poseidon2_permutation(),
-            self.actual.totals.padded_poseidon2_permutation(),
+            "padded_blakeg",
+            self.target.totals.padded_blakeg_compression(),
+            self.actual.totals.padded_blakeg_compression(),
+        )?;
+        write_bracket_row(
+            f,
+            "padded_and8_lookup",
+            self.target.totals.padded_and8_lookup(),
+            self.actual.totals.padded_and8_lookup(),
         )?;
 
         writeln!(f, "\n-- totals (soft: {:.0}% band) --", PER_COMPONENT_TOLERANCE * 100.0)?;
@@ -230,7 +244,7 @@ fn write_bracket_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot::{TraceBreakdown, TraceTotals};
+    use crate::snapshot::{DEFAULT_AND8_LOOKUP_ROWS, TraceBreakdown, TraceTotals};
 
     fn shape(core: u64, hasher: u64, memory: u64) -> TraceShape {
         let breakdown = TraceBreakdown {
@@ -243,7 +257,8 @@ mod tests {
         let totals = TraceTotals {
             core_rows: core,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: hasher,
+            blakeg_compression_rows: hasher,
+            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
             range_rows: 0,
         };
         TraceShape::new(totals, breakdown)
@@ -295,8 +310,9 @@ mod tests {
         let totals = TraceTotals {
             core_rows: 100,
             chiplets_rows: breakdown.chiplets_sum(),
-            poseidon2_permutation_rows: 0,
-            range_rows: 500,
+            blakeg_compression_rows: 0,
+            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
+            range_rows: DEFAULT_AND8_LOOKUP_ROWS + 1,
         };
         let t = TraceShape::new(totals, breakdown);
         let r = VerificationReport::new(t, t);

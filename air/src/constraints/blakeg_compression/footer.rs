@@ -17,15 +17,14 @@
 //! Row F3 is the last footer row; its `C[0..4]` and `D[0..4]` are forwarded
 //! into M0, then through M1 into the input interface row I.
 
-use miden_core::Felt;
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
 use super::views::{BYTES_PER_WORD, FooterRow};
 use super::{
-    FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_H_TOP_MASK_COL, FOOTER_H_TOP_ZERO_COL,
-    FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL, MSG_D_BASE_COL, TAIL_CLK_COL,
-    TAIL_LABEL_COL,
+    FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL,
+    FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL, MSG_D_BASE_COL, TAIL_CLK_COL, TAIL_LABEL_COL,
 };
 
 /// Future-W queue continuity across F0 -> F1 -> F2 -> F3.
@@ -140,15 +139,11 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
             builder.assert_zero(footer_local.vhi_odd_byte(j) - footer_local.vhi_odd_output_byte(j));
         }
 
-        builder.assert_zero(footer_local.h_odd_top_byte() - footer_local.h_odd_byte(3));
         builder.assert_zero(footer_local.out_odd_top_byte() - footer_local.out_odd_byte(3));
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_H_TOP_MASK_COL].clone()) - top_bit_mask.clone(),
-        );
-        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_TOP_ZERO_COL].clone()));
         builder.assert_zero(
             Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL].clone()) - top_bit_mask,
         );
+        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL].clone()));
         builder.assert_zero(footer_local.h_even_word_field() - footer_local.h_even_word());
         builder.assert_zero(footer_local.h_odd_word_field() - footer_local.h_odd_word());
     }
@@ -162,9 +157,9 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
 
 /// `C[t] = pack(H_even) + 2^32 * pack(H_odd)` on row `F_t`.
 ///
-/// The AIR packs the raw `H_odd` bytes. The HIN bus binds `H` to the
-/// computation rows, and the footer top-bit lookup enforces `H_odd[3] & 128 = 0`
-/// so the packed `C[t]` value is canonical.
+/// The AIR packs the raw input-CV halves. [`enforce_footer_c_canonicality`]
+/// ensures this is the canonical field decomposition, so unmasked input CV
+/// lanes are accepted.
 pub fn enforce_footer_c_definition<AB>(
     builder: &mut AB,
     footer_local: &FooterRow<AB>,
@@ -177,6 +172,30 @@ pub fn enforce_footer_c_definition<AB>(
     builder.when(sel.is_f(1)).assert_zero(footer_local.c(1) - c_val.clone());
     builder.when(sel.is_f(2)).assert_zero(footer_local.c(2) - c_val.clone());
     builder.when(sel.is_f(3)).assert_zero(footer_local.c(3) - c_val);
+}
+
+/// Canonicality of the footer input-CV decomposition.
+///
+/// The footer byte lookups range-check `H_even` and `H_odd` as `u32` words.
+/// This zero-test gadget enforces `H_even + 2^32 * H_odd < p`, matching the
+/// canonical field element carried by `C[t]`.
+pub fn enforce_footer_c_canonicality<AB>(
+    builder: &mut AB,
+    footer_local: &FooterRow<AB>,
+    sel: &Selectors<AB>,
+) where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    let max_u32 = AB::Expr::from(Felt::new_unchecked((1u64 << 32) - 1));
+    let h = footer_local.h_odd_word() - max_u32;
+    let inv = footer_local.h_canon_inv();
+    let z = footer_local.h_canon_z();
+    let gate = sel.is_footer();
+
+    let builder = &mut builder.when(gate);
+    builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
+    builder.assert_zero(z.clone() * h);
+    builder.assert_zero(z * footer_local.h_even_word());
 }
 
 /// `D[t] = pack(Out_even) + 2^32 * pack(Out_odd_masked)` on row `F_t`.

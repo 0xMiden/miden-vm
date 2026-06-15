@@ -9,7 +9,7 @@ fn chiplets() {
     // Test a program that uses all of the chiplets.
     let source = "
     begin
-        hperm                   # hasher operation
+        bcompress               # hasher operation
         push.5 push.10 u32or    # bitwise operation
         mem_load                # memory operation
         drop

@@ -78,7 +78,9 @@ A *syscall* block does not have any children. Thus, it must be leaf node in the 
 ### Basic block
 A **basic** block is used to describe a linear sequence of operations. When the VM encounters a *basic* block, it breaks the sequence of operations into batches and groups according to the following rules:
 * A group is represented by a single field element. Thus, assuming a single operation can be encoded using 7 bits, and assuming we are using a 64-bit field, a single group may encode up to 9 operations or a single immediate value.
-* A batch is a set of groups which can be absorbed by a hash function used by the VM in a single permutation. For example, assuming the hash function can absorb up to 8 field elements in a single permutation, a single batch may contain up to 8 groups.
+* A batch is a set of groups which can be absorbed by the VM hash in one compression step. Since
+  the native hash absorbs up to 8 field elements per step, a single batch may contain up to 8
+  groups.
 * There is no limit on the number of batches contained within a single basic block.
 
 Thus, for example, executing 8 pushes in a row will result in two operation batches as illustrated in the picture below:
@@ -137,12 +139,14 @@ Every Miden VM program can be reduced to a unique hash value. Specifically, it i
 
 To prevent program hash collisions we implement domain separation across the variants of control blocks. We define the domain value to be the opcode of the operation that initializes the control block.
 
-Below we denote $hash$ to be an arithmetization-friendly hash function with $4$-element output and capable of absorbing $8$ elements in a single permutation. The hash domain is specified as the subscript of the hash function and its value is used to populate the second capacity register upon initialization of control block hashing - $hash_{domain}(a, b)$.
+Below we denote $hash$ to be the VM-native hash with 4-element output and 8-element block input.
+The hash domain is specified as the subscript of the hash function and is mixed into the
+initial chaining word for control block hashing: $hash_{domain}(a, b)$.
 
 * The hash of a **join** block is computed as $hash_{join}(a, b)$, where $a$ and $b$ are hashes of the code block being joined.
 * The hash of a **split** block is computed as $hash_{split}(a, b)$, where $a$ is a hash of a code block corresponding to the *true* branch of execution, and $b$ is a hash of a code block corresponding to the *false branch* of execution.
 * The hash of a **loop** block is computed as $hash_{loop}(a, 0)$, where $a$ is a hash of a code block corresponding to the loop body.
-* The hash of a **dyn** block is set to a constant, so it is the same for all *dyn* blocks. It does not depend on the hash of the dynamic child. This constant is computed as the Poseidon2 hash of two empty words (`[ZERO, ZERO, ZERO, ZERO]`) using a domain value of `DYN_DOMAIN`, where `DYN_DOMAIN` is the op code of the `Dyn` operation.
+* The hash of a **dyn** block is set to a constant, so it is the same for all *dyn* blocks. It does not depend on the hash of the dynamic child. This constant is computed as the native hash of two empty words (`[ZERO, ZERO, ZERO, ZERO]`) using a domain value of `DYN_DOMAIN`, where `DYN_DOMAIN` is the op code of the `Dyn` operation.
 * The hash of a **call** block is computed as $hash_{call}(a, 0)$, where $a$ is a hash of a program of which the VM is aware.
 * The hash of a **syscall** block is computed as $hash_{syscall}(a, 0)$, where $a$ is a hash of a program belonging to the kernel against which the code was compiled.
 * The hash of a **basic** block is computed as $hash(a_1, ..., a_k)$, where $a_i$ is the $i$th batch of operations in the *basic* block. Each batch of operations is defined as containing $8$ field elements, and thus, hashing a $k$-batch *basic* block requires $k$ absorption steps.
