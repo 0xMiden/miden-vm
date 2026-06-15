@@ -1403,6 +1403,7 @@ dependencies = [
  "miden-ace-codegen",
  "miden-air",
  "miden-assembly",
+ "miden-assembly-syntax",
  "miden-core",
  "miden-crypto",
  "miden-mast-package",

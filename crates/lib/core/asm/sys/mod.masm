@@ -1,3 +1,5 @@
+pub mod vm
+
 # ===== SYSTEM PROCEDURES ==========================================================================
 
 #! Removes elements deep in the stack until the depth of the stack is exactly 16. The elements

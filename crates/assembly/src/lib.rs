@@ -28,7 +28,7 @@ mod tests;
 
 // Re-exported for downstream crates
 pub use miden_assembly_syntax::{
-    ModuleParser, Parse, ParseOptions, Path, PathBuf, ast,
+    ModuleParser, Path, PathBuf, ast,
     ast::{GlobalItemIndex, ModuleIndex},
     debuginfo::{
         self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,

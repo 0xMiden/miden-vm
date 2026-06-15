@@ -32,35 +32,6 @@ pub fn rewrite_symbol(
             },
             ItemInfo::Procedure(_) => (),
         },
-        SymbolItem::Alias { alias, resolved: resolved_gid } => {
-            let context = SymbolResolutionContext {
-                span: alias.span(),
-                module: gid.module,
-                kind: None,
-            };
-            match resolver.resolve_alias_target(&context, alias)? {
-                SymbolResolution::Exact { gid, .. } => {
-                    resolved_gid.set(Some(gid));
-                },
-                SymbolResolution::Local(local) => {
-                    resolved_gid.set(Some(gid.module + local.into_inner()));
-                },
-                SymbolResolution::MastRoot(root) => {
-                    if let Some(gid) = resolver.linker().get_procedure_index_by_digest(&root) {
-                        resolved_gid.set(Some(gid));
-                    }
-                },
-                SymbolResolution::Module { .. } => (),
-                SymbolResolution::External(path) => {
-                    let (span, path) = path.into_parts();
-                    return Err(LinkerError::UndefinedSymbol {
-                        span,
-                        source_file: resolver.source_manager().get(span.source_id()).ok(),
-                        path,
-                    });
-                },
-            }
-        },
         SymbolItem::Procedure(proc) => {
             let mut rewriter = ModuleRewriter::new(gid.module, resolver, cache);
             let mut proc = proc.borrow_mut();

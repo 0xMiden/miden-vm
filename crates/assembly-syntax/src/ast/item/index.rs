@@ -115,24 +115,14 @@ impl core::fmt::Display for ModuleIndex {
 
 #[cfg(test)]
 mod regression_tests {
-    use std::{string::String, sync::Arc};
+    use std::string::String;
 
-    use miden_debug_types::{DefaultSourceManager, SourceSpan, Span};
-
-    use super::ItemIndex;
-    use crate::{
-        Parse, ParseOptions, Path,
-        ast::{
-            Constant, ConstantExpr, Export, Ident, Module, ModuleKind, SymbolResolutionError,
-            Visibility,
-        },
-        parser::IntValue,
-        sema::{LimitKind, SemanticAnalysisError, SyntaxError},
-    };
+    use crate::sema::{LimitKind, SemanticAnalysisError, SyntaxError};
 
     fn huge_library_masm() -> String {
         let num_consts = usize::from(u16::MAX) + 2;
         let mut masm = String::with_capacity(num_consts * 16);
+        masm.push_str("namespace ::m::huge\n\n");
         for i in 0..num_consts {
             masm.push_str("const A");
             masm.push_str(&format!("{i}"));
@@ -141,27 +131,11 @@ mod regression_tests {
         masm
     }
 
-    fn oversized_module_for_resolver() -> Module {
-        let mut module = Module::new(ModuleKind::Library, Path::new("::m::huge"));
-        for i in 0..=ItemIndex::MAX_ITEMS {
-            module.items.push(Export::Constant(Constant::new(
-                SourceSpan::UNKNOWN,
-                Visibility::Private,
-                Ident::new(format!("A{i}")).expect("valid identifier"),
-                ConstantExpr::Int(Span::unknown(IntValue::from(0u8))),
-            )));
-        }
-        module
-    }
-
     #[test]
     fn too_many_items_in_module_is_rejected_during_analysis() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let err = huge_library_masm()
-            .parse_with_options(
-                source_manager,
-                ParseOptions::new(ModuleKind::Library, Path::new("::m::huge")),
-            )
+        let test = crate::testing::SyntaxTestContext::new();
+        let err = test
+            .parse_module(&huge_library_masm())
             .expect_err("expected oversized module to be rejected during analysis");
 
         let syntax_error = err.downcast_ref::<SyntaxError>().expect("expected SyntaxError report");
@@ -172,24 +146,5 @@ mod regression_tests {
             "expected item-limit error, got {:?}",
             syntax_error.errors
         );
-    }
-
-    #[test]
-    fn resolving_name_in_too_large_module_returns_structured_error() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let module = oversized_module_for_resolver();
-        let result = module.resolve(Span::unknown("A0"), source_manager);
-
-        assert!(matches!(result, Err(SymbolResolutionError::TooManyItemsInModule { .. })));
-    }
-
-    #[test]
-    fn resolver_construction_for_too_large_module_returns_structured_error() {
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        let module = oversized_module_for_resolver();
-
-        let result = module.resolver(source_manager);
-
-        assert!(matches!(result, Err(SymbolResolutionError::TooManyItemsInModule { .. })));
     }
 }

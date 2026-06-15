@@ -3,8 +3,8 @@ use std::mem;
 use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        BeginBlock, Block, DoWhileOp, IfOp, Import, Instruction, Procedure, RepeatOp, Signature,
-        SourceFile, TypeBody, TypeDecl, WhileOp,
+        BeginBlock, Block, DoWhileOp, IfOp, Import, ImportKind, ImportSpecifier, Instruction,
+        Procedure, RepeatOp, Signature, SourceFile, TypeBody, TypeDecl, WhileOp,
     },
     rowan::{NodeOrToken, ast::AstNode},
 };
@@ -180,6 +180,9 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
 fn render_item(item: &Item, indent: usize, config: &Config) -> String {
     match item {
         Item::Doc(doc) => render_doc(doc, indent),
+        Item::Namespace(namespace) => render_line_form(namespace.syntax(), indent),
+        Item::ExternPackage(package) => render_line_form(package.syntax(), indent),
+        Item::Submodule(submodule) => render_line_form(submodule.syntax(), indent),
         Item::Import(import) => render_import(import, indent, config),
         Item::Constant(constant) => render_value_declaration(constant.syntax(), indent, config),
         Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent, config),
@@ -207,7 +210,7 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
 }
 
 fn render_import(import: &Import, indent: usize, config: &Config) -> String {
-    let Some(path) = import.path() else {
+    let Some(path) = import.module_path() else {
         return render_line_form(import.syntax(), indent);
     };
 
@@ -217,33 +220,11 @@ fn render_import(import: &Import, indent: usize, config: &Config) -> String {
     }
     header.push_str("use");
 
-    let path_tokens = significant_tokens(path.syntax());
-    let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
-    let path = render_token_sequence(&path_tokens);
-    let mut lines = vec![if path.is_empty() {
-        header
-    } else {
-        format!("{header} {path}")
-    }];
-    if !alias_tokens.is_empty() {
-        let alias = render_import_alias(&alias_tokens);
-        if let Some(last) = lines.last_mut() {
-            let separator =
-                if alias_tokens.first().is_some_and(|token| token.kind() == SyntaxKind::RArrow) {
-                    ""
-                } else {
-                    " "
-                };
-            if line_length(last) + line_length(separator) + line_length(&alias)
-                <= config.max_line_length()
-            {
-                last.push_str(separator);
-                last.push_str(&alias);
-            } else {
-                lines.push(format!("{}{}", indent_string(indent + config.indent_size()), alias));
-            }
-        }
-    }
+    let path = render_token_sequence(&significant_tokens(path.syntax()));
+    let mut lines = match import.kind() {
+        ImportKind::Module => render_module_import_lines(import, header, path, indent, config),
+        ImportKind::Items => render_item_import_lines(import, header, path, indent, config),
+    };
 
     let mut rendered = if lines.len() == 1 && line_length(&lines[0]) <= config.max_line_length() {
         lines.remove(0)
@@ -256,6 +237,110 @@ fn render_import(import: &Import, indent: usize, config: &Config) -> String {
     }
 
     rendered
+}
+
+fn render_module_import_lines(
+    import: &Import,
+    header: String,
+    path: String,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    let mut line = format!("{header} {path}");
+    let Some(alias) = import.module_alias_token().map(render_single_token) else {
+        return vec![line];
+    };
+
+    let alias = format!("as {alias}");
+    if line_length(&line) + 1 + line_length(&alias) <= config.max_line_length() {
+        line.push(' ');
+        line.push_str(&alias);
+        vec![line]
+    } else {
+        vec![line, format!("{}{}", indent_string(indent + config.indent_size()), alias)]
+    }
+}
+
+fn render_item_import_lines(
+    import: &Import,
+    header: String,
+    path: String,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    if let Some(import_list) = import.import_list()
+        && has_comment_token(import_list.syntax())
+    {
+        return render_commented_item_import_lines(
+            import_list.syntax(),
+            header,
+            path,
+            indent,
+            config,
+        );
+    }
+
+    let specs = import.item_specs().map(render_import_specifier).collect::<Vec<_>>().join(", ");
+    let items = format!("{{{specs}}}");
+    let from = format!("from {path}");
+    let line = format!("{header} {items} {from}");
+
+    if line_length(&line) <= config.max_line_length() {
+        vec![line]
+    } else {
+        vec![
+            format!("{header} {items}"),
+            format!("{}{}", indent_string(indent + config.indent_size()), from),
+        ]
+    }
+}
+
+fn render_commented_item_import_lines(
+    import_list: &SyntaxNode,
+    header: String,
+    path: String,
+    indent: usize,
+    config: &Config,
+) -> Vec<String> {
+    let mut list_lines = render_token_stream_with_comments(
+        &all_tokens(import_list),
+        indent,
+        SpacingStyle::Default,
+        config,
+    );
+    let Some(first_line) = list_lines.first_mut() else {
+        return vec![format!("{header} {{}} from {path}")];
+    };
+    *first_line = format!("{header} {}", first_line.trim_start());
+
+    let from = format!("from {path}");
+    match list_lines.last_mut() {
+        Some(last_line)
+            if last_line.trim_start().starts_with('}')
+                && line_length(last_line) + 1 + line_length(&from) <= config.max_line_length() =>
+        {
+            last_line.push(' ');
+            last_line.push_str(&from);
+        },
+        _ => list_lines.push(format!("{}{}", indent_string(indent + config.indent_size()), from)),
+    }
+
+    list_lines
+}
+
+fn render_import_specifier(spec: ImportSpecifier) -> String {
+    let Some(name) = spec.name_token().map(render_single_token) else {
+        return render_compact_tokens(spec.syntax());
+    };
+
+    match spec.alias_token().map(render_single_token) {
+        Some(alias) => format!("{name} as {alias}"),
+        None => name,
+    }
+}
+
+fn render_single_token(token: SyntaxToken) -> String {
+    render_token_sequence(&[token])
 }
 
 fn render_value_declaration(node: &SyntaxNode, indent: usize, config: &Config) -> String {
@@ -1138,16 +1223,6 @@ fn render_instruction_tokens(node: &SyntaxNode) -> String {
     render_token_sequence_with_style(&significant_tokens(node), SpacingStyle::CompactInstruction)
 }
 
-fn render_import_alias(tokens: &[SyntaxToken]) -> String {
-    match tokens.split_first() {
-        Some((first, rest)) if first.kind() == SyntaxKind::RArrow => {
-            let alias = render_token_sequence(rest);
-            format!("->{alias}")
-        },
-        _ => render_token_sequence(tokens),
-    }
-}
-
 #[derive(Clone, Copy)]
 enum SpacingStyle {
     Default,
@@ -1237,31 +1312,6 @@ fn significant_tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec
             NodeOrToken::Node(candidate) => tokens.extend(significant_tokens(&candidate)),
             NodeOrToken::Token(token)
                 if !token.kind().is_trivia()
-                    && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
-            {
-                tokens.push(token)
-            },
-            NodeOrToken::Token(_) => (),
-        }
-    }
-
-    tokens
-}
-
-fn significant_tokens_after_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
-    let mut tokens = Vec::new();
-    let mut seen_child = false;
-
-    for element in node.children_with_tokens() {
-        match element {
-            NodeOrToken::Node(candidate) if candidate == *child => seen_child = true,
-            NodeOrToken::Node(candidate) if seen_child => {
-                tokens.extend(significant_tokens(&candidate))
-            },
-            NodeOrToken::Node(_) => (),
-            NodeOrToken::Token(token)
-                if seen_child
-                    && !token.kind().is_trivia()
                     && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
             {
                 tokens.push(token)
@@ -1623,12 +1673,13 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace => false,
         LBracket | Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
         Colon if matches!(style, SpacingStyle::TypeBodyItem) => false,
-        Tombstone | Error | SourceFile | Doc | Import | Constant | TypeDecl | AdviceMap
-        | BeginBlock | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp
-        | DoWhileOp | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline
-        | Comment | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString
-        | At | Bang | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow
-        | Semicolon | Slash | SlashSlash | Star => match previous_kind {
+        Tombstone | Error | SourceFile | Doc | Namespace | ExternPackage | Submodule | Import
+        | ImportList | ImportSpecifier | Constant | TypeDecl | AdviceMap | BeginBlock
+        | Procedure | Attribute | Visibility | Signature | Block | IfOp | WhileOp | DoWhileOp
+        | RepeatOp | Instruction | Path | Expr | TypeBody | Whitespace | Newline | Comment
+        | DocComment | Ident | SpecialIdent | Number | QuotedIdent | QuotedString | At | Bang
+        | Colon | Equal | LBrace | LBracket | LParen | Minus | Plus | RArrow | Semicolon
+        | Slash | SlashSlash | Star => match previous_kind {
             Equal if matches!(style, SpacingStyle::CompactInstruction) => false,
             DotDot => false,
             Comma | Equal | RArrow | Colon | Plus | Minus | Star | Slash | SlashSlash => true,
@@ -1690,7 +1741,7 @@ mod tests {
         &[
             "\
 #! docs
-pub   use   miden::core::mem  ->  memory
+use   miden::core::mem   as   memory
 
 # const comment
 pub const EVENT=event(\"miden::event\")
@@ -1782,7 +1833,10 @@ const Y = event(\"miden::event\")
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let config = Config::default();
+        let config = Config {
+            max_line_length: Some(80),
+            ..Config::default()
+        };
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 const X = (1)
@@ -1833,10 +1887,40 @@ const X =
     }
 
     #[test]
+    fn formats_namespace_extern_package_and_submodule_forms() {
+        let source = "\
+namespace   app::main # root
+extern   package   \"miden:base@1.0.0\"
+pub   mod   lib
+mod   private
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+namespace app::main # root
+extern package \"miden:base@1.0.0\"
+pub mod lib
+mod private
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
     fn formats_top_level_forms_and_anchors_comments() {
         let source = "\
 #! docs
-pub   use   miden::core::mem  ->  memory
+use   miden::core::mem   as   memory
 
 # const comment
 pub const EVENT=event(\"miden::event\")
@@ -1860,7 +1944,7 @@ end
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
 #! docs
-pub use miden::core::mem->memory
+use miden::core::mem as memory
 
 # const comment
 pub const EVENT = event(\"miden::event\")
@@ -2082,9 +2166,107 @@ enum Status : u16 {
     }
 
     #[test]
-    fn wraps_long_imports_and_procedure_headers_without_mangling_generic_types() {
+    fn format_import_module_and_item_forms() {
         let source = "\
-pub use ::miden::core::collections::sorted_array::lowerbound_key_value -> lowerbound_key_value_long_alias
+use   some::module   as   sm
+use   foo
+use   {foo,bar  as  baz,\"as\" as \"from\"}   from   some::module # items
+pub   use   {alpha}   from   core
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use some::module as sm
+use foo
+use {foo, bar as baz, \"as\" as \"from\"} from some::module # items
+pub use {alpha} from core
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn format_import_preserves_comments_inside_item_list() {
+        let source = "\
+use   {
+foo, # first import
+# exported under baz
+bar   as   baz,
+\"as\" as \"from\" # contextual
+}   from   some::module # import
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use {
+    foo, # first import
+    # exported under baz
+    bar as baz,
+    \"as\" as \"from\" # contextual
+} from some::module # import
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn format_import_wraps_commented_item_import_from_clause() {
+        let source = "\
+pub use {
+foo, # first import
+bar as baz
+} from ::miden::core::collections::sorted_array
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config {
+            max_line_length: Some(40),
+            ..Config::default()
+        };
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+pub use {
+    foo, # first import
+    bar as baz
+}
+    from ::miden::core::collections::sorted_array
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn format_import_wraps_long_item_imports_without_breaking_module_paths() {
+        let source = "\
+pub use { lowerbound_key_value as lowerbound_key_value_long_alias } from ::miden::core::collections::sorted_array
 
 pub proc println_debug_message_with_context(message: ptr<u8, addrspace(byte)>, context: ptr<u8, addrspace(byte)>) -> (result: ptr<u8, addrspace(byte)>, status: i1)
     nop
@@ -2094,11 +2276,57 @@ end
         let parse = parse_text(source);
         assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
 
-        let config = Config::default();
+        let config = Config {
+            max_line_length: Some(80),
+            ..Config::default()
+        };
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-pub use ::miden::core::collections::sorted_array::lowerbound_key_value
-    ->lowerbound_key_value_long_alias
+pub use {lowerbound_key_value as lowerbound_key_value_long_alias}
+    from ::miden::core::collections::sorted_array
+
+pub proc println_debug_message_with_context(
+    message: ptr<u8, addrspace(byte)>,
+    context: ptr<u8, addrspace(byte)>
+) -> (
+    result: ptr<u8, addrspace(byte)>,
+    status: i1
+)
+    nop
+end
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= config.max_line_length()));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", parse.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn wraps_long_imports_and_procedure_headers_without_mangling_generic_types() {
+        let source = "\
+use ::miden::core::collections::sorted_array as lowerbound_key_value_really_long_alias
+
+pub proc println_debug_message_with_context(message: ptr<u8, addrspace(byte)>, context: ptr<u8, addrspace(byte)>) -> (result: ptr<u8, addrspace(byte)>, status: i1)
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config {
+            max_line_length: Some(80),
+            ..Config::default()
+        };
+        let formatted = format_syntax(&config, &parse.syntax());
+        let expected = "\
+use ::miden::core::collections::sorted_array
+    as lowerbound_key_value_really_long_alias
 
 pub proc println_debug_message_with_context(
     message: ptr<u8, addrspace(byte)>,
@@ -2121,7 +2349,7 @@ end
     #[test]
     fn wrapped_long_imports_do_not_break_on_components() {
         let source = "\
-use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSET_PLUS_ENOUGH_EXTRA_TO_WRAP
+use miden::protocol::kernel_proc_offsets::tx_update_expiration_block_delta_offset_plus_enough_extra_to_wrap
 ";
 
         let parse = parse_text(source);
@@ -2130,7 +2358,7 @@ use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSE
         let config = Config::default();
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSET_PLUS_ENOUGH_EXTRA_TO_WRAP
+use miden::protocol::kernel_proc_offsets::tx_update_expiration_block_delta_offset_plus_enough_extra_to_wrap
 ";
 
         assert_eq!(formatted, expected);
@@ -2145,7 +2373,7 @@ use miden::protocol::kernel_proc_offsets::TX_UPDATE_EXPIRATION_BLOCK_DELTA_OFFSE
     #[test]
     fn preserves_root_import_spacing_and_structured_header_comments() {
         let source = "\
-use ::miden::utils::panic # import
+use {panic} from ::miden::utils # import
 
 begin # begin
  if.true # if
@@ -2170,7 +2398,7 @@ end
         let config = Config::default();
         let formatted = format_syntax(&config, &parse.syntax());
         let expected = "\
-use ::miden::utils::panic # import
+use {panic} from ::miden::utils # import
 
 begin # begin
     if.true # if

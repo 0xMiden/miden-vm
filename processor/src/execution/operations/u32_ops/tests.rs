@@ -287,7 +287,7 @@ fn test_u32assertw_err_wrapper_assembled() {
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
-            r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
+                r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
         )
         .expect("program should assemble")
         .unwrap_program();

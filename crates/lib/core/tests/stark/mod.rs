@@ -1,7 +1,7 @@
 use std::{array, sync::Arc};
 
 use miden_air::PublicInputs;
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
@@ -79,21 +79,23 @@ pub fn generate_recursive_verifier_data(
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
 ) -> VerifierData {
-    let source_manager = Arc::new(DefaultSourceManager::default());
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
-                let kernel_lib = Assembler::new(source_manager.clone())
-                    .assemble_kernel("kernel", kernel)
+                let context = miden_assembly::testing::TestContext::new();
+                let kernel = context.parse_kernel(source_file!(&context, kernel)).unwrap();
+                let kernel_lib = Assembler::new(context.source_manager())
+                    .assemble_kernel("kernel", kernel, None)
                     .map(Arc::<Package>::from)
                     .unwrap();
-                let assembler = Assembler::with_kernel(source_manager, kernel_lib.clone()).unwrap();
+                let assembler =
+                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
                 let program: Program =
                     assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
-                let program: Program = Assembler::new(source_manager)
+                let program: Program = Assembler::default()
                     .assemble_program("program", source)
                     .unwrap()
                     .unwrap_program();

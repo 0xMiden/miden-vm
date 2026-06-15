@@ -14,7 +14,7 @@ use alloc::{
 };
 
 use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
-use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{Linkage, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -73,6 +73,18 @@ mod test_builders;
 
 #[cfg(all(feature = "arbitrary", not(target_family = "wasm")))]
 pub use proptest;
+
+pub fn module_source(path: impl AsRef<Path>, source: impl ToString) -> String {
+    let source = source.to_string();
+    if source.trim_start().starts_with("namespace ") {
+        source
+    } else {
+        let path = path.as_ref().to_string();
+        let namespace = path.strip_prefix("::").unwrap_or(&path);
+        format!("namespace {namespace}\n\n{source}")
+    }
+}
+
 // CONSTANTS
 // ================================================================================================
 
@@ -303,7 +315,9 @@ impl Test {
 
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
-        self.add_modules.push((path.as_ref().into(), source.to_string()));
+        let path = path.as_ref();
+        let source = module_source(path, source);
+        self.add_modules.push((path.into(), source));
     }
 
     /// Add a handler for a specific event when running the `Host`.
@@ -426,7 +440,10 @@ impl Test {
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
     pub fn compile(&self) -> Result<(Program, Option<Arc<Package>>), Report> {
-        use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
+        use miden_assembly::{
+            Assembler,
+            ast::{Module, ModuleKind},
+        };
 
         #[cfg(all(feature = "std", not(target_family = "wasm")))]
         let cache_key = self.compile_cache_key();
@@ -447,8 +464,10 @@ impl Test {
         }
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
+            let mut parser = Module::parser(Some(ModuleKind::Kernel));
+            let kernel = parser.parse(Some(Path::KERNEL), kernel, self.source_manager.clone())?;
             let kernel_lib = Assembler::new(self.source_manager.clone())
-                .assemble_kernel("kernel", kernel)
+                .assemble_kernel("kernel", kernel, None)
                 .map(Arc::<Package>::from)
                 .unwrap();
 
@@ -462,11 +481,8 @@ impl Test {
 
         let mut assembler =
             self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
-                let module = source
-                    .parse_with_options(
-                        self.source_manager.clone(),
-                        ParseOptions::new(ModuleKind::Library, path.clone()),
-                    )
+                let module = Module::parser(None)
+                    .parse_str(Some(path.as_ref()), source, self.source_manager.clone())
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler

@@ -157,7 +157,7 @@ fn log_precompile_request_procedure() {
     let program: Program = Assembler::default()
         .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
         .expect("failed to load core library")
-        .assemble_program("program", source)
+        .assemble_program("program", &source)
         .expect("failed to assemble log_precompile fixture")
         .unwrap_program();
 

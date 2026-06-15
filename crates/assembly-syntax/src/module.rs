@@ -6,7 +6,7 @@ use midenc_hir_type::FunctionType;
 
 use crate::{
     Path, Word,
-    ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName},
+    ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName, SubmoduleDecl},
 };
 
 // MODULE INFO
@@ -19,6 +19,7 @@ pub struct ModuleInfo {
     /// disambiguated by version.
     version: Option<crate::Version>,
     items: Vec<ItemInfo>,
+    submodules: Vec<SubmoduleDecl>,
 }
 
 impl ModuleInfo {
@@ -31,7 +32,12 @@ impl ModuleInfo {
     /// The semantic version is optional, as currently the assembler allows assembling artifacts
     /// without providing one.
     pub fn new(path: Arc<Path>, version: Option<crate::Version>) -> Self {
-        Self { version, path, items: Vec::new() }
+        Self {
+            version,
+            path,
+            items: Vec::new(),
+            submodules: Vec::new(),
+        }
     }
 
     /// Specify the version of this module
@@ -80,6 +86,11 @@ impl ModuleInfo {
         self.items.push(ItemInfo::Type(TypeInfo { name, ty }));
     }
 
+    /// Adds a submodule declaration to the module surface.
+    pub fn add_submodule(&mut self, submodule: SubmoduleDecl) {
+        self.submodules.push(submodule);
+    }
+
     /// Returns the module's library path.
     pub fn path(&self) -> &Path {
         &self.path
@@ -123,6 +134,11 @@ impl ModuleInfo {
     /// module.
     pub fn items(&self) -> impl ExactSizeIterator<Item = (ItemIndex, &ItemInfo)> {
         self.items.iter().enumerate().map(|(idx, item)| (ItemIndex::new(idx), item))
+    }
+
+    /// Returns the declared submodules in this module surface.
+    pub fn submodules(&self) -> &[SubmoduleDecl] {
+        &self.submodules
     }
 
     /// Returns an iterator over the procedure infos in the module with their corresponding

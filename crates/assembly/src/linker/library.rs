@@ -1,7 +1,7 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::module::ModuleInfo;
-use miden_mast_package::{MastForest, Package};
+use miden_mast_package::{ManifestValidationError, MastForest, Package};
 pub use miden_project::Linkage;
 
 /// Represents an assembled module or modules to use when resolving references while linking,
@@ -31,7 +31,7 @@ impl LinkLibrary {
     }
 
     #[inline]
-    pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
-        self.package.module_infos()
+    pub fn module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+        self.package.try_module_infos()
     }
 }

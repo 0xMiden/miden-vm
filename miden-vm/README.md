@@ -54,18 +54,19 @@ failed. If you need an execution trace, use `FastProcessor::execute_trace_inputs
 For example:
 
 ```rust
-use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
-    assembly::DefaultSourceManager,
-    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+    Assembler, execute_sync, ExecutionOptions, DefaultHost, StackInputs
 };
 
 // instantiate the assembler
-let mut assembler = Assembler::default();
+let assembler = Assembler::default();
 
 // compile Miden assembly source code into a program
-let program = assembler.assemble_program("prg", "begin push.3 push.5 add swap drop end").unwrap();
+let program = assembler.assemble_program(
+    "prg",
+    "begin push.3 push.5 add swap drop end",
+).unwrap();
 
 // use an empty list as initial stack
 let stack_inputs = StackInputs::default();
@@ -107,19 +108,20 @@ If the program is executed successfully, the function returns a tuple with 2 ele
 Here is a simple example of executing a program which pushes two numbers onto the stack and computes their sum:
 
 ```rust
-use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
-    assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ExecutionOptions, ProvingOptions, Program, prove_sync, StackInputs
+    Assembler, DefaultHost, ExecutionOptions, ProvingOptions, prove_sync, StackInputs
 };
 
 // instantiate the assembler
-let mut assembler = Assembler::default();
+let assembler = Assembler::default();
 
 // this is our program, we compile it from assembly code
-let program = assembler.assemble_program("prg", "begin push.3 push.5 add swap drop end").unwrap();
+let program = assembler.assemble_program(
+    "prg",
+    "begin push.3 push.5 add swap drop end",
+).unwrap();
 
 // let's execute it and generate a STARK proof
 let (outputs, proof) = prove_sync(
@@ -160,13 +162,14 @@ Notice how the verifier needs to know only the hash of the program - not what th
 Here is a simple example of verifying execution of the program from the previous example:
 
 ```rust,ignore
-use miden;
+use miden_vm::{field::Felt, ProgramInfo, StackInputs, StackOutputs};
 
 let program =   /* value from previous example */;
 let proof =     /* value from previous example */;
+let expected_outputs = StackOutputs::new(&[Felt::new(8).unwrap()]).unwrap();
 
 // let's verify program execution
-match miden_vm::verify(program.hash(), StackInputs::default(), &[8], proof) {
+match miden_vm::verify(ProgramInfo::from(program), StackInputs::default(), expected_outputs, proof) {
     Ok(_) => println!("Execution verified!"),
     Err(msg) => println!("Something went terribly wrong: {}", msg),
 }
@@ -193,12 +196,10 @@ add         // stack state: 3 2
 Notice that except for the first 2 operations which initialize the stack, the sequence of `swap dup.1 add` operations repeats over and over. In fact, we can repeat these operations an arbitrary number of times to compute an arbitrary Fibonacci number. In Rust, it would look like this:
 
 ```rust
-use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
-    assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, Program, ProvingOptions, StackInputs
+    Assembler, DefaultHost, ProvingOptions, StackInputs
 };
 
 // set the number of terms to compute
@@ -214,7 +215,7 @@ let source = format!(
     end",
     n - 1
 );
-let mut assembler = Assembler::default();
+let assembler = Assembler::default();
 let program = assembler.assemble_program("prg", &source).unwrap();
 
 // initialize a default host (with an empty advice provider)

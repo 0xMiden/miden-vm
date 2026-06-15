@@ -68,7 +68,7 @@ name = "app"
 version = "1.0.0"
 
 [lib]
-path = "lib.masm"
+path = "library/root.masm"
 
 [[bin]]
 name = "primary"
@@ -77,6 +77,13 @@ path = "main.masm"
 [[bin]]
 name = "alternate"
 path = "main2.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("library/root.masm"),
+        r#"pub proc helper
+    push.0
+end
 "#,
     );
     write_file(
@@ -95,10 +102,11 @@ end
     );
     write_file(
         &tempdir.path().join("main.masm"),
-        r#"use app::shared
+        r#"pub mod lib
+pub mod shared
 
 begin
-    exec.app::helper
+    exec.lib::helper
     exec.shared::helper
 end
 "#,
@@ -137,9 +145,17 @@ path = "kernel.masm"
 "#,
     );
     write_file(
-        &tempdir.path().join("kernel.masm"),
+        &tempdir.path().join("support.masm"),
         r#"pub proc foo
     caller
+end
+"#,
+    );
+    write_file(
+        &tempdir.path().join("kernel.masm"),
+        r#"pub mod support
+pub proc foo
+    exec.support::foo
 end
 "#,
     );
@@ -515,22 +531,21 @@ fn preassembled_dependency_bypasses_registry_semver_collision() {
     let tempdir = TempDir::new().unwrap();
     let mut context = TestContext::new();
 
-    let registered_module = Module::parse(
-        "deps::predep",
-        ModuleKind::Library,
-        source_file!(
+    let registered_module = context
+        .parse_module(source_file!(
             context,
-            r#"pub proc leaf
+            r#"namespace deps::predep
+
+pub proc leaf
     push.1
     drop
 end
 "#
-        ),
-        context.source_manager(),
-    )
-    .unwrap();
-    let registered =
-        context.assemble_library("predep", Some("1.0.0"), [registered_module]).unwrap();
+        ))
+        .unwrap();
+    let registered = context
+        .assemble_library("predep", Some("1.0.0"), registered_module, None::<Box<Module>>)
+        .unwrap();
     let registered_digest = registered.digest();
     context.registry_mut().add_package(registered.into());
 
@@ -1834,7 +1849,7 @@ description = "metadata-only update"
 ticket = "ignored"
 
 [lib]
-path = "src/lib.masm"
+path = "lib.masm"
 
 [[bin]]
 name = "unused"
@@ -2718,7 +2733,7 @@ path = "kernel.masm"
 
 [[bin]]
 name = "main"
-path = "main.masm"
+path = "bin/main.masm"
 "#,
     );
     write_file(
@@ -2729,7 +2744,7 @@ end
 "#,
     );
     write_file(
-        &root.join("main.masm"),
+        &root.join("bin/main.masm"),
         r#"begin
     syscall.foo
 end

@@ -17,6 +17,13 @@
 - [BREAKING] Removed MASM `trace` decorators, remaining decorator execution scaffolding, the CLI `--trace` flag, trace-specific processor and host APIs, and decorator wire slots from the unreleased MAST format `0.0.4` ([#3208](https://github.com/0xMiden/miden-vm/pull/3208)).
 - [BREAKING] Changed semantics of `LoopNode` to unconditionally enter loops ([#3187](https://github.com/0xMiden/miden-vm/pull/3187)).
 - Removed the legacy LALRPOP parser backend
+- [BREAKING] Miden Assembly module structure must now be explicitly declared via `mod name`/`pub mod name`. The assembler will now
+  ensure that only modules declared in this way are included in an artifact. For more details, see ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] `Assembler::compile_and_statically_link_from_dir` is now `Assembler::compile_and_statically_link_from_root`, this is related to the change to MASM module structure mentioned above.
+  This change is necessary, as we now trace library structure via explicit module declarations, rather than implicitly from filesystem structure.
+- [BREAKING] Import syntax in MASM has changed to be more explicit in distinguishing item vs module imports. Module imports are of the form `use some::module` or `use some::module as alias`, and may not have `pub` visibility; while item imports are of the form `use {item} from some::module` or `use {item1, item2 as alias} from some::module`, and may have `pub` visibility. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] Re-exports in MASM (i.e. `pub use ...`) may no longer re-export modules. Normal imports (i.e. `use ...`) are not affected by this change. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
+- [BREAKING] Imports in MASM may no longer refer to other imports in scope. Imports are now resolved in the global namespace (i.e. as if the path is absolute). The sole exception to this are imports which are submodule-relative - these now require an explicit `self::` prefix to tell the assembler that these should be resolved relative to a specific submodule. See ([#3220](https://github.com/0xMiden/miden-vm/pull/3220))
 - [BREAKING] Cleaned up `Processor` trait by moving methods into their corresponding sub-interface ([#3202](https://github.com/0xMiden/miden-vm/pull/3202)).
 - [BREAKING] Update `miden-crypto` and `miden-lifted-stark` dependencies to v0.26 ([#3228](https://github.com/0xMiden/miden-vm/pull/3228)).
 - Moved `proptest` test support behind optional features so `rand` 0.9 is not in the default dependency tree ([#3241](https://github.com/0xMiden/miden-vm/pull/3241)).
@@ -27,6 +34,7 @@
 - Speed-up native verifier by skipping symbolic recomputation of constraint degree ([#3242](https://github.com/0xMiden/miden-vm/pull/3242)).
 - [BREAKING] Targets specified in `miden-project.toml` must now always provide a `path` key, though it may refer to files with extensions other than `.masm`, such as the case in Rust projects ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - [BREAKING] `ProjectAssembler::assemble_with_sources` has been removed - projects require assembly from the filesystem going forward ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
+- [BREAKING] `miden-vm bundle` now treats the `--kernel` option as a flag; when set, it expects the file path given to `bundle` to be the path to the root module of the kernel, and the support library for the kernel is derived from explicit submodule declarations in that module.
 
 #### Fixes
 
