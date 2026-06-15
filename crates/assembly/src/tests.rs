@@ -7057,16 +7057,17 @@ end
 #[test]
 fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResult {
     let context = TestContext::default();
-    let lib_module = context.parse_module_with_path(
-        "lib::lib",
+    let lib_module = context.parse_module(
         r#"
+        namespace lib::lib
+
         pub proc lib_proc
             push.1
         end
         "#,
     )?;
     let lib = Assembler::new(context.source_manager().clone())
-        .assemble_library("lib", [lib_module])
+        .assemble_library("lib", lib_module, None::<Box<Module>>)
         .map(Arc::<Package>::from)?;
     let package = Assembler::new(context.source_manager())
         .with_package(lib, Linkage::Static)?

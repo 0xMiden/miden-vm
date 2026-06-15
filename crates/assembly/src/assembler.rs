@@ -29,9 +29,9 @@ use miden_core::{
     serde::Serializable,
 };
 use miden_mast_package::{
-    ConstantExport, Package, PackageExport, PackageId, PackageModule, PackageSubmodule,
-    PackageDebugInfoError, ProcedureExport,
-    Section, SectionId, TypeExport, debug_info::DebugSourceNodeId,
+    ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
+    PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
+    debug_info::DebugSourceNodeId,
 };
 use miden_project::{Linkage, TargetType};
 

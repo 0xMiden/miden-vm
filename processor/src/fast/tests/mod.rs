@@ -39,10 +39,7 @@ mod all_ops;
 mod masm_consistency;
 mod memory;
 
-fn parse_kernel_source(
-    source_manager: Arc<dyn miden_debug_types::SourceManager>,
-    source: &str,
-) -> Box<Module> {
+fn parse_kernel_source(source_manager: Arc<dyn SourceManager>, source: &str) -> Box<Module> {
     let mut parser = Module::parser(Some(ModuleKind::Kernel));
     parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
 }

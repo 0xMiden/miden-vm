@@ -839,8 +839,8 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageDebugInfoError, PackageExport, PackageId,
-        PackageModule, PackageSubmodule, ProcedureExport, SectionId, TargetType,
+        Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
+        PackageSubmodule, ProcedureExport, SectionId, TargetType,
         debug_info::{
             DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
             DebugSourceNodeId,

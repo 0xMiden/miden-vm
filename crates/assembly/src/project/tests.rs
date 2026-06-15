@@ -8,7 +8,7 @@ use miden_core::{
     utils::hash_string_to_word,
 };
 use miden_mast_package::{
-    PackageExport, ProcedureExport, Section, SectionId,
+    PackageExport, PackageModule, ProcedureExport, Section, SectionId,
     debug_info::{
         DEBUG_FUNCTIONS_VERSION, DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection,
         DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
@@ -441,10 +441,12 @@ fn debug_bearing_static_package(
     let digest = forest[root].digest();
 
     let mut exports = Vec::new();
+    let mut module_paths = Vec::new();
     let export_path =
         miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
     let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
     let export_path = Arc::from(export_path.into_boxed_path());
+    push_export_module_path(&mut module_paths, &export_path);
     let source_root = DebugSourceNodeId::from(0);
     let export = ProcedureExport::new(export_path, Some(root), digest, None)
         .with_source_node(Some(source_root));
@@ -460,6 +462,7 @@ fn debug_bearing_static_package(
             .expect("test marker export path should parse");
         let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
         let marker_path = Arc::from(marker_path.into_boxed_path());
+        push_export_module_path(&mut module_paths, &marker_path);
         exports.push(PackageExport::Procedure(ProcedureExport::new(
             marker_path,
             Some(marker_root),
@@ -488,12 +491,14 @@ fn debug_bearing_static_package(
         )],
     );
 
-    let mut package = MastPackage::create(
+    let modules = module_paths.into_iter().map(|path| PackageModule::new(path, []));
+    let mut package = MastPackage::create_with_modules(
         PackageId::from(name),
         "1.0.0".parse().unwrap(),
         TargetType::Library,
         Arc::new(forest),
         exports,
+        modules,
         [],
     )
     .expect("test package should be valid");
@@ -502,6 +507,18 @@ fn debug_bearing_static_package(
         Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
     ];
     package
+}
+
+fn push_export_module_path(
+    module_paths: &mut Vec<Arc<miden_assembly_syntax::ast::Path>>,
+    export_path: &Arc<miden_assembly_syntax::ast::Path>,
+) {
+    let module_path = export_path.parent().expect("export path should have a module path");
+    let module_path: Arc<miden_assembly_syntax::ast::Path> =
+        Arc::from(module_path.to_path_buf().into_boxed_path());
+    if !module_paths.iter().any(|path| path.as_ref() == module_path.as_ref()) {
+        module_paths.push(module_path);
+    }
 }
 
 #[test]

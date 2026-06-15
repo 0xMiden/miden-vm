@@ -5,7 +5,6 @@ use std::{
 };
 
 use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
-use miden_core::serde::Deserializable;
 use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{

@@ -570,6 +570,7 @@ impl Package {
             match export {
                 PackageExport::Procedure(ProcedureExport {
                     node,
+                    source_node,
                     digest,
                     path,
                     signature,
@@ -582,6 +583,7 @@ impl Package {
                         signature.clone().map(Arc::new),
                         attributes.clone(),
                         *node,
+                        source_node.map(u32::from),
                         Some(self.mast.commitment()),
                     );
                 },
