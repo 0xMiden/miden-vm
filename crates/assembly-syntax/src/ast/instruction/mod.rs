@@ -260,7 +260,7 @@ pub enum Instruction {
     MTreeMerge,
     MTreeVerify,
     MTreeVerifyWithError(ErrorMsg),
-    CryptoStream,
+    AeadStream,
 
     // ----- STARK proof verification ------------------------------------------------------------
     FriExt2Fold4,

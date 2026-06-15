@@ -331,6 +331,14 @@ pub(crate) trait HasherInterface {
     /// new 4-felt chaining value from `state[8..12]`.
     fn bcompress(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
+    /// Applies one BlakeG compression and returns all 16 raw XOF lanes.
+    fn compress_aead_xof(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError>;
+
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.
     ///

@@ -7,8 +7,8 @@
 //! ## Selector Hierarchy
 //!
 //! The chiplet system uses `s_ctrl = chiplets[0]` for hasher-controller rows and
-//! the virtual selector `s0 = 1 - s_ctrl` for all remaining chiplets. The `s_perm`
-//! column is reserved and constrained to zero. The remaining
+//! the virtual selector `s0 = 1 - s_ctrl` for all remaining chiplets. The `stream_mode`
+//! column is a local mode bit inside the bitwise selector region. The remaining
 //! selectors `s1..s4` subdivide the `s0` region.
 //!
 //! | Chiplet     | Active when                    |
@@ -22,7 +22,7 @@
 //! ## Selector Transition Rules
 //!
 //! - `s_ctrl` is boolean.
-//! - `s_perm = 0`.
+//! - `stream_mode` is boolean under `s0` and zero after the bitwise region.
 //! - `s0 = 1` forces `s_ctrl' = 0` (once in the non-controller region, stay there).
 //!
 //! These force the trace ordering: controller rows first, then non-controller chiplets.
@@ -41,7 +41,7 @@
 //!
 //! ## Constraints
 //!
-//! 1. **Top-level partition**: `s_ctrl` is boolean and `s_perm` is zero.
+//! 1. **Top-level partition**: `s_ctrl` is boolean and `stream_mode` is bitwise-local.
 //! 2. **Transition rules**: ctrl to ctrl-or-s0, s0 to s0
 //! 3. **Binary constraints**: `s1..s4` are binary when their prefix is active
 //! 4. **Stability constraints**: Once `s1..s4` become 1, they stay 1
@@ -78,8 +78,18 @@ pub struct ChipletFlags<E> {
 pub struct ChipletSelectors<E> {
     pub controller: ChipletFlags<E>,
     pub bitwise: ChipletFlags<E>,
+    pub stream_mode: StreamModeFlags<E>,
     pub memory: ChipletFlags<E>,
     pub ace: ChipletFlags<E>,
+}
+
+/// Local mode expressions inside the bitwise selector region.
+#[derive(Clone)]
+pub struct StreamModeFlags<E> {
+    /// Normal `u32and`/`u32xor` rows.
+    pub normal_bitwise: E,
+    /// AEAD stream rows.
+    pub aead_stream_and8: E,
 }
 
 // ENTRY POINT
@@ -88,7 +98,7 @@ pub struct ChipletSelectors<E> {
 /// Enforce chiplet selector constraints and build precomputed flags.
 ///
 /// This enforces:
-/// 1. Top-level partition constraints for `s_ctrl`, `s_perm = 0`, virtual `s0`
+/// 1. Top-level partition constraints for `s_ctrl`, bitwise-local `stream_mode`, virtual `s0`
 /// 2. Transition rules (ctrl to ctrl-or-s0, s0 to s0)
 /// 3. Binary and stability constraints for `s1..s4` under `s0`
 /// 4. Last-row invariant (`s_ctrl = 0`, `s1..s4 = 1`)
@@ -106,7 +116,7 @@ where
     // LOAD SELECTOR COLUMNS
     // =========================================================================
 
-    // [s_ctrl, s_perm, s1, s2, s3, s4]
+    // [s_ctrl, stream_mode, s1, s2, s3, s4]
     let sel = local.chiplet_selectors();
     let sel_next = next.chiplet_selectors();
 
@@ -114,8 +124,8 @@ where
     let s_ctrl: AB::Expr = sel[0].into();
     let s_ctrl_next: AB::Expr = sel_next[0].into();
 
-    // Reserved selector slot. This column is zero on every chiplets row.
-    let s_perm: AB::Expr = sel[1].into();
+    // AEAD stream mode slot. It is used only inside the bitwise selector region.
+    let stream_mode: AB::Expr = sel[1].into();
 
     // s1..s4: remaining chiplet selectors.
     let s1: AB::Expr = sel[2].into();
@@ -136,7 +146,6 @@ where
     // =========================================================================
 
     builder.assert_bool(s_ctrl.clone());
-    builder.assert_zero(s_perm);
 
     // Transition rules: enforce the trace ordering ctrl...ctrl, s0...s0.
     {
@@ -154,6 +163,14 @@ where
     let s01 = s0.clone() * s1.clone();
     let s012 = s01.clone() * s2.clone();
     let s0123 = s012.clone() * s3.clone();
+
+    // `stream_mode` only refines the bitwise region (`s0 = 1, s1 = 0`). Once `s1 = 1`,
+    // the trace has moved past bitwise rows and stream mode must be zero.
+    builder.when(s0.clone()).assert_bool(stream_mode.clone());
+    builder.when(s01.clone()).assert_zero(stream_mode.clone());
+
+    let aead_stream_active: AB::Expr = local.aead_stream_active.into();
+    builder.assert_eq(aead_stream_active.clone(), s0.clone() * stream_mode);
 
     // s1..s4 booleanity, gated by their prefix under s0.
     builder.when(s0.clone()).assert_bool(s1.clone());
@@ -214,6 +231,7 @@ where
     let is_bitwise = s0.clone() - s01.clone();
     let is_memory = s01.clone() - s012.clone();
     let is_ace = s012.clone() - s0123;
+    let normal_bitwise = is_bitwise.clone() - aead_stream_active.clone();
 
     // --- Remaining chiplet last-row flags: is_active * s_n' ---
     let is_bitwise_last = is_bitwise.clone() * s1_next;
@@ -248,6 +266,10 @@ where
             is_transition: bitwise_transition,
             is_last: is_bitwise_last,
             next_is_first: next_is_bitwise_first,
+        },
+        stream_mode: StreamModeFlags {
+            normal_bitwise,
+            aead_stream_and8: aead_stream_active,
         },
         memory: ChipletFlags {
             is_active: is_memory,

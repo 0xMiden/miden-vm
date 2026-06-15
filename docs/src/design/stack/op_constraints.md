@@ -216,7 +216,7 @@ This group contains operations which require constraints with degree up to $5$.
 | Operation    | Opcode value | Binary encoding |            Operation group             | Flag degree |
 | ------------ | :----------: | :-------------: | :------------------------------------: | :---------: |
 | `MRUPDATE`   |     $96$     |   `110_0000`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `CRYPTOSTREAM` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
+| `AEADSTREAM` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
 | `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/index.md) |     $4$     |

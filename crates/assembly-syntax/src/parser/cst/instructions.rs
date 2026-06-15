@@ -342,8 +342,8 @@ static PRIMITIVE_SPECS: &[PrimitiveSpec] = &[
         build: || Instruction::Clk,
     },
     PrimitiveSpec {
-        spelling: "crypto_stream",
-        build: || Instruction::CryptoStream,
+        spelling: "aead_stream",
+        build: || Instruction::AeadStream,
     },
     PrimitiveSpec {
         spelling: "dyncall",

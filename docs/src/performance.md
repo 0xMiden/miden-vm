@@ -3,6 +3,8 @@ title: "Performance"
 sidebar_position: 4
 ---
 
+<!-- TODO: Re-measure the performance tables for the Eidos (BlakeG) native hash. -->
+
 # Performance
 
 The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons that many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
@@ -44,9 +46,9 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ## Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. One downside of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, the VM uses arithmetization-friendly native hashing. The current native hash is Eidos, built on BlakeG compression. One downside of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
 
-The historical benchmarks below execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+The historical benchmarks below execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3. Current Eidos/BlakeG recursion-friendly benchmark numbers have not been published in this document yet.
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |

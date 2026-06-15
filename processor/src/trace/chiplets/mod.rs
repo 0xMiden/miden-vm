@@ -20,7 +20,7 @@ use crate::{
 };
 
 mod bitwise;
-use bitwise::Bitwise;
+use bitwise::{AEAD_STREAM_AND8_FRAGMENT_WIDTH, Bitwise};
 
 mod hasher;
 use hasher::Hasher;
@@ -63,81 +63,54 @@ pub struct BlakeGCompressionTrace {
 /// The module's trace can be thought of as 5 stacked segments in the following form.
 ///
 /// The chiplet system uses `s_ctrl = column 0` to select the hasher controller.
-/// Columns 1-4 (`s1..s4`) subdivide the remaining region. Column 20 (`s_perm`)
-/// is reserved and constrained to zero in `ChipletsAir`.
+/// Columns 1-4 (`s1..s4`) subdivide the remaining region. `stream_mode` is a
+/// bitwise-local mode bit; `aead_stream_active` materializes stream rows for
+/// low-degree consumers.
 ///
 /// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
 ///   - column 0 (s_ctrl): ONE
 ///   - columns 1-19: hasher-controller trace
-///   - column 20 (s_perm): ZERO
+///   - stream mode columns: ZERO
 ///
 /// * Bitwise segment: begins at the end of the hasher segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - column 1 (s1): ZERO
 ///   - columns 2-14: execution trace of bitwise chiplet
-///   - columns 15-20: unused columns padded with ZERO
+///   - columns 15-21: unused columns padded with ZERO
+///   - stream mode columns: ZERO for normal bitwise rows
 ///
 /// * Memory segment: begins at the end of the bitwise segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - column 1 (s1): ONE
 ///   - column 2 (s2): ZERO
 ///   - columns 3-19: execution trace of memory chiplet
-///   - column 20: unused column padded with ZERO
+///   - columns 20-21: unused columns padded with ZERO
+///   - stream mode columns: ZERO
 ///
 /// * ACE segment: begins at the end of the memory segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - column 1-2 (s1, s2): ONE
 ///   - column 3 (s3): ZERO
 ///   - columns 4-20: execution trace of ACE chiplet
+///   - stream mode columns: ZERO
 ///
 /// * Kernel ROM segment: begins at the end of the ACE segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - columns 1-3 (s1, s2, s3): ONE
 ///   - column 4 (s4): ZERO
 ///   - columns 5-9: execution trace of kernel ROM chiplet
-///   - columns 10-20: unused columns padded with ZERO
+///   - columns 10-21: unused columns padded with ZERO
+///   - stream mode columns: ZERO
 ///
 /// * Padding segment: fills the rest of the trace.
 ///   - column 0 (s_ctrl): ZERO
 ///   - columns 1-4 (s1..s4): ONE
-///   - columns 5-20: unused columns padded with ZERO
+///   - columns 5-21 and stream mode columns: ZERO
 ///
-///
-/// The following is a pictorial representation of the chiplet module:
-///
-/// ```text
-///        s_ctrl s1  s2  s3  s4  s_perm
-///          [0] [1] [2] [3] [4]   [20]
-///         +---+----------------------------------------------------------+---+
-///  ctrl   | 1 |       Hash chiplet (controller rows)                     | 0 |
-///         | . |       19 columns                                         | . |
-///         | 1 |       constraint degree 9                                | 0 |
-///         +---+                                                          +---+
-///         | 0 | 0 |                                                      |---|
-///         | . | . |                Bitwise chiplet                       |---|
-///         | . | . |                  13 columns                          |---|
-///         | 0 | 0 |             constraint degree 5                      |---|
-///         | . +---+---+--------------------------------------------------+---+
-///         | . | 1 | 0 |                                                  |---|
-///         | . | . | . |          Memory chiplet                          |---|
-///         | . | . | . |            17 columns                            |---|
-///         | . | . | 0 |        constraint degree 9                       |---|
-///         | . + . +---+---+----------------------------------------------+---+
-///         | . | . | 1 | 0 |                                              |---|
-///         | . | . | . | . |        ACE chiplet                           |---|
-///         | . | . | . | . |          16 columns                          |---|
-///         | . | . | . | 0 |      constraint degree 5                     |---|
-///         | . + . | . +---+---+-------------------------+--------------------+
-///         | . | . | . | 1 | 0 |                         |--------------------|
-///         | . | . | . | . | . |   Kernel ROM chiplet    |--------------------|
-///         | . | . | . | . | . |   5 columns             |--------------------|
-///         | . | . | . | . | 0 |   constraint degree 9   |--------------------|
-///         | . + . | . | . +---+-------------------------+--------------------+
-///         | . | . | . | . | 1 |-------- Padding ---------|                   |
-///         | . | . | . | . | . |                          |                   |
-///         | 0 | 1 | 1 | 1 | 1 |                          | 0                |
-///         +---+---+---+---+---+--------------------------+-------------------+
-/// ```
+/// Column ranges are stable for existing chiplets: controller uses columns 1..20,
+/// normal bitwise uses 2..15, memory uses 3..18, ACE uses 4..20, and kernel ROM
+/// uses 5..10. AEAD stream rows reuse the bitwise region and extend
+/// through column 23 (`chiplets[2..22]`, `stream_mode`, `aead_stream_active`).
 #[derive(Debug)]
 pub struct Chiplets {
     pub hasher: Hasher,
@@ -278,7 +251,7 @@ impl Chiplets {
         let ace_len = ace.trace_len();
         let kernel_rom_len = kernel_rom.trace_len();
 
-        // Chiplets nest hasher ⊃ bitwise ⊃ memory ⊃ ace ⊃ kernel_rom and begin at columns
+        // Chiplets are nested as hasher > bitwise > memory > ace > kernel_rom and begin at columns
         // 1, 2, 3, 4, 5. Each chiplet's `copy_rows_from` writes its prefix selector ONEs and
         // `chip_clk` along with its data; `s_ctrl` (col 0) is hasher-set per row, and
         // padding rows are filled directly below.
@@ -292,11 +265,12 @@ impl Chiplets {
 
         let mut hasher_fragment =
             ChipletTraceFragment::with_overheads(hasher_band, W, 1, HASHER_WIDTH, 0, &[]);
+        let bitwise_width = BITWISE_WIDTH.max(AEAD_STREAM_AND8_FRAGMENT_WIDTH);
         let mut bitwise_fragment = ChipletTraceFragment::with_overheads(
             bitwise_band,
             W,
             2,
-            BITWISE_WIDTH,
+            bitwise_width,
             hasher_len,
             &[],
         );
@@ -326,13 +300,15 @@ impl Chiplets {
         );
 
         let mut and8_counts = Vec::new();
+        let mut bitwise_and8_counts = Vec::new();
         rayon::scope(|s| {
             let and8_counts = &mut and8_counts;
             s.spawn(move |_| {
                 *and8_counts = hasher.fill_trace(&mut hasher_fragment, blakeg_trace);
             });
+            let bitwise_and8_counts = &mut bitwise_and8_counts;
             s.spawn(move |_| {
-                bitwise.fill_trace(&mut bitwise_fragment);
+                *bitwise_and8_counts = bitwise.fill_trace(&mut bitwise_fragment);
             });
             s.spawn(move |_| {
                 memory.fill_trace(&mut memory_fragment);
@@ -347,6 +323,10 @@ impl Chiplets {
                 fill_padding_rows(padding_band, padding_start);
             });
         });
+
+        for (count, bitwise_count) in and8_counts.iter_mut().zip(bitwise_and8_counts) {
+            *count += bitwise_count;
+        }
 
         and8_counts
     }

@@ -68,9 +68,9 @@ pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64)
 
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 ///
-/// The following bitwise section currently hosts 16-row direct-AND8 stream entries. Padding the
-/// controller to this boundary keeps stream rows phase-aligned.
-pub const CONTROLLER_TRACE_ALIGNMENT: usize = 16;
+/// The following bitwise section can host 8-row AEAD stream entries. Padding the controller
+/// to this boundary keeps stream rows phase-aligned.
+pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
 
 /// Number of columns in the hasher-controller trace.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 4;

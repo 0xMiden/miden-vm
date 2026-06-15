@@ -1,0 +1,806 @@
+#! BlakeG/u32-XOR AEAD helpers.
+#!
+#! The encryption path uses `aead_stream`, which calls the AEAD stream chip to
+#! derive BlakeG-XOF blocks from `K_CTR` and a counter. The chip XORs the stream
+#! with plaintext felts and writes expanded ciphertext limbs.
+#! Authentication covers expanded ciphertext with empty associated data.
+#!
+#! Security contract:
+#! - callers must never reuse `(key, nonce)`;
+#! - counter blocks under a fixed `K_CTR` must be unique;
+#! - expanded-ciphertext authentication is the canonical AEAD tag direction;
+#! - this construction is not nonce-misuse-resistant.
+#!
+#! Test vectors are checked against `miden_crypto::hash::eidos::aead_ref`.
+
+use miden::core::crypto::hashes::eidos
+
+# Constants
+# ================================================================================================
+
+# Eidos::init_chaining_word(AEAD_CTR_DOMAIN, 0), where
+# AEAD_CTR_DOMAIN = 0x000a_ead0. Fixed-arity derivations use the domain tag
+# for separation; length binding is only needed for variable-length Eidos hashing.
+const AEAD_CTR_INIT_CV_0 = 4280581858871862887
+const AEAD_CTR_INIT_CV_1 = 2688637133034287986
+const AEAD_CTR_INIT_CV_2 = 1947077364413033168
+const AEAD_CTR_INIT_CV_3 = 6620516959492505600
+
+# Eidos::init_chaining_word(AEAD_MAC_DOMAIN, 0), where
+# AEAD_MAC_DOMAIN = 0x000a_ead1.
+const AEAD_MAC_INIT_CV_0 = 4280581858871862887
+const AEAD_MAC_INIT_CV_1 = 2688637133034287986
+const AEAD_MAC_INIT_CV_2 = 1947077364413033169
+const AEAD_MAC_INIT_CV_3 = 6620516959492505600
+
+# Procedures
+# ================================================================================================
+
+#! Derives the CTR chaining value (`K_CTR`) from a key and nonce.
+#!
+#! `K_MAC` uses a separate proc with the `AEAD_MAC_DOMAIN` init CV. This proc is
+#! hardcoded for `AEAD_CTR_DOMAIN`.
+#!
+#! The caller must not reuse `(key, nonce)`.
+#!
+#! Input:  [key(4), nonce(4), ...]
+#! Output: [K_CTR(4), ...]
+pub proc derive_ctr_key
+    # Push init CV in reverse so CV_0 lands on top for the compression CV.
+    push.AEAD_CTR_INIT_CV_3.AEAD_CTR_INIT_CV_2.AEAD_CTR_INIT_CV_1.AEAD_CTR_INIT_CV_0
+    # Move init CV below the key/nonce block.
+    movdnw.2
+    bcompress
+    exec.eidos::digest
+end
+
+#! Derives the MAC key (`K_MAC`) from a key and nonce.
+#!
+#! Output word layout: `[r0, r1, s0, s1]`, where `(r0, r1)` is the
+#! quadratic-extension evaluation point and `(s0, s1)` is the final mask.
+#!
+#! Input:  [key(4), nonce(4), ...]
+#! Output: [K_MAC(4), ...]
+pub proc derive_mac_key
+    # Push init CV in reverse so CV_0 lands on top for the compression CV.
+    push.AEAD_MAC_INIT_CV_3.AEAD_MAC_INIT_CV_2.AEAD_MAC_INIT_CV_1.AEAD_MAC_INIT_CV_0
+    # Move init CV below the key/nonce block.
+    movdnw.2
+    bcompress
+    exec.eidos::digest
+end
+
+#! Folds `num_pairs` consecutive 8-Felt memory batches into the Horner accumulator.
+#!
+#! Input:  [alpha_ptr, acc0, acc1, stream_ptr, num_pairs, ...]
+#! Output: [alpha_ptr, acc0, acc1, stream_ptr + 8*num_pairs, ...]
+proc auth_horner_stream_pairs
+    # Shape the stack once for the `mem_stream` + `horner_eval_base` loop:
+    # [Y, Y, C, stream_ptr, alpha_ptr, acc0, acc1, ...], with `num_pairs`
+    # stored in C[3]. `mem_stream` preserves C and advances stream_ptr.
+    movup.3
+    movup.4
+    push.0.0.0
+    padw padw
+    # => [Y, Y, 0, 0, 0, num_pairs, stream_ptr, alpha_ptr, acc0, acc1, ...]
+
+    # Process leading batches until the count is divisible by eight, then run
+    # the hot loop in eight-batch chunks to amortize `while.true` overhead.
+    dup.11 u32mod.2
+    if.true
+        movup.11
+        sub.1
+        movdn.11
+
+        mem_stream
+        horner_eval_base
+    end
+
+    dup.11 u32mod.4 eq.2
+    if.true
+        movup.11
+        sub.2
+        movdn.11
+
+        repeat.2
+            mem_stream
+            horner_eval_base
+        end
+    end
+
+    dup.11 u32mod.8 eq.4
+    if.true
+        movup.11
+        sub.4
+        movdn.11
+
+        repeat.4
+            mem_stream
+            horner_eval_base
+        end
+    end
+
+    dup.11 neq.0
+    while.true
+        movup.11
+        sub.8
+        movdn.11
+
+        repeat.8
+            mem_stream
+            horner_eval_base
+        end
+
+        dup.11 neq.0
+    end
+
+    dropw dropw dropw
+    movdn.3
+    # => [alpha_ptr, acc0, acc1, stream_ptr_final, ...]
+end
+
+#! Copies `count` Felts from `src_ptr` to `dst_ptr`.
+#!
+#! Input:  [src_ptr, dst_ptr, count, ...]
+#! Output: [src_ptr + count, dst_ptr + count, ...]
+proc copy_felts
+    dup.2
+    u32divmod.4
+    swap
+    movup.2
+    movup.3
+    swap
+    # => [src_ptr, dst_ptr, full_words, tail, count, ...]
+
+    dup.2 neq.0
+    while.true
+        movup.2 sub.1 movdn.2
+        # => [src_ptr, dst_ptr, remaining_words - 1, tail, count, ...]
+
+        padw dup.4 mem_loadw_le
+        # => [WORD, src_ptr, dst_ptr, remaining_words, tail, count, ...]
+        dup.5 mem_storew_le
+        dropw
+        # => [src_ptr, dst_ptr, remaining_words, tail, count, ...]
+
+        add.4
+        swap add.4 swap
+        # => [src_ptr + 4, dst_ptr + 4, remaining_words, tail, count, ...]
+        dup.2 neq.0
+    end
+
+    movup.2 drop
+    # => [src_ptr + 4*full_words, dst_ptr + 4*full_words, tail, count, ...]
+
+    dup.2 neq.0
+    while.true
+        dup mem_load
+        dup.2 mem_store
+        add.1
+        swap add.1 swap
+        movup.2 sub.1 movdn.2
+        dup.2 neq.0
+    end
+    drop
+    movup.2 drop
+end
+
+#! Stores zero in `count` consecutive memory cells.
+#!
+#! Input:  [dst_ptr, count, ...]
+#! Output: [dst_ptr + count, ...]
+proc zero_felts
+    dup.1 neq.0
+    while.true
+        push.0 dup.1 mem_store
+        add.1
+        swap sub.1 swap
+        dup.1 neq.0
+    end
+    drop
+end
+
+#! Loads `count` Felts from advice into memory.
+#!
+#! Input:  [dst_ptr, count, ...]
+#! Output: [dst_ptr + count, ...]
+proc load_advice_felts_to_memory
+    dup.1
+    u32divmod.8
+    swap
+    movup.2
+    # => [dst_ptr, full_batches, tail, count, ...]
+
+    padw padw padw
+    # => [R0=0w, R1=0w, C=0w, dst_ptr, full_batches, tail, count, ...]
+
+    dup.13 u32mod.2
+    if.true
+        movup.13 sub.1 movdn.13
+        adv_pipe
+    end
+
+    dup.13 u32mod.4 eq.2
+    if.true
+        movup.13 sub.2 movdn.13
+        repeat.2
+            adv_pipe
+        end
+    end
+
+    dup.13 u32mod.8 eq.4
+    if.true
+        movup.13 sub.4 movdn.13
+        repeat.4
+            adv_pipe
+        end
+    end
+
+    dup.13 neq.0
+    while.true
+        movup.13 sub.8 movdn.13
+        # => [R0, R1, C, dst_ptr, remaining_batches - 8, tail, count, ...]
+        repeat.8
+            adv_pipe
+        end
+        # => [R0, R1, C, dst_ptr + 64, remaining_batches, tail, count, ...]
+        dup.13 neq.0
+    end
+
+    dropw dropw dropw
+    swap drop
+    # => [dst_ptr + 8*full_batches, tail, count, ...]
+
+    dup.1 push.4 u32gte
+    if.true
+        padw adv_loadw
+        # => [WORD, dst_ptr, tail, count, ...]
+        dup.4 mem_storew_le
+        dropw
+        add.4
+        swap sub.4 swap
+        # => [dst_ptr + 4, tail - 4, count, ...]
+    end
+    # => [dst_ptr + 8*full_batches + word_tail, tail % 4, count, ...]
+
+    dup.1 neq.0
+    while.true
+        adv_push
+        dup.1 mem_store
+        add.1
+        swap sub.1 swap
+        dup.1 neq.0
+    end
+    drop
+    swap drop
+end
+
+#! Asserts equality of two `count`-Felt memory ranges.
+#!
+#! Input:  [lhs_ptr, rhs_ptr, count, ...]
+#! Output: [lhs_ptr + count, rhs_ptr + count, ...]
+proc assert_felts_equal
+    dup.2
+    u32divmod.4
+    swap
+    movup.2
+    movup.3
+    swap
+    # => [lhs_ptr, rhs_ptr, full_words, tail, count, ...]
+
+    dup.2 neq.0
+    while.true
+        movup.2 sub.1 movdn.2
+        # => [lhs_ptr, rhs_ptr, remaining_words - 1, tail, count, ...]
+
+        padw dup.4 mem_loadw_le
+        # => [LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+        padw dup.9 mem_loadw_le
+        # => [RHS_WORD, LHS_WORD, lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+        assert_eqw.err="AEAD ciphertext mismatch"
+        # => [lhs_ptr, rhs_ptr, remaining_words, tail, count, ...]
+
+        add.4
+        swap add.4 swap
+        # => [lhs_ptr + 4, rhs_ptr + 4, remaining_words, tail, count, ...]
+        dup.2 neq.0
+    end
+
+    movup.2 drop
+    # => [lhs_ptr + 4*full_words, rhs_ptr + 4*full_words, tail, count, ...]
+
+    dup.2 neq.0
+    while.true
+        dup mem_load
+        dup.2 mem_load
+        assert_eq.err="AEAD ciphertext mismatch"
+        add.1
+        swap add.1 swap
+        movup.2 sub.1 movdn.2
+        dup.2 neq.0
+    end
+    drop
+    movup.2 drop
+end
+
+#! Authenticates exact-length expanded ciphertext with empty associated data.
+#!
+#! MAC input:
+#! `nonce(4) || ciphertext(ciphertext_len) || [ad_len=0, ciphertext_len]`
+#!
+#! `scratch_ptr` is temporary workspace for the initial partial batch and for
+#! the final tail plus length fields.
+#!
+#! Input:  [K_MAC(4), nonce(4), ct_ptr, ciphertext_len, scratch_ptr, ...]
+#! Output: [tag0, tag1, ...]
+#!
+#! Preconditions: `scratch_ptr` points to at least 16 writable Felts and does
+#! not overlap `ct_ptr..ct_ptr + ciphertext_len`.
+@locals(16)
+pub proc auth_empty_ad_expanded_with_scratch
+    loc_storew_le.0
+    dropw
+    loc_storew_le.4
+    dropw
+    # => [ct_ptr, ciphertext_len, scratch_ptr, ...]
+
+    dup loc_store.8
+    dup.1 loc_store.9
+    dup.2 loc_store.10
+    # => [ct_ptr, ciphertext_len, scratch_ptr, ...]
+
+    drop drop drop
+    # => [...]
+
+    push.0.0
+    locaddr.0
+    # => [alpha_ptr, acc0, acc1, ...]
+
+    loc_load.9 push.4 u32gte
+    if.true
+        # First batch: nonce(4) || ciphertext[0..4].
+        padw loc_loadw_le.4
+        loc_load.10 mem_storew_le
+        dropw
+
+        padw loc_load.8 mem_loadw_le
+        loc_load.10 add.4 mem_storew_le
+        dropw
+
+        loc_load.10 movdn.3
+        push.1 movdn.4
+        exec.auth_horner_stream_pairs
+        movup.3 drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        # Stream the aligned middle directly from the input.
+        loc_load.9 sub.4
+        u32divmod.8
+        swap
+        dup loc_store.11
+        dup.1 loc_store.12
+        drop drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.11 mul.8
+        loc_load.8 add.4 add
+        loc_store.13
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.8 add.4 movdn.3
+        loc_load.11 movdn.4
+        exec.auth_horner_stream_pairs
+        movup.3 drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        # Final batch: tail || [0, ciphertext_len] || zero padding. A 7-Felt tail
+        # needs two Horner batches because the length pair crosses the boundary.
+        loc_load.12 push.7 eq
+        if.true
+            push.2
+        else
+            push.1
+        end
+        loc_store.14
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.12
+        loc_load.10
+        loc_load.13
+        exec.copy_felts
+        drop drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.10 loc_load.12 add
+        dup push.0 swap mem_store
+        dup add.1 loc_load.9 swap mem_store
+        drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.14 mul.8
+        loc_load.12 add.2
+        sub
+        loc_store.15
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.15
+        loc_load.10 loc_load.12 add.2 add
+        exec.zero_felts
+        drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.10 movdn.3
+        loc_load.14 movdn.4
+        exec.auth_horner_stream_pairs
+        movup.3 drop
+        # => [alpha_ptr, acc0, acc1, ...]
+    else
+        # Small input: nonce || ciphertext_tail || [0, ciphertext_len] || zero padding.
+        padw loc_loadw_le.4
+        loc_load.10 mem_storew_le
+        dropw
+
+        loc_load.9
+        loc_load.10 add.4
+        loc_load.8
+        exec.copy_felts
+        drop drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.10 add.4 loc_load.9 add
+        dup push.0 swap mem_store
+        dup add.1 loc_load.9 swap mem_store
+        drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.9 push.3 eq
+        if.true
+            push.2
+        else
+            push.1
+        end
+        loc_store.14
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.14 mul.8
+        loc_load.9 add.6
+        sub
+        loc_store.15
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.15
+        loc_load.10 add.6 loc_load.9 add
+        exec.zero_felts
+        drop
+        # => [alpha_ptr, acc0, acc1, ...]
+
+        loc_load.10 movdn.3
+        loc_load.14 movdn.4
+        exec.auth_horner_stream_pairs
+        movup.3 drop
+        # => [alpha_ptr, acc0, acc1, ...]
+    end
+
+    drop
+    # => [acc0, acc1, ...]
+
+    loc_load.3
+    loc_load.2
+    ext2add
+end
+
+#! Authenticates expanded ciphertext with empty associated data.
+#!
+#! MAC input:
+#! `nonce(4) || ciphertext(8*num_blocks) || [ad_len=0, ct_len=8*num_blocks]`
+#!
+#! Input:  [K_MAC(4), nonce(4), ct_ptr, num_blocks, ...]
+#! Output: [tag0, tag1, ...]
+#!
+#! Preconditions: `ct_ptr` is word-aligned and points to `num_blocks * 8`
+#! expanded ciphertext-limb Felts.
+@locals(12)
+pub proc auth_empty_ad_expanded
+    loc_storew_le.0
+    dropw
+    loc_storew_le.4
+    dropw
+    # => [ct_ptr, num_blocks, ...]
+
+    # Store the final length fields and the two padding zeros.
+    push.0.0.0.0
+    loc_storew_le.8
+    dropw
+    dup.1 mul.8 loc_store.9
+    # => [ct_ptr, num_blocks, ...]
+
+    dup.1 neq.0
+    if.true
+        # Accumulator state for `horner_eval_base`: [alpha_ptr, acc0, acc1, ...].
+        push.0.0
+        locaddr.0
+        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
+
+        # First batch: nonce(4) || ciphertext[0..4].
+        padw padw push.0
+        dup.12
+        mem_loadw_le
+        padw
+        loc_loadw_le.4
+        horner_eval_base
+        dropw dropw dropw drop
+        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
+
+        # Middle batches: ciphertext[4..8*num_blocks-4].
+        movup.3
+        add.4
+        movdn.3
+        movup.4
+        sub.1
+        movdn.4
+        # => [alpha_ptr, acc0, acc1, stream_ptr, remaining_middle, ...]
+
+        exec.auth_horner_stream_pairs
+        # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
+
+        # Final batch: last ciphertext word || [0, ct_len] || zero(2).
+        padw padw push.0
+        dup.12
+        mem_loadw_le
+        padw
+        loc_loadw_le.8
+        swapw
+        horner_eval_base
+        dropw dropw dropw drop
+        # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
+
+        movup.3
+        drop
+        drop
+        # => [acc0, acc1, ...]
+    else
+        # Empty ciphertext: nonce(4) || [0, 0, 0, 0].
+        push.0.0
+        locaddr.0
+        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
+
+        padw padw padw push.0
+        loc_loadw_le.4
+        horner_eval_base
+        dropw dropw dropw drop
+        # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
+
+        movup.4
+        drop
+        movup.3
+        drop
+        drop
+        # => [acc0, acc1, ...]
+    end
+
+    loc_load.3
+    loc_load.2
+    ext2add
+end
+
+#! Encrypts `num_blocks * 8` plaintext felts using the `aead_stream` fast path.
+#!
+#! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_blocks, ...]
+#! Output: [K_CTR(4), src_ptr + 8*num_blocks, dst_ptr + 16*num_blocks,
+#!          counter + num_blocks, ...]
+#!
+#! Preconditions: `src_ptr` and `dst_ptr` are word-aligned and non-overlapping
+#! for every encrypted block. Plaintext length must be an exact multiple of 8 felts.
+#! `num_blocks = 0` is a valid no-op. Counter blocks under the same `K_CTR` must
+#! not repeat.
+pub proc encrypt_blocks_stream
+    # Put loop state in the order expected below the BlakeG counter block.
+    movup.6
+    movdn.4
+    # => [K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]
+
+    # Process leading blocks until `remaining` is divisible by eight, then run
+    # the hot loop in eight-block chunks to amortize `while.true` overhead.
+    dup.7 u32mod.2
+    if.true
+        aead_stream
+    end
+
+    dup.7 u32mod.4 eq.2
+    if.true
+        repeat.2
+            aead_stream
+        end
+    end
+
+    dup.7 u32mod.8 eq.4
+    if.true
+        repeat.4
+            aead_stream
+        end
+    end
+
+    dup.7 neq.0
+    while.true
+        repeat.8
+            aead_stream
+        end
+        dup.7 neq.0
+    end
+
+    movup.7
+    drop
+    movup.4
+    movdn.6
+    # => [K_CTR(4), src_ptr, dst_ptr, counter, ...]
+end
+
+#! Encrypts `num_felts` plaintext Felts into expanded ciphertext limbs.
+#!
+#! Full 8-Felt blocks use `encrypt_blocks_stream`; a non-empty tail is copied
+#! into local scratch, encrypted as one padded stream block, and copied back as
+#! exactly `2 * tail` ciphertext-limb Felts.
+#!
+#! Input:  [K_CTR(4), src_ptr, dst_ptr, counter, num_felts, ...]
+#! Output: [K_CTR(4), src_ptr + num_felts, dst_ptr + 2*num_felts,
+#!          counter + ceil(num_felts / 8), ...]
+#!
+#! Preconditions: `src_ptr` and `dst_ptr` are non-overlapping. The aligned
+#! prefix pointers must be word-aligned; the tail may have any length in 0..7.
+#! Counter blocks under the same `K_CTR` must not repeat.
+@locals(28)
+pub proc encrypt_felts_expanded
+    movup.7
+    u32divmod.8
+    swap
+    # => [full_blocks, tail, K_CTR(4), src_ptr, dst_ptr, counter, ...]
+
+    swap loc_store.24
+    movdn.7
+    exec.encrypt_blocks_stream
+    # => [K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+
+    loc_load.24
+    dup neq.0
+    if.true
+        # Save the post-prefix pointers and counter. The tail length remains on
+        # the stack until it is consumed by `copy_felts`.
+        dup.5 loc_store.25
+        dup.6 loc_store.26
+        dup.7 loc_store.27
+        # => [tail, K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+
+        # Local memory is not guaranteed to be zeroed.
+        padw locaddr.0 mem_storew_le dropw
+        padw locaddr.4 mem_storew_le dropw
+        # => [tail, K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+
+        # Copy the plaintext tail into an 8-Felt scratch block.
+        dup.5 locaddr.0 swap
+        # => [src_ptr_full, tail_pt_ptr, tail, K_CTR(4), ...]
+        exec.copy_felts
+        drop drop
+        # => [K_CTR(4), src_ptr_full, dst_ptr_full, counter_full, ...]
+
+        movup.6 drop
+        movup.5 drop
+        movup.4 drop
+        # => [K_CTR(4), ...]
+
+        locaddr.0 movdn.4
+        locaddr.8 movdn.5
+        loc_load.27 movdn.6
+        push.1 movdn.7
+        # => [K_CTR(4), tail_pt_ptr, tail_ct_ptr, counter_full, 1, ...]
+
+        movup.6 movdn.4
+        # => [K_CTR(4), counter_full, tail_pt_ptr, tail_ct_ptr, 1, ...]
+        aead_stream
+        # => [K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0, ...]
+
+        # Copy only the logical ciphertext limbs for the original tail.
+        loc_load.24 mul.2
+        loc_load.26
+        locaddr.8
+        # => [tail_dst_ptr, dst_ptr_full, 2*tail, K_CTR(4), ...]
+        exec.copy_felts
+        drop drop
+        # => [K_CTR(4), counter_tail, tail_pt_ptr + 8, tail_ct_ptr + 16, 0, ...]
+
+        movup.7 drop
+        movup.6 drop
+        movup.5 drop
+        movup.4 loc_store.27
+        # => [K_CTR(4), ...]
+
+        loc_load.25 loc_load.24 add movdn.4
+        loc_load.26 loc_load.24 mul.2 add movdn.5
+        loc_load.27 movdn.6
+        # => [K_CTR(4), src_ptr_full + tail, dst_ptr_full + 2*tail, counter_tail, ...]
+    else
+        drop
+    end
+end
+
+#! Decrypts and authenticates expanded ciphertext using advice plaintext.
+#!
+#! The plaintext is nondeterministic advice. This procedure verifies it by
+#! re-encrypting into `scratch_ptr`, comparing the regenerated ciphertext with
+#! the input ciphertext, and checking the tag over the input ciphertext.
+#!
+#! Input:  [key(4), nonce(4), src_ptr, dst_ptr, num_felts, scratch_ptr, ...]
+#! Output: [...]
+#!
+#! Where:
+#! - `src_ptr` points to `2 * num_felts` ciphertext-limb Felts followed by
+#!   `tag(2)`.
+#! - `dst_ptr` receives `num_felts` plaintext Felts from advice.
+#! - Advice supplies plaintext Felts in memory order; the first `adv_push`
+#!   returns the first plaintext Felt.
+#! - `scratch_ptr` must fit the regenerated ciphertext and MAC scratch stream.
+@locals(12)
+pub proc decrypt_empty_ad
+    loc_storew_le.0
+    dropw
+    loc_storew_le.4
+    dropw
+    loc_store.8
+    loc_store.9
+    loc_store.10
+    loc_store.11
+    # => [...]
+
+    # Authenticate the input ciphertext and tag before using advice plaintext.
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
+    exec.derive_mac_key
+    # => [K_MAC(4), ...]
+
+    padw loc_loadw_le.4
+    swapw
+    loc_load.8 movdn.8
+    loc_load.10 mul.2 movdn.9
+    loc_load.11 movdn.10
+    # => [K_MAC(4), nonce(4), src_ptr, ciphertext_len, scratch_ptr, ...]
+
+    exec.auth_empty_ad_expanded_with_scratch
+    # => [tag0, tag1, ...]
+
+    loc_load.8 loc_load.10 mul.2 add
+    # => [tag_ptr, tag0, tag1, ...]
+    dup mem_load
+    movup.2 assert_eq.err="AEAD tag mismatch"
+    # => [tag_ptr, tag1, ...]
+    dup add.1 mem_load
+    movup.2 assert_eq.err="AEAD tag mismatch"
+    drop
+    # => [...]
+
+    loc_load.10
+    loc_load.9
+    exec.load_advice_felts_to_memory
+    drop
+    # => [...]
+
+    # Re-encrypt the claimed plaintext into scratch.
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
+    exec.derive_ctr_key
+    # => [K_CTR(4), ...]
+
+    loc_load.9 movdn.4
+    loc_load.11 movdn.5
+    push.0 movdn.6
+    loc_load.10 movdn.7
+    exec.encrypt_felts_expanded
+    dropw drop drop drop
+    # => [...]
+
+    loc_load.10 mul.2
+    loc_load.8
+    loc_load.11
+    # => [scratch_ptr, src_ptr, ciphertext_len, ...]
+    exec.assert_felts_equal
+    drop drop
+    # => [...]
+end

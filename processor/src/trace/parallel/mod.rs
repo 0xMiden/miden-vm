@@ -58,9 +58,9 @@ use super::{
     chiplets::{self, Chiplets},
     execution_tracer::TraceGenerationContext,
     trace_state::{
-        AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
-        ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
-        RangeCheckerReplay,
+        AceReplay, BitwiseOp, BitwiseReplay, BitwiseReplayEntry, CoreTraceFragmentContext,
+        CoreTraceState, ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay,
+        MemoryWritesReplay, RangeCheckerReplay,
     },
 };
 
@@ -508,6 +508,10 @@ fn initialize_chiplets(
                 let _ = chiplets.hasher.bcompress(input_state);
                 check_chiplets_trace_len(&chiplets)?;
             },
+            HasherOp::AeadXof(ctx, clk, input_state) => {
+                let _ = chiplets.hasher.compress_aead_xof(ctx, clk, input_state);
+                check_chiplets_trace_len(&chiplets)?;
+            },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
                 check_chiplets_trace_len(&chiplets)?;
@@ -541,14 +545,27 @@ fn initialize_chiplets(
     }
 
     // populate bitwise chiplet
-    for (bitwise_op, a, b) in bitwise {
-        match bitwise_op {
-            BitwiseOp::U32And => {
+    for entry in bitwise {
+        match entry {
+            BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b) => {
                 chiplets.bitwise.u32and(a, b).map_exec_err_no_ctx()?;
                 check_chiplets_trace_len(&chiplets)?;
             },
-            BitwiseOp::U32Xor => {
+            BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b) => {
                 chiplets.bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
+                check_chiplets_trace_len(&chiplets)?;
+            },
+            BitwiseReplayEntry::AeadStreamAnd8(entry) => {
+                chiplets.bitwise.aead_stream_and8(
+                    entry.ctx,
+                    entry.clk,
+                    entry.src_ptr,
+                    entry.dst_ptr,
+                    entry.lane_base,
+                    entry.plaintext,
+                    entry.keystream,
+                    entry.ciphertext,
+                );
                 check_chiplets_trace_len(&chiplets)?;
             },
         }

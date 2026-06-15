@@ -10,7 +10,7 @@
 //! - Row 60: `M0`, the first message row (`m[0..8]`).
 //! - Row 61: `M1`, the second message row (`m[8..16]`).
 //! - Row 62: `I`, the input interface row. It exposes the packed input state,
-//!   packed digest, and multiplicity to the buses.
+//!   packed digest, output mode, and multiplicity to the buses.
 //! - Row 63: `O`, the packed output interface row.
 //!
 //! This module is split by *section of the trace*, with one submodule per
@@ -26,7 +26,7 @@
 //! - [`footer`]: F0..F3 W continuity, accumulator continuity, byte
 //!   decomposition, accumulator definitions, F3 -> M0 forwarding.
 //! - [`interface`]: M0/M1 limb reconstruction and rate binding, M -> I forwarding,
-//!   I.C/I.H consistency, and I -> O forwarding.
+//!   I.C/I.H consistency, output-mode selection, and I -> O forwarding.
 //!
 //! [`enforce_blakeg_constraints`] is the public entry point. It builds the
 //! row views once and dispatches to each submodule. The order is intentionally
@@ -62,11 +62,11 @@ pub const NUM_BLAKEG_COMPRESSION_COLS: usize = 80;
 /// Top-bit mask used by the footer `mask_bit` witness.
 pub const FOOTER_TOP_BIT_MASK: u8 = 128;
 
-/// Tail label column in the footer/message/interface rows. Packed-output mode constrains it to zero.
-pub const TAIL_LABEL_COL: usize = 78;
+/// AEAD-XOF selector in the footer/message/interface tail rows.
+pub const AEAD_XOF_MODE_COL: usize = 78;
 
-/// Tail clock column in the footer/message/interface rows. Packed-output mode constrains it to zero.
-pub const TAIL_CLK_COL: usize = TAIL_LABEL_COL + 1;
+/// AEAD-XOF transaction clock in the footer/message/interface tail rows.
+pub const AEAD_XOF_CLK_COL: usize = AEAD_XOF_MODE_COL + 1;
 
 /// Footer columns carrying the queue of W words needed by later footer rows.
 pub const FOOTER_FUTURE_W_COLS: [usize; 12] = [57, 58, 59, 60, 61, 62, 63, 64, 65, 75, 76, 77];
@@ -323,7 +323,7 @@ pub fn enforce_blakeg_constraints<AB>(
     //    input-CV canonicality, and mask_bit Boolean.
     footer::enforce_footer_w_continuity(builder, local, next, &sel);
     footer::enforce_footer_accumulator_continuity(builder, local, next, &sel);
-    footer::enforce_footer_tail_label_continuity(builder, local, next, &sel);
+    footer::enforce_footer_aead_label_continuity(builder, local, next, &sel);
     local_checks::enforce_footer_accumulator_zero_init(builder, local, &sel);
     footer::enforce_footer_vlo_vhi_decomposition(builder, &footer_local, local, &sel);
     footer::enforce_footer_c_definition(builder, &footer_local, &sel);
@@ -343,9 +343,9 @@ pub fn enforce_blakeg_constraints<AB>(
     interface::enforce_m0_to_m1(builder, local, next, &sel);
     interface::enforce_m1_to_iface_in(builder, local, next, &sel);
 
-    // 7. Interface rows: I C/H consistency, tail-label zeroing, I -> O forwarding.
+    // 7. Interface rows: I C/H consistency, output-mode binding, I -> O forwarding.
     interface::enforce_iface_in_c_h_consistency(builder, local, &sel);
-    interface::enforce_tail_label_constraints(builder, local, next, &sel);
+    interface::enforce_aead_mode_and_label_constraints(builder, local, next, &sel);
     interface::enforce_iface_in_to_out(builder, local, next, &sel);
 
     // 8. Footer tail constraints.

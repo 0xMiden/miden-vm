@@ -12,21 +12,23 @@ use core::{
 
 use super::{
     chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        AceCols, AceEvalCols, AceReadCols, AeadStreamAnd8Cols, AeadStreamAnd8HighFirstCols,
+        AeadStreamAnd8HighSecondCols, AeadStreamAnd8LowSecondCols, AeadStreamAnd8ReadCols,
+        BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
+use crate::trace::{CHIPLETS_DATA_WIDTH, TRACE_WIDTH};
 
 // CORE TRACE COLUMN STRUCT
 // ================================================================================================
 
 /// Column layout of the core execution trace.
 ///
-/// `CoreCols` covers the system, decoder, stack, and range-check segments — the columns owned
+/// `CoreCols` covers the system, decoder, stack, and range-check segments - the columns owned
 /// by `CoreAir`. It is also the layout of the leading `NUM_CORE_COLS` columns of the unified
 /// `TRACE_WIDTH`-wide main trace, so it can be borrowed from either a per-AIR
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
@@ -63,7 +65,7 @@ impl<T> BorrowMut<CoreCols<T>> for [T] {
 
 impl<T> CoreCols<T> {
     /// Returns the column layout as a flat slice of length NUM_CORE_COLS, in column-index
-    /// order. Useful for column-index → field lookups (e.g. a `CoreCols<&str>` name table).
+    /// order. Useful for column-index -> field lookups (e.g. a `CoreCols<&str>` name table).
     pub fn as_slice(&self) -> &[T] {
         let ptr = self as *const Self as *const T;
         unsafe { core::slice::from_raw_parts(ptr, NUM_CORE_COLS) }
@@ -75,7 +77,8 @@ impl<T> CoreCols<T> {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the 20 shared chiplet data columns + `s_perm` + `chip_clk` — the
+/// `ChipletCols` covers the shared chiplet data columns, AEAD stream mode columns, and
+/// `chip_clk` - the
 /// columns owned by `ChipletsAir`. It is also the layout of the trailing `NUM_CHIPLETS_COLS`
 /// columns of the unified main trace, so it can be borrowed from either a per-AIR
 /// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
@@ -83,27 +86,29 @@ impl<T> CoreCols<T> {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 2],
-    /// Reserved chiplet selector column. It is constrained to zero in `ChipletsAir`.
-    pub s_perm: T,
+    pub(crate) chiplets: [T; CHIPLETS_DATA_WIDTH],
+    /// Bitwise-region mode bit. `0` selects normal bitwise rows; `1` selects AEAD stream rows.
+    pub stream_mode: T,
+    /// Materialized AEAD stream row flag used by low-degree consumers.
+    pub aead_stream_active: T,
     /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
     pub chip_clk: T,
 }
 
-/// Number of columns in the chiplets trace (21), derived from the struct layout.
+/// Number of columns in the chiplets trace, derived from the struct layout.
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
 impl<T> ChipletCols<T> {
-    /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
+    /// Returns the 6 chiplet selector columns `[s_ctrl, stream_mode, s1, s2, s3, s4]`.
     ///
-    /// `s_perm` is a reserved zero column included in the selector bundle.
+    /// `stream_mode` is local to the bitwise selector region.
     pub fn chiplet_selectors(&self) -> [T; 6]
     where
         T: Copy,
     {
         [
             self.chiplets[0],
-            self.s_perm,
+            self.stream_mode,
             self.chiplets[1],
             self.chiplets[2],
             self.chiplets[3],
@@ -114,6 +119,11 @@ impl<T> ChipletCols<T> {
     /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
     pub fn bitwise(&self) -> &BitwiseCols<T> {
         self.chiplets[2..15].borrow()
+    }
+
+    /// Returns a typed borrow of the AEAD stream columns (chiplets\[2..22\]).
+    pub fn aead_stream_and8(&self) -> &AeadStreamAnd8Cols<T> {
+        self.chiplets[2..22].borrow()
     }
 
     /// Returns a typed borrow of the memory chiplet columns (chiplets\[3..18\]).
@@ -146,7 +156,7 @@ impl<T> ChipletCols<T> {
 
     /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
     pub fn ace(&self) -> &AceCols<T> {
-        self.chiplets[4..].borrow()
+        self.chiplets[4..20].borrow()
     }
 
     /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
@@ -156,7 +166,7 @@ impl<T> ChipletCols<T> {
 
     /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
     pub fn controller(&self) -> &ControllerCols<T> {
-        self.chiplets[1..].borrow()
+        self.chiplets[1..20].borrow()
     }
 }
 
@@ -207,6 +217,14 @@ pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
 pub const NUM_STACK_COLS: usize = size_of::<StackCols<u8>>();
 pub const NUM_RANGE_COLS: usize = size_of::<RangeCols<u8>>();
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
+pub const NUM_AEAD_STREAM_AND8_COLS: usize = size_of::<AeadStreamAnd8Cols<u8>>();
+pub const NUM_AEAD_STREAM_AND8_READ_COLS: usize = size_of::<AeadStreamAnd8ReadCols<u8>>();
+pub const NUM_AEAD_STREAM_AND8_HIGH_FIRST_COLS: usize =
+    size_of::<AeadStreamAnd8HighFirstCols<u8>>();
+pub const NUM_AEAD_STREAM_AND8_LOW_SECOND_COLS: usize =
+    size_of::<AeadStreamAnd8LowSecondCols<u8>>();
+pub const NUM_AEAD_STREAM_AND8_HIGH_SECOND_COLS: usize =
+    size_of::<AeadStreamAnd8HighSecondCols<u8>>();
 pub const NUM_MEMORY_COLS: usize = size_of::<MemoryCols<u8>>();
 pub const NUM_ACE_COLS: usize = size_of::<AceCols<u8>>();
 pub const NUM_ACE_READ_COLS: usize = size_of::<AceReadCols<u8>>();
@@ -218,6 +236,11 @@ const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
 const _: () = assert!(NUM_RANGE_COLS == 2);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
+const _: () = assert!(NUM_AEAD_STREAM_AND8_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_AND8_READ_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_AND8_HIGH_FIRST_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_AND8_LOW_SECOND_COLS == 20);
+const _: () = assert!(NUM_AEAD_STREAM_AND8_HIGH_SECOND_COLS == 20);
 const _: () = assert!(NUM_MEMORY_COLS == 15);
 const _: () = assert!(NUM_ACE_COLS == 16);
 const _: () = assert!(NUM_ACE_READ_COLS == 4);
@@ -230,7 +253,7 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::{DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
+    use crate::trace::{CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
 
     /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
     /// column index inside its own AIR. `CORE_COL_MAP` lines up with unified-trace offsets
@@ -302,9 +325,10 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[19], 19);
-        assert_eq!(CHIPLET_COL_MAP.s_perm, 20);
-        assert_eq!(CHIPLET_COL_MAP.chip_clk, 21);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[21], 21);
+        assert_eq!(CHIPLET_COL_MAP.stream_mode, 22);
+        assert_eq!(CHIPLET_COL_MAP.aead_stream_active, 23);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, 24);
     }
 
     // --- Multi-AIR split: CoreCols + ChipletCols widths ---------------------------------------
@@ -354,6 +378,31 @@ mod tests {
     #[test]
     fn bitwise_col_map_layout() {
         insta::assert_debug_snapshot!(col_map!(BitwiseCols));
+    }
+
+    #[test]
+    fn aead_stream_and8_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8Cols));
+    }
+
+    #[test]
+    fn aead_stream_and8_read_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8ReadCols));
+    }
+
+    #[test]
+    fn aead_stream_and8_high_first_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8HighFirstCols));
+    }
+
+    #[test]
+    fn aead_stream_and8_low_second_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8LowSecondCols));
+    }
+
+    #[test]
+    fn aead_stream_and8_high_second_col_map_layout() {
+        insta::assert_debug_snapshot!(col_map!(AeadStreamAnd8HighSecondCols));
     }
 
     #[test]

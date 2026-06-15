@@ -22,7 +22,7 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceInitMsg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
+                AceInitMsg, And8Msg, BitwiseMsg, BusId, HasherMsg, HasherPayload, KernelRomMsg,
                 MemoryResponseMsg,
             },
         },
@@ -38,8 +38,9 @@ use crate::{
 /// mutually exclusive `(s0, s1, s2, is_boundary)` combinations. The kernel-ROM branch
 /// emits two fractions per active row: an INIT-labeled remove (multiplicity 1) plus a
 /// CALL-labeled add with multiplicity equal to the row's `multiplicity` column. Every
-/// other chiplet emits exactly one fraction when active. Per-row max: 2.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
+/// other chiplet emits exactly one fraction when active. AEAD stream rows emit four
+/// byte-pair removals. Per-row max: 4.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
 /// Emit the chiplet responses bus.
 pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
@@ -52,15 +53,28 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     let next = ctx.next;
 
     // Read the typed periodic column view (used for bitwise k_transition).
-    let k_transition: LB::Expr = {
+    let (k_transition, aead_phase): (LB::Expr, [LB::Expr; 8]) = {
         let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        periodic.bitwise.k_transition.into()
+        (
+            periodic.bitwise.k_transition.into(),
+            [
+                periodic.aead_stream_and8.r0.into(),
+                periodic.aead_stream_and8.r1.into(),
+                periodic.aead_stream_and8.r2.into(),
+                periodic.aead_stream_and8.r3.into(),
+                periodic.aead_stream_and8.r4.into(),
+                periodic.aead_stream_and8.r5.into(),
+                periodic.aead_stream_and8.r6.into(),
+                periodic.aead_stream_and8.r7.into(),
+            ],
+        )
     };
 
     // Typed chiplet-data overlays.
     let ctrl = local.controller();
     let ctrl_next = next.controller();
     let bw = local.bitwise();
+    let stream = local.aead_stream_and8();
     let mem = local.memory();
     let ace = local.ace();
     let krom = local.kernel_rom();
@@ -245,6 +259,44 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         },
                         Deg { v: 3, u: 4 },
                     );
+
+                    let mut remove_stream_row = |name: &'static str, phase_idx: usize| {
+                        let gate =
+                            ctx.local.aead_stream_active.into() * aead_phase[phase_idx].clone();
+                        g.batch(
+                            name,
+                            gate,
+                            |b| {
+                                let bytes = match phase_idx % 4 {
+                                    0 => stream.read().bytes,
+                                    1 => stream.high_first().bytes,
+                                    2 => stream.low_second().bytes,
+                                    3 => stream.high_second().bytes,
+                                    _ => unreachable!(),
+                                };
+                                for idx in 0..4 {
+                                    b.remove(
+                                        "aead_stream_and8_byte",
+                                        And8Msg::new(
+                                            bytes[idx].into(),
+                                            bytes[4 + idx].into(),
+                                            bytes[8 + idx].into(),
+                                        ),
+                                        Deg { v: 2, u: 3 },
+                                    );
+                                }
+                            },
+                            Deg { v: 3, u: 4 },
+                        );
+                    };
+                    remove_stream_row("aead_stream_and8_row0", 0);
+                    remove_stream_row("aead_stream_and8_row1", 1);
+                    remove_stream_row("aead_stream_and8_row2", 2);
+                    remove_stream_row("aead_stream_and8_row3", 3);
+                    remove_stream_row("aead_stream_and8_row4", 4);
+                    remove_stream_row("aead_stream_and8_row5", 5);
+                    remove_stream_row("aead_stream_and8_row6", 6);
+                    remove_stream_row("aead_stream_and8_row7", 7);
 
                     // Memory response: runtime (is_read, is_word) mux keeps column transition at 8.
                     g.add(

@@ -1,5 +1,7 @@
 # Miden Virtual Machine
 
+<!-- TODO: Re-measure the performance tables for the Eidos (BlakeG) native hash. -->
+
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-MIT)
 [![LICENSE](https://img.shields.io/badge/license-APACHE-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-APACHE)
 [![Test](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml)
@@ -36,7 +38,7 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Flow control.** Miden VM is Turing-complete and supports familiar flow control structures such as conditional statements and counter/condition-controlled loops. There are no restrictions on the maximum number of loop iterations or the depth of control flow logic.
 - **Procedures and execution contexts.** Miden assembly programs can be broken into subroutines called _procedures_, and program execution can span multiple isolated contexts, each with its own dedicated memory space. The contexts are separated into the _root context_ and _user contexts_. The root context can be accessed from user contexts via customizable kernel calls.
 - **Memory.** Miden VM supports read-write random-access memory. Procedures can reserve portions of global memory for easier management of local variables.
-- **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers (arithmetic, comparison, and bitwise operations) as well as built-in instructions for computing hashes and verifying Merkle paths using the Poseidon2 hash function (the native hash function of the VM).
+- **Rich instruction set.** Miden VM provides native operations for 32-bit unsigned integers (arithmetic, comparison, and bitwise operations) as well as built-in instructions for computing hashes and verifying Merkle paths using the VM-native Eidos hash.
 - **External libraries.** Miden VM supports compiling programs against pre-defined libraries. The VM ships with one such library: Miden `miden-core-lib` which adds support for such things as 64-bit unsigned integers. Developers can build other similar libraries to extend the VM's functionality in ways which fit their use cases.
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
 - **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
@@ -122,9 +124,9 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 
 ### Recursion-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, the VM uses arithmetization-friendly native hashing. The current native hash is Eidos, built on BlakeG compression.
 
-In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+The historical benchmarks below execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3. Current Eidos/BlakeG recursion-friendly benchmark numbers have not been published in this document yet.
 
 | Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
 | ------------------------------ | :------------: | :----------: | :----------------: |

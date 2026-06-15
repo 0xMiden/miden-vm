@@ -6,7 +6,10 @@ sidebar_position: 8
 # Cryptographic operations
 In this section we describe the AIR constraints for Miden VM cryptographic operations.
 
-Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chiplets/hasher.md). Communication between the stack and the hash chiplet is accomplished via the chiplet bus $b_{chip}$. To make requests to and to read results from the chiplet bus we need to divide its current value by the value representing the request.
+Hash and Merkle operations communicate with the hasher controller through LogUp messages.
+The controller then links each compression request to `BlakeGCompressionAir`, which proves the
+BlakeG rounds. `AEADSTREAM` also uses memory, BlakeG-XOF output, and AEAD stream rows in the
+bitwise selector region.
 
 Thus, to describe AIR constraints for the cryptographic operations, we need to define how to compute these input and output values within the stack. We do this in the following sections.
 
@@ -17,25 +20,16 @@ The `BCOMPRESS` operation applies one BlakeG compression to the top $12$ element
 
 In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
 
-For the `BCOMPRESS` operation, we define input and output values as follows:
+The stack removes two LogUp messages from the hasher-controller domains:
 
-$$
-v_{input} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_LINEAR\_HASH} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j)
-$$
+- `HasherLinearHashInit(h0, stack[0..12])`, carrying the block and input chaining word.
+- `HasherReturnHash(h0 + 1, next.stack[8..12])`, carrying the returned chaining word.
 
-$$
-v_{output} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_RETURN\_HASH} + \alpha_2 \cdot (h_0 + 1) + \sum_{j=0}^{3} (\alpha_{j+4} \cdot s'_{8+j})
-$$
+The hasher controller inserts the matching messages on consecutive controller rows.
 
-In the above, $\mathsf{HASHER\_LINEAR\_HASH}$ and $\mathsf{HASHER\_RETURN\_HASH}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a compression and reading the returned chaining word respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because this computation does not use the index column.
-
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
-$$
-
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet. In the controller/compression split design these rows are consecutive, so their addresses differ by exactly $1$.
+The controller input/output pair is then linked to the standalone BlakeG compression AIR by the
+compression-link message `[block(8), cv_in(4), cv_out(4)]`. This binds the block preserved on the
+stack, the input chaining word, and the returned chaining word to one BlakeG compression block.
 
 The effect of this operation on the rest of the stack is:
 * **No change** in positions $0..8$.
@@ -55,27 +49,16 @@ The Merkle path itself is expected to be provided by the prover non-deterministi
 
 ![mpverify](../../img/design/stack/crypto_ops/MPVERIFY.png)
 
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
+In the above, $r$ (located in the helper register $h_0$) is the controller row address set by
+the prover non-deterministically.
 
-For the `MPVERIFY` operation, we define input and output values as follows:
+The stack removes:
 
-$$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{mpver} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3 \alpha_{j + 4} \cdot s_{j}
-$$
+- `HasherMerkleVerifyInit(h0, index, leaf)`, where `index = s5` and `leaf = stack[0..4]`.
+- `HasherReturnHash(h0 + 2 * depth - 1, root)`, where `depth = s4` and `root = stack[6..10]`.
 
-$$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
-$$
-
-In the above, $op_{mpver}$ and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a Merkle path verification computation and reading the hash result respectively. The sum expression for inputs computes the value of the leaf node, while the sum expression for the output computes the value of the tree root.
-
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
-$$
-
-The above constraint enforces that the specified input and output controller rows must be present in the trace of the hash chiplet, and that they must be exactly $2 \cdot d - 1$ rows apart, where $d$ is the depth of the node. Each Merkle level contributes one controller pair `(input, output)`.
+The hasher controller inserts the matching messages. Each Merkle level contributes two
+controller rows, so the returned root is at offset `2 * depth - 1` from the input row.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -94,104 +77,64 @@ The Merkle path for the node is expected to be provided by the prover non-determ
 
 ![mrupdate](../../img/design/stack/crypto_ops/MRUPDATE.png)
 
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
+In the above, $r$ (located in the helper register $h_0$) is the controller row address set by
+the prover non-deterministically.
 
-For the `MRUPDATE` operation, we define input and output values as follows:
+The stack removes four hasher-controller messages:
 
-$$
-v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}
-$$
+- `HasherMerkleOldInit(h0, index, old_value)`.
+- `HasherReturnHash(h0 + 2 * depth - 1, old_root)`.
+- `HasherMerkleNewInit(h0 + 2 * depth, index, new_value)`.
+- `HasherReturnHash(h0 + 4 * depth - 1, new_root)`.
 
-$$
-v_{outputold} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
-$$
-
-$$
-v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 2 \cdot s_4) + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{10 + j}
-$$
-
-$$
-v_{outputnew} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 4 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}'
-$$
-
-In the above, the first two expressions correspond to inputs and outputs for verifying the Merkle path between the old node value and the old tree root, while the last two expressions correspond to inputs and outputs for verifying the Merkle path between the new node value and the new tree root. The hash chiplet ensures the same set of sibling nodes are used in both of these computations.
-
-The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) used by the above computations.
-
-> $$
-> b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
-> $$
-
-The above constraint enforces that the specified input and output controller rows for both the old and the new node/root combinations must be present in the trace of the hash chiplet. The old-path output is $2 \cdot d - 1$ rows after the old-path input, the new-path input starts immediately after that at offset $2 \cdot d$, and the new-path output is $4 \cdot d - 1$ rows after the initial old-path input. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The first pair verifies the path from the old node value to the old root. The second pair updates
+the same path with the new node value and returns the new root. The hasher controller and sibling
+table constraints bind both paths to the same sibling sequence.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
 
-## CRYPTOSTREAM
-The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
-top 8 stack elements (the rate), writes the resulting ciphertext back to memory,
-and replaces the top 8 stack elements with the ciphertext. The source and
-destination pointers are stored in stack positions $12$ and $13$, respectively.
+## AEADSTREAM
+The `AEADSTREAM` operation encrypts two memory words with a BlakeG-XOF
+keystream derived from the AEAD CTR chaining word and block counter. It reads
+8 packed plaintext felts from memory, writes 16 ciphertext-limb felts, and
+advances the stream state.
 
-Let $r_i = s_i$ be the rate values and $c_i = s_i'$ be the ciphertext values on
-the stack after the operation. We define plaintext values as $p_i = c_i - r_i$.
-
-The source and destination pointers advance by two words:
+The stack layout is:
 
 $$
-s_{12}' = s_{12} + 8
+[K_{CTR,0}, K_{CTR,1}, K_{CTR,2}, K_{CTR,3}, ctr, src, dst, rem, ...]
 $$
 
-$$
-s_{13}' = s_{13} + 8
-$$
-
-The capacity and tail elements are unchanged:
+After the operation:
 
 $$
-s_i' - s_i = 0 \text{ for } i \in \{8,9,10,11,14,15\}
-$$
-
-We define the two read requests and two write requests as follows:
-
-$$
-u_{read,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot s_{12} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot p_j
+s_4' = s_4 + 1
 $$
 
 $$
-u_{read,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot (s_{12} + 4) + \alpha_4 \cdot clk +
-\sum_{j=0}^3 \alpha_{j+5} \cdot p_{j+4}
+s_5' = s_5 + 8
 $$
 
 $$
-u_{write,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot c_j
+s_6' = s_6 + 16
 $$
 
 $$
-u_{write,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
-\alpha_3 \cdot (s_{13} + 4) + \alpha_4 \cdot clk +
-\sum_{j=0}^3 \alpha_{j+5} \cdot c_{j+4}
+s_7' = s_7 - 1
 $$
 
-$$
-u_{mem} = u_{read,1} \cdot u_{read,2} \cdot u_{write,1} \cdot u_{write,2}
-$$
+The CTR chaining word and stack tail are unchanged.
 
-In the above, $op_{mem\_readword}$ and $op_{mem\_writeword}$ are the unique
-[operation labels](../chiplets/index.md#operation-labels) for the memory read
-and write word operations.
+The operation emits:
 
-Using the above value, the chiplet bus constraint is:
+- one BlakeG-XOF request for `[ctr, 0, 0, 0, 0, 0, 0, 0, K_CTR]`;
+- two memory reads at `src` and `src + 4`;
+- four memory writes at `dst`, `dst + 4`, `dst + 8`, and `dst + 12`;
+- two 8-row AEAD stream lookups binding plaintext, keystream, and ciphertext bytes.
 
-$$
-b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 5
-$$
-
-The effect of this operation on the rest of the stack is:
-* **No change** starting from position $8$, except for the pointer updates above.
+The source range `[src, src + 8)` and destination range `[dst, dst + 16)` must
+be word-aligned, in bounds, and non-overlapping.
 
 ## FRIE2F4
 The `FRIE2F4` operation performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2 extension of the base field. It also performs several computations needed for checking correctness of the folding from the previous layer as well as simplifying folding of the next FRI layer.
@@ -274,27 +217,8 @@ $$
 \end{align*}
 $$
 
-The `HORNERBASE` makes two memory access requests (reading $\alpha_0$ and $\alpha_1$ individually):
-
-$$
-\begin{aligned}
- u_{mem,0} &= \alpha_0 + \alpha_1 \cdot op_{mem\_read} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} \\
-           &\quad + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0}.
-\end{aligned}
-$$
-
-$$
-\begin{aligned}
- u_{mem,1} &= \alpha_0 + \alpha_1 \cdot op_{mem\_read} + \alpha_2 \cdot ctx + \alpha_3 \cdot (s_{13} + 1) \\
-           &\quad + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{1}.
-\end{aligned}
-$$
-
-Using the above values, we can describe the constraint for the chiplets bus column as follows:
-
-$$
-b_{chip}' \cdot u_{mem,0} \cdot u_{mem,1} = b_{chip} \text{ | degree} = 3
-$$
+`HORNERBASE` removes two memory-read LogUp messages: one for `alpha_ptr` carrying `h0`, and
+one for `alpha_ptr + 1` carrying `h1`.
 
 The effect on the rest of the stack is:
 * **No change.**
@@ -341,17 +265,8 @@ $$
 The effect on the rest of the stack is:
 * **No change.**
 
-The `HORNEREXT` makes one memory access request:
-
-$$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{2} + \alpha_{8} \cdot h_{3}
-$$
-
-Using the above value, we can describe the constraint for the chiplets bus column as follows:
-
-$$
-b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 2
-$$
+`HORNEREXT` removes one memory-word LogUp message for `alpha_ptr`, carrying
+`[h0, h1, h2, h3]`.
 
 ## EVALCIRCUIT
 
@@ -366,23 +281,9 @@ The diagram below illustrates this graphically.
 
 ![evalcircuit](../../img/design/stack/crypto_ops/EVALCIRCUIT.png)
 
-Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
-
-$$
-v_{ace} = \alpha_0 + \mathsf{ACE\_LABEL}\cdot\alpha_1 + ctx \cdot\alpha_2 + ptr\cdot\alpha_3 + clk\cdot\alpha_4 + n_{read}\cdot\alpha_5 + n_{eval}\cdot\alpha_6.
-$$
-
-where:
-- $\mathsf{ACE\_LABEL}$ is the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a circuit evaluation request to the ACE chiplet,
-- $ctx$ is the memory context from which the operation was initiated,
-- $clk$ is the clock cycle at which the operation was initiated,
-- $ptr$, $n_{read}$ and $n_{eval}$ are as above.
-
-Then, using the above value, we can describe the constraint for the chiplets' bus column as follows:
-
-$$
-b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
-$$
+Calling the operation has no effect on the stack or on helper registers. Instead, the operation
+removes an ACE initialization LogUp message carrying `[clk, ctx, ptr, num_read, num_eval]`.
+The ACE chiplet inserts the matching message on its start row.
 
 ## LOG_PRECOMPILE
 
@@ -406,18 +307,18 @@ with each `LOG_PRECOMPILE` invocation. The previous state is provided non‑dete
 helper registers and is denoted `STATE_PREV`. The virtual-table bus links each removal to a
 matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates a BlakeG compression with block `[ZERO, STMNT]` and chaining word
-`STATE_PREV`,
-with the following stack transition:
+The operation evaluates a BlakeG compression with block `[STATE_PREV, STMNT]`
+and the constant Eidos two-to-one chaining word:
 
 ```
-Before:  [_,         STMNT,      _,       ...]
-After:   [STATE_NEW, OUT_RATE1,  OUT_CAP, ...]
+Before:  [_,         STMNT, ...]
+After:   [STATE_NEW, STMNT, ...]
 ```
 
-`STMNT` placement on the second block word lets the chiplet bus's β⁶..β⁹ products coincide with
-BCOMPRESS's second-block products, so they share gates after circuit memoization. `OUT_RATE1` and
-`OUT_CAP` are unused and are typically dropped by the caller immediately.
+`STMNT` placement on the second block word lets the hasher-controller message terms share the
+same coefficient positions as BCOMPRESS's second block, so they share gates after circuit
+memoization. Only the top word is overwritten with `STATE_NEW`; `STMNT` remains in stack slots
+4..8.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
@@ -436,20 +337,17 @@ elements appearing on the bus are:
 
 $$
 \begin{aligned}
-\mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(helper registers)}\\
-\mathsf{STMNT}_i               &= s_{4+i}     &&\text{(stack slots 4..7)}\\
-0                              &              &&\text{(constant capacity input)}
+\mathsf{STATE}^{\text{prev}}_i &= h_{i+1}     &&\text{(first block word)}\\
+\mathsf{STMNT}_i               &= s_{4+i}     &&\text{(second block word)}\\
+\mathsf{CV}_i                  &= \mathsf{two\_to\_one\_cv}(0)_i
+                                                     &&\text{(constant Eidos chaining word)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message records the BlakeG compression input `[ZERO, STMNT, STATE_PREV]`:
-
-$$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_LINEAR\_HASH} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{prev}}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{STMNT}_i.
-$$
-
-One controller row later, the `HASHER_RETURN_HASH` response provides the new transcript state. Denote the
+The input message records the BlakeG compression input `[STATE_PREV, STMNT, CV]`, where
+`CV = two_to_one_chaining_word(0)`.
+One controller row later, the returned hash message provides the new transcript state. Denote the
 stack after the instruction by $s'_i$; the new state is in the top word:
 
 $$
@@ -459,21 +357,8 @@ $$
 \qquad i \in \{0,1,2,3\},
 $$
 
-and the response message is
-
-$$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot \mathsf{HASHER\_RETURN\_HASH} + \alpha_2 \cdot (h_0 + 1) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{STATE}^{\text{new}}_i.
-$$
-
-Using the above values, we can describe the constraint for the chiplet bus column as follows:
-
-$$
-b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
-$$
-
-The above constraint enforces that the specified input and output controller rows must be present
-in the trace of the hash chiplet. In the controller/compression split design these two controller
-rows are consecutive, so their addresses differ by exactly 1.
+The stack removes two hasher-controller messages: the input message at `h0` and the returned hash
+message at `h0 + 1`. The hasher controller inserts the matching messages on consecutive rows.
 
 The BCOMPRESS and `log_precompile` messages share the same hasher-controller shape, so their
 bus constraints can share gates after circuit memoization.

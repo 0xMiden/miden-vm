@@ -10,7 +10,9 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
 use super::views::{ACRow, BDRow, FooterRow, NUM_G};
-use super::{FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL, TAIL_CLK_COL, TAIL_LABEL_COL};
+use super::{
+    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL,
+};
 
 /// BlakeG IV (the 8 fractional-bit constants of `sqrt(p)` for the first eight
 /// primes). The chiplet trace seeds `v[8..16] = IV[0..8]` at row 0; this AIR
@@ -165,17 +167,19 @@ where
     }
 }
 
-/// Footer tail constraints for columns unused by the packed-output interface.
+/// Footer tail constraints: mode Booleanity, packed-mode clock gating, and spare-column zero.
 pub fn enforce_footer_tail_constraints<AB>(builder: &mut AB, local: &[AB::Var], sel: &Selectors<AB>)
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let is_footer = sel.is_footer();
     let builder = &mut builder.when(is_footer);
+    let mode: AB::Expr = local[AEAD_XOF_MODE_COL].clone().into();
+    let inactive = AB::Expr::ONE - mode.clone();
 
-    for col in [TAIL_LABEL_COL, TAIL_CLK_COL, FOOTER_SPARE_COL] {
-        builder.assert_zero(Into::<AB::Expr>::into(local[col].clone()));
-    }
+    builder.assert_zero(mode.clone() * inactive.clone());
+    builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL].clone()));
+    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE_COL].clone()));
 }
 
 /// Footer accumulator zero-initialization on F0, F1, F2.

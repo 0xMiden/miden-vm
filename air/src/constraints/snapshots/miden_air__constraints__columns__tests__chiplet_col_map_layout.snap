@@ -24,7 +24,10 @@ ChipletCols {
         17,
         18,
         19,
+        20,
+        21,
     ],
-    s_perm: 20,
-    chip_clk: 21,
+    stream_mode: 22,
+    aead_stream_active: 23,
+    chip_clk: 24,
 }

@@ -843,7 +843,7 @@ fn test_diagnostic_procedure_not_found_call() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        "procedure with root digest 0x5db8dd734c7c4533414b2067c4f1fa557ec027bdc959bf0fb03d84b84e050375 could not be found",
         regex!(r#",-\[::\$exec:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
@@ -904,7 +904,7 @@ fn test_diagnostic_procedure_not_found_join() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        "procedure with root digest 0x5db8dd734c7c4533414b2067c4f1fa557ec027bdc959bf0fb03d84b84e050375 could not be found",
         regex!(r#",-\[::\$exec:4:9\]"#),
         " 3 |",
         " 4 | ,->         begin",
@@ -969,7 +969,7 @@ fn test_diagnostic_procedure_not_found_loop() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        "procedure with root digest 0x5db8dd734c7c4533414b2067c4f1fa557ec027bdc959bf0fb03d84b84e050375 could not be found",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             while.true",
@@ -1035,7 +1035,7 @@ fn test_diagnostic_procedure_not_found_split() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
+        "procedure with root digest 0x5db8dd734c7c4533414b2067c4f1fa557ec027bdc959bf0fb03d84b84e050375 could not be found",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             if.true",
@@ -1268,7 +1268,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
+        "syscall failed: procedure with root 0xd7da53b736085007f6a3c27263bd125ec3cfdf1f8c4d1658f37526a48d0fbe21 was not found in the kernel",
         regex!(r#",-\[::\$exec:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",

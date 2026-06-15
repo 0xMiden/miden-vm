@@ -10,6 +10,8 @@ Namespace `miden::core::collections` contains modules for commonly-used authenti
 - A Sparse Merkle Tree with 64-bit keys.
 - A Sparse Merkle Tree with 256-bit keys.
 
+Commitments in these data structures use Eidos, the VM-native hash.
+
 ## Merkle Mountain Range
 Module `miden::core::collections::mmr` contains procedures for manipulating [Merkle Mountain Range](https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md) data structure which can be used as an append-only log.
 

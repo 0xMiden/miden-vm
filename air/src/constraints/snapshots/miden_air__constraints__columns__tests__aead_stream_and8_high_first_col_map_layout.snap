@@ -1,0 +1,28 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(AeadStreamAnd8HighFirstCols)
+---
+AeadStreamAnd8HighFirstCols {
+    ctx: 0,
+    clk: 1,
+    src_ptr: 2,
+    lane_base: 3,
+    next_plaintext: 4,
+    c_prev0: 5,
+    hi_quotient: 6,
+    bytes: [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+    ],
+    spare: 19,
+}

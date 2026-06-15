@@ -210,15 +210,15 @@ const AUX_RAND_ELEM_PTR = 3225419776
 ### OOD evaluations region. The codegen layout uses LMCS-aligned per-AIR widths
 ### (alignment = 8). Per row, measured in ACE extension-field slots:
 ###   preprocessed = 16
-###   main         = 56 + 24 + 80 + 16 = 176
+###   main         = 56 + 32 + 80 + 16 = 184
 ###   aux coords   = 64
 ###   quotient     = 8 chunks * 2 coordinates = 16
-###   total        = 272 EF slots = 544 base felts
-### Two rows (curr + next) occupy 1088 base felts.
+###   total        = 280 EF slots = 560 base felts
+### Two rows (curr + next) occupy 1120 base felts.
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
 ### Auxiliary bus boundary values (4 extension field elements = 8 base elements).
-const AUX_BUS_BOUNDARY_PTR = 3225420868       # OOD_EVALUATIONS_PTR + 1088
+const AUX_BUS_BOUNDARY_PTR = 3225420900       # OOD_EVALUATIONS_PTR + 1120
 
 ### Auxiliary inputs for ACE (stark vars), 28 EF slots = 56 base felts:
 ###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma, weight0, f, s0
@@ -229,13 +229,13 @@ const AUX_BUS_BOUNDARY_PTR = 3225420868       # OOD_EVALUATIONS_PTR + 1088
 ###   slots 18-20: BlakeGCompression is_{first,last,transition}
 ###   slots 21-23: And8Lookup is_{first,last,transition}
 ###   slots 24-27: per-AIR trace lengths in semantic AIR order
-const AUXILIARY_ACE_INPUTS_PTR = 3225420876   # AUX_BUS_BOUNDARY_PTR + 8
+const AUXILIARY_ACE_INPUTS_PTR = 3225420908   # AUX_BUS_BOUNDARY_PTR + 8
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420932     # AUXILIARY_ACE_INPUTS_PTR + 56
+const ACE_CIRCUIT_STREAM_PTR = 3225420964     # AUXILIARY_ACE_INPUTS_PTR + 56
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225422096            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (1164 for multi-AIR)
+const ACE_CIRCUIT_PTR = 3225422100            # ACE_CIRCUIT_STREAM_PTR + num_const_felts (1136 for multi-AIR)
 
 ## FRI
 ##
@@ -269,9 +269,9 @@ const ACE_CIRCUIT_PTR = 3225422096            # ACE_CIRCUIT_STREAM_PTR + num_con
 const FRI_COM_PTR = 4294912800
 
 ## Current trace row
-## 16 field elements for the aligned preprocessed trace row, 176 field elements for the aligned
+## 16 field elements for the aligned preprocessed trace row, 184 field elements for the aligned
 ## main trace row, 64 field elements for aligned auxiliary coordinates, and 16 field elements for
-## quotient chunks, i.e. 16 + 176 + 64 + 16 = 272 slots.
+## quotient chunks, i.e. 16 + 184 + 64 + 16 = 280 slots.
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
 ## Its size is determined by the sum of widths of all traces.

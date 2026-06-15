@@ -1,0 +1,30 @@
+---
+source: air/src/constraints/columns.rs
+expression: col_map!(AeadStreamAnd8ReadCols)
+---
+AeadStreamAnd8ReadCols {
+    ctx: 0,
+    clk: 1,
+    src_ptr: 2,
+    lane_base: 3,
+    plaintext: [
+        4,
+        5,
+        6,
+        7,
+    ],
+    bytes: [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+    ],
+}

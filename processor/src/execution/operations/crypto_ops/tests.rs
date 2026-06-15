@@ -1,8 +1,11 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, Word, ZERO,
-    chiplets::hasher::{Hasher, compress_state},
+    Felt, ONE, Word, ZERO,
+    chiplets::{
+        blakeg,
+        hasher::{Hasher, compress_state},
+    },
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
@@ -11,8 +14,7 @@ use miden_core::{
 use proptest::prelude::*;
 
 use super::{
-    op_bcompress, op_crypto_stream, op_horner_eval_base, op_horner_eval_ext, op_mpverify,
-    op_mrupdate,
+    op_aead_stream, op_bcompress, op_horner_eval_base, op_horner_eval_ext, op_mpverify, op_mrupdate,
 };
 use crate::{
     AdviceInputs, ContextId,
@@ -125,22 +127,21 @@ proptest! {
 
 proptest! {
     #[test]
-    fn test_op_crypto_stream(
-        // Rate (keystream) - top 8 stack elements
-        r0 in any::<u64>(),
-        r1 in any::<u64>(),
-        r2 in any::<u64>(),
-        r3 in any::<u64>(),
-        r4 in any::<u64>(),
-        r5 in any::<u64>(),
-        r6 in any::<u64>(),
-        r7 in any::<u64>(),
-        // Capacity - stack positions 8-11
-        c0 in any::<u64>(),
-        c1 in any::<u64>(),
-        c2 in any::<u64>(),
-        c3 in any::<u64>(),
-        // Plaintext words (stored in memory)
+    fn test_op_aead_stream(
+        k0 in any::<u64>(),
+        k1 in any::<u64>(),
+        k2 in any::<u64>(),
+        k3 in any::<u64>(),
+        counter in any::<u64>(),
+        remaining in 1_u64..1000,
+        tail0 in any::<u64>(),
+        tail1 in any::<u64>(),
+        tail2 in any::<u64>(),
+        tail3 in any::<u64>(),
+        tail4 in any::<u64>(),
+        tail5 in any::<u64>(),
+        tail6 in any::<u64>(),
+        tail7 in any::<u64>(),
         p0 in any::<u64>(),
         p1 in any::<u64>(),
         p2 in any::<u64>(),
@@ -154,25 +155,24 @@ proptest! {
         let src_addr: u64 = 1000;
         let dst_addr: u64 = 2000;
 
-        // Build the initial stack state
-        // Stack layout (top first): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
+        // Stack layout: [K_CTR(4), counter, src_ptr, dst_ptr, remaining, tail(8)].
         let stack_inputs = [
-            felt(r0),           // position 0 (top)
-            felt(r1),           // position 1
-            felt(r2),           // position 2
-            felt(r3),           // position 3
-            felt(r4),           // position 4
-            felt(r5),           // position 5
-            felt(r6),           // position 6
-            felt(r7),           // position 7
-            felt(c0),           // position 8
-            felt(c1),           // position 9
-            felt(c2),           // position 10
-            felt(c3),           // position 11
-            felt(src_addr),     // position 12 (src_ptr)
-            felt(dst_addr),     // position 13 (dst_ptr)
-            ZERO,                    // position 14
-            ZERO,                    // position 15 (bottom)
+            felt(k0),
+            felt(k1),
+            felt(k2),
+            felt(k3),
+            felt(counter),
+            felt(src_addr),
+            felt(dst_addr),
+            felt(remaining),
+            felt(tail0),
+            felt(tail1),
+            felt(tail2),
+            felt(tail3),
+            felt(tail4),
+            felt(tail5),
+            felt(tail6),
+            felt(tail7),
         ];
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
@@ -199,61 +199,66 @@ proptest! {
         ).unwrap();
         processor.system_mut().increment_clock();
 
-        // Execute the operation
-        let result = op_crypto_stream(&mut processor, &mut tracer);
+        let input_state = [
+            felt(counter),
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+            felt(k0),
+            felt(k1),
+            felt(k2),
+            felt(k3),
+        ];
+        let keystream = blakeg::compress_raw_xof_lanes(&input_state);
+        let plaintext = [plaintext_word1, plaintext_word2];
+        let expected_ciphertext: [Felt; 16] = core::array::from_fn(|i| {
+            let (lo, hi) = blakeg::unpack(plaintext[i / 8][(i % 8) / 2]);
+            let p = if i % 2 == 0 { lo } else { hi };
+            Felt::from_u32(p ^ keystream[i])
+        });
+
+        let result = op_aead_stream(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
         processor.system_mut().increment_clock();
 
-        // Compute expected ciphertext: ciphertext = plaintext + rate
-        let expected_cipher1 = [
-            felt(p0) + felt(r0),
-            felt(p1) + felt(r1),
-            felt(p2) + felt(r2),
-            felt(p3) + felt(r3),
-        ];
-        let expected_cipher2 = [
-            felt(p4) + felt(r4),
-            felt(p5) + felt(r5),
-            felt(p6) + felt(r6),
-            felt(p7) + felt(r7),
-        ];
-
-        // Check that ciphertext was written to destination memory
         let clk = processor.clock();
-        let cipher_word1 = processor.memory_mut().read_word(ContextId::root(), felt(dst_addr), clk).unwrap();
-        let cipher_word2 = processor.memory_mut().read_word(ContextId::root(), felt(dst_addr + 4), clk).unwrap();
+        for word_idx in 0..4 {
+            let actual = processor
+                .memory_mut()
+                .read_word(
+                    ContextId::root(),
+                    felt(dst_addr + 4 * word_idx as u64),
+                    clk,
+                )
+                .unwrap();
+            for lane in 0..4 {
+                prop_assert_eq!(
+                    actual[lane],
+                    expected_ciphertext[4 * word_idx + lane],
+                    "cipher word {} lane {}",
+                    word_idx,
+                    lane,
+                );
+            }
+        }
 
-        prop_assert_eq!(cipher_word1[0], expected_cipher1[0], "cipher word1[0]");
-        prop_assert_eq!(cipher_word1[1], expected_cipher1[1], "cipher word1[1]");
-        prop_assert_eq!(cipher_word1[2], expected_cipher1[2], "cipher word1[2]");
-        prop_assert_eq!(cipher_word1[3], expected_cipher1[3], "cipher word1[3]");
-        prop_assert_eq!(cipher_word2[0], expected_cipher2[0], "cipher word2[0]");
-        prop_assert_eq!(cipher_word2[1], expected_cipher2[1], "cipher word2[1]");
-        prop_assert_eq!(cipher_word2[2], expected_cipher2[2], "cipher word2[2]");
-        prop_assert_eq!(cipher_word2[3], expected_cipher2[3], "cipher word2[3]");
-
-        // Check stack state
         let stack = processor.stack_top();
 
-        // Stack[0..7] should be updated with ciphertext
-        prop_assert_eq!(stack[15], expected_cipher1[0], "cipher1[0] at position 0");
-        prop_assert_eq!(stack[14], expected_cipher1[1], "cipher1[1] at position 1");
-        prop_assert_eq!(stack[13], expected_cipher1[2], "cipher1[2] at position 2");
-        prop_assert_eq!(stack[12], expected_cipher1[3], "cipher1[3] at position 3");
-        prop_assert_eq!(stack[11], expected_cipher2[0], "cipher2[0] at position 4");
-        prop_assert_eq!(stack[10], expected_cipher2[1], "cipher2[1] at position 5");
-        prop_assert_eq!(stack[9], expected_cipher2[2], "cipher2[2] at position 6");
-        prop_assert_eq!(stack[8], expected_cipher2[3], "cipher2[3] at position 7");
-
-        // Capacity should be unchanged (c0 at position 8)
-        prop_assert_eq!(stack[7], felt(c0), "c0 at position 8");
-        prop_assert_eq!(stack[6], felt(c1), "c1 at position 9");
-        prop_assert_eq!(stack[5], felt(c2), "c2 at position 10");
-        prop_assert_eq!(stack[4], felt(c3), "c3 at position 11");
-
-        // Pointers should be incremented by 8
-        prop_assert_eq!(stack[3], felt(src_addr + 8), "src_ptr incremented");
-        prop_assert_eq!(stack[2], felt(dst_addr + 8), "dst_ptr incremented");
+        prop_assert_eq!(stack[15], felt(k0), "K_CTR[0]");
+        prop_assert_eq!(stack[14], felt(k1), "K_CTR[1]");
+        prop_assert_eq!(stack[13], felt(k2), "K_CTR[2]");
+        prop_assert_eq!(stack[12], felt(k3), "K_CTR[3]");
+        prop_assert_eq!(stack[11], felt(counter) + ONE, "counter");
+        prop_assert_eq!(stack[10], felt(src_addr + 8), "src_ptr");
+        prop_assert_eq!(stack[9], felt(dst_addr + 16), "dst_ptr");
+        prop_assert_eq!(stack[8], felt(remaining) - ONE, "remaining");
+        for i in 0..8 {
+            prop_assert_eq!(stack[7 - i], stack_inputs[8 + i], "tail lane {}", i);
+        }
     }
 }
 

@@ -134,7 +134,7 @@ fn confirm_operation_structure() {
         Operation::MStore => (),
         Operation::MStream => (),
         Operation::Pipe => (),
-        Operation::CryptoStream => (),
+        Operation::AeadStream => (),
         Operation::BCompress => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),
@@ -224,7 +224,7 @@ fn sample_basic_block_operations_all_variants() -> Vec<Operation> {
         Operation::MStore,
         Operation::MStream,
         Operation::Pipe,
-        Operation::CryptoStream,
+        Operation::AeadStream,
         Operation::BCompress,
         Operation::MpVerify(Felt::from_u32(1022)),
         Operation::MrUpdate,
@@ -310,7 +310,7 @@ fn assert_operation_encoded_size_matches_serialized_len(operation: Operation) {
         | Operation::MStore
         | Operation::MStream
         | Operation::Pipe
-        | Operation::CryptoStream
+        | Operation::AeadStream
         | Operation::BCompress
         | Operation::MpVerify(_)
         | Operation::MrUpdate

@@ -21,7 +21,6 @@ use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
-    aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     debug::default_debug_handlers,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
@@ -54,7 +53,7 @@ use crate::handlers::{
 /// The core library provides several categories of functionality:
 ///
 /// - **Cryptographic primitives**: Hash functions (Keccak256, SHA-512), digital signature
-///   verification (ECDSA, EdDSA-Ed25519, Falcon), and authenticated encryption (AEAD decryption).
+///   verification (ECDSA, EdDSA-Ed25519, Falcon), and authenticated-encryption helpers.
 /// - **Mathematical operations**: Division operations for u64, u128, and u256.
 /// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
 ///   array utilities with lower-bound search capabilities.
@@ -152,7 +151,6 @@ impl CoreLibrary {
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
-            (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ];
         handlers.extend(default_debug_handlers());
         handlers

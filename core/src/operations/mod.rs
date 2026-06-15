@@ -121,7 +121,7 @@ pub mod opcodes {
     /* unused                      0b0101_1111 */
 
     pub const MRUPDATE: u8       = 0b0110_0000;
-    pub const CRYPTOSTREAM: u8   = 0b0110_0100;
+    pub const AEADSTREAM: u8     = 0b0110_0100;
     pub const SYSCALL: u8        = 0b0110_1000;
     pub const CALL: u8           = 0b0110_1100;
     pub const END: u8            = 0b0111_0000;
@@ -484,23 +484,15 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = opcodes::PIPE,
 
-    /// Encrypts data from source memory to destination memory using the current stream rate.
-    ///
-    /// Two consecutive words (8 elements) are loaded from source memory, each element is added
-    /// to the corresponding element in the rate (top 8 stack elements), and the resulting
-    /// ciphertext is written to destination memory and replaces the rate. Source and destination
-    /// addresses are incremented by 8.
+    /// Encrypts two memory words with a BlakeG-XOF keystream.
     ///
     /// Stack transition:
     /// ```text
-    /// [rate(8), cap(4), src, dst, ...]
+    /// [K_CTR(4), counter, src, dst, remaining, ...]
     ///     ↓
-    /// [ct(8), cap(4), src+8, dst+8, ...]
+    /// [K_CTR(4), counter+1, src+8, dst+16, remaining-1, ...]
     /// ```
-    /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
-    ///
-    /// After this operation, `bcompress` should be applied to refresh the keystream for the next block.
-    CryptoStream = opcodes::CRYPTOSTREAM,
+    AeadStream = opcodes::AEADSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
     /// Performs a block-preserving BlakeG compression on the top 3 words of the operand stack.
@@ -785,7 +777,7 @@ impl fmt::Display for Operation {
 
             Self::MStream => write!(f, "mstream"),
             Self::Pipe => write!(f, "pipe"),
-            Self::CryptoStream => write!(f, "crypto_stream"),
+            Self::AeadStream => write!(f, "aead_stream"),
 
             Self::Emit => write!(f, "emit"),
 
@@ -889,7 +881,7 @@ impl Serializable for Operation {
             | Operation::MStore
             | Operation::MStream
             | Operation::Pipe
-            | Operation::CryptoStream
+            | Operation::AeadStream
             | Operation::BCompress
             | Operation::MrUpdate
             | Operation::FriE2F4
@@ -983,7 +975,7 @@ impl Operation {
             | Operation::MStore
             | Operation::MStream
             | Operation::Pipe
-            | Operation::CryptoStream
+            | Operation::AeadStream
             | Operation::BCompress
             | Operation::MrUpdate
             | Operation::FriE2F4
@@ -1080,7 +1072,7 @@ impl Deserializable for Operation {
             opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             opcodes::PIPE => Self::Pipe,
             opcodes::MSTREAM => Self::MStream,
-            opcodes::CRYPTOSTREAM => Self::CryptoStream,
+            opcodes::AEADSTREAM => Self::AeadStream,
             opcodes::HORNERBASE => Self::HornerBase,
             opcodes::HORNEREXT => Self::HornerExt,
             opcodes::LOGPRECOMPILE => Self::LogPrecompile,

@@ -26,12 +26,12 @@ use miden_air::trace::{
         BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, byte_lookup_result,
     },
     blakeg_compression::{
-        AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
-        FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_SPARE_COL, FOOTER_H_CANON_Z_COL,
-        FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_WORD_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
-        FOOTER_OUT_ODD_TOP_BYTE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_ROW_INDEX_COL,
-        FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL, IFACE_D_BASE_COL,
-        IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
+        AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL,
+        FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_SPARE_COL,
+        FOOTER_H_CANON_Z_COL, FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_WORD_COL,
+        FOOTER_OUT_MASKED_TOP_BIT_COL, FOOTER_OUT_ODD_TOP_BYTE_COL, FOOTER_OUT_TOP_MASK_COL,
+        FOOTER_ROW_INDEX_COL, FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL,
+        IFACE_D_BASE_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
         MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS,
         ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT, footer_future_w_col, iface_h_word_col,
         iface_m0_route_col, iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col,
@@ -42,6 +42,8 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
 };
+
+use super::CompressionOutput;
 
 // BlakeG constants
 const IV: [u32; 8] = [
@@ -81,6 +83,7 @@ pub const IFACE_OUTPUT_ROW: usize = 63;
 const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
 const FOOTER_BYTE_SLOT_COUNT: usize = 18;
+const RAW_OUT_LEN: usize = 8;
 const FIRST_B_HIN_PAIR2_SLOT: usize = 16;
 const FIRST_B_HIN_PAIR3_SLOT: usize = 17;
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
@@ -284,8 +287,9 @@ fn generate_footer_rows(
     start_row: usize,
     h_in: &[u32; 8],
     v: &[u32; 16],
+    output_mode: CompressionOutput,
     and8_counts: &mut [u64],
-) -> ([u64; 4], [u64; 4]) {
+) -> ([u64; 4], [u64; 4], [u64; RAW_OUT_LEN]) {
     let footer_start = start_row + COMPUTATION_ROWS;
     let mut c_accum = [0u64; 4];
     let mut d_accum = [0u64; 4];
@@ -406,9 +410,16 @@ fn generate_footer_rows(
         w.set_col(FOOTER_ROW_INDEX_COL, t as u64);
         w.set_col(FOOTER_H_EVEN_WORD_COL, h_even as u64);
         w.set_col(FOOTER_H_ODD_WORD_COL, h_odd as u64);
+        match output_mode {
+            CompressionOutput::Packed => {},
+            CompressionOutput::AeadXof { clk } => {
+                w.set_abs(AEAD_XOF_MODE_COL, Felt::ONE);
+                w.set_abs(AEAD_XOF_CLK_COL, clk);
+            },
+        }
     }
 
-    (c_accum, d_accum)
+    (c_accum, d_accum, raw_out)
 }
 
 // ---- Interface rows ----
@@ -420,6 +431,7 @@ fn generate_interface_rows(
     input_state: &[Felt; 12],
     c_accum: &[u64; 4],
     d_accum: &[u64; 4],
+    output_mode: CompressionOutput,
     multiplicity: u64,
 ) {
     let row_i = start_row + IFACE_INPUT_ROW;
@@ -441,6 +453,13 @@ fn generate_interface_rows(
         rows[row_i][IFACE_D_BASE_COL + k] = Felt::new_unchecked(d_accum[k]);
     }
     rows[row_i][IFACE_MULTIPLICITY_COL] = Felt::new_unchecked(multiplicity);
+    match output_mode {
+        CompressionOutput::Packed => {},
+        CompressionOutput::AeadXof { clk } => {
+            rows[row_i][AEAD_XOF_MODE_COL] = Felt::ONE;
+            rows[row_i][AEAD_XOF_CLK_COL] = clk;
+        },
+    }
 
     // Row O: block[0..8], D[0..3], multiplicity.
     for k in 0..8 {
@@ -450,6 +469,13 @@ fn generate_interface_rows(
         rows[row_o][8 + k] = Felt::new_unchecked(d_accum[k]);
     }
     rows[row_o][12] = Felt::new_unchecked(multiplicity);
+    match output_mode {
+        CompressionOutput::Packed => {},
+        CompressionOutput::AeadXof { clk } => {
+            rows[row_o][AEAD_XOF_MODE_COL] = Felt::ONE;
+            rows[row_o][AEAD_XOF_CLK_COL] = clk;
+        },
+    }
 }
 
 // ---- Message rows ----
@@ -464,6 +490,7 @@ fn generate_message_rows(
     input_state: &[Felt; 12],
     c_accum: &[u64; 4],
     d_accum: &[u64; 4],
+    output_mode: CompressionOutput,
 ) {
     let row_m0 = start_row + MSG_ROW0;
     let row_m1 = start_row + MSG_ROW1;
@@ -550,6 +577,63 @@ fn generate_message_rows(
         rows[row_m0][MSG_D_BASE_COL + t] = Felt::new_unchecked(d_accum[t]);
         rows[row_m1][MSG_D_BASE_COL + t] = Felt::new_unchecked(d_accum[t]);
     }
+    match output_mode {
+        CompressionOutput::Packed => {},
+        CompressionOutput::AeadXof { clk } => {
+            for row in [row_m0, row_m1] {
+                rows[row][AEAD_XOF_MODE_COL] = Felt::ONE;
+                rows[row][AEAD_XOF_CLK_COL] = clk;
+            }
+        },
+    }
+}
+
+#[cfg(debug_assertions)]
+fn footer_high_word_from_row(row: &[Felt; NUM_BLAKEG_COMPRESSION_COLS], odd: bool) -> u32 {
+    let slot_base = if odd { footer_slot_base(4) } else { footer_slot_base(0) };
+    let bytes = core::array::from_fn(|j| {
+        let base = slot_base + BYTE_SLOT_WIDTH * j;
+        let vhi = row[base].as_canonical_u64();
+        let h = row[base + 1].as_canonical_u64();
+        let and = row[base + 2].as_canonical_u64();
+        debug_assert!(vhi <= u8::MAX as u64);
+        debug_assert!(h <= u8::MAX as u64);
+        debug_assert!(and <= u8::MAX as u64);
+        (vhi + h - 2 * and) as u8
+    });
+    bytes_to_u32(&bytes)
+}
+
+#[cfg(debug_assertions)]
+fn debug_assert_aead_xof_footer_output(
+    rows: &[[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
+    start_row: usize,
+    input_state: &[Felt; 12],
+    raw_out: &[u64; RAW_OUT_LEN],
+) {
+    use miden_core::chiplets::blakeg;
+
+    let expected = blakeg::compress_raw_xof_lanes(input_state);
+    for i in 0..RAW_OUT_LEN {
+        debug_assert_eq!(
+            raw_out[i], expected[i] as u64,
+            "AEAD-XOF low lane {i} mismatch at block starting row {start_row}"
+        );
+    }
+
+    for footer_row in 0..4 {
+        let row = &rows[start_row + COMPUTATION_ROWS + footer_row];
+        debug_assert_eq!(
+            footer_high_word_from_row(row, false),
+            expected[8 + 2 * footer_row],
+            "AEAD-XOF high even lane {footer_row} mismatch at block starting row {start_row}",
+        );
+        debug_assert_eq!(
+            footer_high_word_from_row(row, true),
+            expected[8 + 2 * footer_row + 1],
+            "AEAD-XOF high odd lane {footer_row} mismatch at block starting row {start_row}",
+        );
+    }
 }
 
 // ---- Top-level generation ----
@@ -562,6 +646,7 @@ pub fn generate_compression_block(
     m: &[u32; 16],
     input_state: &[Felt; 12],
     output_state: &[Felt; 12],
+    output_mode: CompressionOutput,
     multiplicity: u64,
     and8_counts: &mut [u64],
 ) {
@@ -626,41 +711,60 @@ pub fn generate_compression_block(
     }
 
     // Footer
-    let (c_accum, d_accum) = generate_footer_rows(rows, start_row, h, &v, and8_counts);
+    let (c_accum, d_accum, raw_out) =
+        generate_footer_rows(rows, start_row, h, &v, output_mode, and8_counts);
+    #[cfg(not(debug_assertions))]
+    let _ = raw_out;
 
     // Debug: verify generated footer/interface data matches the expected output state.
     #[cfg(debug_assertions)]
     {
-        use miden_core::chiplets::blakeg;
-        let mut check_state = *input_state;
-        blakeg::compress_state(&mut check_state);
-        debug_assert_eq!(
-            &check_state[8..12],
-            &output_state[8..12],
-            "output_state digest mismatch at block starting row {start_row}"
-        );
-        debug_assert_eq!(
-            &input_state[..8],
-            &output_state[..8],
-            "output_state block lanes must be preserved at block starting row {start_row}"
-        );
-        for t in 0..4 {
-            let expected = output_state[8 + t].as_canonical_u64();
-            debug_assert_eq!(
-                d_accum[t], expected,
-                "D[{t}] accumulator mismatch at block starting row {start_row}: got {}, expected {}",
-                d_accum[t], expected
-            );
+        match output_mode {
+            CompressionOutput::Packed => {
+                use miden_core::chiplets::blakeg;
+                let mut check_state = *input_state;
+                blakeg::compress_state(&mut check_state);
+                debug_assert_eq!(
+                    &check_state[8..12],
+                    &output_state[8..12],
+                    "output_state digest mismatch at block starting row {start_row}"
+                );
+                debug_assert_eq!(
+                    &input_state[..8],
+                    &output_state[..8],
+                    "output_state block lanes must be preserved at block starting row {start_row}"
+                );
+                for t in 0..4 {
+                    let expected = output_state[8 + t].as_canonical_u64();
+                    debug_assert_eq!(
+                        d_accum[t], expected,
+                        "D[{t}] accumulator mismatch at block starting row {start_row}: got {}, expected {}",
+                        d_accum[t], expected
+                    );
+                }
+            },
+            CompressionOutput::AeadXof { .. } => {
+                debug_assert_aead_xof_footer_output(rows, start_row, input_state, &raw_out);
+            },
         }
     }
     let _ = output_state; // used only in debug_assertions
 
     // Message rows (M0 row 60, M1 row 61) are emitted before the interface rows
     // because the C/D accumulators flow F3 -> M0 -> M1 -> I.
-    generate_message_rows(rows, start_row, input_state, &c_accum, &d_accum);
+    generate_message_rows(rows, start_row, input_state, &c_accum, &d_accum, output_mode);
 
     // Interface rows (I row 62, O row 63)
-    generate_interface_rows(rows, start_row, h, input_state, &c_accum, &d_accum, multiplicity);
+    generate_interface_rows(
+        rows,
+        start_row,
+        h,
+        input_state,
+        &c_accum,
+        &d_accum,
+        output_mode,
+        multiplicity,
+    );
 }
 
 // ---- Byte-pair lookup multiplicities ----

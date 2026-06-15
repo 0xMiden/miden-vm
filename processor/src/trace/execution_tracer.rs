@@ -745,6 +745,16 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
+    fn record_hasher_aead_xof(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        input_state: [Felt; STATE_WIDTH],
+    ) {
+        self.hasher_for_chiplet.record_aead_xof_input(ctx, clk, input_state);
+    }
+
+    #[inline(always)]
     fn record_hasher_build_merkle_root(
         &mut self,
         node: Word,
@@ -849,21 +859,62 @@ impl Tracer for ExecutionTracer {
     }
 
     #[inline(always)]
-    fn record_crypto_stream(
+    fn record_aead_stream(
         &mut self,
         plaintext: [Word; 2],
         src_addr: Felt,
-        ciphertext: [Word; 2],
+        keystream: [Felt; 16],
+        ciphertext: [Felt; 16],
         dst_addr: Felt,
         ctx: ContextId,
         clk: RowIndex,
     ) {
+        let ciphertext_words = [
+            [ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3]].into(),
+            [ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]].into(),
+            [ciphertext[8], ciphertext[9], ciphertext[10], ciphertext[11]].into(),
+            [ciphertext[12], ciphertext[13], ciphertext[14], ciphertext[15]].into(),
+        ];
+
+        self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads
             .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
-        self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
-        self.memory_writes
-            .record_write_word(ciphertext[1], dst_addr + PTR_OFFSET_WORD, ctx, clk);
+        self.memory_reads
+            .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
+        for (i, word) in ciphertext_words.into_iter().enumerate() {
+            self.memory_writes.record_write_word(
+                word,
+                dst_addr + Felt::new_unchecked((i * 4) as u64),
+                ctx,
+                clk,
+            );
+        }
+
+        let trace_ctx = Felt::new_unchecked(u32::from(ctx) as u64);
+        let trace_clk = Felt::from(clk);
+        self.bitwise
+            .record_aead_stream_and8(crate::trace::trace_state::AeadStreamReplayEntry {
+                ctx: trace_ctx,
+                clk: trace_clk,
+                src_ptr: src_addr,
+                dst_ptr: dst_addr,
+                lane_base: ZERO,
+                plaintext: plaintext[0].into(),
+                keystream: keystream[..8].try_into().expect("low keystream chunk has 8 lanes"),
+                ciphertext: ciphertext[..8].try_into().expect("low ciphertext chunk has 8 lanes"),
+            });
+        self.bitwise
+            .record_aead_stream_and8(crate::trace::trace_state::AeadStreamReplayEntry {
+                ctx: trace_ctx,
+                clk: trace_clk,
+                src_ptr: src_addr + PTR_OFFSET_WORD,
+                dst_ptr: dst_addr + Felt::new_unchecked(8),
+                lane_base: Felt::new_unchecked(8),
+                plaintext: plaintext[1].into(),
+                keystream: keystream[8..].try_into().expect("high keystream chunk has 8 lanes"),
+                ciphertext: ciphertext[8..].try_into().expect("high ciphertext chunk has 8 lanes"),
+            });
     }
 
     #[inline(always)]

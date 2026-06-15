@@ -743,10 +743,30 @@ pub enum BitwiseOp {
     U32Xor,
 }
 
+/// One 8-row AEAD stream entry to replay into the bitwise chiplet.
+#[derive(Debug)]
+pub struct AeadStreamReplayEntry {
+    pub ctx: Felt,
+    pub clk: Felt,
+    pub src_ptr: Felt,
+    pub dst_ptr: Felt,
+    pub lane_base: Felt,
+    pub plaintext: [Felt; 4],
+    pub keystream: [Felt; 8],
+    pub ciphertext: [Felt; 8],
+}
+
+/// Replay entry for the bitwise chiplet.
+#[derive(Debug)]
+pub enum BitwiseReplayEntry {
+    U32(BitwiseOp, Felt, Felt),
+    AeadStreamAnd8(AeadStreamReplayEntry),
+}
+
 /// Replay data for bitwise operations.
 #[derive(Debug, Default)]
 pub struct BitwiseReplay {
-    u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
+    entries: VecDeque<BitwiseReplayEntry>,
 }
 
 impl BitwiseReplay {
@@ -755,22 +775,27 @@ impl BitwiseReplay {
 
     /// Records the operands of a u32and operation.
     pub fn record_u32and(&mut self, a: Felt, b: Felt) {
-        self.u32op_with_operands.push_back((BitwiseOp::U32And, a, b));
+        self.entries.push_back(BitwiseReplayEntry::U32(BitwiseOp::U32And, a, b));
     }
 
     /// Records the operands of a u32xor operation.
     pub fn record_u32xor(&mut self, a: Felt, b: Felt) {
-        self.u32op_with_operands.push_back((BitwiseOp::U32Xor, a, b));
+        self.entries.push_back(BitwiseReplayEntry::U32(BitwiseOp::U32Xor, a, b));
+    }
+
+    /// Records one 8-row AEAD stream entry.
+    pub fn record_aead_stream_and8(&mut self, entry: AeadStreamReplayEntry) {
+        self.entries.push_back(BitwiseReplayEntry::AeadStreamAnd8(entry));
     }
 }
 
 impl IntoIterator for BitwiseReplay {
-    type Item = (BitwiseOp, Felt, Felt);
-    type IntoIter = <VecDeque<(BitwiseOp, Felt, Felt)> as IntoIterator>::IntoIter;
+    type Item = BitwiseReplayEntry;
+    type IntoIter = <VecDeque<BitwiseReplayEntry> as IntoIterator>::IntoIter;
 
-    /// Returns an iterator over all recorded u32 operations with their operands.
+    /// Returns an iterator over all recorded bitwise replay entries.
     fn into_iter(self) -> Self::IntoIter {
-        self.u32op_with_operands.into_iter()
+        self.entries.into_iter()
     }
 }
 
@@ -964,6 +989,15 @@ impl HasherInterface for HasherResponseReplay {
         self.replay_permute()
     }
 
+    fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError> {
+        Ok(miden_core::chiplets::blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32))
+    }
+
     fn verify_merkle_root(
         &mut self,
         claimed_root: Word,
@@ -1007,6 +1041,7 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     BCompress([Felt; STATE_WIDTH]),
+    AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
     /// `(forest_id, node_id, expected_hash)` — `forest_id` is an id into the
     /// `mast_forest_store` of the [`crate::TraceGenerationContext`] that owns this replay.
@@ -1034,6 +1069,16 @@ impl HasherRequestReplay {
     /// Records a `Hasher::bcompress()` request.
     pub fn record_bcompress_input(&mut self, state: [Felt; STATE_WIDTH]) {
         self.hasher_ops.push_back(HasherOp::BCompress(state));
+    }
+
+    /// Records an AEAD-XOF compression request.
+    pub fn record_aead_xof_input(
+        &mut self,
+        ctx: ContextId,
+        clk: RowIndex,
+        state: [Felt; STATE_WIDTH],
+    ) {
+        self.hasher_ops.push_back(HasherOp::AeadXof(ctx, clk, state));
     }
 
     /// Records a `Hasher::hash_control_block()` request.

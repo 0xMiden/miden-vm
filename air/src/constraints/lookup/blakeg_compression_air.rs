@@ -3,12 +3,13 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::messages::{
-    BlakeGInputPairMsg, BlakeGWordMsg, BusId, HasherPermLinkMsg, blakeg_rot7_bus, blakeg_rot12_bus,
+    AeadBlakeGInputMsg, AeadBlakeGOutputPairMsg, BlakeGInputPairMsg, BlakeGWordMsg, BusId,
+    HasherPermLinkMsg, blakeg_rot7_bus, blakeg_rot12_bus,
 };
 use crate::{
     constraints::blakeg_compression::{
-        BlakeGCompressionCols, IFACE_C_BASE_COL, IFACE_D_BASE_COL, IFACE_MULTIPLICITY_COL,
-        IFACE_R_BASE_COL, periodic::*,
+        AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, BlakeGCompressionCols, IFACE_C_BASE_COL,
+        IFACE_D_BASE_COL, IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, periodic::*,
     },
     lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
 };
@@ -34,6 +35,11 @@ const M0_ROUTE_OR_FIRST_B_HIN_SLOT: usize = 16;
 const FOOTER_OUT_MASK_SLOT: usize = 17;
 const AC_FOOTER_HIN_SLOT: usize = 18;
 const AC_ONLY_SLOT: usize = 19;
+const FOOTER_BYTE_SLOT_COUNT: usize = 18;
+const FOOTER_HIGH_EVEN_SLOT_BASE: usize = 0;
+const FOOTER_HIGH_ODD_SLOT_BASE: usize = 4;
+const FOOTER_OUTPUT_EVEN_SLOT_BASE: usize = 8;
+const FOOTER_OUTPUT_ODD_SLOT_BASE: usize = 12;
 const COMPACT_PAIR_BASE_COL: usize = AC_A_BASE_COL;
 const COMPACT_M0_PAIR_INDEX_BASE: usize = 6;
 const COMPACT_M1_PAIR_INDEX_BASE: usize = 14;
@@ -58,7 +64,10 @@ const MULTIPLICITY_AC_ONLY: usize = 7;
 const MULTIPLICITY_GROUP_COUNT: usize = 8;
 
 const BATCH_2: Deg = Deg { v: 2, u: 2 };
-const ANNEX0: Deg = Deg { v: 1, u: 2 };
+const AEAD_XOF_PAIR: Deg = Deg { v: 2, u: 2 };
+const AEAD_XOF_INPUT: Deg = Deg { v: 2, u: 2 };
+const COMPRESSION_LINK: Deg = Deg { v: 3, u: 2 };
+const ANNEX0: Deg = Deg { v: 3, u: 2 };
 const ANNEX1: Deg = Deg { v: 2, u: 2 };
 
 const _: () = assert!(BLAKEG_COMPRESSION_COLUMN_SHAPE.len() == ANNEX1_COLUMN + 1);
@@ -90,6 +99,71 @@ fn c<LB: BlakeGCompressionLookupBuilder>(
     idx: usize,
 ) -> LB::Expr {
     local.columns[idx].into()
+}
+
+#[inline]
+fn pack4<LB: BlakeGCompressionLookupBuilder>(
+    b0: LB::Expr,
+    b1: LB::Expr,
+    b2: LB::Expr,
+    b3: LB::Expr,
+) -> LB::Expr {
+    b0 + b1 * expr::<LB>(256) + b2 * expr::<LB>(1 << 16) + b3 * expr::<LB>(1 << 24)
+}
+
+#[inline]
+fn footer_slot_field(slot: usize, field: usize) -> usize {
+    debug_assert!(slot < FOOTER_BYTE_SLOT_COUNT);
+    debug_assert!(field < 3);
+    BYTE_SLOT_WIDTH * slot + field
+}
+
+#[inline]
+fn footer_xor_word<LB: BlakeGCompressionLookupBuilder>(
+    local: &BlakeGCompressionCols<LB::Var>,
+    slot_base: usize,
+) -> LB::Expr {
+    let two = expr::<LB>(2);
+    pack4::<LB>(
+        c::<LB>(local, footer_slot_field(slot_base, 0))
+            + c::<LB>(local, footer_slot_field(slot_base, 1))
+            - two.clone() * c::<LB>(local, footer_slot_field(slot_base, 2)),
+        c::<LB>(local, footer_slot_field(slot_base + 1, 0))
+            + c::<LB>(local, footer_slot_field(slot_base + 1, 1))
+            - two.clone() * c::<LB>(local, footer_slot_field(slot_base + 1, 2)),
+        c::<LB>(local, footer_slot_field(slot_base + 2, 0))
+            + c::<LB>(local, footer_slot_field(slot_base + 2, 1))
+            - two.clone() * c::<LB>(local, footer_slot_field(slot_base + 2, 2)),
+        c::<LB>(local, footer_slot_field(slot_base + 3, 0))
+            + c::<LB>(local, footer_slot_field(slot_base + 3, 1))
+            - two * c::<LB>(local, footer_slot_field(slot_base + 3, 2)),
+    )
+}
+
+#[inline]
+fn footer_high_word<LB: BlakeGCompressionLookupBuilder>(
+    local: &BlakeGCompressionCols<LB::Var>,
+    odd: bool,
+) -> LB::Expr {
+    let slot_base = if odd {
+        FOOTER_HIGH_ODD_SLOT_BASE
+    } else {
+        FOOTER_HIGH_EVEN_SLOT_BASE
+    };
+    footer_xor_word::<LB>(local, slot_base)
+}
+
+#[inline]
+fn footer_output_word<LB: BlakeGCompressionLookupBuilder>(
+    local: &BlakeGCompressionCols<LB::Var>,
+    odd: bool,
+) -> LB::Expr {
+    let slot_base = if odd {
+        FOOTER_OUTPUT_ODD_SLOT_BASE
+    } else {
+        FOOTER_OUTPUT_EVEN_SLOT_BASE
+    };
+    footer_xor_word::<LB>(local, slot_base)
 }
 
 #[inline]
@@ -126,7 +200,7 @@ where
     let multiplicity = if sign >= 0 {
         G::Expr::from_u32(sign as u32)
     } else {
-        G::Expr::ZERO - G::Expr::from_u32((-sign) as u32)
+        -G::Expr::from_u32((-sign) as u32)
     };
     g.insert(name, flag, multiplicity, || msg, Deg { v: 1, u: 1 });
 }
@@ -455,7 +529,8 @@ pub(crate) fn emit_blakeg_compression_lookup_columns<LB>(
     let is_msg_row1: LB::Expr = p[P_IS_MSG_ROW1].into();
     let gate_add3 = is_a.clone() + is_c.clone();
     let gate_add3_nonfirst = gate_add3.clone() - is_first.clone();
-    let is_footer = is_f0 + is_f1 + is_f2 + is_f3;
+    let footer_gates = [is_f0, is_f1, is_f2, is_f3];
+    let is_footer = footer_gates.iter().cloned().fold(LB::Expr::ZERO, |acc, gate| acc + gate);
     let selectors = SlotSelectors::new(
         is_first.clone(),
         is_first_b.clone(),
@@ -471,7 +546,7 @@ pub(crate) fn emit_blakeg_compression_lookup_columns<LB>(
     for aux_col in 0..BLAKEG_COMPRESSION_COLUMN_SHAPE.len() {
         builder.next_column(
             |col| {
-                emit_lookup_column::<LB, _>(col, local, aux_col, &selectors);
+                emit_lookup_column::<LB, _>(col, local, aux_col, &selectors, &footer_gates);
             },
             column_deg(aux_col),
         );
@@ -483,6 +558,7 @@ fn emit_lookup_column<LB, C>(
     local: &BlakeGCompressionCols<LB::Var>,
     aux_col: usize,
     selectors: &SlotSelectors<LB::Expr>,
+    footer_gates: &[LB::Expr; 4],
 ) where
     LB: BlakeGCompressionLookupBuilder,
     C: LookupColumn<Expr = LB::Expr, ExprEF = LB::ExprEF>,
@@ -495,12 +571,12 @@ fn emit_lookup_column<LB, C>(
         ),
         ANNEX0_COLUMN => column.group(
             "blakeg_compression",
-            |g| emit_annex0::<LB, _>(g, local, selectors),
+            |g| emit_annex0::<LB, _>(g, local, selectors, footer_gates),
             column_deg(aux_col),
         ),
         ANNEX1_COLUMN => column.group(
             "blakeg_compression",
-            |g| emit_annex1::<LB, _>(g, local, selectors),
+            |g| emit_annex1::<LB, _>(g, local, selectors, footer_gates),
             column_deg(aux_col),
         ),
         _ => unreachable!("BlakeG lookup aux column out of range"),
@@ -554,10 +630,57 @@ fn compression_link_msg<LB: BlakeGCompressionLookupBuilder>(
     }
 }
 
+fn aead_blakeg_input_msg<LB: BlakeGCompressionLookupBuilder>(
+    local: &BlakeGCompressionCols<LB::Var>,
+) -> AeadBlakeGInputMsg<LB::Expr> {
+    AeadBlakeGInputMsg {
+        clk: c::<LB>(local, AEAD_XOF_CLK_COL),
+        state: core::array::from_fn(|i| {
+            if i < 8 {
+                c::<LB>(local, IFACE_R_BASE_COL + i)
+            } else {
+                c::<LB>(local, IFACE_C_BASE_COL + (i - 8))
+            }
+        }),
+    }
+}
+
+fn emit_aead_xof_pair<LB, G>(
+    group: &mut G,
+    local: &BlakeGCompressionCols<LB::Var>,
+    footer_gates: &[LB::Expr; 4],
+    name: &'static str,
+    first_lane_offset: usize,
+    value0: LB::Expr,
+    value1: LB::Expr,
+) where
+    LB: BlakeGCompressionLookupBuilder,
+    G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
+{
+    let multiplicity = -c::<LB>(local, AEAD_XOF_MODE_COL);
+    let clk = c::<LB>(local, AEAD_XOF_CLK_COL);
+
+    for (footer_row, gate) in footer_gates.iter().enumerate() {
+        group.insert(
+            name,
+            gate.clone(),
+            multiplicity.clone(),
+            || AeadBlakeGOutputPairMsg {
+                clk: clk.clone(),
+                first_lane_idx: expr::<LB>((first_lane_offset + 2 * footer_row) as u64),
+                value0: value0.clone(),
+                value1: value1.clone(),
+            },
+            AEAD_XOF_PAIR,
+        );
+    }
+}
+
 fn emit_annex0<LB, G>(
     group: &mut G,
     local: &BlakeGCompressionCols<LB::Var>,
     selectors: &SlotSelectors<LB::Expr>,
+    footer_gates: &[LB::Expr; 4],
 ) where
     LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
@@ -584,12 +707,33 @@ fn emit_annex0<LB, G>(
         -7,
         compact_message_word::<LB>(local, COMPACT_M1_PAIR_INDEX_BASE, 0),
     );
+
+    emit_aead_xof_pair::<LB, G>(
+        group,
+        local,
+        footer_gates,
+        "aead_xof_low_pair",
+        0,
+        footer_output_word::<LB>(local, false),
+        footer_output_word::<LB>(local, true),
+    );
+
+    let mode = c::<LB>(local, AEAD_XOF_MODE_COL);
+    let compression_mode = LB::Expr::ONE - mode;
+    group.insert(
+        "compression_link",
+        selectors.is_iface_in.clone(),
+        -(c::<LB>(local, IFACE_MULTIPLICITY_COL) * compression_mode),
+        || compression_link_msg::<LB>(local),
+        COMPRESSION_LINK,
+    );
 }
 
 fn emit_annex1<LB, G>(
     group: &mut G,
     local: &BlakeGCompressionCols<LB::Var>,
     selectors: &SlotSelectors<LB::Expr>,
+    footer_gates: &[LB::Expr; 4],
 ) where
     LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
@@ -617,12 +761,22 @@ fn emit_annex1<LB, G>(
         compact_message_word::<LB>(local, COMPACT_M1_PAIR_INDEX_BASE + 1, 1),
     );
 
-    let mult = -c::<LB>(local, IFACE_MULTIPLICITY_COL);
+    emit_aead_xof_pair::<LB, G>(
+        group,
+        local,
+        footer_gates,
+        "aead_xof_high_pair",
+        8,
+        footer_high_word::<LB>(local, false),
+        footer_high_word::<LB>(local, true),
+    );
+
+    let mode = c::<LB>(local, AEAD_XOF_MODE_COL);
     group.insert(
-        "compression_link",
+        "aead_blakeg_input",
         selectors.is_iface_in.clone(),
-        mult,
-        || compression_link_msg::<LB>(local),
-        ANNEX1,
+        -mode,
+        || aead_blakeg_input_msg::<LB>(local),
+        AEAD_XOF_INPUT,
     );
 }

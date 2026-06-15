@@ -2,7 +2,8 @@
 //!
 //! Verifies that the batch implementation produces identical query indices to a reference
 //! implementation that calls `sample_bits` in a loop. Both programs start from the same
-//! sponge state and parameters, and we compare the resulting query words stored in memory.
+//! Eidos challenger state and parameters, and we compare the resulting query words stored in
+//! memory.
 
 use miden_core::Felt;
 use miden_processor::ContextId;
@@ -11,15 +12,15 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
 // Memory layout constants (must match constants.masm).
-// Must match the constants in `crates/lib/core/asm/stark/constants.masm`.
-const R1_PTR: u32 = 3223322676;
-const R2_PTR: u32 = 3223322680;
-const C_PTR: u32 = 3223322672;
+const RANDOM_COIN_CV_PTR: u32 = 3223322672;
+const RANDOM_COIN_OUTPUT_WORD_PTR: u32 = 3223322676;
 const NUM_QUERIES_PTR: u32 = 3223322628;
 const LDE_DOMAIN_LOG_SIZE_PTR: u32 = 3223322625;
 const FRI_QUERIES_ADDRESS_PTR: u32 = 3223322633;
+const RANDOM_COIN_INPUT_BUF_PTR: u32 = 3223322752;
 const RANDOM_COIN_INPUT_LEN_PTR: u32 = 3223322760;
 const RANDOM_COIN_OUTPUT_LEN_PTR: u32 = 3223322761;
+const RANDOM_COIN_COUNTER_PTR: u32 = 3223322762;
 
 // Fixed query storage address.
 const QUERY_PTR: u32 = 100_000;
@@ -28,45 +29,42 @@ const QUERY_PTR: u32 = 100_000;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build the MASM preamble that initializes the sponge state and verifier parameters.
+/// Build the MASM preamble that initializes the Eidos state and verifier parameters.
 ///
-/// `sponge` is 12 field-element values `[r1_0..r1_3, r2_0..r2_3, c_0..c_3]`.
-fn setup_masm(sponge: &[u64; 12], output_len: u32, num_queries: u32, depth: u32) -> String {
+/// `state` is `[output_word[0..4], cv[0..4]]`.
+fn setup_masm(state: &[u64; 8], output_len: u32, num_queries: u32, depth: u32) -> String {
     format!(
         r#"
-    # Store R1 (rate word 1)
-    push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
-    push.{R1_PTR} mem_storew_le dropw
+    # Store the currently buffered output word.
+    push.{out_3}.{out_2}.{out_1}.{out_0}
+    push.{RANDOM_COIN_OUTPUT_WORD_PTR} mem_storew_le dropw
 
-    # Store R2 (rate word 2)
-    push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
-    push.{R2_PTR} mem_storew_le dropw
-
-    # Store C (capacity)
+    # Store the Eidos chaining value.
     push.{c_3}.{c_2}.{c_1}.{c_0}
-    push.{C_PTR} mem_storew_le dropw
+    push.{RANDOM_COIN_CV_PTR} mem_storew_le dropw
 
-    # Random coin buffer state
+    # Random coin buffer state. The tests start in squeezing state with no pending absorb.
+    # Internally, counter=1 means the next refill uses counter block 1.
+    padw push.{RANDOM_COIN_INPUT_BUF_PTR} mem_storew_le dropw
+    padw push.{RANDOM_COIN_INPUT_BUF_PTR_PLUS_4} mem_storew_le dropw
     push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
     push.{output_len} push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
+    push.1 push.{RANDOM_COIN_COUNTER_PTR} mem_store
 
     # Verifier parameters
     push.{num_queries} push.{NUM_QUERIES_PTR} mem_store
     push.{depth} push.{LDE_DOMAIN_LOG_SIZE_PTR} mem_store
     push.{QUERY_PTR} push.{FRI_QUERIES_ADDRESS_PTR} mem_store
     "#,
-        r1_0 = sponge[0],
-        r1_1 = sponge[1],
-        r1_2 = sponge[2],
-        r1_3 = sponge[3],
-        r2_0 = sponge[4],
-        r2_1 = sponge[5],
-        r2_2 = sponge[6],
-        r2_3 = sponge[7],
-        c_0 = sponge[8],
-        c_1 = sponge[9],
-        c_2 = sponge[10],
-        c_3 = sponge[11],
+        out_0 = state[0],
+        out_1 = state[1],
+        out_2 = state[2],
+        out_3 = state[3],
+        c_0 = state[4],
+        c_1 = state[5],
+        c_2 = state[6],
+        c_3 = state[7],
+        RANDOM_COIN_INPUT_BUF_PTR_PLUS_4 = RANDOM_COIN_INPUT_BUF_PTR + 4,
     )
 }
 
@@ -89,34 +87,6 @@ fn reference_source(setup: &str) -> String {
         r#"
     use miden::core::stark::random_coin
     use miden::core::stark::constants
-    use miden::core::crypto::hashes::eidos
-
-    #! Sample a felt, permuting first if the output buffer is empty.
-    proc sample_felt_safe
-        push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_load
-        push.0 eq
-        if.true
-            exec.random_coin::load_random_coin_state
-            exec.eidos::compress
-            exec.random_coin::store_random_coin_state
-            push.8 push.{RANDOM_COIN_OUTPUT_LEN_PTR} mem_store
-        end
-        exec.random_coin::sample_felt
-    end
-
-    #! sample_bits using the safe wrapper.
-    proc sample_bits_safe
-        dup
-        pow2
-        u32assert u32overflowing_sub.1 assertz
-        exec.sample_felt_safe
-        u32split
-        swap
-        drop
-        u32and
-        swap
-        drop
-    end
 
     begin
         {setup}
@@ -129,7 +99,7 @@ fn reference_source(setup: &str) -> String {
         dup.3 push.0 neq
         while.true
             dup.1
-            exec.sample_bits_safe
+            exec.random_coin::sample_bits
             dup.2 swap dup movdn.2
             push.0 movdn.3
             dup.4
@@ -139,7 +109,6 @@ fn reference_source(setup: &str) -> String {
             movup.3 sub.1 movdn.3
             dup.3 push.0 neq
         end
-        push.0 push.{RANDOM_COIN_INPUT_LEN_PTR} mem_store
         drop drop drop drop
     end
     "#,
@@ -148,13 +117,8 @@ fn reference_source(setup: &str) -> String {
 
 /// Run both batch and reference programs with identical initial state, then compare
 /// all generated query words and the final `output_len`.
-fn assert_batch_matches_reference(
-    sponge: &[u64; 12],
-    output_len: u32,
-    num_queries: u32,
-    depth: u32,
-) {
-    let setup = setup_masm(sponge, output_len, num_queries, depth);
+fn assert_batch_matches_reference(state: &[u64; 8], output_len: u32, num_queries: u32, depth: u32) {
+    let setup = setup_masm(state, output_len, num_queries, depth);
     let batch_src = batch_source(&setup);
     let ref_src = reference_source(&setup);
 
@@ -206,17 +170,17 @@ fn assert_batch_matches_reference(
     );
 }
 
-/// Generate a deterministic sponge state from a seed.
-fn random_sponge(seed: u64) -> [u64; 12] {
+/// Generate a deterministic Eidos state from a seed.
+fn random_eidos_state(seed: u64) -> [u64; 8] {
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
-    core::array::from_fn(|_| rng.random::<u64>())
+    core::array::from_fn(|_| rng.random::<u64>() % (1u64 << 62))
 }
 
 // ---------------------------------------------------------------------------
 // Parametric tests
 // ---------------------------------------------------------------------------
 
-/// Test across a range of num_queries values with fixed sponge and depth.
+/// Test across a range of num_queries values with fixed Eidos state and depth.
 /// Covers: 1 query, small batches, exact rate boundary (7), one past (8, 9),
 /// typical (27), and a larger value (40 = 5 permutations).
 #[rstest]
@@ -230,8 +194,8 @@ fn random_sponge(seed: u64) -> [u64; 12] {
 #[case::twentyseven_queries_typical(27)]
 #[case::forty_queries_five_permutes(40)]
 fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
-    let sponge = random_sponge(42);
-    assert_batch_matches_reference(&sponge, 7, num_queries, 17);
+    let state = random_eidos_state(42);
+    assert_batch_matches_reference(&state, 3, num_queries, 17);
 }
 
 /// Test across a range of LDE domain depths.
@@ -244,31 +208,30 @@ fn batch_vs_reference_num_queries(#[case] num_queries: u32) {
 #[case::depth_20(20)]
 #[case::depth_24(24)]
 fn batch_vs_reference_depth(#[case] depth: u32) {
-    let sponge = random_sponge(99);
-    assert_batch_matches_reference(&sponge, 7, 27, depth);
+    let state = random_eidos_state(99);
+    assert_batch_matches_reference(&state, 3, 27, depth);
 }
 
 /// Test different initial output_len values.
-/// After PoW the typical value is 7, but we test the range 1..=8 to ensure
-/// the permute-on-exhaustion logic is correct at every boundary.
+/// Eidos output words contain four felts; cover empty, partial, and full buffers.
 #[rstest]
+#[case::output_len_0(0)]
 #[case::output_len_1(1)]
 #[case::output_len_2(2)]
+#[case::output_len_3(3)]
 #[case::output_len_4(4)]
-#[case::output_len_7(7)]
-#[case::output_len_8(8)]
 fn batch_vs_reference_output_len(#[case] output_len: u32) {
-    let sponge = random_sponge(77);
-    assert_batch_matches_reference(&sponge, output_len, 27, 17);
+    let state = random_eidos_state(77);
+    assert_batch_matches_reference(&state, output_len, 27, 17);
 }
 
-/// Test with several different random sponge states to exercise varied rate element values.
+/// Test with several different random Eidos states.
 #[rstest]
 #[case::seed_0(0)]
 #[case::seed_1(1)]
 #[case::seed_12345(12345)]
 #[case::seed_999999(999999)]
-fn batch_vs_reference_random_sponge(#[case] seed: u64) {
-    let sponge = random_sponge(seed);
-    assert_batch_matches_reference(&sponge, 7, 27, 17);
+fn batch_vs_reference_random_eidos_state(#[case] seed: u64) {
+    let state = random_eidos_state(seed);
+    assert_batch_matches_reference(&state, 3, 27, 17);
 }

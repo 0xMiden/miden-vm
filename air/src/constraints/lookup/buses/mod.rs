@@ -61,7 +61,7 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 pub(crate) struct ChipletActiveFlags<E> {
     /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
-    /// `is_active` for the bitwise chiplet (= `s0 - s01`).
+    /// `is_active` for normal bitwise rows.
     pub bitwise: E,
     /// `is_active` for the memory chiplet (= `s01 - s012`).
     pub memory: E,
@@ -82,8 +82,9 @@ where
     /// - `s_ctrl = chiplets[0]`
     /// - virtual `s0 = 1 - s_ctrl`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
-    /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
-    ///   = s0123 - s01234`
+    /// - `is_bitwise = s0 - s01`
+    /// - `normal_bitwise = is_bitwise - aead_stream_and8`
+    /// - `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom = s0123 - s01234`
     pub fn from_chiplet_cols<V>(local: &ChipletCols<V>) -> Self
     where
         V: Copy,
@@ -94,6 +95,7 @@ where
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();
         let s4: E = local.chiplets[4].into();
+        let aead_stream_and8: E = local.aead_stream_active.into();
 
         // Virtual non-hasher selector and prefix products.
         let s0 = E::ONE - s_ctrl.clone();
@@ -103,7 +105,7 @@ where
         let s01234 = s0123.clone() * s4;
 
         // Active flags via the subtraction trick.
-        let bitwise = s0 - s01.clone();
+        let bitwise = s0 - s01.clone() - aead_stream_and8.clone();
         let memory = s01 - s012.clone();
         let ace = s012 - s0123.clone();
         let kernel_rom = s0123 - s01234;

@@ -6,7 +6,7 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    chiplets::hasher::compress_state,
+    chiplets::{blakeg, hasher::compress_state},
     crypto::merkle::MerklePath,
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
     program::MIN_STACK_DEPTH,
@@ -78,6 +78,16 @@ impl HasherInterface for FastProcessor {
 
         // Return a default value for the address, as it is not needed in trace generation.
         Ok((ZERO, input_state))
+    }
+
+    #[inline(always)]
+    fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        state: HasherState,
+    ) -> Result<[Felt; 16], OperationError> {
+        Ok(blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32))
     }
 
     #[inline(always)]

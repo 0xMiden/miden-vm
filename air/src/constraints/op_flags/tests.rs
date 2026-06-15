@@ -91,12 +91,12 @@ fn naive_composites(
     let prefix_011 = not_6 * bit_5 * bit_4;
     let add3_madd_prefix = bit_6 * not_5 * not_4 * bit_3 * bit_2;
 
-    let split_loop_flag = deg5[4] + deg5[5];
+    let split_flag = deg5[4];
     let shift_left_on_end = deg4[4] * is_loop_end;
 
     let right_shift_flag = prefix_011 + deg5[11] + deg6[4];
     let left_shift_flag =
-        prefix_010 + add3_madd_prefix + split_loop_flag + deg5[8] + deg4[5] + shift_left_on_end;
+        prefix_010 + add3_madd_prefix + split_flag + deg5[8] + deg4[5] + shift_left_on_end;
 
     let control_flow = deg5[4] + deg5[5] + deg5[6] + deg5[7] // SPAN/JOIN/SPLIT/LOOP
         + deg4[4] + deg4[5] + deg4[6] + deg4[7] // END/REPEAT/RESPAN/HALT
@@ -155,7 +155,7 @@ fn test_get_op_index_degree5() {
 fn test_get_op_index_degree4() {
     // Degree 4 operations have opcodes 96-127, only every 4th opcode is used
     assert_eq!(get_op_index(opcodes::MRUPDATE), 0);
-    assert_eq!(get_op_index(opcodes::CRYPTOSTREAM), 1);
+    assert_eq!(get_op_index(opcodes::AEADSTREAM), 1);
     assert_eq!(get_op_index(opcodes::SYSCALL), 2);
     assert_eq!(get_op_index(opcodes::CALL), 3);
     assert_eq!(get_op_index(opcodes::END), 4);
@@ -493,10 +493,10 @@ fn composite_stream_word_flags() {
     }
 }
 
-/// Tests left shift composite flags for LOOP/REPEAT operations.
+/// Tests left shift composite flags for REPEAT.
 #[test]
 fn composite_loop_left_shift() {
-    for opcode in [opcodes::LOOP, opcodes::REPEAT] {
+    for opcode in [opcodes::REPEAT] {
         let op_flags = op_flags_for_opcode(opcode.into());
 
         assert_eq!(op_flags.left_shift_at(0), ZERO);
@@ -515,6 +515,22 @@ fn composite_loop_left_shift() {
         assert_eq!(op_flags.right_shift(), ZERO);
         assert_eq!(op_flags.control_flow(), ONE);
     }
+}
+
+/// Tests LOOP, which enters the loop body without consuming a stack item.
+#[test]
+fn composite_loop_no_shift() {
+    let op_flags = op_flags_for_opcode(opcodes::LOOP.into());
+
+    for i in 0..16 {
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOOP");
+        assert_eq!(op_flags.left_shift_at(i), ZERO, "left_shift_at({i}) should be ZERO for LOOP");
+        assert_eq!(op_flags.right_shift_at(i), ZERO, "right_shift_at({i}) should be ZERO for LOOP");
+    }
+
+    assert_eq!(op_flags.left_shift(), ZERO);
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.control_flow(), ONE);
 }
 
 /// Tests left shift composite flags for AND operation (shifts from position 2).

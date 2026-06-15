@@ -1,6 +1,6 @@
 mod falcon;
 
-mod aead;
+mod aead_blakeg;
 mod blake3;
 mod circuit_evaluation;
 mod ecdsa_k256_keccak;

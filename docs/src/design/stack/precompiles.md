@@ -20,7 +20,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 4. **`sys::log_precompile_request` folds the commitment into the transcript** – The wrapper calls the helper with `[COMM, TAG, ...]` on top of the stack. The helper:
    - Computes the per-call statement word `STMNT = hmerge(COMM, TAG)`.
    - Seats `STMNT` at stack[4..8] (the second BCOMPRESS block word) by pushing one zero word above it, then invokes the `log_precompile` opcode, which folds `STMNT` into the rolling transcript state. `STATE_PREV` is supplied non-deterministically via helper registers.
-   - Drops the three output words `[STATE_NEW, OUT_RATE1, OUT_CAP]` so they are not visible to the caller.
+   - Drops `STATE_NEW` and the preserved `STMNT` helper word so they are not visible to the caller.
 5. **Transcript-state tracking via vtable** – The transcript state is tracked inside the VM via the chiplets’ virtual table; the host never tracks it. The table always stores the current state. On each `log_precompile`:
    - The previous state is removed from the table.
    - The compression step links `STATE_PREV --[STMNT]--> STATE_NEW`.
@@ -50,10 +50,10 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - Typically commits to inputs.
   - May also include outputs when results are long, so that `(TAG, COMM)` together represent the full request (inputs + outputs).
   - The exact composition is precompile‑specific and defined by its verifier specification.
-- `log_precompile` stack effect: `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
-  where `BCOMPRESS` updates the transcript chaining word from `STATE_PREV` and `STMNT`.
-  `STATE_PREV` is supplied non-deterministically via the user op helper registers. `STMNT`
-  lives at stack[4..8] so its bus message lanes share with BCOMPRESS's second block word.
+- `log_precompile` stack effect: `[_, STMNT, ...] -> [STATE_NEW, STMNT, ...]`
+  where BCOMPRESS is applied to block `[STATE_PREV, STMNT]` with the constant Eidos two-to-one
+  chaining word. `STATE_PREV` is supplied non-deterministically via the user op helper registers.
+  `STMNT` lives at stack[4..8] so its bus message lanes share with BCOMPRESS's second block word.
 - `sys::log_precompile_request` stack effect: `[COMM, TAG, ...] -> [...]`. The helper computes
   `STMNT = hmerge(COMM, TAG)` and folds it into the transcript via `log_precompile`.
 

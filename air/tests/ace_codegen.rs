@@ -6,11 +6,14 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{LiftedAir, MidenAir};
+use miden_air::{AIRS, LiftedAir, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
-    stark::air::symbolic::{AirLayout, SymbolicAirBuilder},
+    stark::air::{
+        BaseAir,
+        symbolic::{AirLayout, SymbolicAirBuilder},
+    },
 };
 
 #[test]
@@ -205,12 +208,20 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     let layout = circuit.layout();
 
     // Combined widths concatenate each per-AIR matrix after LMCS alignment.
+    let expected_main_width = AIRS
+        .iter()
+        .map(|spec| <MidenAir as BaseAir<Felt>>::width(&spec.air).next_multiple_of(8))
+        .sum::<usize>();
+    let expected_aux_width = AIRS
+        .iter()
+        .map(|spec| LiftedAir::<Felt, QuadFelt>::num_aux_values(&spec.air).next_multiple_of(8))
+        .sum::<usize>();
     assert_eq!(
-        layout.counts.width, 176,
+        layout.counts.width, expected_main_width,
         "combined main width must be sum of per-AIR LMCS-aligned widths"
     );
     assert_eq!(
-        layout.counts.aux_width, 32,
+        layout.counts.aux_width, expected_aux_width,
         "combined aux_width must include Core, Chiplets, BlakeGCompression, and And8Lookup"
     );
     assert_eq!(layout.counts.num_aux_boundary, 4, "one boundary slot per AIR");

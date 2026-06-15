@@ -25,7 +25,6 @@ use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::selectors::ChipletFlags;
 use crate::{
     AirBuilder, ChipletCols, MidenAirBuilder,
     constraints::{
@@ -48,7 +47,7 @@ pub fn enforce_bitwise_constraints<AB>(
     builder: &mut AB,
     local: &ChipletCols<AB::Var>,
     next: &ChipletCols<AB::Var>,
-    flags: &ChipletFlags<AB::Expr>,
+    normal_bitwise: AB::Expr,
 ) where
     AB: MidenAirBuilder,
 {
@@ -56,13 +55,11 @@ pub fn enforce_bitwise_constraints<AB>(
     let k_first = periodic.bitwise.k_first;
     let k_transition = periodic.bitwise.k_transition;
 
-    let bitwise_flag = flags.is_active.clone();
-
     let cols: &BitwiseCols<AB::Var> = local.bitwise();
     let cols_next: &BitwiseCols<AB::Var> = next.bitwise();
 
-    // All bitwise constraints are gated on the bitwise chiplet being active.
-    let bitwise_builder = &mut builder.when(bitwise_flag);
+    // Normal bitwise rows are disabled while the AEAD stream overlay uses this region.
+    let bitwise_builder = &mut builder.when(normal_bitwise);
 
     // ==========================================================================
     // OPERATION FLAG CONSTRAINTS

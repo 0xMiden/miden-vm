@@ -5,10 +5,10 @@ use miden_core::chiplets::blakeg;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
+    BaseHost, ContextId, ExecutionError, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
+    errors::{CryptoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
-    mast::ExecutableMastForest,
+    mast::{ExecutableMastForest, MastNodeId},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -221,9 +221,9 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 /// The computation processes 8 base field coefficients from the stack using Horner's method.
 /// If we denote the values at stack positions 0..7 as `s[0]..s[7]`, the computation is:
 ///
-/// - Level 1: tmp0 = (acc * α + s[0]) * α + s[1]
-/// - Level 2: tmp1 = ((tmp0 * α + s[2]) * α + s[3]) * α + s[4]
-/// - Level 3: acc' = ((tmp1 * α + s[5]) * α + s[6]) * α + s[7]
+/// - Level 1: tmp0 = (acc * alpha + s[0]) * alpha + s[1]
+/// - Level 2: tmp1 = ((tmp0 * alpha + s[2]) * alpha + s[3]) * alpha + s[4]
+/// - Level 3: acc' = ((tmp1 * alpha + s[5]) * alpha + s[6]) * alpha + s[7]
 ///
 /// This evaluates the polynomial:
 ///
@@ -257,13 +257,13 @@ pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
 ///    coefficient (X^7) and s[7] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁). The operation reads α₀
-///    from alpha_addr and α₁ from alpha_addr + 1.
+/// 3. alpha_addr is the memory address of the evaluation point alpha = (alpha0, alpha1). The
+///    operation reads alpha0 from alpha_addr and alpha1 from alpha_addr + 1.
 ///
 /// The instruction uses helper registers to store intermediate values:
-/// - h₀, h₁: evaluation point α = (α₀, α₁)
-/// - h₂, h₃: Level 2 intermediate result tmp1
-/// - h₄, h₅: Level 1 intermediate result tmp0
+/// - h0, h1: evaluation point alpha = (alpha0, alpha1)
+/// - h2, h3: Level 2 intermediate result tmp1
+/// - h4, h5: Level 1 intermediate result tmp0
 #[inline(always)]
 pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -312,13 +312,13 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     let acc_high = processor.stack().get(ACC_HIGH_INDEX);
     let acc = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
-    // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+    // Level 1: tmp0 = (acc * alpha + c0) * alpha + c1
     let tmp0 = (acc * alpha + c0) * alpha + c1;
 
-    // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+    // Level 2: tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4
     let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
 
-    // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+    // Level 3: acc' = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7
     let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
     // Update the accumulator values on the stack (LE: low at lower index)
@@ -337,8 +337,8 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 /// If we denote the QuadFelt values at stack positions (0,1), (2,3), (4,5), (6,7) as
 /// `s[0]..s[3]`, the computation is:
 ///
-/// - Level 1: acc_tmp = (acc * α + s[0]) * α + s[1]
-/// - Level 2: acc' = ((acc_tmp * α + s[2]) * α + s[3]
+/// - Level 1: acc_tmp = (acc * alpha + s[0]) * alpha + s[1]
+/// - Level 2: acc' = ((acc_tmp * alpha + s[2]) * alpha + s[3]
 ///
 /// This evaluates the polynomial:
 ///
@@ -371,9 +371,9 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
 ///    2*i. s[0] is the highest-degree coefficient (X^3) and s[3] is the constant term (X^0).
 /// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
 ///    (acc0', acc1') is the updated accumulator after processing this batch.
-/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁).
+/// 3. alpha_addr is the memory address of the evaluation point alpha = (alpha0, alpha1).
 ///
-/// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
+/// The instruction uses helper registers to hold alpha and the intermediate value acc_tmp.
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
@@ -480,103 +480,133 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
 // STREAM CIPHER OPERATION
 // ================================================================================================
 
-/// Encrypts data from source memory to destination memory using the current stream rate.
-///
-/// This operation performs AEAD encryption by:
-/// 1. Loading 8 elements (2 words) from source memory at stack[12]
-/// 2. Adding each element to the corresponding rate element (stack[0..7])
-/// 3. Writing the resulting ciphertext to destination memory at stack[13]
-/// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next bcompress)
-/// 5. Preserving capacity (stack[8..11])
-/// 6. Incrementing both source and destination pointers by 8
+#[derive(Debug)]
+pub(super) enum AeadStreamError {
+    Memory(MemoryError),
+    Operation(OperationError),
+}
+
+impl From<MemoryError> for AeadStreamError {
+    fn from(err: MemoryError) -> Self {
+        Self::Memory(err)
+    }
+}
+
+impl From<OperationError> for AeadStreamError {
+    fn from(err: OperationError) -> Self {
+        Self::Operation(err)
+    }
+}
+
+impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
+    fn map_exec_err_with_op_idx<F>(
+        self,
+        mast_forest: &F,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>
+    where
+        F: ExecutableMastForest,
+    {
+        match self {
+            Ok(result) => Ok(result),
+            Err(AeadStreamError::Memory(err)) => Result::<T, MemoryError>::Err(err)
+                .map_exec_err_with_op_idx(mast_forest, node_id, host, op_idx),
+            Err(AeadStreamError::Operation(err)) => Result::<T, OperationError>::Err(err)
+                .map_exec_err_with_op_idx(mast_forest, node_id, host, op_idx),
+        }
+    }
+}
+
+/// Encrypts two memory words with a BlakeG-XOF keystream.
 ///
 /// Stack transition:
-/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
-/// ...]
+/// `[K_CTR(4), counter, src_ptr, dst_ptr, remaining, ...]`
+/// to `[K_CTR(4), counter+1, src_ptr+8, dst_ptr+16, remaining-1, ...]`.
 #[inline(always)]
-pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
+pub(super) fn op_aead_stream<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, MemoryError> {
-    // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
-    const SRC_PTR_IDX: usize = 12;
-    const DST_PTR_IDX: usize = 13;
+) -> Result<OperationHelperRegisters, AeadStreamError> {
+    const K_CTR_IDX: usize = 0;
+    const COUNTER_IDX: usize = 4;
+    const SRC_PTR_IDX: usize = 5;
+    const DST_PTR_IDX: usize = 6;
+    const REMAINING_IDX: usize = 7;
 
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
 
-    // Get source and destination pointers
+    let k_ctr = processor.stack().get_word(K_CTR_IDX);
+    let counter = processor.stack().get(COUNTER_IDX);
     let src_addr = processor.stack().get(SRC_PTR_IDX);
     let dst_addr = processor.stack().get(DST_PTR_IDX);
+    let counter_next = counter + ONE;
+    let remaining_next = processor.stack().get(REMAINING_IDX) - ONE;
 
-    // Validate address ranges and check for overlap using half-open intervals.
-    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk)?;
+    let input_state = [
+        counter, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, k_ctr[0], k_ctr[1], k_ctr[2], k_ctr[3],
+    ];
+    let keystream = processor.hasher().compress_aead_xof(ctx, clk, input_state)?;
+    tracer.record_hasher_aead_xof(ctx, clk, input_state);
 
-    // Load plaintext from source memory (2 words = 8 elements)
-    let src_addr_word2 = src_addr + WORD_SIZE_FELT;
-    let plaintext_word1 = processor.memory_mut().read_word(ctx, src_addr, clk)?;
-    let plaintext_word2 = processor.memory_mut().read_word(ctx, src_addr_word2, clk)?;
+    validate_aead_stream_addrs(src_addr, dst_addr, ctx, clk)?;
 
-    // Get rate (keystream) from stack[0..7]
-    let rate: [Felt; 8] = processor.stack().get_double_word(0);
+    // Each 4-row stream half emits a read interaction, so the trace records each source word twice.
+    let plaintext0 = processor.memory_mut().read_word(ctx, src_addr, clk)?;
+    let plaintext0_dup = processor.memory_mut().read_word(ctx, src_addr, clk)?;
+    let plaintext1 = processor.memory_mut().read_word(ctx, src_addr + WORD_SIZE_FELT, clk)?;
+    let plaintext1_dup = processor.memory_mut().read_word(ctx, src_addr + WORD_SIZE_FELT, clk)?;
+    debug_assert_eq!(plaintext0, plaintext0_dup);
+    debug_assert_eq!(plaintext1, plaintext1_dup);
+    let plaintext = [plaintext0, plaintext1];
 
-    // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
-    let ciphertext_word1 = [
-        plaintext_word1[0] + rate[0],
-        plaintext_word1[1] + rate[1],
-        plaintext_word1[2] + rate[2],
-        plaintext_word1[3] + rate[3],
-    ]
-    .into();
-    let ciphertext_word2 = [
-        plaintext_word2[0] + rate[4],
-        plaintext_word2[1] + rate[5],
-        plaintext_word2[2] + rate[6],
-        plaintext_word2[3] + rate[7],
-    ]
-    .into();
+    let mut ciphertext = [ZERO; 16];
+    for i in 0..8 {
+        let (lo, hi) = blakeg::unpack(plaintext[i / 4][i % 4]);
+        ciphertext[2 * i] = Felt::from_u32(lo ^ keystream[2 * i].as_canonical_u64() as u32);
+        ciphertext[2 * i + 1] = Felt::from_u32(hi ^ keystream[2 * i + 1].as_canonical_u64() as u32);
+    }
 
-    // Write ciphertext to destination memory
-    let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
-    processor.memory_mut().write_word(ctx, dst_addr, clk, ciphertext_word1)?;
-    processor.memory_mut().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)?;
+    for word_idx in 0..4 {
+        let base = 4 * word_idx;
+        let word: Word = [
+            ciphertext[base],
+            ciphertext[base + 1],
+            ciphertext[base + 2],
+            ciphertext[base + 3],
+        ]
+        .into();
+        processor.memory_mut().write_word(
+            ctx,
+            dst_addr + Felt::new_unchecked((4 * word_idx) as u64),
+            clk,
+            word,
+        )?;
+    }
 
-    tracer.record_crypto_stream(
-        [plaintext_word1, plaintext_word2],
-        src_addr,
-        [ciphertext_word1, ciphertext_word2],
-        dst_addr,
-        ctx,
-        clk,
-    );
+    tracer.record_aead_stream(plaintext, src_addr, keystream, ciphertext, dst_addr, ctx, clk);
 
-    // Update stack[0..7] with ciphertext (becomes new rate for next bcompress)
-    processor.stack_mut().set_word(0, &ciphertext_word1);
-    processor.stack_mut().set_word(4, &ciphertext_word2);
-
-    // Increment pointers by 8 (2 words)
+    processor.stack_mut().set(COUNTER_IDX, counter_next);
     processor.stack_mut().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
-    processor.stack_mut().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+    processor.stack_mut().set(DST_PTR_IDX, dst_addr + Felt::new_unchecked(16));
+    processor.stack_mut().set(REMAINING_IDX, remaining_next);
 
     Ok(OperationHelperRegisters::Empty)
 }
 
-// Note: assert_binary now returns OperationError, imported via crate::OperationError in the
-// function
-
-/// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
-/// are within u32 bounds and do not overlap in the same cycle.
+/// Validates the source and destination ranges used by `aead_stream`.
 ///
-/// Uses half-open intervals: [addr, addr+8). If ranges overlap, returns an IllegalMemoryAccess
-/// error pointing at the first destination word that would be written.
+/// The source range is `[src, src+8)`, and the destination range is `[dst, dst+16)`.
 #[inline(always)]
-fn validate_dual_word_stream_addrs(
+fn validate_aead_stream_addrs(
     src_addr: Felt,
     dst_addr: Felt,
     ctx: ContextId,
     clk: RowIndex,
 ) -> Result<(), MemoryError> {
-    // Convert to u32 and check end-exclusive bounds
+    // Convert to u32 and check end-exclusive bounds.
     let src_addr_u64 = src_addr.as_canonical_u64();
     let dst_addr_u64 = dst_addr.as_canonical_u64();
 
@@ -589,15 +619,14 @@ fn validate_dual_word_stream_addrs(
     let dst_addr_u32 = u32::try_from(dst_addr_u64)
         .map_err(|_| MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
     let dst_end = dst_addr_u32
-        .checked_add(8)
+        .checked_add(16)
         .ok_or(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
 
-    // Check for overlap between [src, src+8) and [dst, dst+8)
     if src_addr_u32 < dst_end && dst_addr_u32 < src_end {
-        let dst_word2 = dst_addr_u32 + 4; // safe since dst_end computed above
-        // We write dst first, then dst+4. Use the first that overlaps.
-        let overlap_first = (dst_addr_u32 >= src_addr_u32) && (dst_addr_u32 < src_end);
-        let offending_addr = if overlap_first { dst_addr_u32 } else { dst_word2 };
+        let offending_addr = [dst_addr_u32, dst_addr_u32 + 4, dst_addr_u32 + 8, dst_addr_u32 + 12]
+            .into_iter()
+            .find(|addr| *addr >= src_addr_u32 && *addr < src_end)
+            .unwrap_or(dst_addr_u32);
         return Err(MemoryError::IllegalMemoryAccess {
             ctx,
             addr: offending_addr,

@@ -3,8 +3,7 @@
 //! Decoder-side requests into the hasher, bitwise, memory, ACE init, and kernel ROM chiplets.
 //!
 //! Every interaction is folded into a single [`super::super::LookupColumn::group`] call.
-//! The cached-encoding optimization can be reintroduced later if symbolic expression growth
-//! becomes a bottleneck.
+//! The emitter uses ordinary lookup batches; cached encoding is unnecessary for this column today.
 
 use core::array;
 
@@ -15,7 +14,10 @@ use miden_core::{
 use crate::{
     constraints::lookup::{
         main_air::{MainBusContext, MainLookupBuilder},
-        messages::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryMsg},
+        messages::{
+            AceInitMsg, AeadBlakeGInputMsg, AeadStreamRequestMsg, BitwiseMsg, HasherMsg,
+            KernelRomMsg, MemoryMsg,
+        },
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
@@ -463,61 +465,48 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                         Deg { v: 6, u: 7 }, // (V, U) = (1 + 5, 2 + 5)
                     );
 
-                    // --- CRYPTOSTREAM ---
-                    // Two word reads (plaintext from src_ptr, src_ptr + 4) followed by two word
-                    // writes (ciphertext to dst_ptr, dst_ptr + 4). The rate lives on
-                    // `local.stack[0..8]`, and the ciphertext on `next.stack[0..8]`; the
-                    // plaintext is recovered algebraically as `cipher - rate`.
-                    let src_ptr = stk.get(12);
-                    let dst_ptr = stk.get(13);
+                    // --- AEAD STREAM ---
+                    let src_ptr = stk.get(5);
+                    let dst_ptr = stk.get(6);
                     g.batch(
-                        "cryptostream",
-                        op_flags.cryptostream(),
+                        "aead_stream",
+                        op_flags.aead_stream(),
                         move |b| {
-                            let src0: LB::Expr = src_ptr.into();
-                            let src1: LB::Expr = src0.clone() + LB::Expr::from_u16(4);
-                            let dst0: LB::Expr = dst_ptr.into();
-                            let dst1: LB::Expr = dst0.clone() + LB::Expr::from_u16(4);
-                            let rate: [LB::Expr; 8] = array::from_fn(|i| stk.get(i).into());
-                            let cipher: [LB::Expr; 8] = array::from_fn(|i| stk_next.get(i).into());
-                            let plain: [LB::Expr; 8] =
-                                array::from_fn(|i| cipher[i].clone() - rate[i].clone());
-                            let plain_word0: [LB::Expr; 4] = array::from_fn(|i| plain[i].clone());
-                            let plain_word1: [LB::Expr; 4] =
-                                array::from_fn(|i| plain[4 + i].clone());
-                            let cipher_word0: [LB::Expr; 4] = array::from_fn(|i| cipher[i].clone());
-                            let cipher_word1: [LB::Expr; 4] =
-                                array::from_fn(|i| cipher[4 + i].clone());
-                            b.remove(
-                                "cryptostream_read0",
-                                MemoryMsg::read_word(sys_ctx.into(), src0, clk.into(), plain_word0),
+                            let state = core::array::from_fn(|i| {
+                                if i == 0 {
+                                    stk.get(4).into()
+                                } else if i < 8 {
+                                    LB::Expr::ZERO
+                                } else {
+                                    stk.get(i - 8).into()
+                                }
+                            });
+                            b.insert(
+                                "aead_blakeg_input",
+                                LB::Expr::ONE,
+                                AeadBlakeGInputMsg { clk: clk.into(), state },
                                 Deg { v: 4, u: 5 },
                             );
-                            b.remove(
-                                "cryptostream_read1",
-                                MemoryMsg::read_word(sys_ctx.into(), src1, clk.into(), plain_word1),
-                                Deg { v: 4, u: 5 },
-                            );
-                            b.remove(
-                                "cryptostream_write0",
-                                MemoryMsg::write_word(
-                                    sys_ctx.into(),
-                                    dst0,
-                                    clk.into(),
-                                    cipher_word0,
-                                ),
-                                Deg { v: 4, u: 5 },
-                            );
-                            b.remove(
-                                "cryptostream_write1",
-                                MemoryMsg::write_word(
-                                    sys_ctx.into(),
-                                    dst1,
-                                    clk.into(),
-                                    cipher_word1,
-                                ),
-                                Deg { v: 4, u: 5 },
-                            );
+                            for (name, src_offset, dst_offset, lane_base) in
+                                [("aead_stream_low", 0, 0, 0), ("aead_stream_high", 4, 8, 8)]
+                            {
+                                // The stream side emits the same request from both 4-row halves
+                                // of one 8-row entry, so Core supplies multiplicity -2.
+                                b.insert(
+                                    name,
+                                    -LB::Expr::from_u16(2),
+                                    AeadStreamRequestMsg {
+                                        ctx: sys_ctx.into(),
+                                        clk: clk.into(),
+                                        src_ptr: Into::<LB::Expr>::into(src_ptr)
+                                            + LB::Expr::from_u16(src_offset),
+                                        dst_ptr: Into::<LB::Expr>::into(dst_ptr)
+                                            + LB::Expr::from_u16(dst_offset),
+                                        lane_base: LB::Expr::from_u16(lane_base),
+                                    },
+                                    Deg { v: 4, u: 5 },
+                                );
+                            }
                         },
                         Deg { v: 7, u: 8 }, // (V, U) = (3 + 4, 4 + 4)
                     );

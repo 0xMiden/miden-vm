@@ -106,6 +106,12 @@ pub enum BusId {
     BlakeGInputWord = 34,
     /// BlakeG internal message-word bus: `[word_index, word]`.
     BlakeGMessageWord = 35,
+    /// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+    AeadStreamRequest = 36,
+    /// AEAD-XOF BlakeG input request: `[clk, state[0..12]]`.
+    AeadBlakeGInput = 37,
+    /// AEAD-XOF BlakeG output pair: `[clk, first_lane_idx, value0, value1]`.
+    AeadBlakeGOutputPair = 38,
 }
 
 impl BusId {
@@ -113,7 +119,7 @@ impl BusId {
     /// in lockstep with the enum: adding a new variant with a higher discriminant bumps
     /// `COUNT` automatically (and the assertion flags a missed update if the new variant's
     /// discriminant isn't contiguous).
-    pub const COUNT: usize = Self::BlakeGMessageWord as usize + 1;
+    pub const COUNT: usize = Self::AeadBlakeGOutputPair as usize + 1;
 }
 
 // Per-variant discriminant locks. `BusId::COUNT` only catches gaps. A *reorder* that
@@ -158,6 +164,9 @@ const _: () = assert!(BusId::BlakeGRot7Pos2 as usize == 32);
 const _: () = assert!(BusId::BlakeGRot7Pos3 as usize == 33);
 const _: () = assert!(BusId::BlakeGInputWord as usize == 34);
 const _: () = assert!(BusId::BlakeGMessageWord as usize == 35);
+const _: () = assert!(BusId::AeadStreamRequest as usize == 36);
+const _: () = assert!(BusId::AeadBlakeGInput as usize == 37);
+const _: () = assert!(BusId::AeadBlakeGOutputPair as usize == 38);
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -629,6 +638,35 @@ pub struct BlakeGInputPairMsg<E> {
     pub word_odd: E,
 }
 
+// AEAD STREAM MESSAGES
+// ================================================================================================
+
+/// AEAD stream operation request: `[ctx, clk, src_ptr, dst_ptr, lane_base]`.
+#[derive(Clone, Debug)]
+pub struct AeadStreamRequestMsg<E> {
+    pub ctx: E,
+    pub clk: E,
+    pub src_ptr: E,
+    pub dst_ptr: E,
+    pub lane_base: E,
+}
+
+/// AEAD-XOF BlakeG input request: `[clk, state[0..12]]`.
+#[derive(Clone, Debug)]
+pub struct AeadBlakeGInputMsg<E> {
+    pub clk: E,
+    pub state: [E; 12],
+}
+
+/// AEAD-XOF BlakeG output pair: `[clk, first_lane_idx, value0, value1]`.
+#[derive(Clone, Debug)]
+pub struct AeadBlakeGOutputPairMsg<E> {
+    pub clk: E,
+    pub first_lane_idx: E,
+    pub value0: E,
+    pub value1: E,
+}
+
 // KERNEL ROM MESSAGE
 // ================================================================================================
 
@@ -791,6 +829,62 @@ where
         challenges.encode(
             BusId::Bitwise as usize,
             [self.op.clone(), self.a.clone(), self.b.clone(), self.result.clone()],
+        )
+    }
+}
+
+// --- AEAD stream messages -----------------------------------------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for AeadStreamRequestMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadStreamRequest as usize,
+            [
+                self.ctx.clone(),
+                self.clk.clone(),
+                self.src_ptr.clone(),
+                self.dst_ptr.clone(),
+                self.lane_base.clone(),
+            ],
+        )
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadBlakeGInputMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let fields: [E; 13] = core::array::from_fn(|i| {
+            if i == 0 {
+                self.clk.clone()
+            } else {
+                self.state[i - 1].clone()
+            }
+        });
+        challenges.encode(BusId::AeadBlakeGInput as usize, fields)
+    }
+}
+
+impl<E, EF> LookupMessage<E, EF> for AeadBlakeGOutputPairMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        challenges.encode(
+            BusId::AeadBlakeGOutputPair as usize,
+            [
+                self.clk.clone(),
+                self.first_lane_idx.clone(),
+                self.value0.clone(),
+                self.value1.clone(),
+            ],
         )
     }
 }

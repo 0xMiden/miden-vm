@@ -7,6 +7,13 @@ sidebar_position: 3
 
 In this note we describe how to compute bitwise AND and XOR operations on 32-bit values and the constraints required for proving correct execution.
 
+The bitwise selector region has two modes. When `stream_mode = 0`, it contains the normal
+`U32AND` and `U32XOR` rows described below. When `stream_mode = 1`, the same region contains
+AEAD stream rows. An AEAD stream entry spans 8 rows and encrypts one plaintext word; one
+`AEADSTREAM` opcode emits two such entries. Each stream row proves one u32 XOR with four AND8
+byte-pair lookups and links plaintext, BlakeG-XOF keystream, ciphertext, and memory messages
+through the lookup buses. The normal bitwise constraints below are disabled on AEAD stream rows.
+
 Assume that $a$ and $b$ are field elements in a 64-bit prime field. Assume also that $a$ and $b$ are known to contain values smaller than $2^{32}$. We want to compute $a \oplus b \rightarrow z$, where $\oplus$ is either bitwise AND or XOR, and $z$ is a field element containing the result of the corresponding bitwise operation.
 
 First, observe that we can compute AND and XOR relations for **single bit values** as follows:
@@ -59,10 +66,10 @@ The Bitwise chiplet supports two operations with the following operation selecto
 - `U32AND`: $s = 0$
 - `U32XOR`: $s = 1$
 
-Let $fb = s_0 \cdot (1 - s_1)$ be the bitwise chiplet selector flag derived from the chiplet
-selectors. All constraints below are implicitly gated by $fb$ so they only apply on bitwise rows.
-Degrees shown below exclude the $fb$ gate; to get the effective degree, add the degree of $fb$
-(degree $2$).
+Let $f_b = s_0 \cdot (1 - s_1) \cdot (1 - stream\_mode)$ be the normal bitwise selector flag derived from the chiplet
+selectors. All constraints below are implicitly gated by $f_b$ so they only apply on normal
+bitwise rows. Degrees shown below exclude the $f_b$ gate; to get the effective degree, add
+the degree of $f_b$.
 
 The constraints must require that the selectors be binary and stay the same throughout the cycle:
 
@@ -134,31 +141,10 @@ $$
 > z - \left(z_p \cdot 16 + a_{\text{and}} + s \cdot (a_{\text{xor}} - a_{\text{and}})\right) = 0 \text{ | degree} = 3
 > $$
 
-## Chiplets bus constraints
+## Lookup bus constraints
 
-To simplify the notation for describing bitwise constraints on the chiplets bus, we'll first define variable $u$, which represents how $a$, $b$, and $z$ in the execution trace are reduced to a single value. Denoting the random values received from the verifier as $\alpha_0, \alpha_1$, etc., this can be achieved as follows.
+Normal bitwise rows answer stack `U32AND` and `U32XOR` requests through the `Bitwise`
+LogUp message domain. The message payload is `[op, a, b, z]`, where `op` selects AND or XOR.
 
-$$
-u = \alpha_0 + \alpha_1 \cdot op_{bit} + \alpha_2 \cdot a + \alpha_3 \cdot b + \alpha_4 \cdot z
-$$
-
-Where, $op_{bit}$ is the unique [operation label](./index.md#operation-labels) of the bitwise operation.
-
-The request side of the constraint for the bitwise operation is described in the [stack bitwise operation section](../stack/u32_ops.md#u32and).
-
-To provide the results of bitwise operations to the chiplets bus, we want to include values of $a$, $b$ and $z$ at the last row of the cycle.
-
-Setting $m_i = 1 - k_{1,i}$, we can compute the permutation product from the
-bitwise chiplet as follows:
-
-$$
-\prod_{i=0}^n (u_i \cdot m_i + 1 - m_i)
-$$
-
-The above ensures that when $1 - k_1 = 0$ (which is true for all rows in the 8-row cycle except for the last one), the product does not change. Otherwise, $u_i$ gets included into the product.
-
-The response side of the bus communication can be enforced with the following constraint:
-
-> $$
-> b'_{chip} = b_{chip} \cdot (u_i \cdot m_i + 1 - m_i) \text{ | degree} = 3
-> $$
+The stack removes the requested message. The bitwise chiplet inserts the matching message only on
+the last row of the 8-row cycle, where `a`, `b`, and `z` contain the full 32-bit inputs and output.

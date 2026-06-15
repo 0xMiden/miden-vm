@@ -29,6 +29,7 @@ use miden_air::{
         debug::collect_column_oracle_folds,
     },
     trace::{
+        CHIPLETS_DATA_WIDTH,
         and8_lookup::{AND8_TABLE_ROWS, NUM_AND8_LOOKUP_COLS},
         chiplets::hasher::HASH_CYCLE_LEN,
     },
@@ -41,6 +42,14 @@ use miden_core::{
 use super::{ExecutionTrace, Felt, build_trace_from_ops, rand_array};
 use crate::operation::Operation;
 
+const BLAKEG_ANNEX_COLUMNS: usize = 2;
+const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;
+const BLAKEG_ANNEX_COLUMN_CAPACITY: usize = 1;
+const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
+const AEAD_STREAM_ACTIVE_COL: usize = CHIPLETS_DATA_WIDTH + 1;
+const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
+const AEAD_LOW_SECOND_SRC_PTR_OFFSET: usize = 2;
+
 /// Pad/Add/Mul/Drop inside a span - same kind of ops the decoder/stack tests use, with
 /// enough variety to exercise decoder, stack, and range-check bus emitters.
 fn tiny_span() -> Vec<Operation> {
@@ -52,6 +61,21 @@ fn tiny_span() -> Vec<Operation> {
         Operation::Mul,
         Operation::Drop,
     ]
+}
+
+fn aead_stream_trace() -> ExecutionTrace {
+    // Stack layout: [K_CTR(4), counter, src_ptr, dst_ptr, remaining, tail(8)].
+    build_trace_from_ops(
+        vec![Operation::AeadStream],
+        &[
+            1, 2, 3, 4, // K_CTR
+            0, // counter
+            0, // src_ptr
+            8, // dst_ptr
+            1, // remaining
+            0, 0, 0, 0, 0, 0, 0, 0, // tail
+        ],
+    )
 }
 
 /// Asserts the `accumulate` output matches the oracle folds bit-exactly on every
@@ -112,6 +136,12 @@ fn lookup_global_balance_closes_for_tiny_span() {
 #[test]
 fn lookup_global_balance_closes_for_bcompress() {
     let trace = build_trace_from_ops(vec![Operation::BCompress], &[1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_global_lookup_balance(&trace);
+}
+
+#[test]
+fn lookup_global_balance_closes_for_aead_stream() {
+    let trace = aead_stream_trace();
     assert_global_lookup_balance(&trace);
 }
 
@@ -191,7 +221,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
 fn expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         // Row 0 sends the first message words, emits A/C byte-pair lookups, and routes HIN
-        // pairs 0/1 through the singleton annex.
+        // pairs 0/1 through the annex columns.
         0 => 22,
         // The first B row receives HIN pairs 2/3 in otherwise idle narrow slots.
         1 => 18,
@@ -219,6 +249,7 @@ fn expected_blakeg_degree3_fraction_entry_range_at_cycle_row(
     cycle_row: usize,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
+        56..=59 => 18..=20,
         // Padding blocks skip the interface links because their multiplicity is zero.
         62 => 16..=18,
         _ => {
@@ -283,41 +314,100 @@ fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
     );
 }
 
+#[test]
+fn lookup_balance_rejects_tampered_aead_output_pair_lane() {
+    let trace = aead_stream_trace();
+    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+        trace.main_trace().to_air_matrices();
+
+    let first_stream_row = aead_stream_rows(&chip_matrix)
+        .into_iter()
+        .next()
+        .expect("AEAD stream trace should contain stream rows");
+    mutate_chip_cell(
+        &mut chip_matrix,
+        first_stream_row,
+        AEAD_STREAM_PAYLOAD_BASE_COL + AEAD_READ_LANE_BASE_OFFSET,
+        Felt::ONE,
+    );
+
+    assert_global_lookup_balance_rejects(
+        "tampered AEAD output pair lane",
+        &trace,
+        &core_matrix,
+        &chip_matrix,
+        &blakeg_matrix,
+        &and8_matrix,
+        "AeadBlakeGOutputPairMsg",
+    );
+}
+
+#[test]
+fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
+    let trace = aead_stream_trace();
+    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+        trace.main_trace().to_air_matrices();
+
+    let stream_rows = aead_stream_rows(&chip_matrix);
+    assert!(stream_rows.len() >= 3, "AEAD stream trace should contain low-second rows");
+    let first_low_second_row = stream_rows[2];
+    mutate_chip_cell(
+        &mut chip_matrix,
+        first_low_second_row,
+        AEAD_STREAM_PAYLOAD_BASE_COL + AEAD_LOW_SECOND_SRC_PTR_OFFSET,
+        Felt::ONE,
+    );
+
+    assert_global_lookup_balance_rejects(
+        "tampered AEAD request source pointer",
+        &trace,
+        &core_matrix,
+        &chip_matrix,
+        &blakeg_matrix,
+        &and8_matrix,
+        "AeadStreamRequestMsg",
+    );
+}
+
 fn assert_blakeg_degree3_column_shape(
     label: &str,
     fractions: &LookupFractions<Felt, QuadFelt>,
 ) -> (usize, usize) {
     let shape = fractions.shape();
-    let singleton_annex_columns = shape.iter().rev().take_while(|&&count| count == 1).count();
+    let annex_columns = BLAKEG_ANNEX_COLUMNS;
     let narrow_batch_columns = shape
         .len()
-        .checked_sub(singleton_annex_columns)
+        .checked_sub(annex_columns)
         .expect("annex count cannot exceed lookup width");
 
     assert!(
         narrow_batch_columns > 0,
         "{label}: BlakeG lookup shape must include narrow batch columns",
     );
-    assert!(
-        singleton_annex_columns > 0,
-        "{label}: BlakeG lookup shape must include singleton annex columns",
-    );
+    assert!(annex_columns > 0, "{label}: BlakeG lookup shape must include annex columns",);
 
-    for (col, &count) in shape.iter().enumerate() {
-        let expected = if col < narrow_batch_columns { 2 } else { 1 };
+    for (col, &count) in shape.iter().take(narrow_batch_columns).enumerate() {
         assert_eq!(
-            count, expected,
-            "{label}: BlakeG lookup column {col} has shape {count}, expected {expected}",
+            count, BLAKEG_NARROW_COLUMN_CAPACITY,
+            "{label}: BlakeG lookup column {col} has shape {count}, expected \
+             {BLAKEG_NARROW_COLUMN_CAPACITY}",
+        );
+    }
+    for (col, &count) in shape.iter().enumerate().skip(narrow_batch_columns) {
+        assert_eq!(
+            count, BLAKEG_ANNEX_COLUMN_CAPACITY,
+            "{label}: BlakeG lookup column {col} has shape {count}, expected \
+             {BLAKEG_ANNEX_COLUMN_CAPACITY}",
         );
     }
 
     assert_eq!(
         fractions.num_columns(),
-        narrow_batch_columns + singleton_annex_columns,
+        narrow_batch_columns + annex_columns,
         "{label}: BlakeG lookup aux width drifted",
     );
 
-    (narrow_batch_columns, singleton_annex_columns)
+    (narrow_batch_columns, annex_columns)
 }
 
 fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFractions<Felt, QuadFelt>) {
@@ -327,7 +417,7 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
         "{label}: BlakeG trace height must be a whole number of compression blocks",
     );
 
-    let (narrow_batch_columns, singleton_annex_columns) =
+    let (narrow_batch_columns, annex_columns) =
         assert_blakeg_degree3_column_shape(label, fractions);
 
     let mut seen_cycle_rows = [false; HASH_CYCLE_LEN];
@@ -341,7 +431,7 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
 
         for (col, &count) in column_counts[..narrow_batch_columns].iter().enumerate() {
             assert!(
-                count <= 2,
+                count <= BLAKEG_NARROW_COLUMN_CAPACITY,
                 "{label}: row {row} cycle row {cycle_row} narrow column {col} pushed {count} \
                  fractions, above batch-2 capacity",
             );
@@ -352,26 +442,31 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
         let annex_counts = &column_counts[narrow_batch_columns..];
         assert_eq!(
             annex_counts.len(),
-            singleton_annex_columns,
+            annex_columns,
             "{label}: row {row} cycle row {cycle_row} annex width mismatch",
         );
         assert!(
-            annex_counts.iter().all(|&count| count <= 1),
-            "{label}: row {row} cycle row {cycle_row} singleton annex count exceeded capacity",
+            annex_counts.iter().all(|&count| count <= BLAKEG_ANNEX_COLUMN_CAPACITY),
+            "{label}: row {row} cycle row {cycle_row} annex count exceeded capacity",
         );
         let annex_total: usize = annex_counts.iter().sum();
         match cycle_row {
             0 | 60 | 61 => assert_eq!(
-                annex_total, singleton_annex_columns,
-                "{label}: row {row} cycle row {cycle_row} should use both singleton annex columns",
+                annex_total, 2,
+                "{label}: row {row} cycle row {cycle_row} should use two annex columns",
+            ),
+            56..=59 => assert!(
+                annex_total == 0 || annex_total == annex_columns,
+                "{label}: row {row} cycle row {cycle_row} footer should use either no annex \
+                 columns or both AEAD-XOF pair columns",
             ),
             62 => assert!(
-                annex_total <= singleton_annex_columns,
+                annex_total <= annex_columns,
                 "{label}: row {row} cycle row {cycle_row} interface annex count exceeded capacity",
             ),
             _ => assert_eq!(
                 annex_total, 0,
-                "{label}: row {row} cycle row {cycle_row} should not use singleton annex columns",
+                "{label}: row {row} cycle row {cycle_row} should not use annex columns",
             ),
         }
         saw_annex_row |= annex_total > 0;
@@ -402,6 +497,46 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
 fn assert_global_lookup_balance(trace: &ExecutionTrace) {
     let (core_matrix, chip_matrix, blakeg_matrix, and8_matrix) =
         trace.main_trace().to_air_matrices();
+    let residuals =
+        global_lookup_residuals(trace, &core_matrix, &chip_matrix, &blakeg_matrix, &and8_matrix);
+
+    assert!(
+        residuals.is_empty(),
+        "global LogUp balance did not close:\n{}",
+        format_lookup_residuals(residuals)
+    );
+}
+
+fn assert_global_lookup_balance_rejects(
+    label: &str,
+    trace: &ExecutionTrace,
+    core_matrix: &RowMajorMatrix<Felt>,
+    chip_matrix: &RowMajorMatrix<Felt>,
+    blakeg_matrix: &RowMajorMatrix<Felt>,
+    and8_matrix: &RowMajorMatrix<Felt>,
+    expected_msg: &str,
+) {
+    let residuals =
+        global_lookup_residuals(trace, core_matrix, chip_matrix, blakeg_matrix, and8_matrix);
+    assert!(!residuals.is_empty(), "{label}: tampered trace unexpectedly balanced");
+
+    let found_expected_msg = residuals
+        .iter()
+        .any(|(_, (_, lines))| lines.iter().any(|line| line.contains(expected_msg)));
+    assert!(
+        found_expected_msg,
+        "{label}: expected residual containing {expected_msg}; got:\n{}",
+        format_lookup_residuals(residuals),
+    );
+}
+
+fn global_lookup_residuals(
+    trace: &ExecutionTrace,
+    core_matrix: &RowMajorMatrix<Felt>,
+    chip_matrix: &RowMajorMatrix<Felt>,
+    blakeg_matrix: &RowMajorMatrix<Felt>,
+    and8_matrix: &RowMajorMatrix<Felt>,
+) -> Vec<(QuadFelt, (Felt, Vec<String>))> {
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
 
     let raw = rand_array::<Felt, 4>();
@@ -483,26 +618,40 @@ fn assert_global_lookup_balance(trace: &ExecutionTrace) {
     let mut residuals: Vec<_> =
         totals.into_iter().filter(|(_, (net, _))| *net != Felt::ZERO).collect();
     residuals.sort_by_key(|(denom, _)| *denom);
+    residuals
+}
 
-    assert!(
-        residuals.is_empty(),
-        "global LogUp balance did not close:\n{}",
-        residuals
-            .into_iter()
-            .take(8)
-            .map(|(denom, (net, lines))| format!(
-                "denom {denom:?} net {net:?}\n{}",
-                lines.join("\n")
-            ))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+fn format_lookup_residuals(residuals: Vec<(QuadFelt, (Felt, Vec<String>))>) -> String {
+    residuals
+        .into_iter()
+        .take(8)
+        .map(|(denom, (net, lines))| format!("denom {denom:?} net {net:?}\n{}", lines.join("\n")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn aead_stream_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
+    let width = chip_matrix.width();
+    (0..chip_matrix.height())
+        .filter(|&row| chip_matrix.values[row * width + AEAD_STREAM_ACTIVE_COL] == Felt::ONE)
+        .collect()
+}
+
+fn mutate_chip_cell(chip_matrix: &mut RowMajorMatrix<Felt>, row: usize, col: usize, delta: Felt) {
+    let width = chip_matrix.width();
+    chip_matrix.values[row * width + col] += delta;
 }
 
 #[test]
 fn build_lookup_fractions_matches_constraint_path_oracle() {
     let trace = build_trace_from_ops(tiny_span(), &[]);
     assert_lookup_fractions_match_constraint_path_oracle("tiny span", &trace);
+}
+
+#[test]
+fn build_lookup_fractions_matches_constraint_path_oracle_for_aead_stream() {
+    let trace = aead_stream_trace();
+    assert_lookup_fractions_match_constraint_path_oracle("AEAD stream", &trace);
 }
 
 fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &ExecutionTrace) {

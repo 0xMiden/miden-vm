@@ -89,7 +89,8 @@ end
 #! will enter an infinite loop.
 #!
 #! Input: [R0, R1, C, start_addr, end_addr, ...]
-#! Output: [R0', R1', C', end_addr, end_addr ...]
+#! Output: [R0', R1', C', start_addr', end_addr, ...]
+#! where `start_addr' = end_addr`.
 #!
 #! Where:
 #! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
@@ -490,7 +491,7 @@ end
 #!
 #! Where:
 #! - A and B are the words to be merged (A corresponds to the first rate word).
-#! - C is `hash_elements_in_domain(A || B, domain)`.
+#! - C is `hash_elements_with_domain(A || B, domain)`.
 #!
 #! Cycles: 16
 pub proc merge_in_domain

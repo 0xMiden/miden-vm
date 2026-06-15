@@ -24,8 +24,9 @@ hashing) use Eidos framing over this primitive.
 ## Controller rows
 
 The controller lives inside `ChipletsAir`. The chiplet-level selector
-`s_ctrl = chiplets[0]` selects controller rows; the reserved `s_perm` column is
-constrained to zero. On controller rows, the three sub-selector columns
+`s_ctrl = chiplets[0]` selects controller rows. The `stream_mode` column is
+outside the controller overlay and is used by the bitwise/AEAD-stream region.
+On controller rows, the three sub-selector columns
 `(s0, s1, s2)` classify the row:
 
 | Sub-selectors | Meaning |
@@ -50,9 +51,9 @@ chiplet section begins.
 
 `BlakeGCompressionAir` owns the BlakeG arithmetic constraints. Its trace is a
 64-row block per compression request, followed by padding blocks as needed. The
-AIR exposes the request input and output through LogUp lookup messages:
+controller/compression link is a LogUp message:
 
-- controller input rows emit `[block(8), cv_in(4), cv_out(4)]`,
+- the controller input/output transition emits `[block(8), cv_in(4), cv_out(4)]`,
 - the BlakeG AIR receives the matching message, weighted by the
   compression multiplicity.
 
@@ -77,10 +78,10 @@ controller semantics only. `mrupdate_id` separates the old and new legs of
 
 The hasher participates in three lookup relations:
 
-1. **Chiplets bus (`b_chiplets`)**: external VM requests and responses.
+1. **Hasher controller messages**: external VM requests and responses.
 2. **Hasher compression link**: controller rows to `BlakeGCompressionAir`
    interface rows.
-3. **Hash-kernel virtual table (`b_hash_kernel`)**: Merkle sibling balancing and
+3. **Hash-kernel table**: Merkle sibling balancing and
    precompile transcript-state tracking.
 
 ## Implementation map
@@ -95,5 +96,7 @@ The hasher participates in three lookup relations:
   BlakeG AIR lookup columns.
 - `air/src/constraints/lookup/buses/hash_kernel.rs`:
   sibling-table and precompile transcript virtual-table interactions.
-- `processor/src/trace/chiplets/hasher.rs`:
+- `air/src/trace/chiplets/hasher.rs`:
   trace layout constants for the controller and BlakeG compression trace.
+- `processor/src/trace/chiplets/hasher/`:
+  trace construction for controller and BlakeG compression rows.

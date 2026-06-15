@@ -13,6 +13,8 @@ use miden_air::trace::{
 use miden_core::chiplets::{blakeg, hasher::compress_state};
 use rayon::prelude::*;
 
+use crate::{ContextId, RowIndex};
+
 use super::{
     ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
     RangeChecker, Word as Digest, ZERO,
@@ -36,6 +38,22 @@ type DigestKey = [u64; 4];
 
 /// Key type for full-state lookups.
 type StateKey = [u64; STATE_WIDTH];
+
+/// Output shape requested from one BlakeG compression block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum CompressionOutput {
+    /// Packed digest output used by the VM hash operations.
+    Packed,
+    /// Direct 16-lane XOF output used by AEAD stream rows.
+    AeadXof { clk: Felt },
+}
+
+/// Deduplication key for standalone BlakeG compression blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CompressionRequestKey {
+    state: StateKey,
+    output: CompressionOutput,
+}
 
 /// Converts a Digest to a DigestKey for BTreeMap lookup.
 fn digest_to_key(digest: Digest) -> DigestKey {
@@ -76,9 +94,9 @@ pub struct Hasher {
     trace: HasherTrace,
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
-    /// Maps input state -> multiplicity for compression deduplication.
+    /// Maps (input state, output shape) -> multiplicity for compression deduplication.
     /// During trace generation, one 64-row BlakeG block is emitted per entry.
-    compression_request_map: BTreeMap<StateKey, u64>,
+    compression_request_map: BTreeMap<CompressionRequestKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
     /// Whether the controller trace has been finalized.
@@ -144,7 +162,7 @@ impl Hasher {
         );
 
         for key in self.compression_request_map.keys() {
-            append_message_row_range_checks(&key_to_state(key), range);
+            append_message_row_range_checks(&key_to_state(&key.state), range);
         }
 
         append_zero_message_row_range_checks(
@@ -201,6 +219,20 @@ impl Hasher {
         );
 
         (addr, compressed)
+    }
+
+    /// Applies one BlakeG compression and returns all 16 raw output lanes.
+    pub fn compress_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        clk: RowIndex,
+        state: HasherState,
+    ) -> [Felt; 16] {
+        self.record_compression_request(
+            &state,
+            CompressionOutput::AeadXof { clk: Felt::from(clk) },
+        );
+        blakeg::compress_raw_xof_lanes(&state).map(Felt::from_u32)
     }
 
     /// Computes hash(h1, h2) for a control block and returns the result.
@@ -473,7 +505,7 @@ impl Hasher {
         );
 
         // Record this compression request for deduplication.
-        self.record_compression_request(&state);
+        self.record_compression_request(&state, CompressionOutput::Packed);
 
         compressed
     }
@@ -547,8 +579,8 @@ impl Hasher {
 
     /// Records a compression request for the given input state. If the same state was already
     /// seen, increments the multiplicity counter.
-    fn record_compression_request(&mut self, state: &HasherState) {
-        let key = state_to_key(state);
+    fn record_compression_request(&mut self, state: &HasherState, output: CompressionOutput) {
+        let key = CompressionRequestKey { state: state_to_key(state), output };
         *self.compression_request_map.entry(key).or_insert(0) += 1;
     }
 
@@ -571,7 +603,7 @@ impl Hasher {
             self.trace.replay_ops_range(op_start..op_end, self.mrupdate_id);
 
         for input_state in input_states {
-            self.record_compression_request(&input_state);
+            self.record_compression_request(&input_state, CompressionOutput::Packed);
         }
 
         let result = get_digest(&last_state);
@@ -591,7 +623,7 @@ impl Hasher {
 }
 
 fn fill_blakeg_compression_trace(
-    compression_requests: BTreeMap<StateKey, u64>,
+    compression_requests: BTreeMap<CompressionRequestKey, u64>,
     trace: &mut [Felt],
 ) -> Vec<u64> {
     const W: usize = NUM_BLAKEG_COMPRESSION_COLS;
@@ -627,10 +659,11 @@ fn fill_blakeg_compression_trace(
                 for (block_rows, (key, multiplicity)) in
                     rows_chunk.chunks_exact_mut(HASH_CYCLE_LEN).zip(requests_chunk.iter())
                 {
-                    let state = key_to_state(key);
+                    let state = key_to_state(&key.state);
                     write_blakeg_compression_block(
                         block_rows,
                         &state,
+                        key.output,
                         *multiplicity,
                         &mut local_counts,
                     );
@@ -656,7 +689,13 @@ fn fill_blakeg_compression_trace(
         let zero_state = [ZERO; STATE_WIDTH];
         let mut dummy_block = vec![[ZERO; W]; HASH_CYCLE_LEN];
         let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-        write_blakeg_compression_block(&mut dummy_block, &zero_state, 0, &mut dummy_counts);
+        write_blakeg_compression_block(
+            &mut dummy_block,
+            &zero_state,
+            CompressionOutput::Packed,
+            0,
+            &mut dummy_counts,
+        );
 
         let dummy_blocks = dummy_rows.len() / HASH_CYCLE_LEN;
         for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
@@ -706,6 +745,7 @@ fn num_basic_block_hash_groups(op_batches: &[OpBatch]) -> usize {
 fn write_blakeg_compression_block(
     rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
     input_state: &HasherState,
+    output_mode: CompressionOutput,
     multiplicity: u64,
     and8_counts: &mut [u64],
 ) {
@@ -721,6 +761,7 @@ fn write_blakeg_compression_block(
         &block,
         input_state,
         &output_state,
+        output_mode,
         multiplicity,
         and8_counts,
     );

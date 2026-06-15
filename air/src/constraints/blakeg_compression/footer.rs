@@ -7,7 +7,7 @@
 //!   v_{8+2t}, v_{8+2t+1})` pair and its AND witnesses;
 //! - future W words needed by later footer rows;
 //! - progressive C/D accumulators;
-//! - HIN-pair fields and tail labels.
+//! - HIN-pair fields and AEAD-XOF labels.
 //!
 //! On `F_t`, the per-row witnesses correspond to lane `t`. `C[t]` and `D[t]`
 //! are *defined* on `F_t` (from the H bytes and Out bytes respectively). The
@@ -23,8 +23,9 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 use super::selectors::Selectors;
 use super::views::{BYTES_PER_WORD, FooterRow};
 use super::{
-    FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL,
-    FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL, MSG_D_BASE_COL, TAIL_CLK_COL, TAIL_LABEL_COL,
+    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
+    FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL,
+    MSG_D_BASE_COL,
 };
 
 /// Future-W queue continuity across F0 -> F1 -> F2 -> F3.
@@ -96,8 +97,8 @@ pub fn enforce_footer_accumulator_continuity<AB>(
     }
 }
 
-/// Tail-label continuity across F0 -> F1 -> F2 -> F3.
-pub fn enforce_footer_tail_label_continuity<AB>(
+/// AEAD-XOF `(mode, clk)` continuity across F0 -> F1 -> F2 -> F3.
+pub fn enforce_footer_aead_label_continuity<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
@@ -110,7 +111,7 @@ pub fn enforce_footer_tail_label_continuity<AB>(
     let is_f2 = sel.is_f(2);
     let gate = is_f0 + is_f1 + is_f2;
 
-    for col in [TAIL_LABEL_COL, TAIL_CLK_COL] {
+    for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
         let local_value: AB::Expr = local[col].clone().into();
         let next_value: AB::Expr = next[col].clone().into();
         builder.when(gate.clone()).assert_zero(local_value - next_value);
@@ -244,7 +245,7 @@ pub fn enforce_f3_to_m0<AB>(
                 - Into::<AB::Expr>::into(next[MSG_D_BASE_COL + t].clone()),
         );
     }
-    for col in [TAIL_LABEL_COL, TAIL_CLK_COL] {
+    for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
         builder.when(is_f3.clone()).assert_zero(
             Into::<AB::Expr>::into(local[col].clone()) - Into::<AB::Expr>::into(next[col].clone()),
         );

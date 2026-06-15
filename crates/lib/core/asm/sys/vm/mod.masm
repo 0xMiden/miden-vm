@@ -25,10 +25,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # Each circuit commitment covers one order-specific encoded ACE circuit. The digest
 # input is:
 #   [PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...]
-const RELATION_DIGEST_0 = 326192858004868948
-const RELATION_DIGEST_1 = 4952860489267485520
-const RELATION_DIGEST_2 = 4278020021713331307
-const RELATION_DIGEST_3 = 1672068434668367486
+const RELATION_DIGEST_0 = 6882348267520798495
+const RELATION_DIGEST_1 = 6666654704388783457
+const RELATION_DIGEST_2 = 284736780256084649
+const RELATION_DIGEST_3 = 5330343423749095791
 
 # Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
 # This is trusted verifier setup, not proof data or advice.

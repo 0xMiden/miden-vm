@@ -116,7 +116,7 @@ fn span_end_hasher_bus() {
         if op == opcodes::SPAN as u64 {
             let addr_next = main.addr(RowIndex::from(row + 1));
             let rate = rate_from_hasher_state(main, idx);
-            exp.remove(row, &HasherMsg::control_block(addr_next, &rate, 0));
+            exp.remove(row, &HasherMsg::basic_block_init(addr_next, &rate, main.group_count(idx)));
             request_count += 1;
         } else if op == opcodes::END as u64 {
             let parent = main.addr(idx) + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
@@ -238,9 +238,9 @@ fn merge_hasher_bus() {
         }
         let addr = main.clk(idx) + ONE;
         let state = main.chiplet_hasher_state(idx);
-        // SPLIT's own hasher response carries opcode `SPLIT` at capacity[1] (position 9 of the
-        // 12-lane state); sibling SPAN sponge_start rows carry opcode 0.
-        if state[9] == Felt::from(opcodes::SPLIT) {
+        // SPLIT's own hasher response carries the SPLIT domain in its Eidos chaining word;
+        // sibling SPAN sponge_start rows use the default domain.
+        if state[10] == blakeg::two_to_one_chaining_word(opcodes::SPLIT as u32)[2] {
             exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
             split_response_count += 1;
         }

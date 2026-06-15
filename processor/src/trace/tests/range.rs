@@ -100,10 +100,10 @@ fn memory_chiplet_row_emits_range_check_removes() {
     log.assert_contains(&exp);
 }
 
-/// Every trace row carries the range-checker table's response: a `RangeMsg { value: v }` add
-/// with runtime multiplicity `m`. This test verifies the per-row add side of the bus using
-/// hardcoded request demand: a `U32add` requests 4 values (helper columns) and each chiplet
-/// row with a range-check demand adds its `m` copies of that value to the bus.
+/// Rows with nonzero range-check multiplicity emit a `RangeMsg { value: v }` add with
+/// runtime multiplicity `m`. This test verifies the per-row add side of the bus using
+/// hardcoded request demand: a `U32add` requests 4 values (helper columns), and each
+/// range-check table row with demand adds its `m` copies of that value to the bus.
 ///
 /// Catches regressions where the range-checker add-back emitter misreads the multiplicity
 /// column, the value column, or drops the always-active gate — bugs that the per-request
@@ -113,7 +113,7 @@ fn range_checker_table_emits_per_row_adds() {
     // U32add issues 4 range-check requests for values {0, 256, 0, 0} on 1 + 255 = 256. The
     // range-checker chiplet will then add back four multiplicities of those values distributed
     // across its trace rows. We don't need to predict where — subset semantics lets us verify
-    // that *every* row's add matches its `(m, v)` columns.
+    // that every emitted add matches its `(m, v)` columns.
     let stack = [1, 255];
     let operations = vec![Operation::U32add];
     let trace = build_trace_from_ops(operations, &stack);
@@ -127,9 +127,9 @@ fn range_checker_table_emits_per_row_adds() {
         let range = &main.core_row(idx).range;
         let m = range.multiplicity;
         let v = range.value;
-        exp.push(row, m, &RangeMsg { value: v });
         if m != Felt::from_u8(0) {
             nonzero_mult_rows += 1;
+            exp.push(row, m, &RangeMsg { value: v });
         }
     }
 

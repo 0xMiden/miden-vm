@@ -144,6 +144,17 @@ pub trait Tracer {
     ) {
     }
 
+    /// Records one AEAD-XOF compression request.
+    ///
+    /// Called by: `AEADSTREAM`.
+    fn record_hasher_aead_xof(
+        &mut self,
+        _ctx: ContextId,
+        _clk: RowIndex,
+        _input_state: [Felt; STATE_WIDTH],
+    ) {
+    }
+
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     ///
     /// The `path` is an `Option` to support environments where the `Hasher` is not present, such as
@@ -264,15 +275,15 @@ pub trait Tracer {
     ) {
     }
 
-    /// Records a `CRYPTO_STREAM` operation: reading 2 plaintext words from source memory and
-    /// writing 2 ciphertext words to destination memory.
+    /// Records an `AEADSTREAM` operation.
     ///
-    /// Called by: `CRYPTO_STREAM`.
-    fn record_crypto_stream(
+    /// Called by: `AEADSTREAM`.
+    fn record_aead_stream(
         &mut self,
         _plaintext: [Word; 2],
         _src_addr: Felt,
-        _ciphertext: [Word; 2],
+        _keystream: [Felt; 16],
+        _ciphertext: [Felt; 16],
         _dst_addr: Felt,
         _ctx: ContextId,
         _clk: RowIndex,

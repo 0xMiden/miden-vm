@@ -153,9 +153,9 @@ impl MainTrace {
     /// Returns the stored chiplets trace row at index `i`.
     ///
     /// The returned [`ChipletCols`] is the raw column layout shared across all chiplets;
-    /// use one of the per-chiplet overlays (`.controller()`, `.permutation()`, `.bitwise()`,
-    /// `.memory()`, `.ace()`, `.kernel_rom()`) to name the physical columns according to
-    /// the chiplet active on that row.
+    /// use one of the per-chiplet overlays (`.controller()`, `.bitwise()`, `.memory()`,
+    /// `.ace()`, `.kernel_rom()`) to name the physical columns according to the chiplet
+    /// active on that row.
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets trace height — see [`Self::chiplets_height`]. The
@@ -507,7 +507,7 @@ impl MainTrace {
         self.chiplet_cols(i).chiplets[5]
     }
 
-    /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
+    /// Returns `true` if a row is part of the hasher-controller chiplet.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height — rows past `chiplets_height()`
     /// are not part of any chiplet by definition in the split-trace model.
@@ -545,15 +545,19 @@ impl MainTrace {
         self.chiplet_cols(i).controller().direction_bit
     }
 
-    /// Returns the reserved `s_perm` column at row i. The column is constrained to zero in
-    /// `ChipletsAir`; BlakeG compression rows live in `BlakeGCompressionAir`.
+    /// Returns the chiplet stream-mode column at row i.
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
     /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
     /// height, so they can be used as bound-aware filters.
-    pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).s_perm
+    pub fn chiplet_stream_mode(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).stream_mode
+    }
+
+    /// Returns the materialized AEAD stream flag at row i.
+    pub fn chiplet_aead_stream_active(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).aead_stream_active
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.
@@ -567,8 +571,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0) and s1=0. The reserved `s_perm`
-    /// column must be zero on every chiplets row.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height so the classifier is safe to
     /// call on any row of the unified trace.
@@ -577,7 +580,7 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ZERO
     }
 
@@ -597,8 +600,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0) and s1=1, s2=0. The reserved
-    /// `s_perm` column must be zero on every chiplets row.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
@@ -606,7 +608,7 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ZERO
     }
@@ -657,8 +659,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0) and s1=1, s2=1, s3=0. The reserved
-    /// `s_perm` column must be zero on every chiplets row.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
@@ -666,7 +667,7 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ZERO
@@ -777,8 +778,7 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the kernel chiplet.
-    /// Active when virtual s0=1 (s_ctrl=0) and s1=1, s2=1, s3=1, s4=0. The
-    /// reserved `s_perm` column must be zero on every chiplets row.
+    /// Active when virtual s0=1 (s_ctrl=0), s1=1, s2=1, s3=1, s4=0, and `stream_mode=0`.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
@@ -786,7 +786,7 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_s_perm(i) == ZERO
+            && self.chiplet_stream_mode(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
@@ -843,7 +843,6 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_s_perm(i) == ZERO   // reserved selector column
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
             && self.chiplet_selector_3(i) == ZERO // s2=0
@@ -861,7 +860,6 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_s_perm(i) == ZERO   // reserved selector column
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
             && self.chiplet_selector_3(i) == ONE // s2=1

@@ -1,13 +1,9 @@
-//! `v_wiring` shared bus column (`BusId::{AceWiring, HasherPermLinkInput}`).
+//! `v_wiring` shared bus column.
 //!
-//! Both buses live inside one [`super::super::LookupColumn::group`] call. The chiplet selectors
-//! make ACE rows and hasher controller rows mutually exclusive, so the simple-group composition
-//! `U_g += (d_i - 1) * f_i`, `V_g += m_i * f_i` is sound. The column's
-//! running `(V, U)` takes MAX over per-interaction degrees rather than summing them (which a
-//! sibling-group split would do).
-//! Each bus's denominator uses a distinct `bus_prefix[bus]` additive base, so even
-//! though they share the same accumulator their contributions are linearly independent in
-//! the extension field and cannot cancel across buses.
+//! ACE wiring, hasher compression links, and AEAD stream output/request traffic live in one
+//! [`super::super::LookupColumn::group`] call. Their row selectors are mutually exclusive at the
+//! chiplet level, so the simple-group composition is sound and the column degree is the maximum
+//! of the active branch degrees.
 //!
 //! ## ACE wiring (`BusId::AceWiring`)
 //!
@@ -47,16 +43,25 @@
 //!
 //! The compression-link gate has degree `(5, 6)`, below the ACE batch's `(8, 7)`.
 //! Merging into the same group therefore leaves the column's transition at `(8, 7)`.
+//!
+//! ## AEAD stream
+//!
+//! AEAD stream rows emit paired BlakeG-XOF output limbs. The first limb comes from the
+//! current stream row; the second comes from the next row, whose phase is constrained by the
+//! stream-row transition constraints. Request messages fire on phases 2 and 6.
 
-use core::array;
+use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
+        chiplets::columns::{AeadStreamAnd8Cols, PeriodicCols},
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{AceWireMsg, HasherPermLinkMsg},
+            messages::{
+                AceWireMsg, AeadBlakeGOutputPairMsg, AeadStreamRequestMsg, HasherPermLinkMsg,
+            },
         },
         utils::BoolNot,
     },
@@ -65,16 +70,17 @@ use crate::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Single group hosts both buses. ACE rows and hasher-controller rows are pairwise mutually
+/// Single group hosts all wiring buses. Active branches are pairwise mutually
 /// exclusive, so on any given row only one of:
 /// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
 ///   when the outer `ace_flag` fires).
 /// - **Hasher compression link** on controller input rows: 1 fraction.
+/// - **AEAD stream** rows: at most 2 fractions.
 ///
-/// Per-row max is therefore `max(3, 1) = 3`.
+/// Per-row max is therefore `max(3, 1, 2) = 3`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
-/// Emit the `v_wiring` shared column: ACE wiring + hasher compression link.
+/// Emit the `v_wiring` shared column.
 pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
@@ -83,6 +89,19 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 {
     let local = ctx.local;
     let next = ctx.next;
+    let aead_phase: [LB::Expr; 8] = {
+        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+        [
+            periodic.aead_stream_and8.r0.into(),
+            periodic.aead_stream_and8.r1.into(),
+            periodic.aead_stream_and8.r2.into(),
+            periodic.aead_stream_and8.r3.into(),
+            periodic.aead_stream_and8.r4.into(),
+            periodic.aead_stream_and8.r5.into(),
+            periodic.aead_stream_and8.r6.into(),
+            periodic.aead_stream_and8.r7.into(),
+        ]
+    };
 
     // ---- ACE wiring captures (Group 1) ----
     let ace_flag = ctx.chiplet_active.ace.clone();
@@ -123,6 +142,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
     let ctrl_state_next: [LB::Var; 12] = array::from_fn(|i| ctrl_next.state[i]);
+    let stream = local.aead_stream_and8();
+    let stream_next = next.aead_stream_and8();
+    let stream_gate: LB::Expr = local.aead_stream_active.into();
 
     builder.next_column(
         |col| {
@@ -146,7 +168,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let m_0: LB::Expr = m_0.into();
                             let m_1: LB::Expr = m_1.into();
                             let wire_1_mult = sblock.not() * m_1 - sblock.clone();
-                            let wire_2_mult = LB::Expr::ZERO - sblock;
+                            let wire_2_mult = -sblock;
 
                             let wire_0 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -192,10 +214,146 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         },
                         Deg { v: 5, u: 6 },
                     );
+
+                    let mut add_stream_pair =
+                        |name: &'static str, phase_idx: usize, first_lane_offset: u16| {
+                            g.add(
+                                name,
+                                stream_gate.clone() * aead_phase[phase_idx].clone(),
+                                || {
+                                    aead_stream_pair_msg::<LB>(
+                                        stream,
+                                        stream_next,
+                                        phase_idx,
+                                        first_lane_offset,
+                                    )
+                                },
+                                Deg { v: 3, u: 4 },
+                            );
+                        };
+                    add_stream_pair("aead_stream_pair0", 0, 0);
+                    add_stream_pair("aead_stream_pair2", 4, 0);
+
+                    g.batch(
+                        "aead_stream_pair1_request",
+                        stream_gate.clone() * aead_phase[2].clone(),
+                        |b| {
+                            b.add(
+                                "aead_stream_pair1",
+                                aead_stream_pair_msg::<LB>(stream, stream_next, 2, 2),
+                                Deg { v: 3, u: 4 },
+                            );
+                            b.add(
+                                "aead_stream_request",
+                                aead_stream_request_msg::<LB>(stream, 0),
+                                Deg { v: 3, u: 4 },
+                            );
+                        },
+                        Deg { v: 4, u: 7 },
+                    );
+
+                    g.batch(
+                        "aead_stream_pair3_request",
+                        stream_gate.clone() * aead_phase[6].clone(),
+                        |b| {
+                            b.add(
+                                "aead_stream_pair3",
+                                aead_stream_pair_msg::<LB>(stream, stream_next, 6, 2),
+                                Deg { v: 3, u: 4 },
+                            );
+                            b.add(
+                                "aead_stream_request",
+                                aead_stream_request_msg::<LB>(stream, 4),
+                                Deg { v: 3, u: 4 },
+                            );
+                        },
+                        Deg { v: 4, u: 7 },
+                    );
                 },
                 Deg { v: 8, u: 7 },
             );
         },
         Deg { v: 8, u: 7 },
     );
+}
+
+fn aead_stream_pair_msg<LB>(
+    stream: &AeadStreamAnd8Cols<LB::Var>,
+    stream_next: &AeadStreamAnd8Cols<LB::Var>,
+    phase_idx: usize,
+    first_lane_offset: u16,
+) -> AeadBlakeGOutputPairMsg<LB::Expr>
+where
+    LB: ChipletLookupBuilder,
+{
+    let (clk, lane_base, value0, value1) = match phase_idx % 4 {
+        0 => {
+            let row = stream.read();
+            let next = stream_next.high_first();
+            (
+                row.clk.into(),
+                row.lane_base.into(),
+                stream_b_limb::<LB>(row.bytes),
+                stream_b_limb::<LB>(next.bytes),
+            )
+        },
+        2 => {
+            let row = stream.low_second();
+            let next = stream_next.high_second();
+            (
+                row.clk.into(),
+                row.lane_base.into(),
+                stream_b_limb::<LB>(row.bytes),
+                stream_b_limb::<LB>(next.bytes),
+            )
+        },
+        _ => unreachable!(),
+    };
+    AeadBlakeGOutputPairMsg {
+        clk,
+        first_lane_idx: lane_base + LB::Expr::from_u16(first_lane_offset),
+        value0,
+        value1,
+    }
+}
+
+fn aead_stream_request_msg<LB>(
+    stream: &AeadStreamAnd8Cols<LB::Var>,
+    second_half_offset: u16,
+) -> AeadStreamRequestMsg<LB::Expr>
+where
+    LB: ChipletLookupBuilder,
+{
+    let row = stream.low_second();
+    let dst_ptr: LB::Expr = row.dst_ptr.into();
+    let lane_base: LB::Expr = row.lane_base.into();
+    let offset = LB::Expr::from_u16(second_half_offset);
+    AeadStreamRequestMsg {
+        ctx: row.ctx.into(),
+        clk: row.clk.into(),
+        src_ptr: row.src_ptr.into(),
+        dst_ptr: dst_ptr - offset.clone(),
+        lane_base: lane_base - offset,
+    }
+}
+
+fn stream_b_limb<LB>(bytes: [LB::Var; 12]) -> LB::Expr
+where
+    LB: ChipletLookupBuilder,
+{
+    pack_u32::<LB>([bytes[4], bytes[5], bytes[6], bytes[7]])
+}
+
+fn pack_u32<LB>(bytes: [LB::Var; 4]) -> LB::Expr
+where
+    LB: ChipletLookupBuilder,
+{
+    let shift8 = LB::Expr::from_u16(256);
+    let shift16 = LB::Expr::from_u32(1 << 16);
+    let shift24 = LB::Expr::from_u32(1 << 24);
+
+    Into::<LB::Expr>::into(bytes[0])
+        + shift8 * Into::<LB::Expr>::into(bytes[1])
+        + shift16 * Into::<LB::Expr>::into(bytes[2])
+        + shift24 * Into::<LB::Expr>::into(bytes[3])
 }

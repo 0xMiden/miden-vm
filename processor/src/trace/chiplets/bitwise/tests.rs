@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
-use miden_core::{ZERO, field::PrimeCharacteristicRing};
+use miden_core::{ONE, ZERO, chiplets::blakeg, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, ChipletTraceFragment, Felt};
@@ -204,19 +204,87 @@ fn bitwise_multiple() {
     }
 }
 
+#[test]
+fn aead_stream_and8_trace() {
+    let mut bitwise = Bitwise::new();
+
+    let plaintext_limbs = [1_u32, 2, 3, 4, 5, 6, 7, 8];
+    let plaintext = [
+        blakeg::pack(plaintext_limbs[0], plaintext_limbs[1]),
+        blakeg::pack(plaintext_limbs[2], plaintext_limbs[3]),
+        blakeg::pack(plaintext_limbs[4], plaintext_limbs[5]),
+        blakeg::pack(plaintext_limbs[6], plaintext_limbs[7]),
+    ];
+    let keystream = core::array::from_fn(|idx| Felt::from_u32(20 + idx as u32));
+    let ciphertext = core::array::from_fn(|idx| {
+        Felt::from_u32(plaintext_limbs[idx] ^ keystream[idx].as_canonical_u64() as u32)
+    });
+
+    let ctx = Felt::from_u32(3);
+    let clk = Felt::from_u32(11);
+    let src_ptr = Felt::from_u32(100);
+    let dst_ptr = Felt::from_u32(200);
+    let lane_base = Felt::from_u32(40);
+    bitwise
+        .aead_stream_and8(ctx, clk, src_ptr, dst_ptr, lane_base, plaintext, keystream, ciphertext);
+
+    let (trace, and8_counts) =
+        build_trace_with_width_and_counts(bitwise, 8, super::AEAD_STREAM_AND8_FRAGMENT_WIDTH);
+    assert_eq!(and8_counts.iter().sum::<u64>(), 32);
+
+    for row in 0..8 {
+        assert_eq!(trace[super::STREAM_MODE_OFFSET][row], ONE);
+        assert_eq!(trace[super::AEAD_STREAM_ACTIVE_OFFSET][row], ONE);
+    }
+
+    // r0: read + low limb for plaintext[0].
+    assert_eq!(trace[0][0], ctx);
+    assert_eq!(trace[1][0], clk);
+    assert_eq!(trace[2][0], src_ptr);
+    assert_eq!(trace[3][0], lane_base);
+    assert_eq!(trace[4][0], plaintext[0]);
+    assert_eq!(trace[8][0], Felt::from_u8(plaintext_limbs[0] as u8));
+    assert_eq!(trace[12][0], keystream[0]);
+    assert_eq!(
+        trace[16][0],
+        Felt::from_u8((plaintext_limbs[0] as u8) & (keystream[0].as_canonical_u64() as u8)),
+    );
+
+    // r1 carries ciphertext limb 0 and plaintext[1].
+    assert_eq!(trace[4][1], plaintext[1]);
+    assert_eq!(trace[5][1], ciphertext[0]);
+
+    // r4 starts the second word pair at lane_base + 4.
+    assert_eq!(trace[3][4], lane_base + Felt::from_u32(4));
+    assert_eq!(trace[4][4], plaintext[0]);
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 
 /// Builds a trace of the specified length and fills it with data from the provided Bitwise
 /// instance.
 fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
-    let mut band = Felt::zero_vec(TRACE_WIDTH * num_rows);
-    let mut fragment = ChipletTraceFragment::row_major(&mut band, TRACE_WIDTH, 0, TRACE_WIDTH);
-    bitwise.fill_trace(&mut fragment);
+    build_trace_with_width(bitwise, num_rows, TRACE_WIDTH)
+}
 
-    (0..TRACE_WIDTH)
-        .map(|c| (0..num_rows).map(|r| band[r * TRACE_WIDTH + c]).collect())
-        .collect()
+fn build_trace_with_width(bitwise: Bitwise, num_rows: usize, width: usize) -> Vec<Vec<Felt>> {
+    build_trace_with_width_and_counts(bitwise, num_rows, width).0
+}
+
+fn build_trace_with_width_and_counts(
+    bitwise: Bitwise,
+    num_rows: usize,
+    width: usize,
+) -> (Vec<Vec<Felt>>, Vec<u64>) {
+    let mut band = Felt::zero_vec(width * num_rows);
+    let mut fragment = ChipletTraceFragment::row_major(&mut band, width, 0, width);
+    let and8_counts = bitwise.fill_trace(&mut fragment);
+
+    let trace = (0..width)
+        .map(|c| (0..num_rows).map(|r| band[r * width + c]).collect())
+        .collect();
+    (trace, and8_counts)
 }
 
 fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {
