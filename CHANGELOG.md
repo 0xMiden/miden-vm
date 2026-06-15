@@ -34,6 +34,7 @@
 - Pinned the initial AIR system context and function hash to zero, preventing forged caller hashes at row 0 ([#3240](https://github.com/0xMiden/miden-vm/pull/3240)).
 - Preserved `LOGPRECOMPILE` tail stack slots in the AIR, preventing forged values in `stack[12..15]` ([#3244](https://github.com/0xMiden/miden-vm/pull/3244)).
 - Bound memory AIR word addresses to their range-checked decomposition limbs ([#3245](https://github.com/0xMiden/miden-vm/pull/3245)).
+- Rejected oversized AEAD decrypt outputs before reading ciphertext or running host-side decryption ([#3252](https://github.com/0xMiden/miden-vm/pull/3252)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Made `miden-vm run` and `miden-vm prove` fail when the inferred `.inputs` file is missing ([#3236](https://github.com/0xMiden/miden-vm/pull/3236)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).
