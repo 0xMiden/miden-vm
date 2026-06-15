@@ -288,8 +288,14 @@ proc get_multi_leaf_value
     push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
     # => [ptr_end, K, R]
 
+    locaddr.0
+    # => [start_ptr, end_ptr, K, R]
+
+    exec.assert_unique_multi_leaf_keys
+    # => [start_ptr, end_ptr, K, R]
+
     # (4 cycles)
-    movdn.4 locaddr.0 movdn.4
+    drop movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
     # (56 cycles)
@@ -325,6 +331,40 @@ proc get_multi_leaf_value
         drop drop drop padw
         # => [ZERO, R]
     end
+end
+
+#! Checks that all key-value pairs in a multi-leaf preimage have unique sorted keys.
+#!
+#! Inputs:  [start_ptr, end_ptr, ...]
+#! Outputs: [start_ptr, end_ptr, ...]
+#!
+#! Panics if:
+#! - any adjacent key pair is not strictly increasing.
+proc assert_unique_multi_leaf_keys
+    dup add.8
+    # => [next_key_ptr, start_ptr, end_ptr, ...]
+
+    dup dup.3 u32lt
+    while.true
+        dup sub.8
+        # => [prev_key_ptr, next_key_ptr, start_ptr, end_ptr, ...]
+
+        padw movup.4 mem_loadw_le
+        # => [PREV_KEY, next_key_ptr, start_ptr, end_ptr, ...]
+
+        padw dup.8 mem_loadw_le
+        # => [NEXT_KEY, PREV_KEY, next_key_ptr, start_ptr, end_ptr, ...]
+
+        exec.word::lt
+        assert.err="invalid multi-leaf preimage: keys must be unique and sorted"
+        # => [next_key_ptr, start_ptr, end_ptr, ...]
+
+        add.8
+        dup dup.3 u32lt
+    end
+
+    drop
+    # => [start_ptr, end_ptr, ...]
 end
 
 # SET SINGLE-LEAF HELPERS
@@ -664,6 +704,15 @@ proc set_multi_leaf
     # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
 
     push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
+    # => [end_ptr; NV, K, V, leaf_size, R]
+
+    locaddr.0
+    # => [start_ptr, end_ptr; NV, K, V, leaf_size, R]
+
+    exec.assert_unique_multi_leaf_keys
+    # => [start_ptr, end_ptr; NV, K, V, leaf_size, R]
+
+    drop
     # => [end_ptr; NV, K, V, leaf_size, R]
 
     movdn.12
