@@ -45,7 +45,10 @@ pub use self::{
 };
 use crate::{
     Dependency, Version,
-    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+    debug_info::{
+        DebugFunctionInfo, DebugFunctionsSection, DebugSourceNodeId, DebugSourcesSection,
+        DebugTypeIdx, DebugTypeInfo, DebugTypesSection, PackageDebugInfo,
+    },
 };
 
 /// Errors raised while stripping package-owned debug information.
@@ -630,6 +633,20 @@ impl Package {
         &self,
         debug_info: &PackageDebugInfo,
     ) -> Result<(), PackageDebugInfoError> {
+        if let Some(types) = debug_info.types.as_ref() {
+            self.validate_debug_types(types)?;
+        }
+        if let Some(sources) = debug_info.sources.as_ref() {
+            self.validate_debug_sources(sources)?;
+        }
+        if let Some(functions) = debug_info.functions.as_ref() {
+            self.validate_debug_functions(
+                debug_info.types.as_ref(),
+                debug_info.sources.as_ref(),
+                functions,
+            )?;
+        }
+
         let source_graph = debug_info.source_graph.as_ref();
         if let Some(source_map) = debug_info.source_map.as_ref()
             && source_graph.is_none()
@@ -768,6 +785,215 @@ impl Package {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_debug_types(&self, types: &DebugTypesSection) -> Result<(), PackageDebugInfoError> {
+        let type_count = types.types.len();
+        let string_count = types.strings.len();
+        for (type_index, ty) in types.types.iter().enumerate() {
+            self.validate_debug_type(ty, type_index, type_count, string_count)?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_type(
+        &self,
+        ty: &DebugTypeInfo,
+        type_index: usize,
+        type_count: usize,
+        string_count: usize,
+    ) -> Result<(), PackageDebugInfoError> {
+        match ty {
+            DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => Ok(()),
+            DebugTypeInfo::Pointer { pointee_type_idx } => self.validate_type_index(
+                *pointee_type_idx,
+                type_count,
+                format!("debug type {type_index} pointer target"),
+            ),
+            DebugTypeInfo::Array { element_type_idx, .. } => self.validate_type_index(
+                *element_type_idx,
+                type_count,
+                format!("debug type {type_index} array element"),
+            ),
+            DebugTypeInfo::Struct { name_idx, fields, .. } => {
+                self.validate_string_index(
+                    *name_idx,
+                    string_count,
+                    format!("debug type {type_index} struct name"),
+                )?;
+                for (field_index, field) in fields.iter().enumerate() {
+                    self.validate_string_index(
+                        field.name_idx,
+                        string_count,
+                        format!("debug type {type_index} field {field_index} name"),
+                    )?;
+                    self.validate_type_index(
+                        field.type_idx,
+                        type_count,
+                        format!("debug type {type_index} field {field_index} type"),
+                    )?;
+                }
+                Ok(())
+            },
+            DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+                if let Some(return_type_idx) = return_type_idx {
+                    self.validate_type_index(
+                        *return_type_idx,
+                        type_count,
+                        format!("debug type {type_index} function return type"),
+                    )?;
+                }
+                for (param_index, param_type_idx) in param_type_indices.iter().copied().enumerate()
+                {
+                    self.validate_type_index(
+                        param_type_idx,
+                        type_count,
+                        format!("debug type {type_index} function parameter {param_index}"),
+                    )?;
+                }
+                Ok(())
+            },
+            DebugTypeInfo::Enum {
+                name_idx,
+                discriminant_type_idx,
+                variants,
+                ..
+            } => {
+                self.validate_string_index(
+                    *name_idx,
+                    string_count,
+                    format!("debug type {type_index} enum name"),
+                )?;
+                self.validate_type_index(
+                    *discriminant_type_idx,
+                    type_count,
+                    format!("debug type {type_index} enum discriminant"),
+                )?;
+                for (variant_index, variant) in variants.iter().enumerate() {
+                    self.validate_string_index(
+                        variant.name_idx,
+                        string_count,
+                        format!("debug type {type_index} variant {variant_index} name"),
+                    )?;
+                    if let Some(type_idx) = variant.type_idx {
+                        self.validate_type_index(
+                            type_idx,
+                            type_count,
+                            format!("debug type {type_index} variant {variant_index} payload"),
+                        )?;
+                    }
+                }
+                Ok(())
+            },
+        }
+    }
+
+    fn validate_debug_sources(
+        &self,
+        sources: &DebugSourcesSection,
+    ) -> Result<(), PackageDebugInfoError> {
+        let string_count = sources.strings.len();
+        for (file_index, file) in sources.files.iter().enumerate() {
+            self.validate_string_index(
+                file.path_idx,
+                string_count,
+                format!("debug source file {file_index} path"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_functions(
+        &self,
+        types: Option<&DebugTypesSection>,
+        sources: Option<&DebugSourcesSection>,
+        functions: &DebugFunctionsSection,
+    ) -> Result<(), PackageDebugInfoError> {
+        let string_count = functions.strings.len();
+        let file_count = sources.map_or(0, |sources| sources.files.len());
+        let type_count = types.map_or(0, |types| types.types.len());
+
+        for (function_index, function) in functions.functions.iter().enumerate() {
+            self.validate_debug_function(
+                function,
+                function_index,
+                string_count,
+                file_count,
+                type_count,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_function(
+        &self,
+        function: &DebugFunctionInfo,
+        function_index: usize,
+        string_count: usize,
+        file_count: usize,
+        type_count: usize,
+    ) -> Result<(), PackageDebugInfoError> {
+        self.validate_string_index(
+            function.name_idx,
+            string_count,
+            format!("debug function {function_index} name"),
+        )?;
+        if let Some(linkage_name_idx) = function.linkage_name_idx {
+            self.validate_string_index(
+                linkage_name_idx,
+                string_count,
+                format!("debug function {function_index} linkage name"),
+            )?;
+        }
+        if function.file_idx as usize >= file_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "debug function {function_index} file index {} is outside debug source file table length {file_count}",
+                    function.file_idx,
+                ),
+            });
+        }
+        if let Some(type_idx) = function.type_idx {
+            self.validate_type_index(
+                type_idx,
+                type_count,
+                format!("debug function {function_index} type"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_string_index(
+        &self,
+        index: u32,
+        string_count: usize,
+        context: String,
+    ) -> Result<(), PackageDebugInfoError> {
+        if index as usize >= string_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{context} string index {index} is outside string table length {string_count}",
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_type_index(
+        &self,
+        index: DebugTypeIdx,
+        type_count: usize,
+        context: String,
+    ) -> Result<(), PackageDebugInfoError> {
+        if index.as_u32() as usize >= type_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{context} type index {} is outside type table length {type_count}",
+                    index.as_u32(),
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -1118,13 +1344,15 @@ mod tests {
         serde::Serializable,
         utils::IndexVec,
     };
+    use miden_debug_types::{ColumnNumber, LineNumber};
 
     use super::*;
     use crate::{
         Dependency, Version,
         debug_info::{
-            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
-            DebugSourceNodeId,
+            DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugSourceAsmOp,
+            DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
+            DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
         },
     };
 
@@ -1364,6 +1592,43 @@ mod tests {
         assert!(matches!(
             error,
             PackageDebugInfoError::DecodeSection { id, .. } if id == SectionId::DEBUG_SOURCE_GRAPH
+        ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_non_source_graph_table_indices() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+
+        let mut types = DebugTypesSection::new();
+        types
+            .types
+            .push(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(99) });
+        package.sections = vec![Section::new(SectionId::DEBUG_TYPES, types.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
+        ));
+
+        let mut sources = DebugSourcesSection::new();
+        sources.files.push(DebugFileInfo::new(0));
+        package.sections = vec![Section::new(SectionId::DEBUG_SOURCES, sources.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
+        ));
+
+        let mut functions = DebugFunctionsSection::new();
+        let name_idx = functions.add_string(Arc::from("app::entry"));
+        functions.add_function(DebugFunctionInfo::new(
+            name_idx,
+            0,
+            LineNumber::new(1).unwrap(),
+            ColumnNumber::new(1).unwrap(),
+        ));
+        package.sections = vec![Section::new(SectionId::DEBUG_FUNCTIONS, functions.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
         ));
     }
 
