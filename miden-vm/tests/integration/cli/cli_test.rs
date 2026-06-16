@@ -116,7 +116,7 @@ fn cli_bundle_debug() {
         .arg(output_file.as_path());
     cmd.assert().success();
 
-    let lib = Package::deserialize_from_file(&output_file).unwrap();
+    let lib = Package::deserialize_from_file_trusted(&output_file).unwrap();
     // If there are any package-owned AssemblyOps, the bundle is in debug mode.
     let found_one_asm_op =
         lib.debug_info()

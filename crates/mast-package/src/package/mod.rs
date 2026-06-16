@@ -1031,26 +1031,41 @@ impl Package {
     }
 
     #[cfg(feature = "std")]
+    /// Reads a package file from an untrusted path.
+    ///
+    /// This validates the embedded MAST forest and discards package-owned debug sections before
+    /// returning the package. Use this for user-provided paths or bytes received across a trust
+    /// boundary.
+    pub fn deserialize_from_file(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, DeserializationError> {
+        let bytes = read_package_file(path)?;
+        Self::read_from_bytes(&bytes)
+    }
+
+    #[cfg(feature = "std")]
     /// Reads a trusted local package file.
     ///
     /// This preserves package-owned debug sections and should be used only for files/cache entries
     /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
     /// bytes received across a trust boundary.
-    pub fn deserialize_from_file(
+    pub fn deserialize_from_file_trusted(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, DeserializationError> {
-        use miden_core::serde::DeserializationError;
-
-        let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "failed to open file at {}: {err}",
-                path.to_string_lossy()
-            ))
-        })?;
-
+        let bytes = read_package_file(path)?;
         Self::read_from_bytes_trusted(&bytes)
     }
+}
+
+#[cfg(feature = "std")]
+fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, DeserializationError> {
+    let path = path.as_ref();
+    std::fs::read(path).map_err(|err| {
+        DeserializationError::InvalidValue(format!(
+            "failed to open file at {}: {err}",
+            path.to_string_lossy()
+        ))
+    })
 }
 
 // TESTS

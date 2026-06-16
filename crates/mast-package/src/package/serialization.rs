@@ -809,6 +809,8 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "std")]
+    use alloc::format;
     use alloc::{
         string::{String, ToString},
         sync::Arc,
@@ -816,6 +818,8 @@ mod tests {
         vec::Vec,
     };
     use std::collections::BTreeMap;
+    #[cfg(feature = "std")]
+    use std::fs;
 
     use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName};
     use miden_core::{
@@ -1050,6 +1054,50 @@ mod tests {
         let bytes = package.to_bytes();
 
         let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
+
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
+        assert!(deserialized.debug_info().unwrap().is_some());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_discards_untrusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "debug-sections"
+        ));
+        package.write_to_file(&path).unwrap();
+
+        let deserialized = Package::deserialize_from_file(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(
+            !deserialized.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted package file reads should discard debug sections"
+        );
+        assert!(deserialized.debug_info().unwrap().is_none());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_trusted_preserves_trusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "trusted-debug-sections"
+        ));
+        package.write_to_file(&path).unwrap();
+
+        let deserialized = Package::deserialize_from_file_trusted(&path).unwrap();
+        fs::remove_file(&path).unwrap();
 
         assert!(
             deserialized
