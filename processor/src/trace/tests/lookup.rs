@@ -29,18 +29,23 @@ use miden_air::{
         debug::collect_column_oracle_folds,
     },
     trace::{
-        CHIPLETS_STREAM_MODE_COL,
+        CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, NUM_AND8_LOOKUP_COLS},
         chiplets::hasher::HASH_CYCLE_LEN,
     },
 };
 use miden_core::{
+    Word,
+    crypto::merkle::{MerkleStore, MerkleTree},
     field::{Field, QuadFelt},
     utils::{Matrix, RowMajorMatrix},
 };
 
-use super::{ExecutionTrace, Felt, build_trace_from_ops, rand_array};
+use super::{
+    ExecutionTrace, Felt, build_trace_from_ops, build_trace_from_ops_with_inputs, rand_array,
+};
 use crate::operation::Operation;
+use crate::{AdviceInputs, StackInputs};
 
 const BLAKEG_ANNEX_COLUMNS: usize = 2;
 const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;
@@ -49,6 +54,16 @@ const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
 const AEAD_LOW_SECOND_SRC_PTR_OFFSET: usize = 2;
+const CONTROLLER_S_CTRL_COL: usize = 0;
+const CONTROLLER_BASE_COL: usize = 1;
+const CONTROLLER_SELECTOR_COUNT: usize = 3;
+const CONTROLLER_STATE_WIDTH: usize = 12;
+const CONTROLLER_ROW_DATA_BASE_COL: usize =
+    CONTROLLER_BASE_COL + CONTROLLER_SELECTOR_COUNT + CONTROLLER_STATE_WIDTH;
+const CONTROLLER_S0_COL: usize = CONTROLLER_BASE_COL;
+const CONTROLLER_S2_COL: usize = CONTROLLER_BASE_COL + 2;
+const CONTROLLER_IS_START_COL: usize = CONTROLLER_ROW_DATA_BASE_COL + 2;
+const CONTROLLER_MERKLE_OR_PADDING_COL: usize = CHIPLETS_MODE_COL;
 
 /// Pad/Add/Mul/Drop inside a span - same kind of ops the decoder/stack tests use, with
 /// enough variety to exercise decoder, stack, and range-check bus emitters.
@@ -76,6 +91,43 @@ fn aead_stream_trace() -> ExecutionTrace {
             0, 0, 0, 0, 0, 0, 0, 0, // tail
         ],
     )
+}
+
+fn mpverify_trace() -> ExecutionTrace {
+    let leaves: Vec<Word> = (0..8).map(test_word).collect();
+    let tree = MerkleTree::new(&leaves).expect("test Merkle tree should be valid");
+    let store = MerkleStore::from(&tree);
+    let leaf_idx = 5usize;
+    let node = leaves[leaf_idx];
+    let root = tree.root();
+    let stack = [
+        node[0],
+        node[1],
+        node[2],
+        node[3],
+        Felt::new_unchecked(tree.depth() as u64),
+        Felt::new_unchecked(leaf_idx as u64),
+        root[0],
+        root[1],
+        root[2],
+        root[3],
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+        Felt::ZERO,
+    ];
+    let advice_inputs = AdviceInputs::default().with_merkle_store(store);
+    build_trace_from_ops_with_inputs(
+        vec![Operation::MpVerify(Felt::ZERO)],
+        StackInputs::new(&stack).expect("test stack inputs should be valid"),
+        advice_inputs,
+    )
+}
+
+fn test_word(value: usize) -> Word {
+    [Felt::new_unchecked(value as u64), Felt::ZERO, Felt::ZERO, Felt::ZERO].into()
 }
 
 /// Asserts the `accumulate` output matches the oracle folds bit-exactly on every
@@ -369,6 +421,29 @@ fn lookup_balance_rejects_tampered_aead_request_source_pointer() {
     );
 }
 
+#[test]
+fn lookup_balance_rejects_tampered_merkle_start_flag() {
+    let trace = mpverify_trace();
+    let (core_matrix, mut chip_matrix, blakeg_matrix, and8_matrix) =
+        trace.main_trace().to_air_matrices();
+
+    let first_merkle_start = merkle_start_rows(&chip_matrix)
+        .into_iter()
+        .next()
+        .expect("MPVERIFY trace should contain a Merkle start row");
+    mutate_chip_cell(&mut chip_matrix, first_merkle_start, CONTROLLER_IS_START_COL, -Felt::ONE);
+
+    assert_global_lookup_balance_rejects(
+        "tampered Merkle start flag",
+        &trace,
+        &core_matrix,
+        &chip_matrix,
+        &blakeg_matrix,
+        &and8_matrix,
+        "HasherMerkleVerifyInit",
+    );
+}
+
 fn assert_blakeg_degree3_column_shape(
     label: &str,
     fractions: &LookupFractions<Felt, QuadFelt>,
@@ -638,6 +713,20 @@ fn aead_stream_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
             chip_matrix.values[base] == Felt::ZERO
                 && chip_matrix.values[base + 1] == Felt::ZERO
                 && chip_matrix.values[base + AEAD_STREAM_MODE_COL] == Felt::ONE
+        })
+        .collect()
+}
+
+fn merkle_start_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
+    let width = chip_matrix.width();
+    (0..chip_matrix.height())
+        .filter(|&row| {
+            let base = row * width;
+            chip_matrix.values[base + CONTROLLER_S_CTRL_COL] == Felt::ONE
+                && chip_matrix.values[base + CONTROLLER_MERKLE_OR_PADDING_COL] == Felt::ONE
+                && chip_matrix.values[base + CONTROLLER_S0_COL] == Felt::ONE
+                && chip_matrix.values[base + CONTROLLER_S2_COL] == Felt::ONE
+                && chip_matrix.values[base + CONTROLLER_IS_START_COL] == Felt::ONE
         })
         .collect()
 }

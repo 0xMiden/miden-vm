@@ -1044,7 +1044,7 @@ fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of controller rows per compression request (input + output = 2), as u32.
+/// The number of controller rows per compression request, as u32.
 const NUM_HASHER_ROWS_PER_OP: u32 = CONTROLLER_ROWS_PER_HASHER_OP as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
@@ -1095,7 +1095,7 @@ impl HasherChipletShim {
     }
     /// Records the output of one BlakeG compression request.
     pub fn record_compression_output(&mut self, hashed_state: [Felt; 12]) {
-        self.hasher_replay.record_permute(Felt::from_u32(self.addr), hashed_state);
+        self.hasher_replay.record_compression(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_OP;
     }
 

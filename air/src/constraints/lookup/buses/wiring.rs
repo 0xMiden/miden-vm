@@ -30,14 +30,16 @@
 //! `wire_2` interaction is fully suppressed via the `-sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Hasher compression link (`BusId::HasherPermLinkInput`)
+//! ## Hasher compression link (`BusId::HasherCompressionLink`)
 //!
 //! Binds hasher controller rows to the standalone BlakeG compression AIR. Without this bus a
 //! malicious prover could pair any controller `(state_in, state_out)` with any compression execution
-//! (or skip the cycle entirely). The controller side emits one interaction on the input row:
+//! (or skip the cycle entirely). The controller side emits one interaction per compression row:
 //!
-//! - **Controller compression** (`s_ctrl * is_input`, multiplicity `+1`):
+//! - **Hash compression** (`s_ctrl * !controller_merkle_or_padding`, multiplicity `+1`):
 //!   `[block(8), cv_in(4), cv_out(4)]`.
+//! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
+//!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //!
 //! The BlakeG compression AIR emits the matching receive on its interface row.
 //!
@@ -52,7 +54,7 @@
 
 use core::{array, borrow::Borrow};
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_core::{chiplets::blakeg, field::PrimeCharacteristicRing};
 
 use crate::{
     constraints::{
@@ -60,7 +62,7 @@ use crate::{
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
             messages::{
-                AceWireMsg, AeadBlakeGOutputPairMsg, AeadStreamRequestMsg, HasherPermLinkMsg,
+                AceWireMsg, AeadBlakeGOutputPairMsg, AeadStreamRequestMsg, HasherCompressionLinkMsg,
             },
         },
         utils::BoolNot,
@@ -74,7 +76,7 @@ use crate::{
 /// exclusive, so on any given row only one of:
 /// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
 ///   when the outer `ace_flag` fires).
-/// - **Hasher compression link** on controller input rows: 1 fraction.
+/// - **Hasher compression link** on controller rows: 1 fraction.
 /// - **AEAD stream** rows: at most 2 fractions.
 ///
 /// Per-row max is therefore `max(3, 1, 2) = 3`.
@@ -131,17 +133,17 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     // `m_1`.
     let sblock: LB::Expr = ace.s_block.into();
 
-    // Controller input rows emit one compression-link tuple. Padding and output rows are inactive
-    // because they have `s0 = 0`.
+    // Controller rows emit one compression-link tuple except padding rows.
     let ctrl = local.controller();
-    let ctrl_next = next.controller();
-    let is_input: LB::Expr = ctrl.s0.into();
-
     let controller_flag = ctx.chiplet_active.controller.clone();
-    let f_ctrl_compression = controller_flag * is_input;
+    let merkle_or_padding: LB::Expr = local.controller_merkle_or_padding().into();
+    let ctrl_s0: LB::Expr = ctrl.s0.into();
+    let f_hash_compression = controller_flag.clone() * merkle_or_padding.clone().not();
+    let f_merkle_compression = controller_flag * merkle_or_padding * ctrl_s0;
 
     let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
-    let ctrl_state_next: [LB::Var; 12] = array::from_fn(|i| ctrl_next.state[i]);
+    let ctrl_row_data: [LB::Var; 4] = ctrl.hash_digest();
+    let merkle_cv = blakeg::two_to_one_chaining_word(0);
     let stream = local.aead_stream();
     let stream_next = next.aead_stream();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();
@@ -200,17 +202,30 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                         Deg { v: 8, u: 7 }, // (V, U) = (4 + 4, 3 + 4); ace_flag deg 4
                     );
 
-                    // ---- Hasher compression link (BusId::HasherPermLinkInput) ----
+                    // ---- Hasher compression link (BusId::HasherCompressionLink) ----
 
-                    // Controller compression: +1 / encode(block, cv_in, cv_out).
+                    // Hash compression: +1 / encode(block, cv_in, cv_out).
                     g.add(
-                        "ctrl_compression",
-                        f_ctrl_compression,
+                        "hash_compression",
+                        f_hash_compression,
                         move || {
                             let block = array::from_fn(|i| ctrl_state[i].into());
                             let cv_in = array::from_fn(|i| ctrl_state[8 + i].into());
-                            let cv_out = array::from_fn(|i| ctrl_state_next[8 + i].into());
-                            HasherPermLinkMsg { block, cv_in, cv_out }
+                            let cv_out = array::from_fn(|i| ctrl_row_data[i].into());
+                            HasherCompressionLinkMsg { block, cv_in, cv_out }
+                        },
+                        Deg { v: 5, u: 6 },
+                    );
+
+                    // Merkle compression: +1 / encode(block, fixed_cv, cv_out).
+                    g.add(
+                        "merkle_compression",
+                        f_merkle_compression,
+                        move || {
+                            let block = array::from_fn(|i| ctrl_state[i].into());
+                            let cv_in = array::from_fn(|i| LB::Expr::from(merkle_cv[i]));
+                            let cv_out = array::from_fn(|i| ctrl_state[8 + i].into());
+                            HasherCompressionLinkMsg { block, cv_in, cv_out }
                         },
                         Deg { v: 5, u: 6 },
                     );

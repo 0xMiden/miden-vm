@@ -6,8 +6,8 @@ use miden_air::trace::{
     and8_lookup::BYTE_LOOKUP_COUNT_LEN,
     blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
     chiplets::hasher::{
-        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_CYCLE_LEN, LINEAR_HASH, MP_VERIFY,
-        MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors,
+        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, HASH_CYCLE_LEN, LINEAR_HASH,
+        MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, STATE_WIDTH, Selectors,
     },
 };
 use miden_core::chiplets::{blakeg, hasher::compress_state};
@@ -36,7 +36,7 @@ mod tests;
 /// Key type for digest-based lookups.
 type DigestKey = [u64; 4];
 
-/// Key type for full-state lookups.
+/// Key type for BlakeG compression input states.
 type StateKey = [u64; STATE_WIDTH];
 
 /// Output shape requested from one BlakeG compression block.
@@ -73,22 +73,11 @@ fn key_to_state(key: &StateKey) -> HasherState {
 
 /// Hash chiplet for the VM.
 ///
-/// This component uses a controller/compression split architecture:
-///
-/// - **Controller region**: pairs of (input, output) rows for each compression
-///   request. Input rows (s0=1) capture the operation type and pre-compression state. Output rows
-///   (s0=0, s1=0) capture the post-compression state.
-///
-/// - **BlakeG compression AIR**: one 64-row block per unique input state. The block multiplicity
-///   is linked to controller rows via the hasher compression-link LogUp bus.
-///
-/// This architecture enables compression deduplication: N requests with the same input state
-/// produce N controller pairs but only one BlakeG block with multiplicity N.
-///
-/// ## Controller trace layout (20 columns)
-///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit
-/// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
+/// The controller records one row per compression request. Hash rows carry
+/// `block[8] || cv_in[4]` in the state columns and `cv_out[4]` in row data; Merkle rows carry
+/// `block[8] || cv_out[4]` plus their path-index data. The standalone BlakeG compression AIR
+/// executes one 64-row block per unique input state, with multiplicity tracked by the
+/// compression-link bus.
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
@@ -109,7 +98,7 @@ impl Hasher {
 
     /// Returns the length of the execution trace.
     ///
-    /// Before finalization, this returns an estimate based on the controller region length
+    /// Before finalization, this returns an estimate based on the controller region length.
     /// The estimate is verified against the actual length during `fill_trace()` via a
     /// debug assertion.
     pub(super) fn trace_len(&self) -> usize {
@@ -183,40 +172,11 @@ impl Hasher {
     // HASHING METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Applies one packed BlakeG compression and records a state return.
-    pub fn permute(&mut self, state: HasherState) -> (Felt, HasherState) {
-        let addr = self.trace.next_row_addr();
-
-        let compressed = self.append_controller_compression(
-            LINEAR_HASH,
-            RETURN_STATE,
-            state,
-            ZERO, // input_node_index
-            ZERO, // output_node_index
-            ONE,  // is_boundary_input = 1 (first input)
-            ONE,  // is_boundary_output = 1 (final output)
-            ZERO, // input_direction_bit (non-Merkle)
-            ZERO, // output_direction_bit (non-Merkle)
-        );
-
-        (addr, compressed)
-    }
-
-    /// Applies one packed BlakeG compression and records a digest-only return.
+    /// Applies one packed BlakeG compression.
     pub fn bcompress(&mut self, state: HasherState) -> (Felt, HasherState) {
         let addr = self.trace.next_row_addr();
 
-        let compressed = self.append_controller_compression(
-            LINEAR_HASH,
-            RETURN_HASH,
-            state,
-            ZERO,
-            ZERO,
-            ONE,
-            ONE,
-            ZERO,
-            ZERO,
-        );
+        let compressed = self.append_hash_compression(LINEAR_HASH, state, true);
 
         (addr, compressed)
     }
@@ -252,18 +212,7 @@ impl Hasher {
         let addr = self.trace.next_row_addr();
         let op_start = self.trace.next_op_index();
         let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
-        // Single compression: boundary on both input and output.
-        let compressed = self.append_controller_compression(
-            LINEAR_HASH,
-            RETURN_HASH,
-            init_state,
-            ZERO,
-            ZERO, // node_index: input, output
-            ONE,
-            ONE, // is_boundary: input=1, output=1
-            ZERO,
-            ZERO, // direction_bit: non-Merkle
-        );
+        let compressed = self.append_hash_compression(LINEAR_HASH, init_state, true);
 
         self.insert_to_memoized_trace_map(op_start, expected_hash);
         let result = get_digest(&compressed);
@@ -291,66 +240,21 @@ impl Hasher {
         let init_state = init_state(op_batches[0].groups(), n);
 
         if num_batches == 1 {
-            // Single batch: boundary on both input and output
-            let compressed = self.append_controller_compression(
-                LINEAR_HASH,
-                RETURN_HASH,
-                init_state,
-                ZERO,
-                ZERO,
-                ONE,
-                ONE,
-                ZERO,
-                ZERO,
-            );
+            let compressed = self.append_hash_compression(LINEAR_HASH, init_state, true);
             self.insert_to_memoized_trace_map(op_start, expected_hash);
             let result = get_digest(&compressed);
             return (addr, result);
         }
 
-        // Multiple batches:
-        // First batch: boundary input only
-        let mut state = self.append_controller_compression(
-            LINEAR_HASH,
-            RETURN_STATE,
-            init_state,
-            ZERO,
-            ZERO,
-            ONE,
-            ZERO,
-            ZERO,
-            ZERO,
-        );
+        let mut state = self.append_hash_compression(LINEAR_HASH, init_state, false);
 
-        // Middle batches: no boundary flags
         for batch in op_batches.iter().take(num_batches - 1).skip(1) {
             absorb_into_state(&mut state, batch.groups());
-            state = self.append_controller_compression(
-                LINEAR_HASH,
-                RETURN_STATE,
-                state,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-                ZERO,
-            );
+            state = self.append_hash_compression(HASH_ABSORB, state, false);
         }
 
-        // Last batch: boundary output only
         absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
-        let compressed = self.append_controller_compression(
-            LINEAR_HASH,
-            RETURN_HASH,
-            state,
-            ZERO,
-            ZERO,
-            ZERO,
-            ONE,
-            ZERO,
-            ZERO,
-        );
+        let compressed = self.append_hash_compression(HASH_ABSORB, state, true);
 
         self.insert_to_memoized_trace_map(op_start, expected_hash);
         let result = get_digest(&compressed);
@@ -452,60 +356,56 @@ impl Hasher {
     // CORE HELPER: CONTROLLER COMPRESSION
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a controller (input, output) pair and records the compression request.
-    ///
-    /// Writes two rows to the controller region:
-    /// - Input row: `init_selectors` (s0=1), pre-compression `state`, `input_node_index`,
-    ///   `is_boundary_input`, `input_direction_bit`.
-    /// - Output row: `final_selectors` (s0=0), post-compression state, `output_node_index`,
-    ///   `is_boundary_output`, `output_direction_bit`.
-    ///
-    /// Both rows carry the current `mrupdate_id` for sibling table domain separation.
-    /// The pre-compression state is also recorded in `compression_request_map` for deduplication.
-    ///
-    /// For Merkle operations, `input_node_index` is the full tree index and
-    /// `output_node_index` is the shifted index (input >> 1). For non-Merkle operations,
-    /// both should be ZERO.
-    ///
-    /// Returns the post-compression state.
-    fn append_controller_compression(
+    /// Appends a hash-controller compression row and records the BlakeG request.
+    fn append_hash_compression(
         &mut self,
-        init_selectors: Selectors,
-        final_selectors: Selectors,
+        selectors: Selectors,
         state: HasherState,
-        input_node_index: Felt,
-        output_node_index: Felt,
-        is_boundary_input: Felt,
-        is_boundary_output: Felt,
-        input_direction_bit: Felt,
-        output_direction_bit: Felt,
+        is_final: bool,
     ) -> HasherState {
-        // Append input controller row
-        self.trace.append_controller_row(
-            init_selectors,
-            &state,
-            input_node_index,
-            self.mrupdate_id,
-            is_boundary_input,
-            input_direction_bit,
-        );
-
-        // Apply the compression.
         let mut compressed = state;
         compress_state(&mut compressed);
 
-        // Append output controller row
+        let digest = get_digest(&compressed).into();
+        let op_final = if is_final { ONE } else { ZERO };
+        self.trace
+            .append_controller_row(selectors, &state, digest, op_final, self.mrupdate_id);
+
+        self.record_compression_request(&state, CompressionOutput::Packed);
+
+        compressed
+    }
+
+    /// Appends a Merkle-controller compression row and records the BlakeG request.
+    fn append_merkle_compression(
+        &mut self,
+        selectors: Selectors,
+        input_state: HasherState,
+        node_index: u64,
+        is_start: bool,
+        is_final: bool,
+    ) -> HasherState {
+        let mut compressed = input_state;
+        compress_state(&mut compressed);
+
+        let mut row_state = input_state;
+        row_state[8..12].copy_from_slice(get_digest(&compressed).as_elements());
+        let row_data = [
+            Felt::new_unchecked(node_index),
+            Felt::new_unchecked(node_index >> 1),
+            if is_start { ONE } else { ZERO },
+            ZERO,
+        ];
+        let op_final = if is_final { ONE } else { ZERO };
         self.trace.append_controller_row(
-            final_selectors,
-            &compressed,
-            output_node_index,
+            selectors,
+            &row_state,
+            row_data,
+            op_final,
             self.mrupdate_id,
-            is_boundary_output,
-            output_direction_bit,
         );
 
-        // Record this compression request for deduplication.
-        self.record_compression_request(&state, CompressionOutput::Packed);
+        self.record_compression_request(&input_state, CompressionOutput::Packed);
 
         compressed
     }
@@ -528,44 +428,15 @@ impl Hasher {
         );
 
         let main_selectors = context.main_selectors();
-        let depth = path.len();
-
         let mut root = value;
 
+        let last_idx = path.len() - 1;
         for (i, &sibling) in path.iter().enumerate() {
-            let is_first = i == 0;
-            let is_last = i == depth - 1;
-
-            // Determine boundary flags
-            let is_boundary_input = if is_first { ONE } else { ZERO };
-            let is_boundary_output = if is_last { ONE } else { ZERO };
-
-            // Direction bit for this step: LSB of the current index
             let b_i = index & 1;
             let state = build_merge_state(&root, &sibling, b_i);
 
-            // Input row carries the full index; output row carries the shifted index.
-            let input_node_idx = Felt::new_unchecked(index);
-            let output_node_idx = Felt::new_unchecked(index >> 1);
-
-            // Direction bit for the NEXT step (forward propagation for routing constraint).
-            // On the last step there is no next step, so direction_bit = 0.
-            let b_next = if is_last { 0 } else { (index >> 1) & 1 };
-
-            let final_selectors = if is_last { RETURN_HASH } else { RETURN_STATE };
-
-            // Append controller pair with direction bits
-            let compressed = self.append_controller_compression(
-                main_selectors,
-                final_selectors,
-                state,
-                input_node_idx,
-                output_node_idx,
-                is_boundary_input,
-                is_boundary_output,
-                Felt::new_unchecked(b_i), // input direction_bit: current step's bit
-                Felt::new_unchecked(b_next), // output direction_bit: next step's bit (propagated)
-            );
+            let compressed =
+                self.append_merkle_compression(main_selectors, state, index, i == 0, i == last_idx);
 
             root = get_digest(&compressed);
             index >>= 1;
@@ -590,8 +461,8 @@ impl Hasher {
     /// Attempts to replay a memoized controller trace for the given expected hash.
     ///
     /// If a memoized trace exists, re-pushes the source ops with the current `mrupdate_id`,
-    /// re-registers compression requests from copied input rows, and returns `Some((addr,
-    /// digest))`. Otherwise returns `None`.
+    /// re-registers compression requests from copied controller rows, and returns
+    /// `Some((addr, digest))`. Otherwise returns `None`.
     fn replay_memoized_trace(&mut self, expected_hash: Digest) -> Option<(Felt, Digest)> {
         let (op_start, op_end) = match self.get_memoized_trace(expected_hash) {
             Some(&(s, e)) => (s, e),

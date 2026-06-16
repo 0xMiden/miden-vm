@@ -56,7 +56,8 @@ pub enum BusId {
     // --- In-circuit buses ---
     KernelRomCall = 3,
     HasherLinearHashInit = 4,
-    HasherReturnState = 5,
+    /// Reserved hasher bus id. One-row controller rows use `HasherReturnHash`.
+    ReservedHasherBus5 = 5,
     HasherAbsorption = 6,
     HasherReturnHash = 7,
     HasherMerkleVerifyInit = 8,
@@ -81,9 +82,9 @@ pub enum BusId {
     /// ACE wiring bus (LogUp).
     AceWiring = 22,
     /// Hasher compression-link bus: `[block(8), cv_in(4), cv_out(4)]`.
-    HasherPermLinkInput = 23,
+    HasherCompressionLink = 23,
     /// Reserved to keep following bus ids stable.
-    HasherPermLinkOutput = 24,
+    ReservedHasherBus24 = 24,
     /// Byte-pair lookup table: ordinary `[a, b, a & b]` for byte-sized operands.
     And8Lookup = 25,
     /// BlakeG rot12 contribution for byte position 0: `[a, b, contribution]`.
@@ -133,7 +134,7 @@ const _: () = assert!(BusId::BlockHashTable as usize == 1);
 const _: () = assert!(BusId::LogPrecompileTranscript as usize == 2);
 const _: () = assert!(BusId::KernelRomCall as usize == 3);
 const _: () = assert!(BusId::HasherLinearHashInit as usize == 4);
-const _: () = assert!(BusId::HasherReturnState as usize == 5);
+const _: () = assert!(BusId::ReservedHasherBus5 as usize == 5);
 const _: () = assert!(BusId::HasherAbsorption as usize == 6);
 const _: () = assert!(BusId::HasherReturnHash as usize == 7);
 const _: () = assert!(BusId::HasherMerkleVerifyInit as usize == 8);
@@ -151,8 +152,8 @@ const _: () = assert!(BusId::StackOverflowTable as usize == 19);
 const _: () = assert!(BusId::SiblingTable as usize == 20);
 const _: () = assert!(BusId::RangeCheck as usize == 21);
 const _: () = assert!(BusId::AceWiring as usize == 22);
-const _: () = assert!(BusId::HasherPermLinkInput as usize == 23);
-const _: () = assert!(BusId::HasherPermLinkOutput as usize == 24);
+const _: () = assert!(BusId::HasherCompressionLink as usize == 23);
+const _: () = assert!(BusId::ReservedHasherBus24 as usize == 24);
 const _: () = assert!(BusId::And8Lookup as usize == 25);
 const _: () = assert!(BusId::BlakeGRot12Pos0 as usize == 26);
 const _: () = assert!(BusId::BlakeGRot12Pos1 as usize == 27);
@@ -186,7 +187,7 @@ pub struct HasherMsg<E> {
 /// Payload for a [`HasherMsg`]; width varies per interaction kind.
 #[derive(Clone, Debug)]
 pub enum HasherPayload<E> {
-    /// 12-lane BlakeG input/output state.
+    /// 12-lane BlakeG state.
     State([E; 12]),
     /// 8-lane rate.
     Rate([E; 8]),
@@ -259,16 +260,6 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         ];
         Self {
             kind: BusId::HasherLinearHashInit,
-            addr,
-            node_index: E::ZERO,
-            payload: HasherPayload::State(state),
-        }
-    }
-
-    /// Return full packed BlakeG output state.
-    pub fn return_state(addr: E, state: [E; 12]) -> Self {
-        Self {
-            kind: BusId::HasherReturnState,
             addr,
             node_index: E::ZERO,
             payload: HasherPayload::State(state),
@@ -560,9 +551,9 @@ pub struct StackOverflowMsg<E> {
 
 /// Hasher compression-link message: `[block(8), cv_in(4), cv_out(4)]`.
 ///
-/// Binds a hasher controller input/output pair to one BlakeG compression block.
+/// Binds one hasher controller row to one BlakeG compression block.
 #[derive(Clone, Debug)]
-pub struct HasherPermLinkMsg<E> {
+pub struct HasherCompressionLinkMsg<E> {
     pub block: [E; 8],
     pub cv_in: [E; 4],
     pub cv_out: [E; 4],
@@ -1094,9 +1085,9 @@ where
     }
 }
 
-// --- HasherPermLinkMsg ---------------------------------------------------------------------------
+// --- HasherCompressionLinkMsg --------------------------------------------------------------------
 
-impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
+impl<E, EF> LookupMessage<E, EF> for HasherCompressionLinkMsg<E>
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
@@ -1111,7 +1102,7 @@ where
                 self.cv_out[i - 12].clone()
             }
         });
-        challenges.encode(BusId::HasherPermLinkInput as usize, payload)
+        challenges.encode(BusId::HasherCompressionLink as usize, payload)
     }
 }
 

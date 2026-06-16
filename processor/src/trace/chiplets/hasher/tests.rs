@@ -3,15 +3,18 @@ use core::ops::Range;
 
 use miden_air::trace::{
     blakeg_compression::{IFACE_C_BASE_COL, IFACE_R_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS},
-    chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, TRACE_WIDTH},
+    chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, HASH_CYCLE_LEN, PADDING, TRACE_WIDTH},
 };
 
 // Chiplet-local column indices used by the hasher trace tests.
 const STATE_COL_RANGE: Range<usize> = 3..15;
+const ROW_DATA_COL_RANGE: Range<usize> = 15..19;
 const NODE_INDEX_COL_IDX: usize = 15;
-const MRUPDATE_ID_COL_IDX: usize = 16;
-const IS_BOUNDARY_COL_IDX: usize = 17;
-const DIRECTION_BIT_COL_IDX: usize = 18;
+const NODE_INDEX_NEXT_COL_IDX: usize = 16;
+const IS_START_COL_IDX: usize = 17;
+const OP_FINAL_COL_IDX: usize = 19;
+const MRUPDATE_ID_COL_IDX: usize = 20;
+const CONTROLLER_MERKLE_OR_PADDING_COL_IDX: usize = TRACE_WIDTH - 1;
 const TEST_TRACE_WIDTH: usize = NUM_BLAKEG_COMPRESSION_COLS;
 
 fn controller_len(controller_rows: usize) -> usize {
@@ -29,20 +32,20 @@ use miden_utils_testing::rand::rand_array;
 
 use super::{
     ChipletTraceFragment, Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW,
-    MR_UPDATE_OLD, MerklePath, RATE_LEN, RETURN_HASH, RETURN_STATE, Selectors, absorb_into_state,
-    get_digest, init_state, init_state_from_words,
+    MR_UPDATE_OLD, MerklePath, RATE_LEN, Selectors, absorb_into_state, get_digest, init_state,
+    init_state_from_words,
 };
 
 // SPONGE MODE TESTS
 // ================================================================================================
 
 #[test]
-fn hasher_compress_return_state() {
-    // --- test one controller compression returning the full state ---
+fn hasher_bcompress_one() {
+    // --- test one controller compression ---
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
 
-    let (addr, final_state) = hasher.permute(init_state);
+    let (addr, final_state) = hasher.bcompress(init_state);
     assert_eq!(ONE, addr);
 
     let expected_state = compress_state(init_state);
@@ -50,48 +53,40 @@ fn hasher_compress_return_state() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 2 rows (1 pair), padded to the chiplet alignment boundary.
+    // Controller region: 1 row, padded to the chiplet alignment boundary.
     // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(2);
+    let compression_start = controller_len(1);
     assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
-    // Row 0: input (LINEAR_HASH, is_boundary=1)
-    check_controller_input(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO);
-    // Row 1: output (RETURN_STATE, is_boundary=1)
-    check_controller_output(&trace, 1, RETURN_STATE, &expected_state, ZERO, ONE, ZERO);
+    check_controller_row(&trace, 0, LINEAR_HASH, &init_state, ZERO, ONE, ZERO, ZERO, ONE);
 
     check_compression_block(&trace, compression_start, &init_state, ONE);
 }
 
 #[test]
-fn hasher_compress_return_state_two() {
+fn hasher_bcompress_two() {
     let mut hasher = Hasher::default();
     let init_state1 = random_state_with_packed_cv();
     let init_state2 = random_state_with_packed_cv();
 
-    let (addr1, final_state1) = hasher.permute(init_state1);
-    let (addr2, final_state2) = hasher.permute(init_state2);
+    let (addr1, final_state1) = hasher.bcompress(init_state1);
+    let (addr2, final_state2) = hasher.bcompress(init_state2);
 
-    // Addresses are 2 rows apart (controller pairs)
     assert_eq!(ONE, addr1);
-    assert_eq!(Felt::from_u8(3), addr2);
+    assert_eq!(Felt::from_u8(2), addr2);
 
     assert_eq!(compress_state(init_state1), final_state1);
     assert_eq!(compress_state(init_state2), final_state2);
 
     let trace = build_trace(hasher);
 
-    // Controller region: 4 rows (2 pairs), padded to the chiplet alignment boundary.
+    // Controller region: two compression rows, padded to the chiplet alignment boundary.
     // Compression segment: 2 real cycles plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(4);
+    let compression_start = controller_len(2);
     assert_eq!(trace[0].len(), compression_start + 3 * HASH_CYCLE_LEN);
 
-    // Pair 1
-    check_controller_input(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO);
-    check_controller_output(&trace, 1, RETURN_STATE, &final_state1, ZERO, ONE, ZERO);
-    // Pair 2
-    check_controller_input(&trace, 2, LINEAR_HASH, &init_state2, ZERO, ONE, ZERO, ZERO);
-    check_controller_output(&trace, 3, RETURN_STATE, &final_state2, ZERO, ONE, ZERO);
+    check_controller_row(&trace, 0, LINEAR_HASH, &init_state1, ZERO, ONE, ZERO, ZERO, ONE);
+    check_controller_row(&trace, 1, LINEAR_HASH, &init_state2, ZERO, ONE, ZERO, ZERO, ONE);
 }
 
 // TREE MODE TESTS
@@ -105,7 +100,7 @@ fn hasher_compress_return_state_two() {
 ///  L0      L1
 /// ```
 ///
-/// Verifying the path from L0 to root requires 1 controller pair.
+/// Verifying the path from L0 to root requires 1 controller row.
 #[test]
 fn hasher_build_merkle_root_depth_1() {
     let leaves = init_leaves(&[1, 2]);
@@ -119,11 +114,8 @@ fn hasher_build_merkle_root_depth_1() {
 
     let trace = build_trace(hasher);
 
-    // Row 0: input (MP_VERIFY, is_boundary=1, node_index=0)
     let init_state = init_state_from_words(&leaves[0], &path0[0]);
-    check_controller_input(&trace, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO);
-    // Row 1: output (RETURN_HASH, is_boundary=1, node_index=0)
-    check_controller_output(&trace, 1, RETURN_HASH, &compress_state(init_state), ZERO, ONE, ZERO);
+    check_controller_row(&trace, 0, MP_VERIFY, &init_state, ZERO, ONE, ZERO, ZERO, ONE);
 }
 
 /// Merkle tree with 8 leaves (depth 3):
@@ -138,7 +130,7 @@ fn hasher_build_merkle_root_depth_1() {
 ///      L0 L1 L2 L3 L4 L5 L6 L7
 /// ```
 ///
-/// Verifying the path from L5 (node_index=5) to root requires 3 controller pairs.
+/// Verifying the path from L5 (node_index=5) to root requires 3 controller rows.
 /// The node_index shifts right by 1 at each level: 5 -> 2 -> 1 -> 0.
 #[test]
 fn hasher_build_merkle_root_depth_3() {
@@ -153,14 +145,11 @@ fn hasher_build_merkle_root_depth_3() {
 
     let trace = build_trace(hasher);
 
-    // Depth 3: 3 controller pairs = 6 rows
+    // Depth 3: 3 controller rows.
     // Index=5 (binary 101): direction bits are LSBs at each level
-    // Pair 0 (rows 0-1): node_index 5 -> 2, b_0=5&1=1, b_next=(5>>1)&1=0
-    check_merkle_controller_pair(&trace, 0, MP_VERIFY, 5, true, false, ZERO, ONE, ZERO);
-    // Pair 1 (rows 2-3): node_index 2 -> 1, b_1=2&1=0, b_next=(2>>1)&1=1
-    check_merkle_controller_pair(&trace, 2, MP_VERIFY, 2, false, false, ZERO, ZERO, ONE);
-    // Pair 2 (rows 4-5): node_index 1 -> 0, b_2=1&1=1, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 4, MP_VERIFY, 1, false, true, ZERO, ONE, ZERO);
+    check_merkle_controller_row(&trace, 0, MP_VERIFY, 5, true, false, ZERO, ONE);
+    check_merkle_controller_row(&trace, 1, MP_VERIFY, 2, false, false, ZERO, ZERO);
+    check_merkle_controller_row(&trace, 2, MP_VERIFY, 1, false, true, ZERO, ONE);
 }
 
 #[test]
@@ -184,22 +173,33 @@ fn hasher_update_merkle_root() {
 
     let trace = build_trace(hasher);
 
-    // Depth 2: 2 pairs for MV (old path) + 2 pairs for MU (new path) = 8 controller rows.
+    // Depth 2: two MV rows (old path) + two MU rows (new path) = four controller rows.
     // All rows share mrupdate_id=1.
 
-    // MV leg (old path): rows 0-3
+    // MV leg (old path): rows 0-1
     // Index=1 (binary 01): direction bits are LSBs at each level
-    // Pair 0 (rows 0-1): node_index 1 -> 0, b_0=1&1=1, b_next=(1>>1)&1=0
-    check_merkle_controller_pair(&trace, 0, MR_UPDATE_OLD, 1, true, false, ONE, ONE, ZERO);
-    // Pair 1 (rows 2-3): node_index 0 -> 0, b_1=0&1=0, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 2, MR_UPDATE_OLD, 0, false, true, ONE, ZERO, ZERO);
+    check_merkle_controller_row(&trace, 0, MR_UPDATE_OLD, 1, true, false, ONE, ONE);
+    check_merkle_controller_row(&trace, 1, MR_UPDATE_OLD, 0, false, true, ONE, ZERO);
 
-    // MU leg (new path): rows 4-7
+    // MU leg (new path): rows 2-3
     // Same index, same direction bits
-    // Pair 0 (rows 4-5): node_index 1 -> 0, b_0=1&1=1, b_next=(1>>1)&1=0
-    check_merkle_controller_pair(&trace, 4, MR_UPDATE_NEW, 1, true, false, ONE, ONE, ZERO);
-    // Pair 1 (rows 6-7): node_index 0 -> 0, b_1=0&1=0, b_next=0 (last step)
-    check_merkle_controller_pair(&trace, 6, MR_UPDATE_NEW, 0, false, true, ONE, ZERO, ZERO);
+    check_merkle_controller_row(&trace, 2, MR_UPDATE_NEW, 1, true, false, ONE, ONE);
+    check_merkle_controller_row(&trace, 3, MR_UPDATE_NEW, 0, false, true, ONE, ZERO);
+
+    for row in 4..controller_len(4) {
+        assert_eq!(trace[0][row], PADDING[0], "padding s0 at row {row}");
+        assert_eq!(trace[1][row], PADDING[1], "padding s1 at row {row}");
+        assert_eq!(trace[2][row], PADDING[2], "padding s2 at row {row}");
+        for col in STATE_COL_RANGE.clone().chain(ROW_DATA_COL_RANGE.clone()) {
+            assert_eq!(trace[col][row], ZERO, "padding payload col {col} at row {row}");
+        }
+        assert_eq!(trace[OP_FINAL_COL_IDX][row], ZERO, "padding op_final at row {row}");
+        assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], ONE, "padding mrupdate_id at row {row}");
+        assert_eq!(
+            trace[CONTROLLER_MERKLE_OR_PADDING_COL_IDX][row], ONE,
+            "padding discriminator at row {row}"
+        );
+    }
 }
 
 // COMBINED COMPRESSION-BLOCK VIEW TESTS
@@ -210,7 +210,7 @@ fn compression_segment_structure() {
     // One BCOMPRESS yields one 64-row compression block with multiplicity 1.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
-    let (addr, result) = hasher.permute(init_state);
+    let (addr, result) = hasher.bcompress(init_state);
 
     // Verify returned address and compressed state
     assert_eq!(addr, ONE, "first compression should start at address 1");
@@ -219,7 +219,7 @@ fn compression_segment_structure() {
     let trace = build_trace(hasher);
 
     // The test view appends compression blocks after the padded controller rows.
-    let compression_start = controller_len(2);
+    let compression_start = controller_len(1);
 
     assert_eq!(compression_multiplicity(&trace, compression_start), ONE);
     assert_eq!(compression_multiplicity(&trace, compression_start + HASH_CYCLE_LEN), ZERO);
@@ -231,8 +231,8 @@ fn compression_deduplication() {
     // Two identical BCOMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
     let init_state = random_state_with_packed_cv();
-    let (addr1, result1) = hasher.permute(init_state);
-    let (addr2, result2) = hasher.permute(init_state); // same state
+    let (addr1, result1) = hasher.bcompress(init_state);
+    let (addr2, result2) = hasher.bcompress(init_state); // same state
 
     // Both should produce the same result but at different addresses
     assert_eq!(result1, result2, "same input should produce same output");
@@ -240,9 +240,9 @@ fn compression_deduplication() {
 
     let trace = build_trace(hasher);
 
-    // Controller: 4 rows (2 pairs), padded to the chiplet alignment boundary.
+    // Controller: two compression rows, padded to the chiplet alignment boundary.
     // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(4);
+    let compression_start = controller_len(2);
     assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
     // Compression segment: multiplicity should be 2.
@@ -275,9 +275,9 @@ fn hash_memoization_control_blocks() {
 
     let trace = build_trace(hasher);
 
-    // Both calls produce controller pairs (4 rows), but share compression requests.
+    // Both calls produce one controller row each, but share compression requests.
     // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(4);
+    let compression_start = controller_len(2);
     assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
     // Compression segment has multiplicity 2 (two requests for same state)
@@ -306,13 +306,12 @@ fn hash_memoization_basic_blocks_single_batch() {
 
     let trace = build_trace(hasher);
 
-    // Single batch -> 1 controller pair per call = 4 rows total.
+    // Single batch: one controller row per call, two rows total.
     // Compression segment: 1 real cycle plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(4);
+    let compression_start = controller_len(2);
     assert_eq!(trace[0].len(), compression_start + 2 * HASH_CYCLE_LEN);
 
-    // Verify first call: rows 0-1
-    check_controller_input(
+    check_controller_row(
         &trace,
         0,
         LINEAR_HASH,
@@ -321,22 +320,10 @@ fn hash_memoization_basic_blocks_single_batch() {
         ONE,
         ZERO,
         ZERO,
-    );
-    check_controller_output(
-        &trace,
-        1,
-        RETURN_HASH,
-        &compress_state(init_state(
-            batches[0].groups(),
-            num_basic_block_hash_groups(&batches) as u32,
-        )),
-        ZERO,
         ONE,
-        ZERO,
     );
 
-    // Verify memoized call: rows 2-3 should match rows 0-1 in selectors and state
-    check_memoized_trace(&trace, 0..2, 2..4);
+    check_memoized_trace(&trace, 0..1, 1..2);
 
     // Compression segment: multiplicity should be 2 (original + memoized)
     assert_eq!(compression_multiplicity(&trace, compression_start), Felt::from_u8(2));
@@ -345,7 +332,7 @@ fn hash_memoization_basic_blocks_single_batch() {
 #[test]
 fn hash_memoization_basic_blocks_multi_batch() {
     // Test memoization of a multi-batch basic block (3 batches).
-    // The second call should copy all 3 controller pairs and re-register all 3 compression
+    // The second call should copy all 3 controller rows and re-register all 3 compression
     // requests.
     let mut hasher = Hasher::default();
 
@@ -361,27 +348,16 @@ fn hash_memoization_basic_blocks_multi_batch() {
 
     let trace = build_trace(hasher);
 
-    // 3 batches -> 3 controller pairs per call = 12 rows total.
+    // 3 batches -> 3 controller rows per call = 6 rows total.
     // 3 real compression states plus one zero-multiplicity dummy cycle.
-    let compression_start = controller_len(12);
+    let compression_start = controller_len(6);
     assert_eq!(trace[0].len(), compression_start + 4 * HASH_CYCLE_LEN);
 
-    // Verify first call: rows 0-5 (3 pairs)
-    // Row 0: first batch input, is_boundary=1 (start)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][0], ONE);
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][0], ZERO);
-    // Row 1: first batch output, is_boundary=0 (not final)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][1], ZERO);
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][1], ZERO);
-    // Row 2: second batch input, is_boundary=0 (continuation)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][2], ZERO);
-    // Row 4: third batch input, is_boundary=0 (continuation)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][4], ZERO);
-    // Row 5: third batch output, is_boundary=1 (final)
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][5], ONE);
+    assert_eq!([trace[0][0], trace[1][0], trace[2][0]], LINEAR_HASH);
+    assert_eq!([trace[0][1], trace[1][1], trace[2][1]], super::HASH_ABSORB);
+    assert_eq!([trace[0][2], trace[1][2], trace[2][2]], super::HASH_ABSORB);
 
-    // Verify memoized call: rows 6-11 should match rows 0-5
-    check_memoized_trace(&trace, 0..6, 6..12);
+    check_memoized_trace(&trace, 0..3, 3..6);
 
     // Compression segment: each of the 3 unique states should have multiplicity 2
     for i in 0..3 {
@@ -408,11 +384,11 @@ fn hash_memoization_basic_blocks_check() {
     // it should be memoized from BB1's trace, so BB1's compression states get multiplicity 2.
     //
     // Expected controller row layout:
-    // Rows 0-3:   BB1 (2 batches = 2 pairs)
-    // Rows 4-5:   Loop body (1 batch = 1 pair)
-    // Rows 6-7:   Join2 (1 pair)
-    // Rows 8-11:  BB2 memoized (2 pairs, copied from BB1)
-    // Rows 12-13: Join1 (1 pair)
+    // Rows 0..2: BB1 (2 batches)
+    // Row  2:    Loop body
+    // Row  3:    Join2
+    // Rows 4..6: BB2 memoized from BB1
+    // Row  6:    Join1
     let mut hasher = Hasher::default();
 
     let batches = make_multi_batch(2);
@@ -456,19 +432,19 @@ fn hash_memoization_basic_blocks_check() {
     let trace = build_trace(hasher);
 
     // Verify BB2's controller rows (the memoized copy) match BB1's original rows.
-    // BB1 is at rows 0..4 (2 batches = 2 pairs = 4 rows).
-    // Loop body is at rows 4..6 (1 batch = 1 pair = 2 rows).
-    // Join2 is at rows 6..8 (1 pair).
-    // BB2 (memoized) is at rows 8..12.
-    // Join1 is at rows 12..14.
+    // BB1 is at rows 0..2.
+    // Loop body is at row 2.
+    // Join2 is at row 3.
+    // BB2 (memoized) is at rows 4..6.
+    // Join1 is at row 6.
     let bb1_start = bb1_addr.as_canonical_u64() as usize - 1;
     let bb2_start = bb2_addr.as_canonical_u64() as usize - 1;
-    check_memoized_trace(&trace, bb1_start..bb1_start + 4, bb2_start..bb2_start + 4);
+    check_memoized_trace(&trace, bb1_start..bb1_start + 2, bb2_start..bb2_start + 2);
 
     // Verify compression multiplicities: BB1's 2 compression states should each have
     // multiplicity 2 (original from BB1 + memoized from BB2). The loop body's compression
     // state and the two join compression states should each have multiplicity 1.
-    let controller_rows: usize = 14; // 4 + 2 + 2 + 4 + 2
+    let controller_rows: usize = 7; // 2 + 1 + 1 + 2 + 1
     let controller_padded_len = controller_len(controller_rows);
 
     // Count unique compression states: BB1 has 2 unique states (2 batches), loop body has 1,
@@ -545,119 +521,116 @@ fn build_trace(hasher: Hasher) -> Vec<Vec<Felt>> {
         .collect()
 }
 
-/// Checks a controller input row.
-fn check_controller_input(
+/// Checks one controller row.
+fn check_controller_row(
     trace: &[Vec<Felt>],
     row: usize,
     selectors: Selectors,
     state: &HasherState,
     node_index: Felt,
-    is_boundary: Felt,
+    is_start: Felt,
     mrupdate_id: Felt,
-    direction_bit: Felt,
+    expected_bit: Felt,
+    op_final: Felt,
 ) {
-    // Selectors
     assert_eq!(trace[0][row], selectors[0], "s0 at row {row}");
     assert_eq!(trace[1][row], selectors[1], "s1 at row {row}");
     assert_eq!(trace[2][row], selectors[2], "s2 at row {row}");
 
-    // State
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row}");
+    let output = compress_state(*state);
+    if is_merkle_selector(selectors) {
+        for i in 0..8 {
+            assert_eq!(trace[STATE_COL_RANGE.start + i][row], state[i], "state[{i}] at row {row}");
+        }
+        for i in 0..4 {
+            assert_eq!(
+                trace[STATE_COL_RANGE.start + 8 + i][row],
+                output[8 + i],
+                "merkle digest[{i}] at row {row}"
+            );
+        }
+        assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
+        assert_eq!(
+            trace[NODE_INDEX_NEXT_COL_IDX][row],
+            Felt::new_unchecked(node_index.as_canonical_u64() >> 1),
+            "node_index_next at row {row}"
+        );
+        assert_eq!(trace[IS_START_COL_IDX][row], is_start, "is_start at row {row}");
+        assert_eq!(
+            trace[NODE_INDEX_COL_IDX][row] - trace[NODE_INDEX_NEXT_COL_IDX][row].double(),
+            expected_bit,
+            "virtual direction_bit at row {row}"
+        );
+    } else {
+        for (i, &val) in state.iter().enumerate() {
+            assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row}");
+        }
+        for i in 0..4 {
+            assert_eq!(
+                trace[ROW_DATA_COL_RANGE.start + i][row],
+                output[8 + i],
+                "hash digest[{i}] at row {row}"
+            );
+        }
     }
 
-    // Control columns
-    assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
     assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], mrupdate_id, "mrupdate_id at row {row}");
+    assert_eq!(trace[OP_FINAL_COL_IDX][row], op_final, "op_final at row {row}");
+    assert_eq!(
+        trace[CONTROLLER_MERKLE_OR_PADDING_COL_IDX][row],
+        if is_merkle_selector(selectors) { ONE } else { ZERO },
+        "controller discriminator at row {row}"
+    );
 }
 
-/// Checks a controller output row.
-fn check_controller_output(
+/// Checks one Merkle controller row.
+fn check_merkle_controller_row(
     trace: &[Vec<Felt>],
     row: usize,
     selectors: Selectors,
-    state: &HasherState,
-    node_index: Felt,
-    is_boundary: Felt,
+    node_index: u64,
+    is_start: bool,
+    is_final: bool,
+    mrupdate_id: Felt,
     direction_bit: Felt,
 ) {
-    assert_eq!(trace[0][row], selectors[0], "s0 at row {row}");
-    assert_eq!(trace[1][row], selectors[1], "s1 at row {row}");
-    assert_eq!(trace[2][row], selectors[2], "s2 at row {row}");
-
-    for (i, &val) in state.iter().enumerate() {
-        assert_eq!(trace[STATE_COL_RANGE.start + i][row], val, "state[{i}] at row {row}");
-    }
-
-    assert_eq!(trace[NODE_INDEX_COL_IDX][row], node_index, "node_index at row {row}");
-    assert_eq!(trace[IS_BOUNDARY_COL_IDX][row], is_boundary, "is_boundary at row {row}");
-    assert_eq!(trace[DIRECTION_BIT_COL_IDX][row], direction_bit, "direction_bit at row {row}");
+    assert_eq!(trace[0][row], selectors[0], "s0 at Merkle row {row}");
+    assert_eq!(trace[1][row], selectors[1], "s1 at Merkle row {row}");
+    assert_eq!(trace[2][row], selectors[2], "s2 at Merkle row {row}");
+    assert_eq!(
+        trace[NODE_INDEX_COL_IDX][row],
+        Felt::new_unchecked(node_index),
+        "node_index at Merkle row {row}"
+    );
+    assert_eq!(
+        trace[NODE_INDEX_NEXT_COL_IDX][row],
+        Felt::new_unchecked(node_index >> 1),
+        "node_index_next at Merkle row {row}"
+    );
+    assert_eq!(
+        trace[IS_START_COL_IDX][row],
+        if is_start { ONE } else { ZERO },
+        "is_start at Merkle row {row}"
+    );
+    assert_eq!(
+        trace[NODE_INDEX_COL_IDX][row] - trace[NODE_INDEX_NEXT_COL_IDX][row].double(),
+        direction_bit,
+        "virtual direction_bit at Merkle row {row}"
+    );
+    assert_eq!(trace[MRUPDATE_ID_COL_IDX][row], mrupdate_id, "mrupdate_id at Merkle row {row}");
+    assert_eq!(
+        trace[OP_FINAL_COL_IDX][row],
+        if is_final { ONE } else { ZERO },
+        "op_final at Merkle row {row}"
+    );
+    assert_eq!(
+        trace[CONTROLLER_MERKLE_OR_PADDING_COL_IDX][row], ONE,
+        "controller discriminator at Merkle row {row}"
+    );
 }
 
-/// Checks both the input and output rows of a Merkle controller pair.
-///
-/// A Merkle pair consists of:
-/// - Input row (`input_row`): has `input_selectors`, `node_index`, `is_boundary_input` flag.
-/// - Output row (`input_row + 1`): has `node_index >> 1`, `is_boundary_output` flag.
-///
-/// Both rows must have the given `mrupdate_id`.
-fn check_merkle_controller_pair(
-    trace: &[Vec<Felt>],
-    input_row: usize,
-    input_selectors: Selectors,
-    node_index: u64,
-    is_boundary_input: bool,
-    is_boundary_output: bool,
-    mrupdate_id: Felt,
-    input_direction_bit: Felt,
-    output_direction_bit: Felt,
-) {
-    let output_row = input_row + 1;
-    let is_boundary_input_felt = if is_boundary_input { ONE } else { ZERO };
-    let is_boundary_output_felt = if is_boundary_output { ONE } else { ZERO };
-
-    // Input row: selectors, node_index, is_boundary, direction_bit.
-    assert_eq!(trace[0][input_row], input_selectors[0], "s0 at input row {input_row}");
-    assert_eq!(trace[1][input_row], input_selectors[1], "s1 at input row {input_row}");
-    assert_eq!(trace[2][input_row], input_selectors[2], "s2 at input row {input_row}");
-    assert_eq!(
-        trace[NODE_INDEX_COL_IDX][input_row],
-        Felt::new_unchecked(node_index),
-        "node_index at input row {input_row}"
-    );
-    assert_eq!(
-        trace[IS_BOUNDARY_COL_IDX][input_row], is_boundary_input_felt,
-        "is_boundary at input row {input_row}"
-    );
-    assert_eq!(
-        trace[DIRECTION_BIT_COL_IDX][input_row], input_direction_bit,
-        "direction_bit at input row {input_row}"
-    );
-    assert_eq!(
-        trace[MRUPDATE_ID_COL_IDX][input_row], mrupdate_id,
-        "mrupdate_id at input row {input_row}"
-    );
-
-    // Output row: node_index >> 1, is_boundary, direction_bit.
-    assert_eq!(
-        trace[NODE_INDEX_COL_IDX][output_row],
-        Felt::new_unchecked(node_index >> 1),
-        "node_index at output row {output_row}"
-    );
-    assert_eq!(
-        trace[IS_BOUNDARY_COL_IDX][output_row], is_boundary_output_felt,
-        "is_boundary at output row {output_row}"
-    );
-    assert_eq!(
-        trace[DIRECTION_BIT_COL_IDX][output_row], output_direction_bit,
-        "direction_bit at output row {output_row}"
-    );
-    assert_eq!(
-        trace[MRUPDATE_ID_COL_IDX][output_row], mrupdate_id,
-        "mrupdate_id at output row {output_row}"
-    );
+fn is_merkle_selector(selectors: Selectors) -> bool {
+    selectors == MP_VERIFY || selectors == MR_UPDATE_OLD || selectors == MR_UPDATE_NEW
 }
 
 /// Checks one 64-row BlakeG compression block in the combined test view.
@@ -731,7 +704,7 @@ fn init_leaf(value: u64) -> Digest {
 
 /// Verifies that a memoized (copied) range of controller rows matches the original range.
 ///
-/// Checks selectors (s0, s1, s2), state columns (h0..h11), and node_index.
+/// Checks controller columns copied by memoization.
 /// Does NOT check mrupdate_id (which is overwritten by the hasher on copy).
 fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Range<usize>) {
     assert_eq!(
@@ -741,7 +714,6 @@ fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Ran
     );
 
     for (orig_row, copy_row) in original.zip(copied) {
-        // Selectors s0, s1, s2
         for col in 0..3 {
             assert_eq!(
                 trace[col][orig_row], trace[col][copy_row],
@@ -749,29 +721,17 @@ fn check_memoized_trace(trace: &[Vec<Felt>], original: Range<usize>, copied: Ran
             );
         }
 
-        // State columns h0..h11
-        for col in STATE_COL_RANGE {
+        for col in STATE_COL_RANGE
+            .clone()
+            .chain(ROW_DATA_COL_RANGE.clone())
+            .chain(core::iter::once(OP_FINAL_COL_IDX))
+            .chain(core::iter::once(CONTROLLER_MERKLE_OR_PADDING_COL_IDX))
+        {
             assert_eq!(
                 trace[col][orig_row], trace[col][copy_row],
-                "state col {col} mismatch: original row {orig_row} vs copied row {copy_row}"
+                "controller col {col} mismatch: original row {orig_row} vs copied row {copy_row}"
             );
         }
-
-        // node_index
-        assert_eq!(
-            trace[NODE_INDEX_COL_IDX][orig_row], trace[NODE_INDEX_COL_IDX][copy_row],
-            "node_index mismatch: original row {orig_row} vs copied row {copy_row}"
-        );
-
-        // is_boundary, direction_bit should also match
-        assert_eq!(
-            trace[IS_BOUNDARY_COL_IDX][orig_row], trace[IS_BOUNDARY_COL_IDX][copy_row],
-            "is_boundary mismatch: original row {orig_row} vs copied row {copy_row}"
-        );
-        assert_eq!(
-            trace[DIRECTION_BIT_COL_IDX][orig_row], trace[DIRECTION_BIT_COL_IDX][copy_row],
-            "direction_bit mismatch: original row {orig_row} vs copied row {copy_row}"
-        );
     }
 }
 

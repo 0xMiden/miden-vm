@@ -21,7 +21,7 @@ use super::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-use crate::trace::{CHIPLETS_DATA_WIDTH, TRACE_WIDTH};
+use crate::trace::{CHIPLETS_DATA_WIDTH, CHIPLETS_MODE_COL, TRACE_WIDTH};
 
 // CORE TRACE COLUMN STRUCT
 // ================================================================================================
@@ -77,7 +77,8 @@ impl<T> CoreCols<T> {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the shared chiplet data columns, `stream_mode`, and `chip_clk`.
+/// `ChipletCols` covers the shared chiplet data columns and `chip_clk`.
+/// Shared chiplet cells are row overlays; prefer semantic accessors over raw indices.
 /// These are the columns owned by `ChipletsAir`. It is also the layout of the trailing
 /// `NUM_CHIPLETS_COLS`
 /// columns of the unified main trace, so it can be borrowed from either a per-AIR
@@ -87,8 +88,6 @@ impl<T> CoreCols<T> {
 #[derive(Clone, Debug)]
 pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_DATA_WIDTH],
-    /// Bitwise-region mode bit. `0` selects normal bitwise rows; `1` selects AEAD stream rows.
-    pub stream_mode: T,
     /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
     pub chip_clk: T,
 }
@@ -97,21 +96,32 @@ pub struct ChipletCols<T> {
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
 impl<T> ChipletCols<T> {
-    /// Returns the 6 chiplet selector columns `[s_ctrl, stream_mode, s1, s2, s3, s4]`.
+    /// Returns the 6 columns used by the chiplet selector logic.
     ///
-    /// `stream_mode` is local to the bitwise selector region.
+    /// The second entry is the shared mode cell, interpreted as stream mode only in the bitwise
+    /// selector region.
     pub fn chiplet_selectors(&self) -> [T; 6]
     where
         T: Copy,
     {
         [
             self.chiplets[0],
-            self.stream_mode,
+            self.bitwise_stream_mode(),
             self.chiplets[1],
             self.chiplets[2],
             self.chiplets[3],
             self.chiplets[4],
         ]
+    }
+
+    /// Returns the bitwise-local stream mode.
+    ///
+    /// Meaningful only in the bitwise selector region.
+    pub fn bitwise_stream_mode(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[CHIPLETS_MODE_COL]
     }
 
     /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
@@ -165,6 +175,38 @@ impl<T> ChipletCols<T> {
     /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
     pub fn controller(&self) -> &ControllerCols<T> {
         self.chiplets[1..20].borrow()
+    }
+
+    /// Returns the controller-local final-row marker (`chiplets[20]`).
+    ///
+    /// Meaningful only when `s_ctrl = 1`; other chiplets use this physical cell according to
+    /// their own overlays.
+    pub fn controller_op_final(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[20]
+    }
+
+    /// Returns the controller-local MRUPDATE id (`chiplets[21]`).
+    ///
+    /// Meaningful only when `s_ctrl = 1`; other chiplets use this physical cell according to
+    /// their own overlays.
+    pub fn controller_mrupdate_id(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[21]
+    }
+
+    /// Returns the shared mode cell as interpreted by controller rows.
+    ///
+    /// Controller constraints bind this cell to `is_merkle + is_padding`.
+    pub fn controller_merkle_or_padding(&self) -> T
+    where
+        T: Copy,
+    {
+        self.chiplets[CHIPLETS_MODE_COL]
     }
 }
 
@@ -249,8 +291,8 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 mod tests {
     use super::*;
     use crate::trace::{
-        CHIPLETS_CLK_COL, CHIPLETS_DATA_WIDTH, CHIPLETS_STREAM_MODE_COL, CHIPLETS_WIDTH,
-        DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        CHIPLETS_CLK_COL, CHIPLETS_MODE_COL, CHIPLETS_WIDTH, DECODER_TRACE_WIDTH,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
     };
 
     /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
@@ -323,8 +365,7 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[CHIPLETS_DATA_WIDTH - 1], CHIPLETS_DATA_WIDTH - 1);
-        assert_eq!(CHIPLET_COL_MAP.stream_mode, CHIPLETS_STREAM_MODE_COL);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[CHIPLETS_MODE_COL], CHIPLETS_MODE_COL);
         assert_eq!(CHIPLET_COL_MAP.chip_clk, CHIPLETS_CLK_COL);
     }
 

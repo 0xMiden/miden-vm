@@ -470,11 +470,10 @@ pub fn enforce_main<AB>(
     // Block address (addr) constraints
     // =============================================
     // The block address links decoder rows to the hasher table, which computes native-hash
-    // commitments for MAST node contents. Each hash uses a controller input/output pair
-    // (CONTROLLER_ROWS_PER_HASHER_OP = 2 rows in the hasher table).
+    // commitments for MAST node contents. Each hash consumes one controller row.
     //
     // When RESPAN starts a new batch within the same span, the hasher table needs a new
-    // controller pair, so addr increments by CONTROLLER_ROWS_PER_HASHER_OP.
+    // controller row, so addr increments by CONTROLLER_ROWS_PER_HASHER_OP.
 
     // Inside a basic block, addr must stay the same (all ops in one batch share the same
     // hasher-table address).

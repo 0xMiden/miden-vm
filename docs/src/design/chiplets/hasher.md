@@ -24,25 +24,33 @@ hashing) use Eidos framing over this primitive.
 ## Controller rows
 
 The controller lives inside `ChipletsAir`. The chiplet-level selector
-`s_ctrl = chiplets[0]` selects controller rows. The `stream_mode` column is
-outside the controller overlay and is used by the bitwise/AEAD-stream region.
-On controller rows, the three sub-selector columns
-`(s0, s1, s2)` classify the row:
+`s_ctrl = chiplets[0]` selects controller rows. A shared mode cell is interpreted
+as a normal/AEAD stream selector on bitwise rows and as the Merkle/padding
+discriminator on controller rows. On controller rows, the three sub-selector
+columns `(s0, s1, s2)` classify the row. The separate `op_final` cell marks rows
+that also return a digest.
 
 | Sub-selectors | Meaning |
 |---------------|---------|
-| `(1, 0, 0)` | hash input: linear hash, 2-to-1 hash, or `BCOMPRESS` |
-| `(1, 0, 1)` | Merkle path verify input |
-| `(1, 1, 0)` | Merkle update old-path input |
-| `(1, 1, 1)` | Merkle update new-path input |
-| `(0, 0, 0)` | return digest (`HOUT`) |
-| `(0, 0, 1)` | return full state (`SOUT`) |
-| `(0, 1, *)` | controller padding |
+| `(1, 0, 0)` | hash start row |
+| `(0, 0, 0)` | hash continuation row |
+| `(1, 0, 1)` | Merkle path verify row |
+| `(1, 1, 0)` | Merkle update old-path row |
+| `(1, 1, 1)` | Merkle update new-path row |
+| `(0, 1, 0)` | controller padding |
 
-Each hash request is recorded as consecutive controller rows:
+The remaining selector patterns are invalid. Hash rows carry
+`block(8) || cv_in(4)` in the state columns and `cv_out(4)` in the row-data
+columns. Merkle rows carry `block(8) || cv_out(4)` in the state columns and
+Merkle routing data in the row-data columns.
 
-- an input row containing the pre-compression state or Merkle step input,
-- an output row containing the returned digest or full state.
+Controller LogUp messages are addressed by `chip_clk`. The stack may choose the
+initial address non-deterministically, but lookup balance requires that address
+to match an actual controller row. Since `chip_clk` is constrained to increment
+by one on every chiplet row, each address identifies at most one row. A final
+row emits a return message at its own `chip_clk`; multi-row operations are tied
+together by the controller transition constraints between the initial row and
+that final row.
 
 The controller region is padded to its alignment boundary before the next
 chiplet section begins.
@@ -53,7 +61,7 @@ chiplet section begins.
 64-row block per compression request, followed by padding blocks as needed. The
 controller/compression link is a LogUp message:
 
-- the controller input/output transition emits `[block(8), cv_in(4), cv_out(4)]`,
+- the controller row emits `[block(8), cv_in(4), cv_out(4)]`,
 - the BlakeG AIR receives the matching message, weighted by the
   compression multiplicity.
 

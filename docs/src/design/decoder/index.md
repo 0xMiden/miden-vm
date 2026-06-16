@@ -133,14 +133,14 @@ These registers have the following meanings:
 
 To compute hashes of program blocks, the decoder relies on the [hash chiplet](../chiplets/hasher.md). Specifically, the decoder needs to perform two types of hashing operations:
 
-1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements and get back $4$ field elements representing the result. In the controller/compression split hasher design, this is represented by one controller pair plus one BlakeG compression block for the corresponding input state.
-2. A sequential hash of $n$ elements. This requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. At the controller level, each absorbed batch contributes one `(input, output)` controller pair, so the controller addresses for successive batches advance by $2$.
+1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements and get back $4$ field elements representing the result. In the controller/compression split hasher design, this is represented by one controller row plus one BlakeG compression block for the corresponding input state.
+2. A sequential hash of $n$ elements. This requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. At the controller level, each absorbed batch contributes one controller row, so the controller addresses for successive batches advance by $1$.
 
-To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/index.md#chiplets-bus) column $b_{chip}$ as described below.
+To make hashing requests to the hash chiplet and to read the results from it, the decoder emits LogUp messages on the chiplets bus as described below.
 
 #### Simple 2-to-1 hash
 
-To initiate a 2-to-1 hash of $8$ elements ($v_0, ..., v_7$) we need to divide $b_{chip}$ by the following value:
+To initiate a 2-to-1 hash of $8$ elements ($v_0, ..., v_7$), the decoder removes the following hasher-request message:
 
 $$
 \alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
@@ -151,43 +151,43 @@ where:
 * $r$ is the address of the row at which the hashing begins.
 * Some $\alpha$ values are skipped in the above (e.g., $\alpha_3$) because of the specifics of how auxiliary hasher table rows are reduced to field elements (described [here](../chiplets/hasher.md#multiset-check-constraints)). For example, $\alpha_3$ is used as a coefficient for node index values during Merkle path computations in the hasher, and thus, is not relevant in this case. The capacity lanes (state indices $8..11$, coefficients $\alpha_{12..15}$) are zero for these messages, so those terms drop out.
 
-To read the $4$-element result ($u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
+To read the $4$-element result ($u_0, ..., u_3$), the decoder removes the matching return message:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{ret} + \alpha_2 \cdot r + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
 $$
 
 where:
-* $m_{hout}$ is a label indicating return of the hash value. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
+* $m_{ret}$ is a label indicating return of the hash value. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
 * $r$ is the address of the row at which the hashing began.
 
 #### Sequential hash
 
-To initiate a sequential hash of $n$ elements ($v_0, ..., v_{n-1}$), we need to divide $b_{chip}$ by the following value:
+To initiate a sequential hash of $n$ elements ($v_0, ..., v_{n-1}$), the decoder removes the first hasher-request message:
 
 $$
 \alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
 $$
 
-This also absorbs the first $8$ elements of the sequence into the hasher state. Then, to absorb the next sequence of $8$ elements (e.g., $v_8, ..., v_{15}$), we need to divide $b_{chip}$ by the following value:
+This also absorbs the first $8$ elements of the sequence into the hasher state. Then, to absorb the next sequence of $8$ elements (e.g., $v_8, ..., v_{15}$), the decoder removes another request message:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 2) + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_{i + 8})
+\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 1) + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_{i + 8})
 $$
 
 Where $m_{abp}$ is a label indicating absorption of more elements into the hasher state. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
 
-We can keep absorbing elements into the hasher in the similar manner until all elements have been absorbed. Then, to read the result (e.g., $u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
+We can keep absorbing elements into the hasher in the similar manner until all elements have been absorbed. Then, to read the result (e.g., $u_0, ..., u_3$), the decoder removes the return message:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 2 \cdot \lceil n / 8 \rceil - 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{ret} + \alpha_2 \cdot (r + \lceil n / 8 \rceil - 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
 $$
 
-Thus, for example, if $n = 14$, the result of the hash is available at controller output row $r + 3$ (two absorbed batches).
+Thus, for example, if $n = 14$, the result of the hash is available at controller row $r + 1$ (two absorbed batches).
 
 ### Control flow tables
 
-In addition to the hash chiplet, control flow operations rely on $3$ virtual tables: *block stack* table, *block hash* table, and _op group_ table. These tables are virtual in that they don't require separate trace columns. Their state is described solely by running product columns: $p_1$, $p_2$, and $p_3$. The tables are described in the following sections.
+In addition to the hash chiplet, control flow operations rely on $3$ virtual tables: *block stack* table, *block hash* table, and _op group_ table. These tables are virtual in that they don't require separate table traces. Their updates are enforced by LogUp lookup columns in `CoreAir`. The tables are described in the following sections.
 
 #### Block stack table
 
@@ -208,7 +208,7 @@ where:
 
 In the above diagram, the first 2 rows correspond to 2 different `CALL` operations. The first `CALL` operation is called from the root context, and hence its parent fn hash is the zero hash. Additionally, the second `CALL` operation has a parent fn hash of `[h0, h1, h2, h3]`, indicating that the first `CALL` was to a procedure with that hash.
 
-Running product column $p_1$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_1$ defines which rows are present in the table.
+The block-stack table bus keeps track of rows added to and removed from this table.
 
 To reduce a row in the block stack table to a single value, we compute the following.
 
@@ -232,7 +232,7 @@ where:
 * The next column ($t_5$) contains a binary value which is set to $1$ if the block is the first child of a *join* block, and to $0$ otherwise.
 * The last column ($t_6$) contains a binary value which is set to $1$ if the block is a body of a loop, and to $0$ otherwise.
 
-Running product column $p_2$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_2$ defines which rows are present in the table.
+The block-hash table bus keeps track of rows added to and removed from this table.
 
 To reduce a row in the block hash table to a single value, we compute the following.
 
@@ -244,7 +244,7 @@ Where $\alpha_0, ..., \alpha_7$ are the random values provided by the verifier.
 
 Unlike other virtual tables, block hash table does not start out in an empty state. Specifically, it is initialized with a single row containing the hash of the program's root block. This needs to be done because the root block does not have a parent and, thus, otherwise it would never be added to the block hash table.
 
-Initialization of the block hash table is done by setting the initial value of $p_2$ to the value of the row containing the hash of a program's root block.
+Initialization of the block hash table is handled by a boundary LogUp term for the program root hash.
 
 #### Op group table
 *Op group* table is used in decoding of *basic* blocks, which are leaves in a program's MAST. As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups.
@@ -261,7 +261,7 @@ The meaning of the columns is as follows:
 * The second column ($t_1$) contains the position of the group in the *basic* block (not just in the current batch). The position is $1$-based and is counted from the end. Thus, for example, if a *basic* block consists of a single batch with $4$ groups, the position of the first group would be $4$, the position of the second group would be $3$ etc. (the reason for this is explained in [this](#single-batch-span) section). Note that the group with position $4$ is not added to the table, because it is the first group in the batch, so the first row of the table will be for the group with position $3$.
 * The third column ($t_2$) contains the actual values of operation groups (this could include up to $9$ opcodes or a single immediate value).
 
-Permutation column $p_3$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_3$ defines which rows are present in the table.
+The op-group table bus keeps track of rows added to and removed from this table.
 
 To reduce a row in the op group table to a single value, we compute the following.
 
@@ -396,7 +396,7 @@ When the VM executes an `END` operation, it does the following:
         - in the above, the `x_next` variables denote the column `x` in the next row
     - else, we remove a row `(blk, prnt, f1, 0, 0, 0, 0, 0)`
 2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is either `END` or `REPEAT`, and $1$ otherwise.
-3. Reads the hash result from the hash chiplet (as described [here](#program-block-hashing)) using `blk + 1` as the controller output row address.
+3. Reads the hash result from the hash chiplet (as described [here](#program-block-hashing)) using `blk` as the controller row address.
 4. If $h_5 = 1$ (i.e., we are exiting a *loop* block), pops the value off the top of the stack and verifies that the value is $0$.
 5. Verifies that `group_count` register is set to $0$.
 
@@ -440,14 +440,14 @@ In the above diagram, `g0_op0` is the first operation of the new operation batch
 
 When the VM executes a `RESPAN` operation, it does the following:
 
-1. Increments block address by $2$.
+1. Increments block address by $1$.
 2. Removes the tuple `(blk, prnt, 0, 0...)` from the block stack table.
-3. Adds the tuple `(blk+2, prnt, 0, 0...)` to the block stack table.
+3. Adds the tuple `(blk+1, prnt, 0, 0...)` to the block stack table.
 4. Absorbs values in registers $h_0, ..., h_7$ into the hasher state of the hash chiplet (as described [here](#sequential-hash)).
 5. Sets the `in_span` register to $1$.
-6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+2` as batch ID.
+6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+1` as batch ID.
 
-The net result of the above is that we incremented the ID of the current block by $2$ (the next controller input row) and added the next set of operation groups to the op group table.
+The net result of the above is that we incremented the ID of the current block by $1$ (the next controller row) and added the next set of operation groups to the op group table.
 
 #### CALL operation
 
@@ -637,9 +637,9 @@ First, after the `SPAN` operation is executed, the op group table will look as f
 
 Notice that while the same groups ($g_1, ..., g_7$) are added to the table, their positions now reflect the total number of groups in the *basic* block.
 
-Second, executing a `RESPAN` operation increments the hasher controller address by $2$. This is done because each absorbed batch is represented by one controller pair `(input, output)`, so the next batch starts at the next controller input row.
+Second, executing a `RESPAN` operation increments the hasher controller address by $1$. This is done because each absorbed batch is represented by one controller row, so the next batch starts at the next row.
 
-Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 2, prnt, 0)`. To perform this operation, the prover sets the value of $h_1` in the next row to `prnt`.
+Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 1, prnt, 0)`. To perform this operation, the prover sets the value of $h_1$ in the next row to `prnt`.
 
 Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op group table, which now would look as follows:
 
@@ -647,7 +647,7 @@ Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op 
 
 Then, the execution of the second batch proceeds in a manner similar to the first batch: we remove operations from the current op group, execute them, and when the value of the op group reaches $0$, we start executing the next group in the batch. Thus, by the time we get to the `END` operation, the op group table should be empty.
 
-When executing the `END` operation, the hash of the *basic* block will be read from the paired controller output row at address `addr + 1`, which, in our example, will be equal to `blk + 3` after one `RESPAN`.
+When executing the `END` operation, the hash of the *basic* block will be read from the current controller row address, which, in our example, will be equal to `blk + 1` after one `RESPAN`.
 
 #### Handling immediate values
 

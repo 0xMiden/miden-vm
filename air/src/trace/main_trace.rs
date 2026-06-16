@@ -523,26 +523,35 @@ impl MainTrace {
         self.chiplet_cols(i).controller().state
     }
 
-    /// Returns the hasher's node index column at row i
+    /// Returns the Merkle current-node index carried by a controller row.
     pub fn chiplet_node_index(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().node_index
+        self.chiplet_cols(i).controller().merkle_node_index()
+    }
+
+    /// Returns the Merkle parent-node index carried by a controller row.
+    pub fn chiplet_node_index_next(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).controller().merkle_node_index_next()
     }
 
     /// Returns the hasher's mrupdate_id column at row i (domain separator for sibling table).
     pub fn chiplet_mrupdate_id(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().mrupdate_id
+        self.chiplet_cols(i).controller_mrupdate_id()
     }
 
-    /// Returns the hasher's is_boundary column at row i (1 on boundary rows: first input or last
-    /// output of an operation).
-    pub fn chiplet_is_boundary(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().is_boundary
+    /// Returns the Merkle start flag carried by a controller row.
+    pub fn chiplet_merkle_is_start(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).controller().merkle_is_start()
     }
 
-    /// Returns the hasher's direction_bit column at row i. On Merkle controller rows this holds
-    /// the direction bit extracted from the node index; zero on non-Merkle rows.
-    pub fn chiplet_direction_bit(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).controller().direction_bit
+    /// Returns the virtual Merkle direction bit `node_index - 2 * node_index_next`.
+    pub fn chiplet_merkle_direction_bit(&self, i: RowIndex) -> Felt {
+        let ctrl = self.chiplet_cols(i).controller();
+        ctrl.merkle_node_index() - ctrl.merkle_node_index_next().double()
+    }
+
+    /// Returns the chiplet row clock at row i.
+    pub fn chiplet_clk(&self, i: RowIndex) -> Felt {
+        self.chiplet_cols(i).chip_clk
     }
 
     /// Returns the chiplet stream-mode column at row i.
@@ -552,13 +561,14 @@ impl MainTrace {
     /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
     /// height, so they can be used as bound-aware filters.
     pub fn chiplet_stream_mode(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).stream_mode
+        self.chiplet_cols(i).bitwise_stream_mode()
     }
 
     /// Returns the derived AEAD stream flag at row i. No physical column stores this flag.
     pub fn chiplet_aead_stream_active(&self, i: RowIndex) -> Felt {
         let cols = self.chiplet_cols(i);
-        if cols.chiplets[0] == ZERO && cols.chiplets[1] == ZERO && cols.stream_mode == ONE {
+        if cols.chiplets[0] == ZERO && cols.chiplets[1] == ZERO && cols.bitwise_stream_mode() == ONE
+        {
             ONE
         } else {
             ZERO
@@ -837,10 +847,10 @@ impl MainTrace {
     //
     // MPVERIFY (read-only path verification) does not interact with the sibling table.
 
-    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) hasher controller input row.
+    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) controller row.
     ///
     /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
-    /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
+    /// MV rows insert siblings into the virtual sibling table via the hash-kernel bus.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
     pub fn f_mv(&self, i: RowIndex) -> bool {
@@ -848,15 +858,15 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
             && self.chiplet_selector_3(i) == ZERO // s2=0
     }
 
-    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) hasher controller input row.
+    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) controller row.
     ///
     /// These rows appear during the new-path leg of a Merkle root update (MRUPDATE). Each
-    /// MU input row removes a sibling from the virtual sibling table via the hash_kernel bus.
+    /// MU rows remove siblings from the virtual sibling table via the hash-kernel bus.
     /// The sibling table balance ensures the old and new paths use the same siblings.
     ///
     /// Short-circuits to `false` past the chiplets-AIR height; see [`Self::is_bitwise_row`].
@@ -865,7 +875,7 @@ impl MainTrace {
             return false;
         }
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (Merkle row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
             && self.chiplet_selector_3(i) == ONE // s2=1
     }

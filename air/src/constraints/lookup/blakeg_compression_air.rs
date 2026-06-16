@@ -4,7 +4,7 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 use super::messages::{
     AeadBlakeGInputMsg, AeadBlakeGOutputPairMsg, BlakeGInputPairMsg, BlakeGWordMsg, BusId,
-    HasherPermLinkMsg, blakeg_rot7_bus, blakeg_rot12_bus,
+    HasherCompressionLinkMsg, blakeg_rot7_bus, blakeg_rot12_bus,
 };
 use crate::{
     constraints::blakeg_compression::{
@@ -622,8 +622,8 @@ fn compact_message_word<LB: BlakeGCompressionLookupBuilder>(
 
 fn compression_link_msg<LB: BlakeGCompressionLookupBuilder>(
     local: &BlakeGCompressionCols<LB::Var>,
-) -> HasherPermLinkMsg<LB::Expr> {
-    HasherPermLinkMsg {
+) -> HasherCompressionLinkMsg<LB::Expr> {
+    HasherCompressionLinkMsg {
         block: core::array::from_fn(|i| c::<LB>(local, IFACE_R_BASE_COL + i)),
         cv_in: core::array::from_fn(|i| c::<LB>(local, IFACE_C_BASE_COL + i)),
         cv_out: core::array::from_fn(|i| c::<LB>(local, IFACE_D_BASE_COL + i)),

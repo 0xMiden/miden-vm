@@ -11,7 +11,7 @@ use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
     bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, STATE_WIDTH},
+    hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -45,55 +45,92 @@ macro_rules! impl_borrow_for_chiplet_cols {
 
 /// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
-/// Logical overlay for controller rows (`s_ctrl = 1`). `s0` distinguishes input rows
-/// (`s0 = 1`) from output/padding rows (`s0 = 0`).
+/// Logical overlay for controller rows (`s_ctrl = 1`). The `s0/s1/s2` columns select the
+/// controller row kind; see `hasher_control::flags` for the encoding.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `stream_mode` (= `ChipletCols::stream_mode`) are consumed by
-/// the chiplet selector system and are NOT part of this overlay. Because the chiplet-level
-/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl`) and is
-/// never a named column or struct field, there is no name collision with the
-/// controller-internal `s0` defined here.
+/// `s_ctrl` (= `chiplets[0]`) and the shared mode cell are not part of this overlay. Controller
+/// code reads that shared cell through `ChipletCols::controller_merkle_or_padding()`.
 ///
-/// The state holds BlakeG's `[block_lo, block_hi, cv]` layout. `state[8..12]` is the
-/// chaining-value/digest word.
+/// The controller uses a row-kind-dependent overlay to fit one compression request in one row:
+///
+/// - hash rows: `state = block[8] || cv_in[4]`, `row_data = digest_out[4]`;
+/// - Merkle rows: `state = block[8] || digest_out[4]`,
+///   `row_data = [node_index, node_index_next, is_start, 0]`.
+///
+/// Merkle input CV is the fixed domain-0 two-to-one chaining word, so it does not need trace
+/// columns. Hash rows need both `cv_in` and `digest_out`, so they place the digest in `row_data`.
 ///
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 | state[12]                                    | extra cols      |
-/// |          | block_lo[4]         | block_hi[4] | cv[4]    |                 |
-/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
+/// | s0 s1 s2 | state[12]                                       | row_data[4]   |
+/// |          | block_lo[4]      | block_hi[4] | cv/digest[4]    | row-kind data |
 /// ```
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct ControllerCols<T> {
-    /// Hasher-internal sub-selector: `s0 = 1` on controller input rows, 0 on output/padding.
+    /// Hasher-internal row-kind selector.
     pub s0: T,
-    /// Operation sub-selector s1.
+    /// Hasher-internal row-kind selector.
     pub s1: T,
-    /// Operation sub-selector s2.
+    /// Hasher-internal row-kind selector.
     pub s2: T,
-    /// BlakeG state (8 block Felts + 4 chaining-value Felts).
+    /// BlakeG row payload. See the row-kind overlay documented above.
     pub state: [T; STATE_WIDTH],
-    /// Merkle tree node index.
-    pub node_index: T,
-    /// Domain separator for sibling table across MRUPDATE ops.
-    pub mrupdate_id: T,
-    /// 1 on boundary rows (first input or last output of each compression request).
-    pub is_boundary: T,
-    /// Direction bit for Merkle path verification.
-    pub direction_bit: T,
+    /// Row-kind-dependent payload. See the row-kind overlay documented above.
+    pub row_data: [T; DIGEST_LEN],
 }
 
 impl<T: Copy> ControllerCols<T> {
+    /// Returns the rate portion of the state (state[0..8]).
+    pub fn rate(&self) -> [T; RATE_LEN] {
+        [
+            self.state[0],
+            self.state[1],
+            self.state[2],
+            self.state[3],
+            self.state[4],
+            self.state[5],
+            self.state[6],
+            self.state[7],
+        ]
+    }
+
     /// Returns the capacity portion of the state (state[8..12]).
     pub fn capacity(&self) -> [T; CAPACITY_LEN] {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
     }
 
-    /// Returns the digest portion of the state (state[8..12]).
-    pub fn digest(&self) -> [T; DIGEST_LEN] {
+    /// Returns the state tail (`state[8..12]`).
+    ///
+    /// On hash rows this is the input CV. On Merkle rows this is the output digest.
+    pub fn state_tail(&self) -> [T; DIGEST_LEN] {
         [self.state[8], self.state[9], self.state[10], self.state[11]]
+    }
+
+    /// Returns the hash-row output digest (`row_data[0..4]`).
+    pub fn hash_digest(&self) -> [T; DIGEST_LEN] {
+        self.row_data
+    }
+
+    /// Returns the Merkle-row output digest (`state[8..12]`).
+    pub fn merkle_digest(&self) -> [T; DIGEST_LEN] {
+        self.state_tail()
+    }
+
+    /// Merkle current node index (`row_data[0]`).
+    pub fn merkle_node_index(&self) -> T {
+        self.row_data[0]
+    }
+
+    /// Merkle next node index (`row_data[1]`).
+    pub fn merkle_node_index_next(&self) -> T {
+        self.row_data[1]
+    }
+
+    /// Merkle operation start flag (`row_data[2]`).
+    pub fn merkle_is_start(&self) -> T {
+        self.row_data[2]
     }
 
     /// Returns rate0 (state[0..4]).

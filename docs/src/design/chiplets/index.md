@@ -15,7 +15,7 @@ Currently, Miden VM relies on 5 chiplets:
 - The [Arithmetic Circuit Evaluation (ACE)](./ace.md), used to ensure that arithmetic circuits evaluate to zero.
 - The [Kernel ROM Chiplet](kernel_rom.md), used to enable executing kernel procedures during the [`SYSCALL` operation](../programs.md#syscall-block).
 
-Each chiplet executes its computations separately from the rest of the VM and proves the internal correctness of its execution trace in a unique way that is specific to the operation(s) it supports. These methods are described by each chiplet’s documentation.
+Each chiplet executes its computations separately from the rest of the VM and proves the internal correctness of its execution trace in a unique way that is specific to the operation(s) it supports. These methods are described by each chiplet's documentation.
 
 ## Chiplets module trace
 
@@ -43,7 +43,7 @@ The resulting order is as follows:
 
 | Segment | Row structure | Overlay columns | Selector condition |
 | ------- | ------------- | --------------- | ------------------ |
-| Hasher controller | input/output controller rows | `chiplets[1..20]` | `s_ctrl = 1` |
+| Hasher controller | one row per compression request | `chiplets[1..20]` plus shared mode cell | `s_ctrl = 1` |
 | Normal bitwise | 8-row AND/XOR cycles | `chiplets[2..15]` | `s_ctrl = 0`, `s1 = 0`, `stream_mode = 0` |
 | AEAD stream | 8-row stream entries | `chiplets[2..22]` plus stream flags | `s_ctrl = 0`, `s1 = 0`, `stream_mode = 1` |
 | Memory | memory event rows | `chiplets[3..18]` | `s_ctrl = 0`, `s1 = 1`, `s2 = 0` |
@@ -82,12 +82,12 @@ The chiplets module participates in these message families:
 
 | Message family | Purpose |
 | -------------- | ------- |
-| Hasher controller messages | Stack and decoder requests to controller rows, including linear hash, Merkle path, Merkle update, digest return, and full-state return messages. |
+| Hasher controller messages | Stack and decoder requests to controller rows, including linear hash, Merkle path, Merkle update, and digest return messages. |
 | Memory messages | Element and word reads/writes between VM users and the memory chiplet. |
 | Bitwise messages | Normal `U32AND`/`U32XOR` requests and responses. |
 | Kernel ROM messages | Kernel procedure initialization and `SYSCALL` lookup messages. |
 | ACE messages | ACE initialization plus ACE wiring and memory-read interactions. |
-| BlakeG compression link | The controller input/output transition is linked to `BlakeGCompressionAir` by `[block(8), cv_in(4), cv_out(4)]`. |
+| BlakeG compression link | Each controller compression row is linked to `BlakeGCompressionAir` by `[block(8), cv_in(4), cv_out(4)]`. |
 | Byte-pair lookup messages | AND8 and BlakeG rotation-contribution lookups against the byte-pair preprocessed table. |
 | BlakeG internal messages | BlakeG compression word-routing and message-schedule lookups internal to `BlakeGCompressionAir`. |
 | AEAD stream messages | AEAD-XOF input, AEAD-XOF output pairs, and AEAD stream row requests. |
@@ -135,7 +135,7 @@ the chiplet lookup columns; some domains share a physical column when their row 
 
 - **Chiplet requests/responses:** stack, decoder, and public-input requests are balanced by hasher
   controller, normal bitwise, memory, ACE-init, and kernel-ROM responses.
-- **Hasher compression link:** hasher controller input/output transitions are balanced against
+- **Hasher compression link:** hasher controller compression rows are balanced against
   `BlakeGCompressionAir` compression rows.
 - **Hash-kernel table:** Merkle sibling entries, ACE memory reads, AEAD stream memory I/O, and
   memory-side range checks share one LogUp column with disjoint row gates.

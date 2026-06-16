@@ -63,21 +63,21 @@ pub struct BlakeGCompressionTrace {
 /// The module's trace can be thought of as 5 stacked segments in the following form.
 ///
 /// The chiplet system uses `s_ctrl = column 0` to select the hasher controller.
-/// Columns 1-4 (`s1..s4`) subdivide the remaining region. `stream_mode` is a
-/// bitwise-local mode bit; AEAD stream activity is derived from `s_ctrl = 0`,
-/// `s1 = 0`, and `stream_mode = 1`.
+/// Columns 1-4 (`s1..s4`) subdivide the remaining region. The final shared data column is
+/// row-local: bitwise rows use it as normal/AEAD stream mode, while controller rows use it as
+/// the Merkle/padding flag.
 ///
 /// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`.
 ///   - column 0 (s_ctrl): ONE
 ///   - columns 1-19: hasher-controller trace
-///   - stream_mode column: ZERO
+///   - column 22: Merkle/padding discriminator
 ///
 /// * Bitwise segment: begins at the end of the hasher segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - column 1 (s1): ZERO
 ///   - columns 2-14: execution trace of bitwise chiplet
 ///   - columns 15-21: unused columns padded with ZERO
-///   - stream_mode column: ZERO for normal bitwise rows
+///   - column 22: ZERO for normal bitwise rows
 ///
 /// * Memory segment: begins at the end of the bitwise segment.
 ///   - column 0 (s_ctrl): ZERO
@@ -85,14 +85,14 @@ pub struct BlakeGCompressionTrace {
 ///   - column 2 (s2): ZERO
 ///   - columns 3-19: execution trace of memory chiplet
 ///   - columns 20-21: unused columns padded with ZERO
-///   - stream_mode column: ZERO
+///   - column 22: ZERO
 ///
 /// * ACE segment: begins at the end of the memory segment.
 ///   - column 0 (s_ctrl): ZERO
 ///   - column 1-2 (s1, s2): ONE
 ///   - column 3 (s3): ZERO
 ///   - columns 4-20: execution trace of ACE chiplet
-///   - stream_mode column: ZERO
+///   - column 22: ZERO
 ///
 /// * Kernel ROM segment: begins at the end of the ACE segment.
 ///   - column 0 (s_ctrl): ZERO
@@ -100,17 +100,17 @@ pub struct BlakeGCompressionTrace {
 ///   - column 4 (s4): ZERO
 ///   - columns 5-9: execution trace of kernel ROM chiplet
 ///   - columns 10-21: unused columns padded with ZERO
-///   - stream_mode column: ZERO
+///   - column 22: ZERO
 ///
 /// * Padding segment: fills the rest of the trace.
 ///   - column 0 (s_ctrl): ZERO
 ///   - columns 1-4 (s1..s4): ONE
-///   - columns 5-21 and stream_mode column: ZERO
+///   - columns 5-22: ZERO
 ///
 /// Column ranges are stable for existing chiplets: controller uses columns 1..20,
 /// normal bitwise uses 2..15, memory uses 3..18, ACE uses 4..20, and kernel ROM
-/// uses 5..10. AEAD stream rows reuse the bitwise region and extend
-/// through column 22 (`chiplets[2..22]`, `stream_mode`).
+/// uses 5..10. AEAD stream rows reuse the bitwise region and use columns 2..21 as
+/// payload, with column 22 as the AEAD stream selector.
 #[derive(Debug)]
 pub struct Chiplets {
     pub hasher: Hasher,

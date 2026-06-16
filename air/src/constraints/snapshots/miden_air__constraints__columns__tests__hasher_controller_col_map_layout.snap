@@ -20,8 +20,10 @@ ControllerCols {
         13,
         14,
     ],
-    node_index: 15,
-    mrupdate_id: 16,
-    is_boundary: 17,
-    direction_bit: 18,
+    row_data: [
+        15,
+        16,
+        17,
+        18,
+    ],
 }

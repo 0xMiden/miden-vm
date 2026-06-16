@@ -106,6 +106,10 @@ $$b' \cdot u_{lookup} = b \cdot v_{lookup}$$
 
 ### Communication buses in Miden VM
 
-In Miden VM, the specialized components are implemented as dedicated segments of the execution trace, which include the 3 chiplets in the Chiplets module (the hash chiplet, bitwise chiplet, and memory chiplet).
+In Miden VM, specialized components are implemented as dedicated trace regions. The Chiplets trace
+contains regions for the hasher controller, bitwise and AEAD stream operations, memory, ACE, and
+kernel ROM. BlakeG compression is proved by a separate AIR and linked to hasher-controller rows by a
+compression bus.
 
-Miden VM currently uses multiset checks to implement the chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, ACE, and Kernel ROM).
+The current VM uses LogUp lookup columns to implement the chiplet communication buses described in
+the [Chiplets module](../chiplets/index.md#chiplets-bus).

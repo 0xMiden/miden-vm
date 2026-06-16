@@ -500,10 +500,6 @@ fn initialize_chiplets(
     // populate hasher chiplet
     for hasher_op in hasher_for_chiplet.into_iter() {
         match hasher_op {
-            HasherOp::Permute(input_state) => {
-                let _ = chiplets.hasher.permute(input_state);
-                check_chiplets_trace_len(&chiplets)?;
-            },
             HasherOp::BCompress(input_state) => {
                 let _ = chiplets.hasher.bcompress(input_state);
                 check_chiplets_trace_len(&chiplets)?;

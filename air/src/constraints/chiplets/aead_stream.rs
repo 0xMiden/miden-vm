@@ -183,7 +183,7 @@ where
 {
     let s_ctrl_next: AB::Expr = next.chiplets[0].into();
     let s1_next: AB::Expr = next.chiplets[1].into();
-    let stream_mode_next: AB::Expr = next.stream_mode.into();
+    let stream_mode_next: AB::Expr = next.bitwise_stream_mode().into();
     s_ctrl_next.not() * s1_next.not() * stream_mode_next
 }
 

@@ -944,8 +944,8 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records a `Hasher::permute` operation with its address and compressed state.
-    pub fn record_permute(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
+    /// Records a `Hasher::bcompress` operation with its address and compressed state.
+    pub fn record_compression(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
         self.compression_operations.push_back((addr, hashed_state));
     }
 
@@ -962,8 +962,8 @@ impl HasherResponseReplay {
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
 
-    /// Replays a `Hasher::permute` operation, returning its address and compressed state.
-    pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
+    /// Replays a `Hasher::bcompress` operation, returning its address and compressed state.
+    pub fn replay_compression(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
         self.compression_operations
             .pop_front()
             .ok_or(OperationError::Internal("no compression operations recorded"))
@@ -986,7 +986,7 @@ impl HasherResponseReplay {
 
 impl HasherInterface for HasherResponseReplay {
     fn bcompress(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
-        self.replay_permute()
+        self.replay_compression()
     }
 
     fn compress_aead_xof(
@@ -1039,7 +1039,6 @@ impl HasherInterface for HasherResponseReplay {
 /// operands.
 #[derive(Debug)]
 pub enum HasherOp {
-    Permute([Felt; STATE_WIDTH]),
     BCompress([Felt; STATE_WIDTH]),
     AeadXof(ContextId, RowIndex, [Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
@@ -1061,11 +1060,6 @@ pub struct HasherRequestReplay {
 }
 
 impl HasherRequestReplay {
-    /// Records a `Hasher::permute()` request.
-    pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
-        self.hasher_ops.push_back(HasherOp::Permute(state));
-    }
-
     /// Records a `Hasher::bcompress()` request.
     pub fn record_bcompress_input(&mut self, state: [Felt; STATE_WIDTH]) {
         self.hasher_ops.push_back(HasherOp::BCompress(state));

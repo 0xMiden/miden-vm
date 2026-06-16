@@ -139,9 +139,8 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // The widest main-trace payload is `HasherMsg::State` (linear_hash_init /
-        // return_state) at 15 slots, but `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM
-        // transcript alignment.
+        // The widest main-trace payload is `HasherMsg::State` at 15 slots; keep the
+        // rounded-up width for MASM transcript alignment.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 

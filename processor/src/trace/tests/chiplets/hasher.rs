@@ -7,7 +7,7 @@
 //!
 //! Because request and response messages share a `bus_prefix` and the same payload shape,
 //! an add at a controller row and a remove at the matching decoder row produce the same
-//! encoded denominator with opposite multiplicities — which is what makes the bus balance.
+//! encoded denominator with opposite multiplicities, which is what makes the bus balance.
 //! The subset matcher verifies each claimed interaction lands; their pairing is an algebraic
 //! consequence.
 //!
@@ -47,10 +47,10 @@ use crate::{AdviceInputs, RowIndex, trace::utils::build_span_with_respan_ops};
 // RESPONSE-SIDE DISPATCH
 // ================================================================================================
 
-/// Hasher controller response kinds, keyed on the emitter's `(hs0, hs1, hs2, is_boundary)` mux.
+/// Hasher controller response kinds emitted by one-row controller rows.
 ///
 /// Shared across every test so each can `match` on the semantic kind instead of re-deriving
-/// the selector combinations (`ctrl · hs0 · not_hs1 · not_hs2 · is_boundary`, etc.) by hand.
+/// the selector combinations by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HasherResponseKind {
     SpongeStart,
@@ -58,41 +58,54 @@ enum HasherResponseKind {
     MpInput,
     MvOldInput,
     MuNewInput,
-    Hout,
-    Sout,
+    ReturnHash,
 }
 
-/// Walk every hasher controller row in `main` and yield a [`HasherResponseKind`] for each row
-/// that matches one of the 7 emitter patterns (see `chiplet_responses.rs::emit_chiplet_responses`
-/// and `docs/src/design/chiplets/hasher.md`).
-///
-/// Controller rows where no response fires (e.g. Merkle tree continuation rows where
-/// `is_boundary = 0`) are skipped.
-fn hasher_response_rows(
-    main: &MainTrace,
-) -> impl Iterator<Item = (RowIndex, HasherResponseKind)> + '_ {
-    (0..main.chiplets_height()).filter_map(move |row| {
+/// Walk every hasher controller row and collect the response-side interactions that row emits.
+fn hasher_response_rows(main: &MainTrace) -> Vec<(RowIndex, HasherResponseKind)> {
+    let mut rows = Vec::new();
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !is_hasher_controller_row(main, idx) {
-            return None;
+            continue;
         }
-        let hs0 = as_bit(main.chiplet_selector_1(idx))?;
-        let hs1 = as_bit(main.chiplet_selector_2(idx))?;
-        let hs2 = as_bit(main.chiplet_selector_3(idx))?;
-        let is_boundary = as_bit(main.chiplet_is_boundary(idx))?;
-        // Selector table — see `docs/src/design/chiplets/hasher.md`.
-        let kind = match (hs0, hs1, hs2, is_boundary) {
-            (true, false, false, true) => HasherResponseKind::SpongeStart,
-            (true, false, false, false) => HasherResponseKind::SpongeRespan,
-            (true, false, true, true) => HasherResponseKind::MpInput,
-            (true, true, false, true) => HasherResponseKind::MvOldInput,
-            (true, true, true, true) => HasherResponseKind::MuNewInput,
-            (false, false, false, _) => HasherResponseKind::Hout,
-            (false, false, true, true) => HasherResponseKind::Sout,
-            _ => return None,
+        let Some(hs0) = as_bit(main.chiplet_selector_1(idx)) else {
+            continue;
         };
-        Some((idx, kind))
-    })
+        let Some(hs1) = as_bit(main.chiplet_selector_2(idx)) else {
+            continue;
+        };
+        let Some(hs2) = as_bit(main.chiplet_selector_3(idx)) else {
+            continue;
+        };
+        let Some(merkle_or_padding) = as_bit(main.chiplet_cols(idx).controller_merkle_or_padding())
+        else {
+            continue;
+        };
+        let Some(op_final) = as_bit(main.chiplet_cols(idx).controller_op_final()) else {
+            continue;
+        };
+
+        if !merkle_or_padding {
+            if hs0 {
+                rows.push((idx, HasherResponseKind::SpongeStart));
+            } else {
+                rows.push((idx, HasherResponseKind::SpongeRespan));
+            }
+        } else if hs0 && as_bit(main.chiplet_merkle_is_start(idx)) == Some(true) {
+            match (hs1, hs2) {
+                (false, true) => rows.push((idx, HasherResponseKind::MpInput)),
+                (true, false) => rows.push((idx, HasherResponseKind::MvOldInput)),
+                (true, true) => rows.push((idx, HasherResponseKind::MuNewInput)),
+                _ => {},
+            }
+        }
+
+        if op_final {
+            rows.push((idx, HasherResponseKind::ReturnHash));
+        }
+    }
+    rows
 }
 
 // TESTS
@@ -129,15 +142,15 @@ fn span_end_hasher_bus() {
 
     let mut response_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         match kind {
             HasherResponseKind::SpongeStart => {
                 exp.add(usize::from(idx), &HasherMsg::linear_hash_init(addr, state));
                 response_count += 1;
             },
-            HasherResponseKind::Hout => {
-                let digest = digest_from_hasher_state(state);
+            HasherResponseKind::ReturnHash => {
+                let digest = return_digest_from_controller_row(main, idx);
                 exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
                 response_count += 1;
             },
@@ -146,7 +159,7 @@ fn span_end_hasher_bus() {
     }
 
     assert_eq!(request_count, 2, "SPAN+END: expected 2 removes (SPAN + END)");
-    assert_eq!(response_count, 2, "SPAN+END: expected 2 adds (sponge_start + HOUT)");
+    assert_eq!(response_count, 2, "SPAN+END: expected 2 adds (init + return)");
     log.assert_contains(&exp);
 }
 
@@ -179,7 +192,7 @@ fn respan_hasher_bus() {
         if kind != HasherResponseKind::SpongeRespan {
             continue;
         }
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         let rate: [Felt; 8] =
             [state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7]];
@@ -236,7 +249,7 @@ fn merge_hasher_bus() {
         if kind != HasherResponseKind::SpongeStart {
             continue;
         }
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         // SPLIT's own hasher response carries the SPLIT domain in its Eidos chaining word;
         // sibling SPAN sponge_start rows use the default domain.
@@ -288,9 +301,9 @@ fn bcompress_hasher_bus() {
     let bcompress_return_addr = bcompress_helper0 + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
-    let mut hout_count = 0usize;
+    let mut return_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         match kind {
             HasherResponseKind::SpongeStart => {
@@ -301,11 +314,11 @@ fn bcompress_hasher_bus() {
                     sponge_start_count += 1;
                 }
             },
-            HasherResponseKind::Hout => {
-                let digest = digest_from_hasher_state(state);
+            HasherResponseKind::ReturnHash => {
+                let digest = return_digest_from_controller_row(main, idx);
                 exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
                 if addr == bcompress_return_addr {
-                    hout_count += 1;
+                    return_count += 1;
                 }
             },
             _ => {},
@@ -314,7 +327,7 @@ fn bcompress_hasher_bus() {
 
     assert_eq!(request_count, 2, "BCOMPRESS: expected 2 removes (init + return)");
     assert_eq!(sponge_start_count, 1, "BCOMPRESS: expected 1 BCOMPRESS-paired sponge_start");
-    assert_eq!(hout_count, 1, "BCOMPRESS: expected 1 BCOMPRESS-paired HOUT");
+    assert_eq!(return_count, 1, "BCOMPRESS: expected 1 BCOMPRESS-paired return");
     log.assert_contains(&exp);
 }
 
@@ -367,9 +380,9 @@ fn logprecompile_hasher_bus() {
     let log_return_addr = log_addr + CONTROLLER_ROWS_PER_HASHER_OP_FELT - ONE;
 
     let mut sponge_start_count = 0usize;
-    let mut hout_count = 0usize;
+    let mut return_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         match kind {
             HasherResponseKind::SpongeStart => {
@@ -378,11 +391,11 @@ fn logprecompile_hasher_bus() {
                     sponge_start_count += 1;
                 }
             },
-            HasherResponseKind::Hout => {
-                let digest = digest_from_hasher_state(state);
+            HasherResponseKind::ReturnHash => {
+                let digest = return_digest_from_controller_row(main, idx);
                 exp.add(usize::from(idx), &HasherMsg::return_hash(addr, digest));
                 if addr == log_return_addr {
-                    hout_count += 1;
+                    return_count += 1;
                 }
             },
             _ => {},
@@ -394,7 +407,7 @@ fn logprecompile_hasher_bus() {
         sponge_start_count, 1,
         "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired sponge_start"
     );
-    assert_eq!(hout_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired HOUT");
+    assert_eq!(return_count, 1, "LOGPRECOMPILE: expected 1 LOGPRECOMPILE-paired return");
     log.assert_contains(&exp);
 }
 
@@ -443,32 +456,27 @@ fn mpverify_hasher_bus() {
     }
 
     let mut mp_input_count = 0usize;
-    let mut hout_count = 0usize;
+    let mut return_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
         let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
         match kind {
             HasherResponseKind::MpInput => {
                 let node_index = main.chiplet_node_index(idx);
-                // Match the emitter's own `bit = node_index - 2·node_index_next` formula rather
-                // than reading `chiplet_direction_bit`: keeps this assertion independent of the
-                // column whose constraints are under test.
+                // Match the emitter's own `bit = node_index - 2 * node_index_next` formula.
                 let bit = merkle_direction_bit(main, idx);
                 let word: [Felt; 4] = if bit == ZERO { rate_0 } else { rate_1 };
                 exp.add(usize::from(idx), &HasherMsg::merkle_verify_init(addr, node_index, word));
                 mp_input_count += 1;
             },
-            HasherResponseKind::Hout => {
-                // `chiplet_node_index(idx)` is `ZERO` at MPVERIFY's final HOUT row (Merkle walk
-                // terminates with node_index halved to 0). Using `return_hash` keeps the test
-                // aligned with the decoder-side `HasherMsg::return_hash(...)` shape.
+            HasherResponseKind::ReturnHash => {
                 exp.add(
                     usize::from(idx),
-                    &HasherMsg::return_hash(addr, digest_from_hasher_state(state)),
+                    &HasherMsg::return_hash(addr, return_digest_from_controller_row(main, idx)),
                 );
-                hout_count += 1;
+                return_count += 1;
             },
             _ => {},
         }
@@ -476,8 +484,7 @@ fn mpverify_hasher_bus() {
 
     assert_eq!(request_count, 2, "MPVERIFY: expected 2 removes (init + return)");
     assert_eq!(mp_input_count, 1, "MPVERIFY: expected 1 mp_verify_input add");
-    // Depth-3 MPVERIFY emits HOUT on every merkle-verify sub-cycle return (one per level).
-    assert_eq!(hout_count, 2, "MPVERIFY: expected exactly 2 HOUT adds");
+    assert_eq!(return_count, 2, "MPVERIFY: expected exactly 2 return-hash adds");
     log.assert_contains(&exp);
 }
 
@@ -536,9 +543,9 @@ fn mrupdate_hasher_bus() {
 
     let mut mv_count = 0usize;
     let mut mu_count = 0usize;
-    let mut hout_count = 0usize;
+    let mut return_count = 0usize;
     for (idx, kind) in hasher_response_rows(main) {
-        let addr = main.clk(idx) + ONE;
+        let addr = main.chiplet_clk(idx);
         let state = main.chiplet_hasher_state(idx);
         let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
         let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
@@ -555,12 +562,12 @@ fn mrupdate_hasher_bus() {
                 exp.add(usize::from(idx), &HasherMsg::merkle_new_init(addr, node_index, word));
                 mu_count += 1;
             },
-            HasherResponseKind::Hout => {
+            HasherResponseKind::ReturnHash => {
                 exp.add(
                     usize::from(idx),
-                    &HasherMsg::return_hash(addr, digest_from_hasher_state(state)),
+                    &HasherMsg::return_hash(addr, return_digest_from_controller_row(main, idx)),
                 );
-                hout_count += 1;
+                return_count += 1;
             },
             _ => {},
         }
@@ -572,8 +579,7 @@ fn mrupdate_hasher_bus() {
     );
     assert_eq!(mv_count, 1, "MRUPDATE: expected 1 mr_update_old_input add");
     assert_eq!(mu_count, 1, "MRUPDATE: expected 1 mr_update_new_input add");
-    // Depth-3 MRUPDATE emits HOUT on each old-path and new-path sub-cycle return.
-    assert_eq!(hout_count, 3, "MRUPDATE: expected exactly 3 HOUT adds");
+    assert_eq!(return_count, 3, "MRUPDATE: expected exactly 3 return-hash adds");
     log.assert_contains(&exp);
 }
 
@@ -595,8 +601,13 @@ fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
     ]
 }
 
-fn digest_from_hasher_state(state: [Felt; 12]) -> [Felt; 4] {
-    [state[8], state[9], state[10], state[11]]
+fn return_digest_from_controller_row(main: &MainTrace, row: RowIndex) -> [Felt; 4] {
+    let ctrl = main.chiplet_cols(row).controller();
+    if main.chiplet_cols(row).controller_merkle_or_padding() == ONE {
+        ctrl.merkle_digest()
+    } else {
+        ctrl.hash_digest()
+    }
 }
 
 fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
@@ -617,12 +628,9 @@ fn as_bit(val: Felt) -> Option<bool> {
     }
 }
 
-/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2·node_index_next`
-/// (see `chiplet_responses.rs::mp_verify_input`). Independent of the `chiplet_direction_bit`
-/// column, so bugs in that column don't make the assertion vacuously pass.
+/// Recompute the Merkle direction bit the emitter uses: `bit = node_index - 2 * node_index_next`.
 fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
-    let next = RowIndex::from(usize::from(row) + 1);
-    main.chiplet_node_index(row) - main.chiplet_node_index(next).double()
+    main.chiplet_node_index(row) - main.chiplet_node_index_next(row).double()
 }
 
 // SIBLING TABLE BUS (MRUPDATE add/remove pairing)
@@ -635,11 +643,11 @@ fn merkle_direction_bit(main: &MainTrace, row: RowIndex) -> Felt {
 //
 // The test iterates every hasher controller row, picks out the MV/MU sibling-emitting rows
 // via the `(s0, s1, s2)` sub-selectors, and attaches a `SiblingMsg` expectation tagged with
-// the direction bit. Column-blind — the subset matcher finds each message regardless of
+// the direction bit. The subset matcher is column-blind and finds each message regardless of
 // where the M4/C2 packing puts it.
 
 /// Drive a depth-3 Merkle MRUPDATE and assert the sibling-table bus fires one add per MV
-/// controller row and one remove per MU controller row (3 levels → 3 adds + 3 removes).
+/// controller row and one remove per MU controller row (3 levels -> 3 adds + 3 removes).
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
@@ -664,8 +672,8 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
 
     // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
     // `chiplet_active.controller = 1` (s_ctrl column) AND the hasher internal
-    // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
-    // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
+    // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0 * s1 * (1-s2)`) or MU-all
+    // (`s0 * s1 * s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
@@ -708,9 +716,8 @@ fn push_sibling(exp: &mut Expectations<'_>, row: RowIndex, main: &MainTrace, sid
     let rate_0: [Felt; 4] = [state[0], state[1], state[2], state[3]];
     let rate_1: [Felt; 4] = [state[4], state[5], state[6], state[7]];
 
-    // Direction bit drives which rate half the sibling lives in. The trace's
-    // `chiplet_direction_bit` column carries the extracted bit on Merkle controller rows.
-    let bit = main.chiplet_direction_bit(row);
+    // Direction bit drives which rate half the sibling lives in.
+    let bit = main.chiplet_merkle_direction_bit(row);
     let row_usize = usize::from(row);
     let (bit_tag, h) = if bit == ZERO {
         (SiblingBit::Zero, rate_1)

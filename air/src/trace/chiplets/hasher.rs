@@ -37,10 +37,10 @@ pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 /// Number of field elements in the chaining-value portion of the hasher's state.
 pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 
-/// Legacy index of the second element in the chaining-value word.
+/// Index of the second element in the chaining-value word.
 ///
-/// Older helpers stored domain tags in this lane. Eidos computes the full chaining word from the
-/// domain and input length.
+/// Domain separation is encoded by the BlakeG chaining-word constructors, not by mutating this
+/// lane directly.
 pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
 /// Number of field elements in the rate portion of the hasher's state.
@@ -73,10 +73,10 @@ pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64)
 pub const CONTROLLER_TRACE_ALIGNMENT: usize = 8;
 
 /// Number of columns in the hasher-controller trace.
-pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 4;
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 7;
 
-/// Number of controller rows per compression request (one input + one output).
-pub const CONTROLLER_ROWS_PER_HASHER_OP: usize = 2;
+/// Number of controller rows per compression request.
+pub const CONTROLLER_ROWS_PER_HASHER_OP: usize = 1;
 
 /// Felt version of [CONTROLLER_ROWS_PER_HASHER_OP] for address arithmetic.
 pub const CONTROLLER_ROWS_PER_HASHER_OP_FELT: Felt =
@@ -88,6 +88,8 @@ pub const CONTROLLER_ROWS_PER_HASHER_OP_FELT: Felt =
 /// executing linear hash computation. These selectors can also be used for a simple 2-to-1 hash
 /// computation.
 pub const LINEAR_HASH: Selectors = [ONE, ZERO, ZERO];
+/// Specifies a continuation row for an executing linear hash computation.
+pub const HASH_ABSORB: Selectors = [ZERO, ZERO, ZERO];
 /// Specifies a start of Merkle path verification computation or absorption of a new path node
 /// into the hasher state.
 pub const MP_VERIFY: Selectors = [ONE, ZERO, ONE];
@@ -100,10 +102,5 @@ pub const MR_UPDATE_OLD: Selectors = [ONE, ONE, ZERO];
 /// state for the "new" node value during Merkle root update computation.
 pub const MR_UPDATE_NEW: Selectors = [ONE, ONE, ONE];
 
-/// Specifies a completion of a computation such that only the hash result (values in h0, h1, h2
-/// h3) is returned.
-pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
-
-/// Specifies a completion of a computation such that the entire hasher state (values in h0 through
-/// h11) is returned.
-pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
+/// Specifies an inactive controller padding row.
+pub const PADDING: Selectors = [ZERO, ONE, ZERO];

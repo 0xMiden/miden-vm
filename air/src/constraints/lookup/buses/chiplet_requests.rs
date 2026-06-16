@@ -65,9 +65,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
     // Constants reused across BCOMPRESS / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
-    // Strides are measured in controller-trace rows (2 per hasher operation), not physical
-    // hasher sub-chiplet rows — the address must cancel against `clk + 1` on the hasher
-    // controller output row.
+    // Strides are measured in controller-trace rows.
     let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_HASHER_OP - 1) as u16);
     let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_HASHER_OP as u16);
 
@@ -84,7 +82,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                 |g| {
                     // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN; CALL / SYSCALL
                     // share the payload but live in batches below). SPAN encodes opcode 0
-                    // at the β¹² slot.
+                    // at the beta^12 slot.
                     let mut control_remove = |name, flag, opcode: u8| {
                         g.remove(
                             name,
@@ -161,9 +159,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- RESPAN ---
-                    // Uses `addr_next` directly: in the controller/perm split, the next row's
-                    // decoder `addr` already points at the continuation input
-                    // row, so no offset is needed.
+                    // Uses `addr_next` directly: the next row's decoder `addr` already points at
+                    // the continuation controller row, so no offset is needed.
                     g.remove(
                         "respan",
                         op_flags.respan(),
@@ -512,10 +509,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- HORNERBASE / HORNEREXT ---
-                    // Both ops read the evaluation point α from memory at `stack[13]`. HORNERBASE
-                    // reads two base-field elements (α₀ at `addr`, α₁ at `addr + 1`); HORNEREXT
-                    // reads a single word `[α₀, α₁, k₀, k₁]` at `addr`. α is held in helpers[0..2]
-                    // for both ops (HORNEREXT additionally parks k₀, k₁ in helpers[2..4]).
+                    // Both ops read the evaluation point alpha from memory at `stack[13]`.
+                    // HORNERBASE reads two base-field elements (`alpha_0` at `addr`,
+                    // `alpha_1` at `addr + 1`); HORNEREXT reads a single word
+                    // `[alpha_0, alpha_1, k_0, k_1]` at `addr`. The point is held in
+                    // helpers[0..2] for both ops; HORNEREXT also stores `k_0`, `k_1` in
+                    // helpers[2..4].
                     let alpha_ptr = stk.get(13);
                     g.batch(
                         "hornerbase",

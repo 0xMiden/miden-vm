@@ -1,6 +1,6 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! The Miden VM's LogUp buses are emitted across 7 columns — most host a single bus, but
+//! The Miden VM's LogUp buses are emitted across 8 columns — most host a single bus, but
 //! several host two or more linearly-independent buses sharing one running accumulator via
 //! distinct `bus_prefix[bus]` additive bases (see per-bus module docs for the merges).
 //! Each emitter is a crate-private `pub(in crate::constraints::lookup) fn emit_*` that
@@ -20,7 +20,7 @@
 //! - [`super::main_air::MainBusContext`] — two-row window plus the shared
 //!   [`crate::constraints::op_flags::OpFlags`] instance consumed by the 4 main-trace emitters.
 //! - [`super::chiplet_air::ChipletBusContext`] — two-row window plus the shared
-//!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
+//!   [`ChipletActiveFlags`] snapshot consumed by the chiplet-trace emitters.
 //!
 //! Each context is built once per `eval` through an extension-trait hook
 //! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
@@ -39,6 +39,7 @@ pub(in crate::constraints::lookup) mod block_stack_and_range_logcap;
 pub(in crate::constraints::lookup) mod chiplet_requests;
 pub(in crate::constraints::lookup) mod chiplet_responses;
 pub(in crate::constraints::lookup) mod hash_kernel;
+pub(in crate::constraints::lookup) mod hasher_returns;
 pub(in crate::constraints::lookup) mod lookup_op_flags;
 pub(in crate::constraints::lookup) mod stack_overflow;
 pub(in crate::constraints::lookup) mod wiring;
@@ -98,7 +99,7 @@ where
         let s2: E = local.chiplets[2].into();
         let s3: E = local.chiplets[3].into();
         let s4: E = local.chiplets[4].into();
-        let stream_mode: E = local.stream_mode.into();
+        let stream_mode: E = local.bitwise_stream_mode().into();
 
         // Virtual non-hasher selector and prefix products.
         let s0 = E::ONE - s_ctrl.clone();

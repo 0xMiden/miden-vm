@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    CHIPLETS_WIDTH, TRACE_WIDTH,
+    CHIPLETS_MODE_COL, CHIPLETS_WIDTH, TRACE_WIDTH,
     chiplets::{
         KERNEL_ROM_TRACE_WIDTH, NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
         NUM_MEMORY_SELECTORS,
@@ -38,9 +38,9 @@ fn hasher_chiplet_trace() {
     // --- single hasher compression with no stack manipulation ---
     // The program is a single basic block containing BCompress.
     // This produces:
-    //   - 1 span hash (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows
-    //   - 1 BCOMPRESS (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows
-    // Total: 4 controller rows padded to the chiplet alignment boundary.
+    //   - 1 span hash controller row
+    //   - 1 BCOMPRESS controller row
+    // Total: 2 controller rows padded to the chiplet alignment boundary.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
     let operations = vec![Operation::BCompress];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
@@ -55,7 +55,7 @@ fn hasher_chiplet_trace() {
 #[test]
 fn bitwise_chiplet_trace() {
     // --- single bitwise operation with no stack manipulation ---
-    // This produces: 1 span hash (2 controller rows), then 8 bitwise rows.
+    // This produces: 1 span hash controller row, then 8 bitwise rows.
     let stack = [4, 8];
     let operations = vec![Operation::U32xor];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
@@ -91,9 +91,9 @@ fn stacked_chiplet_trace() {
     // --- operations in hasher, bitwise, and memory processors ---
     // Operations: U32xor, Push(0), MStoreW, BCompress
     // This produces:
-    //   - 1 span hash (2 controller rows) for the basic block
-    //   - 1 BCompress (2 controller rows)
-    // Total hasher: 4 controller rows padded to the chiplet alignment boundary.
+    //   - 1 span hash controller row for the basic block
+    //   - 1 BCOMPRESS controller row
+    // Total hasher: 2 controller rows padded to the chiplet alignment boundary.
     // Then: 8 bitwise rows (U32xor), then 1 memory row (MStoreW)
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
     let ops = vec![
@@ -228,25 +228,13 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
     }
 
     // --- Check controller rows ---
-    // Controller rows come in pairs: input row (is_start varies) + output row (is_final varies).
-    // For a span hash: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
-    // For BCompress: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
+    // Each controller row carries one compression request.
     for row in 0..controller_rows {
-        let is_input_row = row % CONTROLLER_ROWS_PER_HASHER_OP == 0;
-        if is_input_row {
-            // Input rows have s0=1 (LINEAR_HASH[0])
-            assert_eq!(
-                trace[s0_col][row], LINEAR_HASH[0],
-                "controller input row {row}: s0 should be {} (LINEAR_HASH)",
-                LINEAR_HASH[0]
-            );
-        } else {
-            // Output rows have s0=0 (RETURN_HASH or RETURN_STATE)
-            assert_eq!(
-                trace[s0_col][row], ZERO,
-                "controller output row {row}: s0 should be 0 (RETURN_*)"
-            );
-        }
+        assert_eq!(
+            trace[s0_col][row], LINEAR_HASH[0],
+            "controller row {row}: s0 should be {} (LINEAR_HASH)",
+            LINEAR_HASH[0]
+        );
     }
 
     // --- Check padding rows ---
@@ -259,11 +247,16 @@ fn validate_hasher_trace(trace: &ChipletsTrace, expected_len: usize, controller_
         assert_eq!(trace[s1_col][row], ONE, "padding row {row}: s1 should be 1");
         assert_eq!(trace[s2_col][row], ZERO, "padding row {row}: s2 should be 0");
 
-        // Non-selector hasher columns should be zero on padding rows.
-        // Hasher state columns (indices 4..16 in chiplets trace = hasher cols 3..15).
+        // Non-selector hasher columns should be zero on padding rows, except the shared
+        // controller discriminator. Controller constraints bind this cell to
+        // `is_merkle + is_padding`.
         // The trailing column (chip_clk, CHIPLETS_WIDTH - 1) is the chiplet-trace row counter
         // and is non-zero on every row by design; see `air/src/constraints/chiplets/chip_clk.rs`.
         for col in 4..CHIPLETS_WIDTH - 1 {
+            if col == CHIPLETS_MODE_COL {
+                assert_eq!(trace[col][row], ONE, "padding row {row}: mode cell should be 1");
+                continue;
+            }
             assert_eq!(trace[col][row], ZERO, "padding row {row}, col {col} should be zero");
         }
     }

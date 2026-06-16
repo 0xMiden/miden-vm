@@ -3,8 +3,8 @@
 //!
 //! Combines four interaction families on a single LogUp column:
 //!
-//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On hasher controller
-//!    input rows with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
+//! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller
+//!    rows with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
 //!    (old path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects
 //!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
 //!    (two add, two remove).
@@ -21,7 +21,7 @@
 //!    memory address space.
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
-//! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
+//! gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
 //! use the derived AEAD stream flag, and the memory row gate is `chiplet_active.memory`. Hasher sub-selectors,
 //! hasher state,
 //! `node_index`, and `mrupdate_id` come from the typed
@@ -75,7 +75,6 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
-    let next = ctx.next;
     let aead_phase: [LB::Expr; 8] = {
         let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
         [
@@ -92,10 +91,9 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
 
     // --- Sibling-table setup ---
 
-    // Typed hasher-controller overlay: sub-selectors `s0/s1/s2`, state lanes, `node_index`,
-    // `mrupdate_id`. Next-row `node_index` for the direction-bit computation.
+    // Typed hasher-controller overlay: sub-selectors `s0/s1/s2`, state lanes, Merkle index data,
+    // and carried MRUPDATE id.
     let ctrl = local.controller();
-    let ctrl_next = next.controller();
 
     let hs0: LB::Expr = ctrl.s0.into();
     let hs1: LB::Expr = ctrl.s1.into();
@@ -111,13 +109,13 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     // sibling messages only use the rate halves.
     let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
     let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
-    let mrupdate_id = ctrl.mrupdate_id;
-    let node_index = ctrl.node_index;
+    let mrupdate_id = local.controller_mrupdate_id();
+    let node_index = ctrl.merkle_node_index();
 
     // Direction bit `b = node_index - 2 * node_index_next`. The bit / one_minus_bit combine
     // multiplicatively into the sibling flags below - they're computed once and cloned into
     // each `g.add` / `g.remove` flag argument.
-    let node_index_next: LB::Expr = ctrl_next.node_index.into();
+    let node_index_next: LB::Expr = ctrl.merkle_node_index_next().into();
     let bit: LB::Expr = node_index.into() - node_index_next.double();
     let one_minus_bit: LB::Expr = bit.not();
 

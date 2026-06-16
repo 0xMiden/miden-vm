@@ -1,41 +1,21 @@
-//! Semantic row-kind flags for the controller sub-chiplet.
+//! Semantic row-kind flags for the single-row hasher controller.
 //!
 //! [`ControllerFlags`] is a pure naming layer over compositions of the hasher-internal
-//! sub-selectors `(s0, s1, s2)` on the current and next rows. Each field gives a
-//! meaningful name to a bit-pattern product so constraint code never references
-//! raw `cols.s0 / cols.s1 / cols.s2` as ad-hoc gate factors.
+//! sub-selectors `(s0, s1, s2)`. It carries no chiplet-level scope; callers combine these flags
+//! with [`ChipletFlags`](super::super::selectors::ChipletFlags).
 //!
-//! This struct contains **no** chiplet-level scope (`is_active`, `is_transition`):
-//! those live on [`ChipletFlags`] and are combined with these row flags by
-//! multiplication at each call site.
+//! ## Selector encoding
 //!
-//! ## Selector encoding (current row, within controller rows)
+//! | s0 | s1 | s2 | Row type |
+//! |----|----|----|----------|
+//! |  1 |  0 |  0 | Hash start: full BlakeG input state |
+//! |  0 |  0 |  0 | Hash continuation: full BlakeG input state |
+//! |  1 |  0 |  1 | MP row |
+//! |  1 |  1 |  0 | MV row |
+//! |  1 |  1 |  1 | MU row |
+//! |  0 |  1 |  0 | Padding |
 //!
-//! | s0 | s1 | s2 | Row type | Flag |
-//! |----|----|----|----------|------|
-//! |  1 |  0 |  0 | Hash input (LINEAR_HASH / 2-to-1 / BCOMPRESS) | `is_hash_input` |
-//! |  1 |  0 |  1 | MP input (Merkle path verify) | `is_merkle_input` |
-//! |  1 |  1 |  0 | MV input (old-path Merkle root update) | `is_merkle_input` / `is_mv_input` |
-//! |  1 |  1 |  1 | MU input (new-path Merkle root update) | `is_merkle_input` |
-//! |  0 |  0 |  0 | HOUT output (return digest) | `is_hout` / `is_output` |
-//! |  0 |  0 |  1 | SOUT output (return full state) | `is_sout` / `is_output` |
-//! |  0 |  1 |  * | Padding (inactive slot) | `is_padding` |
-//!
-//! On non-controller rows, `s0/s1/s2` are interpreted by the active chiplet under
-//! `s0 = 1 - s_ctrl`, so these flags are don't-care there. Constraint code gates
-//! them by `ChipletFlags.is_active` (= `s_ctrl`) at the call site.
-//!
-//! ## Operation semantics
-//!
-//! - **Hash input** (`is_hash_input`): LINEAR_HASH (multi-batch span), single 2-to-1 hash,
-//!   or BCOMPRESS. In linear-hash mode, the chaining-value lanes are set on the
-//!   first input and carried across continuations; Merkle ops set those lanes independently
-//!   at each level.
-//! - **MP**: MPVERIFY — read-only Merkle path check. Does not interact with the sibling table.
-//! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling table
-//!   via the hash_kernel bus.
-//! - **MU**: new-path leg of MRUPDATE. Each MU row removes a sibling from the virtual sibling
-//!   table. The table balance ensures the same siblings are used for both the old and new paths.
+//! The two remaining patterns are invalid.
 
 use miden_core::field::PrimeCharacteristicRing;
 
@@ -44,104 +24,38 @@ use crate::constraints::{chiplets::columns::ControllerCols, utils::BoolNot};
 // CONTROLLER FLAGS
 // ================================================================================================
 
-/// Named compositions of the controller sub-selectors `(s0, s1, s2)` on the current
-/// and next rows.
-///
-/// Pure row-kind layer — contains no chiplet-level scope. Combine with [`ChipletFlags`](
-/// super::super::selectors::ChipletFlags) at the call site by multiplication.
+/// Named compositions of the controller sub-selectors `(s0, s1, s2)` on the current row.
+#[derive(Clone)]
 pub struct ControllerFlags<E> {
-    // ========================================================================
-    // Current row — compositions of cols.{s0, s1, s2}
-    // ========================================================================
-    /// Input row: `s0` (deg 1). Covers all input operations (hash + Merkle variants).
-    pub is_input: E,
-
-    /// Output row: `(1-s0)*(1-s1)` (deg 2). Covers HOUT and SOUT.
-    pub is_output: E,
-
-    /// Padding row: `(1-s0)*s1` (deg 2). Inactive controller slot.
+    pub is_hash: E,
+    pub is_merkle: E,
     pub is_padding: E,
-
-    /// Hash input row (LINEAR_HASH / 2-to-1 / BCOMPRESS):
-    /// `s0*(1-s1)*(1-s2)` (deg 3).
-    pub is_hash_input: E,
-
-    /// Any Merkle input row (MP/MV/MU): `s0*(s1+s2-s1*s2)` (deg 3).
-    ///
-    /// The expression `s1 + s2 - s1*s2` equals `s1 OR s2` for binary inputs.
-    pub is_merkle_input: E,
-
-    /// HOUT (return digest) output: `(1-s0)*(1-s1)*(1-s2)` (deg 3).
-    pub is_hout: E,
-
-    /// SOUT (return full state) output: `(1-s0)*(1-s1)*s2` (deg 3).
-    pub is_sout: E,
-
-    // ========================================================================
-    // Next row — compositions of cols_next.{s0, s1, s2}
-    // ========================================================================
-    /// Next row is an output row: `(1-s0')*(1-s1')` (deg 2).
-    pub is_output_next: E,
-
-    /// Next row is a padding row: `(1-s0')*s1'` (deg 2).
-    pub is_padding_next: E,
-
-    /// Next row is a hash input — LINEAR_HASH continuation: `s0'*(1-s1')*(1-s2')` (deg 3).
-    pub is_hash_input_next: E,
-
-    /// Next row is any Merkle input (MP/MV/MU): `s0'*(s1'+s2'-s1'*s2')` (deg 3).
-    pub is_merkle_input_next: E,
-
-    /// Next row is an MV input — old-path MRUPDATE start: `s0'*s1'*(1-s2')` (deg 3).
-    pub is_mv_input_next: E,
+    pub is_invalid: E,
 }
 
 impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
-    /// Build all row-kind flags from the current and next row's sub-selector columns.
-    pub fn new<V: Copy + Into<E>>(cols: &ControllerCols<V>, cols_next: &ControllerCols<V>) -> Self {
-        // --- Current row ---
+    /// Build all row-kind flags from the current row's sub-selector columns.
+    pub fn new<V: Copy + Into<E>>(cols: &ControllerCols<V>) -> Self {
         let s0: E = cols.s0.into();
         let s1: E = cols.s1.into();
         let s2: E = cols.s2.into();
-        let not_s0 = s0.not();
-        let not_s1 = s1.not();
-        let not_s2 = s2.not();
+        let not_s0 = s0.clone().not();
+        let not_s1 = s1.clone().not();
+        let not_s2 = s2.clone().not();
 
-        let is_input = s0.clone();
-        let is_output = not_s0.clone() * not_s1.clone();
-        let is_padding = not_s0 * s1.clone();
-        let is_hash_input = s0.clone() * not_s1 * not_s2.clone();
-        let is_merkle_input = s0 * (s1.clone() + s2.clone() - s1 * s2.clone());
-        let is_hout = is_output.clone() * not_s2;
-        let is_sout = is_output.clone() * s2;
-
-        // --- Next row ---
-        let s0n: E = cols_next.s0.into();
-        let s1n: E = cols_next.s1.into();
-        let s2n: E = cols_next.s2.into();
-        let not_s0n = s0n.not();
-        let not_s1n = s1n.not();
-        let not_s2n = s2n.not();
-
-        let is_output_next = not_s0n.clone() * not_s1n.clone();
-        let is_padding_next = not_s0n * s1n.clone();
-        let is_hash_input_next = s0n.clone() * not_s1n * not_s2n.clone();
-        let is_merkle_input_next = s0n.clone() * (s1n.clone() + s2n.clone() - s1n.clone() * s2n);
-        let is_mv_input_next = s0n * s1n * not_s2n;
+        let is_hash = not_s1.clone() * not_s2.clone();
+        let is_mp = s0.clone() * not_s1 * s2.clone();
+        let is_mv = s0.clone() * s1.clone() * not_s2.clone();
+        let is_mu = s0 * s1.clone() * s2.clone();
+        let is_padding = not_s0.clone() * s1 * not_s2;
+        let is_invalid = not_s0 * s2;
+        let is_merkle = is_mp + is_mv + is_mu;
 
         Self {
-            is_input,
-            is_output,
+            is_hash,
+            is_merkle,
             is_padding,
-            is_hash_input,
-            is_merkle_input,
-            is_hout,
-            is_sout,
-            is_output_next,
-            is_padding_next,
-            is_hash_input_next,
-            is_merkle_input_next,
-            is_mv_input_next,
+            is_invalid,
         }
     }
 }

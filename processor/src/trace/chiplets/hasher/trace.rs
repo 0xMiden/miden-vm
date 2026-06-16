@@ -3,29 +3,33 @@ use core::{borrow::BorrowMut, ops::Range};
 
 use miden_air::{
     ControllerCols,
-    trace::chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, TRACE_WIDTH},
+    trace::{
+        CHIPLETS_MODE_COL,
+        chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
+    },
 };
+use miden_core::chiplets::blakeg;
 
-use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, ZERO};
+use super::{
+    ChipletTraceFragment, Felt, HasherState, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, ONE,
+    STATE_WIDTH, Selectors, ZERO,
+};
 
 // HASHER OPERATION
 // ================================================================================================
 
-/// A single logical operation appended to the hasher trace. Each variant maps deterministically
-/// to a known number of trace rows; the actual row materialization happens once in
-/// [`HasherTrace::fill_trace`].
+/// A logical operation appended to the hasher trace.
 #[derive(Debug, Clone)]
 enum HasherOp {
     /// A single controller row.
     Controller {
         selectors: Selectors,
         state: HasherState,
-        node_index: Felt,
+        row_data: [Felt; 4],
+        op_final: Felt,
         mrupdate_id: Felt,
-        is_boundary: Felt,
-        direction_bit: Felt,
     },
-    /// Padding rows filling the controller region up to a chiplet alignment boundary.
+    /// Padding rows filling the controller region to the chiplet alignment boundary.
     Padding { count: usize, mrupdate_id: Felt },
 }
 
@@ -44,16 +48,13 @@ impl HasherOp {
 
 /// Execution trace of the hasher component.
 ///
-/// The trace consists of 20 columns grouped logically as follows:
-/// - 3 selector columns (s0, s1, s2).
-/// - 12 columns describing hasher state (h0..h11).
-/// - 1 node_index column: holds the Merkle tree node index on controller rows.
-/// - 1 mrupdate_id column (domain separator for sibling table).
-/// - 1 is_boundary column (1 on boundary rows: first input or last output, 0 otherwise).
-/// - 1 direction_bit column. On Merkle rows it is the path bit; on one-shot
-///   full-state hash rows it selects packed (`0`) or raw (`1`) BlakeG output.
-///
-/// BlakeG compression cycles are materialized into `BlakeGCompressionAir`.
+/// Each controller row writes 22 fragment cells:
+/// - 3 row-kind selectors.
+/// - 12 state cells.
+/// - 4 row-kind data cells.
+/// - 1 final-row marker.
+/// - 1 carried MRUPDATE id.
+/// - 1 controller mode cell, written to the chiplets shared mode column.
 #[derive(Debug, Default)]
 pub struct HasherTrace {
     ops: Vec<HasherOp>,
@@ -69,17 +70,12 @@ impl HasherTrace {
         self.row_count
     }
 
-    /// Returns the next row address. The address is equal to the current trace length + 1.
-    ///
-    /// The above means that row addresses start at ONE (rather than ZERO), and are incremented by
-    /// ONE at every row. Starting at ONE is needed for the decoder so that the address of the
-    /// first code block is a non-zero value.
+    /// Returns the next row address. Row addresses start at ONE.
     pub fn next_row_addr(&self) -> Felt {
         Felt::new_unchecked(self.row_count as u64 + 1)
     }
 
-    /// Returns the index that the next op pushed will occupy. Used to bracket memoization-eligible
-    /// op ranges in the caller.
+    /// Returns the index that the next op pushed will occupy.
     pub fn next_op_index(&self) -> usize {
         self.ops.len()
     }
@@ -92,18 +88,16 @@ impl HasherTrace {
         &mut self,
         selectors: Selectors,
         state: &HasherState,
-        node_index: Felt,
+        row_data: [Felt; 4],
+        op_final: Felt,
         mrupdate_id: Felt,
-        is_boundary: Felt,
-        direction_bit: Felt,
     ) {
         self.ops.push(HasherOp::Controller {
             selectors,
             state: *state,
-            node_index,
+            row_data,
+            op_final,
             mrupdate_id,
-            is_boundary,
-            direction_bit,
         });
         self.row_count += 1;
     }
@@ -112,10 +106,6 @@ impl HasherTrace {
     // --------------------------------------------------------------------------------------------
 
     /// Appends padding rows to fill the controller region to `CONTROLLER_TRACE_ALIGNMENT`.
-    ///
-    /// Padding rows have all columns set to zero except mrupdate_id, which must carry the
-    /// last value to satisfy the AIR progression constraint (mrupdate_id is constant on
-    /// non-MV-start transitions).
     pub fn pad_to_controller_boundary(&mut self, mrupdate_id: Felt) {
         let remainder = self.row_count % CONTROLLER_TRACE_ALIGNMENT;
         if remainder != 0 {
@@ -128,13 +118,9 @@ impl HasherTrace {
     // MEMOIZATION SUPPORT
     // --------------------------------------------------------------------------------------------
 
-    /// Re-pushes the ops in `range` with `new_mrupdate_id` substituted on every controller and
-    /// padding row. Returns the post-compression state (i.e. the state of the last controller
-    /// op in the range, which is by construction an output row) and the input states of every
-    /// controller input row encountered (s0 == ONE).
+    /// Re-pushes the ops in `range` with `new_mrupdate_id` substituted.
     ///
-    /// Used to memoize identical controller blocks: the source op range is identified by
-    /// digest in the caller's memoization map.
+    /// Returns the post-compression state and every copied compression input state.
     pub fn replay_ops_range(
         &mut self,
         range: Range<usize>,
@@ -145,12 +131,14 @@ impl HasherTrace {
         let mut input_states = Vec::new();
         for mut op in copied {
             match &mut op {
-                HasherOp::Controller { mrupdate_id, selectors, state, .. } => {
+                HasherOp::Controller {
+                    mrupdate_id, selectors, state, row_data, ..
+                } => {
                     *mrupdate_id = new_mrupdate_id;
-                    if selectors[0] == ONE {
-                        input_states.push(*state);
+                    if *selectors != PADDING {
+                        input_states.push(input_state_from_row(*selectors, state));
+                        last_state = output_state_from_row(*selectors, state, row_data);
                     }
-                    last_state = *state;
                 },
                 HasherOp::Padding { mrupdate_id, .. } => {
                     *mrupdate_id = new_mrupdate_id;
@@ -168,55 +156,49 @@ impl HasherTrace {
     /// Fills the provided trace fragment by materializing the op log row by row.
     pub fn fill_trace(self, trace: &mut ChipletTraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
-        debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");
+        debug_assert!(trace.width() >= TRACE_WIDTH, "inconsistent trace widths");
 
-        let mut chunk = [ZERO; TRACE_WIDTH * CONTROLLER_TRACE_ALIGNMENT];
+        let row_width = trace.width();
+        let mut chunk = vec![ZERO; row_width * CONTROLLER_TRACE_ALIGNMENT];
 
         let mut row_idx = 0usize;
         for op in &self.ops {
             let n = op.row_count();
             debug_assert!(n <= CONTROLLER_TRACE_ALIGNMENT);
-            let (chunk_rows, _) = chunk.as_mut_slice().as_chunks_mut::<TRACE_WIDTH>();
             match op {
                 HasherOp::Controller {
                     selectors,
                     state,
-                    node_index,
+                    row_data,
+                    op_final,
                     mrupdate_id,
-                    is_boundary,
-                    direction_bit,
                 } => {
                     write_controller_row(
-                        &mut chunk_rows[0],
+                        &mut chunk[..row_width],
                         *selectors,
                         state,
-                        *node_index,
+                        *row_data,
+                        *op_final,
                         *mrupdate_id,
-                        *is_boundary,
-                        *direction_bit,
                     );
                 },
                 HasherOp::Padding { count, mrupdate_id } => {
-                    // Padding selectors: [0, 1, 0]. This combination is unused in the controller
-                    // region and prevents padding rows from being mistaken for HOUT output rows.
-                    let padding_selectors = [ZERO, ONE, ZERO];
-                    for row in &mut chunk_rows[..*count] {
+                    for row in chunk.chunks_mut(row_width).take(*count) {
                         write_controller_row(
                             row,
-                            padding_selectors,
+                            PADDING,
                             &[ZERO; STATE_WIDTH],
+                            [ZERO; 4],
                             ZERO,
                             *mrupdate_id,
-                            ZERO,
-                            ZERO,
                         );
                     }
                 },
             }
 
-            trace.copy_rows_into(row_idx, &chunk[..n * TRACE_WIDTH]);
+            trace.copy_rows_into(row_idx, &chunk[..n * row_width]);
 
-            // Write `s_ctrl = ONE` on controller/padding rows.
+            // Write `s_ctrl = ONE` on controller and padding rows.
             for i in 0..n {
                 let prefix = trace.prefix_mut(row_idx + i);
                 if let Some(s_ctrl) = prefix.first_mut() {
@@ -234,21 +216,62 @@ impl HasherTrace {
 // ================================================================================================
 
 fn write_controller_row(
-    row: &mut [Felt; TRACE_WIDTH],
+    row: &mut [Felt],
     selectors: Selectors,
     state: &HasherState,
-    node_index: Felt,
+    row_data: [Felt; 4],
+    op_final: Felt,
     mrupdate_id: Felt,
-    is_boundary: Felt,
-    direction_bit: Felt,
 ) {
-    let cols: &mut ControllerCols<Felt> = row[..].borrow_mut();
+    row.fill(ZERO);
+
+    let cols: &mut ControllerCols<Felt> = row[..CONTROLLER_OVERLAY_WIDTH].borrow_mut();
     cols.s0 = selectors[0];
     cols.s1 = selectors[1];
     cols.s2 = selectors[2];
     cols.state = *state;
-    cols.node_index = node_index;
-    cols.mrupdate_id = mrupdate_id;
-    cols.is_boundary = is_boundary;
-    cols.direction_bit = direction_bit;
+    cols.row_data = row_data;
+    row[OP_FINAL_OFFSET] = op_final;
+    row[MRUPDATE_ID_OFFSET] = mrupdate_id;
+    row[CONTROLLER_MERKLE_OR_PADDING_OFFSET] =
+        if selectors == PADDING || is_merkle_selector(selectors) {
+            ONE
+        } else {
+            ZERO
+        };
+}
+
+const CONTROLLER_OVERLAY_WIDTH: usize = 19;
+const OP_FINAL_OFFSET: usize = 19;
+const MRUPDATE_ID_OFFSET: usize = 20;
+const CONTROLLER_MERKLE_OR_PADDING_OFFSET: usize = CHIPLETS_MODE_COL - 1;
+
+fn is_merkle_selector(selectors: Selectors) -> bool {
+    selectors == MP_VERIFY || selectors == MR_UPDATE_OLD || selectors == MR_UPDATE_NEW
+}
+
+fn input_state_from_row(selectors: Selectors, state: &HasherState) -> HasherState {
+    let mut input = *state;
+    if is_merkle_selector(selectors) {
+        let cv = blakeg::two_to_one_chaining_word(0);
+        input[8..12].copy_from_slice(cv.as_elements());
+    }
+    input
+}
+
+fn output_state_from_row(
+    selectors: Selectors,
+    state: &HasherState,
+    row_data: &[Felt; 4],
+) -> HasherState {
+    let mut output = [ZERO; STATE_WIDTH];
+    if is_merkle_selector(selectors) {
+        let cv = blakeg::two_to_one_chaining_word(0);
+        output[..4].copy_from_slice(cv.as_elements());
+        output[8..12].copy_from_slice(&state[8..12]);
+    } else {
+        output[..4].copy_from_slice(&state[8..12]);
+        output[8..12].copy_from_slice(row_data);
+    }
+    output
 }

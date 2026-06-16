@@ -37,7 +37,7 @@ exposed by the VM, which is set to $1$ for the control-flow operations
 `SPAN`, `JOIN`, `SPLIT`, `LOOP`, `END`, `REPEAT`, `RESPAN`, `HALT`, `DYN`, `DYNCALL`, `CALL`,
 and `SYSCALL` (and $0$ otherwise). It has degree $5$.
 
-As described [previously](./index.md#program-decoding), the general idea of the decoder is that the prover provides the program to the VM by populating some of cells in the trace non-deterministically. Values in these are then used to update virtual tables (represented via multiset checks) such as block hash table, block stack table etc. Transition constraints are used to ensure that the tables are updates correctly, and we also apply boundary constraints to enforce the correct initial and final states of these tables. One of these boundary constraints binds the execution trace to the hash of the program being executed. Thus, if the virtual tables were updated correctly and boundary constraints hold, we can be convinced that the prover executed the claimed program on the VM.
+As described [previously](./index.md#program-decoding), the general idea of the decoder is that the prover provides the program to the VM by populating some cells in the trace non-deterministically. These values are then used to update virtual tables such as the block-hash table and block-stack table. LogUp lookup arguments enforce that the table updates are balanced, and boundary terms enforce the correct initial and final states. One boundary term binds the execution trace to the hash of the program being executed. Thus, if the virtual tables are balanced and boundary constraints hold, we can be convinced that the prover executed the claimed program on the VM.
 
 In the sections below, we describe constraints according to their logical grouping. However, we start out with a set of general constraints which are applicable to multiple parts of the decoder.
 
@@ -68,10 +68,10 @@ Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_lo
 > f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
 > $$
 
-When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
+When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $1$:
 
 > $$
-> f_{respan} \cdot (a' - a - 2) = 0 \text{ | degree} = 5
+> f_{respan} \cdot (a' - a - 1) = 0 \text{ | degree} = 5
 > $$
 
 When `END` operation is executed and we are exiting a *loop* block (i.e., `is_loop`, value which is stored in $h_5$, is $1$), the value at the top of the operand stack must be $0$:
@@ -139,13 +139,13 @@ When the value in `in_span` column is set to $1$, control flow operations cannot
 ## Block hash computation constraints
 As described [previously](./index.md#program-block-hashing), when the VM starts executing a new block, it also initiates computation of the block's hash. There are two separate methodologies for computing block hashes.
 
-For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element rate). For *dyn*, only the second half of the hasher registers ($h_4,\dots,h_7$) are forced to $0$, while the first half holds the callee digest read from memory; thus the input is not all zeros. The hasher is initialized using the hash chiplet, and we use the address of the controller input row as the block's ID. The result of the hash is then available in the paired controller output row at block ID plus $1$, and we read that result when the `END` operation is executed for the block.
+For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element rate). For *dyn*, only the second half of the hasher registers ($h_4,\dots,h_7$) are forced to $0$, while the first half holds the callee digest read from memory; thus the input is not all zeros. The hasher is initialized using the hash chiplet, and we use the controller row address as the block's ID. The result of the hash is available on the same controller row and is read when the `END` operation is executed for the block.
 
-For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the first controller input row as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch starts at the next controller input row, so the batch address is incremented by $2$. We read the result from the controller output row corresponding to the final batch when the `END` operation is executed for the block.
+For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the first controller row address as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch starts at the next controller row, so the batch address is incremented by $1$. We read the result from the controller row corresponding to the final batch when the `END` operation is executed for the block.
 
 ### Chiplets bus constraints
 
-The decoder communicates with the hash chiplet via the [chiplets bus](../chiplets/index.md#chiplets-bus). This works by dividing values of the multiset check column $b_{chip}$ by the values of operations providing inputs to or reading outputs from the hash chiplet. A constraint to enforce this would look as $b_{chip}' \cdot u = b_{chip}$, where $u$ is the value which defines the operation.
+The decoder communicates with the hash chiplet via LogUp messages on the [chiplets bus](../chiplets/index.md#chiplets-bus). Decoder rows remove hasher-request and return messages; matching controller rows in `ChipletsAir` insert them.
 
 In constructing values for decoder bus requests, we use the hasher message format
 described in the [hasher chiplet](../chiplets/hasher.md#multiset-check-constraints).
@@ -282,24 +282,12 @@ $$
 u_{end} = f_{end} \cdot h_{end} \text{ | degree} = 5
 $$
 
-Using the above definitions, we can describe the constraint for computing block hashes as follows:
-
-> $$
-> b_{chip}' \cdot (u_{ctrli} + u_{call} + u_{syscall} + u_{dyn} + u_{dyncall} + u_{span} + u_{respan} + u_{end} + \\
-> 1 - (f_{ctrli} + f_{call} + f_{syscall} + f_{dyn} + f_{dyncall} + f_{span} + f_{respan} + f_{end})) = b_{chip}
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags to ensure that when none of the flags is set to $1$, the above constraint reduces to $b_{chip}' = b_{chip}$.
-
-The degree of this constraint is $9$.
+The decoder emits these values as LogUp removes in the chiplet-request column. Rows for `CALL`, `SYSCALL`, `DYN`, and `DYNCALL` batch the hasher message together with their memory or kernel-ROM message so the row contributes all required bus interactions.
 
 ## Block stack table constraints
 As described [previously](./index.md#block-stack-table), block stack table keeps track of program blocks currently executing on the VM. Thus, whenever the VM starts executing a new block, an entry for this block is added to the block stack table. And when execution of a block completes, it is removed from the block stack table.
 
-Adding and removing entries to/from the block stack table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`
-. A constraint to enforce this would look as $p_1' = p_1 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`. A constraint to enforce this would look as $p_1' \cdot u = p_1$, where $u$ is the value representing the row to be removed.
+Adding and removing entries to/from the block stack table is accomplished with LogUp messages over tuples `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`. Block-start rows add table entries, and `END`/`RESPAN` rows remove the entries they close or replace.
 
 > Recall that the columns `ctx_next, b0_next, b1_next, fn_hash_next` are only set on `CALL`, `SYSCALL`, and their corresponding `END` block. Therefore, for simplicity, we will ignore them when documenting all other block types (such that their values are set to `0`).
 
@@ -376,26 +364,12 @@ u_{end} &= f_{end} \cdot ((1 - h_6 - h_7) \cdot u_{endnocall} + (h_6 + h_7) \cdo
 \end{align*}
 $$
 
-Using the above definitions, we can describe the constraint for updating the block stack table as follows:
-
-> $$
-> p_1' \cdot (u_{end} + u_{respan} + 1 - (f_{end} + f_{respan})) = p_1 \cdot 
-> (v_{join} + v_{split} + v_{loop} + v_{span} + v_{respan} + v_{dyn} + v_{dyncall} + v_{callorsyscall} + 1 - 
-> (f_{join} + f_{split} + f_{loop} + f_{span} + f_{respan} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_1' = p_1$.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, we also need to impose boundary constraints against the $p_1$ column to make sure the first and the last values in the column are set to $1$. This enforces that the block stack table starts and ends in an empty state.
+The decoder emits these values into the block-stack table bus. Boundary terms enforce that the block stack table starts and ends empty.
 
 ## Block hash table constraints
 As described [previously](./index.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `REPEAT`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children).
 
-Adding and removing entries to/from the block hash table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' = p_2 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' \cdot u = p_2$, where $u$ is the value representing the row to be removed.
+Adding and removing entries to/from the block hash table is accomplished with LogUp messages over tuples `(prnt_id, block_hash, is_first_child, is_loop_body)`.
 
 To simplify constraint descriptions, we define a generic message for a block hash entry:
 
@@ -453,28 +427,17 @@ $$
 When `END` operation is executed, the hash of the completed block is removed from the block
 hash table. We differentiate between the first and second child of a `JOIN` by looking at
 the next opcode: if the next operation is not `END`, `REPEAT`, `RESPAN`, or `HALT`, then this
-block is the first child and `is_first_child = 1`. `RESPAN` is included defensively — no single
-constraint forbids `END → RESPAN`, so excluding it would let an adversarial trace inject a
-false-positive `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
+block is the first child and `is_first_child = 1`. `RESPAN` is included because no single
+constraint forbids `END` followed by `RESPAN`; excluding it would let an adversarial trace inject
+a false-positive `is_first_child = 1`. The `is_loop_body` flag is read from $h_4$.
 
 $$
 u_{end} = f_{end} \cdot m(a', h_0..h_3, 1 - (f_{end}' + f_{repeat}' + f_{respan}' + f_{halt}'), h_4) \text{ | } \text{degree} = 8
 $$
 
-Using the above definitions, we can describe the constraint for updating the block hash table as follows:
-
-> $$
-> p_2' \cdot (u_{end} + 1 - f_{end}) = 
-> p_2 \cdot (v_{join} + v_{split} + v_{loop} + v_{repeat} + v_{allcalls} + 1 - (f_{join} + f_{split} + f_{loop} + f_{repeat} + f_{dyn} + f_{dyncall} + f_{call} + f_{syscall}))
-> $$
-
-We need to add $1$ and subtract the sum of the relevant operation flags from each side to ensure that when none of the flags is set to $1$, the above constraint reduces to $p_2' = p_2$.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, the last value in the column is $1$
-(i.e., the block hash table is empty). The initial program-hash boundary constraint
-is planned but not enforced yet.
+The decoder emits these values into the block-hash table bus. The block
+hash table is empty at the end of the trace, and a boundary term accounts for the initial
+program hash.
 
 ## Basic block
 Basic block constraints ensure proper decoding of basic blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of basic blocks requires constraints described below.
@@ -704,8 +667,8 @@ When we have at most 1 groups in a batch, register $h_1$ should also be set to $
 ### Op group table constraints
 Op group table is used to ensure that all operation groups in a given batch are consumed before a new batch is started (i.e., via a `RESPAN` operation) or the execution of a *basic* block is complete (i.e., via an `END` operation). The op group table is updated according to the following rules:
 
-* When a new operation batch is started, we add groups from this batch to the table. To add a group to the table, we multiply the value in column $p_3$ by a value representing a tuple `(batch_id, group_pos, group)`. A constraint to enforce this would look as $p_3' = p_3 \cdot v$, where $v$ is the value representing the row to be added. Depending on the batch, we may need to add multiple groups to the table (i.e., $p_3' = p_3 \cdot v_1 \cdot v_2 \cdot v_3 ...$). Flags $f_{g1}$, $f_{g2}$, $f_{g4}$, and $f_{g8}$ are used to define how many groups to add.
-* When a new operation group starts executing or when an immediate value is consumed, we remove the corresponding group from the table. To do this, we divide the value in column $p_3$ by a value representing a tuple `(batch_id, group_pos, group)`. A constraint to enforce this would look as $p_3' \cdot u = p_3$, where $u$ is the value representing the row to be removed.
+* When a new operation batch is started, the decoder adds this batch's groups to the op-group table bus. Flags $f_{g1}$, $f_{g2}$, $f_{g4}$, and $f_{g8}$ define how many groups to add.
+* When a new operation group starts executing or when an immediate value is consumed, the decoder removes the corresponding group from the op-group table bus.
 
 To simplify constraint descriptions, we first define variables representing the rows to be added to and removed from the op group table.
 
@@ -733,16 +696,5 @@ $$
 
 The above says that we remove groups from the op group table whenever group count is decremented. We multiply by $sp$ to exclude the cases when the group count is decremented due to `SPAN` or `RESPAN` operations.
 
-Using the above variables together with flags $f_{g1}$, $f_{g2}$, $f_{g4}$, $f_{g8}$ defined in the previous section, we describe the constraint for updating op group table as follows:
-
-> $$
-> p_3' \cdot (f_{dg} \cdot u + 1 - f_{dg}) = p_3 \cdot (f_{g1} + f_{g2} \cdot v_1 + f_{g4} \cdot \prod_{i=1}^3 v_i + f_{g8} \cdot (\prod_{i=1}^7 v_i) + 1 - (f_{span} + f_{respan}))
-> $$
-
-The above constraint specifies that:
-* When `SPAN` or `RESPAN` operations are executed, we add between $0$ and $7$ groups to the op group table; else, leave $p3$ untouched.
-* When group count is decremented inside a *basic* block, we remove a group from the op group table; else, leave $p3'$ untouched.
-
-The degree of this constraint is $9$.
-
-In addition to the above transition constraint, we also need to impose boundary constraints against the $p_3$ column to make sure the first and the last value in the column is set to $1$. This enforces that the op group table table starts and ends in an empty state.
+The decoder emits these values into the op-group table bus. Boundary terms
+enforce that the op-group table starts and ends empty.
