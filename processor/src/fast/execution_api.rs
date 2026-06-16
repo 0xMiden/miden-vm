@@ -40,6 +40,11 @@ impl FastProcessor {
     }
 
     /// Executes the given program synchronously with package-owned source/debug context.
+    ///
+    /// This derives the entrypoint source occurrence from [`PackageDebugInfo`], so the source graph
+    /// must contain at most one root for the executable entrypoint. When the package manifest names
+    /// the exact entrypoint source occurrence, use
+    /// [`Self::execute_with_package_debug_info_at_source_node_sync`] instead.
     pub fn execute_with_package_debug_info_sync(
         self,
         program: &Program,
@@ -49,6 +54,29 @@ impl FastProcessor {
         self.execute_with_package_debug_info_and_tracer_sync(
             program,
             package_debug_info,
+            None,
+            host,
+            &mut NoopTracer,
+        )
+    }
+
+    /// Executes the given program synchronously with package-owned source/debug context rooted at
+    /// `entrypoint_source_node_id`.
+    ///
+    /// Use this when the package manifest names the exact source/debug occurrence for the
+    /// executable entrypoint. This preserves source disambiguation when multiple source roots map
+    /// to the same executable MAST node.
+    pub fn execute_with_package_debug_info_at_source_node_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl SyncHost,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute_with_package_debug_info_and_tracer_sync(
+            program,
+            package_debug_info,
+            Some(entrypoint_source_node_id),
             host,
             &mut NoopTracer,
         )
@@ -65,6 +93,9 @@ impl FastProcessor {
     }
 
     /// Async variant of [`Self::execute_with_package_debug_info_sync`].
+    ///
+    /// When the package manifest names the exact entrypoint source occurrence, use
+    /// [`Self::execute_with_package_debug_info_at_source_node`] instead.
     #[inline(always)]
     pub async fn execute_with_package_debug_info(
         self,
@@ -75,6 +106,26 @@ impl FastProcessor {
         self.execute_with_package_debug_info_and_tracer(
             program,
             package_debug_info,
+            None,
+            host,
+            &mut NoopTracer,
+        )
+        .await
+    }
+
+    /// Async variant of [`Self::execute_with_package_debug_info_at_source_node_sync`].
+    #[inline(always)]
+    pub async fn execute_with_package_debug_info_at_source_node(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl Host,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute_with_package_debug_info_and_tracer(
+            program,
+            package_debug_info,
+            Some(entrypoint_source_node_id),
             host,
             &mut NoopTracer,
         )
@@ -133,6 +184,36 @@ impl FastProcessor {
         let execution_output = self.execute_with_package_debug_info_and_tracer_sync(
             program,
             package_debug_info,
+            None,
+            host,
+            &mut tracer,
+        )?;
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+    }
+
+    /// Executes the given program synchronously with package-owned source/debug context rooted at
+    /// `entrypoint_source_node_id` and returns the bundled trace inputs required by
+    /// [`crate::trace::build_trace`].
+    #[cfg(any(test, feature = "testing"))]
+    #[instrument(
+        name = "execute_trace_inputs_with_package_debug_info_at_source_node_sync",
+        skip_all
+    )]
+    pub fn execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl SyncHost,
+    ) -> Result<TraceBuildInputs, ExecutionError> {
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let execution_output = self.execute_with_package_debug_info_and_tracer_sync(
+            program,
+            package_debug_info,
+            Some(entrypoint_source_node_id),
             host,
             &mut tracer,
         )?;
@@ -173,6 +254,35 @@ impl FastProcessor {
             .execute_with_package_debug_info_and_tracer(
                 program,
                 package_debug_info,
+                None,
+                host,
+                &mut tracer,
+            )
+            .await?;
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
+    }
+
+    /// Async variant of
+    /// [`Self::execute_trace_inputs_with_package_debug_info_at_source_node_sync`].
+    #[cfg(any(test, feature = "testing"))]
+    #[inline(always)]
+    #[instrument(name = "execute_trace_inputs_with_package_debug_info_at_source_node", skip_all)]
+    pub async fn execute_trace_inputs_with_package_debug_info_at_source_node(
+        self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl Host,
+    ) -> Result<TraceBuildInputs, ExecutionError> {
+        let mut tracer = ExecutionTracer::new(
+            self.options.core_trace_fragment_size(),
+            self.options.max_stack_depth(),
+        );
+        let execution_output = self
+            .execute_with_package_debug_info_and_tracer(
+                program,
+                package_debug_info,
+                Some(entrypoint_source_node_id),
                 host,
                 &mut tracer,
             )
@@ -214,14 +324,18 @@ impl FastProcessor {
         mut self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
         host: &mut impl Host,
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack =
-            Self::source_aware_continuation_stack(program, package_debug_info)?;
+        let mut continuation_stack = Self::source_aware_continuation_stack(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+        )?;
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -271,14 +385,18 @@ impl FastProcessor {
         mut self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
         host: &mut impl SyncHost,
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
         T: Tracer<Processor = Self, Forest = Arc<MastForest>>,
     {
-        let mut continuation_stack =
-            Self::source_aware_continuation_stack(program, package_debug_info)?;
+        let mut continuation_stack = Self::source_aware_continuation_stack(
+            program,
+            package_debug_info,
+            entrypoint_source_node_id,
+        )?;
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
@@ -417,7 +535,23 @@ impl FastProcessor {
     fn source_aware_continuation_stack(
         program: &Program,
         package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
     ) -> Result<ContinuationStack<Arc<MastForest>>, ExecutionError> {
+        if let Some(source_node_id) = entrypoint_source_node_id {
+            let Some(source_node) = package_debug_info.source_node(source_node_id) else {
+                return Err(ExecutionError::Internal(
+                    "package debug source graph is missing the entrypoint source node",
+                ));
+            };
+            if source_node.exec_node != program.entrypoint() {
+                return Err(ExecutionError::Internal(
+                    "package debug entrypoint source node does not match the program entrypoint",
+                ));
+            }
+
+            return Ok(ContinuationStack::new_with_source_node_id(program, source_node_id));
+        }
+
         let Some(source_node_id) = package_debug_info
             .unique_source_root_for_exec_node(program.entrypoint())
             .map_err(|_| {
@@ -437,6 +571,7 @@ impl FastProcessor {
         &mut self,
         program: &Program,
         package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: Option<DebugSourceNodeId>,
     ) -> Result<ResumeContext, ExecutionError> {
         self.advice
             .extend_map(program.mast_forest().advice_map())
@@ -444,7 +579,11 @@ impl FastProcessor {
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
-            continuation_stack: Self::source_aware_continuation_stack(program, package_debug_info)?,
+            continuation_stack: Self::source_aware_continuation_stack(
+                program,
+                package_debug_info,
+                entrypoint_source_node_id,
+            )?,
             kernel: program.kernel().clone(),
         })
     }
@@ -803,7 +942,37 @@ impl FastProcessor {
         host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut current_resume_ctx =
-            self.source_aware_resume_context(program, package_debug_info)?;
+            self.source_aware_resume_context(program, package_debug_info, None)?;
+
+        loop {
+            match self.step_with_package_debug_info_sync(
+                host,
+                current_resume_ctx,
+                package_debug_info,
+            )? {
+                Some(next_resume_ctx) => {
+                    current_resume_ctx = next_resume_ctx;
+                },
+                None => break Ok(self.current_stack_outputs()),
+            }
+        }
+    }
+
+    /// Executes the given program synchronously one step at a time with package-owned source/debug
+    /// context rooted at `entrypoint_source_node_id`.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn execute_by_step_with_package_debug_info_at_source_node_sync(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl SyncHost,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut current_resume_ctx = self.source_aware_resume_context(
+            program,
+            package_debug_info,
+            Some(entrypoint_source_node_id),
+        )?;
 
         loop {
             match self.step_with_package_debug_info_sync(
@@ -849,7 +1018,38 @@ impl FastProcessor {
         host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut current_resume_ctx =
-            self.source_aware_resume_context(program, package_debug_info)?;
+            self.source_aware_resume_context(program, package_debug_info, None)?;
+        let mut processor = self;
+
+        loop {
+            match processor
+                .step_with_package_debug_info(host, current_resume_ctx, package_debug_info)
+                .await?
+            {
+                Some(next_resume_ctx) => {
+                    current_resume_ctx = next_resume_ctx;
+                },
+                None => break Ok(processor.current_stack_outputs()),
+            }
+        }
+    }
+
+    /// Async variant of
+    /// [`Self::execute_by_step_with_package_debug_info_at_source_node_sync`].
+    #[cfg(any(test, feature = "testing"))]
+    #[inline(always)]
+    pub async fn execute_by_step_with_package_debug_info_at_source_node(
+        mut self,
+        program: &Program,
+        package_debug_info: &PackageDebugInfo,
+        entrypoint_source_node_id: DebugSourceNodeId,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut current_resume_ctx = self.source_aware_resume_context(
+            program,
+            package_debug_info,
+            Some(entrypoint_source_node_id),
+        )?;
         let mut processor = self;
 
         loop {

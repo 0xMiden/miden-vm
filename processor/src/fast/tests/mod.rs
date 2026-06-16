@@ -1,24 +1,27 @@
-use alloc::{string::ToString, sync::Arc, vec};
+use alloc::{format, string::ToString, sync::Arc, vec};
+use core::str::FromStr;
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
     Assembler, DefaultSourceManager, Path,
-    ast::{Module, ModuleKind},
+    ast::{Module, ModuleKind, QualifiedProcedureName},
 };
 use miden_core::{
     ONE, Word, assert_matches,
     events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
-        MastForestContributor, SplitNodeBuilder,
+        MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
     operations::Operation,
     program::StackInputs,
     serde::{Deserializable, Serializable},
 };
-use miden_debug_types::{ByteIndex, Location, SourceContent, SourceManager, SourceSpan, Uri};
+use miden_debug_types::{
+    ByteIndex, Location, SourceContent, SourceFile, SourceManager, SourceSpan, Uri,
+};
 use miden_mast_package::{
-    Package,
+    Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
     debug_info::{
         DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
         DebugSourceNodeId, PackageDebugInfo,
@@ -326,6 +329,76 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 }
 
 #[test]
+fn package_source_debug_execution_uses_manifest_entrypoint_source_node() {
+    let fixture =
+        same_digest_entrypoint_fixture(vec![Operation::Assert(Felt::from_u32(9))], "assert");
+    assert!(
+        fixture
+            .debug_info
+            .unique_source_root_for_exec_node(fixture.program.entrypoint())
+            .is_err(),
+        "debug info alone cannot pick the manifest-selected same-digest entrypoint"
+    );
+
+    let mut host = DefaultHost::default().with_source_manager(fixture.source_manager);
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_with_package_debug_info_at_source_node_sync(
+            &fixture.program,
+            &fixture.debug_info,
+            fixture.entrypoint_source_node_id,
+            &mut host,
+        )
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::new(fixture.source_file.id(), 9u32..17)
+            && actual_source_file.id() == fixture.source_file.id()
+            && err_code == Felt::from_u32(9)
+    );
+}
+
+#[test]
+fn package_source_debug_trace_and_step_use_manifest_entrypoint_source_node() {
+    let fixture = same_digest_entrypoint_fixture(vec![Operation::Add], "add");
+    assert!(
+        fixture
+            .debug_info
+            .unique_source_root_for_exec_node(fixture.program.entrypoint())
+            .is_err(),
+        "debug info alone cannot pick the manifest-selected same-digest entrypoint"
+    );
+
+    let mut trace_host = DefaultHost::default();
+    let trace_inputs =
+        FastProcessor::new(StackInputs::new(&[Felt::from_u32(3), Felt::from_u32(4)]).unwrap())
+            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+                &fixture.program,
+                &fixture.debug_info,
+                fixture.entrypoint_source_node_id,
+                &mut trace_host,
+            )
+            .unwrap();
+    assert_eq!(trace_inputs.stack_outputs().get_element(0), Some(Felt::from_u32(7)));
+
+    let mut step_host = DefaultHost::default();
+    let stack_outputs =
+        FastProcessor::new(StackInputs::new(&[Felt::from_u32(3), Felt::from_u32(4)]).unwrap())
+            .execute_by_step_with_package_debug_info_at_source_node_sync(
+                &fixture.program,
+                &fixture.debug_info,
+                fixture.entrypoint_source_node_id,
+                &mut step_host,
+            )
+            .unwrap();
+    assert_eq!(stack_outputs.get_element(0), Some(Felt::from_u32(7)));
+}
+
+#[test]
 fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
@@ -379,13 +452,107 @@ fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
     assert_eq!(output.stack.get_element(0), Some(Felt::from_u32(7)));
 }
 
-fn missing_external_package_source_debug_fixture() -> (
-    Program,
-    PackageDebugInfo,
-    DefaultHost,
-    SourceSpan,
-    Arc<miden_debug_types::SourceFile>,
-) {
+fn absolute_path(name: &str) -> Arc<Path> {
+    Arc::from(Path::validate(&format!("::{name}")).unwrap())
+}
+
+struct SameDigestEntrypointFixture {
+    program: Program,
+    debug_info: PackageDebugInfo,
+    entrypoint_source_node_id: DebugSourceNodeId,
+    source_manager: Arc<DefaultSourceManager>,
+    source_file: Arc<SourceFile>,
+}
+
+fn same_digest_entrypoint_fixture(
+    operations: Vec<Operation>,
+    op_name: &str,
+) -> SameDigestEntrypointFixture {
+    let mut forest = MastForest::new();
+    let op_end = operations.len() as u32;
+    let block_id = BasicBlockNodeBuilder::new(operations).add_to_forest(&mut forest).unwrap();
+    forest.make_root(block_id);
+    let digest = forest[block_id].digest();
+
+    let source_alias_a = DebugSourceNodeId::from(0);
+    let source_alias_b = DebugSourceNodeId::from(1);
+    let exports = [("app::alias_a", source_alias_a), ("app::alias_b", source_alias_b)]
+        .into_iter()
+        .map(|(path, source_node_id)| {
+            let path = absolute_path(path);
+            PackageExport::Procedure(
+                ProcedureExport::new(path, Some(block_id), digest, None)
+                    .with_source_node(Some(source_node_id)),
+            )
+        });
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let uri = Uri::new("file://pkg/same-digest-entrypoint.masm");
+    let source_file = source_manager.load_from_raw_parts(
+        uri.clone(),
+        SourceContent::new("masm", uri.clone(), "alias_a;\nalias_b;\n"),
+    );
+    let source_graph = DebugSourceGraphSection::from_parts(
+        vec![
+            DebugSourceNode::new(block_id, vec![], 0, op_end),
+            DebugSourceNode::new(block_id, vec![], 0, op_end),
+        ],
+        vec![source_alias_a, source_alias_b],
+    );
+    let source_map = DebugSourceMapSection::from_parts(
+        vec![
+            DebugSourceAsmOp::new(
+                source_alias_a,
+                0,
+                Some(Location::new(uri.clone(), ByteIndex::new(0), ByteIndex::new(8))),
+                "alias_a".into(),
+                op_name.into(),
+                1,
+            ),
+            DebugSourceAsmOp::new(
+                source_alias_b,
+                0,
+                Some(Location::new(uri, ByteIndex::new(9), ByteIndex::new(17))),
+                "alias_b".into(),
+                op_name.into(),
+                1,
+            ),
+        ],
+        vec![],
+    );
+
+    let mut package = Package::create(
+        PackageId::from("app"),
+        Version::new(1, 0, 0),
+        TargetType::Library,
+        Arc::new(forest),
+        exports,
+        None,
+    )
+    .unwrap();
+    package.sections = vec![
+        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+    ];
+    let executable = package
+        .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
+        .unwrap();
+    let entrypoint_source_node_id = executable
+        .entrypoint_source_node()
+        .expect("entrypoint source node should be present");
+    assert_eq!(entrypoint_source_node_id, source_alias_b);
+
+    SameDigestEntrypointFixture {
+        program: executable.unwrap_program(),
+        debug_info: executable.debug_info().unwrap().unwrap(),
+        entrypoint_source_node_id,
+        source_manager,
+        source_file,
+    }
+}
+
+fn missing_external_package_source_debug_fixture()
+-> (Program, PackageDebugInfo, DefaultHost, SourceSpan, Arc<SourceFile>) {
     let mut forest = MastForest::new();
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let external_id = ExternalNodeBuilder::new(missing_digest).add_to_forest(&mut forest).unwrap();

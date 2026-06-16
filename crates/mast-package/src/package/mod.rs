@@ -340,6 +340,16 @@ impl Package {
         self.manifest.entrypoint()
     }
 
+    /// Returns the source/debug occurrence for the executable entrypoint, if recorded.
+    #[inline]
+    pub fn entrypoint_source_node(&self) -> Option<DebugSourceNodeId> {
+        self.entrypoint()
+            .as_deref()
+            .and_then(|entrypoint| self.get_export_by_lookup_path(entrypoint))
+            .and_then(PackageExport::as_procedure)
+            .and_then(|procedure| procedure.source_node)
+    }
+
     /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
     pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
         self.try_module_infos()
