@@ -613,14 +613,15 @@ end
     assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
     assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
 
-    let depa_vars = debug_info
-        .debug_vars_for_operation(depa_source, 0)
-        .map(|row| row.var.name())
-        .collect::<Vec<_>>();
-    let depb_vars = debug_info
-        .debug_vars_for_operation(depb_source, 0)
-        .map(|row| row.var.name())
-        .collect::<Vec<_>>();
+    let vars_at_source_start = |source_node_id| {
+        let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
+        debug_info
+            .debug_vars_for_operation(source_node_id, op_start)
+            .map(|row| row.var.name())
+            .collect::<Vec<_>>()
+    };
+    let depa_vars = vars_at_source_start(depa_source);
+    let depb_vars = vars_at_source_start(depb_source);
     assert_eq!(depa_vars, vec!["depa_var"]);
     assert_eq!(depb_vars, vec!["depb_var"]);
 
@@ -638,10 +639,12 @@ end
         "depa_ctx",
     );
     assert_eq!(
-        round_tripped_debug_info
-            .debug_vars_for_operation(depb_source, 0)
-            .map(|row| row.var.name())
-            .collect::<Vec<_>>(),
+        {
+            let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
+            round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
+        }
+        .map(|row| row.var.name())
+        .collect::<Vec<_>>(),
         vec!["depb_var"],
     );
 }
