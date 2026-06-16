@@ -29,6 +29,7 @@ testing = ["arbitrary"]
 [dependencies]
 miden-air.workspace = true
 miden-assembly.workspace = true
+miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-mast-package.workspace = true

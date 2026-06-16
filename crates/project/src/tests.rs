@@ -275,6 +275,45 @@ path = "lib.masm"
 }
 
 #[test]
+fn load_package_ignores_broken_workspace_members_when_not_a_member() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    let vendor_dir = root.join("vendor").join("dep");
+    fs::create_dir_all(&vendor_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["missing"]
+"#,
+    )
+    .unwrap();
+
+    let vendor_manifest = vendor_dir.join("miden-project.toml");
+    fs::write(
+        &vendor_manifest,
+        r#"[package]
+name = "dep"
+version = "9.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(vendor_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+    let vendor_manifest = vendor_manifest.canonicalize().unwrap();
+
+    let context = TestContext::default();
+    let project = Project::load(&vendor_manifest, &context.source_manager)?;
+
+    assert!(!project.is_workspace_member());
+    assert_eq!(project.manifest_path(), Some(vendor_manifest.as_path()));
+
+    Ok(())
+}
+
+#[test]
 fn load_project_reference_resolves_workspace_manifest_file_inputs() -> Result<(), Report> {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
@@ -314,6 +353,73 @@ path = "lib.masm"
     assert_eq!(format!("{}", project.package().version()), "1.2.3");
 
     Ok(())
+}
+
+#[test]
+fn load_project_reference_rejects_standalone_package_name_mismatch() {
+    let tempdir = TempDir::new().unwrap();
+    let dep_dir = tempdir.path().join("dep");
+    fs::create_dir_all(&dep_dir).unwrap();
+
+    fs::write(
+        dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "actual"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
+        .expect_err("package name mismatch should be rejected");
+
+    assert!(
+        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn load_project_reference_rejects_workspace_member_package_name_mismatch() {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    let dep_dir = root.join("dep");
+    fs::create_dir_all(&dep_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["dep"]
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "actual"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let err = Project::load_project_reference("expected", &dep_dir, &context.source_manager)
+        .expect_err("workspace member package name mismatch should be rejected");
+
+    assert!(
+        format!("{err}").contains("dependency 'expected' resolved to package 'actual'"),
+        "{err}"
+    );
 }
 
 #[test]

@@ -2737,6 +2737,26 @@ end
     }
 
     #[test]
+    fn rejects_unknown_special_identifiers() {
+        for source in [
+            "use $foo::bar\n",
+            "begin\n    exec.$foo::bar\nend\n",
+            "begin\n    exec.$execFoo::bar\nend\n",
+            "begin\n    exec.$kernelFoo::bar\nend\n",
+        ] {
+            let parse = parse_text(source);
+            assert!(parse.has_errors(), "expected {source:?} to reject unknown special ident");
+            assert!(parse.diagnostics().iter().any(|diag| diag.labels.as_ref().is_some_and(
+                |labels| {
+                    labels.iter().any(|l| {
+                        l.label().is_some_and(|label| label.contains("unrecognized token"))
+                    })
+                }
+            )));
+        }
+    }
+
+    #[test]
     fn parse_source_file_tracks_source_aware_spans() {
         let source = Arc::new(ManagedSourceFile::new(
             SourceId::new(11),

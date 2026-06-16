@@ -1,9 +1,14 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
-    io::{Read, Seek, Write},
+    env,
+    ffi::OsString,
+    fs,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use miden_assembly_syntax::Report;
@@ -24,13 +29,13 @@ pub enum LocalRegistryError {
     #[error("missing required environment variable '{var}'")]
     MissingEnv { var: &'static str },
     #[error("failed to read registry index: {0}")]
-    IndexRead(#[source] std::io::Error),
+    IndexRead(#[source] io::Error),
     #[error("failed to seek in registry index stream: {0}")]
-    IndexSeek(#[source] std::io::Error),
+    IndexSeek(#[source] io::Error),
     #[error("failed to lock registry index for reading: {0}")]
     IndexReadLock(#[source] fs::TryLockError),
     #[error("failed to write registry index: {0}")]
-    IndexWrite(#[source] std::io::Error),
+    IndexWrite(#[source] io::Error),
     #[error("failed to lock registry index for writing: {0}")]
     IndexWriteLock(#[source] fs::TryLockError),
     #[error(
@@ -98,6 +103,8 @@ pub struct LocalPackageRegistry {
     index: InMemoryPackageRegistry,
     index_checksum: [u8; 32],
 }
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// The metadata about a package produced when listing or describing a package in the index
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -167,6 +174,11 @@ impl LocalPackageRegistry {
             fs::create_dir_all(parent).map_err(LocalRegistryError::IndexWrite)?;
         }
         fs::create_dir_all(&artifact_dir).map_err(LocalRegistryError::IndexWrite)?;
+        // Use a stable sidecar lock file rather than locking the index itself. The index is
+        // atomically replaced on writes, so locking the replaceable file would leave stale file
+        // handles on Unix. If no sidecar exists yet, read the atomically replaced index without
+        // creating the lock so read-only registries remain loadable.
+        let _lock_file = open_existing_index_lock_for_read(&index_path)?;
 
         let index_checksum: [u8; 32];
         let index = if index_path.exists() {
@@ -178,15 +190,6 @@ impl LocalPackageRegistry {
             {
                 let mut file =
                     fs::File::open(&index_path).map_err(LocalRegistryError::IndexRead)?;
-                // Acquire a non-exclusive lock on the file for reading, but return an error if
-                // there is an outstanding exclusive lock on the file already.
-                //
-                // This will fail if a handle to the index file has an exclusive lock on it for
-                // writing, see `save` for details.
-                //
-                // Multiple readers can hold this type of lock simultaneously, but a shared lock
-                // cannot be acquired in the presence of an exclusive lock, and vice versa.
-                file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
                 file.read_to_string(&mut contents).map_err(LocalRegistryError::IndexRead)?;
             }
             let contents = contents.trim();
@@ -363,35 +366,31 @@ impl LocalPackageRegistry {
     ) -> Result<(), LocalRegistryError> {
         let persisted = PersistedIndex { packages: self.index.packages().clone() };
         let contents = toml::to_string_pretty(&persisted)?;
-        let mut file = fs::File::options()
+        let lock_path = lock_path_for_index(&self.index_path);
+        let lock_file = fs::File::options()
             .read(true)
             .write(true)
             .truncate(false)
             .create(true)
-            .open(&self.index_path)
+            .open(lock_path)
             .map_err(LocalRegistryError::IndexWrite)?;
-        // Acquire an exclusive lock for writing the index file, and return an error if we cannot
-        // obtain one due to any other outstanding lock on the file.
+        // Acquire an exclusive lock on the stable sidecar lock file, and return an error if we
+        // cannot obtain one due to any other outstanding registry read or write lock.
         //
-        // This will fail if another write is being performed on the same file, or if the index is
-        // currently being loaded by another process.
-        //
-        // See `load` for the non-exclusive lock obtained for reads
-        file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
+        // The index itself is atomically replaced, so locking the index file directly is not safe:
+        // a process that opened the old index before replacement would lock a stale inode.
+        lock_file.try_lock().map_err(LocalRegistryError::IndexWriteLock)?;
 
         // Validate that the contents of the persisted index have not changed under us, by
         // recomputing the checksum of its contents and comparing to when we last loaded the index.
-        #[expect(
-            clippy::verbose_file_reads,
-            reason = "checksum validation must read from the already-locked file handle"
-        )]
-        {
-            let mut prev_contents = Vec::with_capacity(1024);
-            file.read_to_end(&mut prev_contents).map_err(LocalRegistryError::IndexRead)?;
-            let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
-            if &self.index_checksum != checksum.as_bytes() {
-                return Err(LocalRegistryError::WriteToStaleIndex);
-            }
+        let prev_contents = match fs::read(&self.index_path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(LocalRegistryError::IndexRead(error)),
+        };
+        let checksum = miden_core::crypto::hash::Sha256::hash(prev_contents.trim_ascii());
+        if &self.index_checksum != checksum.as_bytes() {
+            return Err(LocalRegistryError::WriteToStaleIndex);
         }
 
         operation()?;
@@ -400,11 +399,8 @@ impl LocalPackageRegistry {
         // update the in-memory state until we've successfully persisted the index
         let new_checksum = miden_core::crypto::hash::Sha256::hash(contents.as_bytes().trim_ascii());
 
-        // Truncate the file to ensure that if the new index is smaller than the old one, that
-        // we don't end up with a corrupted index.
-        file.rewind().map_err(LocalRegistryError::IndexSeek)?;
-        file.set_len(0).map_err(LocalRegistryError::IndexWrite)?;
-        file.write_all(contents.as_bytes()).map_err(LocalRegistryError::IndexWrite)?;
+        write_file_atomically(&self.index_path, contents.as_bytes())
+            .map_err(LocalRegistryError::IndexWrite)?;
 
         // Update the index checksum for the next write
         self.index_checksum = *new_checksum.as_bytes();
@@ -443,7 +439,7 @@ impl LocalPackageRegistry {
                         Version::new(existing_package.version.clone(), existing_package.digest());
                     if existing_package.name == package.name && existing_version == *version {
                         if &existing_package == package {
-                            fs::write(artifact_path, existing_bytes)
+                            write_file_atomically(artifact_path, &existing_bytes)
                                 .map_err(LocalRegistryError::IndexWrite)
                         } else {
                             Err(LocalRegistryError::DuplicateSemanticVersion {
@@ -452,12 +448,16 @@ impl LocalPackageRegistry {
                             })
                         }
                     } else {
-                        fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+                        write_file_atomically(artifact_path, bytes)
+                            .map_err(LocalRegistryError::IndexWrite)
                     }
                 },
-                Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+                Err(_) => write_file_atomically(artifact_path, bytes)
+                    .map_err(LocalRegistryError::IndexWrite),
             },
-            Err(_) => fs::write(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite),
+            Err(_) => {
+                write_file_atomically(artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+            },
         }
     }
 
@@ -612,7 +612,7 @@ impl LocalPackageRegistry {
         }
 
         self.register_and_save_with_locked_operation(package.name.clone(), record, || {
-            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+            write_file_atomically(&artifact_path, &bytes).map_err(LocalRegistryError::IndexWrite)
         })?;
 
         Ok(PublishedPackage {
@@ -656,7 +656,7 @@ impl LocalPackageRegistry {
 
         // Persist the updated registry index and artifact under the index write lock.
         self.register_and_save_with_locked_operation(package.name.clone(), record, || {
-            fs::write(&artifact_path, bytes).map_err(LocalRegistryError::IndexWrite)
+            write_file_atomically(&artifact_path, &bytes).map_err(LocalRegistryError::IndexWrite)
         })?;
 
         Ok(PublishedPackage {
@@ -664,6 +664,111 @@ impl LocalPackageRegistry {
             version,
             artifact_path,
         })
+    }
+}
+
+fn lock_path_for_index(index_path: &Path) -> PathBuf {
+    let parent = index_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut file_name = index_path
+        .file_name()
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("index.toml"));
+    file_name.push(".lock");
+    parent.join(file_name)
+}
+
+fn open_existing_index_lock_for_read(
+    index_path: &Path,
+) -> Result<Option<fs::File>, LocalRegistryError> {
+    let lock_path = lock_path_for_index(index_path);
+    let lock_file = match fs::File::options().read(true).open(lock_path) {
+        Ok(lock_file) => lock_file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(LocalRegistryError::IndexRead(error)),
+    };
+    lock_file.try_lock_shared().map_err(LocalRegistryError::IndexReadLock)?;
+    Ok(Some(lock_file))
+}
+
+fn write_file_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_file_atomically_with(path, |file| file.write_all(bytes))
+}
+
+fn write_file_atomically_with(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "atomic write path has no file name")
+    })?;
+    let counter = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut temp_name = OsString::from(".");
+    temp_name.push(file_name);
+    temp_name.push(format!(".tmp-{}-{counter}", std::process::id()));
+    let temp_path = parent.join(temp_name);
+
+    let result = (|| {
+        let existing_permissions = match fs::metadata(path) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let mut open_options = fs::File::options();
+        open_options.write(true).create_new(true);
+
+        #[cfg(unix)]
+        if let Some(permissions) = existing_permissions.as_ref() {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+            open_options.mode(permissions.mode() & 0o777);
+        }
+
+        let mut temp = open_options.open(&temp_path)?;
+        if let Some(permissions) = existing_permissions {
+            fs::set_permissions(&temp_path, permissions)?;
+        }
+        write(&mut temp)?;
+        temp.sync_all()?;
+        drop(temp);
+        replace_path_atomically(&temp_path, path)?;
+        let _ = fs::File::open(parent).and_then(|dir| dir.sync_all());
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    result
+}
+
+#[cfg(not(windows))]
+fn replace_path_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
+    fs::rename(temp_path, path)
+}
+
+#[cfg(windows)]
+fn replace_path_atomically(temp_path: &Path, path: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let temp_path = temp_path.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+    let path = path.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            temp_path.as_ptr(),
+            path.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -740,6 +845,114 @@ mod tests {
         let index_path = tempdir.path().join("midenup").join("registry").join("index.toml");
         let artifact_dir = tempdir.path().join("sysroot").join("lib");
         LocalPackageRegistry::load(index_path, artifact_dir).expect("failed to load registry")
+    }
+
+    #[test]
+    fn atomic_file_replacement_preserves_existing_file_on_write_failure() {
+        let tempdir = TempDir::new().unwrap();
+        let target = tempdir.path().join("index.toml");
+        fs::write(&target, b"previous index").unwrap();
+
+        let error = write_file_atomically_with(&target, |_file| {
+            Err(io::Error::other("injected write failure"))
+        })
+        .expect_err("injected write failure should be returned");
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&target).unwrap(), b"previous index");
+        let leftovers = fs::read_dir(tempdir.path()).unwrap().count();
+        assert_eq!(leftovers, 1);
+    }
+
+    #[test]
+    fn atomic_file_replacement_overwrites_existing_file() {
+        let tempdir = TempDir::new().unwrap();
+        let target = tempdir.path().join("index.toml");
+        fs::write(&target, b"previous index").unwrap();
+
+        write_file_atomically(&target, b"updated index").unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"updated index");
+    }
+
+    #[test]
+    fn registry_uses_stable_sidecar_lock_file() {
+        let tempdir = TempDir::new().unwrap();
+        let mut registry = load_registry(&tempdir);
+        let lock_path = lock_path_for_index(&registry.index_path);
+        assert_ne!(lock_path, registry.index_path);
+        assert!(!lock_path.exists());
+
+        let package_path = tempdir.path().join("pkg.masp");
+        build_package("pkg", "1.0.0", []).write_to_file(&package_path).unwrap();
+        registry.publish(&package_path).unwrap();
+
+        assert!(lock_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_read_only_registry_without_lock_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tempdir = TempDir::new().unwrap();
+        let index_dir = tempdir.path().join("midenup").join("registry");
+        let artifact_dir = tempdir.path().join("sysroot").join("lib");
+        fs::create_dir_all(&index_dir).unwrap();
+        fs::create_dir_all(&artifact_dir).unwrap();
+        let index_path = index_dir.join("index.toml");
+        fs::write(&index_path, b"").unwrap();
+        let lock_path = lock_path_for_index(&index_path);
+        assert!(!lock_path.exists());
+
+        let index_dir_permissions = fs::metadata(&index_dir).unwrap().permissions();
+        let artifact_dir_permissions = fs::metadata(&artifact_dir).unwrap().permissions();
+        fs::set_permissions(&index_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::set_permissions(&artifact_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = LocalPackageRegistry::load(index_path, artifact_dir.clone());
+
+        fs::set_permissions(&index_dir, index_dir_permissions).unwrap();
+        fs::set_permissions(&artifact_dir, artifact_dir_permissions).unwrap();
+
+        let registry = result.expect("read-only registry should load without creating a lock file");
+        assert!(registry.list().is_empty());
+        assert!(!lock_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_file_replacement_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tempdir = TempDir::new().unwrap();
+        let target = tempdir.path().join("index.toml");
+        fs::write(&target, b"previous index").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_file_atomically(&target, b"updated index").unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"updated index");
+        assert_eq!(fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_file_creation_uses_default_permissions_for_new_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tempdir = TempDir::new().unwrap();
+        let target = tempdir.path().join("index.toml");
+        let control = tempdir.path().join("control.toml");
+
+        fs::write(&control, b"control").unwrap();
+        write_file_atomically(&target, b"new index").unwrap();
+
+        assert_eq!(fs::read(&target).unwrap(), b"new index");
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&control).unwrap().permissions().mode() & 0o777,
+        );
     }
 
     #[test]
