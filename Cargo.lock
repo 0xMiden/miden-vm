@@ -1336,6 +1336,7 @@ dependencies = [
 name = "miden-lifted-air"
 version = "0.27.0"
 dependencies = [
+ "miden-field",
  "p3-air",
  "p3-challenger",
  "p3-field",

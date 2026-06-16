@@ -10,7 +10,7 @@ rust-version.workspace = true
 version.workspace      = true
 
 [lib]
-doctest = false
+doctest = true
 test    = false
 
 [dependencies]
@@ -21,6 +21,9 @@ p3-matrix.workspace     = true
 p3-util.workspace       = true
 
 thiserror.workspace = true
+
+[dev-dependencies]
+miden-field.workspace = true
 
 [lints]
 workspace = true

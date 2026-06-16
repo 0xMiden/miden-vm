@@ -152,11 +152,44 @@ impl Smt {
         }
     }
 
-    /// Similar to `with_entries` but avoids the overhead of sorting if the entries are already
-    /// sorted.
+    /// Similar to [`Self::with_entries`] but avoids the overhead of sorting if the entries are
+    /// already sorted by leaf index.
     ///
     /// This only applies if the "concurrent" feature is enabled. Without the feature, the behavior
-    /// is equivalent to `with_entiries`.
+    /// is equivalent to [`Self::with_entries`].
+    ///
+    /// When the "concurrent" feature is enabled, entries must be sorted by
+    /// `LeafIndex::<SMT_DEPTH>::from(key).position()`, not by key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_crypto::{
+    ///     Felt, Word,
+    ///     merkle::smt::{LeafIndex, SMT_DEPTH, Smt},
+    /// };
+    ///
+    /// fn word(a: u64, b: u64, c: u64, d: u64) -> Word {
+    ///     Word::new([
+    ///         Felt::new_unchecked(a),
+    ///         Felt::new_unchecked(b),
+    ///         Felt::new_unchecked(c),
+    ///         Felt::new_unchecked(d),
+    ///     ])
+    /// }
+    ///
+    /// let mut entries = vec![
+    ///     (word(1, 0, 0, 3), word(10, 0, 0, 0)),
+    ///     (word(0, 0, 0, 1), word(20, 0, 0, 0)),
+    ///     (word(0, 1, 0, 2), word(30, 0, 0, 0)),
+    /// ];
+    ///
+    /// let expected = Smt::with_entries(entries.clone()).unwrap();
+    /// entries.sort_by_key(|(key, _)| LeafIndex::<SMT_DEPTH>::from(*key).position());
+    /// let actual = Smt::with_sorted_entries(entries).unwrap();
+    ///
+    /// assert_eq!(actual, expected);
+    /// ```
     ///
     /// # Errors
     /// Returns an error if inserting a key-value pair would exceed [`MAX_LEAF_ENTRIES`] (1024

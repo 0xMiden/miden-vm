@@ -293,6 +293,8 @@ where
     /// observes the instance count and `log_trace_heights` separately after this
     /// hook, but passes the heights here so custom bindings can include AIR
     /// metadata that depends on the prover-chosen trace ordering or heights.
+    /// See [`Statement::observe`](crate::Statement::observe) for a runnable
+    /// example of the default binding sequence.
     ///
     /// # Soundness gap (TODO)
     ///

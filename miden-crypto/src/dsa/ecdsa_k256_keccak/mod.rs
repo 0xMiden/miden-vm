@@ -311,7 +311,7 @@ pub enum PublicKeyError {
 ///
 /// This implementation supports 2 serialization formats:
 ///
-/// ### Custom Format (66 bytes):
+/// ### Custom Format (65 bytes):
 /// - Bytes 0-31: r component (32 bytes, big-endian)
 /// - Bytes 32-63: s component (32 bytes, big-endian)
 /// - Byte 64: recovery ID (v) - values 0-3
@@ -320,6 +320,32 @@ pub enum PublicKeyError {
 /// - Bytes 0-31: r component (32 bytes, big-endian)
 /// - Bytes 32-63: s component (32 bytes, big-endian)
 /// - Note: Recovery ID
+///
+/// # Examples
+///
+/// ```
+/// use miden_crypto::{
+///     Felt, Word,
+///     dsa::ecdsa_k256_keccak::{Signature, SigningKey},
+///     rand::test_utils::seeded_rng,
+/// };
+/// use miden_serde_utils::{Deserializable, Serializable};
+///
+/// let mut rng = seeded_rng([7; 32]);
+/// let signing_key = SigningKey::with_rng(&mut rng);
+/// let message = Word::new([
+///     Felt::new_unchecked(1),
+///     Felt::new_unchecked(2),
+///     Felt::new_unchecked(3),
+///     Felt::new_unchecked(4),
+/// ]);
+///
+/// let signature = signing_key.sign(message);
+/// let encoded = signature.to_bytes();
+///
+/// assert_eq!(encoded.len(), 65);
+/// assert_eq!(Signature::read_from_bytes(&encoded).unwrap(), signature);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     r: [u8; SCALARS_SIZE_BYTES],
