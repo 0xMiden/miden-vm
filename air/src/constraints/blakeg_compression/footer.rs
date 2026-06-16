@@ -188,7 +188,7 @@ pub fn enforce_footer_c_canonicality<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let max_u32 = AB::Expr::from(Felt::new_unchecked((1u64 << 32) - 1));
-    let h = footer_local.h_odd_word() - max_u32;
+    let h = footer_local.h_odd_word_field() - max_u32;
     let inv = footer_local.h_canon_inv();
     let z = footer_local.h_canon_z();
     let gate = sel.is_footer();
@@ -196,7 +196,7 @@ pub fn enforce_footer_c_canonicality<AB>(
     let builder = &mut builder.when(gate);
     builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
     builder.assert_zero(z.clone() * h);
-    builder.assert_zero(z * footer_local.h_even_word());
+    builder.assert_zero(z * footer_local.h_even_word_field());
 }
 
 /// `D[t] = pack(Out_even) + 2^32 * pack(Out_odd_masked)` on row `F_t`.

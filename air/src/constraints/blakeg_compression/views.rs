@@ -391,12 +391,12 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(super::FOOTER_ROW_INDEX_COL)
     }
 
-    /// Stored even H word used by the HIN-pair slot.
+    /// Stored even H word, bound to the row's `H_even` bytes.
     pub fn h_even_word_field(&self) -> AB::Expr {
         self.col(super::FOOTER_H_EVEN_WORD_COL)
     }
 
-    /// Stored odd H word used by the HIN-pair slot.
+    /// Stored odd H word, bound to the row's `H_odd` bytes.
     pub fn h_odd_word_field(&self) -> AB::Expr {
         self.col(super::FOOTER_H_ODD_WORD_COL)
     }
@@ -588,7 +588,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     /// Felt-level packing of `H_even || H_odd` for the row's `C[t]` definition.
     /// `C[t] = H_even_word + 2^32 * H_odd_word`.
     pub fn c_value_from_h(&self) -> AB::Expr {
-        self.h_even_word() + self.h_odd_word() * felt::<AB>(1u64 << 32)
+        self.h_even_word_field() + self.h_odd_word_field() * felt::<AB>(1u64 << 32)
     }
 
     /// Felt-level packing of `Out_even || Out_odd_masked` for `D[t]`.
