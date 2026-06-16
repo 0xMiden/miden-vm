@@ -550,9 +550,9 @@ fn public_input_transcript_matches_rust_challenger(#[case] num_kernel_proc_diges
     .expect("valid statement");
 
     let preprocessed = Preprocessed::build(&statement, &config).expect("AND8 setup is present");
-    let preprocessed_commitment: [Felt; WORD_SIZE] = preprocessed.commitment().into();
+    let preprocessed_commitment: [u64; WORD_SIZE] = preprocessed.commitment().into();
     for &element in &preprocessed_commitment {
-        challenger.observe(element);
+        challenger.observe(Felt::new_unchecked(element));
     }
     statement.observe(&mut challenger, &log_heights);
     challenger.observe(Felt::new_unchecked(4));

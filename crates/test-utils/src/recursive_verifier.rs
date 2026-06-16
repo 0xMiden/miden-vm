@@ -387,7 +387,7 @@ fn batch_proof_to_merkle<L>(
 ) -> Result<BatchMerkleResult, VerifierError>
 where
     L: Lmcs<F = Felt>,
-    L::Commitment: Copy + Into<[Felt; 4]>,
+    L::Commitment: Copy + Into<[u64; 4]>,
     L::BatchProof: BatchProofView<Felt, L::Commitment>,
     L::Commitment: PartialEq,
 {
@@ -447,13 +447,12 @@ fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
     fixed_len
 }
 
-fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
-    let felts: [Felt; 4] = commitment.into();
-    felts.iter().map(Felt::as_canonical_u64).collect()
+fn commitment_to_u64s<C: Copy + Into<[u64; 4]>>(commitment: C) -> Vec<u64> {
+    commitment.into().to_vec()
 }
 
-fn commitment_to_word<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Word {
-    Word::new(commitment.into())
+fn commitment_to_word<C: Copy + Into<[u64; 4]>>(commitment: C) -> Word {
+    Word::new(commitment.into().map(Felt::new_unchecked))
 }
 
 fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {

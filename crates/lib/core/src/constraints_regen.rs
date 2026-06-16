@@ -197,7 +197,8 @@ fn compute_and8_preprocessed_commitment() -> [Felt; 4] {
     let preprocessed = Preprocessed::build(&statement, &config)
         .expect("Miden relation must declare the AND8 preprocessed table");
 
-    preprocessed.commitment().into()
+    let commitment: [u64; 4] = preprocessed.commitment().into();
+    commitment.map(Felt::new_unchecked)
 }
 
 fn render_constraints_eval_file(
