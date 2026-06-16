@@ -150,6 +150,8 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
 
 #[cfg(test)]
 mod tests {
+    use miden_air::trace::chiplets::bitwise::OP_CYCLE_LEN;
+
     use super::*;
 
     // MEASUREMENT TESTS
@@ -210,16 +212,13 @@ mod tests {
     fn bitwise_snippet_rows_match_op_cycle_len() {
         let c = cal();
         let bitwise = c["bitwise"];
-        // OP_CYCLE_LEN = 8 per u32 bitwise op.
+        let expected = OP_CYCLE_LEN as f64;
+        let delta = (bitwise.bitwise - expected).abs();
         assert!(
-            bitwise.bitwise >= 7.5,
-            "bitwise per-iter ({}) below OP_CYCLE_LEN",
-            bitwise.bitwise
-        );
-        assert!(
-            bitwise.bitwise <= 9.0,
-            "bitwise per-iter ({}) above OP_CYCLE_LEN",
-            bitwise.bitwise
+            delta <= 0.01,
+            "bitwise per-iter ({}) should match OP_CYCLE_LEN ({})",
+            bitwise.bitwise,
+            OP_CYCLE_LEN,
         );
     }
 

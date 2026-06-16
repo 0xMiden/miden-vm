@@ -10,7 +10,7 @@ use miden_core::{Felt, WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
-    bitwise::NUM_DECOMP_BITS,
+    bitwise::NUM_U32_BYTES,
     hasher::{CAPACITY_LEN, DIGEST_LEN, RATE_LEN, STATE_WIDTH},
 };
 
@@ -149,28 +149,22 @@ impl<T: Copy> ControllerCols<T> {
 
 /// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
 ///
-/// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
-/// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
+/// Normal bitwise rows store one full u32 operation. The byte arrays are little-endian:
+/// `value = b0 + 2^8*b1 + 2^16*b2 + 2^24*b3`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct BitwiseCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.
     pub op_flag: T,
-    /// Aggregated input a.
-    pub a: T,
-    /// Aggregated input b.
-    pub b: T,
-    /// 4-bit decomposition of a.
-    pub a_bits: [T; NUM_DECOMP_BITS],
-    /// 4-bit decomposition of b.
-    pub b_bits: [T; NUM_DECOMP_BITS],
-    /// Previous aggregated output.
-    pub prev_output: T,
-    /// Current aggregated output.
-    pub output: T,
+    /// Little-endian bytes of input `a`.
+    pub a_bytes: [T; NUM_U32_BYTES],
+    /// Little-endian bytes of input `b`.
+    pub b_bytes: [T; NUM_U32_BYTES],
+    /// Bytewise `a & b` witnesses.
+    pub and_bytes: [T; NUM_U32_BYTES],
 }
 
-/// AND8-backed AEAD stream overlay (20 columns), viewed from `chiplets[2..22]`.
+/// AEAD stream overlay (20 columns), viewed from `chiplets[2..22]`.
 ///
 /// One stream entry spans eight rows. Each row proves one u32 XOR as four AND8 byte lookups;
 /// row-specific overlays define the remaining cells.
@@ -492,20 +486,8 @@ pub struct KernelRomCols<T> {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct PeriodicCols<T> {
-    /// Bitwise periodic columns.
-    pub bitwise: BitwisePeriodicCols<T>,
     /// AEAD stream phase columns.
     pub aead_stream: AeadStreamPeriodicCols<T>,
-}
-
-/// Bitwise chiplet periodic columns (2 columns, period = 8 rows).
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct BitwisePeriodicCols<T> {
-    /// Marks first row of 8-row cycle: `[1, 0, 0, 0, 0, 0, 0, 0]`.
-    pub k_first: T,
-    /// Marks non-last rows of 8-row cycle: `[1, 1, 1, 1, 1, 1, 1, 0]`.
-    pub k_transition: T,
 }
 
 /// AEAD stream periodic columns (8 columns, period = 8 rows).
@@ -524,36 +506,6 @@ pub struct AeadStreamPeriodicCols<T> {
 
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
-
-#[allow(clippy::new_without_default)]
-impl BitwisePeriodicCols<Vec<Felt>> {
-    /// Generate periodic columns for the bitwise chiplet.
-    pub fn new() -> Self {
-        let k_first = vec![
-            Felt::ONE,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-            Felt::ZERO,
-        ];
-
-        let k_transition = vec![
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ONE,
-            Felt::ZERO,
-        ];
-
-        Self { k_first, k_transition }
-    }
-}
 
 #[allow(clippy::new_without_default)]
 impl AeadStreamPeriodicCols<Vec<Felt>> {
@@ -581,11 +533,10 @@ impl AeadStreamPeriodicCols<Vec<Felt>> {
 impl PeriodicCols<Vec<Felt>> {
     /// Generate all chiplet periodic columns as a flat `Vec<Vec<Felt>>`.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
-        let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
         let AeadStreamPeriodicCols { r0, r1, r2, r3, r4, r5, r6, r7 } =
             AeadStreamPeriodicCols::new();
 
-        vec![k_first, k_transition, r0, r1, r2, r3, r4, r5, r6, r7]
+        vec![r0, r1, r2, r3, r4, r5, r6, r7]
     }
 }
 
@@ -602,8 +553,7 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
 }
 
 const _: () = {
-    assert!(size_of::<PeriodicCols<u8>>() == 10);
-    assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
+    assert!(size_of::<PeriodicCols<u8>>() == 8);
     assert!(size_of::<AeadStreamPeriodicCols<u8>>() == 8);
 
     assert!(size_of::<ControllerCols<u8>>() == 19);

@@ -10,7 +10,7 @@ pub const NUM_SELECTORS: usize = 1;
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + 12;
 
 /// The number of rows required to compute an operation in the Bitwise chiplet.
-pub const OP_CYCLE_LEN: usize = 8;
+pub const OP_CYCLE_LEN: usize = 1;
 
 // --- OPERATION SELECTORS ------------------------------------------------------------------------
 
@@ -22,8 +22,8 @@ pub const BITWISE_XOR: Felt = ONE;
 
 // --- INPUT DECOMPOSITION ------------------------------------------------------------------------
 
-/// The number of bits decomposed per row per input parameter `a` or `b`.
-pub const NUM_DECOMP_BITS: usize = 4;
+/// Number of bytes in a u32 operand.
+pub const NUM_U32_BYTES: usize = 4;
 
 // TYPE ALIASES
 // ================================================================================================

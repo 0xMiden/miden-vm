@@ -65,7 +65,7 @@ use crate::{
                 AceWireMsg, AeadBlakeGOutputPairMsg, AeadStreamRequestMsg, HasherCompressionLinkMsg,
             },
         },
-        utils::BoolNot,
+        utils::{BoolNot, pack_u32_bytes_le},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
@@ -363,12 +363,5 @@ fn pack_u32<LB>(bytes: [LB::Var; 4]) -> LB::Expr
 where
     LB: ChipletLookupBuilder,
 {
-    let shift8 = LB::Expr::from_u16(256);
-    let shift16 = LB::Expr::from_u32(1 << 16);
-    let shift24 = LB::Expr::from_u32(1 << 24);
-
-    Into::<LB::Expr>::into(bytes[0])
-        + shift8 * Into::<LB::Expr>::into(bytes[1])
-        + shift16 * Into::<LB::Expr>::into(bytes[2])
-        + shift24 * Into::<LB::Expr>::into(bytes[3])
+    pack_u32_bytes_le::<_, LB::Expr>(bytes)
 }

@@ -16,8 +16,8 @@ use crate::{
             columns::{AeadStreamCols, PeriodicCols},
             selectors::ChipletSelectors,
         },
-        constants::{TWO_POW_16, TWO_POW_32, TWO_POW_32_MINUS_1},
-        utils::BoolNot,
+        constants::{TWO_POW_32, TWO_POW_32_MINUS_1},
+        utils::{BoolNot, pack_u32_bytes_le},
     },
 };
 
@@ -242,26 +242,12 @@ where
         Into::<AB::Expr>::into(bytes[3]) + Into::<AB::Expr>::into(bytes[7])
             - two * Into::<AB::Expr>::into(bytes[11]),
     ];
-    pack_u32_expr::<AB>(xor_bytes)
+    pack_u32_bytes_le::<_, AB::Expr>(xor_bytes)
 }
 
 fn pack_u32<AB>(bytes: [AB::Var; 4]) -> AB::Expr
 where
     AB: MidenAirBuilder,
 {
-    pack_u32_expr::<AB>(bytes.map(Into::into))
-}
-
-fn pack_u32_expr<AB>(bytes: [AB::Expr; 4]) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    let shift8 = AB::Expr::from_u16(256);
-    let shift16 = AB::Expr::from(TWO_POW_16);
-    let shift24 = shift16.clone() * AB::Expr::from_u16(256);
-
-    bytes[0].clone()
-        + shift8 * bytes[1].clone()
-        + shift16 * bytes[2].clone()
-        + shift24 * bytes[3].clone()
+    pack_u32_bytes_le::<_, AB::Expr>(bytes)
 }

@@ -1,20 +1,21 @@
-//! Hash-kernel virtual table bus. Shares one column across
-//! `BusId::{SiblingTable, RangeCheck}` plus the shared chiplets column for ACE reads.
+//! Hash-kernel virtual table bus.
 //!
-//! Combines four interaction families on a single LogUp column:
+//! Combines five row-disjoint interaction families on a single LogUp column:
 //!
 //! 1. **Sibling table** (`BusId::SiblingTable`) - Merkle update siblings. On Merkle controller
 //!    rows with `s0 * s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV
 //!    (old path, adds siblings). The direction bit `b = node_index - 2 * node_index_next` selects
 //!    which half of `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions
 //!    (two add, two remove).
-//! 2. **ACE memory reads** (chiplet-responses column) - on ACE chiplet rows, the block selector
+//! 2. **ACE memory reads** - on ACE chiplet rows, the block selector
 //!    distinguishes word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`).
 //!    Both are removed from the chiplets bus.
 //! 3. **AEAD stream memory I/O** (`BusId::{MemoryReadWord, MemoryWriteWord}`) - on stream rows,
 //!    phases 0 and 4 remove the duplicated plaintext reads, and the two terminal phases remove
 //!    ciphertext writes.
-//! 4. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
+//! 4. **Normal bitwise AND8 checks** (`BusId::And8Lookup`) - on normal bitwise rows, four
+//!    removes bind the bytewise `a & b` witnesses to the shared AND8 lookup table.
+//! 5. **Memory-side range checks** (`BusId::RangeCheck`) - on memory chiplet rows, a five-remove
 //!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
 //!    `w0`, `w1`, and `4 * w1`. Together these enforce `d0, d1, w0, w1 in [0, 2^16)` plus `w1 in [0,
 //!    2^14)` (via the `4 * w1` check), which bounds `word_addr = 4 * (w0 + 2^16 * w1)` to the 32-bit
@@ -41,9 +42,9 @@ use crate::{
         chiplets::columns::PeriodicCols,
         lookup::{
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-            messages::{MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
+            messages::{And8Msg, MemoryMsg, RangeMsg, SiblingBit, SiblingMsg},
         },
-        utils::BoolNot,
+        utils::{BoolNot, pack_u32_bytes_le},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::chiplets::ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
@@ -59,12 +60,14 @@ use crate::{
 ///   mutually exclusive via `block_sel` -> 1 fraction.
 /// - **AEAD stream memory I/O** on stream rows: one memory interaction on
 ///   each of phases 0, 3, 4, and 7, so this contributes at most 1 fraction per row.
-/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
-///   `d1`, `w0`, `w1`, `4 * w1`) fires unconditionally when the outer batch flag is active -> 5
-///   fractions.
+/// - **Normal bitwise AND8 checks** on normal bitwise rows: a 4-remove batch fires once per
+///   one-row bitwise operation -> 4 fractions.
+/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch
+///   (`d0`, `d1`, `w0`, `w1`, `4 * w1`) fires unconditionally when the outer batch flag is active
+///   -> 5 fractions.
 ///
 /// Row-type disjointness means only one set fires per row, so the per-row max is
-/// `max(1, 1, 1, 5) = 5`.
+/// `max(1, 1, 1, 4, 5) = 5`.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the hash-kernel virtual table bus.
@@ -141,6 +144,8 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_eval_op = ace.eval_op;
     let stream = local.aead_stream();
     let stream_gate = ctx.chiplet_active.aead_stream.clone();
+    let bitwise = local.bitwise();
+    let normal_bitwise_gate = ctx.chiplet_active.bitwise.clone();
 
     // --- Memory-side range-check setup ---
 
@@ -280,6 +285,30 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     remove_stream_write("aead_stream_write0", 3);
                     remove_stream_write("aead_stream_write1", 7);
 
+                    // --- NORMAL BITWISE AND8 CHECKS (BusId::And8Lookup) ---
+                    //
+                    // The response column emits `BitwiseMsg`. This column carries the four AND8
+                    // removals, reusing row-disjoint capacity instead of widening the chiplet
+                    // lookup shape.
+                    g.batch(
+                        "bitwise_and8_lookups",
+                        normal_bitwise_gate,
+                        |b| {
+                            for idx in 0..4 {
+                                b.remove(
+                                    "bitwise_and8_byte",
+                                    And8Msg::new(
+                                        bitwise.a_bytes[idx].into(),
+                                        bitwise.b_bytes[idx].into(),
+                                        bitwise.and_bytes[idx].into(),
+                                    ),
+                                    Deg { v: 2, u: 3 },
+                                );
+                            }
+                        },
+                        Deg { v: 5, u: 6 },
+                    );
+
                     // --- MEMORY-SIDE RANGE CHECKS (BusId::RangeCheck) ---
                     // Five removes per memory-active row:
                     // - `d0`, `d1` - the two 16-bit delta limbs used by the memory chiplet's
@@ -337,19 +366,5 @@ where
         Into::<LB::Expr>::into(bytes[3]) + Into::<LB::Expr>::into(bytes[7])
             - two * Into::<LB::Expr>::into(bytes[11]),
     ];
-    pack_u32_expr::<LB>(xor_bytes)
-}
-
-fn pack_u32_expr<LB>(bytes: [LB::Expr; 4]) -> LB::Expr
-where
-    LB: ChipletLookupBuilder,
-{
-    let shift8 = LB::Expr::from_u16(256);
-    let shift16 = LB::Expr::from_u32(1 << 16);
-    let shift24 = LB::Expr::from_u32(1 << 24);
-
-    bytes[0].clone()
-        + shift8 * bytes[1].clone()
-        + shift16 * bytes[2].clone()
-        + shift24 * bytes[3].clone()
+    pack_u32_bytes_le::<_, LB::Expr>(xor_bytes)
 }

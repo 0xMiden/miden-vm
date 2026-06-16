@@ -95,31 +95,19 @@ impl Entry {
 /// It also builds an execution trace of these operations.
 ///
 /// ## Bitwise operation execution trace (AND and XOR)
-/// The execution trace for each operation consists of 8 rows and 13 columns. At a high level,
-/// we break input values into 4-bit limbs, apply the bitwise operation to these limbs at every
-/// row starting with the most significant limb, and accumulate the result in the result column.
+/// Each operation uses one row. The row stores the operation flag, little-endian bytes of both
+/// inputs, and bytewise `a & b` witnesses. Four AND8 lookups prove the byte witnesses. The
+/// response bus reconstructs the VM-facing values and derives XOR as `a + b - 2*(a & b)`.
 ///
 /// The layout of the table is illustrated below.
 ///
-///    s     a     b      a0     a1     a2     a3     b0     b1     b2     b3    zp     z
-/// |-----+-----+-----+-------+------+------+------+------+------+------+------+-----+-----|
+///    s     a0    a1    a2    a3    b0    b1    b2    b3    c0    c1    c2    c3
+/// |-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----|
 ///
 /// In the above, the meaning of the columns is as follows:
-/// - Selector column s is used to specify the bitwise operator for each row.
-/// - Columns `a` and `b` contain accumulated 4-bit limbs of input values. Specifically, at the
-///   first row, the values of columns `a` and `b` are set to the most significant 4-bit limb of
-///   each input value. With all subsequent rows, the next most significant limb is appended to each
-///   column for the corresponding value. Thus, by the 8th row, columns `a` and `b` contain full
-///   input values for the bitwise operation.
-/// - Columns `a0` through `a3` and `b0` through `b3` contain bits of the least significant 4-bit
-///   limb of the values in `a` and `b` columns respectively.
-/// - Column `zp` contains the accumulated result of applying the bitwise operation to 4-bit limbs,
-///   but for the previous row. In the first row, it is 0.
-/// - Column `z` contains the accumulated result of applying the bitwise operation to 4-bit limbs.
-///   At the first row, column `z` contains the result of bitwise operation applied to the most
-///   significant 4-bit limbs of the input values. With every subsequent row, the next most
-///   significant 4-bit limb of the result is appended to it. Thus, by the 8th row, column `z`
-///   contains the full result of the bitwise operation.
+/// - `s` selects the bitwise operator: 0 = AND, 1 = XOR.
+/// - `a*` and `b*` are little-endian input bytes.
+/// - `c*` are bytewise `a & b` witnesses.
 #[derive(Debug)]
 pub struct Bitwise {
     entries: Vec<Entry>,
@@ -198,7 +186,7 @@ impl Bitwise {
     // --------------------------------------------------------------------------------------------
 
     /// Fills the provided trace fragment with the row-major trace materialized from the recorded
-    /// op log: 8 rows per op, 4-bit limbs accumulated MSB first.
+    /// op log: one row per normal bitwise op, eight rows per AEAD stream entry.
     pub fn fill_trace(self, trace: &mut ChipletTraceFragment) -> Vec<u64> {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert!(trace.width() >= TRACE_WIDTH, "inconsistent trace widths");
@@ -217,7 +205,9 @@ impl Bitwise {
             let row_count = entry.row_count();
             let mut chunk = vec![ZERO; row_width * row_count];
             match entry {
-                Entry::Bitwise(op) => fill_bitwise_chunk(&mut chunk, row_width, op),
+                Entry::Bitwise(op) => {
+                    fill_bitwise_chunk(&mut chunk, row_width, op, &mut and8_counts);
+                },
                 Entry::AeadStream(op) => {
                     fill_aead_stream_chunk(&mut chunk, row_width, op, &mut and8_counts);
                 },
@@ -244,46 +234,28 @@ pub fn assert_u32(value: Felt) -> Result<u32, OperationError> {
         .map_err(|_| OperationError::NotU32Values { values: vec![value] })
 }
 
-fn fill_bitwise_chunk(chunk: &mut [Felt], row_width: usize, BitwiseOp { op, a, b }: BitwiseOp) {
-    debug_assert_eq!(chunk.len(), row_width * OP_CYCLE_LEN);
+fn fill_bitwise_chunk(
+    chunk: &mut [Felt],
+    row_width: usize,
+    BitwiseOp { op, a, b }: BitwiseOp,
+    and8_counts: &mut [u64],
+) {
+    debug_assert_eq!(chunk.len(), row_width);
 
-    let a = a as u64;
-    let b = b as u64;
+    let a_bytes = a.to_le_bytes();
+    let b_bytes = b.to_le_bytes();
     let selector = op.selector();
 
-    // 8 rows per op, MSB-limb first. Each row contains the cumulative `a`, `b`, and result after
-    // appending one more 4-bit limb to the accumulators.
-    let mut result: u64 = 0;
-    for (i, bit_offset) in (0..32).step_by(4).rev().enumerate() {
-        let prev_output = result;
-        let a_acc = a >> bit_offset;
-        let b_acc = b >> bit_offset;
-        let result_4_bit = match op {
-            Op::And => (a_acc & b_acc) & 0xf,
-            Op::Xor => (a_acc ^ b_acc) & 0xf,
-        };
-        result = (result << 4) | result_4_bit;
-
-        let row = &mut chunk[i * row_width..i * row_width + TRACE_WIDTH];
-        let cols: &mut BitwiseCols<Felt> = row.borrow_mut();
-        cols.op_flag = selector;
-        cols.a = Felt::new_unchecked(a_acc);
-        cols.b = Felt::new_unchecked(b_acc);
-        cols.a_bits = [
-            Felt::new_unchecked(a_acc & 1),
-            Felt::new_unchecked((a_acc >> 1) & 1),
-            Felt::new_unchecked((a_acc >> 2) & 1),
-            Felt::new_unchecked((a_acc >> 3) & 1),
-        ];
-        cols.b_bits = [
-            Felt::new_unchecked(b_acc & 1),
-            Felt::new_unchecked((b_acc >> 1) & 1),
-            Felt::new_unchecked((b_acc >> 2) & 1),
-            Felt::new_unchecked((b_acc >> 3) & 1),
-        ];
-        cols.prev_output = Felt::new_unchecked(prev_output);
-        cols.output = Felt::new_unchecked(result);
-    }
+    let row = &mut chunk[..TRACE_WIDTH];
+    let cols: &mut BitwiseCols<Felt> = row.borrow_mut();
+    cols.op_flag = selector;
+    cols.a_bytes = a_bytes.map(Felt::from_u8);
+    cols.b_bytes = b_bytes.map(Felt::from_u8);
+    cols.and_bytes = core::array::from_fn(|idx| {
+        let and = a_bytes[idx] & b_bytes[idx];
+        count_and8(and8_counts, a_bytes[idx], b_bytes[idx], and);
+        Felt::from_u8(and)
+    });
 }
 
 fn fill_aead_stream_chunk(

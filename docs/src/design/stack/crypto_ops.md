@@ -142,7 +142,8 @@ The operation emits:
 - one BlakeG-XOF request for `[ctr, 0, 0, 0, 0, 0, 0, 0, K_CTR]`;
 - two memory reads at `src` and `src + 4`;
 - four memory writes at `dst`, `dst + 4`, `dst + 8`, and `dst + 12`;
-- two 8-row AEAD stream lookups binding plaintext, keystream, and ciphertext bytes.
+- two 8-row AEAD stream entries, where the stream chip XORs BlakeG-XOF limbs with plaintext
+  through byte-pair checks and produces expanded ciphertext limbs.
 
 The source range `[src, src + 8)` and destination range `[dst, dst + 16)` must
 be word-aligned, in bounds, and non-overlapping.

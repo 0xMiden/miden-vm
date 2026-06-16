@@ -55,7 +55,7 @@ fn hasher_chiplet_trace() {
 #[test]
 fn bitwise_chiplet_trace() {
     // --- single bitwise operation with no stack manipulation ---
-    // This produces: 1 span hash controller row, then 8 bitwise rows.
+    // This produces: 1 span hash controller row, then 1 bitwise row.
     let stack = [4, 8];
     let operations = vec![Operation::U32xor];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
@@ -94,7 +94,7 @@ fn stacked_chiplet_trace() {
     //   - 1 span hash controller row for the basic block
     //   - 1 BCOMPRESS controller row
     // Total hasher: 2 controller rows padded to the chiplet alignment boundary.
-    // Then: 8 bitwise rows (U32xor), then 1 memory row (MStoreW)
+    // Then: 1 bitwise row (U32xor), then 1 memory row (MStoreW)
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
     let ops = vec![
         Operation::U32xor,
@@ -349,8 +349,8 @@ fn validate_kernel_rom_trace(trace: &ChipletsTrace, start: usize, end: usize) {
 /// Validates the padding region at the end of the chiplets trace.
 ///
 /// Checks:
-/// - s_ctrl (column 0) = 0, s1..s4 (columns 1-4) = 1, stream_mode = 0
-/// - All remaining columns (5..CHIPLETS_WIDTH) are zero
+/// - s_ctrl (column 0) = 0, s1..s4 (columns 1-4) = 1
+/// - payload columns are zero
 fn validate_padding(trace: &ChipletsTrace, start: usize, end: usize) {
     for row in start..end {
         // s_ctrl = 0 on padding rows
@@ -359,8 +359,7 @@ fn validate_padding(trace: &ChipletsTrace, start: usize, end: usize) {
         for col in 1..5 {
             assert_eq!(ONE, trace[col][row], "padding s{col} at row {row}");
         }
-        // All non-selector columns should be zero.
-        // chip_clk at CHIPLETS_WIDTH - 1 is non-zero by design (chiplet-trace row counter).
+        // chip_clk at CHIPLETS_WIDTH - 1 is non-zero by design.
         for col in 5..CHIPLETS_WIDTH - 1 {
             assert_eq!(ZERO, trace[col][row], "padding data col {col} at row {row} should be zero");
         }

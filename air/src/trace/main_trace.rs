@@ -142,7 +142,7 @@ impl MainTrace {
     /// Returns the stored core trace row at index `i`.
     ///
     /// # Panics
-    /// Panics if `i` is past the core trace height — see [`Self::core_height`]. Callers
+    /// Panics if `i` is past the core trace height; see [`Self::core_height`]. Callers
     /// iterating the unified trace must bound by [`Self::core_height`] for Core accessors.
     #[inline]
     pub fn core_row(&self, i: RowIndex) -> &CoreCols<Felt> {
@@ -158,7 +158,7 @@ impl MainTrace {
     /// active on that row.
     ///
     /// # Panics
-    /// Panics if `i` is past the chiplets trace height — see [`Self::chiplets_height`]. The
+    /// Panics if `i` is past the chiplets trace height; see [`Self::chiplets_height`]. The
     /// four `is_*_row` classifiers short-circuit past the chiplets height, so they can be
     /// used as bound-aware filters when iterating the unified trace.
     #[inline]
@@ -242,7 +242,7 @@ impl MainTrace {
     /// Returns one column as a new vector.
     ///
     /// Returns a column of length [`Self::core_height`] for Core columns and
-    /// [`Self::chiplets_height`] for Chiplets columns — there is no unified projection.
+    /// [`Self::chiplets_height`] for Chiplets columns; there is no unified projection.
     // Test/debug-only, the proving path never materializes columns.
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column(&self, col_idx: usize) -> Vec<Felt> {
@@ -509,7 +509,7 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the hasher-controller chiplet.
     ///
-    /// Short-circuits to `false` past the chiplets-AIR height — rows past `chiplets_height()`
+    /// Short-circuits to `false` past the chiplets-AIR height; rows past `chiplets_height()`
     /// are not part of any chiplet by definition in the split-trace model.
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
         if i.as_usize() >= self.chiplets_height() {
@@ -599,19 +599,24 @@ impl MainTrace {
             && self.chiplet_selector_1(i) == ZERO
     }
 
-    /// Returns the bitwise column holding the aggregated value of input `a` at row i.
+    /// Returns bitwise input `a`, recomposed from little-endian byte witnesses at row i.
     pub fn chiplet_bitwise_a(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().a
+        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().a_bytes)
     }
 
-    /// Returns the bitwise column holding the aggregated value of input `b` at row i.
+    /// Returns bitwise input `b`, recomposed from little-endian byte witnesses at row i.
     pub fn chiplet_bitwise_b(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().b
+        u32_from_bitwise_bytes(self.chiplet_cols(i).bitwise().b_bytes)
     }
 
-    /// Returns the bitwise column holding the aggregated value of the output at row i.
+    /// Returns the bitwise result recomposed from the byte witnesses at row i.
     pub fn chiplet_bitwise_z(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).bitwise().output
+        let cols = self.chiplet_cols(i).bitwise();
+        let a = u32_from_bitwise_bytes(cols.a_bytes);
+        let b = u32_from_bitwise_bytes(cols.b_bytes);
+        let and = u32_from_bitwise_bytes(cols.and_bytes);
+        let xor = a + b - and.double();
+        and + cols.op_flag * (xor - and)
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
@@ -879,6 +884,13 @@ impl MainTrace {
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
             && self.chiplet_selector_3(i) == ONE // s2=1
     }
+}
+
+fn u32_from_bitwise_bytes(bytes: [Felt; 4]) -> Felt {
+    let bytes = bytes.map(|byte| {
+        u8::try_from(byte.as_canonical_u64()).expect("bitwise byte witness should fit in u8")
+    });
+    Felt::from_u32(u32::from_le_bytes(bytes))
 }
 
 #[cfg(test)]

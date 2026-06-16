@@ -2,7 +2,7 @@
 //!
 //! Runs a program with `U32and` + `U32xor` operations and verifies that every bitwise request
 //! row emits the expected `BitwiseMsg` on the chiplet-requests side AND that every bitwise
-//! chiplet cycle-end row emits the matching response on the chiplet-responses side.
+//! chiplet row emits the matching response on the chiplet-responses side.
 //!
 //! Column-blind by design: the subset matcher in `lookup_harness` compares `(mult, denom)`
 //! pairs regardless of which aux column the framework routes them onto.
@@ -20,9 +20,6 @@ use super::super::{
     lookup_harness::{Expectations, InteractionLog},
 };
 use crate::RowIndex;
-
-/// Period of the bitwise chiplet cycle. The response fires on the last row of each cycle.
-const BITWISE_CYCLE_LEN: usize = 8;
 
 #[test]
 fn bitwise_chiplet_bus_emits_per_request_row() {
@@ -101,19 +98,11 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         exp.remove(usize::from(row), &msg);
     }
 
-    // ---- Response side: each bitwise-chiplet cycle-end row emits `+1 × BitwiseMsg`.
-    //
-    // Cycle-end = `row % BITWISE_CYCLE_LEN == BITWISE_CYCLE_LEN - 1` (the periodic `k_transition`
-    // column is `0` on the last row of every 8-row cycle, starting from trace row 0). The bitwise
-    // chiplet segment starts on the 8-row controller alignment boundary, so this condition holds
-    // across the whole trace.
+    // ---- Response side: each normal bitwise row emits one `BitwiseMsg` with multiplicity +1.
     let mut response_rows_seen = 0usize;
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_bitwise_row(idx) {
-            continue;
-        }
-        if row % BITWISE_CYCLE_LEN != BITWISE_CYCLE_LEN - 1 {
             continue;
         }
         response_rows_seen += 1;
@@ -127,18 +116,16 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     let expected_responses = and_expected.len() + xor_expected.len();
     assert_eq!(
         response_rows_seen, expected_responses,
-        "response cardinality guardrail: expected {expected_responses} cycle-end bitwise rows, \
-         found {response_rows_seen}",
+        "response cardinality guardrail: expected {expected_responses} bitwise rows, found \
+         {response_rows_seen}",
     );
 
     log.assert_contains(&exp);
 }
 
-/// Regression test for huitseeker's
-/// <https://github.com/0xMiden/miden-vm/pull/3177#discussion_r3284561750>: in the split-trace
-/// model the bitwise classifier must return `false` past the chiplets-AIR height. The bitwise
-/// active pattern is all-zero selectors (`s_ctrl=0, stream_mode=0, s1=0`), which used to alias
-/// rows past the chiplets height under the unified-projection semantics.
+/// Regression test for split-trace projection: the bitwise classifier must return `false` past the
+/// chiplets-AIR height. The bitwise active pattern is all-zero selectors
+/// (`s_ctrl=0, stream_mode=0, s1=0`), so it must not alias rows outside the chiplets segment.
 #[test]
 fn rows_past_chiplets_height_are_not_classified_as_bitwise() {
     let trace = build_trace_from_ops(vec![Operation::Noop; 128], &[]);

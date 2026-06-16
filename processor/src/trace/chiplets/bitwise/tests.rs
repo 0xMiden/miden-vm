@@ -2,18 +2,16 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH};
-use miden_core::{ONE, ZERO, chiplets::blakeg, field::PrimeCharacteristicRing};
+use miden_core::{ONE, chiplets::blakeg, field::PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, ChipletTraceFragment, Felt};
 
 // Chiplet-local column indices for assertions in the bitwise trace tests.
-const A_COL_IDX: usize = 1;
-const B_COL_IDX: usize = 2;
-const A_COL_RANGE: Range<usize> = 3..7;
-const B_COL_RANGE: Range<usize> = 7..11;
-const PREV_OUTPUT_COL_IDX: usize = 11;
-const OUTPUT_COL_IDX: usize = 12;
+const OP_COL_IDX: usize = 0;
+const A_BYTE_RANGE: Range<usize> = 1..5;
+const B_BYTE_RANGE: Range<usize> = 5..9;
+const AND_BYTE_RANGE: Range<usize> = 9..13;
 
 #[test]
 fn bitwise_init() {
@@ -31,40 +29,10 @@ fn bitwise_and() {
     let result = bitwise.u32and(a, b).unwrap();
     assert_eq!(a.as_canonical_u64() & b.as_canonical_u64(), result.as_canonical_u64());
 
-    // --- check generated trace ----------------------------------------------
-    let trace = build_trace(bitwise, OP_CYCLE_LEN);
-
-    // make sure the selector values specify bitwise AND at each step in the trace
-    for row in 0..OP_CYCLE_LEN {
-        assert_eq!(trace[0][row], BITWISE_AND);
-    }
-
-    // make sure result and result from the trace are the same
-    assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
-
-    // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
-
-    // make sure the result was re-composed correctly
-    let mut prev_result = ZERO;
-
-    for i in 0..OP_CYCLE_LEN {
-        let c0 = binary_and(trace[A_COL_RANGE.start][i], trace[B_COL_RANGE.start][i]);
-        let c1 = binary_and(trace[A_COL_RANGE.start + 1][i], trace[B_COL_RANGE.start + 1][i]);
-        let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
-        let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
-
-        let result_4_bit = c0
-            + Felt::new_unchecked(2) * c1
-            + Felt::new_unchecked(4) * c2
-            + Felt::new_unchecked(8) * c3;
-        let result = prev_result * Felt::new_unchecked(16) + result_4_bit;
-
-        assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
-        assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
-
-        prev_result = result;
-    }
+    let (trace, and8_counts) =
+        build_trace_with_width_and_counts(bitwise, OP_CYCLE_LEN, TRACE_WIDTH);
+    assert_eq!(and8_counts.iter().sum::<u64>(), 4);
+    check_bitwise_row(&trace, 0, BITWISE_AND, a, b, result);
 }
 
 #[test]
@@ -77,40 +45,10 @@ fn bitwise_xor() {
     let result = bitwise.u32xor(a, b).unwrap();
     assert_eq!(a.as_canonical_u64() ^ b.as_canonical_u64(), result.as_canonical_u64());
 
-    // --- check generated trace ----------------------------------------------
-    let trace = build_trace(bitwise, OP_CYCLE_LEN);
-
-    // make sure the selector values specify bitwise XOR at each step in the trace
-    for row in 0..OP_CYCLE_LEN {
-        assert_eq!(trace[0][row], BITWISE_XOR);
-    }
-
-    // make sure result and result from the trace are the same
-    assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
-
-    // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
-
-    // make sure the result was re-composed correctly
-    let mut prev_result = ZERO;
-
-    for i in 0..8 {
-        let c0 = binary_xor(trace[A_COL_RANGE.start][i], trace[B_COL_RANGE.start][i]);
-        let c1 = binary_xor(trace[A_COL_RANGE.start + 1][i], trace[B_COL_RANGE.start + 1][i]);
-        let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
-        let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
-
-        let result_4_bit = c0
-            + Felt::new_unchecked(2) * c1
-            + Felt::new_unchecked(4) * c2
-            + Felt::new_unchecked(8) * c3;
-        let result = prev_result * Felt::new_unchecked(16) + result_4_bit;
-
-        assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
-        assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
-
-        prev_result = result;
-    }
+    let (trace, and8_counts) =
+        build_trace_with_width_and_counts(bitwise, OP_CYCLE_LEN, TRACE_WIDTH);
+    assert_eq!(and8_counts.iter().sum::<u64>(), 4);
+    check_bitwise_row(&trace, 0, BITWISE_XOR, a, b, result);
 }
 
 #[test]
@@ -132,76 +70,13 @@ fn bitwise_multiple() {
     let result2 = bitwise.u32and(a[2], b[2]).unwrap();
     assert_eq!(a[2].as_canonical_u64() & b[2].as_canonical_u64(), result2.as_canonical_u64());
 
-    // --- check generated trace ----------------------------------------------
-    let trace = build_trace(bitwise, 3 * OP_CYCLE_LEN);
+    let (trace, and8_counts) =
+        build_trace_with_width_and_counts(bitwise, 3 * OP_CYCLE_LEN, TRACE_WIDTH);
+    assert_eq!(and8_counts.iter().sum::<u64>(), 12);
 
-    // make sure results and results from the trace are the same
-    assert_eq!(result0, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
-    assert_eq!(result1, trace[OUTPUT_COL_IDX][2 * OP_CYCLE_LEN - 1]);
-    assert_eq!(result2, trace[OUTPUT_COL_IDX][3 * OP_CYCLE_LEN - 1]);
-    // make sure input values were decomposed correctly
-    check_decomposition(&trace, 0, a[0].as_canonical_u64(), b[0].as_canonical_u64());
-    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_canonical_u64(), b[1].as_canonical_u64());
-    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_canonical_u64(), b[2].as_canonical_u64());
-
-    // make sure the results was re-composed correctly
-
-    let mut prev_result = ZERO;
-    for i in 0..OP_CYCLE_LEN {
-        let c0 = binary_and(trace[A_COL_RANGE.start][i], trace[B_COL_RANGE.start][i]);
-        let c1 = binary_and(trace[A_COL_RANGE.start + 1][i], trace[B_COL_RANGE.start + 1][i]);
-        let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
-        let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
-
-        let result_4_bit = c0
-            + Felt::new_unchecked(2) * c1
-            + Felt::new_unchecked(4) * c2
-            + Felt::new_unchecked(8) * c3;
-        let result = prev_result * Felt::new_unchecked(16) + result_4_bit;
-
-        assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
-        assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
-
-        prev_result = result;
-    }
-
-    let mut prev_result = ZERO;
-    for i in OP_CYCLE_LEN..(2 * OP_CYCLE_LEN) {
-        let c0 = binary_xor(trace[A_COL_RANGE.start][i], trace[B_COL_RANGE.start][i]);
-        let c1 = binary_xor(trace[A_COL_RANGE.start + 1][i], trace[B_COL_RANGE.start + 1][i]);
-        let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
-        let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
-
-        let result_4_bit = c0
-            + Felt::new_unchecked(2) * c1
-            + Felt::new_unchecked(4) * c2
-            + Felt::new_unchecked(8) * c3;
-        let result = prev_result * Felt::new_unchecked(16) + result_4_bit;
-
-        assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
-        assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
-
-        prev_result = result;
-    }
-
-    let mut prev_result = ZERO;
-    for i in (2 * OP_CYCLE_LEN)..(3 * OP_CYCLE_LEN) {
-        let c0 = binary_and(trace[A_COL_RANGE.start][i], trace[B_COL_RANGE.start][i]);
-        let c1 = binary_and(trace[A_COL_RANGE.start + 1][i], trace[B_COL_RANGE.start + 1][i]);
-        let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
-        let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
-
-        let result_4_bit = c0
-            + Felt::new_unchecked(2) * c1
-            + Felt::new_unchecked(4) * c2
-            + Felt::new_unchecked(8) * c3;
-        let result = prev_result * Felt::new_unchecked(16) + result_4_bit;
-
-        assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
-        assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
-
-        prev_result = result;
-    }
+    check_bitwise_row(&trace, 0, BITWISE_AND, a[0], b[0], result0);
+    check_bitwise_row(&trace, OP_CYCLE_LEN, BITWISE_XOR, a[1], b[1], result1);
+    check_bitwise_row(&trace, 2 * OP_CYCLE_LEN, BITWISE_AND, a[2], b[2], result2);
 }
 
 #[test]
@@ -260,16 +135,6 @@ fn aead_stream_trace() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Builds a trace of the specified length and fills it with data from the provided Bitwise
-/// instance.
-fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
-    build_trace_with_width(bitwise, num_rows, TRACE_WIDTH)
-}
-
-fn build_trace_with_width(bitwise: Bitwise, num_rows: usize, width: usize) -> Vec<Vec<Felt>> {
-    build_trace_with_width_and_counts(bitwise, num_rows, width).0
-}
-
 fn build_trace_with_width_and_counts(
     bitwise: Bitwise,
     num_rows: usize,
@@ -285,39 +150,42 @@ fn build_trace_with_width_and_counts(
     (trace, and8_counts)
 }
 
-fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {
-    let mut bit_offset = 28;
+fn check_bitwise_row(trace: &[Vec<Felt>], row: usize, op: Felt, a: Felt, b: Felt, result: Felt) {
+    assert_eq!(trace[OP_COL_IDX][row], op);
 
-    for i in start..start + 8 {
-        let a = a >> bit_offset;
-        let b = b >> bit_offset;
-
-        assert_eq!(Felt::new_unchecked(a), trace[A_COL_IDX][i]);
-        assert_eq!(Felt::new_unchecked(b), trace[B_COL_IDX][i]);
-
-        assert_eq!(Felt::new_unchecked(a & 1), trace[A_COL_RANGE.start][i]);
-        assert_eq!(Felt::new_unchecked((a >> 1) & 1), trace[A_COL_RANGE.start + 1][i]);
-        assert_eq!(Felt::new_unchecked((a >> 2) & 1), trace[A_COL_RANGE.start + 2][i]);
-        assert_eq!(Felt::new_unchecked((a >> 3) & 1), trace[A_COL_RANGE.start + 3][i]);
-
-        assert_eq!(Felt::new_unchecked(b & 1), trace[B_COL_RANGE.start][i]);
-        assert_eq!(Felt::new_unchecked((b >> 1) & 1), trace[B_COL_RANGE.start + 1][i]);
-        assert_eq!(Felt::new_unchecked((b >> 2) & 1), trace[B_COL_RANGE.start + 2][i]);
-        assert_eq!(Felt::new_unchecked((b >> 3) & 1), trace[B_COL_RANGE.start + 3][i]);
-
-        bit_offset -= 4;
+    let a_bytes = felt_u32(a).to_le_bytes();
+    let b_bytes = felt_u32(b).to_le_bytes();
+    for idx in 0..4 {
+        assert_eq!(Felt::from_u8(a_bytes[idx]), trace[A_BYTE_RANGE.start + idx][row]);
+        assert_eq!(Felt::from_u8(b_bytes[idx]), trace[B_BYTE_RANGE.start + idx][row]);
+        assert_eq!(
+            Felt::from_u8(a_bytes[idx] & b_bytes[idx]),
+            trace[AND_BYTE_RANGE.start + idx][row],
+        );
     }
-}
 
-fn binary_and(a: Felt, b: Felt) -> Felt {
-    a * b
-}
-
-fn binary_xor(a: Felt, b: Felt) -> Felt {
-    a + b - Felt::new_unchecked(2) * a * b
+    let and = u32_from_bytes([
+        trace[AND_BYTE_RANGE.start][row],
+        trace[AND_BYTE_RANGE.start + 1][row],
+        trace[AND_BYTE_RANGE.start + 2][row],
+        trace[AND_BYTE_RANGE.start + 3][row],
+    ]);
+    let xor = a + b - and.double();
+    let recomposed = and + op * (xor - and);
+    assert_eq!(result, recomposed);
 }
 
 fn rand_u32() -> Felt {
     let value = rand_value::<u64>() as u32 as u64;
     Felt::new_unchecked(value)
+}
+
+fn felt_u32(value: Felt) -> u32 {
+    u32::try_from(value.as_canonical_u64()).expect("test value should fit in u32")
+}
+
+fn u32_from_bytes(bytes: [Felt; 4]) -> Felt {
+    let bytes = bytes
+        .map(|byte| u8::try_from(byte.as_canonical_u64()).expect("test byte should fit in u8"));
+    Felt::from_u32(u32::from_le_bytes(bytes))
 }

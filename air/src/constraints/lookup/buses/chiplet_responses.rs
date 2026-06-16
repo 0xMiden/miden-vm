@@ -25,7 +25,7 @@ use crate::{
                 MemoryResponseMsg,
             },
         },
-        utils::BoolNot,
+        utils::{BoolNot, pack_u32_bytes_le},
     },
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
@@ -52,22 +52,19 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
-    // Read the typed periodic column view (used for bitwise k_transition).
-    let (k_transition, aead_phase): (LB::Expr, [LB::Expr; 8]) = {
+    // Read the typed periodic column view used by AEAD stream rows.
+    let aead_phase: [LB::Expr; 8] = {
         let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
-        (
-            periodic.bitwise.k_transition.into(),
-            [
-                periodic.aead_stream.r0.into(),
-                periodic.aead_stream.r1.into(),
-                periodic.aead_stream.r2.into(),
-                periodic.aead_stream.r3.into(),
-                periodic.aead_stream.r4.into(),
-                periodic.aead_stream.r5.into(),
-                periodic.aead_stream.r6.into(),
-                periodic.aead_stream.r7.into(),
-            ],
-        )
+        [
+            periodic.aead_stream.r0.into(),
+            periodic.aead_stream.r1.into(),
+            periodic.aead_stream.r2.into(),
+            periodic.aead_stream.r3.into(),
+            periodic.aead_stream.r4.into(),
+            periodic.aead_stream.r5.into(),
+            periodic.aead_stream.r6.into(),
+            periodic.aead_stream.r7.into(),
+        ]
     };
 
     // Typed chiplet-data overlays.
@@ -106,8 +103,8 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Non-hasher flags ---
 
-    // Bitwise: responds only on the last row of the 8-row cycle (k_transition = 0).
-    let is_bitwise_responding: LB::Expr = ctx.chiplet_active.bitwise.clone() * k_transition.not();
+    // Normal bitwise rows use one row per operation.
+    let is_bitwise_responding: LB::Expr = ctx.chiplet_active.bitwise.clone();
 
     // ACE init: responds only on ACE start rows.
     let is_ace_init: LB::Expr = ctx.chiplet_active.ace.clone() * ace.s_start.into();
@@ -193,14 +190,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         is_bitwise_responding,
                         || {
                             let bw_op: LB::Expr = bw.op_flag.into();
-                            BitwiseMsg {
-                                op: bw_op,
-                                a: bw.a.into(),
-                                b: bw.b.into(),
-                                result: bw.output.into(),
-                            }
+                            let a = pack_u32_bytes_le::<_, LB::Expr>(bw.a_bytes);
+                            let b = pack_u32_bytes_le::<_, LB::Expr>(bw.b_bytes);
+                            let and = pack_u32_bytes_le::<_, LB::Expr>(bw.and_bytes);
+                            let xor = a.clone() + b.clone() - and.clone().double();
+                            let result = and.clone() + bw_op.clone() * (xor - and);
+                            BitwiseMsg { op: bw_op, a, b, result }
                         },
-                        Deg { v: 3, u: 4 },
+                        Deg { v: 3, u: 5 },
                     );
 
                     let mut remove_stream_row = |name: &'static str, phase_idx: usize| {
