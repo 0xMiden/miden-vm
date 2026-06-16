@@ -291,9 +291,14 @@ impl Serializable for DebugSourceMapSection {
             write_required_location(location, target);
         }
 
+        target.write_usize(self.strings().len());
+        for string in self.strings() {
+            string.write_into(target);
+        }
+
         target.write_usize(self.asm_ops().len());
         for asm_op in self.asm_ops() {
-            write_source_asm_op(asm_op, self.locations(), target);
+            write_source_asm_op(asm_op, self.locations(), self.strings(), target);
         }
 
         self.debug_vars().write_into(target);
@@ -321,8 +326,20 @@ impl Deserializable for DebugSourceMapSection {
             locations.push(read_required_location(source)?);
         }
 
+        let strings_len = source.read_usize()?;
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_source_map strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
+        let mut strings = Vec::with_capacity(strings_len);
+        for _ in 0..strings_len {
+            strings.push(String::read_from(source)?);
+        }
+
         let asm_ops_len = source.read_usize()?;
-        let max_asm_ops = source.max_alloc(DebugSourceAsmOp::min_serialized_size());
+        let max_asm_ops = source.max_alloc(min_source_map_asm_op_row_serialized_size());
         if asm_ops_len > max_asm_ops {
             return Err(DeserializationError::InvalidValue(alloc::format!(
                 "debug_source_map asm op count {asm_ops_len} exceeds budget {max_asm_ops}"
@@ -330,7 +347,7 @@ impl Deserializable for DebugSourceMapSection {
         }
         let mut asm_ops = Vec::with_capacity(asm_ops_len);
         for _ in 0..asm_ops_len {
-            asm_ops.push(read_source_asm_op(source, &locations)?);
+            asm_ops.push(read_source_asm_op(source, &locations, &strings)?);
         }
 
         let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
@@ -341,6 +358,7 @@ impl Deserializable for DebugSourceMapSection {
 fn write_source_asm_op<W: ByteWriter>(
     asm_op: &DebugSourceAsmOp,
     locations: &[Location],
+    strings: &[String],
     target: &mut W,
 ) {
     asm_op.source_node.write_into(target);
@@ -355,14 +373,15 @@ fn write_source_asm_op<W: ByteWriter>(
     } else {
         target.write_bool(false);
     }
-    asm_op.context_name.write_into(target);
-    asm_op.op.write_into(target);
+    write_source_map_string_ref(&asm_op.context_name, strings, target);
+    write_source_map_string_ref(&asm_op.op, strings, target);
     target.write_u8(asm_op.num_cycles);
 }
 
 fn read_source_asm_op<R: ByteReader>(
     source: &mut R,
     locations: &[Location],
+    strings: &[String],
 ) -> Result<DebugSourceAsmOp, DeserializationError> {
     let source_node = DebugSourceNodeId::read_from(source)?;
     let op_idx = source.read_u32()?;
@@ -377,8 +396,8 @@ fn read_source_asm_op<R: ByteReader>(
     } else {
         None
     };
-    let context_name = String::read_from(source)?;
-    let op = String::read_from(source)?;
+    let context_name = read_source_map_string_ref(source, strings)?;
+    let op = read_source_map_string_ref(source, strings)?;
     let num_cycles = source.read_u8()?;
     Ok(DebugSourceAsmOp::new(
         source_node,
@@ -388,6 +407,31 @@ fn read_source_asm_op<R: ByteReader>(
         op,
         num_cycles,
     ))
+}
+
+fn min_source_map_asm_op_row_serialized_size() -> usize {
+    DebugSourceNodeId::min_serialized_size() + 4 + 1 + 4 + 4 + 1
+}
+
+fn write_source_map_string_ref<W: ByteWriter>(string: &String, strings: &[String], target: &mut W) {
+    let string_idx = strings
+        .iter()
+        .position(|candidate| candidate == string)
+        .expect("debug source map string table should contain every row string");
+    target.write_u32(string_idx as u32);
+}
+
+fn read_source_map_string_ref<R: ByteReader>(
+    source: &mut R,
+    strings: &[String],
+) -> Result<String, DeserializationError> {
+    let string_idx = source.read_u32()? as usize;
+    strings.get(string_idx).cloned().ok_or_else(|| {
+        DeserializationError::InvalidValue(alloc::format!(
+            "debug source asm op string index {string_idx} out of bounds for {} strings",
+            strings.len()
+        ))
+    })
 }
 
 // DEBUG ERROR MESSAGES SECTION SERIALIZATION
@@ -1026,6 +1070,34 @@ mod tests {
         let bytes = section.to_bytes();
         let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
         assert_eq!(deserialized.locations(), section.locations());
+        assert_eq!(deserialized.asm_ops(), section.asm_ops());
+    }
+
+    #[test]
+    fn test_debug_source_map_strings_are_deduplicated() {
+        let source_node = DebugSourceNodeId::from(0);
+        let section = DebugSourceMapSection::from_parts(
+            alloc::vec![
+                DebugSourceAsmOp::new(source_node, 0, None, "test::ctx".into(), "add".into(), 1,),
+                DebugSourceAsmOp::new(source_node, 1, None, "test::ctx".into(), "mul".into(), 1,),
+                DebugSourceAsmOp::new(source_node, 2, None, "test::other".into(), "add".into(), 1,),
+            ],
+            alloc::vec![],
+        );
+
+        assert_eq!(
+            section.strings(),
+            &[
+                String::from("test::ctx"),
+                String::from("add"),
+                String::from("mul"),
+                String::from("test::other"),
+            ]
+        );
+
+        let bytes = section.to_bytes();
+        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized.strings(), section.strings());
         assert_eq!(deserialized.asm_ops(), section.asm_ops());
     }
 

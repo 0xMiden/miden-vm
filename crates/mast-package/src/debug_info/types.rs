@@ -883,6 +883,8 @@ pub struct DebugSourceMapSection {
     version: u8,
     /// Deduplicated source locations referenced by assembly operation rows.
     locations: Vec<Location>,
+    /// Deduplicated strings referenced by assembly operation rows.
+    strings: Vec<String>,
     /// Source-keyed assembly operation rows.
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Source-keyed debug variable rows.
@@ -895,6 +897,7 @@ impl DebugSourceMapSection {
         Self {
             version: DEBUG_SOURCE_MAP_VERSION,
             locations: Vec::new(),
+            strings: Vec::new(),
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
         }
@@ -903,9 +906,11 @@ impl DebugSourceMapSection {
     /// Creates a source-keyed debug metadata section from rows.
     pub fn from_parts(asm_ops: Vec<DebugSourceAsmOp>, debug_vars: Vec<DebugSourceVar>) -> Self {
         let locations = intern_locations(&asm_ops);
+        let strings = intern_source_map_strings(&asm_ops);
         Self {
             version: DEBUG_SOURCE_MAP_VERSION,
             locations,
+            strings,
             asm_ops,
             debug_vars,
         }
@@ -924,6 +929,11 @@ impl DebugSourceMapSection {
     /// Returns the deduplicated source locations referenced by assembly operation rows.
     pub fn locations(&self) -> &[Location] {
         &self.locations
+    }
+
+    /// Returns the deduplicated strings referenced by assembly operation rows.
+    pub fn strings(&self) -> &[String] {
+        &self.strings
     }
 
     /// Returns source-keyed debug variable rows.
@@ -993,6 +1003,19 @@ fn intern_locations(asm_ops: &[DebugSourceAsmOp]) -> Vec<Location> {
         });
     }
     locations
+}
+
+fn intern_source_map_strings(asm_ops: &[DebugSourceAsmOp]) -> Vec<String> {
+    let mut strings = Vec::new();
+    let mut by_string = BTreeMap::new();
+    for value in asm_ops.iter().flat_map(|row| [&row.context_name, &row.op]) {
+        by_string.entry(value.clone()).or_insert_with(|| {
+            let idx = strings.len();
+            strings.push(value.clone());
+            idx
+        });
+    }
+    strings
 }
 
 // DEBUG ERROR MESSAGES SECTION
