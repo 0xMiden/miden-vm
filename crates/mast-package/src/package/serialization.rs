@@ -1627,6 +1627,63 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc k1
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("$kernel::k1");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("kernel"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Kernel,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+            debug_sections_trusted: true,
+        };
+
+        let (bytes, _) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
+        let file_path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "spoofed-kernel-digest"
+        ));
+        fs::write(&file_path, bytes).expect("failed to write tampered package file");
+
+        let err = Package::deserialize_from_file(&file_path)
+            .expect_err("expected file deserialization to reject inconsistent node digests");
+        fs::remove_file(&file_path).unwrap();
+
+        assert!(
+            err.to_string().contains("invalid untrusted MAST forest"),
+            "expected untrusted-MAST validation failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("hash mismatch for node"),
+            "expected digest mismatch failure, got: {err}"
+        );
+    }
+
     #[test]
     fn unchecked_kernel_package_deserialisation_accepts_spoofed_mast_node_digests() {
         // Build mast for:
