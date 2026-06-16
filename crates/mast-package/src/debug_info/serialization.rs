@@ -286,7 +286,16 @@ impl Deserializable for DebugSourceVar {
 impl Serializable for DebugSourceMapSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(self.version());
-        self.asm_ops().write_into(target);
+        target.write_usize(self.locations().len());
+        for location in self.locations() {
+            write_required_location(location, target);
+        }
+
+        target.write_usize(self.asm_ops().len());
+        for asm_op in self.asm_ops() {
+            write_source_asm_op(asm_op, self.locations(), target);
+        }
+
         self.debug_vars().write_into(target);
     }
 }
@@ -300,10 +309,85 @@ impl Deserializable for DebugSourceMapSection {
             )));
         }
 
-        let asm_ops = Vec::<DebugSourceAsmOp>::read_from(source)?;
+        let locations_len = source.read_usize()?;
+        let max_locations = source.max_alloc(MIN_REQUIRED_LOCATION_SERIALIZED_SIZE);
+        if locations_len > max_locations {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_source_map locations count {locations_len} exceeds budget {max_locations}"
+            )));
+        }
+        let mut locations = Vec::with_capacity(locations_len);
+        for _ in 0..locations_len {
+            locations.push(read_required_location(source)?);
+        }
+
+        let asm_ops_len = source.read_usize()?;
+        let max_asm_ops = source.max_alloc(DebugSourceAsmOp::min_serialized_size());
+        if asm_ops_len > max_asm_ops {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_source_map asm op count {asm_ops_len} exceeds budget {max_asm_ops}"
+            )));
+        }
+        let mut asm_ops = Vec::with_capacity(asm_ops_len);
+        for _ in 0..asm_ops_len {
+            asm_ops.push(read_source_asm_op(source, &locations)?);
+        }
+
         let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
         Ok(Self::from_parts(asm_ops, debug_vars))
     }
+}
+
+fn write_source_asm_op<W: ByteWriter>(
+    asm_op: &DebugSourceAsmOp,
+    locations: &[Location],
+    target: &mut W,
+) {
+    asm_op.source_node.write_into(target);
+    target.write_u32(asm_op.op_idx);
+    if let Some(location) = asm_op.location.as_ref() {
+        target.write_bool(true);
+        let location_idx = locations
+            .iter()
+            .position(|candidate| candidate == location)
+            .expect("debug source map location table should contain every row location");
+        target.write_u32(location_idx as u32);
+    } else {
+        target.write_bool(false);
+    }
+    asm_op.context_name.write_into(target);
+    asm_op.op.write_into(target);
+    target.write_u8(asm_op.num_cycles);
+}
+
+fn read_source_asm_op<R: ByteReader>(
+    source: &mut R,
+    locations: &[Location],
+) -> Result<DebugSourceAsmOp, DeserializationError> {
+    let source_node = DebugSourceNodeId::read_from(source)?;
+    let op_idx = source.read_u32()?;
+    let location = if source.read_bool()? {
+        let location_idx = source.read_u32()? as usize;
+        Some(locations.get(location_idx).cloned().ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "debug source asm op location index {location_idx} out of bounds for {} locations",
+                locations.len()
+            ))
+        })?)
+    } else {
+        None
+    };
+    let context_name = String::read_from(source)?;
+    let op = String::read_from(source)?;
+    let num_cycles = source.read_u8()?;
+    Ok(DebugSourceAsmOp::new(
+        source_node,
+        op_idx,
+        location,
+        context_name,
+        op,
+        num_cycles,
+    ))
 }
 
 // DEBUG ERROR MESSAGES SECTION SERIALIZATION
@@ -353,9 +437,7 @@ impl Deserializable for DebugErrorMessagesSection {
 fn write_location<W: ByteWriter>(location: &Option<Location>, target: &mut W) {
     if let Some(location) = location {
         target.write_bool(true);
-        location.uri.write_into(target);
-        target.write_u32(location.start.to_u32());
-        target.write_u32(location.end.to_u32());
+        write_required_location(location, target);
     } else {
         target.write_bool(false);
     }
@@ -370,6 +452,21 @@ fn read_location<R: ByteReader>(source: &mut R) -> Result<Option<Location>, Dese
     let start = ByteIndex::new(source.read_u32()?);
     let end = ByteIndex::new(source.read_u32()?);
     Ok(Some(Location::new(uri, start, end)))
+}
+
+const MIN_REQUIRED_LOCATION_SERIALIZED_SIZE: usize = 9;
+
+fn write_required_location<W: ByteWriter>(location: &Location, target: &mut W) {
+    location.uri.write_into(target);
+    target.write_u32(location.start.to_u32());
+    target.write_u32(location.end.to_u32());
+}
+
+fn read_required_location<R: ByteReader>(source: &mut R) -> Result<Location, DeserializationError> {
+    let uri = Uri::read_from(source)?;
+    let start = ByteIndex::new(source.read_u32()?);
+    let end = ByteIndex::new(source.read_u32()?);
+    Ok(Location::new(uri, start, end))
 }
 
 // DEBUG TYPE INFO SERIALIZATION
@@ -895,6 +992,41 @@ mod tests {
         );
 
         roundtrip(&section);
+    }
+
+    #[test]
+    fn test_debug_source_map_locations_are_deduplicated() {
+        let source_node = DebugSourceNodeId::from(0);
+        let location =
+            Location::new(Uri::new("file://test.masm"), ByteIndex::new(10), ByteIndex::new(14));
+        let section = DebugSourceMapSection::from_parts(
+            alloc::vec![
+                DebugSourceAsmOp::new(
+                    source_node,
+                    0,
+                    Some(location.clone()),
+                    "test::ctx".into(),
+                    "push.1".into(),
+                    1,
+                ),
+                DebugSourceAsmOp::new(
+                    source_node,
+                    1,
+                    Some(location.clone()),
+                    "test::ctx".into(),
+                    "add".into(),
+                    1,
+                ),
+            ],
+            alloc::vec![],
+        );
+
+        assert_eq!(section.locations(), &[location]);
+
+        let bytes = section.to_bytes();
+        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized.locations(), section.locations());
+        assert_eq!(deserialized.asm_ops(), section.asm_ops());
     }
 
     #[test]

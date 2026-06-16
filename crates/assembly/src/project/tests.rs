@@ -10,9 +10,9 @@ use miden_core::{
 use miden_mast_package::{
     PackageExport, PackageModule, ProcedureExport, Section, SectionId,
     debug_info::{
-        DEBUG_FUNCTIONS_VERSION, DebugFunctionsSection, DebugSourceAsmOp, DebugSourceGraphSection,
-        DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-        DebugSourcesSection, DebugTypesSection,
+        DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection, DebugSourceAsmOp,
+        DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
+        DebugSourceVar, DebugSourcesSection, DebugTypesSection,
     },
 };
 use miden_package_registry::PackageRegistry;
@@ -278,7 +278,7 @@ end
     let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
     let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
         .expect("DEBUG_SOURCE_MAP should deserialize");
-    assert_eq!(debug_source_map.version(), 1);
+    assert_eq!(debug_source_map.version(), DEBUG_SOURCE_MAP_VERSION);
     assert!(!debug_source_map.asm_ops().is_empty());
 }
 

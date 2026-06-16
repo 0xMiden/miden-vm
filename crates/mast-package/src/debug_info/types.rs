@@ -881,6 +881,8 @@ impl DebugSourceVar {
 pub struct DebugSourceMapSection {
     /// Version of the debug source map format.
     version: u8,
+    /// Deduplicated source locations referenced by assembly operation rows.
+    locations: Vec<Location>,
     /// Source-keyed assembly operation rows.
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Source-keyed debug variable rows.
@@ -892,6 +894,7 @@ impl DebugSourceMapSection {
     pub fn new() -> Self {
         Self {
             version: DEBUG_SOURCE_MAP_VERSION,
+            locations: Vec::new(),
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
         }
@@ -899,8 +902,10 @@ impl DebugSourceMapSection {
 
     /// Creates a source-keyed debug metadata section from rows.
     pub fn from_parts(asm_ops: Vec<DebugSourceAsmOp>, debug_vars: Vec<DebugSourceVar>) -> Self {
+        let locations = intern_locations(&asm_ops);
         Self {
             version: DEBUG_SOURCE_MAP_VERSION,
+            locations,
             asm_ops,
             debug_vars,
         }
@@ -914,6 +919,11 @@ impl DebugSourceMapSection {
     /// Returns source-keyed assembly operation rows.
     pub fn asm_ops(&self) -> &[DebugSourceAsmOp] {
         &self.asm_ops
+    }
+
+    /// Returns the deduplicated source locations referenced by assembly operation rows.
+    pub fn locations(&self) -> &[Location] {
+        &self.locations
     }
 
     /// Returns source-keyed debug variable rows.
@@ -970,6 +980,19 @@ impl DebugSourceMapSection {
         self.debug_vars_for_source_node(source_node)
             .filter(move |row| row.op_idx == op_idx)
     }
+}
+
+fn intern_locations(asm_ops: &[DebugSourceAsmOp]) -> Vec<Location> {
+    let mut locations = Vec::new();
+    let mut by_location = BTreeMap::new();
+    for location in asm_ops.iter().filter_map(|row| row.location.as_ref()) {
+        by_location.entry(location.clone()).or_insert_with(|| {
+            let idx = locations.len();
+            locations.push(location.clone());
+            idx
+        });
+    }
+    locations
 }
 
 // DEBUG ERROR MESSAGES SECTION
@@ -1357,9 +1380,8 @@ mod tests {
                     nodes: alloc::vec![DebugSourceNode::new(block, alloc::vec![], 0, 1,)],
                     roots: alloc::vec![source_node],
                 }),
-                source_map: Some(DebugSourceMapSection {
-                    version: DEBUG_SOURCE_MAP_VERSION,
-                    asm_ops: alloc::vec![DebugSourceAsmOp::new(
+                source_map: Some(DebugSourceMapSection::from_parts(
+                    alloc::vec![DebugSourceAsmOp::new(
                         source_node,
                         0,
                         None,
@@ -1367,12 +1389,12 @@ mod tests {
                         "add".into(),
                         1,
                     )],
-                    debug_vars: alloc::vec![DebugSourceVar::new(
+                    alloc::vec![DebugSourceVar::new(
                         source_node,
                         0,
                         DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
                     )],
-                }),
+                )),
                 ..PackageDebugInfo::default()
             }
         }
@@ -1447,9 +1469,8 @@ mod tests {
                 ],
                 roots: alloc::vec![root_source],
             }),
-            source_map: Some(DebugSourceMapSection {
-                version: DEBUG_SOURCE_MAP_VERSION,
-                asm_ops: alloc::vec![DebugSourceAsmOp::new(
+            source_map: Some(DebugSourceMapSection::from_parts(
+                alloc::vec![DebugSourceAsmOp::new(
                     child_source,
                     0,
                     None,
@@ -1457,8 +1478,8 @@ mod tests {
                     "add".into(),
                     1,
                 )],
-                debug_vars: alloc::vec![],
-            }),
+                alloc::vec![],
+            )),
             ..PackageDebugInfo::default()
         };
 
@@ -1494,14 +1515,13 @@ mod tests {
         assert_eq!(graph.nodes().iter().filter(|node| node.exec_node == exec_node).count(), 2);
         assert_eq!(graph.source_node(source_a).unwrap().exec_node, exec_node);
 
-        let source_map = DebugSourceMapSection {
-            version: DEBUG_SOURCE_MAP_VERSION,
-            asm_ops: alloc::vec![
+        let source_map = DebugSourceMapSection::from_parts(
+            alloc::vec![
                 DebugSourceAsmOp::new(source_a, 0, None, "alias_a".into(), "add".into(), 1),
                 DebugSourceAsmOp::new(source_b, 0, None, "alias_b".into(), "add".into(), 1),
                 DebugSourceAsmOp::new(source_b, 2, None, "alias_b_later".into(), "mul".into(), 1),
             ],
-            debug_vars: alloc::vec![
+            alloc::vec![
                 DebugSourceVar::new(
                     source_a,
                     0,
@@ -1513,7 +1533,7 @@ mod tests {
                     DebugVarInfo::new("y", DebugVarLocation::Stack(1)),
                 ),
             ],
-        };
+        );
 
         assert_eq!(source_map.asm_op_for_operation(source_a, 0).unwrap().context_name, "alias_a",);
         assert_eq!(source_map.asm_op_for_operation(source_b, 0).unwrap().context_name, "alias_b",);
