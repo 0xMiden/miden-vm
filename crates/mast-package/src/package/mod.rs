@@ -1235,6 +1235,7 @@ impl Package {
                     .map_err(Report::msg)?;
                     package.description = self.description.clone();
                     package.sections = self.sections.clone();
+                    package.debug_sections_trusted = self.debug_sections_trusted;
                     Ok(package)
                 },
             }
@@ -1323,6 +1324,7 @@ mod tests {
     };
     use miden_core::{
         advice::AdviceMap,
+        assert_matches,
         mast::{
             BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
             MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
@@ -2033,6 +2035,32 @@ mod tests {
 
         let program = executable.try_into_program().unwrap();
         assert_eq!(program.entrypoint(), entrypoint_node);
+    }
+
+    #[test]
+    fn make_executable_preserves_debug_section_trust_state() {
+        let (mast, exports, sections) = build_same_digest_package_exports(&[
+            ("app::alias_a", "alias_a"),
+            ("app::alias_b", "alias_b"),
+        ]);
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("package should be valid");
+        package.sections = sections;
+        package.debug_sections_trusted = false;
+
+        let executable = package
+            .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
+            .unwrap();
+
+        assert!(!executable.debug_sections_trusted);
+        assert_matches!(executable.debug_info(), Err(PackageDebugInfoError::UntrustedSections));
     }
 
     #[test]

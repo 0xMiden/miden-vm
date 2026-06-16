@@ -427,31 +427,38 @@ impl MastForestBuilder {
         Ok(node_ref)
     }
 
-    fn source_child_refs_for_node_refs(&self, child_refs: &[MastNodeRef]) -> Vec<SourceNodeRef> {
+    fn source_refs_for_node_ref_occurrences(
+        &self,
+        node_refs: &[MastNodeRef],
+    ) -> Vec<SourceNodeRef> {
         let mut child_counts = BTreeMap::<MastNodeRef, usize>::new();
-        for child_ref in child_refs {
-            *child_counts.entry(*child_ref).or_default() += 1;
+        for node_ref in node_refs {
+            *child_counts.entry(*node_ref).or_default() += 1;
         }
 
         let mut child_seen = BTreeMap::<MastNodeRef, usize>::new();
-        child_refs
+        node_refs
             .iter()
-            .map(|child_ref| {
+            .map(|node_ref| {
                 let history = self
                     .source_refs_by_node_ref
-                    .get(child_ref)
-                    .expect("child execution ref must have a source occurrence");
-                let needed = child_counts[child_ref];
-                let seen = child_seen.entry(*child_ref).or_default();
+                    .get(node_ref)
+                    .expect("execution ref must have a source occurrence");
+                let needed = child_counts[node_ref];
+                let seen = child_seen.entry(*node_ref).or_default();
                 let start = history.len().saturating_sub(needed);
                 let source_ref = history
                     .get((start + *seen).min(history.len() - 1))
                     .copied()
-                    .expect("child execution ref must have at least one source occurrence");
+                    .expect("execution ref must have at least one source occurrence");
                 *seen += 1;
                 source_ref
             })
             .collect()
+    }
+
+    fn source_child_refs_for_node_refs(&self, child_refs: &[MastNodeRef]) -> Vec<SourceNodeRef> {
+        self.source_refs_for_node_ref_occurrences(child_refs)
     }
 
     fn record_source_occurrence(
@@ -939,7 +946,9 @@ impl MastForestBuilder {
 
         let mut merged_basic_block_refs: Vec<MastNodeRef> = Vec::new();
 
-        for &basic_block_ref in contiguous_basic_block_refs {
+        let source_refs = self.source_refs_for_node_ref_occurrences(contiguous_basic_block_refs);
+
+        for (&basic_block_ref, source_ref) in contiguous_basic_block_refs.iter().zip(source_refs) {
             // check if the block should be merged with other blocks
             if should_merge(
                 self.is_procedure_root_ref(basic_block_ref),
@@ -958,9 +967,7 @@ impl MastForestBuilder {
                 };
                 let ops_offset = operations.len();
 
-                if let Some(source_ref) = self.latest_source_ref_by_node_ref.get(&basic_block_ref) {
-                    merged_source_occurrences.push((*source_ref, ops_offset));
-                }
+                merged_source_occurrences.push((source_ref, ops_offset));
 
                 let pending_node = &self.nodes[basic_block_ref];
                 merged_asm_ops.extend(
@@ -1475,6 +1482,58 @@ mod tests {
                         .any(|(_, asm_op)| asm_op.context_name() == "merge::second")
             }),
             "second pre-merge source block should survive as range 1..2",
+        );
+    }
+
+    #[test]
+    fn test_source_graph_preserves_repeated_deduped_block_ranges_in_merge_window() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let first_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::first", "add"));
+        let second_asm_op = add_test_asm_op(&mut builder, test_asm_op("merge::second", "add"));
+        let first_block_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, first_asm_op)], vec![])
+            .unwrap();
+        let second_block_ref = builder
+            .ensure_block_ref(vec![Operation::Add], vec![(0, second_asm_op)], vec![])
+            .unwrap();
+
+        assert_eq!(
+            first_block_ref, second_block_ref,
+            "identical execution blocks should dedup to one execution ref",
+        );
+
+        let merged_blocks =
+            builder.merge_basic_block_refs(&[first_block_ref, second_block_ref]).unwrap();
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_ref = record_test_root(&mut builder, merged_blocks[0]);
+
+        let (_, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_merged_id = remapping[&merged_ref];
+        let source_nodes = source_nodes_for_exec(&source_graph, final_merged_id);
+
+        assert!(
+            source_nodes.iter().any(|source_node| {
+                source_node.op_start() == 0
+                    && source_node.op_end() == 1
+                    && source_node
+                        .asm_ops()
+                        .iter()
+                        .any(|(_, asm_op)| asm_op.context_name() == "merge::first")
+            }),
+            "first deduped source block should survive as range 0..1",
+        );
+        assert!(
+            source_nodes.iter().any(|source_node| {
+                source_node.op_start() == 1
+                    && source_node.op_end() == 2
+                    && source_node
+                        .asm_ops()
+                        .iter()
+                        .any(|(_, asm_op)| asm_op.context_name() == "merge::second")
+            }),
+            "second deduped source block should survive as range 1..2",
         );
     }
 

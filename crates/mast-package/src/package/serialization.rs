@@ -78,7 +78,7 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [5, 0, 0];
+const VERSION: [u8; 3] = [6, 0, 0];
 
 /// Byte-read budget multiplier for package deserialization from a byte slice.
 ///

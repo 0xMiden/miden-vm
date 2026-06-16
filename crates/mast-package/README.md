@@ -8,7 +8,7 @@ and optional custom sections.
 
 The header contains the following fields:
 - `MASP\0` magic bytes;
-- Version of the package binary format (currently `5.0.0`);
+- Version of the package binary format (currently `6.0.0`);
 
 The package data contains:
 - Package name
