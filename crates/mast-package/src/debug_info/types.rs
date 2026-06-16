@@ -24,8 +24,6 @@ use miden_core::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{ColumnNumber, LineNumber, Location};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 // DEBUG SOURCE GRAPH LOOKUP ERROR
 // ================================================================================================
@@ -80,11 +78,9 @@ pub enum PackageDebugInfoMergeError {
 /// where a type index is expected).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
 )]
 pub struct DebugTypeIdx(u32);
 
@@ -141,7 +137,6 @@ pub const DEBUG_TYPES_VERSION: u8 = 1;
 /// String indices in sub-types (e.g., `name_idx` in `DebugFieldInfo`) are relative
 /// to this section's own string table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugTypesSection {
     /// Version of the debug types format
     pub version: u8,
@@ -208,7 +203,6 @@ pub const DEBUG_SOURCES_VERSION: u8 = 1;
 /// String indices in sub-types (e.g., `path_idx` in `DebugFileInfo`) are relative
 /// to this section's own string table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourcesSection {
     /// Version of the debug sources format
     pub version: u8,
@@ -286,7 +280,6 @@ pub const DEBUG_ERROR_MESSAGES_VERSION: u8 = 1;
 /// String indices in sub-types (e.g., `name_idx` in `DebugFunctionInfo`) are relative
 /// to this section's own string table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFunctionsSection {
     /// Version of the debug functions format
     pub version: u8,
@@ -337,7 +330,6 @@ impl DebugFunctionsSection {
 
 /// Trusted package-owned debug information decoded from well-known debug sections.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageDebugInfo {
     /// Type definitions for source-level debug consumers.
     pub(crate) types: Option<DebugTypesSection>,
@@ -652,7 +644,7 @@ impl PackageDebugInfo {
 
 /// A strongly-typed index into the source/debug MAST occurrence graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct DebugSourceNodeId(u32);
 
@@ -703,7 +695,6 @@ impl Deserializable for DebugSourceNodeId {
 /// Source-map rows in [`DebugSourceMapSection`] attach assembly operations and debug variables to
 /// these source occurrences.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceNode {
     /// The executable MAST node represented by this source occurrence.
     pub exec_node: MastNodeId,
@@ -729,7 +720,6 @@ impl DebugSourceNode {
 
 /// Package-owned source/debug MAST occurrence graph.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceGraphSection {
     /// Version of the debug source graph format.
     version: u8,
@@ -832,14 +822,12 @@ impl DebugSourceGraphSection {
 
 /// Assembly operation metadata keyed by a source/debug MAST occurrence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceAsmOp {
     /// Source/debug occurrence that owns this operation row.
     pub source_node: DebugSourceNodeId,
     /// Operation index local to the reduced execution node.
     pub op_idx: u32,
     /// Optional source location for the assembly operation.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub location: Option<Location>,
     /// Assembly context name.
     pub context_name: String,
@@ -872,7 +860,6 @@ impl DebugSourceAsmOp {
 
 /// Debug variable metadata keyed by a source/debug MAST occurrence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceVar {
     /// Source/debug occurrence that owns this variable row.
     pub source_node: DebugSourceNodeId,
@@ -891,7 +878,6 @@ impl DebugSourceVar {
 
 /// Package-owned source-keyed debug metadata rows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceMapSection {
     /// Version of the debug source map format.
     version: u8,
@@ -991,7 +977,6 @@ impl DebugSourceMapSection {
 
 /// Assertion error message keyed by its runtime error code.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugErrorMessage {
     /// Runtime error code emitted by the assembled assertion operation.
     pub err_code: u64,
@@ -1008,7 +993,6 @@ impl DebugErrorMessage {
 
 /// Package-owned assertion error messages.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugErrorMessagesSection {
     /// Version of the debug error messages format.
     version: u8,
@@ -1065,7 +1049,6 @@ impl DebugErrorMessagesSection {
 /// This encodes the type of a variable or expression, enabling debuggers to properly
 /// display values on the stack or in memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DebugTypeInfo {
     /// A primitive type (e.g., i32, i64, felt, etc.)
     Primitive(DebugPrimitiveType),
@@ -1117,7 +1100,6 @@ pub enum DebugTypeInfo {
 /// New variants must be added at the end to maintain backwards compatibility
 /// with previously serialized debug info.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum DebugPrimitiveType {
     /// Void type (0 bytes)
@@ -1184,7 +1166,6 @@ impl DebugPrimitiveType {
 
 /// Field information within a struct type.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFieldInfo {
     /// Name of the field (index into string table)
     pub name_idx: u32,
@@ -1196,7 +1177,6 @@ pub struct DebugFieldInfo {
 
 /// Variant information within an enum type.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugVariantInfo {
     /// Name of the variant (index into string table).
     pub name_idx: u32,
@@ -1220,7 +1200,6 @@ pub struct DebugVariantInfo {
 /// is expected to be absolute. This would allow sharing common directory prefixes across
 /// multiple files.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFileInfo {
     /// Full path to the source file (index into string table).
     pub path_idx: u32,
@@ -1253,7 +1232,6 @@ impl DebugFileInfo {
 ///
 /// Links source-level function information to the compiled MAST representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFunctionInfo {
     /// Name of the function (index into string table)
     pub name_idx: u32,
