@@ -3,7 +3,7 @@ use core::str::FromStr;
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Path,
+    Assembler, DefaultSourceManager, Linkage, Path,
     ast::{Module, ModuleKind, QualifiedProcedureName},
 };
 use miden_core::{
@@ -18,7 +18,7 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_debug_types::{
-    ByteIndex, Location, SourceContent, SourceFile, SourceManager, SourceSpan, Uri,
+    ByteIndex, Location, SourceContent, SourceFile, SourceLanguage, SourceManager, SourceSpan, Uri,
 };
 use miden_mast_package::{
     Package, PackageExport, PackageId, ProcedureExport, Section, SectionId, TargetType, Version,
@@ -256,6 +256,121 @@ fn untrusted_debug_stripped_child_bearing_package_executes_without_debug_info() 
         .unwrap();
 
     assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(4)));
+}
+
+#[test]
+fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let root = source_manager.load(
+        SourceLanguage::Masm,
+        Uri::from("lib/root.masm"),
+        r#"
+        namespace lib
+
+        pub mod a
+        pub mod b
+        "#
+        .to_string(),
+    );
+    let a = source_manager.load(
+        SourceLanguage::Masm,
+        Uri::from("lib/a.masm"),
+        r#"
+        namespace lib::a
+
+        pub proc same
+            push.1 add
+        end
+        "#
+        .to_string(),
+    );
+    let b = source_manager.load(
+        SourceLanguage::Masm,
+        Uri::from("lib/b.masm"),
+        r#"
+        namespace lib::b
+
+        pub proc same
+            push.1 add
+        end
+        "#
+        .to_string(),
+    );
+    let lib = Assembler::new(source_manager.clone())
+        .assemble_library("lib", root, [a, b])
+        .map(Arc::<Package>::from)
+        .expect("library should assemble");
+    let lib_debug_info = lib
+        .debug_info()
+        .expect("library debug info should decode")
+        .expect("library should contain debug info");
+    let mut same_digest_roots = lib_debug_info
+        .source_graph()
+        .expect("library should have a source graph")
+        .roots()
+        .iter()
+        .map(|root| lib_debug_info.source_node(*root).unwrap().exec_node)
+        .collect::<Vec<_>>();
+    same_digest_roots.sort_unstable();
+    same_digest_roots.dedup();
+    assert_eq!(
+        same_digest_roots.len(),
+        1,
+        "the two library exports should reduce to the same executable node",
+    );
+
+    let main = source_manager.load(
+        SourceLanguage::Masm,
+        Uri::from("main.masm"),
+        r#"
+        use lib::b
+
+        begin
+            call.b::same
+        end
+        "#
+        .to_string(),
+    );
+    let package = Assembler::new(source_manager)
+        .with_package(lib, Linkage::Static)
+        .expect("library should link statically")
+        .assemble_program("program", main)
+        .expect("program should assemble");
+    let package_debug_info = package
+        .debug_info()
+        .expect("program debug info should decode")
+        .expect("program should contain debug info");
+    let source_map = package_debug_info.source_map().expect("program should have a source map");
+    let selected_rows = source_map
+        .asm_ops()
+        .iter()
+        .filter(|row| {
+            row.location
+                .as_ref()
+                .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(!selected_rows.is_empty(), "the selected call should keep lib/b.masm metadata");
+    assert!(
+        !source_map.asm_ops().iter().any(|row| {
+            row.location
+                .as_ref()
+                .is_some_and(|location| location.uri().as_str() == "lib/a.masm")
+        }),
+        "the uncalled identical procedure should not leak into the executable source map",
+    );
+
+    let program = package.unwrap_program();
+    let output = FastProcessor::new(StackInputs::new(&[Felt::new_unchecked(41)]).unwrap())
+        .execute_with_package_debug_info_sync(
+            &program,
+            &package_debug_info,
+            &mut DefaultHost::default(),
+        )
+        .expect("duplicate executable roots should not make source-aware execution fail");
+
+    assert_eq!(output.stack.get_element(0), Some(Felt::new_unchecked(42)));
 }
 
 #[test]
