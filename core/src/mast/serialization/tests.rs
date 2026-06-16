@@ -908,6 +908,34 @@ fn mast_forest_wire_view_rejects_trailing_bytes_after_stripped_payload() {
     );
 }
 
+#[test]
+fn mast_forest_byte_readers_reject_trailing_bytes_after_stripped_payload() {
+    let mut bytes = serialized_single_block_forest();
+    bytes.extend_from_slice(&[1, 2, 3]);
+
+    let trusted = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        trusted,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("extra bytes after stripped MastForest payload")
+    );
+
+    let materialized_view =
+        MastForest::read_view_from_bytes(&bytes, MastForestReadMode::Materialized);
+    assert_matches!(
+        materialized_view,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("extra bytes after stripped MastForest payload")
+    );
+
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        untrusted,
+        Err(DeserializationError::InvalidValue(msg))
+            if msg.contains("extra bytes after stripped MastForest payload")
+    );
+}
+
 // OPBATCH PRESERVATION TESTS
 // ================================================================================================
 

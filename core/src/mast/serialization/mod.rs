@@ -555,15 +555,17 @@ fn check_no_legacy_debug_payload(
     if payload.is_empty() {
         return Ok(());
     }
-    Err(DeserializationError::InvalidValue(
-        "extra bytes after stripped MastForest payload".into(),
-    ))
+    Err(extra_bytes_after_stripped_payload_error())
 }
 
 fn legacy_debug_info_error() -> DeserializationError {
     DeserializationError::InvalidValue(
         "MastForest payloads with legacy DebugInfo are no longer supported; debug metadata belongs in Package debug sections".into(),
     )
+}
+
+fn extra_bytes_after_stripped_payload_error() -> DeserializationError {
+    DeserializationError::InvalidValue("extra bytes after stripped MastForest payload".into())
 }
 
 impl MastForest {
@@ -810,7 +812,11 @@ impl Deserializable for MastForest {
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let budget = bytes.len().saturating_mul(TRUSTED_BYTE_READ_BUDGET_MULTIPLIER);
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        Self::read_from(&mut reader)
+        let forest = Self::read_from(&mut reader)?;
+        if reader.has_more_bytes() {
+            return Err(extra_bytes_after_stripped_payload_error());
+        }
+        Ok(forest)
     }
 }
 

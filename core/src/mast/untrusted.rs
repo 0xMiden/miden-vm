@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use super::{AdviceMap, MastForest, MastForestError, serialization};
-use crate::serde::{BudgetedReader, DeserializationError, SliceReader};
+use crate::serde::{BudgetedReader, ByteReader, DeserializationError, SliceReader};
 
 /// A [`MastForest`] deserialized from untrusted input that has not yet been validated.
 ///
@@ -157,10 +157,15 @@ impl UntrustedMastForest {
     ) -> Result<Self, DeserializationError> {
         let wire_byte_budget = options.wire_byte_budget(bytes.len());
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), wire_byte_budget);
-        serialization::read_untrusted_with_flags_and_allocation_budget(
+        let (forest, _flags) = serialization::read_untrusted_with_flags_and_allocation_budget(
             &mut reader,
             options.validation_allocation_budget(wire_byte_budget),
-        )
-        .map(|(forest, _flags)| forest)
+        )?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after stripped MastForest payload".into(),
+            ));
+        }
+        Ok(forest)
     }
 }
