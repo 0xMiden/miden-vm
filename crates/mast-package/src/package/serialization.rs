@@ -121,15 +121,16 @@ impl Package {
         }
     }
 
-    /// Reads a package from `source` without validating the embedded MAST forest.
+    /// Reads a trusted package from `source` without validating the embedded MAST forest.
     ///
-    /// This is only correct when serialization and deserialization happen within the same trust
-    /// domain. A typical use case is reloading bytes that were already validated before being
-    /// persisted to local storage controlled by the same trusted system.
+    /// # Trust boundary
     ///
-    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
-    /// received over the network or from another party. Authenticating the outer byte stream does
-    /// not prove that embedded MAST node digests are semantically valid.
+    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
+    /// bytes that were already validated before being persisted by the same trusted system.
+    ///
+    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
+    /// other package that crosses a trust boundary. Use [`Package::read_from`] for those
+    /// inputs.
     pub fn read_from_unchecked<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
@@ -138,9 +139,16 @@ impl Package {
         Self::read_from_with_header_and_mast(source, header, mast_forest, true)
     }
 
-    /// Reads a package from `bytes` without validating the embedded MAST forest.
+    /// Reads trusted package bytes without validating the embedded MAST forest.
     ///
-    /// See [`Package::read_from_unchecked`].
+    /// # Trust boundary
+    ///
+    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
+    /// bytes that were already validated before being persisted by the same trusted system.
+    ///
+    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
+    /// other package that crosses a trust boundary. Use [`Package::read_from_bytes`] for those
+    /// inputs.
     pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut source = SliceReader::new(bytes);
         Self::read_from_unchecked(&mut source)
