@@ -27,7 +27,7 @@ use miden_core::{
     Word,
     advice::AdviceMap,
     crypto::hash::Poseidon2,
-    mast::{MastForest, MastNodeExt, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::Kernel,
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
@@ -662,6 +662,25 @@ impl Package {
                     ),
                 });
             };
+            if source_node.op_start > source_node.op_end {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} has invalid operation range {}..{}",
+                        source_node.op_start, source_node.op_end,
+                    ),
+                });
+            }
+            if let MastNode::Block(block) = exec_node {
+                let num_ops = block.num_operations();
+                if source_node.op_end > num_ops {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} has operation range {}..{}, outside execution node {:?} operation count {num_ops}",
+                            source_node.op_start, source_node.op_end, source_node.exec_node,
+                        ),
+                    });
+                }
+            }
 
             let mut exec_children = Vec::new();
             exec_node.for_each_child(|child_id| exec_children.push(child_id));
@@ -1378,6 +1397,28 @@ mod tests {
         let error = package.debug_info().expect_err("mismatched source child should be rejected");
 
         assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_source_node_operation_ranges() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceNodeId::from(0);
+
+        for (op_start, op_end) in [(1, 0), (0, 2)] {
+            let source_graph = DebugSourceGraphSection::from_parts(
+                vec![DebugSourceNode::new(exec_node, Vec::new(), op_start, op_end)],
+                vec![source_node],
+            );
+            package.sections =
+                vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+            let error = package
+                .debug_info()
+                .expect_err("invalid source node operation range should be rejected");
+
+            assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+        }
     }
 
     #[test]
