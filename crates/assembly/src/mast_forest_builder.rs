@@ -2367,7 +2367,7 @@ mod tests {
     }
 
     #[test]
-    fn test_static_link_ambiguous_same_commitment_source_root_stays_external() {
+    fn test_static_link_ambiguous_same_commitment_source_root_drops_source_metadata() {
         let mut source_a_builder = MastForestBuilder::new(&[]).unwrap();
         let source_a_asm_op = add_test_asm_op(
             &mut source_a_builder,
@@ -2408,10 +2408,18 @@ mod tests {
                 None,
             )
             .unwrap();
+        assert!(
+            !builder.nodes[linked_ref].kind.is_external(),
+            "ambiguous same-commitment provenance should not force an external node"
+        );
+        record_test_root(&mut builder, linked_ref);
+        let (_forest, remapping, source_graph, _) =
+            builder.build().unwrap().into_parts_with_source_graph();
+        let final_linked = remapping[&linked_ref];
 
         assert!(
-            builder.nodes[linked_ref].kind.is_external(),
-            "ambiguous same-commitment provenance must not import the wrong source metadata"
+            source_asm_contexts(&source_graph, final_linked).is_empty(),
+            "ambiguous same-commitment provenance should import execution without source metadata"
         );
     }
 

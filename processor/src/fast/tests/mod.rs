@@ -326,14 +326,14 @@ fn package_source_debug_execution_distinguishes_same_exec_node_split_children() 
 }
 
 #[test]
-fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
+fn package_source_debug_execution_degrades_ambiguous_local_dyn_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
         .assemble_program(
             "program",
             "
         proc foo
-            assert
+            push.7 swap drop
         end
 
         begin
@@ -368,19 +368,15 @@ fn package_source_debug_execution_rejects_ambiguous_local_dyn_root() {
         ));
 
     let processor = FastProcessor::new(StackInputs::default());
-    let err = processor
+    let output = processor
         .execute_with_package_debug_info_sync(
             &program,
             &package_debug_info,
             &mut DefaultHost::default(),
         )
-        .unwrap_err();
+        .unwrap();
 
-    assert_matches!(
-        err,
-        ExecutionError::Internal(msg)
-            if msg.contains("ambiguous or malformed dynamic call root")
-    );
+    assert_eq!(output.stack.get_element(0), Some(Felt::from_u32(7)));
 }
 
 fn missing_external_package_source_debug_fixture() -> (

@@ -232,9 +232,8 @@ impl MastForestBuilder {
                 StaticRootLookup::Found(linked_root) => return Some(linked_root),
                 // `MastForest::commitment()` does not include diagnostics metadata, so multiple
                 // source forests can share a commitment while still carrying different metadata.
-                // Without a non-colliding package identity, an ambiguous exact lookup must not
-                // fall back to digest-only linking because that can import the wrong source node.
-                StaticRootLookup::Ambiguous => return None,
+                // In that case we drop the source hint and fall back to digest-only linking.
+                StaticRootLookup::Ambiguous => {},
                 StaticRootLookup::Missing => {},
             }
         }
