@@ -536,6 +536,9 @@ impl PackageDebugInfo {
                 )?;
                 debug_vars.push(DebugSourceVar::new(source_node, row.op_idx, row.var.clone()));
             }
+            // Inline-call rows refer to function and source-file tables. This source-only merge
+            // leaves those tables to higher-level package composition, so it cannot safely carry
+            // inline calls across forests.
         }
 
         Ok(Self {
@@ -631,6 +634,27 @@ impl PackageDebugInfo {
         self.source_map
             .iter()
             .flat_map(move |source_map| source_map.debug_vars_for_operation(source_node, op_idx))
+    }
+
+    /// Returns inline-call rows for a source/debug occurrence.
+    pub fn inline_calls_for_source_node(
+        &self,
+        source_node: DebugSourceNodeId,
+    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.source_map
+            .iter()
+            .flat_map(move |source_map| source_map.inline_calls_for_source_node(source_node))
+    }
+
+    /// Returns inline-call rows for `source_node` at `op_idx`.
+    pub fn inline_calls_for_operation(
+        &self,
+        source_node: DebugSourceNodeId,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.source_map
+            .iter()
+            .flat_map(move |source_map| source_map.inline_calls_for_operation(source_node, op_idx))
     }
 
     /// Returns the assertion error message for `err_code`, if present.
@@ -876,6 +900,44 @@ impl DebugSourceVar {
     }
 }
 
+/// Inline-call metadata keyed by a source/debug MAST occurrence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugSourceInlineCall {
+    /// Source/debug occurrence that owns this inline-call row.
+    pub source_node: DebugSourceNodeId,
+    /// Operation index local to the reduced execution node.
+    pub op_idx: u32,
+    /// Inlined callee function index in the debug functions table.
+    pub callee_idx: u32,
+    /// Call-site source file index in the debug sources table.
+    pub file_idx: u32,
+    /// Call-site line number.
+    pub line: LineNumber,
+    /// Call-site column number.
+    pub column: ColumnNumber,
+}
+
+impl DebugSourceInlineCall {
+    /// Creates a source-keyed inline-call metadata row.
+    pub fn new(
+        source_node: DebugSourceNodeId,
+        op_idx: u32,
+        callee_idx: u32,
+        file_idx: u32,
+        line: LineNumber,
+        column: ColumnNumber,
+    ) -> Self {
+        Self {
+            source_node,
+            op_idx,
+            callee_idx,
+            file_idx,
+            line,
+            column,
+        }
+    }
+}
+
 /// Package-owned source-keyed debug metadata rows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DebugSourceMapSection {
@@ -889,6 +951,8 @@ pub struct DebugSourceMapSection {
     asm_ops: Vec<DebugSourceAsmOp>,
     /// Source-keyed debug variable rows.
     debug_vars: Vec<DebugSourceVar>,
+    /// Source-keyed inline-call rows.
+    inline_calls: Vec<DebugSourceInlineCall>,
 }
 
 impl DebugSourceMapSection {
@@ -900,11 +964,21 @@ impl DebugSourceMapSection {
             strings: Vec::new(),
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
+            inline_calls: Vec::new(),
         }
     }
 
     /// Creates a source-keyed debug metadata section from rows.
     pub fn from_parts(asm_ops: Vec<DebugSourceAsmOp>, debug_vars: Vec<DebugSourceVar>) -> Self {
+        Self::from_parts_with_inline_calls(asm_ops, debug_vars, Vec::new())
+    }
+
+    /// Creates a source-keyed debug metadata section from rows, including inline calls.
+    pub fn from_parts_with_inline_calls(
+        asm_ops: Vec<DebugSourceAsmOp>,
+        debug_vars: Vec<DebugSourceVar>,
+        inline_calls: Vec<DebugSourceInlineCall>,
+    ) -> Self {
         let locations = intern_locations(&asm_ops);
         let strings = intern_source_map_strings(&asm_ops);
         Self {
@@ -913,6 +987,7 @@ impl DebugSourceMapSection {
             strings,
             asm_ops,
             debug_vars,
+            inline_calls,
         }
     }
 
@@ -941,9 +1016,14 @@ impl DebugSourceMapSection {
         &self.debug_vars
     }
 
+    /// Returns source-keyed inline-call rows.
+    pub fn inline_calls(&self) -> &[DebugSourceInlineCall] {
+        &self.inline_calls
+    }
+
     /// Returns true if the section contains no metadata rows.
     pub fn is_empty(&self) -> bool {
-        self.asm_ops.is_empty() && self.debug_vars.is_empty()
+        self.asm_ops.is_empty() && self.debug_vars.is_empty() && self.inline_calls.is_empty()
     }
 
     /// Returns assembly operation rows for a source/debug occurrence.
@@ -988,6 +1068,24 @@ impl DebugSourceMapSection {
         op_idx: u32,
     ) -> impl Iterator<Item = &DebugSourceVar> {
         self.debug_vars_for_source_node(source_node)
+            .filter(move |row| row.op_idx == op_idx)
+    }
+
+    /// Returns inline-call rows for a source/debug occurrence.
+    fn inline_calls_for_source_node(
+        &self,
+        source_node: DebugSourceNodeId,
+    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.inline_calls.iter().filter(move |row| row.source_node == source_node)
+    }
+
+    /// Returns inline-call rows for `source_node` at `op_idx`.
+    fn inline_calls_for_operation(
+        &self,
+        source_node: DebugSourceNodeId,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceInlineCall> {
+        self.inline_calls_for_source_node(source_node)
             .filter(move |row| row.op_idx == op_idx)
     }
 }
@@ -1373,6 +1471,40 @@ mod tests {
         assert_eq!(idx2, 1);
         assert_eq!(idx3, 0); // Should return same index
         assert_eq!(section.strings.len(), 2);
+    }
+
+    #[test]
+    fn test_debug_source_map_inline_calls_are_keyed_by_source_operation() {
+        let source_a = DebugSourceNodeId::from(0);
+        let source_b = DebugSourceNodeId::from(1);
+        let inline_a = DebugSourceInlineCall::new(
+            source_a,
+            3,
+            0,
+            0,
+            LineNumber::new(10).unwrap(),
+            ColumnNumber::new(4).unwrap(),
+        );
+        let inline_b = DebugSourceInlineCall::new(
+            source_b,
+            3,
+            1,
+            0,
+            LineNumber::new(20).unwrap(),
+            ColumnNumber::new(8).unwrap(),
+        );
+        let source_map = DebugSourceMapSection::from_parts_with_inline_calls(
+            alloc::vec![],
+            alloc::vec![],
+            alloc::vec![inline_a.clone(), inline_b.clone()],
+        );
+
+        assert_eq!(source_map.inline_calls(), &[inline_a.clone(), inline_b]);
+        assert_eq!(
+            source_map.inline_calls_for_operation(source_a, 3).collect::<Vec<_>>(),
+            alloc::vec![&inline_a],
+        );
+        assert!(source_map.inline_calls_for_operation(source_a, 4).next().is_none());
     }
 
     #[test]

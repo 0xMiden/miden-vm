@@ -708,6 +708,33 @@ impl Package {
                     "debug variable",
                 )?;
             }
+            let function_count =
+                debug_info.functions.as_ref().map_or(0, |section| section.functions.len());
+            let file_count = debug_info.sources.as_ref().map_or(0, |section| section.files.len());
+            for row in source_map.inline_calls() {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "inline call",
+                )?;
+                if row.callee_idx as usize >= function_count {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug inline call callee index {} is outside debug function table length {function_count}",
+                            row.callee_idx,
+                        ),
+                    });
+                }
+                if row.file_idx as usize >= file_count {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug inline call file index {} is outside debug source file table length {file_count}",
+                            row.file_idx,
+                        ),
+                    });
+                }
+            }
         }
 
         for export in self.manifest.exports() {
@@ -1311,8 +1338,8 @@ mod tests {
         Dependency, Version,
         debug_info::{
             DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugSourceAsmOp,
-            DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
-            DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+            DebugSourceGraphSection, DebugSourceInlineCall, DebugSourceMapSection, DebugSourceNode,
+            DebugSourceNodeId, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
         },
     };
 
@@ -1590,6 +1617,50 @@ mod tests {
             package.debug_info(),
             Err(PackageDebugInfoError::InvalidReference { .. })
         ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_inline_call_indices() {
+        let source_node = DebugSourceNodeId::from(0);
+        let mut sources = DebugSourcesSection::new();
+        let path_idx = sources.add_string(Arc::from("app.masm"));
+        sources.add_file(DebugFileInfo::new(path_idx));
+
+        let mut functions = DebugFunctionsSection::new();
+        let name_idx = functions.add_string(Arc::from("app::entry"));
+        functions.add_function(DebugFunctionInfo::new(
+            name_idx,
+            0,
+            LineNumber::new(1).unwrap(),
+            ColumnNumber::new(1).unwrap(),
+        ));
+
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceNode::new(MastNodeId::new_unchecked(0), vec![], 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts_with_inline_calls(
+            Vec::new(),
+            Vec::new(),
+            vec![DebugSourceInlineCall::new(
+                source_node,
+                0,
+                1,
+                0,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+            )],
+        );
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCES, sources.to_bytes()),
+            Section::new(SectionId::DEBUG_FUNCTIONS, functions.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let err = package.debug_info().expect_err("bad inline call index should be rejected");
+        assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
     }
 
     #[test]

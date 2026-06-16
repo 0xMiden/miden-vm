@@ -14,8 +14,9 @@ use super::{
     DEBUG_SOURCE_MAP_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugErrorMessage,
     DebugErrorMessagesSection, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo,
     DebugFunctionsSection, DebugPrimitiveType, DebugSourceAsmOp, DebugSourceGraphSection,
-    DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId, DebugSourceVar, DebugSourcesSection,
-    DebugTypeIdx, DebugTypeInfo, DebugTypesSection, DebugVariantInfo,
+    DebugSourceInlineCall, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
+    DebugSourceVar, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DebugVariantInfo,
 };
 
 // DEBUG TYPES SECTION SERIALIZATION
@@ -283,6 +284,43 @@ impl Deserializable for DebugSourceVar {
     }
 }
 
+impl Serializable for DebugSourceInlineCall {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.source_node.write_into(target);
+        target.write_u32(self.op_idx);
+        target.write_u32(self.callee_idx);
+        target.write_u32(self.file_idx);
+        target.write_u32(self.line.to_u32());
+        target.write_u32(self.column.to_u32());
+    }
+}
+
+impl Deserializable for DebugSourceInlineCall {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let source_node = DebugSourceNodeId::read_from(source)?;
+        let op_idx = source.read_u32()?;
+        let callee_idx = source.read_u32()?;
+        let file_idx = source.read_u32()?;
+        let line_raw = source.read_u32()?;
+        let column_raw = source.read_u32()?;
+        let line = LineNumber::new(line_raw).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "debug source inline call line {line_raw} is invalid"
+            ))
+        })?;
+        let column = ColumnNumber::new(column_raw).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "debug source inline call column {column_raw} is invalid"
+            ))
+        })?;
+        Ok(Self::new(source_node, op_idx, callee_idx, file_idx, line, column))
+    }
+
+    fn min_serialized_size() -> usize {
+        DebugSourceNodeId::min_serialized_size() + 20
+    }
+}
+
 impl Serializable for DebugSourceMapSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(self.version());
@@ -302,6 +340,7 @@ impl Serializable for DebugSourceMapSection {
         }
 
         self.debug_vars().write_into(target);
+        self.inline_calls().write_into(target);
     }
 }
 
@@ -351,7 +390,8 @@ impl Deserializable for DebugSourceMapSection {
         }
 
         let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
-        Ok(Self::from_parts(asm_ops, debug_vars))
+        let inline_calls = Vec::<DebugSourceInlineCall>::read_from(source)?;
+        Ok(Self::from_parts_with_inline_calls(asm_ops, debug_vars, inline_calls))
     }
 }
 
@@ -1019,7 +1059,7 @@ mod tests {
     #[test]
     fn test_debug_source_map_section_roundtrip() {
         let source_node = DebugSourceNodeId::from(0);
-        let section = DebugSourceMapSection::from_parts(
+        let section = DebugSourceMapSection::from_parts_with_inline_calls(
             alloc::vec![DebugSourceAsmOp::new(
                 source_node,
                 2,
@@ -1032,6 +1072,14 @@ mod tests {
                 source_node,
                 2,
                 DebugVarInfo::new("x", DebugVarLocation::Stack(0)),
+            )],
+            alloc::vec![DebugSourceInlineCall::new(
+                source_node,
+                2,
+                0,
+                0,
+                LineNumber::new(10).unwrap(),
+                ColumnNumber::new(5).unwrap(),
             )],
         );
 
