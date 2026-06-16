@@ -81,8 +81,8 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s_01`, `s_00`
-    /// - virtual `s0 = 1 - s_01 - s_00`
+    /// - `s_00`, `s_01`
+    /// - virtual `s0 = 1 - s_00 - s_01`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`

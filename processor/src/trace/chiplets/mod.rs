@@ -57,15 +57,15 @@ pub struct ChipletsTrace {
 /// The module's trace can be thought of as 6 stacked segments in the following form.
 ///
 /// The chiplet system uses two physical selector columns (`s_00 = column 0` and
-/// `s_01 = column 1`) plus the virtual `s0 = 1 - (s_01 + s_00)` to partition rows into three
+/// `s_01 = column 1`) plus the virtual `s0 = 1 - (s_00 + s_01)` to partition rows into three
 /// top-level regions. Columns 3-6 (`s1..s4`) subdivide the `s0` region. Column 2 holds
 /// `chip_clk`, the chiplet-trace row counter.
 ///
 /// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`. Split into
-///   controller (s_01=1, s_00=0) and permutation (s_01=0, s_00=1) sub-regions.
+///   controller (s_00=0, s_01=1) and permutation (s_00=1, s_01=0) sub-regions.
+///   - column 0 (s_00): 0 on controller rows, 1 on permutation rows
 ///   - column 1 (s_01): 1 on controller rows, 0 on permutation rows
 ///   - columns 3-21: execution trace of hash chiplet
-///   - column 0 (s_00): 0 on controller rows, 1 on permutation rows
 ///
 /// * Bitwise segment: begins at the end of the hasher segment.
 ///   - column 1 (s_01): ZERO

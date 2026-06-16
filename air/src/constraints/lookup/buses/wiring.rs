@@ -2,7 +2,7 @@
 //! HasherPermLinkOutput}`).
 //!
 //! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
-//! tri-state (`s_01 + s_00 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
+//! tri-state (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
 //! and hasher permutation rows pairwise mutually exclusive, so the simple-group
 //! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
 //! interactions fires per row, and the column's running `(V, U)` takes MAX over per-

@@ -49,7 +49,7 @@ macro_rules! impl_borrow_for_chiplet_cols {
 /// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
 /// and `multiplicity` shares the same physical column as the controller's `node_index`.
 ///
-/// `s_01` and `s_00` (= `ChipletCols::s_01` and `ChipletCols::s_00`) are consumed by the chiplet
+/// `s_00` and `s_01` (= `ChipletCols::s_00` and `ChipletCols::s_01`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
@@ -133,9 +133,9 @@ impl<T: Copy> PermutationCols<T> {
 /// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
 /// [`PermutationCols`], but column names reflect the controller/permutation split.
 ///
-/// `s_01` and `s_00` (= `ChipletCols::s_01` and `ChipletCols::s_00`) are consumed by the chiplet
+/// `s_00` and `s_01` (= `ChipletCols::s_00` and `ChipletCols::s_01`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay. Because the chiplet-level
-/// non-hasher selector is only ever a virtual expression (`1 - s_01 - s_00`) and is
+/// non-hasher selector is only ever a virtual expression (`1 - s_00 - s_01`) and is
 /// never a named column or struct field, there is no name collision with the
 /// controller-internal `s0` defined here.
 ///

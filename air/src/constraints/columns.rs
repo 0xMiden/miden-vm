@@ -97,18 +97,18 @@ pub struct ChipletCols<T> {
 pub const NUM_CHIPLETS_COLS: usize = size_of::<ChipletCols<u8>>();
 
 impl<T> ChipletCols<T> {
-    /// Returns the 6 chiplet selector columns `[s_01, s_00, s1, s2, s3, s4]`.
+    /// Returns the 6 chiplet selector columns `[s_00, s_01, s1, s2, s3, s4]`.
     ///
-    /// `s_01` and `s_00` are the two physical selectors for the controller and permutation
+    /// `s_00` and `s_01` are the two physical selectors for the permutation and controller
     /// sub-chiplets. `s1..s4` subdivide the remaining chiplets under the virtual
-    /// `s0 = 1 - (s_01 + s_00)`.
+    /// `s0 = 1 - (s_00 + s_01)`.
     pub fn chiplet_selectors(&self) -> [T; 6]
     where
         T: Copy,
     {
         [
-            self.s_01,
             self.s_00,
+            self.s_01,
             self.chiplets[0],
             self.chiplets[1],
             self.chiplets[2],

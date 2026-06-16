@@ -6,15 +6,15 @@
 //!
 //! ## Selector Hierarchy
 //!
-//! The chiplet system uses two physical selector columns (`s_01` and
-//! `s_00`) plus the virtual `s0 = 1 - (s_01 + s_00)` to partition
+//! The chiplet system uses two physical selector columns (`s_00` and
+//! `s_01`) plus the virtual `s0 = 1 - (s_00 + s_01)` to partition
 //! rows into three top-level regions. The remaining selectors `s1..s4` subdivide the
 //! `s0` region into the remaining chiplets.
 //!
 //! | Chiplet     | Active when                    |
 //! |-------------|--------------------------------|
-//! | Controller  | `s_01`                         |
 //! | Permutation | `s_00`                         |
+//! | Controller  | `s_01`                         |
 //! | Bitwise     | `s0 * !s1`                     |
 //! | Memory      | `s0 * s1 * !s2`                |
 //! | ACE         | `s0 * s1 * s2 * !s3`           |
@@ -22,12 +22,12 @@
 //!
 //! ## Selector Transition Rules
 //!
-//! - `s_01`, `s_00`, and `s_01 + s_00` are boolean (at most one is active)
-//! - `s_01 = 1 → s_01' + s_00' = 1` (a controller row must be followed by another controller
-//!   row or a permutation row)
-//! - `s_00 = 1 → s_01' = 0` (a permutation row cannot be followed by a controller row; it can
-//!   only continue as permutation or transition to s0)
-//! - `s0 = 1 → s_01' = 0 ∧ s_00' = 0` (once in the s0 region, stay there)
+//! - `s_00`, `s_01`, and `s_00 + s_01` are boolean (at most one is active)
+//! - `s_00 = 1 → s_01' = 0` (a permutation row cannot be followed by a controller row; it can only
+//!   continue as permutation or transition to s0)
+//! - `s_01 = 1 → s_00' + s_01' = 1` (a controller row must be followed by another controller row or
+//!   a permutation row)
+//! - `s0 = 1 → s_00' = 0 ∧ s_01' = 0` (once in the s0 region, stay there)
 //!
 //! These force the trace ordering: `ctrl...ctrl, perm...perm, s0...s0`.
 //!
@@ -39,13 +39,13 @@
 //! - `is_last`: last row of this chiplet's section (`is_active * s_n'`)
 //! - `next_is_first`: next row is the first of this chiplet (`is_last[n-1] * (1 - s_n')`)
 //!
-//! For controller and permutation, `is_active` is the direct physical selector (`s_01` or
-//! `s_00`). For the remaining chiplets under `s0`, `is_active` uses the subtraction trick
+//! For permutation and controller, `is_active` is the direct physical selector (`s_00` or
+//! `s_01`). For the remaining chiplets under `s0`, `is_active` uses the subtraction trick
 //! (`prefix - prefix * s_n`).
 //!
 //! ## Constraints
 //!
-//! 1. **Tri-state partition**: `s_01`, `s_00`, `(s_01 + s_00)` are boolean
+//! 1. **Tri-state partition**: `s_00`, `s_01`, `(s_00 + s_01)` are boolean
 //! 2. **Transition rules**: ctrl→ctrl|perm, perm→perm|s0, s0→s0
 //! 3. **Binary constraints**: `s1..s4` are binary when their prefix is active
 //! 4. **Stability constraints**: Once `s1..s4` become 1, they stay 1 (no 1→0 transitions)
@@ -93,7 +93,7 @@ pub struct ChipletSelectors<E> {
 /// Enforce chiplet selector constraints and build precomputed flags.
 ///
 /// This enforces:
-/// 1. Tri-state partition constraints for `s_01`, `s_00`, virtual `s0`
+/// 1. Tri-state partition constraints for `s_00`, `s_01`, virtual `s0`
 /// 2. Transition rules (ctrl→ctrl|perm, perm→perm|s0, s0→s0)
 /// 3. Binary and stability constraints for `s1..s4` under `s0`
 /// 4. Last-row invariant (`s_01 = 0`, `s1..s4 = 1`)
@@ -112,17 +112,17 @@ where
     // LOAD SELECTOR COLUMNS
     // =========================================================================
 
-    // [s_01, s_00, s1, s2, s3, s4]
+    // [s_00, s_01, s1, s2, s3, s4]
     let sel = local.chiplet_selectors();
     let sel_next = next.chiplet_selectors();
 
-    // s_ctrl (= ChipletCols::s_01): 1 on controller rows, 0 on perm/non-hasher rows.
-    let s_ctrl: AB::Expr = sel[0].into();
-    let s_ctrl_next: AB::Expr = sel_next[0].into();
+    // s_perm (= ChipletCols::s_00): 1 on permutation rows, 0 elsewhere.
+    let s_perm: AB::Expr = sel[0].into();
+    let s_perm_next: AB::Expr = sel_next[0].into();
 
-    // s_perm: 1 on permutation rows, 0 elsewhere.
-    let s_perm: AB::Expr = sel[1].into();
-    let s_perm_next: AB::Expr = sel_next[1].into();
+    // s_ctrl (= ChipletCols::s_01): 1 on controller rows, 0 on perm/non-hasher rows.
+    let s_ctrl: AB::Expr = sel[1].into();
+    let s_ctrl_next: AB::Expr = sel_next[1].into();
 
     // s_ctrl_or_s_perm: 1 on any hasher row (controller or permutation), 0 on s0 rows.
     let s_ctrl_or_s_perm = s_ctrl.clone() + s_perm.clone();
