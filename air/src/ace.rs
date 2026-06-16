@@ -12,7 +12,7 @@
 //!
 //! is *not* part of the circuit: the MASM verifier asserts it directly on the
 //! operand stack (see `sys/vm/public_inputs.masm` / `sys/vm/aux_trace.masm`),
-//! mirroring the native verifier's [`MidenMultiAir::eval_external`] check.
+//! mirroring the native verifier's `MidenMultiAir::eval_external` check.
 
 use alloc::vec::Vec;
 
