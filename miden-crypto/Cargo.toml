@@ -115,7 +115,7 @@ proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { workspace = true }
 rand_chacha      = { workspace = true }
 rayon            = { optional = true, workspace = true }
-rocksdb          = { features = ["bindgen-runtime", "lz4"], optional = true, workspace = true }
+rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = true, workspace = true }
 serde            = { features = ["derive"], optional = true, workspace = true }
 sha2             = { workspace = true }
 sha3             = { workspace = true }
