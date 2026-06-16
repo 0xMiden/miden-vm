@@ -11,6 +11,7 @@ members = [
   "stark/miden-lifted-stark",
   "stark/miden-stark-transcript",
   "stark/miden-stateful-hasher",
+  "tests/wycheproof",
 ]
 resolver = "3"
 
@@ -58,35 +59,38 @@ p3-uni-stark     = { default-features = false, version = "0.6" }
 p3-util          = { default-features = false, version = "0.6" }
 
 # Shared third-party dependencies used across workspace crates
-assert_matches   = { default-features = false, version = "1.5" }
-blake3           = { default-features = false, version = "1.8" }
-cc               = "1.2"
-chacha20poly1305 = { default-features = false, version = "0.10" }
-curve25519-dalek = { default-features = false, version = "5.0.0-rc.0" }
-der              = { default-features = false, version = "0.8" }
-ed25519-dalek    = { default-features = false, version = "3.0.0-rc.0" }
-flume            = { default-features = false, version = "0.12.0" }
-hex              = { default-features = false, version = "0.4" }
-hkdf             = { default-features = false, version = "0.13" }
-itertools        = "0.14"
-k256             = { default-features = false, version = "0.14.0-rc.10" }
-num              = { default-features = false, version = "0.4" }
-num-complex      = { default-features = false, version = "0.4" }
-once_cell        = { default-features = false, version = "1.21" }
-proptest         = { default-features = false, version = "1.7" }
-quote            = "1.0"
-rand_chacha      = { default-features = false, version = "0.10" }
-rayon            = "1.10"
-rocksdb          = { default-features = false, version = "0.24" }
-rstest           = "0.26"
-seq-macro        = "0.3"
-sha2             = { default-features = false, version = "0.11" }
-sha3             = { default-features = false, version = "0.12" }
-shake            = { default-features = false, version = "0.1" }
-subtle           = { default-features = false, version = "2.6" }
-syn              = "2.0"
-tempfile         = "3.20"
-x25519-dalek     = { default-features = false, version = "3.0.0-rc.0" }
+assert_matches      = { default-features = false, version = "1.5" }
+blake3              = { default-features = false, version = "1.8" }
+cc                  = "1.2"
+chacha20poly1305    = { default-features = false, version = "0.11.0-rc.3" }
+curve25519-dalek    = { default-features = false, version = "5.0.0-rc.0" }
+der                 = { default-features = false, version = "0.8" }
+ed25519-dalek       = { default-features = false, version = "3.0.0-rc.0" }
+flume               = { default-features = false, version = "0.12.0" }
+hex                 = { default-features = false, version = "0.4" }
+hkdf                = { default-features = false, version = "0.13" }
+itertools           = "0.14"
+k256                = { default-features = false, version = "0.14.0-rc.10" }
+num                 = { default-features = false, version = "0.4" }
+num-complex         = { default-features = false, version = "0.4" }
+once_cell           = { default-features = false, version = "1.21" }
+proptest            = { default-features = false, version = "1.7" }
+quote               = "1.0"
+rand_chacha         = { default-features = false, version = "0.10" }
+rayon               = "1.10"
+rocksdb             = { default-features = false, version = "0.24" }
+rstest              = "0.26"
+seq-macro           = "0.3"
+sha2                = { default-features = false, version = "0.11" }
+sha3                = { default-features = false, version = "0.12" }
+shake               = { default-features = false, version = "0.1" }
+subtle              = { default-features = false, version = "2.6" }
+syn                 = "2.0"
+tempfile            = "3.20"
+wycheproof-ng-core  = { default-features = false, version = "0.1.1" }
+wycheproof-ng-dh    = { default-features = false, version = "0.1.1" }
+wycheproof-ng-eddsa = { default-features = false, version = "0.1.1" }
+x25519-dalek        = { default-features = false, version = "3.0.0-rc.0" }
 
 # Shared third-party dependencies used by imported Miden STARK crates
 clap               = { features = ["derive"], version = "4" }

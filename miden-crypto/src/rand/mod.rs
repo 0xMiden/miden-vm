@@ -6,7 +6,6 @@ use crate::{Felt, Word};
 
 mod coin;
 pub use coin::RandomCoin;
-pub(crate) mod compat;
 
 // Test utilities for generating random data (used in tests and benchmarks)
 #[cfg(any(test, feature = "std"))]

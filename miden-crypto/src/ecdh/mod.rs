@@ -2,7 +2,9 @@
 
 use alloc::vec::Vec;
 
+use hkdf::Hkdf;
 use rand::CryptoRng;
+use sha2::{Sha256, digest::OutputSizeUser};
 use thiserror::Error;
 
 use crate::utils::{
@@ -53,12 +55,31 @@ pub(crate) trait KeyAgreementScheme {
     ) -> Result<Vec<u8>, KeyAgreementError>;
 }
 
+/// Extracts key material from shared secret bytes with HKDF-SHA256.
+///
+/// This is the KDF used by the integrated encryption scheme after ECDH key agreement.
+pub fn extract_key_material(
+    shared_secret: &[u8],
+    salt: Option<&[u8]>,
+    length: usize,
+    info: &[u8],
+) -> Result<Vec<u8>, KeyAgreementError> {
+    if length > 255 * Sha256::output_size() {
+        return Err(KeyAgreementError::HkdfExpansionFailed);
+    }
+    let hkdf = Hkdf::<Sha256>::new(salt, shared_secret);
+    let mut buf = vec![0_u8; length];
+    hkdf.expand(info, &mut buf)
+        .map_err(|_| KeyAgreementError::HkdfExpansionFailed)?;
+    Ok(buf)
+}
+
 // ERROR TYPES
 // ================================================================================================
 
 /// Errors that can occur during encryption/decryption operations
 #[derive(Debug, Error)]
-pub(crate) enum KeyAgreementError {
+pub enum KeyAgreementError {
     #[error("hkdf expansion failed")]
     HkdfExpansionFailed,
     #[error("shared secret is invalid")]
