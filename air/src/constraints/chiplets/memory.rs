@@ -382,19 +382,20 @@ mod tests {
 
     fn memory_row() -> ChipletCols<Felt> {
         ChipletCols {
-            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 2],
-            s_perm: Felt::ZERO,
+            s_00: Felt::ZERO,
+            s_01: Felt::ZERO,
             chip_clk: Felt::ONE,
+            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 3],
         }
     }
 
     fn memory_cols(row: &mut ChipletCols<Felt>) -> &mut MemoryCols<Felt> {
-        row.chiplets[3..18].borrow_mut()
+        row.chiplets[2..17].borrow_mut()
     }
 
     fn set_word_addr_limbs(row: &mut ChipletCols<Felt>, lo: u64, hi: u64) {
-        row.chiplets[18] = Felt::new_unchecked(lo);
-        row.chiplets[19] = Felt::new_unchecked(hi);
+        row.chiplets[17] = Felt::new_unchecked(lo);
+        row.chiplets[18] = Felt::new_unchecked(hi);
     }
 
     fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {
