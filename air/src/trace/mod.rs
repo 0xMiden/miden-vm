@@ -17,7 +17,7 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (25 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (24 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_WIDTH: usize = 6;
@@ -67,11 +67,13 @@ pub mod log_precompile {
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
 
 // Chiplets trace
-// 22 shared chiplet cells + stream_mode + aead_stream_active + chip_clk = 25.
+// 22 shared chiplet cells + stream_mode + chip_clk = 24.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
 // hasher responder address on the chiplet side.
 pub const CHIPLETS_DATA_WIDTH: usize = 22;
-pub const CHIPLETS_WIDTH: usize = CHIPLETS_DATA_WIDTH + 3;
+pub const CHIPLETS_STREAM_MODE_COL: usize = CHIPLETS_DATA_WIDTH;
+pub const CHIPLETS_CLK_COL: usize = CHIPLETS_STREAM_MODE_COL + 1;
+pub const CHIPLETS_WIDTH: usize = CHIPLETS_CLK_COL + 1;
 
 pub mod blakeg_compression {
     pub use crate::constraints::blakeg_compression::{

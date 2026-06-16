@@ -77,9 +77,9 @@ impl<T> CoreCols<T> {
 
 /// Column layout of the chiplets execution trace.
 ///
-/// `ChipletCols` covers the shared chiplet data columns, AEAD stream mode columns, and
-/// `chip_clk` - the
-/// columns owned by `ChipletsAir`. It is also the layout of the trailing `NUM_CHIPLETS_COLS`
+/// `ChipletCols` covers the shared chiplet data columns, `stream_mode`, and `chip_clk`.
+/// These are the columns owned by `ChipletsAir`. It is also the layout of the trailing
+/// `NUM_CHIPLETS_COLS`
 /// columns of the unified main trace, so it can be borrowed from either a per-AIR
 /// `[T; NUM_CHIPLETS_COLS]` slice or the suffix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<ChipletCols<T>>`.
@@ -89,8 +89,6 @@ pub struct ChipletCols<T> {
     pub(crate) chiplets: [T; CHIPLETS_DATA_WIDTH],
     /// Bitwise-region mode bit. `0` selects normal bitwise rows; `1` selects AEAD stream rows.
     pub stream_mode: T,
-    /// Materialized AEAD stream row flag used by low-degree consumers.
-    pub aead_stream_active: T,
     /// Chiplet-trace row counter: starts at 1 on the first row, increments by 1 each row.
     pub chip_clk: T,
 }
@@ -250,7 +248,10 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::{CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
+    use crate::trace::{
+        CHIPLETS_CLK_COL, CHIPLETS_DATA_WIDTH, CHIPLETS_STREAM_MODE_COL, CHIPLETS_WIDTH,
+        DECODER_TRACE_WIDTH, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+    };
 
     /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
     /// column index inside its own AIR. `CORE_COL_MAP` lines up with unified-trace offsets
@@ -322,10 +323,9 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(CHIPLET_COL_MAP.chiplets[0], 0);
-        assert_eq!(CHIPLET_COL_MAP.chiplets[21], 21);
-        assert_eq!(CHIPLET_COL_MAP.stream_mode, 22);
-        assert_eq!(CHIPLET_COL_MAP.aead_stream_active, 23);
-        assert_eq!(CHIPLET_COL_MAP.chip_clk, 24);
+        assert_eq!(CHIPLET_COL_MAP.chiplets[CHIPLETS_DATA_WIDTH - 1], CHIPLETS_DATA_WIDTH - 1);
+        assert_eq!(CHIPLET_COL_MAP.stream_mode, CHIPLETS_STREAM_MODE_COL);
+        assert_eq!(CHIPLET_COL_MAP.chip_clk, CHIPLETS_CLK_COL);
     }
 
     // --- Multi-AIR split: CoreCols + ChipletCols widths ---------------------------------------

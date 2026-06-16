@@ -25,8 +25,7 @@ const INIT_OPS_CAPACITY: usize = 128;
 const AEAD_STREAM_CYCLE_LEN: usize = 8;
 const AEAD_STREAM_WIDTH: usize = size_of::<AeadStreamCols<u8>>();
 const STREAM_MODE_OFFSET: usize = AEAD_STREAM_WIDTH;
-const AEAD_STREAM_ACTIVE_OFFSET: usize = STREAM_MODE_OFFSET + 1;
-pub(crate) const AEAD_STREAM_FRAGMENT_WIDTH: usize = AEAD_STREAM_ACTIVE_OFFSET + 1;
+pub(crate) const AEAD_STREAM_FRAGMENT_WIDTH: usize = STREAM_MODE_OFFSET + 1;
 
 // BITWISE OPERATION
 // ================================================================================================
@@ -320,7 +319,6 @@ fn fill_aead_stream_chunk(
     for row_idx in 0..AEAD_STREAM_CYCLE_LEN {
         let row = &mut chunk[row_idx * row_width..(row_idx + 1) * row_width];
         row[STREAM_MODE_OFFSET] = ONE;
-        row[AEAD_STREAM_ACTIVE_OFFSET] = ONE;
     }
 
     fill_stream_word_pair(

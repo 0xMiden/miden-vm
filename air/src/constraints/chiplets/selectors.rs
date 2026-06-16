@@ -169,9 +169,6 @@ where
     builder.when(s0.clone()).assert_bool(stream_mode.clone());
     builder.when(s01.clone()).assert_zero(stream_mode.clone());
 
-    let aead_stream_active: AB::Expr = local.aead_stream_active.into();
-    builder.assert_eq(aead_stream_active.clone(), s0.clone() * stream_mode);
-
     // s1..s4 booleanity, gated by their prefix under s0.
     builder.when(s0.clone()).assert_bool(s1.clone());
     builder.when(s01.clone()).assert_bool(s2.clone());
@@ -229,6 +226,7 @@ where
 
     // --- Remaining chiplet active flags (subtraction trick: prefix - prefix * s_n) ---
     let is_bitwise = s0.clone() - s01.clone();
+    let aead_stream_active = is_bitwise.clone() * stream_mode;
     let is_memory = s01.clone() - s012.clone();
     let is_ace = s012.clone() - s0123;
     let normal_bitwise = is_bitwise.clone() - aead_stream_active.clone();

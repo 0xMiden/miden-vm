@@ -144,7 +144,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let ctrl_state_next: [LB::Var; 12] = array::from_fn(|i| ctrl_next.state[i]);
     let stream = local.aead_stream();
     let stream_next = next.aead_stream();
-    let stream_gate: LB::Expr = local.aead_stream_active.into();
+    let stream_gate = ctx.chiplet_active.aead_stream.clone();
 
     builder.next_column(
         |col| {

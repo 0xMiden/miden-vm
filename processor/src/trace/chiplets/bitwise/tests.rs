@@ -233,7 +233,6 @@ fn aead_stream_trace() {
 
     for row in 0..8 {
         assert_eq!(trace[super::STREAM_MODE_OFFSET][row], ONE);
-        assert_eq!(trace[super::AEAD_STREAM_ACTIVE_OFFSET][row], ONE);
     }
 
     // r0: read + low limb for plaintext[0].

@@ -198,7 +198,7 @@ proc process_main_segment_execution_trace
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned main leaf: 56 + 32 + 80 + 16 = 184 base felts.
+    # Load the aligned main leaf: 56 + 24 + 80 + 16 = 176 base felts.
     exec.load_main_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -214,7 +214,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_main_segment_execution_trace
-    repeat.23
+    repeat.22
         adv_pipe
         horner_eval_base
         exec.eidos::compress

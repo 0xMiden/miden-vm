@@ -29,7 +29,7 @@ use miden_air::{
         debug::collect_column_oracle_folds,
     },
     trace::{
-        CHIPLETS_DATA_WIDTH,
+        CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, NUM_AND8_LOOKUP_COLS},
         chiplets::hasher::HASH_CYCLE_LEN,
     },
@@ -46,7 +46,7 @@ const BLAKEG_ANNEX_COLUMNS: usize = 2;
 const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;
 const BLAKEG_ANNEX_COLUMN_CAPACITY: usize = 1;
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
-const AEAD_STREAM_ACTIVE_COL: usize = CHIPLETS_DATA_WIDTH + 1;
+const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
 const AEAD_LOW_SECOND_SRC_PTR_OFFSET: usize = 2;
 
@@ -633,7 +633,12 @@ fn format_lookup_residuals(residuals: Vec<(QuadFelt, (Felt, Vec<String>))>) -> S
 fn aead_stream_rows(chip_matrix: &RowMajorMatrix<Felt>) -> Vec<usize> {
     let width = chip_matrix.width();
     (0..chip_matrix.height())
-        .filter(|&row| chip_matrix.values[row * width + AEAD_STREAM_ACTIVE_COL] == Felt::ONE)
+        .filter(|&row| {
+            let base = row * width;
+            chip_matrix.values[base] == Felt::ZERO
+                && chip_matrix.values[base + 1] == Felt::ZERO
+                && chip_matrix.values[base + AEAD_STREAM_MODE_COL] == Felt::ONE
+        })
         .collect()
 }
 

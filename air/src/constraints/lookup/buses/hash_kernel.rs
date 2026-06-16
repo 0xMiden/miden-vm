@@ -22,7 +22,7 @@
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
-//! use `aead_stream_active`, and the memory row gate is `chiplet_active.memory`. Hasher sub-selectors,
+//! use the derived AEAD stream flag, and the memory row gate is `chiplet_active.memory`. Hasher sub-selectors,
 //! hasher state,
 //! `node_index`, and `mrupdate_id` come from the typed
 //! [`local.controller()`](crate::constraints::columns::ChipletCols::controller) overlay;
@@ -57,7 +57,7 @@ use crate::{
 ///   one of the four fires per row -> 1 fraction.
 /// - **ACE memory reads** on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are
 ///   mutually exclusive via `block_sel` -> 1 fraction.
-/// - **AEAD stream memory I/O** on stream rows (`aead_stream_active`): one memory interaction on
+/// - **AEAD stream memory I/O** on stream rows: one memory interaction on
 ///   each of phases 0, 3, 4, and 7, so this contributes at most 1 fraction per row.
 /// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
 ///   `d1`, `w0`, `w1`, `4 * w1`) fires unconditionally when the outer batch flag is active -> 5
@@ -142,7 +142,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_id_2 = ace.eval().id_2;
     let ace_eval_op = ace.eval_op;
     let stream = local.aead_stream();
-    let stream_gate: LB::Expr = local.aead_stream_active.into();
+    let stream_gate = ctx.chiplet_active.aead_stream.clone();
 
     // --- Memory-side range-check setup ---
 

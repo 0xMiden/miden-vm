@@ -262,7 +262,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
                     let mut remove_stream_row = |name: &'static str, phase_idx: usize| {
                         let gate =
-                            ctx.local.aead_stream_active.into() * aead_phase[phase_idx].clone();
+                            ctx.chiplet_active.aead_stream.clone() * aead_phase[phase_idx].clone();
                         g.batch(
                             name,
                             gate,

@@ -555,9 +555,14 @@ impl MainTrace {
         self.chiplet_cols(i).stream_mode
     }
 
-    /// Returns the materialized AEAD stream flag at row i.
+    /// Returns the derived AEAD stream flag at row i. No physical column stores this flag.
     pub fn chiplet_aead_stream_active(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).aead_stream_active
+        let cols = self.chiplet_cols(i);
+        if cols.chiplets[0] == ZERO && cols.chiplets[1] == ZERO && cols.stream_mode == ONE {
+            ONE
+        } else {
+            ZERO
+        }
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.

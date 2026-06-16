@@ -50,7 +50,7 @@ pub fn enforce_aead_stream_constraints<AB>(
     let cols = local.aead_stream();
     let cols_next = next.aead_stream();
     let stream = selectors.stream_mode.aead_stream.clone();
-    let stream_next: AB::Expr = next.aead_stream_active.into();
+    let stream_next = aead_stream_active_next::<AB>(next);
 
     enforce_phase_alignment(builder, selectors, stream.clone(), stream_next, phases[7].clone());
     enforce_carry_constraints(builder, cols, cols_next, stream, &phases);
@@ -176,6 +176,16 @@ fn carry_low_second_to_high_second<AB>(
 
 // HELPERS
 // ================================================================================================
+
+fn aead_stream_active_next<AB>(next: &ChipletCols<AB::Var>) -> AB::Expr
+where
+    AB: MidenAirBuilder,
+{
+    let s_ctrl_next: AB::Expr = next.chiplets[0].into();
+    let s1_next: AB::Expr = next.chiplets[1].into();
+    let stream_mode_next: AB::Expr = next.stream_mode.into();
+    s_ctrl_next.not() * s1_next.not() * stream_mode_next
+}
 
 fn assert_eq_on<AB>(builder: &mut AB, gate: AB::Expr, next: AB::Var, current: AB::Var)
 where
