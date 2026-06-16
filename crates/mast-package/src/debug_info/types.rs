@@ -691,17 +691,27 @@ impl Deserializable for DebugSourceNodeId {
     }
 }
 
-/// A source/debug MAST occurrence that points at a reduced execution node.
+/// A source/debug occurrence for code that produced an executable MAST node.
+///
+/// The `exec_node` field points into the package [`MastForest`](crate::MastForest) after executable
+/// MAST reduction and deduplication. More than one [`DebugSourceNode`] may point at the same
+/// `exec_node`: for example, two source procedures can compile to the same MAST root while still
+/// carrying different source spans, assembly-op rows, or debug-variable rows. Consumers should
+/// treat the [`DebugSourceNodeId`] as the identity of the source occurrence and use `exec_node`
+/// only to find the executable node it describes.
+///
+/// Source-map rows in [`DebugSourceMapSection`] attach assembly operations and debug variables to
+/// these source occurrences.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugSourceNode {
-    /// The reduced execution MAST node represented by this source occurrence.
+    /// The executable MAST node represented by this source occurrence.
     pub exec_node: MastNodeId,
-    /// Child source occurrences.
+    /// Child source occurrences, in the same order as the executable node's children.
     pub children: Vec<DebugSourceNodeId>,
-    /// Inclusive start operation index in the reduced execution node.
+    /// Inclusive start operation index in the executable node.
     pub op_start: u32,
-    /// Exclusive end operation index in the reduced execution node.
+    /// Exclusive end operation index in the executable node.
     pub op_end: u32,
 }
 
