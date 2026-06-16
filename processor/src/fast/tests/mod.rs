@@ -341,17 +341,13 @@ fn package_source_debug_static_call_selects_identical_proc_from_called_file() {
         .expect("program debug info should decode")
         .expect("program should contain debug info");
     let source_map = package_debug_info.source_map().expect("program should have a source map");
-    let selected_rows = source_map
-        .asm_ops()
-        .iter()
-        .filter(|row| {
-            row.location
-                .as_ref()
-                .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
-        })
-        .collect::<Vec<_>>();
+    let selected_row_found = source_map.asm_ops().iter().any(|row| {
+        row.location
+            .as_ref()
+            .is_some_and(|location| location.uri().as_str() == "lib/b.masm")
+    });
 
-    assert!(!selected_rows.is_empty(), "the selected call should keep lib/b.masm metadata");
+    assert!(selected_row_found, "the selected call should keep lib/b.masm metadata");
     assert!(
         !source_map.asm_ops().iter().any(|row| {
             row.location
