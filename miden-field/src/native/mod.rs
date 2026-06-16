@@ -32,6 +32,19 @@ use rand::{
 };
 use subtle::{ConditionallySelectable, ConstantTimeLess};
 
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+mod packed;
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+pub use packed::PackedFelt;
+
 #[cfg(test)]
 mod tests;
 
@@ -188,8 +201,24 @@ impl Hash for Felt {
 // ================================================================================================
 
 impl Field for Felt {
-    // TODO: This should only be the case for WASM targets.
-    // Native targets should be able to leverage AVX2 / NEON optimizations from Plonky3.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    type Packing = PackedFelt;
+
+    #[cfg(not(any(
+        all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")),
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     type Packing = Self;
 
     const GENERATOR: Self = Self(Goldilocks::GENERATOR);

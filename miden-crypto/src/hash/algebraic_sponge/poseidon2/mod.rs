@@ -36,6 +36,18 @@ fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
     P3_POSEIDON2.permute_mut(gl_state);
 }
 
+/// Applies Plonky3's optimized Poseidon2 permutation to a packed `[PackedFelt; 12]` state,
+/// running one independent sponge state per SIMD lane.
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+#[inline(always)]
+pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDTH]) {
+    P3_POSEIDON2.permute_mut(miden_field::PackedFelt::as_goldilocks_array_mut(state));
+}
+
 /// Implementation of the Poseidon2 hash function with 256-bit output.
 ///
 /// The permutation is delegated to Plonky3's optimized `Poseidon2Goldilocks<12>`, which provides
