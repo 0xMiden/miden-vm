@@ -154,6 +154,38 @@ mod tests {
     };
 
     #[test]
+    fn empty_kernel_commitment_matches_hash_of_no_elements() {
+        // The empty kernel is the common case; its commitment must equal the canonical hash of
+        // zero elements, which the recursive verifier mirrors via `hash_elements(ptr, 0)`.
+        let empty = Kernel::default();
+        assert_eq!(empty.commitment(), crate::chiplets::hasher::hash_elements(&[]));
+    }
+
+    #[test]
+    fn kernel_commitment_is_independent_of_procedure_order() {
+        let a: Word = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]
+        .into();
+        let b: Word = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ]
+        .into();
+
+        // The kernel canonicalizes procedure order, so the commitment binds the set of
+        // procedures, not the order in which they were supplied.
+        let in_order = Kernel::new(&[a, b]).unwrap();
+        let reversed = Kernel::new(&[b, a]).unwrap();
+        assert_eq!(in_order.commitment(), reversed.commitment());
+    }
+
+    #[test]
     fn kernel_read_from_rejects_duplicate_procedure_hashes() {
         let a: Word = [
             Felt::new_unchecked(1),
