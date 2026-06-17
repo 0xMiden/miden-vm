@@ -773,6 +773,41 @@ fn test_mmr_unpack_frontier_authenticates_pair() {
 }
 
 #[test]
+fn test_mmr_unpack_frontier_canonicalizes_padding() {
+    let num_leaves = 13_u64;
+    let peaks = [word_from_u64(8), word_from_u64(4), word_from_u64(1)];
+    let root = mmr_frontier_root(num_leaves as usize, &peaks);
+    let mmr_ptr = 1000_u32;
+
+    let mut advised_peaks = peaks.to_vec();
+    while advised_peaks.len() < 16 {
+        advised_peaks.push(word_from_u64(100 + advised_peaks.len() as u64));
+    }
+
+    let mut value = vec![Felt::new_unchecked(num_leaves), ZERO, ZERO, ZERO];
+    for peak in &advised_peaks {
+        value.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(*peak));
+    }
+    let advice_map: &[(Word, Vec<Felt>)] = &[(root, value)];
+
+    let mut stack = word_to_ints(&root);
+    stack.push(num_leaves);
+    stack.push(mmr_ptr as u64);
+
+    let source = "
+        use miden::core::collections::mmr
+        begin exec.mmr::unpack_frontier end
+    ";
+    let test = build_test!(source, &stack, &[], MerkleStore::new(), advice_map.iter().cloned());
+
+    let mut canonical_peaks = peaks.to_vec();
+    canonical_peaks.resize(16, Word::default());
+    let mut expected_memory = vec![num_leaves, 0, 0, 0];
+    expected_memory.extend(digests_to_ints(&canonical_peaks));
+    test.expect_stack_and_memory(&[], mmr_ptr, &expected_memory);
+}
+
+#[test]
 fn test_mmr_unpack_frontier_rejects_wrong_len() {
     // Same raw root, but a longer (empty-padded) length must be rejected: this is huitseeker's
     // empty-padding ambiguity. We commit to `num_leaves + 1` against the root of `num_leaves`.

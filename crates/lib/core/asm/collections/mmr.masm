@@ -307,8 +307,23 @@ pub proc unpack_frontier
     loc_load.0 sub.1 dup loc_store.0 neq.0
   end
 
-  # Drop the leftover sponge state and the advanced cursor.
-  dropw dropw dropw drop
+  # Drop the leftover sponge state, keeping the advanced adv_pipe cursor (= padded_end) on top.
+  dropw dropw dropw
+  # => [padded_end, ROOT, num_leaves, mmr_ptr, ...]
+
+  # Canonicalize padding slots `[peak_end, padded_end)`. `root_from_peak_end` authenticates only the
+  # real peaks, but `pack` hashes the full padded layout, so padding must not retain advice garbage.
+  # A resident ZERO word and the cursor stay on the stack (no per-iteration locals), and the stored
+  # word is all-zero so `mem_storew_be` (1-3 cycles) is equivalent to `_le` (8-9) but cheaper.
+  padw loc_load.1
+  # => [peak_end, ZERO, padded_end, ...]
+  dup dup.6 neq
+  while.true
+    dup movdn.5 mem_storew_be movup.4 add.4
+    # => [cursor+4, ZERO, padded_end, ...]
+    dup dup.6 neq
+  end
+  drop dropw drop
   # => [ROOT, num_leaves, mmr_ptr, ...]
 
   # Recompute the frontier root over the trusted length and assert it matches the commitment.
