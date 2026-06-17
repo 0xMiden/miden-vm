@@ -9,8 +9,8 @@
 //! The advice stack ordering must match the MASM consumption order exactly:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
-//!   aux randomness -> main commit -> aux commit ->
+//!   aux randomness -> num_kernel_proc_digests -> kernel_digests ->
+//!   fixed-length PI -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
