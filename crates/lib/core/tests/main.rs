@@ -82,7 +82,7 @@ fn core_library_does_not_export_precompile_impl_helpers() {
         "::miden::core::crypto::hashes::keccak256::hash_bytes",
         "::miden::core::crypto::hashes::sha512::hash_bytes",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
-        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify",
     ];
     for path in public_paths {
         assert!(
@@ -95,7 +95,9 @@ fn core_library_does_not_export_precompile_impl_helpers() {
         "::miden::core::crypto::hashes::keccak256::hash_bytes_impl",
         "::miden::core::crypto::hashes::sha512::hash_bytes_impl",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash_impl",
-        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash_impl",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_message",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_message_impl",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash",
     ];
     for path in internal_paths {
         assert!(
