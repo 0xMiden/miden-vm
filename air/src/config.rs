@@ -83,11 +83,11 @@ pub fn pcs_params() -> PcsParams {
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
 // ================================================================================================
 
-/// Root of the ACE circuit registry accepted by the recursive verifier.
+/// Root of the accepted ACE circuit registry.
 ///
 /// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
-/// This root is absorbed into Fiat-Shamir as the recursive relation identifier. The recursive
-/// advice builder also seeds the corresponding tree.
+/// This root is absorbed into Fiat-Shamir as the relation identifier and authenticates the
+/// ACE circuit selected by proof order.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
     Felt::new_unchecked(2510026394581042689),
@@ -486,8 +486,7 @@ mod tests {
     extern crate alloc;
     use alloc::vec::Vec;
 
-    use miden_ace_codegen::{AceConfig, LayoutKind};
-    use miden_core::{Felt, field::QuadFelt};
+    use miden_core::Felt;
     use miden_crypto::{Word, hash::eidos::Eidos};
 
     use crate::{ProofOrder, ace};
@@ -502,12 +501,6 @@ mod tests {
     /// --write
     #[test]
     fn relation_digest_matches_current_air() {
-        let config = AceConfig {
-            num_quotient_chunks: 8,
-            num_vlpi_groups: 1,
-            layout: LayoutKind::Masm,
-            is_multi_air: true,
-        };
         let mut expected_leaves = (0..super::ACE_CIRCUIT_REGISTRY_LEAVES.len())
             .map(padding_leaf)
             .collect::<Vec<_>>();
@@ -515,14 +508,14 @@ mod tests {
         let mut expected_metadata = None;
 
         for order in ProofOrder::variants() {
-            let circuit =
-                ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(config, &order).unwrap();
-            let encoded = circuit.to_ace().unwrap();
-            let circuit_digest = Eidos::hash_elements(encoded.instructions());
-            let circuit_commitment =
-                [circuit_digest[0], circuit_digest[1], circuit_digest[2], circuit_digest[3]];
-            let stream_len = encoded.instructions().len();
-            let metadata = (encoded.num_vars(), encoded.num_eval_rows(), stream_len);
+            let circuit = ace::build_recursive_verifier_ace_circuit(&order).unwrap();
+            let circuit_commitment = [
+                circuit.commitment[0],
+                circuit.commitment[1],
+                circuit.commitment[2],
+                circuit.commitment[3],
+            ];
+            let metadata = (circuit.num_inputs, circuit.num_eval_gates, circuit.stream_len);
             if let Some(expected) = expected_metadata {
                 assert_eq!(metadata, expected, "ACE circuit metadata must be uniform");
             } else {
@@ -531,14 +524,14 @@ mod tests {
 
             let tag = order.tag() as usize;
             assert!(tag < ProofOrder::variants().len(), "invalid proof-order tag");
-            expected_leaves[tag] = Word::new(circuit_commitment);
+            expected_leaves[tag] = circuit.commitment;
 
             snapshot_lines.push(format!(
                 "{}:\n  num_inputs: {}\n  num_eval_gates: {}\n  stream_len: {}\n  commitment: {:?}",
                 order.file_stem(),
-                encoded.num_vars(),
-                encoded.num_eval_rows(),
-                stream_len,
+                circuit.num_inputs,
+                circuit.num_eval_gates,
+                circuit.stream_len,
                 circuit_commitment.iter().map(Felt::as_canonical_u64).collect::<Vec<_>>(),
             ));
         }

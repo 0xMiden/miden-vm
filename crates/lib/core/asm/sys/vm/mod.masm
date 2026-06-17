@@ -15,9 +15,8 @@ const ACCEPTABLE_QUERY_POW_BITS = 16
 const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
-# RELATION_DIGEST is the root of the ACE circuit registry. It binds the
-# Fiat-Shamir transcript to the recursive relation; recursive advice also carries
-# the corresponding tree for order-selected ACE circuit authentication.
+# Root of the accepted ACE circuit registry. This value is absorbed into the
+# Fiat-Shamir transcript and authenticates the ACE circuit selected by ORDER_TAG.
 const RELATION_DIGEST_0 = 2510026394581042689
 const RELATION_DIGEST_1 = 5394882770041513920
 const RELATION_DIGEST_2 = 7244246892549217641
@@ -32,8 +31,8 @@ const AND8_PREPROCESSED_TRACE_COM_3 = 5780773595731865481
 
 const AND8_LOOKUP_LOG_HEIGHT = 16
 
-# MIN matches `MIN_TRACE_LEN = 2^6 = 64` in `air/src/trace/mod.rs`.
-# MAX matches `MAX_TRACE_LEN = 1 << 29` in `processor/src/trace/parallel/mod.rs`.
+# Accepted trace-height bounds, expressed as log2(row_count).
+# Every Miden AIR trace in the verified proof must lie within this range.
 const MIN_LOG_TRACE_HEIGHT = 6
 const MAX_LOG_TRACE_HEIGHT = 29
 

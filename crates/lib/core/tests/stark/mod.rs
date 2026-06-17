@@ -179,6 +179,35 @@ fn stark_verifier_e2f4_rejects_missing_ace_registry() {
     store.extend(data.store.inner_nodes().filter(|node| node.value != registry_root));
     data.store = store;
 
+    assert_recursive_verifier_rejects(data, "missing ACE registry should fail");
+}
+
+#[test]
+fn stark_verifier_e2f4_rejects_missing_ace_circuit_stream() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let order = expected_order_from_shape(&data);
+    let circuit_key = Word::new(config::ACE_CIRCUIT_REGISTRY_LEAVES[order.tag() as usize]);
+    data.advice_map.retain(|(key, _)| *key != circuit_key);
+
+    assert_recursive_verifier_rejects(data, "missing ACE circuit stream should fail");
+}
+
+#[test]
+fn stark_verifier_e2f4_rejects_corrupted_ace_circuit_stream() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let order = expected_order_from_shape(&data);
+    let circuit_key = Word::new(config::ACE_CIRCUIT_REGISTRY_LEAVES[order.tag() as usize]);
+    let (_, stream) = data
+        .advice_map
+        .iter_mut()
+        .find(|(key, _)| *key == circuit_key)
+        .expect("advice map must include the selected ACE circuit stream");
+    stream[0] += Felt::ONE;
+
+    assert_recursive_verifier_rejects(data, "corrupted ACE circuit stream should fail");
+}
+
+fn assert_recursive_verifier_rejects(data: VerifierData, message: &str) {
     let source = "
         use miden::core::sys::vm
         begin
@@ -193,7 +222,7 @@ fn stark_verifier_e2f4_rejects_missing_ace_registry() {
         data.advice_map
     );
 
-    assert!(test.execute_for_output().is_err(), "missing ACE registry should fail");
+    assert!(test.execute_for_output().is_err(), "{message}");
 }
 
 pub fn generate_recursive_verifier_data(

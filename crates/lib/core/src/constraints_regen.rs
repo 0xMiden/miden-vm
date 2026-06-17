@@ -6,9 +6,9 @@ use alloc::{
 };
 use std::{fs, io, println};
 
-use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
 use miden_air::{
-    AIRS, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement, config,
+    AIRS, MidenAir, MidenMultiAir, NUM_PUBLIC_VALUES, ProofOrder, Statement,
+    ace::build_recursive_verifier_ace_circuit, config,
     trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT,
 };
 use miden_core::{Felt, field::QuadFelt};
@@ -25,36 +25,12 @@ pub enum Mode {
     Write,
 }
 
-const MASM_CONFIG: AceConfig = AceConfig {
-    num_quotient_chunks: 8,
-    num_vlpi_groups: 1,
-    layout: LayoutKind::Masm,
-    is_multi_air: true,
-};
-
 const ACE_REGISTRY_DEPTH: usize = 5;
 const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_REGISTRY_DEPTH;
 const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
 const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
-
-/// Builds one recursive-verifier ACE circuit for a specific proof order.
-pub fn build_batched_circuit_for_order(
-    order: &ProofOrder,
-    config: AceConfig,
-) -> AceCircuit<QuadFelt> {
-    assert!(
-        config.is_multi_air,
-        "production circuit is multi-AIR; pass AceConfig with is_multi_air = true"
-    );
-    miden_air::ace::build_multi_air_ace_circuit_for_order::<QuadFelt>(config, order).unwrap()
-}
-
-/// Builds the default instance-order circuit.
-pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
-    build_batched_circuit_for_order(&ProofOrder::instance_order(), config)
-}
 
 /// Computes the ACE circuit registry root used by recursive verification.
 pub fn compute_relation_digest(commitments: &[(ProofOrder, [Felt; 4])]) -> [Felt; 4] {
@@ -86,48 +62,15 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let mut order_artifacts = Vec::new();
 
     for order in ProofOrder::variants() {
-        let circuit = build_batched_circuit_for_order(&order, MASM_CONFIG);
-        let encoded = circuit.to_ace().unwrap();
-
-        let num_inputs = encoded.num_vars();
-        let num_eval_gates = encoded.num_eval_rows();
-        let instructions = encoded.instructions();
-        let stream_len = encoded.size_in_felt();
-        if stream_len != instructions.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "circuit size_in_felt ({stream_len}) does not match instruction count ({})",
-                    instructions.len()
-                ),
-            ));
-        }
-        if !stream_len.is_multiple_of(8) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "circuit stream length ({stream_len}) is not 8-aligned; adv_pipe requires 8-element chunks"
-                ),
-            ));
-        }
-        let adv_pipe_rows = stream_len / 8;
-        let circuit_digest = Eidos::hash_elements(instructions);
-        let circuit_elements = circuit_digest.as_elements();
-        let circuit_commitment = [
-            circuit_elements[0],
-            circuit_elements[1],
-            circuit_elements[2],
-            circuit_elements[3],
-        ];
+        let circuit = build_recursive_verifier_ace_circuit(&order)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
         order_artifacts.push(OrderArtifact {
             order,
-            num_inputs,
-            num_eval_gates,
-            stream_len,
-            adv_pipe_rows,
-            circuit_commitment,
-            instructions: instructions.to_vec(),
+            num_inputs: circuit.num_inputs,
+            num_eval_gates: circuit.num_eval_gates,
+            stream_len: circuit.stream_len,
+            circuit_commitment: word_to_array(circuit.commitment),
         });
     }
 
@@ -350,10 +293,11 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
     );
     let circuit_len =
         u32::try_from(first.stream_len).expect("ACE circuit stream length must fit in u32");
+    let adv_pipe_rows = first.stream_len / 8;
     let circuit_stream_init_cv = Eidos::init_chaining_word(0, circuit_len);
     let max_cycle_len_log = max_periodic_cycle_len_log();
 
-    let mut masm = format!(
+    let masm = format!(
         concat!(
             "use miden::core::stark::constants\n",
             "use miden::core::stark::utils\n\n",
@@ -368,10 +312,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "# Depth of the ACE circuit registry tree.\n",
             "const ACE_REGISTRY_DEPTH = {ace_registry_depth}\n\n",
             "# Initial chaining value for hashing the ACE circuit stream.\n",
-            "const CIRCUIT_STREAM_INIT_CV_0 = {init_cv_0}\n",
-            "const CIRCUIT_STREAM_INIT_CV_1 = {init_cv_1}\n",
-            "const CIRCUIT_STREAM_INIT_CV_2 = {init_cv_2}\n",
-            "const CIRCUIT_STREAM_INIT_CV_3 = {init_cv_3}\n\n",
+            "const CIRCUIT_STREAM_INIT_CV = [{init_cv_0}, {init_cv_1}, {init_cv_2}, {init_cv_3}]\n\n",
             "# ERRORS\n",
             "# =================================================================================================\n\n",
             "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"hashed ACE circuit stream does not match registry commitment\"\n\n",
@@ -400,7 +341,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "    # => [C]\n",
             "    exec.constants::ace_circuit_stream_ptr\n",
             "    # => [ptr, C]\n",
-            "    push.CIRCUIT_STREAM_INIT_CV_3.CIRCUIT_STREAM_INIT_CV_2.CIRCUIT_STREAM_INIT_CV_1.CIRCUIT_STREAM_INIT_CV_0\n",
+            "    push.CIRCUIT_STREAM_INIT_CV\n",
             "    # => [CV, ptr, C]\n",
             "    padw padw\n",
             "    # => [BLOCK_SLOTS, CV, ptr, C]\n",
@@ -419,7 +360,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "end\n\n",
             "#! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.\n",
             "proc load_ace_registry_commitment\n",
-            "    exec.constants::relation_digest_ptr mem_loadw_le\n",
+            "    padw exec.constants::relation_digest_ptr mem_loadw_le\n",
             "    # => [REGISTRY_ROOT]\n",
             "    exec.constants::get_order_tag\n",
             "    # => [order_tag, REGISTRY_ROOT]\n",
@@ -429,50 +370,20 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "    # => [C, REGISTRY_ROOT]\n",
             "    swapw dropw\n",
             "    # => [C]\n",
-            "end\n\n",
-            "# COMMITTED ACE CIRCUIT STREAMS\n",
-            "# =================================================================================================\n\n",
+            "end\n",
         ),
         num_inputs = first.num_inputs,
         num_eval_gates = first.num_eval_gates,
         max_cycle_len_log = max_cycle_len_log,
         ace_registry_depth = ACE_REGISTRY_DEPTH,
-        adv_pipe_rows = first.adv_pipe_rows,
+        adv_pipe_rows = adv_pipe_rows,
         init_cv_0 = circuit_stream_init_cv[0].as_canonical_u64(),
         init_cv_1 = circuit_stream_init_cv[1].as_canonical_u64(),
         init_cv_2 = circuit_stream_init_cv[2].as_canonical_u64(),
         init_cv_3 = circuit_stream_init_cv[3].as_canonical_u64(),
     );
 
-    for (index, artifact) in order_artifacts.iter().enumerate() {
-        render_circuit_adv_map(&mut masm, artifact);
-        if index + 1 != order_artifacts.len() {
-            masm.push('\n');
-        }
-    }
     Ok(masm)
-}
-
-fn render_circuit_adv_map(masm: &mut String, artifact: &OrderArtifact) {
-    masm.push_str(&format!("# Proof order: {}\n", artifact.order.label()));
-    masm.push_str(&format!(
-        "adv_map ACE_CIRCUIT_{}([{}, {}, {}, {}]) = [\n",
-        artifact.order.tag(),
-        artifact.circuit_commitment[0].as_canonical_u64(),
-        artifact.circuit_commitment[1].as_canonical_u64(),
-        artifact.circuit_commitment[2].as_canonical_u64(),
-        artifact.circuit_commitment[3].as_canonical_u64(),
-    ));
-    for (i, chunk) in artifact.instructions.chunks(8).enumerate() {
-        let vals: Vec<String> = chunk.iter().map(|f| f.as_canonical_u64().to_string()).collect();
-        let line = vals.join(",");
-        if i < artifact.adv_pipe_rows - 1 {
-            masm.push_str(&format!("    {line},\n"));
-        } else {
-            masm.push_str(&format!("    {line}\n"));
-        }
-    }
-    masm.push_str("]\n");
 }
 
 fn max_periodic_cycle_len_log() -> u32 {
@@ -628,9 +539,7 @@ struct OrderArtifact {
     num_inputs: usize,
     num_eval_gates: usize,
     stream_len: usize,
-    adv_pipe_rows: usize,
     circuit_commitment: [Felt; 4],
-    instructions: Vec<Felt>,
 }
 
 struct ComputedArtifacts {

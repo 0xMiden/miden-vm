@@ -20,8 +20,8 @@
 use alloc::{vec, vec::Vec};
 
 use miden_air::{
-    MidenMultiAir, PublicInputs, Statement, config,
-    trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT,
+    MidenMultiAir, ProofOrder, PublicInputs, Statement, ace::build_recursive_verifier_ace_circuit,
+    config, trace::and8_lookup::LOG_AND8_LOOKUP_TRACE_HEIGHT,
 };
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
@@ -130,6 +130,7 @@ pub fn generate_advice_inputs(
     if log_trace_heights[3] != LOG_AND8_LOOKUP_TRACE_HEIGHT {
         return Err(VerifierError::InvalidProofShape("invalid And8Lookup trace height"));
     }
+    let proof_order = ProofOrder::from_instance_log_heights(&log_trace_heights);
 
     build_advice(
         &config,
@@ -138,6 +139,7 @@ pub fn generate_advice_inputs(
         log_core_trace_height,
         log_chiplets_trace_height,
         log_blakeg_compression_trace_height,
+        &proof_order,
         pub_inputs,
         &kernel_digests,
     )
@@ -169,6 +171,7 @@ fn build_advice(
     log_core_trace_height: usize,
     log_chiplets_trace_height: usize,
     log_blakeg_compression_trace_height: usize,
+    proof_order: &ProofOrder,
     pub_inputs: PublicInputs,
     kernel_digests: &[Word],
 ) -> Result<VerifierData, VerifierError> {
@@ -188,8 +191,7 @@ fn build_advice(
     let num_queries = params.num_queries();
     advice_stack.push(num_queries as u64);
     advice_stack.push(params.query_pow_bits() as u64);
-    // DEEP and folding PoW bits are not publicly exposed on PcsParams;
-    // use the constants from air/src/config.rs directly.
+    // DEEP and folding PoW bits are not publicly exposed on PcsParams.
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
@@ -273,7 +275,7 @@ fn build_advice(
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---
-    let (store, advice_map) = build_merkle_data(config, proof, preprocessed)?;
+    let (store, advice_map) = build_merkle_data(config, proof, preprocessed, proof_order)?;
 
     Ok(VerifierData {
         initial_stack,
@@ -330,6 +332,7 @@ fn build_merkle_data(
     config: &RecursiveConfig,
     proof: &StarkProof<Challenge, RecursiveLmcs>,
     preprocessed: &Preprocessed<Felt, RecursiveLmcs>,
+    proof_order: &ProofOrder,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &proof.pcs_proof;
     let lmcs = config.lmcs();
@@ -372,6 +375,7 @@ fn build_merkle_data(
         store.extend(tree.inner_nodes());
     }
     extend_ace_registry_store(&mut store);
+    extend_ace_circuit_advice(&mut advice_map, proof_order)?;
 
     Ok((store, advice_map))
 }
@@ -379,6 +383,16 @@ fn build_merkle_data(
 fn extend_ace_registry_store(store: &mut MerkleStore) {
     let registry_tree = config::ace_circuit_registry_tree();
     store.extend(registry_tree.inner_nodes());
+}
+
+fn extend_ace_circuit_advice(
+    advice_map: &mut Vec<(Word, Vec<Felt>)>,
+    proof_order: &ProofOrder,
+) -> Result<(), VerifierError> {
+    let circuit = build_recursive_verifier_ace_circuit(proof_order)
+        .map_err(|_| VerifierError::InvalidProofShape("failed to build recursive ACE circuit"))?;
+    advice_map.push((circuit.commitment, circuit.instructions));
+    Ok(())
 }
 
 /// Convert a `BatchProof` into `PartialMerkleTree` entries and advice map entries.
