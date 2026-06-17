@@ -81,10 +81,40 @@ ast_node!(
     "doc comment"
 );
 ast_node!(
+    #[doc = "A `namespace` item."]
+    Namespace,
+    SyntaxKind::Namespace,
+    "namespace declaration"
+);
+ast_node!(
+    #[doc = "An `extern package` item."]
+    ExternPackage,
+    SyntaxKind::ExternPackage,
+    "extern package declaration"
+);
+ast_node!(
+    #[doc = "A `mod` or `pub mod` item."]
+    Submodule,
+    SyntaxKind::Submodule,
+    "submodule declaration"
+);
+ast_node!(
     #[doc = "A `use` item."]
     Import,
     SyntaxKind::Import,
     "import"
+);
+ast_node!(
+    #[doc = "A braced item import list."]
+    ImportList,
+    SyntaxKind::ImportList,
+    "import list"
+);
+ast_node!(
+    #[doc = "An item import specifier."]
+    ImportSpecifier,
+    SyntaxKind::ImportSpecifier,
+    "import specifier"
 );
 ast_node!(
     #[doc = "A `const` item."]
@@ -194,6 +224,9 @@ ast_node!(
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {
     Doc(Doc),
+    Namespace(Namespace),
+    ExternPackage(ExternPackage),
+    Submodule(Submodule),
     Import(Import),
     Constant(Constant),
     TypeDecl(TypeDecl),
@@ -207,6 +240,9 @@ impl Item {
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         match node.kind() {
             SyntaxKind::Doc => Doc::cast(node).map(Self::Doc),
+            SyntaxKind::Namespace => Namespace::cast(node).map(Self::Namespace),
+            SyntaxKind::ExternPackage => ExternPackage::cast(node).map(Self::ExternPackage),
+            SyntaxKind::Submodule => Submodule::cast(node).map(Self::Submodule),
             SyntaxKind::Import => Import::cast(node).map(Self::Import),
             SyntaxKind::Constant => Constant::cast(node).map(Self::Constant),
             SyntaxKind::TypeDecl => TypeDecl::cast(node).map(Self::TypeDecl),
@@ -242,10 +278,45 @@ impl Operation {
     }
 }
 
+/// The explicit syntactic form used by an import declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImportKind {
+    /// A module import such as `use some::module` or `use some::module as local`.
+    Module,
+    /// A braced item import such as `use {foo, bar as baz} from some::module`.
+    Items,
+}
+
 impl SourceFile {
     /// Returns the top-level items in source order.
     pub fn items(&self) -> impl Iterator<Item = Item> + '_ {
         self.syntax.children().filter_map(Item::cast)
+    }
+}
+
+impl Namespace {
+    /// Returns the declared namespace path.
+    pub fn path(&self) -> Option<Path> {
+        support::child(&self.syntax)
+    }
+}
+
+impl ExternPackage {
+    /// Returns the package identifier token following `extern package`.
+    pub fn package_token(&self) -> Option<SyntaxToken> {
+        token_after_keyword(&self.syntax, "package")
+    }
+}
+
+impl Submodule {
+    /// Returns the optional visibility marker for this submodule declaration.
+    pub fn visibility(&self) -> Option<Visibility> {
+        support::child(&self.syntax)
+    }
+
+    /// Returns the declared child-module name token.
+    pub fn name_token(&self) -> Option<SyntaxToken> {
+        token_after_keyword(&self.syntax, "mod")
     }
 }
 
@@ -255,14 +326,68 @@ impl Import {
         support::child(&self.syntax)
     }
 
-    /// Returns the imported path or MAST-root target token group.
-    pub fn path(&self) -> Option<Path> {
+    /// Returns whether this is a module import or a braced item import.
+    pub fn kind(&self) -> ImportKind {
+        if self.import_list().is_some() {
+            ImportKind::Items
+        } else {
+            ImportKind::Module
+        }
+    }
+
+    /// Returns the module path referenced by this import.
+    pub fn module_path(&self) -> Option<Path> {
         support::child(&self.syntax)
     }
 
-    /// Returns the alias name token following `->`, if present.
+    /// Returns the imported module path for legacy callers.
+    ///
+    /// Braced item imports should use [`Self::module_path`] and [`Self::item_specs`] explicitly.
+    pub fn path(&self) -> Option<Path> {
+        (self.kind() == ImportKind::Module).then(|| self.module_path()).flatten()
+    }
+
+    /// Returns the alias name token following contextual `as` in a module import, if present.
+    pub fn module_alias_token(&self) -> Option<SyntaxToken> {
+        if self.kind() != ImportKind::Module {
+            return None;
+        }
+        token_after_contextual_keyword(&self.syntax, "as")
+    }
+
+    /// Returns the module alias token for legacy callers.
     pub fn alias_token(&self) -> Option<SyntaxToken> {
-        token_after_punctuation(&self.syntax, SyntaxKind::RArrow)
+        self.module_alias_token()
+    }
+
+    /// Returns the braced item import list, if this import uses item syntax.
+    pub fn import_list(&self) -> Option<ImportList> {
+        support::child(&self.syntax)
+    }
+
+    /// Returns the imported item specifiers in source order.
+    pub fn item_specs(&self) -> impl Iterator<Item = ImportSpecifier> + '_ {
+        self.syntax.descendants().filter_map(ImportSpecifier::cast)
+    }
+}
+
+impl ImportList {
+    /// Returns the imported item specifiers in source order.
+    pub fn specifiers(&self) -> impl Iterator<Item = ImportSpecifier> + '_ {
+        support::children(&self.syntax)
+    }
+}
+
+impl ImportSpecifier {
+    /// Returns the imported item name token.
+    pub fn name_token(&self) -> Option<SyntaxToken> {
+        significant_tokens(&self.syntax).find(|token| is_name_like_token(token.kind()))
+    }
+
+    /// Returns the local alias name token following contextual `as`, if present.
+    pub fn alias_token(&self) -> Option<SyntaxToken> {
+        let name = self.name_token()?;
+        token_after_contextual_keyword_after(&self.syntax, &name, "as")
     }
 }
 
@@ -425,10 +550,24 @@ fn token_after_keyword(node: &SyntaxNode, keyword: &str) -> Option<SyntaxToken> 
         .find(|token| !token.kind().is_trivia())
 }
 
-fn token_after_punctuation(node: &SyntaxNode, punctuation: SyntaxKind) -> Option<SyntaxToken> {
+fn token_after_contextual_keyword(node: &SyntaxNode, keyword: &str) -> Option<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
-        .skip_while(|token| token.kind() != punctuation)
+        .skip_while(|token| !(token.kind() == SyntaxKind::Ident && token.text() == keyword))
+        .skip(1)
+        .find(|token| !token.kind().is_trivia())
+}
+
+fn token_after_contextual_keyword_after(
+    node: &SyntaxNode,
+    start: &SyntaxToken,
+    keyword: &str,
+) -> Option<SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .skip_while(|token| token != start)
+        .skip(1)
+        .skip_while(|token| !(token.kind() == SyntaxKind::Ident && token.text() == keyword))
         .skip(1)
         .find(|token| !token.kind().is_trivia())
 }
@@ -448,6 +587,10 @@ fn significant_tokens_recursive(node: &SyntaxNode) -> impl Iterator<Item = Synta
     node.descendants_with_tokens()
         .filter_map(rowan::NodeOrToken::into_token)
         .filter(|token| !token.kind().is_trivia())
+}
+
+fn is_name_like_token(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::Ident | SyntaxKind::QuotedIdent | SyntaxKind::SpecialIdent)
 }
 
 fn next_significant_token(node: &SyntaxNode, token: &SyntaxToken) -> Option<SyntaxToken> {

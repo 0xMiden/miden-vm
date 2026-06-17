@@ -13,7 +13,7 @@ pub use self::{
 use super::{GlobalItemIndex, ModuleIndex};
 use crate::{
     Path, Word,
-    ast::{AliasTarget, Ident, ItemIndex},
+    ast::{Ident, ItemIndex},
 };
 
 /// Represents the result of resolving a symbol
@@ -80,22 +80,6 @@ impl LocalSymbolResolver {
     {
         let symbols = LocalSymbolTable::new(symbols, source_manager.clone())?;
         Ok(Self { source_manager, symbols })
-    }
-
-    /// Expand `path` using `get_import` to resolve a raw symbol name to an import in the current
-    /// symbol resolution context.
-    ///
-    /// Uses the provided [SourceManager] to emit errors that are discovered during expansion.
-    #[inline]
-    pub fn expand<F>(
-        get_import: F,
-        path: Span<&Path>,
-        source_manager: &dyn SourceManager,
-    ) -> Result<SymbolResolution, SymbolResolutionError>
-    where
-        F: Fn(&str) -> Option<AliasTarget>,
-    {
-        LocalSymbolTable::expand(get_import, path, source_manager)
     }
 
     #[inline]

@@ -14,7 +14,6 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
-    vec,
     vec::Vec,
 };
 
@@ -35,8 +34,8 @@ use miden_core::{
 pub use self::{
     id::PackageId,
     manifest::{
-        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, ProcedureExport,
-        TypeExport,
+        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
+        PackageSubmodule, ProcedureExport, TypeExport,
     },
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
@@ -98,7 +97,26 @@ impl Package {
         exports: impl IntoIterator<Item = PackageExport>,
         dependencies: impl IntoIterator<Item = Dependency>,
     ) -> Result<Self, ManifestValidationError> {
-        let manifest = PackageManifest::new(exports)?.with_dependencies(dependencies)?;
+        Self::create_with_modules(name, version, kind, mast, exports, [], dependencies)
+    }
+
+    /// Construct a [Package] from its essential component parts and module surface metadata.
+    pub fn create_with_modules(
+        name: PackageId,
+        version: Version,
+        kind: TargetType,
+        mast: Arc<MastForest>,
+        exports: impl IntoIterator<Item = PackageExport>,
+        modules: impl IntoIterator<Item = PackageModule>,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> Result<Self, ManifestValidationError> {
+        let manifest = PackageManifest::new(exports)?
+            .with_modules(modules)?
+            .with_dependencies(dependencies)?;
+
+        if manifest.entrypoint().is_some() && !kind.is_executable() {
+            return Err(ManifestValidationError::NonExecutableEntrypoint);
+        }
 
         // Validate that procedure export node provenance is valid when present
         for export in manifest.exports() {
@@ -238,9 +256,17 @@ impl Package {
         matches!(self.kind, TargetType::Kernel)
     }
 
+    /// Returns the absolute path of the entrypoint procedure for this package, if it is executable
+    #[inline]
+    pub fn entrypoint(&self) -> Option<Arc<Path>> {
+        self.manifest.entrypoint()
+    }
+
     /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
     pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
-        self.module_infos()
+        self.try_module_infos()
+            .map_err(Report::msg)?
+            .into_iter()
             .find(|mi| mi.path().is_kernel_path())
             .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
     }
@@ -285,9 +311,7 @@ impl Package {
     ///
     /// Panics if the specified procedure is not exported from this package.
     pub fn get_export_node_id(&self, path: impl AsRef<Path>) -> MastNodeId {
-        let path = path.as_ref().to_absolute().unwrap();
-        self.manifest
-            .get_export(path)
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
             .expect("procedure not exported from this package")
@@ -295,11 +319,7 @@ impl Package {
 
     /// Returns true if the specified exported procedure is re-exported from a dependency.
     pub fn is_reexport(&self, path: impl AsRef<Path>) -> bool {
-        let Ok(path) = path.as_ref().to_absolute() else {
-            return false;
-        };
-        self.manifest
-            .get_export(path.as_ref())
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
             .map(|node| self.mast[node].is_external())
@@ -309,25 +329,45 @@ impl Package {
     /// Returns the digest of the procedure with the specified name, or `None` if it was not found
     /// in the library or its library path is malformed.
     pub fn get_procedure_root_by_path(&self, path: impl AsRef<Path>) -> Option<Word> {
-        let path = path.as_ref().to_absolute().ok()?;
-        self.manifest
-            .get_export(path)
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .map(|proc| proc.digest)
     }
 
     /// Returns the exact procedure node for the specified path, if it is present.
     pub fn get_procedure_node_by_path(&self, path: impl AsRef<Path>) -> Option<MastNodeId> {
-        let path = path.as_ref().to_absolute().ok()?;
-        self.manifest
-            .get_export(path.as_ref())
+        self.get_export_by_lookup_path(path.as_ref())
             .and_then(PackageExport::as_procedure)
             .and_then(|export| export.node.or_else(|| self.mast.find_procedure_root(export.digest)))
+    }
+
+    fn get_export_by_lookup_path(&self, path: &Path) -> Option<&PackageExport> {
+        self.manifest
+            .get_export(path)
+            .or_else(|| path.is_absolute().then(|| self.manifest.get_export(path.to_relative()))?)
+            .or_else(|| {
+                if path.is_absolute() {
+                    None
+                } else {
+                    path.to_absolute().ok().and_then(|path| self.manifest.get_export(path.as_ref()))
+                }
+            })
     }
 
     /// Returns an iterator over the module infos of the library.
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
         let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+
+        for module in self.manifest.modules() {
+            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            for submodule in module.submodules() {
+                module_info.add_submodule(ast::SubmoduleDecl {
+                    visibility: ast::Visibility::Public,
+                    name: submodule.name.clone(),
+                });
+            }
+            modules_by_path.insert(module.path.clone(), module_info);
+        }
 
         for export in self.manifest.exports() {
             let module_name =
@@ -365,6 +405,98 @@ impl Package {
         }
 
         modules_by_path.into_values()
+    }
+
+    /// Returns module infos after validating that manifest module-surface metadata is complete.
+    ///
+    /// Unlike [`Self::module_infos`], this method does not synthesize missing module surfaces from
+    /// item export paths. Link-time resolution relies on explicit module metadata so that modules
+    /// remain distinct from exported items.
+    pub fn try_module_infos(&self) -> Result<Vec<ModuleInfo>, ManifestValidationError> {
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+
+        for module in self.manifest.modules() {
+            let mut module_info = ModuleInfo::new(module.path.clone(), None);
+            for submodule in module.submodules() {
+                module_info.add_submodule(ast::SubmoduleDecl {
+                    visibility: ast::Visibility::Public,
+                    name: submodule.name.clone(),
+                });
+            }
+            modules_by_path.insert(module.path.clone(), module_info);
+        }
+
+        for module in self.manifest.modules() {
+            for submodule in module.submodules() {
+                let child_path: Arc<Path> =
+                    Arc::from(module.path.join(&submodule.name).into_boxed_path());
+                if !modules_by_path.contains_key(child_path.as_ref()) {
+                    return Err(ManifestValidationError::MissingDeclaredSubmoduleSurface {
+                        parent: module.path.clone(),
+                        name: submodule.name.to_string(),
+                        module: child_path,
+                    });
+                }
+            }
+        }
+
+        for module in self.manifest.modules() {
+            let Some(parent_path) = module.path.parent() else {
+                continue;
+            };
+            let parent_path: Arc<Path> = Arc::from(parent_path.to_path_buf().into_boxed_path());
+            let Some(parent) = self.manifest.get_module(parent_path.as_ref()) else {
+                continue;
+            };
+            let name = module.path.last().expect("module paths have at least one component");
+            if !parent.submodules().iter().any(|submodule| submodule.name.as_str() == name) {
+                return Err(ManifestValidationError::UndeclaredModuleSurface {
+                    module: module.path.clone(),
+                    parent: parent.path.clone(),
+                    name: name.to_string(),
+                });
+            }
+        }
+
+        for export in self.manifest.exports() {
+            let module_name: Arc<Path> =
+                Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
+            let module = modules_by_path.get_mut(module_name.as_ref()).ok_or_else(|| {
+                ManifestValidationError::MissingExportModuleSurface {
+                    export: export.path(),
+                    module: module_name.clone(),
+                }
+            })?;
+            match export {
+                PackageExport::Procedure(ProcedureExport {
+                    node,
+                    digest,
+                    path,
+                    signature,
+                    attributes,
+                }) => {
+                    let name = path.last().unwrap();
+                    module.add_procedure_with_provenance(
+                        ast::ProcedureName::new(name).expect("valid procedure name"),
+                        *digest,
+                        signature.clone().map(Arc::new),
+                        attributes.clone(),
+                        *node,
+                        Some(self.mast.commitment()),
+                    );
+                },
+                PackageExport::Constant(ConstantExport { path, value }) => {
+                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_constant(name, value.clone());
+                },
+                PackageExport::Type(TypeExport { path, ty }) => {
+                    let name = ast::Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_type(name, ty.clone());
+                },
+            }
+        }
+
+        Ok(modules_by_path.into_values().collect())
     }
 }
 
@@ -405,8 +537,10 @@ impl Package {
                 self.kind
             )));
         }
-        let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        if let Some(entrypoint) = self.get_procedure_node_by_path(&main_path) {
+        let entrypoint = self.manifest.entrypoint().unwrap_or_else(|| {
+            MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into()
+        });
+        if let Some(entrypoint) = self.get_procedure_node_by_path(&entrypoint) {
             let mast_forest = self.mast.clone();
             let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
             match (self.try_embedded_kernel_package()?, kernel_dependency) {
@@ -424,7 +558,7 @@ impl Package {
             }
         } else {
             Err(Report::msg(format!(
-                "malformed executable package: no procedure root for '{main_path}'"
+                "malformed executable package: no procedure root for '{entrypoint}'"
             )))
         }
     }
@@ -541,54 +675,46 @@ impl Package {
     /// [miden_core::mast::MastForest] is left untouched, so the resulting package may still contain
     /// nodes in the forest which are now unused.
     pub fn make_executable(&self, entrypoint: &QualifiedProcedureName) -> Result<Self, Report> {
-        use miden_assembly_syntax::{Path as MasmPath, ast as masm};
+        use miden_assembly_syntax::Path as MasmPath;
         if !self.is_library() {
             return Err(Report::msg("expected library but got an executable"));
         }
 
-        let entrypoint_namespace = entrypoint.namespace().to_absolute().map_err(Report::msg)?;
-        let module = self
-            .module_infos()
-            .find(|info| info.path() == entrypoint_namespace.as_ref())
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "invalid entrypoint: library does not contain a module named '{}'",
-                    entrypoint.namespace()
-                ))
-            })?;
-        if let Some(procedure) = module.get_procedure_by_name(entrypoint.name()) {
-            let digest = procedure.digest;
-            let node_id = procedure
-                 .source_root_id()
-                 .or_else(|| self.mast.find_procedure_root(digest))
-                 .ok_or_else(|| {
-                     Report::msg(
-                         "invalid entrypoint: malformed library - procedure exported, but digest has \
-                          no node in the forest",
-                     )
-                 })?;
-
-            let exec_path: Arc<MasmPath> =
-                MasmPath::exec_path().join(masm::ProcedureName::MAIN_PROC_NAME).into();
-            let mut package = Self::create(
-                self.name.clone(),
-                self.version.clone(),
-                TargetType::Executable,
-                self.mast.clone(),
-                vec![PackageExport::Procedure(ProcedureExport::new(
-                    exec_path,
-                    Some(node_id),
-                    digest,
-                    None,
-                ))],
-                self.manifest.dependencies.clone(),
-            )
-            .map_err(Report::msg)?;
-
-            package.description = self.description.clone();
-            package.sections = self.sections.clone();
-
-            Ok(package)
+        let entrypoint =
+            Arc::<MasmPath>::from(entrypoint.to_absolute().map_err(Report::msg)?.to_path_buf());
+        if let Some(export) = self.get_export_by_lookup_path(&entrypoint) {
+            match export {
+                PackageExport::Constant(_) | PackageExport::Type(_) => {
+                    let actual = match export {
+                        PackageExport::Constant(_) => "constant",
+                        PackageExport::Type(_) => "type",
+                        _ => unreachable!(),
+                    };
+                    Err(Report::msg(ManifestValidationError::UnexpectedExportType {
+                        path: entrypoint,
+                        expected: "procedure",
+                        actual,
+                    }))
+                },
+                PackageExport::Procedure(procedure) => {
+                    let executable_entrypoint: Arc<MasmPath> =
+                        MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+                    let mut procedure = procedure.clone();
+                    procedure.path = executable_entrypoint;
+                    let mut package = Self::create(
+                        self.name.clone(),
+                        self.version.clone(),
+                        TargetType::Executable,
+                        self.mast.clone(),
+                        [PackageExport::Procedure(procedure)],
+                        self.manifest.dependencies.clone(),
+                    )
+                    .map_err(Report::msg)?;
+                    package.description = self.description.clone();
+                    package.sections = self.sections.clone();
+                    Ok(package)
+                },
+            }
         } else {
             Err(Report::msg(format!(
                 "invalid entrypoint: library does not export '{entrypoint}'"
@@ -681,6 +807,11 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
+    fn relative_path(name: &str) -> Arc<AstPath> {
+        let path = PathBuf::relative(name);
+        Arc::from(path.into_boxed_path())
+    }
+
     fn build_package_exports(export: &str) -> (Arc<MastForest>, Vec<PackageExport>) {
         let (forest, node_id) = build_forest();
         let root = forest[node_id].digest();
@@ -757,7 +888,9 @@ mod tests {
         let mut package = build_package("kernel", TargetType::Kernel, "$kernel::boot", [], vec![]);
         package.manifest = PackageManifest {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let error = package
@@ -833,6 +966,31 @@ mod tests {
     }
 
     #[test]
+    fn procedure_lookup_accepts_relative_and_absolute_export_paths() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = relative_path("app::entry");
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, Some(node_id), digest, None));
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            vec![export],
+            None,
+        )
+        .expect("package should be valid");
+
+        assert_eq!(package.get_procedure_root_by_path("app::entry"), Some(digest));
+        assert_eq!(package.get_procedure_root_by_path("::app::entry"), Some(digest));
+        assert_eq!(package.get_procedure_node_by_path("app::entry"), Some(node_id));
+        assert_eq!(package.get_procedure_node_by_path("::app::entry"), Some(node_id));
+        assert_eq!(package.get_export_node_id("::app::entry"), node_id);
+        assert!(!package.is_reexport("::app::entry"));
+    }
+
+    #[test]
     fn make_executable_preserves_selected_same_digest_root_metadata() {
         let (mast, exports) = build_same_digest_package_exports(&[
             ("app::alias_a", "alias_a"),
@@ -873,5 +1031,30 @@ mod tests {
                 .context_name(),
             "alias_b"
         );
+    }
+
+    #[test]
+    fn make_executable_accepts_relative_entrypoint_export_path() {
+        let (forest, node_id) = build_forest();
+        let digest = forest[node_id].digest();
+        let path = relative_path("app::entry");
+        let export =
+            PackageExport::Procedure(ProcedureExport::new(path, Some(node_id), digest, None));
+        let package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            Arc::new(forest),
+            [export],
+            None,
+        )
+        .expect("package should be valid");
+
+        let entrypoint = QualifiedProcedureName::from_str("app::entry").unwrap();
+        let executable = package.make_executable(&entrypoint).unwrap();
+
+        let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+        assert_eq!(executable.get_procedure_root_by_path(&main_path), Some(digest));
+        assert_eq!(executable.get_procedure_node_by_path(&main_path), Some(node_id));
     }
 }

@@ -1,5 +1,3 @@
-use lib::lib
-
 begin
-    exec.lib::lib_proc
+    exec.::lib::lib_proc
 end

@@ -85,7 +85,10 @@ pub trait Visit<T = ()> {
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         visit_module(self, module)
     }
-    fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
+    fn visit_import(&mut self, import: &Import) -> ControlFlow<T> {
+        visit_import(self, import)
+    }
+    fn visit_export(&mut self, export: &Item) -> ControlFlow<T> {
         visit_export(self, export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
@@ -118,9 +121,6 @@ pub trait Visit<T = ()> {
     fn visit_enum_variant(&mut self, variant: &Variant) -> ControlFlow<T> {
         visit_enum_variant(self, variant)
     }
-    fn visit_alias(&mut self, alias: &Alias) -> ControlFlow<T> {
-        visit_alias(self, alias)
-    }
     fn visit_block(&mut self, block: &Block) -> ControlFlow<T> {
         visit_block(self, block)
     }
@@ -148,9 +148,6 @@ pub trait Visit<T = ()> {
     }
     fn visit_invoke_target(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         visit_invoke_target(self, target)
-    }
-    fn visit_alias_target(&mut self, target: &AliasTarget) -> ControlFlow<T> {
-        visit_alias_target(self, target)
     }
     fn visit_immediate_u8(&mut self, imm: &Immediate<u8>) -> ControlFlow<T> {
         visit_immediate_u8(self, imm)
@@ -182,7 +179,10 @@ where
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         (**self).visit_module(module)
     }
-    fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
+    fn visit_import(&mut self, import: &Import) -> ControlFlow<T> {
+        (**self).visit_import(import)
+    }
+    fn visit_export(&mut self, export: &Item) -> ControlFlow<T> {
         (**self).visit_export(export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
@@ -215,9 +215,6 @@ where
     fn visit_enum_variant(&mut self, variant: &Variant) -> ControlFlow<T> {
         (**self).visit_enum_variant(variant)
     }
-    fn visit_alias(&mut self, alias: &Alias) -> ControlFlow<T> {
-        (**self).visit_alias(alias)
-    }
     fn visit_block(&mut self, block: &Block) -> ControlFlow<T> {
         (**self).visit_block(block)
     }
@@ -245,9 +242,6 @@ where
     }
     fn visit_invoke_target(&mut self, target: &InvocationTarget) -> ControlFlow<T> {
         (**self).visit_invoke_target(target)
-    }
-    fn visit_alias_target(&mut self, target: &AliasTarget) -> ControlFlow<T> {
-        (**self).visit_alias_target(target)
     }
     fn visit_immediate_u8(&mut self, imm: &Immediate<u8>) -> ControlFlow<T> {
         (**self).visit_immediate_u8(imm)
@@ -283,15 +277,22 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_export<V, T>(visitor: &mut V, export: &Export) -> ControlFlow<T>
+#[inline(always)]
+pub fn visit_import<V, T>(_visitor: &mut V, _import: &Import) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_export<V, T>(visitor: &mut V, export: &Item) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
     match export {
-        Export::Procedure(item) => visitor.visit_procedure(item),
-        Export::Constant(item) => visitor.visit_constant(item),
-        Export::Type(item) => visitor.visit_type_decl(item),
-        Export::Alias(item) => visitor.visit_alias(item),
+        Item::Procedure(item) => visitor.visit_procedure(item),
+        Item::Constant(item) => visitor.visit_constant(item),
+        Item::Type(item) => visitor.visit_type_decl(item),
     }
 }
 
@@ -403,14 +404,6 @@ where
     } else {
         ControlFlow::Continue(())
     }
-}
-
-#[inline(always)]
-pub fn visit_alias<V, T>(visitor: &mut V, alias: &Alias) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    visitor.visit_alias_target(alias.target())
 }
 
 pub fn visit_block<V, T>(visitor: &mut V, block: &Block) -> ControlFlow<T>
@@ -564,14 +557,6 @@ where
 }
 
 #[inline(always)]
-pub fn visit_alias_target<V, T>(_visitor: &mut V, _target: &AliasTarget) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
 pub fn visit_immediate_u8<V, T>(_visitor: &mut V, _imm: &Immediate<u8>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
@@ -660,7 +645,10 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         visit_mut_module(self, module)
     }
-    fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
+    fn visit_mut_import(&mut self, import: &mut Import) -> ControlFlow<T> {
+        visit_mut_import(self, import)
+    }
+    fn visit_mut_export(&mut self, export: &mut Item) -> ControlFlow<T> {
         visit_mut_export(self, export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
@@ -693,9 +681,6 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_enum_variant(&mut self, variant: &mut Variant) -> ControlFlow<T> {
         visit_mut_enum_variant(self, variant)
     }
-    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<T> {
-        visit_mut_alias(self, alias)
-    }
     fn visit_mut_block(&mut self, block: &mut Block) -> ControlFlow<T> {
         visit_mut_block(self, block)
     }
@@ -723,9 +708,6 @@ pub trait VisitMut<T = ()> {
     }
     fn visit_mut_invoke_target(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         visit_mut_invoke_target(self, target)
-    }
-    fn visit_mut_alias_target(&mut self, target: &mut AliasTarget) -> ControlFlow<T> {
-        visit_mut_alias_target(self, target)
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<T> {
         visit_mut_immediate_u8(self, imm)
@@ -757,7 +739,10 @@ where
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         (**self).visit_mut_module(module)
     }
-    fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
+    fn visit_mut_import(&mut self, import: &mut Import) -> ControlFlow<T> {
+        (**self).visit_mut_import(import)
+    }
+    fn visit_mut_export(&mut self, export: &mut Item) -> ControlFlow<T> {
         (**self).visit_mut_export(export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
@@ -790,9 +775,6 @@ where
     fn visit_mut_enum_variant(&mut self, variant: &mut Variant) -> ControlFlow<T> {
         (**self).visit_mut_enum_variant(variant)
     }
-    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<T> {
-        (**self).visit_mut_alias(alias)
-    }
     fn visit_mut_block(&mut self, block: &mut Block) -> ControlFlow<T> {
         (**self).visit_mut_block(block)
     }
@@ -820,9 +802,6 @@ where
     }
     fn visit_mut_invoke_target(&mut self, target: &mut InvocationTarget) -> ControlFlow<T> {
         (**self).visit_mut_invoke_target(target)
-    }
-    fn visit_mut_alias_target(&mut self, target: &mut AliasTarget) -> ControlFlow<T> {
-        (**self).visit_mut_alias_target(target)
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<T> {
         (**self).visit_mut_immediate_u8(imm)
@@ -858,15 +837,22 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_mut_export<V, T>(visitor: &mut V, export: &mut Export) -> ControlFlow<T>
+#[inline(always)]
+pub fn visit_mut_import<V, T>(_visitor: &mut V, _import: &mut Import) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_mut_export<V, T>(visitor: &mut V, export: &mut Item) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
     match export {
-        Export::Procedure(item) => visitor.visit_mut_procedure(item),
-        Export::Constant(item) => visitor.visit_mut_constant(item),
-        Export::Type(item) => visitor.visit_mut_type_decl(item),
-        Export::Alias(item) => visitor.visit_mut_alias(item),
+        Item::Procedure(item) => visitor.visit_mut_procedure(item),
+        Item::Constant(item) => visitor.visit_mut_constant(item),
+        Item::Type(item) => visitor.visit_mut_type_decl(item),
     }
 }
 
@@ -978,14 +964,6 @@ where
     } else {
         ControlFlow::Continue(())
     }
-}
-
-#[inline(always)]
-pub fn visit_mut_alias<V, T>(visitor: &mut V, alias: &mut Alias) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    visitor.visit_mut_alias_target(alias.target_mut())
 }
 
 pub fn visit_mut_block<V, T>(visitor: &mut V, block: &mut Block) -> ControlFlow<T>
@@ -1142,14 +1120,6 @@ pub fn visit_mut_invoke_target<V, T>(
     _visitor: &mut V,
     _target: &mut InvocationTarget,
 ) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_mut_alias_target<V, T>(_visitor: &mut V, _target: &mut AliasTarget) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {

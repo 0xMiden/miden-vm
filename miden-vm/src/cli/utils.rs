@@ -51,8 +51,8 @@ pub fn get_masm_program(
             "masm" => {
                 // Compile kernel from assembly source
                 // Assembler debug mode is always enabled (issue #1821)
-                Assembler::default()
-                    .assemble_kernel("kernel", kernel_path)
+                Assembler::new(source_manager.clone())
+                    .assemble_kernel_from_root("kernel", kernel_path)
                     .map(Arc::from)
                     .wrap_err_with(|| {
                         format!("Failed to compile kernel from `{}`", kernel_path.display())
@@ -84,7 +84,7 @@ pub fn get_masm_program(
 
         // Compile the program
         assembler
-            .assemble_program("program", program_file.ast())
+            .assemble_program("program", program_file.ast().clone())
             .wrap_err("Failed to compile program")?
             .unwrap_program()
     } else {

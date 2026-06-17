@@ -175,6 +175,22 @@ impl Project {
                 Report::msg(format!("could not parse {}: {err}", workspace_manifest.display()))
             })?;
             if contents.contains_key("workspace") {
+                let workspace_file = ast::WorkspaceFile::parse(source.clone())?;
+                let is_workspace_manifest = manifest_path == workspace_manifest;
+
+                if !is_workspace_manifest
+                    && !workspace_declares_member(
+                        &workspace_file,
+                        &workspace_manifest,
+                        manifest_path,
+                    )
+                {
+                    break;
+                }
+                if is_workspace_manifest && name.is_none() {
+                    break;
+                }
+
                 let workspace = Workspace::load(source, source_manager)?;
                 let package = if let Some(package) = workspace
                     .members()
@@ -197,6 +213,8 @@ impl Project {
                     break;
                 };
 
+                validate_package_name(name, &package)?;
+
                 return Ok(Self::WorkspacePackage { package, workspace: workspace.into() });
             } else if Some(ancestor) != initial_package_dir {
                 break;
@@ -205,8 +223,55 @@ impl Project {
 
         let source = source_manager.load_file(manifest_path).map_err(Report::msg)?;
         let package = Package::load(source)?;
+        validate_package_name(name, &package)?;
         Ok(Self::Package(package.into()))
     }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn validate_package_name(expected_name: Option<&str>, package: &Package) -> Result<(), Report> {
+    let Some(expected_name) = expected_name else {
+        return Ok(());
+    };
+
+    let actual_name = package.name();
+    if &**actual_name.inner() == expected_name {
+        Ok(())
+    } else if let Some(location) = package.manifest_path() {
+        Err(Report::msg(format!(
+            "dependency '{}' resolved to package '{}' at '{}'",
+            expected_name,
+            actual_name.inner(),
+            location.display()
+        )))
+    } else {
+        Err(Report::msg(format!(
+            "dependency '{}' resolved to package '{}'",
+            expected_name,
+            actual_name.inner(),
+        )))
+    }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn workspace_declares_member(
+    workspace: &ast::WorkspaceFile,
+    workspace_manifest: &std::path::Path,
+    manifest_path: &std::path::Path,
+) -> bool {
+    let Some(workspace_root) = workspace_manifest.parent() else {
+        return false;
+    };
+
+    workspace.workspace.members.iter().any(|member| {
+        let member_dir =
+            match absolutize_path(std::path::Path::new(member.inner().path()), workspace_root) {
+                Ok(member_dir) => member_dir,
+                Err(_) => return false,
+            };
+
+        member_dir.join("miden-project.toml") == manifest_path
+    })
 }
 
 /// A utility function for making a path absolute and canonical.

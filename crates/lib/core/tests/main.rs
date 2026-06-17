@@ -3,9 +3,10 @@ extern crate alloc;
 /// Instantiates a test with Miden core library included.
 #[macro_export]
 macro_rules! build_test {
-    ($($params:tt)+) => {{
+    ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        miden_utils_testing::build_test_by_mode!(false, $($params)+)
+        let source = $source;
+        miden_utils_testing::build_test_by_mode!(false, source $(, $tail)*)
             .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}
@@ -14,9 +15,10 @@ macro_rules! build_test {
 /// Instantiates a test in debug mode with Miden core library included.
 #[macro_export]
 macro_rules! build_debug_test {
-    ($($params:tt)+) => {{
+    ($source:expr $(, $tail:expr)* $(,)?) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        miden_utils_testing::build_test_by_mode!(true, $($params)+)
+        let source = $source;
+        miden_utils_testing::build_test_by_mode!(true, source $(, $tail)*)
             .with_library(core_lib.package())
             .with_event_handlers(core_lib.handlers())
     }}

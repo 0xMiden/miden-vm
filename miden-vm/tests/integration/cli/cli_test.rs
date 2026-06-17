@@ -109,7 +109,9 @@ fn cli_bundle_debug() {
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -124,7 +126,10 @@ fn cli_bundle_debug() {
 #[test]
 fn cli_bundle_no_exports() {
     let mut cmd = bin_under_test().command();
-    cmd.arg("bundle").arg("./tests/integration/cli/data/lib_noexports");
+    cmd.arg("bundle")
+        .arg("--namespace")
+        .arg("lib")
+        .arg("./tests/integration/cli/data/lib_noexports/mod.masm");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("package must contain at least one exported procedure"));
@@ -136,9 +141,8 @@ fn cli_bundle_kernel() {
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_main.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -152,9 +156,8 @@ fn cli_bundle_kernel_noexports() {
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib_noexports")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_noexports.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -165,7 +168,9 @@ fn cli_bundle_kernel_noexports() {
 fn cli_bundle_output() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
         .arg("cli_bundle_output.masp");
     cmd.assert().success();
@@ -178,7 +183,9 @@ fn cli_bundle_output() {
 fn cli_run_with_lib() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
         .arg("cli_run_with_lib.masp");
     cmd.assert().success();

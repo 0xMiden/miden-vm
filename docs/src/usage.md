@@ -103,8 +103,7 @@ If the level is not specified, `warn` level is set as default.
 
 #### Debugging procedures
 
-You can inspect VM state by importing the [`core::debug`](./user_docs/assembly/debugging.md)
-module and calling its print procedures from a MASM program.
+You can inspect VM state by importing the [`miden::core::debug`](./user_docs/assembly/debugging.md) module and calling its print procedures from a MASM program.
 
 ```shell
 ./target/optimized/miden-vm run [path_to.masm]
@@ -150,11 +149,9 @@ If you want the output of the program in a file, you can use the `--output` or `
 
 This will dump the output of the program into the `fib.out` file. The output file will contain the state of the stack at the end of the program execution.
 
-### Running with `core::debug` procedures
+### Running with `miden::core::debug` procedures
 
-Inside `miden-vm/masm-examples/fib/fib.masm`, import the `core::debug` module before
-`begin`, then call one of its procedures, such as `exec.debug::print_stack`, anywhere
-between `begin` and `end`:
+Inside `miden-vm/masm-examples/fib/fib.masm`, import the `miden::core::debug` module before `begin`, then call one of its procedures, such as `exec.debug::print_stack`, anywhere between `begin` and `end`:
 
 ```masm
 use miden::core::debug

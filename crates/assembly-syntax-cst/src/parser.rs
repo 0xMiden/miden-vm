@@ -285,6 +285,21 @@ impl<'input> Parser<'input> {
             return;
         }
 
+        if self.at_keyword("namespace") {
+            self.parse_namespace();
+            return;
+        }
+
+        if self.at_prefixed_keyword("extern", "package") {
+            self.parse_extern_package();
+            return;
+        }
+
+        if self.at_keyword("mod") || self.at_prefixed_keyword("pub", "mod") {
+            self.parse_submodule();
+            return;
+        }
+
         if self.at_kind(SyntaxKind::At)
             || self.at_keyword("proc")
             || self.at_prefixed_keyword("pub", "proc")
@@ -334,29 +349,253 @@ impl<'input> Parser<'input> {
         self.finish_node();
     }
 
-    fn parse_import(&mut self) {
-        self.start_node(SyntaxKind::Import);
+    fn parse_namespace(&mut self) {
+        self.start_node(SyntaxKind::Namespace);
+        self.expect_keyword("namespace", "expected `namespace` in namespace declaration");
+        self.bump_regular_trivia();
+        self.parse_path_with_message("expected a namespace path");
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_extern_package(&mut self) {
+        self.start_node(SyntaxKind::ExternPackage);
+        self.expect_keyword("extern", "expected `extern` in extern package declaration");
+        self.expect_keyword("package", "expected `package` in extern package declaration");
+        self.bump_regular_trivia();
+
+        if self.at_package_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected a package name");
+        }
+
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_submodule(&mut self) {
+        self.start_node(SyntaxKind::Submodule);
 
         if self.at_keyword("pub") {
             self.parse_visibility();
         }
 
-        self.expect_keyword("use", "expected `use` in import declaration");
+        self.expect_keyword("mod", "expected `mod` in submodule declaration");
         self.bump_regular_trivia();
-        self.parse_import_target();
-
-        if self.peek_after_non_comment_trivia() == Some(SyntaxKind::RArrow) {
-            self.bump_non_comment_trivia();
+        if self.at_name_like() {
             self.bump();
-            self.bump_non_comment_trivia();
-            if self.at_name_like() {
-                self.bump();
-            } else {
-                self.error_here("expected an alias name after `->`");
-            }
+        } else {
+            self.error_here("expected a submodule name");
         }
 
         self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_import(&mut self) {
+        self.start_node(SyntaxKind::Import);
+
+        let is_public = if self.at_keyword("pub") {
+            self.parse_visibility();
+            true
+        } else {
+            false
+        };
+
+        self.expect_keyword("use", "expected `use` in import declaration");
+        self.bump_inline_whitespace();
+
+        if self.at_kind(SyntaxKind::LBrace) {
+            self.parse_import_list();
+            self.parse_item_import_module_path();
+            self.parse_rejected_old_import_alias();
+        } else if self.at_kind(SyntaxKind::Star) {
+            self.parse_rejected_wildcard_import();
+        } else if self.at_kind(SyntaxKind::Number) {
+            self.parse_rejected_digest_import_target();
+        } else {
+            self.parse_module_import(is_public);
+        }
+
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_module_import(&mut self, is_public: bool) {
+        let path_start = self.current().map(Token::span).unwrap_or(self.eof_span);
+        if self.at_kind(SyntaxKind::Newline) || self.eof() {
+            self.error_here("expected an import path");
+            return;
+        }
+
+        self.parse_path_with_message("expected an import path");
+
+        if is_public {
+            self.error_at_span(path_start, "`pub use` is only supported for braced item imports");
+        }
+
+        self.parse_optional_module_alias();
+        self.parse_rejected_old_import_alias();
+    }
+
+    fn parse_optional_module_alias(&mut self) {
+        if !self.peek_contextual_keyword_after_non_comment_trivia("as") {
+            return;
+        }
+
+        self.bump_non_comment_trivia();
+        self.bump();
+        self.bump_inline_whitespace();
+        if self.at_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected an alias name after `as`");
+        }
+    }
+
+    fn parse_import_list(&mut self) {
+        self.start_node(SyntaxKind::ImportList);
+        let _ = self.expect_kind(SyntaxKind::LBrace, "expected `{` to start import list");
+
+        let mut saw_specifier = false;
+        loop {
+            self.bump_regular_trivia();
+
+            if self.eof() {
+                self.error_at_eof("expected `}` to close import list");
+                break;
+            }
+
+            if self.at_kind(SyntaxKind::RBrace) {
+                if !saw_specifier {
+                    self.error_here("import lists must contain at least one item");
+                }
+                self.bump();
+                break;
+            }
+
+            self.parse_import_specifier();
+            saw_specifier = true;
+            self.bump_regular_trivia();
+
+            if self.at_kind(SyntaxKind::Comma) {
+                self.bump();
+                continue;
+            }
+
+            if self.at_kind(SyntaxKind::RBrace) {
+                self.bump();
+                break;
+            }
+
+            self.error_here("expected `,` or `}` in import list");
+            if !self.at_import_list_recovery_boundary() {
+                self.bump();
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_import_specifier(&mut self) {
+        self.start_node(SyntaxKind::ImportSpecifier);
+        self.bump_regular_trivia();
+
+        if self.at_kind(SyntaxKind::Star) {
+            self.error_here("wildcard imports are not supported");
+            self.bump();
+            self.finish_node();
+            return;
+        }
+
+        if self.at_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected an imported item name");
+            if !self.at_import_list_recovery_boundary() {
+                self.bump();
+            }
+            self.finish_node();
+            return;
+        }
+
+        if self.peek_contextual_keyword_after_non_comment_trivia("as") {
+            self.bump_non_comment_trivia();
+            self.bump();
+            self.bump_inline_whitespace();
+            if self.at_name_like() {
+                self.bump();
+            } else {
+                self.error_here("expected an alias name after `as`");
+            }
+        }
+
+        self.parse_rejected_old_import_alias();
+        self.finish_node();
+    }
+
+    fn parse_item_import_module_path(&mut self) {
+        if !self.peek_contextual_keyword_after_non_comment_trivia("from") {
+            self.error_here("expected `from` after import list");
+            return;
+        }
+
+        self.bump_non_comment_trivia();
+        self.bump();
+        self.bump_inline_whitespace();
+
+        if self.at_kind(SyntaxKind::Newline) || self.eof() {
+            self.error_here("expected a module path after `from`");
+            return;
+        }
+
+        if self.at_kind(SyntaxKind::Number) {
+            self.parse_rejected_digest_import_target();
+        } else {
+            self.parse_path_with_message("expected a module path after `from`");
+        }
+    }
+
+    fn parse_rejected_old_import_alias(&mut self) {
+        if self.peek_after_non_comment_trivia() != Some(SyntaxKind::RArrow) {
+            return;
+        }
+
+        self.start_node(SyntaxKind::Error);
+        self.bump_non_comment_trivia();
+        self.error_here("import aliases use `as`; `->` is no longer supported");
+        self.bump();
+        self.bump_non_comment_trivia();
+        if self.at_name_like() {
+            self.bump();
+        } else {
+            self.error_here("expected an alias name after `->`");
+        }
+        self.finish_node();
+    }
+
+    fn parse_rejected_digest_import_target(&mut self) {
+        self.start_node(SyntaxKind::Error);
+        self.error_here("digest imports are not supported in source `use` declarations");
+        self.bump();
+        self.parse_optional_module_alias();
+        self.parse_rejected_old_import_alias();
+        self.finish_node();
+    }
+
+    fn parse_rejected_wildcard_import(&mut self) {
+        self.start_node(SyntaxKind::Error);
+        self.error_here("wildcard imports are not supported");
+        self.bump();
+
+        if self.peek_contextual_keyword_after_non_comment_trivia("from") {
+            self.bump_non_comment_trivia();
+            self.bump();
+            self.bump_regular_trivia();
+            self.parse_path_with_message("expected a module path after `from`");
+        }
+
         self.finish_node();
     }
 
@@ -439,17 +678,7 @@ impl<'input> Parser<'input> {
         self.finish_node();
     }
 
-    fn parse_import_target(&mut self) {
-        self.bump_regular_trivia();
-        if self.at_kind(SyntaxKind::Number) {
-            self.bump();
-            return;
-        }
-
-        self.parse_path();
-    }
-
-    fn parse_path(&mut self) {
+    fn parse_path_with_message(&mut self, message: &'static str) {
         self.start_node(SyntaxKind::Path);
         if self.at_kind(SyntaxKind::ColonColon) {
             self.bump();
@@ -459,7 +688,7 @@ impl<'input> Parser<'input> {
         if self.at_name_like() {
             self.bump();
         } else {
-            self.error_here("expected an import path");
+            self.error_here(message);
             self.finish_node();
             return;
         }
@@ -1075,14 +1304,25 @@ impl<'input> Parser<'input> {
     }
 
     fn peek_after_non_comment_trivia(&self) -> Option<SyntaxKind> {
+        self.peek_token_after_non_comment_trivia().map(Token::kind)
+    }
+
+    fn peek_token_after_non_comment_trivia(&self) -> Option<&Token<'input>> {
         let mut index = self.pos;
         while let Some(token) = self.tokens.get(index) {
             match token.kind() {
                 SyntaxKind::Whitespace | SyntaxKind::Newline => index += 1,
-                kind => return Some(kind),
+                _ => return Some(token),
             }
         }
         None
+    }
+
+    fn peek_contextual_keyword_after_non_comment_trivia(&self, keyword: &str) -> bool {
+        matches!(
+            self.peek_token_after_non_comment_trivia(),
+            Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword
+        )
     }
 
     fn is_top_level_starter(&self, index: usize) -> bool {
@@ -1094,13 +1334,19 @@ impl<'input> Parser<'input> {
             || token.kind() == SyntaxKind::At
             || (token.kind() == SyntaxKind::Ident
                 && match token.text() {
-                    "adv_map" | "begin" | "const" | "enum" | "proc" | "type" | "use" => true,
+                    "adv_map" | "begin" | "const" | "enum" | "mod" | "namespace" | "proc"
+                    | "type" | "use" => true,
+                    "extern" => matches!(
+                        self.next_relevant_top_level_token(index + 1)
+                            .and_then(|next| self.tokens.get(next)),
+                        Some(next) if next.kind() == SyntaxKind::Ident && next.text() == "package"
+                    ),
                     "pub" => matches!(
                         self.next_relevant_top_level_token(index + 1)
                             .and_then(|next| self.tokens.get(next)),
                         Some(next)
                             if next.kind() == SyntaxKind::Ident
-                                && matches!(next.text(), "const" | "enum" | "proc" | "type" | "use")
+                                && matches!(next.text(), "const" | "enum" | "mod" | "proc" | "type" | "use")
                     ),
                     _ => false,
                 })
@@ -1188,6 +1434,14 @@ impl<'input> Parser<'input> {
             self.current_kind(),
             Some(SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent)
         )
+    }
+
+    fn at_package_name_like(&self) -> bool {
+        self.at_name_like() || self.at_kind(SyntaxKind::QuotedString)
+    }
+
+    fn at_import_list_recovery_boundary(&self) -> bool {
+        self.eof() || matches!(self.current_kind(), Some(SyntaxKind::Comma | SyntaxKind::RBrace))
     }
 
     fn at_keyword(&self, keyword: &str) -> bool {
@@ -1307,6 +1561,10 @@ impl<'input> Parser<'input> {
 
     fn error_here(&mut self, message: impl Into<String>) {
         let span = self.current().map(Token::span).unwrap_or(self.eof_span);
+        self.error_at_span(span, message);
+    }
+
+    fn error_at_span(&mut self, span: SourceSpan, message: impl Into<String>) {
         self.diagnostics.push(diagnostic!(
             severity = Severity::Error,
             labels = vec![LabeledSpan::at(span, message.into())],
@@ -1418,7 +1676,10 @@ fn is_reserved_block_keyword(text: &str) -> bool {
             | "else"
             | "end"
             | "enum"
+            | "extern"
             | "if"
+            | "mod"
+            | "namespace"
             | "proc"
             | "pub"
             | "repeat"
@@ -1433,7 +1694,7 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
-        string::ToString,
+        string::{String, ToString},
         sync::Arc,
         vec::Vec,
     };
@@ -1444,7 +1705,7 @@ mod tests {
     use rowan::ast::AstNode;
 
     use crate::{
-        ast::{Item, SourceFile as AstSourceFile},
+        ast::{ImportKind, Item, SourceFile as AstSourceFile},
         parse_source_file, parse_text,
         parser::parse_inline_masm_text,
         syntax::SyntaxKind,
@@ -1493,6 +1754,12 @@ mod tests {
             "",
             "# leading comment\n#! module docs\npub const X = [0x01, 0x02]\n",
             "\
+namespace std::math
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod u64
+",
+            "\
 @inline
 # keep standalone
 @locals(1)
@@ -1530,6 +1797,27 @@ adv_map TABLE = [
             parse.syntax().text().to_string(),
             input,
             "CST parse was not lossless for {label}"
+        );
+    }
+
+    fn diagnostic_labels(parse: &super::Parse) -> Vec<String> {
+        parse
+            .diagnostics()
+            .iter()
+            .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+            .filter_map(|label| label.label())
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn assert_import_rejected(source: &str, expected_label: &str) {
+        let parse = parse_text(source);
+        assert!(parse.has_errors(), "expected {source:?} to be rejected");
+        let labels = diagnostic_labels(&parse);
+        assert!(
+            labels.iter().any(|label| label.contains(expected_label)),
+            "expected {source:?} to report {expected_label:?}, got {:?}",
+            parse.diagnostics()
         );
     }
 
@@ -1656,7 +1944,11 @@ adv_map TABLE = [
     fn parses_top_level_forms_and_nested_structured_ops() {
         let source = "\
 #! docs
-pub use foo::bar -> baz
+namespace std::math
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod u64
+pub use {bar as baz} from foo
 pub const X = 1
 pub type FeltAlias = felt
 adv_map TABLE = [0x01, 0x02]
@@ -1685,6 +1977,10 @@ end
             child_kinds,
             vec![
                 SyntaxKind::Doc,
+                SyntaxKind::Namespace,
+                SyntaxKind::ExternPackage,
+                SyntaxKind::Submodule,
+                SyntaxKind::Submodule,
                 SyntaxKind::Import,
                 SyntaxKind::Constant,
                 SyntaxKind::TypeDecl,
@@ -1702,7 +1998,11 @@ end
     #[test]
     fn exposes_typed_wrappers_for_structured_top_level_forms() {
         let source = "\
-pub use miden::core::mem -> memory
+namespace app::accounts
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod api
+use miden::core::mem as memory
 pub const EVENT = event(\"miden::event\")
 pub enum Bool : u8 {
     FALSE,
@@ -1716,23 +2016,54 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
 
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
         let items = source_file.items().collect::<Vec<_>>();
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 8);
 
-        let Item::Import(import) = &items[0] else {
-            panic!("expected import, got {:?}", items[0]);
+        let Item::Namespace(namespace) = &items[0] else {
+            panic!("expected namespace, got {:?}", items[0]);
         };
         assert_eq!(
-            import
+            namespace
                 .path()
+                .expect("namespace path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["app", "accounts"]
+        );
+
+        let Item::ExternPackage(package) = &items[1] else {
+            panic!("expected extern package, got {:?}", items[1]);
+        };
+        assert_eq!(package.package_token().expect("package name").text(), "\"miden/base@0.1.0\"");
+
+        let Item::Submodule(submodule) = &items[2] else {
+            panic!("expected submodule, got {:?}", items[2]);
+        };
+        assert!(submodule.visibility().is_none());
+        assert_eq!(submodule.name_token().expect("submodule name").text(), "internal");
+
+        let Item::Submodule(submodule) = &items[3] else {
+            panic!("expected public submodule, got {:?}", items[3]);
+        };
+        assert!(submodule.visibility().is_some());
+        assert_eq!(submodule.name_token().expect("submodule name").text(), "api");
+
+        let Item::Import(import) = &items[4] else {
+            panic!("expected import, got {:?}", items[0]);
+        };
+        assert_eq!(import.kind(), ImportKind::Module);
+        assert_eq!(
+            import
+                .module_path()
                 .expect("import path")
                 .segments()
                 .map(|segment| segment.text().to_string())
                 .collect::<Vec<_>>(),
             vec!["miden", "core", "mem"]
         );
-        assert_eq!(import.alias_token().expect("alias").text(), "memory");
+        assert_eq!(import.module_alias_token().expect("alias").text(), "memory");
 
-        let Item::Constant(constant) = &items[1] else {
+        let Item::Constant(constant) = &items[5] else {
             panic!("expected constant, got {:?}", items[1]);
         };
         assert_eq!(constant.name_token().expect("constant name").text(), "EVENT");
@@ -1746,7 +2077,7 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
             vec!["event", "(", "\"miden::event\"", ")"]
         );
 
-        let Item::TypeDecl(type_decl) = &items[2] else {
+        let Item::TypeDecl(type_decl) = &items[6] else {
             panic!("expected type declaration, got {:?}", items[2]);
         };
         assert_eq!(type_decl.keyword_token().expect("type keyword").text(), "enum");
@@ -1756,7 +2087,7 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
             "expected enum declaration to expose a structured type body"
         );
 
-        let Item::AdviceMap(advice_map) = &items[3] else {
+        let Item::AdviceMap(advice_map) = &items[7] else {
             panic!("expected advice map, got {:?}", items[3]);
         };
         assert_eq!(advice_map.name_token().expect("advice map name").text(), "TABLE");
@@ -1847,10 +2178,10 @@ end
     }
 
     #[test]
-    fn parses_multiline_import_aliases() {
+    fn cst_import_parses_multiline_module_aliases() {
         let source = "\
-pub use ::miden::core::collections::sorted_array::lowerbound_key_value
-    -> lowerbound_key_value
+use ::miden::core::collections::sorted_array::lowerbound_key_value
+    as lowerbound_key_value
 ";
 
         let parse = parse_text(source);
@@ -1863,13 +2194,273 @@ pub use ::miden::core::collections::sorted_array::lowerbound_key_value
         let Item::Import(import) = &items[0] else {
             panic!("expected import, got {:?}", items[0]);
         };
-        assert_eq!(import.alias_token().expect("alias").text(), "lowerbound_key_value");
+        assert_eq!(import.kind(), ImportKind::Module);
+        assert_eq!(import.module_alias_token().expect("alias").text(), "lowerbound_key_value");
+    }
+
+    #[test]
+    fn cst_import_parses_module_imports() {
+        let source = "\
+use foo
+use some::module
+use some::module as sm
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let imports = source_file
+            .items()
+            .map(|item| match item {
+                Item::Import(import) => import,
+                other => panic!("expected import, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(imports.len(), 3);
+
+        let first = &imports[0];
+        assert_eq!(first.kind(), ImportKind::Module);
+        assert!(first.visibility().is_none());
+        assert_eq!(
+            first
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["foo"]
+        );
+        assert!(first.module_alias_token().is_none());
+
+        let second = &imports[1];
+        assert_eq!(second.kind(), ImportKind::Module);
+        assert_eq!(
+            second
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["some", "module"]
+        );
+        assert!(second.module_alias_token().is_none());
+
+        let third = &imports[2];
+        assert_eq!(third.kind(), ImportKind::Module);
+        assert_eq!(
+            third
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["some", "module"]
+        );
+        assert_eq!(third.module_alias_token().expect("alias").text(), "sm");
+    }
+
+    #[test]
+    fn cst_import_parses_item_imports() {
+        let source = "\
+use {foo, bar as baz} from some::module
+pub use {alpha} from core
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let imports = source_file
+            .items()
+            .map(|item| match item {
+                Item::Import(import) => import,
+                other => panic!("expected import, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(imports.len(), 2);
+
+        let first = &imports[0];
+        assert_eq!(first.kind(), ImportKind::Items);
+        assert!(first.visibility().is_none());
+        assert!(
+            first.path().is_none(),
+            "item imports must not masquerade as legacy path imports"
+        );
+        assert!(
+            first.module_alias_token().is_none(),
+            "item aliases must not masquerade as module aliases"
+        );
+        assert_eq!(
+            first
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["some", "module"]
+        );
+        let specs = first.item_specs().collect::<Vec<_>>();
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].name_token().expect("item name").text(), "foo");
+        assert!(specs[0].alias_token().is_none());
+        assert_eq!(specs[1].name_token().expect("item name").text(), "bar");
+        assert_eq!(specs[1].alias_token().expect("item alias").text(), "baz");
+
+        let second = &imports[1];
+        assert_eq!(second.kind(), ImportKind::Items);
+        assert!(second.visibility().is_some());
+        assert_eq!(
+            second
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["core"]
+        );
+        let specs = second.item_specs().collect::<Vec<_>>();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name_token().expect("item name").text(), "alpha");
+    }
+
+    #[test]
+    fn cst_import_accepts_quoted_special_and_contextual_names() {
+        let source = "\
+use \"as\"::\"from\" as \"module\"
+use {as, from as as, \"as\" as \"from\", $kernel} from \"from\"::\"as\"
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let imports = source_file
+            .items()
+            .map(|item| match item {
+                Item::Import(import) => import,
+                other => panic!("expected import, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(imports.len(), 2);
+
+        let module = &imports[0];
+        assert_eq!(
+            module
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["\"as\"", "\"from\""]
+        );
+        assert_eq!(module.module_alias_token().expect("module alias").text(), "\"module\"");
+
+        let items = &imports[1];
+        assert_eq!(
+            items
+                .module_path()
+                .expect("module path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["\"from\"", "\"as\""]
+        );
+        let specs = items.item_specs().collect::<Vec<_>>();
+        assert_eq!(specs.len(), 4);
+        assert_eq!(specs[0].name_token().expect("item name").text(), "as");
+        assert!(specs[0].alias_token().is_none());
+        assert_eq!(specs[1].name_token().expect("item name").text(), "from");
+        assert_eq!(specs[1].alias_token().expect("item alias").text(), "as");
+        assert_eq!(specs[2].name_token().expect("item name").text(), "\"as\"");
+        assert_eq!(specs[2].alias_token().expect("item alias").text(), "\"from\"");
+        assert_eq!(specs[3].name_token().expect("item name").text(), "$kernel");
+    }
+
+    #[test]
+    fn cst_import_rejects_public_module_imports_and_removed_forms() {
+        let cases = [
+            ("pub use some::module\n", "`pub use` is only supported for braced item imports"),
+            ("use foo->bar\n", "import aliases use `as`; `->` is no longer supported"),
+            ("pub use foo->bar\n", "import aliases use `as`; `->` is no longer supported"),
+            (
+                "use {foo->bar} from m\n",
+                "import aliases use `as`; `->` is no longer supported",
+            ),
+            (
+                "use 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef->foo\n",
+                "digest imports are not supported",
+            ),
+            (
+                "pub use 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef->foo\n",
+                "digest imports are not supported",
+            ),
+            (
+                "use {foo} from 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n",
+                "digest imports are not supported",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            assert_import_rejected(source, expected);
+        }
+    }
+
+    #[test]
+    fn cst_import_does_not_consume_next_item_after_missing_alias_or_from_path() {
+        let cases = [
+            ("use\npub const X = 1\n", "expected an import path"),
+            ("use foo as\npub const X = 1\n", "expected an alias name after `as`"),
+            ("use {foo} from\npub const X = 1\n", "expected a module path after `from`"),
+        ];
+
+        for (source, expected) in cases {
+            let parse = parse_text(source);
+            assert!(parse.has_errors(), "expected {source:?} to be rejected");
+            let labels = diagnostic_labels(&parse);
+            assert!(
+                labels.iter().any(|label| label.contains(expected)),
+                "expected {source:?} to report {expected:?}, got {:?}",
+                parse.diagnostics()
+            );
+
+            let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+            let items = source_file.items().collect::<Vec<_>>();
+            assert_eq!(items.len(), 2, "next top-level item should remain separate");
+            assert!(matches!(items[0], Item::Import(_)));
+            let Item::Constant(constant) = &items[1] else {
+                panic!("expected second item to remain a constant, got {:?}", items[1]);
+            };
+            assert!(constant.visibility().is_some(), "`pub` must remain attached to const");
+            assert_eq!(constant.name_token().expect("constant name").text(), "X");
+        }
+    }
+
+    #[test]
+    fn cst_import_rejects_malformed_item_imports() {
+        let cases = [
+            ("use {} from m\n", "import lists must contain at least one item"),
+            ("use {foo} m\n", "expected `from` after import list"),
+            ("use foo as\n", "expected an alias name after `as`"),
+            ("use {foo as} from m\n", "expected an alias name after `as`"),
+        ];
+
+        for (source, expected) in cases {
+            assert_import_rejected(source, expected);
+        }
+    }
+
+    #[test]
+    fn cst_import_rejects_wildcard_imports() {
+        for source in ["use * from m\n", "use {*} from m\n", "use {foo, *} from m\n"] {
+            assert_import_rejected(source, "wildcard imports are not supported");
+        }
     }
 
     #[test]
     fn keeps_header_comments_on_structured_nodes() {
         let source = "\
-use ::miden::utils::panic # import
+use {panic} from ::miden::utils # import
 pub proc long_name(arg: felt) # proc
     nop
 end
@@ -2146,6 +2737,26 @@ end
     }
 
     #[test]
+    fn rejects_unknown_special_identifiers() {
+        for source in [
+            "use $foo::bar\n",
+            "begin\n    exec.$foo::bar\nend\n",
+            "begin\n    exec.$execFoo::bar\nend\n",
+            "begin\n    exec.$kernelFoo::bar\nend\n",
+        ] {
+            let parse = parse_text(source);
+            assert!(parse.has_errors(), "expected {source:?} to reject unknown special ident");
+            assert!(parse.diagnostics().iter().any(|diag| diag.labels.as_ref().is_some_and(
+                |labels| {
+                    labels.iter().any(|l| {
+                        l.label().is_some_and(|label| label.contains("unrecognized token"))
+                    })
+                }
+            )));
+        }
+    }
+
+    #[test]
     fn parse_source_file_tracks_source_aware_spans() {
         let source = Arc::new(ManagedSourceFile::new(
             SourceId::new(11),
@@ -2240,17 +2851,38 @@ end
     }
 
     #[test]
-    fn import_path_spans_do_not_consume_trailing_newlines() {
-        let source = "use lib::a::FOO\nbegin end\n";
+    fn cst_import_spans_do_not_consume_trailing_newlines() {
+        let source = "\
+use lib::a
+use {foo} from lib::b
+begin end
+";
         let parse = parse_text(source);
         let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
-        let Item::Import(import) = source_file.items().next().expect("import item") else {
+        let items = source_file.items().collect::<Vec<_>>();
+        let Item::Import(module_import) = &items[0] else {
             panic!("expected first item to be an import");
         };
-        let path = import.path().expect("import path");
-        let start = source.find("lib::a::FOO").expect("path start") as u32;
-        let end = start + "lib::a::FOO".len() as u32;
+        let module_path = module_import.module_path().expect("module path");
+        let start = source.find("lib::a").expect("path start") as u32;
+        let end = start + "lib::a".len() as u32;
         let expected = SourceSpan::new(parse.source().id(), start..end);
-        assert_eq!(parse.span_for_node(path.syntax()), expected);
+        assert_eq!(parse.span_for_node(module_path.syntax()), expected);
+
+        let Item::Import(item_import) = &items[1] else {
+            panic!("expected second item to be an import");
+        };
+        let item_path = item_import.module_path().expect("item import module path");
+        let start = source.find("lib::b").expect("path start") as u32;
+        let end = start + "lib::b".len() as u32;
+        let expected = SourceSpan::new(parse.source().id(), start..end);
+        assert_eq!(parse.span_for_node(item_path.syntax()), expected);
+
+        let spec = item_import.item_specs().next().expect("item specifier");
+        let name = spec.name_token().expect("item name");
+        let start = source.find("foo").expect("item start") as u32;
+        let end = start + "foo".len() as u32;
+        let expected = SourceSpan::new(parse.source().id(), start..end);
+        assert_eq!(parse.span_for_token(&name), expected);
     }
 }

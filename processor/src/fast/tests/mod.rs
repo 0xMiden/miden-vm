@@ -1,7 +1,10 @@
 use alloc::{string::ToString, sync::Arc, vec};
 
 use miden_air::trace::MIN_TRACE_LEN;
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::{
+    Assembler, DefaultSourceManager, Path,
+    ast::{Module, ModuleKind},
+};
 use miden_core::{
     ONE, assert_matches,
     events::SystemEvent,
@@ -23,6 +26,14 @@ mod advice_provider;
 mod all_ops;
 mod masm_consistency;
 mod memory;
+
+fn parse_kernel_source(
+    source_manager: Arc<dyn miden_debug_types::SourceManager>,
+    source: &str,
+) -> Box<Module> {
+    let mut parser = Module::parser(Some(ModuleKind::Kernel));
+    parser.parse_str(Some(Path::KERNEL), source, source_manager).unwrap()
+}
 
 #[test]
 fn stack_get_word_out_of_bounds_read() {
@@ -47,7 +58,7 @@ fn stack_get_word_out_of_bounds_read() {
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
-        .assemble_program("program", program_source)
+        .assemble_program("program", &program_source)
         .expect("program should assemble")
         .unwrap_program();
 
@@ -115,7 +126,7 @@ fn test_reset_stack_in_buffer_from_drop() {
     let initial_stack: [u64; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let final_stack: Vec<u64> = initial_stack.to_vec();
 
-    let test = build_test!(&asm, &initial_stack);
+    let test = build_test!(asm, &initial_stack);
     test.expect_stack(&final_stack);
 }
 
@@ -161,7 +172,7 @@ fn test_reset_stack_in_buffer_from_restore_context() {
     let initial_stack: [u64; 15] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     let final_stack: Vec<u64> = initial_stack.to_vec();
 
-    let test = build_test!(&asm, &initial_stack);
+    let test = build_test!(asm, &initial_stack);
     test.expect_stack(&final_stack);
 }
 

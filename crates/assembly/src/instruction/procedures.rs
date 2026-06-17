@@ -27,9 +27,7 @@ impl Assembler {
         mast_forest_builder: &mut MastForestBuilder,
         asm_op: Option<AssemblyOp>,
     ) -> Result<MastNodeRef, Report> {
-        let resolved = self
-            .resolve_target(kind, callee, caller, mast_forest_builder)?
-            .ok_or_else(|| self.invalid_invoke_target_report(kind, callee, caller))?;
+        let resolved = self.resolve_target(kind, callee, caller.module, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
@@ -70,16 +68,12 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
-            let resolved = self
-                .resolve_target(
-                    InvokeKind::ProcRef,
-                    callee,
-                    caller,
-                    block_builder.mast_forest_builder_mut(),
-                )?
-                .ok_or_else(|| {
-                    self.invalid_invoke_target_report(InvokeKind::ProcRef, callee, caller)
-                })?;
+            let resolved = self.resolve_target(
+                InvokeKind::ProcRef,
+                callee,
+                caller.module,
+                block_builder.mast_forest_builder_mut(),
+            )?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
             block_builder.mast_forest_builder().mast_root_for_ref(resolved.node).unwrap()

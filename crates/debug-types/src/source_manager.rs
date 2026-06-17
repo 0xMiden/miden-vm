@@ -152,6 +152,17 @@ pub trait SourceManager: Debug {
         let content = SourceContent::new(lang, name.clone(), content);
         self.load_from_raw_parts(name, content)
     }
+    /// Load the given `content` into this [SourceManager] with a name generated from the hash of
+    /// its contents
+    fn load_anonymous(&self, lang: SourceLanguage, content: String) -> Arc<SourceFile> {
+        use alloc::format;
+
+        use miden_crypto::hash::sha2::Sha256;
+        let digest = Sha256::hash(content.as_bytes());
+        let name = Uri::new(format!("memory://{}", String::from(digest)));
+        let content = SourceContent::new(lang, name.clone(), content);
+        self.load_from_raw_parts(name, content)
+    }
     /// Load content into this [SourceManager] from raw [SourceFile] components
     fn load_from_raw_parts(&self, name: Uri, content: SourceContent) -> Arc<SourceFile>;
     /// Update the source file corresponding to `id` after being notified of a change event.
@@ -256,7 +267,17 @@ pub trait SourceManagerExt: SourceManager {
     /// Load the content of `path` into this [SourceManager]
     fn load_file(&self, path: &std::path::Path) -> Result<Arc<SourceFile>, SourceManagerError> {
         let uri = Uri::from(path);
-        if let Some(existing) = self.get_by_uri(&uri) {
+        let content = std::fs::read_to_string(path).map_err(|source| {
+            SourceManagerError::custom_with_source(
+                alloc::format!("failed to load file at `{}`", path.display()),
+                source,
+            )
+        })?;
+
+        // Return the already-allocated file if it has already been loaded and with change since
+        if let Some(existing) = self.get_by_uri(&uri)
+            && existing.as_str() == content.as_str()
+        {
             return Ok(existing);
         }
 
