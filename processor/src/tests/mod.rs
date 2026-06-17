@@ -1478,7 +1478,6 @@ fn user_doc_assembly_cycle_fixtures_match_documentation() {
 
 struct AssemblyCycleFixture {
     id: String,
-    marker: String,
     program: String,
     baseline_program: Option<String>,
     stack_inputs: Option<Vec<u64>>,
@@ -1488,7 +1487,8 @@ struct AssemblyCycleFixture {
 fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
     const FIXTURES: &str = include_str!("../../../scripts/assembly-cycle-fixtures.toml");
 
-    let table: toml::Table = FIXTURES.parse().expect("assembly cycle fixtures should be valid TOML");
+    let table: toml::Table =
+        FIXTURES.parse().expect("assembly cycle fixtures should be valid TOML");
     let cases = table
         .get("case")
         .and_then(toml::Value::as_array)
@@ -1510,11 +1510,6 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
 
             AssemblyCycleFixture {
                 id: case.get("id").and_then(toml::Value::as_str).expect("id").to_string(),
-                marker: case
-                    .get("marker")
-                    .and_then(toml::Value::as_str)
-                    .expect("marker")
-                    .to_string(),
                 program: case
                     .get("program")
                     .and_then(toml::Value::as_str)
@@ -1529,8 +1524,7 @@ fn load_assembly_cycle_fixtures() -> Vec<AssemblyCycleFixture> {
                         items
                             .iter()
                             .map(|item| {
-                                item.as_integer()
-                                    .expect("stack input should be an integer") as u64
+                                item.as_integer().expect("stack input should be an integer") as u64
                             })
                             .collect()
                     })

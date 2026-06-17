@@ -207,7 +207,7 @@ check-features: ## Checks all feature combinations compile without warnings usin
 
 .PHONY: check-user-doc-cycles
 check-user-doc-cycles: ## Checks user doc cycle counts against generated core-lib docs
-	@scripts/check-user-doc-cycles.sh
+	@bash scripts/check-user-doc-cycles.sh
 
 # --- building ------------------------------------------------------------------------------------
 
