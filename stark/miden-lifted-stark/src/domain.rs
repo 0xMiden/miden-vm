@@ -531,18 +531,21 @@ impl<F: TwoAdicField> LiftedDomain<F> {
 
     // ============ OOD point sampling ============
 
-    /// Sample an OOD evaluation point outside both `H` and the LDE coset.
+    /// Sample an OOD evaluation point outside both `H` and the LDE coset, and nonzero.
     ///
     /// Repeatedly draws candidates from `channel` until one falls outside both exclusion
-    /// sets. Terminates with overwhelming probability because `|H ∪ gK|` is negligible
-    /// relative to the extension field size.
+    /// sets and is nonzero. Terminates with overwhelming probability because
+    /// `|{0} ∪ H ∪ gK|` is negligible relative to the extension field size.
     pub fn sample_ood_point<EF>(&self, channel: &mut impl Channel<F = F>) -> EF
     where
         EF: ExtensionField<F>,
     {
         loop {
             let candidate: EF = channel.sample_algebra_element();
-            if !self.trace_subgroup.contains(candidate) && !self.lde_coset.contains(candidate) {
+            if !candidate.is_zero()
+                && !self.trace_subgroup.contains(candidate)
+                && !self.lde_coset.contains(candidate)
+            {
                 break candidate;
             }
         }

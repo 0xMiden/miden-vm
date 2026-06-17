@@ -19,11 +19,15 @@
 //! wᵢ(z) = xᵢ / (z − xᵢ)
 //! ```
 //!
+//! The implementation factors `wᵢ(z) = xᵢ/(z − xᵢ) = z · (1/(z − xᵢ) − 1/z)`, replacing
+//! each base×extension product `xᵢ · qᵢ(z)` with an extension subtraction `qᵢ(z) − 1/z`
+//! and pulling the shared `z` into the scaling `s(z)`. This requires `z ≠ 0`.
+//!
 //! # Point quotients
 //! We precompute `qᵢ(zⱼ) = 1/(zⱼ − xᵢ)` for all domain points `xᵢ` and all
 //! opening points `zⱼ` using batch inversion (Montgomery's trick). This single
 //! table is reused for:
-//! - barycentric weights: `wᵢ(zⱼ) = xᵢ · qᵢ(zⱼ)`
+//! - barycentric weights: `wᵢ(zⱼ) = zⱼ · (qᵢ(zⱼ) − 1/zⱼ)`
 //! - DEEP quotients: `(f(zⱼ) − f(X)) / (zⱼ − X)`
 //!
 //! # Lifting and weight folding
@@ -74,7 +78,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
     ///
     /// Preconditions: all evaluation points must be outside the LDE evaluation coset
     /// `gK` represented by `coset_points` (i.e., `zⱼ ≠ xᵢ` for all i, j). Otherwise
-    /// division by zero occurs in the barycentric weights and DEEP quotient.
+    /// division by zero occurs in the barycentric weights and DEEP quotient. Points must
+    /// also be nonzero, since [`Self::batch_eval_lifted`] inverts them.
     ///
     /// In the common case where the trace domain `H` is a sub-coset of `gK`, avoiding
     /// `gK` also avoids `H`. If a caller uses a different domain relationship, it must
@@ -133,12 +138,12 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         let shift = coset_points[0]; // g in bit-reversed order
         let shift_inverse = shift.inverse();
 
-        // Compute barycentric scaling factors for each point:
-        // sⱼ(zⱼ) = ((zⱼ/g)ᵈ − 1) / d
+        // Compute barycentric scaling factors for each point, folding in the `zⱼ` shared by
+        // the factored weights below: zⱼ · sⱼ(zⱼ) = zⱼ · ((zⱼ/g)ᵈ − 1) / d
         let barycentric_scalings = self.points.map(|point| {
             let z_over_shift = point * shift_inverse;
             let t = z_over_shift.exp_power_of_2(log_d) - EF::ONE;
-            t.div_2exp_u64(log_d as u64)
+            point * t.div_2exp_u64(log_d as u64)
         });
 
         let used_degrees: BTreeSet<usize> = matrices_groups
@@ -146,18 +151,17 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
             .flat_map(|g| g.iter().map(|m| m.height() >> log_blowup as usize))
             .collect();
 
-        // Compute barycentric weights for each point at each height:
-        // wᵢⱼ(zⱼ) = xᵢ / (zⱼ − xᵢ) = xᵢ · point_quotient[i][j]
+        // Compute factored barycentric weights for each point at each height:
+        // aᵢⱼ(zⱼ) = point_quotient[i][j] − 1/zⱼ, with the shared zⱼ carried by
+        // `barycentric_scalings` so that zⱼ · aᵢⱼ = xᵢ / (zⱼ − xᵢ).
         // For smaller domains, sum chunks (weight folding).
+        let inv_points = self.points.map(|point| point.inverse());
         let barycentric_weights: LinearMap<usize, Vec<FieldArray<EF, N>>> =
             debug_span!("barycentric_weights", d).in_scope(|| {
                 assert_eq!(*used_degrees.last().unwrap(), d);
                 // Initial weights at full domain size
-                let top_weights: Vec<FieldArray<EF, N>> = coset_points[..d]
-                    .par_iter()
-                    .zip(self.point_quotient[..d].par_iter())
-                    .map(|(&x, invs)| (*invs).map(|inv| inv * x))
-                    .collect();
+                let top_weights: Vec<FieldArray<EF, N>> =
+                    self.point_quotient[..d].par_iter().map(|invs| *invs - inv_points).collect();
 
                 let mut weights = Vec::with_capacity(used_degrees.len());
                 weights.push(top_weights);

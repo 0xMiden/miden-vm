@@ -8,6 +8,7 @@
 - [BREAKING] Make `Felt::Packing` resolve to the SIMD-packed `PackedFelt` from Plonky3 ([#1060](https://github.com/0xMiden/crypto/pull/1060)).
 - Improved LargeSmt RocksDB defaults, added per-DB memory-budget controls, and exposed durability mode selection ([#1056](https://github.com/0xMiden/crypto/pull/1056)).
 - Added doctests for ECDSA signature serialization, sponge state sizing, SMT sorted entries, and lifted AIR Fiat-Shamir docs ([#1049](https://github.com/0xMiden/crypto/pull/1049)).
+- perf: factor the DEEP barycentric inner loop to drop the per-row `xᵢ · qᵢ` base×extension multiplication ([#1064](https://github.com/0xMiden/crypto/issues/1064)).
 
 ## 0.26.0 (06-02-2026)
 
