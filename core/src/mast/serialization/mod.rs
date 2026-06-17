@@ -323,6 +323,7 @@ pub enum MastForestReadView<'a> {
 /// use miden_core::{
 ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
 ///     operations::Operation,
+///     serde::Serializable,
 /// };
 ///
 /// let mut forest = MastForest::new();
@@ -379,6 +380,7 @@ impl<'a> MastForestWireView<'a> {
     /// use miden_core::{
     ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
+    ///     serde::Serializable,
     /// };
     ///
     /// let mut forest = MastForest::new();
@@ -435,6 +437,7 @@ impl<'a> MastForestWireView<'a> {
     /// use miden_core::{
     ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastForestWireView},
     ///     operations::Operation,
+    ///     serde::Serializable,
     /// };
     ///
     /// let mut forest = MastForest::new();
