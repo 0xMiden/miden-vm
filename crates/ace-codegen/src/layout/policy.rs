@@ -143,7 +143,7 @@ impl InputLayout {
 
         let stark_vars = builder.alloc(num_stark_vars, policy.stark_vars);
 
-        // Matches utils::set_up_auxiliary_inputs_ace layout (EF slots).
+        // Matches the VM MASM constraint-evaluation input layout (EF slots).
         //
         // Extension-field values are grouped first (slots 0-6), then base-field
         // values stored as (val, 0) in EF slots (slots 7-9).
@@ -227,10 +227,11 @@ impl InputLayout {
 mod tests {
     use super::super::{InputCounts, InputKey, InputLayout};
 
-    const STARK_UTILS: &str = include_str!("../../../../crates/lib/core/asm/stark/utils.masm");
+    const VM_CONSTRAINT_EVAL_INPUTS: &str =
+        include_str!("../../../../crates/lib/core/asm/sys/vm/constraints_eval_inputs.masm");
 
     fn constraints_eval_inputs_const(name: &str) -> usize {
-        STARK_UTILS
+        VM_CONSTRAINT_EVAL_INPUTS
             .lines()
             .find_map(|line| {
                 let mut parts = line.split_whitespace();

@@ -300,7 +300,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
     let masm = format!(
         concat!(
             "use miden::core::stark::constants\n",
-            "use miden::core::stark::utils\n\n",
+            "use miden::core::sys::vm::constraints_eval_inputs\n\n",
             "# CONSTANTS\n",
             "# =================================================================================================\n\n",
             "# Number of READ variables (inputs + constants) for the constraint evaluation circuit.\n",
@@ -325,7 +325,7 @@ fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result
             "pub proc execute_constraint_evaluation_check()\n",
             "    exec.constants::assert_valid_order_tag\n\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
-            "    exec.utils::set_up_auxiliary_inputs_ace\n\n",
+            "    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace\n\n",
             "    exec.load_and_authenticate_ace_circuit\n\n",
             "    push.NUM_EVAL_GATES_CIRCUIT\n",
             "    push.NUM_INPUTS_CIRCUIT\n",

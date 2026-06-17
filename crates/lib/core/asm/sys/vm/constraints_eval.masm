@@ -1,5 +1,5 @@
 use miden::core::stark::constants
-use miden::core::stark::utils
+use miden::core::sys::vm::constraints_eval_inputs
 
 # CONSTANTS
 # =================================================================================================
@@ -35,7 +35,7 @@ pub proc execute_constraint_evaluation_check()
     exec.constants::assert_valid_order_tag
 
     push.MAX_CYCLE_LEN_LOG
-    exec.utils::set_up_auxiliary_inputs_ace
+    exec.constraints_eval_inputs::set_up_auxiliary_inputs_ace
 
     exec.load_and_authenticate_ace_circuit
 
