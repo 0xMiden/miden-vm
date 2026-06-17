@@ -1,6 +1,8 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BaseHost, BreakReason, ContextId, MapExecErr, Stopper,
@@ -105,7 +107,7 @@ where
     // host).
     match current_forest.find_procedure_root(callee_hash) {
         Some(callee_id) => {
-            let source_node_id = match state.source_debug_info {
+            let source_node_id = match &state.source_debug_info {
                 Some(source_debug_info) => source_debug_info
                     .unique_source_root_for_exec_node(callee_id)
                     .unwrap_or_default(),
@@ -254,8 +256,11 @@ where
 pub fn finish_load_mast_forest_from_dyn_start<P, S, T, F>(
     root_id: MastNodeId,
     new_forest: F,
+    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
+    new_source_node_id: Option<DebugSourceNodeId>,
     processor: &mut P,
     current_forest: &mut F,
+    current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
     stopper: &S,
@@ -268,15 +273,19 @@ where
 {
     // Save the old forest: the continuation from start_clock_cycle references nodes in it.
     let old_forest = current_forest.clone();
+    let old_package_debug_info = current_package_debug_info.clone();
 
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(current_forest.clone());
+    continuation_stack
+        .push_enter_forest_with_package_debug_info(current_forest.clone(), old_package_debug_info);
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    continuation_stack.push_start_node(root_id);
+    continuation_stack
+        .push_with_source_node_id(Continuation::StartNode(root_id), new_source_node_id);
 
     // Set the new MAST forest as current
     *current_forest = new_forest;
+    *current_package_debug_info = new_package_debug_info;
 
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
     // forest because the continuation was set during start_clock_cycle, which referenced the old

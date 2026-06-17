@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::Kernel};
-use miden_mast_package::debug_info::DebugSourceNodeId;
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     ExecutionError, FastProcessor, Stopper,
@@ -21,6 +21,7 @@ pub struct ResumeContext {
     pub(crate) current_forest: Arc<MastForest>,
     pub(crate) continuation_stack: ContinuationStack<Arc<MastForest>>,
     pub(crate) kernel: Kernel,
+    pub(crate) package_debug_info: Option<Arc<PackageDebugInfo>>,
 }
 
 impl ResumeContext {

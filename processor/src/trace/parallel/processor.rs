@@ -148,6 +148,7 @@ impl ReplayProcessor {
     {
         let host = &mut NoopHost;
         let stopper = &ReplayStopper;
+        let mut package_debug_info = None;
 
         while let ControlFlow::Break(internal_break_reason) = execute_impl(
             self,
@@ -157,7 +158,7 @@ impl ReplayProcessor {
             host,
             tracer,
             stopper,
-            None,
+            &mut package_debug_info,
         ) {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
@@ -195,8 +196,11 @@ impl ReplayProcessor {
                     finish_load_mast_forest_from_dyn_start(
                         root_id,
                         new_forest,
+                        None,
+                        None,
                         self,
                         current_forest,
+                        &mut package_debug_info,
                         continuation_stack,
                         tracer,
                         stopper,
@@ -226,8 +230,11 @@ impl ReplayProcessor {
                     finish_load_mast_forest_from_external(
                         root_id,
                         new_forest,
+                        None,
+                        None,
                         external_node_id,
                         current_forest,
+                        &mut package_debug_info,
                         continuation_stack,
                         tracer,
                     )?;

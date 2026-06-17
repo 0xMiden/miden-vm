@@ -4,10 +4,9 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    ProcessorState, StackInputs, Word,
+    LoadedMastForest, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName},
-    mast::MastForest,
 };
 
 struct YieldingAsyncHost {
@@ -33,7 +32,7 @@ impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
         async { None }
     }
 

@@ -1,6 +1,7 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_mast_package::debug_info::DebugSourceNodeId;
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     BreakReason,
@@ -54,8 +55,11 @@ where
 pub fn finish_load_mast_forest_from_external<F, T>(
     resolved_node_id_new_forest: MastNodeId,
     new_mast_forest: F,
+    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
+    new_source_node_id: Option<DebugSourceNodeId>,
     external_node_id_old_forest: MastNodeId,
     current_forest: &mut F,
+    current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
     continuation_stack: &mut ContinuationStack<F>,
     tracer: &mut T,
 ) -> ControlFlow<BreakReason<F>>
@@ -83,18 +87,21 @@ where
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
+    let old_package_debug_info = current_package_debug_info.clone();
+
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(old_forest.clone());
+    continuation_stack
+        .push_enter_forest_with_package_debug_info(old_forest.clone(), old_package_debug_info);
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    //
-    // Caller package debug info describes the forest that contained the `External` node, not the
-    // loaded forest. The loaded root therefore starts without a source sidecar here.
-    continuation_stack
-        .push_with_source_node_id(Continuation::StartNode(resolved_node_id_new_forest), None);
+    continuation_stack.push_with_source_node_id(
+        Continuation::StartNode(resolved_node_id_new_forest),
+        new_source_node_id,
+    );
 
     // Update the current forest to the new MAST forest.
     *current_forest = new_mast_forest;
+    *current_package_debug_info = new_package_debug_info;
 
     // Note that executing an External node does not end the clock cycle, so we do not finalize the
     // clock cycle here.
@@ -137,12 +144,16 @@ mod tests {
         let mut continuation_stack =
             ContinuationStack::new_with_source_node_id(&program, caller_source_node_id);
         let mut tracer = NoopTracer;
+        let mut package_debug_info = None;
 
         let result = finish_load_mast_forest_from_external(
             target_id,
             new_mast_forest,
+            None,
+            None,
             external_id,
             &mut current_forest,
+            &mut package_debug_info,
             &mut continuation_stack,
             &mut tracer,
         );
@@ -154,7 +165,7 @@ mod tests {
         );
         assert_matches!(
             continuation_stack.pop_continuation_with_source_node_id(),
-            Some((Continuation::EnterForest(_), None))
+            Some((Continuation::EnterForest { .. }, None))
         );
         assert_matches!(
             continuation_stack.pop_continuation_with_source_node_id(),

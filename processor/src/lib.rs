@@ -56,7 +56,8 @@ pub use errors::{
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
+    SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };

@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
@@ -45,7 +46,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub host: &'a mut H,
     pub tracer: &'a mut T,
     pub stopper: &'a S,
-    pub source_debug_info: Option<&'a PackageDebugInfo>,
+    pub source_debug_info: Option<Arc<PackageDebugInfo>>,
     pub current_source_node_id: Option<DebugSourceNodeId>,
 }
 
@@ -58,7 +59,7 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
         &self,
         child_index: usize,
     ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
-        let Some(source_debug_info) = self.source_debug_info else {
+        let Some(source_debug_info) = &self.source_debug_info else {
             return Ok(None);
         };
         let Some(current_source_node_id) = self.current_source_node_id else {
@@ -75,9 +76,9 @@ impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
             .map(|(source_node_id, _)| source_node_id))
     }
 
-    pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'a>> {
+    pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'_>> {
         Some(PackageSourceDebugContext::new_optional(
-            self.source_debug_info?,
+            self.source_debug_info.as_deref()?,
             self.current_source_node_id,
         ))
     }
@@ -184,7 +185,7 @@ pub(crate) fn execute_impl<P, S, T, F>(
     host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
-    source_debug_info: Option<&PackageDebugInfo>,
+    source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
 ) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
@@ -192,7 +193,7 @@ where
     T: Tracer<Processor = P, Forest = F>,
     F: ExecutableMastForest + Clone,
 {
-    let Some(source_debug_info) = source_debug_info else {
+    if source_debug_info.is_none() && !continuation_stack.tracks_source_nodes() {
         return execute_impl_pure(
             processor,
             continuation_stack,
@@ -211,7 +212,7 @@ where
         host,
         tracer,
         stopper,
-        source_debug_info: Some(source_debug_info),
+        source_debug_info: source_debug_info.clone(),
         current_source_node_id: None,
     };
 
@@ -306,9 +307,11 @@ where
                 basic_block::finish_basic_block(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::EnterForest(previous_forest) => {
+            Continuation::EnterForest { forest, package_debug_info } => {
                 // Restore the previous forest
-                *current_forest = previous_forest;
+                *current_forest = forest;
+                state.source_debug_info = package_debug_info.clone();
+                *source_debug_info = package_debug_info;
             },
         }
     }
@@ -436,8 +439,8 @@ where
                 basic_block::finish_basic_block(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::EnterForest(previous_forest) => {
-                *current_forest = previous_forest;
+            Continuation::EnterForest { forest, .. } => {
+                *current_forest = forest;
             },
         }
     }

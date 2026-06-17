@@ -69,6 +69,7 @@ fn run(source: &str, advice: AdviceInputs) -> (String, ExecutionOutput) {
     let buf = Arc::new(Mutex::new(String::new()));
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers: debug_handlers_with_writer(SharedBuf(buf.clone())),
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
@@ -293,6 +294,7 @@ fn print_mem_rejects_out_of_bounds_range_end() {
         .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
@@ -335,6 +337,7 @@ fn print_mem_rejects_oversized_range() {
         .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
@@ -377,6 +380,7 @@ fn print_mem_rejects_full_range() {
         .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers: debug_handlers_with_writer(SharedBuf(Arc::new(Mutex::new(String::new())))),
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
@@ -580,6 +584,7 @@ fn debug_handlers_compose_with_default_core_handlers() {
     handlers.extend(advice_debug_handlers());
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers,
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
@@ -649,6 +654,7 @@ fn noop_debug_handlers_run_print_stack_without_output() {
         .unwrap_program();
     let host_lib = HostLibrary {
         mast_forest: core_lib.mast_forest().clone(),
+        package_debug_info: Ok(None),
         handlers: noop_debug_handlers(),
     };
     let mut host = DefaultHost::default().with_library(host_lib).expect("failed to load host lib");
