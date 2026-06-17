@@ -289,6 +289,53 @@ fn host_loaded_package_debug_info_reports_loaded_source_span() {
 }
 
 #[test]
+fn host_loaded_package_debug_info_requires_source_aware_execution() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(
+        source_manager.clone(),
+        vec![Operation::Assert(Felt::from_u32(9))],
+        true,
+    );
+    let (program, _) = external_program_for_digest(target_digest);
+    let mut plain_host = DefaultHost::default()
+        .with_source_manager(source_manager.clone())
+        .with_library(Arc::new(loaded_package.clone()))
+        .expect("loaded package should register");
+
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut plain_host)
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            source_file: None,
+            err: OperationError::FailedAssertion { err_code, .. },
+            ..
+        } if err_code == Felt::from_u32(9)
+    );
+
+    let caller_debug_info = PackageDebugInfo::default();
+    let mut source_aware_host = DefaultHost::default()
+        .with_source_manager(source_manager)
+        .with_library(Arc::new(loaded_package))
+        .expect("loaded package should register");
+    let err = FastProcessor::new(StackInputs::default())
+        .execute_with_package_debug_info_sync(&program, &caller_debug_info, &mut source_aware_host)
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::FailedAssertion { err_code, .. },
+        } if label == SourceSpan::new(loaded_source_file.id(), 0u32..11)
+            && actual_source_file.id() == loaded_source_file.id()
+            && err_code == Felt::from_u32(9)
+    );
+}
+
+#[test]
 fn host_loaded_package_debug_info_survives_missing_caller_entrypoint_root() {
     let source_manager = Arc::new(DefaultSourceManager::default());
     let (loaded_package, target_digest, loaded_source_file) = host_loaded_package_fixture(

@@ -67,6 +67,43 @@ pub enum PackageDebugInfoMergeError {
         forest_index: usize,
         source_node: DebugSourceNodeId,
     },
+    /// A debug type row refers to a string index that is not present in its type string table.
+    #[error(
+        "debug info for forest {forest_index} references type string index {string_idx}, which is not present in the type string table"
+    )]
+    MissingTypeStringMapping { forest_index: usize, string_idx: u32 },
+    /// A debug type or function row refers to a type index that is not present in its type table.
+    #[error(
+        "debug info for forest {forest_index} references type index {type_idx:?}, which is not present in the type table"
+    )]
+    MissingTypeMapping {
+        forest_index: usize,
+        type_idx: DebugTypeIdx,
+    },
+    /// A debug source-file row refers to a string index that is not present in its source string
+    /// table.
+    #[error(
+        "debug info for forest {forest_index} references source string index {string_idx}, which is not present in the source string table"
+    )]
+    MissingSourceStringMapping { forest_index: usize, string_idx: u32 },
+    /// A debug function or inline-call row refers to a source-file index that is not present in its
+    /// source-file table.
+    #[error(
+        "debug info for forest {forest_index} references source file index {file_idx}, which is not present in the source file table"
+    )]
+    MissingSourceFileMapping { forest_index: usize, file_idx: u32 },
+    /// A debug function row refers to a string index that is not present in its function string
+    /// table.
+    #[error(
+        "debug info for forest {forest_index} references function string index {string_idx}, which is not present in the function string table"
+    )]
+    MissingFunctionStringMapping { forest_index: usize, string_idx: u32 },
+    /// A debug inline-call row refers to a function index that is not present in its function
+    /// table.
+    #[error(
+        "debug info for forest {forest_index} references function index {function_idx}, which is not present in the function table"
+    )]
+    MissingFunctionMapping { forest_index: usize, function_idx: u32 },
 }
 
 // DEBUG TYPE INDEX
@@ -422,23 +459,43 @@ impl PackageDebugInfo {
     /// returned node mappings to package source/debug sections so callers can merge
     /// `(MastForest, PackageDebugInfo)` pairs without reattaching debug metadata to the forest.
     ///
-    /// This merges only `debug_source_graph` and `debug_source_map`; type, source-file, and
-    /// function sections have their own string/index tables and are left for higher-level package
-    /// composition.
+    /// This also merges the type, source-file, and function tables referenced by source-map
+    /// inline-call rows.
     pub fn merge_source_debug<'a>(
         inputs: impl IntoIterator<Item = (usize, &'a PackageDebugInfo)>,
         root_map: &MastForestRootMap,
     ) -> Result<Self, PackageDebugInfoMergeError> {
+        let mut types = DebugTypesSection::new();
+        let mut sources = DebugSourcesSection::new();
+        let mut functions = DebugFunctionsSection::new();
         let mut nodes = Vec::new();
         let mut roots = Vec::new();
         let mut asm_ops = Vec::new();
         let mut debug_vars = Vec::new();
+        let mut inline_calls = Vec::new();
         let mut error_messages = BTreeMap::new();
+        let mut saw_types = false;
+        let mut saw_sources = false;
+        let mut saw_functions = false;
         let mut saw_source_graph = false;
         let mut saw_source_map = false;
         let mut saw_error_messages = false;
 
         for (forest_index, debug_info) in inputs {
+            let type_map = merge_debug_types(forest_index, debug_info.types.as_ref(), &mut types)?;
+            saw_types |= debug_info.types.is_some();
+            let source_file_map =
+                merge_debug_sources(forest_index, debug_info.sources.as_ref(), &mut sources)?;
+            saw_sources |= debug_info.sources.is_some();
+            let function_map = merge_debug_functions(
+                forest_index,
+                debug_info.functions.as_ref(),
+                &mut functions,
+                &source_file_map,
+                &type_map,
+            )?;
+            saw_functions |= debug_info.functions.is_some();
+
             let source_graph = debug_info.source_graph.as_ref();
             let source_map = debug_info.source_map.as_ref();
             if source_graph.is_none() && source_map.is_some_and(|source_map| !source_map.is_empty())
@@ -536,23 +593,55 @@ impl PackageDebugInfo {
                 )?;
                 debug_vars.push(DebugSourceVar::new(source_node, row.op_idx, row.var.clone()));
             }
-            // Inline-call rows refer to function and source-file tables. This source-only merge
-            // leaves those tables to higher-level package composition, so it cannot safely carry
-            // inline calls across forests.
+            for row in source_map.inline_calls() {
+                let source_node = source_id_map.get(&row.source_node).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingSourceNodeMapping {
+                        forest_index,
+                        source_node: row.source_node,
+                    },
+                )?;
+                let callee_idx = function_map.get(&row.callee_idx).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingFunctionMapping {
+                        forest_index,
+                        function_idx: row.callee_idx,
+                    },
+                )?;
+                let file_idx = source_file_map.get(&row.file_idx).copied().ok_or(
+                    PackageDebugInfoMergeError::MissingSourceFileMapping {
+                        forest_index,
+                        file_idx: row.file_idx,
+                    },
+                )?;
+                inline_calls.push(DebugSourceInlineCall::new(
+                    source_node,
+                    row.op_idx,
+                    callee_idx,
+                    file_idx,
+                    row.line,
+                    row.column,
+                ));
+            }
         }
 
         Ok(Self {
+            types: saw_types.then_some(types),
+            sources: saw_sources.then_some(sources),
+            functions: saw_functions.then_some(functions),
             source_graph: saw_source_graph
                 .then_some(DebugSourceGraphSection::from_parts(nodes, roots)),
-            source_map: saw_source_map
-                .then_some(DebugSourceMapSection::from_parts(asm_ops, debug_vars)),
+            source_map: saw_source_map.then_some(
+                DebugSourceMapSection::from_parts_with_inline_calls(
+                    asm_ops,
+                    debug_vars,
+                    inline_calls,
+                ),
+            ),
             error_messages: saw_error_messages.then_some(DebugErrorMessagesSection::from_parts(
                 error_messages
                     .into_iter()
                     .map(|(err_code, message)| DebugErrorMessage::new(err_code, message))
                     .collect(),
             )),
-            ..Self::default()
         })
     }
 
@@ -661,6 +750,261 @@ impl PackageDebugInfo {
     pub fn error_message(&self, err_code: u64) -> Option<Arc<str>> {
         self.error_messages.as_ref()?.message(err_code)
     }
+}
+
+fn merge_debug_types(
+    forest_index: usize,
+    section: Option<&DebugTypesSection>,
+    output: &mut DebugTypesSection,
+) -> Result<BTreeMap<u32, DebugTypeIdx>, PackageDebugInfoMergeError> {
+    let Some(section) = section else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut string_map = BTreeMap::new();
+    for (old_idx, string) in section.strings.iter().enumerate() {
+        string_map.insert(old_idx as u32, output.add_string(string.clone()));
+    }
+
+    let base_idx = output.types.len() as u32;
+    let type_map = (0..section.types.len())
+        .map(|old_idx| (old_idx as u32, DebugTypeIdx::from(base_idx + old_idx as u32)))
+        .collect::<BTreeMap<_, _>>();
+
+    for ty in &section.types {
+        output.add_type(remap_debug_type_info(forest_index, ty, &string_map, &type_map)?);
+    }
+
+    Ok(type_map)
+}
+
+fn merge_debug_sources(
+    forest_index: usize,
+    section: Option<&DebugSourcesSection>,
+    output: &mut DebugSourcesSection,
+) -> Result<BTreeMap<u32, u32>, PackageDebugInfoMergeError> {
+    let Some(section) = section else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut string_map = BTreeMap::new();
+    for (old_idx, string) in section.strings.iter().enumerate() {
+        string_map.insert(old_idx as u32, output.add_string(string.clone()));
+    }
+
+    let mut file_map = BTreeMap::new();
+    for (old_idx, file) in section.files.iter().enumerate() {
+        let path_idx = string_map.get(&file.path_idx).copied().ok_or(
+            PackageDebugInfoMergeError::MissingSourceStringMapping {
+                forest_index,
+                string_idx: file.path_idx,
+            },
+        )?;
+        let file = DebugFileInfo {
+            path_idx,
+            checksum: file.checksum.clone(),
+        };
+        let new_idx =
+            output.files.iter().position(|existing| *existing == file).unwrap_or_else(|| {
+                let new_idx = output.files.len();
+                output.files.push(file);
+                new_idx
+            }) as u32;
+        file_map.insert(old_idx as u32, new_idx);
+    }
+
+    Ok(file_map)
+}
+
+fn merge_debug_functions(
+    forest_index: usize,
+    section: Option<&DebugFunctionsSection>,
+    output: &mut DebugFunctionsSection,
+    source_file_map: &BTreeMap<u32, u32>,
+    type_map: &BTreeMap<u32, DebugTypeIdx>,
+) -> Result<BTreeMap<u32, u32>, PackageDebugInfoMergeError> {
+    let Some(section) = section else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut string_map = BTreeMap::new();
+    for (old_idx, string) in section.strings.iter().enumerate() {
+        string_map.insert(old_idx as u32, output.add_string(string.clone()));
+    }
+
+    let mut function_map = BTreeMap::new();
+    for (old_idx, function) in section.functions.iter().enumerate() {
+        let name_idx = remap_string_index(
+            forest_index,
+            function.name_idx,
+            &string_map,
+            |forest_index, string_idx| PackageDebugInfoMergeError::MissingFunctionStringMapping {
+                forest_index,
+                string_idx,
+            },
+        )?;
+        let linkage_name_idx = function
+            .linkage_name_idx
+            .map(|idx| {
+                remap_string_index(forest_index, idx, &string_map, |forest_index, string_idx| {
+                    PackageDebugInfoMergeError::MissingFunctionStringMapping {
+                        forest_index,
+                        string_idx,
+                    }
+                })
+            })
+            .transpose()?;
+        let file_idx = source_file_map.get(&function.file_idx).copied().ok_or(
+            PackageDebugInfoMergeError::MissingSourceFileMapping {
+                forest_index,
+                file_idx: function.file_idx,
+            },
+        )?;
+        let type_idx = function
+            .type_idx
+            .map(|idx| remap_type_idx(forest_index, idx, type_map))
+            .transpose()?;
+        let new_idx = output.functions.len() as u32;
+        output.add_function(DebugFunctionInfo {
+            name_idx,
+            linkage_name_idx,
+            file_idx,
+            line: function.line,
+            column: function.column,
+            type_idx,
+            mast_root: function.mast_root,
+        });
+        function_map.insert(old_idx as u32, new_idx);
+    }
+
+    Ok(function_map)
+}
+
+fn remap_debug_type_info(
+    forest_index: usize,
+    ty: &DebugTypeInfo,
+    string_map: &BTreeMap<u32, u32>,
+    type_map: &BTreeMap<u32, DebugTypeIdx>,
+) -> Result<DebugTypeInfo, PackageDebugInfoMergeError> {
+    Ok(match ty {
+        DebugTypeInfo::Primitive(primitive) => DebugTypeInfo::Primitive(*primitive),
+        DebugTypeInfo::Pointer { pointee_type_idx } => DebugTypeInfo::Pointer {
+            pointee_type_idx: remap_type_idx(forest_index, *pointee_type_idx, type_map)?,
+        },
+        DebugTypeInfo::Array { element_type_idx, count } => DebugTypeInfo::Array {
+            element_type_idx: remap_type_idx(forest_index, *element_type_idx, type_map)?,
+            count: *count,
+        },
+        DebugTypeInfo::Struct { name_idx, size, fields } => DebugTypeInfo::Struct {
+            name_idx: remap_string_index(
+                forest_index,
+                *name_idx,
+                string_map,
+                |forest_index, string_idx| PackageDebugInfoMergeError::MissingTypeStringMapping {
+                    forest_index,
+                    string_idx,
+                },
+            )?,
+            size: *size,
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Ok(DebugFieldInfo {
+                        name_idx: remap_string_index(
+                            forest_index,
+                            field.name_idx,
+                            string_map,
+                            |forest_index, string_idx| {
+                                PackageDebugInfoMergeError::MissingTypeStringMapping {
+                                    forest_index,
+                                    string_idx,
+                                }
+                            },
+                        )?,
+                        type_idx: remap_type_idx(forest_index, field.type_idx, type_map)?,
+                        offset: field.offset,
+                    })
+                })
+                .collect::<Result<_, PackageDebugInfoMergeError>>()?,
+        },
+        DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+            DebugTypeInfo::Function {
+                return_type_idx: return_type_idx
+                    .map(|idx| remap_type_idx(forest_index, idx, type_map))
+                    .transpose()?,
+                param_type_indices: param_type_indices
+                    .iter()
+                    .map(|idx| remap_type_idx(forest_index, *idx, type_map))
+                    .collect::<Result<_, _>>()?,
+            }
+        },
+        DebugTypeInfo::Enum {
+            name_idx,
+            size,
+            discriminant_type_idx,
+            variants,
+        } => DebugTypeInfo::Enum {
+            name_idx: remap_string_index(
+                forest_index,
+                *name_idx,
+                string_map,
+                |forest_index, string_idx| PackageDebugInfoMergeError::MissingTypeStringMapping {
+                    forest_index,
+                    string_idx,
+                },
+            )?,
+            size: *size,
+            discriminant_type_idx: remap_type_idx(forest_index, *discriminant_type_idx, type_map)?,
+            variants: variants
+                .iter()
+                .map(|variant| {
+                    Ok(DebugVariantInfo {
+                        name_idx: remap_string_index(
+                            forest_index,
+                            variant.name_idx,
+                            string_map,
+                            |forest_index, string_idx| {
+                                PackageDebugInfoMergeError::MissingTypeStringMapping {
+                                    forest_index,
+                                    string_idx,
+                                }
+                            },
+                        )?,
+                        type_idx: variant
+                            .type_idx
+                            .map(|idx| remap_type_idx(forest_index, idx, type_map))
+                            .transpose()?,
+                        payload_offset: variant.payload_offset,
+                        discriminant: variant.discriminant,
+                    })
+                })
+                .collect::<Result<_, PackageDebugInfoMergeError>>()?,
+        },
+        DebugTypeInfo::Unknown => DebugTypeInfo::Unknown,
+    })
+}
+
+fn remap_string_index(
+    forest_index: usize,
+    string_idx: u32,
+    string_map: &BTreeMap<u32, u32>,
+    error: impl FnOnce(usize, u32) -> PackageDebugInfoMergeError,
+) -> Result<u32, PackageDebugInfoMergeError> {
+    string_map
+        .get(&string_idx)
+        .copied()
+        .ok_or_else(|| error(forest_index, string_idx))
+}
+
+fn remap_type_idx(
+    forest_index: usize,
+    type_idx: DebugTypeIdx,
+    type_map: &BTreeMap<u32, DebugTypeIdx>,
+) -> Result<DebugTypeIdx, PackageDebugInfoMergeError> {
+    type_map
+        .get(&type_idx.as_u32())
+        .copied()
+        .ok_or(PackageDebugInfoMergeError::MissingTypeMapping { forest_index, type_idx })
 }
 
 // DEBUG SOURCE GRAPH SECTION
@@ -1529,13 +1873,26 @@ mod tests {
             var_name: &str,
         ) -> PackageDebugInfo {
             let source_node = DebugSourceNodeId::from(0);
+            let mut sources = DebugSourcesSection::new();
+            let path_idx = sources.add_string(Arc::from(alloc::format!("{context}.masm")));
+            let file_idx = sources.add_file(DebugFileInfo::new(path_idx));
+            let mut functions = DebugFunctionsSection::new();
+            let name_idx = functions.add_string(Arc::from(alloc::format!("{context}_callee")));
+            functions.add_function(DebugFunctionInfo::new(
+                name_idx,
+                file_idx,
+                LineNumber::new(7).unwrap(),
+                ColumnNumber::new(3).unwrap(),
+            ));
             PackageDebugInfo {
+                sources: Some(sources),
+                functions: Some(functions),
                 source_graph: Some(DebugSourceGraphSection {
                     version: DEBUG_SOURCE_GRAPH_VERSION,
                     nodes: alloc::vec![DebugSourceNode::new(block, alloc::vec![], 0, 1,)],
                     roots: alloc::vec![source_node],
                 }),
-                source_map: Some(DebugSourceMapSection::from_parts(
+                source_map: Some(DebugSourceMapSection::from_parts_with_inline_calls(
                     alloc::vec![DebugSourceAsmOp::new(
                         source_node,
                         0,
@@ -1548,6 +1905,14 @@ mod tests {
                         source_node,
                         0,
                         DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
+                    )],
+                    alloc::vec![DebugSourceInlineCall::new(
+                        source_node,
+                        0,
+                        0,
+                        file_idx,
+                        LineNumber::new(9).unwrap(),
+                        ColumnNumber::new(5).unwrap(),
                     )],
                 )),
                 ..PackageDebugInfo::default()
@@ -1597,6 +1962,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             alloc::vec!["y"],
         );
+        let sources = merged_debug.sources.as_ref().unwrap();
+        let functions = merged_debug.functions.as_ref().unwrap();
+        let inline_a = merged_debug.inline_calls_for_operation(source_a, 0).collect::<Vec<_>>();
+        let inline_b = merged_debug.inline_calls_for_operation(source_b, 0).collect::<Vec<_>>();
+        assert_eq!(inline_a.len(), 1);
+        assert_eq!(inline_b.len(), 1);
+
+        let file_a = sources.get_file(inline_a[0].file_idx).unwrap();
+        let path_a = sources.get_string(file_a.path_idx).unwrap();
+        let function_a = &functions.functions[inline_a[0].callee_idx as usize];
+        let function_name_a = functions.get_string(function_a.name_idx).unwrap();
+        assert_eq!(path_a.as_ref(), "alias_a.masm");
+        assert_eq!(function_name_a.as_ref(), "alias_a_callee");
+        assert_eq!(function_a.file_idx, inline_a[0].file_idx);
+
+        let file_b = sources.get_file(inline_b[0].file_idx).unwrap();
+        let path_b = sources.get_string(file_b.path_idx).unwrap();
+        let function_b = &functions.functions[inline_b[0].callee_idx as usize];
+        let function_name_b = functions.get_string(function_b.name_idx).unwrap();
+        assert_eq!(path_b.as_ref(), "alias_b.masm");
+        assert_eq!(function_name_b.as_ref(), "alias_b_callee");
+        assert_eq!(function_b.file_idx, inline_b[0].file_idx);
     }
 
     #[test]

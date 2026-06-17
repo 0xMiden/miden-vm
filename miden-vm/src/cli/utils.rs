@@ -6,7 +6,10 @@ use miden_assembly::{
 };
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
-use miden_mast_package::Package;
+use miden_mast_package::{
+    Package,
+    debug_info::{DebugSourceNodeId, PackageDebugInfo},
+};
 use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
@@ -24,13 +27,21 @@ pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
     kernel_file: Option<&Path>,
-) -> Result<(Program, Arc<DefaultSourceManager>), Report> {
+) -> Result<
+    (
+        Program,
+        Option<PackageDebugInfo>,
+        Option<DebugSourceNodeId>,
+        Arc<DefaultSourceManager>,
+    ),
+    Report,
+> {
     // Assembler debug mode is always enabled (issue #1821)
     let program_file = ProgramFile::read(path)?;
     let source_manager = program_file.source_manager().clone();
 
     // If kernel is provided, compile it and use it when compiling the program
-    let program = if let Some(kernel_path) = kernel_file {
+    let package = if let Some(kernel_path) = kernel_file {
         // Determine file type based on extension
         let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
@@ -86,11 +97,16 @@ pub fn get_masm_program(
         assembler
             .assemble_program("program", program_file.ast().clone())
             .wrap_err("Failed to compile program")?
-            .unwrap_program()
     } else {
         // No kernel, use the standard compilation path
-        program_file.compile(libraries.libraries.iter().cloned())?
+        program_file.compile_package(libraries.libraries.iter().cloned())?
     };
+    let debug_info = package
+        .debug_info()
+        .into_diagnostic()
+        .wrap_err("Failed to read program debug info")?;
+    let entrypoint_source_node = package.entrypoint_source_node();
+    let program = package.unwrap_program();
 
-    Ok((program, source_manager))
+    Ok((program, debug_info, entrypoint_source_node, source_manager))
 }

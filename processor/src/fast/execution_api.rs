@@ -171,7 +171,6 @@ impl FastProcessor {
 
     /// Executes the given program synchronously with package-owned source/debug context and returns
     /// the bundled trace inputs required by [`crate::trace::build_trace`].
-    #[cfg(any(test, feature = "testing"))]
     #[instrument(name = "execute_trace_inputs_with_package_debug_info_sync", skip_all)]
     pub fn execute_trace_inputs_with_package_debug_info_sync(
         self,
@@ -196,7 +195,6 @@ impl FastProcessor {
     /// Executes the given program synchronously with package-owned source/debug context rooted at
     /// `entrypoint_source_node_id` and returns the bundled trace inputs required by
     /// [`crate::trace::build_trace`].
-    #[cfg(any(test, feature = "testing"))]
     #[instrument(
         name = "execute_trace_inputs_with_package_debug_info_at_source_node_sync",
         skip_all
