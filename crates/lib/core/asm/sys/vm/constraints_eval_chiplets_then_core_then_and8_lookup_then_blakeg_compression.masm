@@ -13,6 +13,9 @@ const NUM_EVAL_GATES_CIRCUIT = 9760
 # Max cycle length for periodic columns.
 const MAX_CYCLE_LEN_LOG = 6
 
+# Depth of the ACE circuit registry tree.
+const ACE_REGISTRY_DEPTH = 5
+
 # Initial chaining value for hashing the ACE circuit stream.
 const CIRCUIT_STREAM_INIT_CV_0 = 4280581858871862887
 const CIRCUIT_STREAM_INIT_CV_1 = 2688637133034287986
@@ -22,7 +25,7 @@ const CIRCUIT_STREAM_INIT_CV_3 = 6620516959492516488
 # ERRORS
 # =================================================================================================
 
-const ERR_CIRCUIT_COMMITMENT_MISMATCH = "hashed ACE circuit stream does not match CIRCUIT_COMMITMENT"
+const ERR_CIRCUIT_COMMITMENT_MISMATCH = "hashed ACE circuit stream does not match registry commitment"
 
 # CONSTRAINT EVALUATION CHECKER
 # =================================================================================================
@@ -46,7 +49,7 @@ end
 
 #! Loads and authenticates this order-specific ACE circuit.
 proc load_and_authenticate_ace_circuit
-    push.CIRCUIT_COMMITMENT
+    exec.load_ace_registry_commitment
     # => [C]
     adv.push_mapval
     # => [C]
@@ -68,6 +71,20 @@ proc load_and_authenticate_ace_circuit
     # => [DIGEST, C]
     assert_eqw.err=ERR_CIRCUIT_COMMITMENT_MISMATCH
     # => []
+end
+
+#! Loads the ACE circuit commitment selected by ORDER_TAG from the registry tree.
+proc load_ace_registry_commitment
+    exec.constants::relation_digest_ptr mem_loadw_le
+    # => [REGISTRY_ROOT]
+    exec.constants::get_order_tag
+    # => [order_tag, REGISTRY_ROOT]
+    push.ACE_REGISTRY_DEPTH
+    # => [depth, order_tag, REGISTRY_ROOT]
+    mtree_get
+    # => [C, REGISTRY_ROOT]
+    swapw dropw
+    # => [C]
 end
 
 # COMMITTED ACE CIRCUIT STREAM

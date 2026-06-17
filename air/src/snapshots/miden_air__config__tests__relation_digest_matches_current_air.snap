@@ -1,102 +1,125 @@
 ---
 source: air/src/config.rs
-assertion_line: 329
 expression: snapshot
 ---
 constraints_eval_core_then_chiplets_then_blakeg_compression_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [24783171865739857, 7127553265361334048, 3897334861478314898, 6313249570395089577]
 constraints_eval_core_then_chiplets_then_and8_lookup_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [4987354328664649769, 7459591106023001916, 1803738333602139636, 5533595785845610778]
 constraints_eval_core_then_blakeg_compression_then_chiplets_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [4560213744455813332, 2516539659880451217, 7295353875824411556, 6823967295387362732]
 constraints_eval_core_then_blakeg_compression_then_and8_lookup_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [9068359012062704689, 4375400920796157652, 4752807284711163154, 6545185574479929215]
 constraints_eval_core_then_and8_lookup_then_chiplets_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [1940058479946711481, 1824788694997684264, 3826113870241805208, 6189194500583241759]
 constraints_eval_core_then_and8_lookup_then_blakeg_compression_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [5376296098277867667, 2279247683192561201, 4165339443840289077, 5953199880825682748]
 constraints_eval_chiplets_then_core_then_blakeg_compression_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [670174752197946447, 8777273628572171981, 3182135647718276022, 6500380144083189635]
 constraints_eval_chiplets_then_core_then_and8_lookup_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [5688202359777958495, 8950320572981376836, 169295229138000877, 813683314524007896]
 constraints_eval_chiplets_then_blakeg_compression_then_core_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [7459022767144147087, 1284507349382510269, 2913010915955959351, 7688816131515155717]
 constraints_eval_chiplets_then_blakeg_compression_then_and8_lookup_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [5876459623316323053, 6478672378196721431, 4860158924472234562, 7844170213133680083]
 constraints_eval_chiplets_then_and8_lookup_then_core_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [1462974323255506686, 4764297051194385386, 8058475597577822155, 6430736171429724940]
 constraints_eval_chiplets_then_and8_lookup_then_blakeg_compression_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [2627201360353621778, 7329292033977909963, 7945871357391416908, 8192894564389532598]
 constraints_eval_blakeg_compression_then_core_then_chiplets_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [444071982357061604, 1507421276840253337, 2445227410041689601, 2077807362638314557]
 constraints_eval_blakeg_compression_then_core_then_and8_lookup_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [2115271293535918628, 2672558495035767491, 2173296295116527099, 2602413378715255737]
 constraints_eval_blakeg_compression_then_chiplets_then_core_then_and8_lookup:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [8855646018226049523, 2620492606346593023, 3369264810658607833, 7827380711855103607]
 constraints_eval_blakeg_compression_then_chiplets_then_and8_lookup_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [3559749311310619785, 8797888172761233653, 2283075626316096186, 2076776437459269287]
 constraints_eval_blakeg_compression_then_and8_lookup_then_core_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [1831532800345224520, 4139000888622613552, 3770742239376038027, 3355700179076123135]
 constraints_eval_blakeg_compression_then_and8_lookup_then_chiplets_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [7586160116672304370, 819131209041478454, 6526679717919125309, 6873345247549161101]
 constraints_eval_and8_lookup_then_core_then_chiplets_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [6409917364437054035, 5615404520408491724, 8926533714486737478, 9199994691999453020]
 constraints_eval_and8_lookup_then_core_then_blakeg_compression_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [7057347802672919026, 1556162801603290262, 381398572779282273, 8532226683583302727]
 constraints_eval_and8_lookup_then_chiplets_then_core_then_blakeg_compression:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [7870317909490551631, 5241698646483758846, 7796460540832491111, 3214945569031738465]
 constraints_eval_and8_lookup_then_chiplets_then_blakeg_compression_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [7396030441601927045, 5230264052281969776, 1693747729902269158, 6451164568584936718]
 constraints_eval_and8_lookup_then_blakeg_compression_then_core_then_chiplets:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [8888891091737108966, 2027989918597121137, 3020926807366775306, 2961979088400517537]
 constraints_eval_and8_lookup_then_blakeg_compression_then_chiplets_then_core:
   num_inputs: 1184
   num_eval_gates: 9760
+  stream_len: 10888
   commitment: [5360769381928880853, 5637637519408356149, 9133415409598736497, 102911608469655880]
-relation_digest: [1199619484997873143, 5688213066924362118, 6656086923748495762, 5598657386983264081]
+relation_digest: [2510026394581042689, 5394882770041513920, 7244246892549217641, 4733287224461634308]

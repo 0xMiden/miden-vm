@@ -371,8 +371,14 @@ fn build_merkle_data(
     for tree in &partial_trees {
         store.extend(tree.inner_nodes());
     }
+    extend_ace_registry_store(&mut store);
 
     Ok((store, advice_map))
+}
+
+fn extend_ace_registry_store(store: &mut MerkleStore) {
+    let registry_tree = config::ace_circuit_registry_tree();
+    store.extend(registry_tree.inner_nodes());
 }
 
 /// Convert a `BatchProof` into `PartialMerkleTree` entries and advice map entries.
@@ -458,4 +464,24 @@ fn commitment_to_word<C: Copy + Into<[u64; 4]>>(commitment: C) -> Word {
 fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
     let base: Vec<Felt> = QuadFelt::flatten_to_base(challenges.to_vec());
     base.iter().map(Felt::as_canonical_u64).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::NodeIndex;
+
+    #[test]
+    fn ace_registry_tree_is_available_in_recursive_advice_store() {
+        let mut store = MerkleStore::new();
+        extend_ace_registry_store(&mut store);
+
+        let root = Word::new(config::RELATION_DIGEST);
+        for (index, leaf) in config::ACE_CIRCUIT_REGISTRY_LEAVES.iter().enumerate() {
+            let node_index =
+                NodeIndex::new(config::ACE_CIRCUIT_REGISTRY_DEPTH as u8, index as u64).unwrap();
+            let stored = store.get_node(root, node_index).unwrap();
+            assert_eq!(stored, Word::new(*leaf));
+        }
+    }
 }

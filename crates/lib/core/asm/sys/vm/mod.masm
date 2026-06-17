@@ -15,20 +15,13 @@ const ACCEPTABLE_QUERY_POW_BITS = 16
 const ACCEPTABLE_DEEP_POW_BITS = 12
 const ACCEPTABLE_FOLDING_POW_BITS = 4
 
-# RELATION_DIGEST is the tagged meta digest for all supported proof-order ACE circuits.
-# It binds the Fiat-Shamir transcript to the relation while allowing the recursive
-# verifier to dispatch to the circuit matching the proof's AIR order.
-#
-# PROTOCOL_ID (defined in circuit_evaluation.rs) implicitly covers every hardcoded
-# protocol choice: hash function, field, blowup factor, FRI folding factor, coset
-# offset, max remainder degree, etc. It must be bumped when any of these change.
-# Each circuit commitment covers one order-specific encoded ACE circuit. The digest
-# input is:
-#   [PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...]
-const RELATION_DIGEST_0 = 1199619484997873143
-const RELATION_DIGEST_1 = 5688213066924362118
-const RELATION_DIGEST_2 = 6656086923748495762
-const RELATION_DIGEST_3 = 5598657386983264081
+# RELATION_DIGEST is the root of the ACE circuit registry. It binds the
+# Fiat-Shamir transcript to the recursive relation; recursive advice also carries
+# the corresponding tree for order-specific ACE circuit authentication.
+const RELATION_DIGEST_0 = 2510026394581042689
+const RELATION_DIGEST_1 = 5394882770041513920
+const RELATION_DIGEST_2 = 7244246892549217641
+const RELATION_DIGEST_3 = 4733287224461634308
 
 # Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
 # This is trusted verifier setup, not proof data or advice.

@@ -322,9 +322,8 @@ end
 
 #! Initializes the Eidos Fiat-Shamir transcript, then derives trace domain parameters.
 #!
-#! RELATION_DIGEST is a compile-time tagged meta digest over all supported
-#! proof-order ACE circuit commitments. The instance-specific wrapper stores it
-#! in memory before calling the generic verifier.
+#! RELATION_DIGEST is the compile-time ACE circuit registry root. The
+#! instance-specific wrapper stores it in memory before calling the generic verifier.
 #!
 #! Currently assumes a blowup factor equal to 8.
 #!

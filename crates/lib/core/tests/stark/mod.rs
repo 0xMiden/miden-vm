@@ -6,7 +6,7 @@ use miden_air::{
 };
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    Felt, WORD_SIZE,
+    Felt, WORD_SIZE, Word,
     advice::AdviceStackBuilder,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     precompile::PrecompileTranscriptState,
@@ -16,7 +16,9 @@ use miden_crypto::stark::{Preprocessed, StarkConfig, challenger::CanObserve};
 use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{
-    AdviceInputs, ProvingOptions, prove_sync,
+    AdviceInputs, ProvingOptions,
+    crypto::MerkleStore,
+    prove_sync,
     recursive_verifier::{VerifierData, generate_advice_inputs},
     stack_inputs_from_ints,
 };
@@ -167,6 +169,31 @@ fn stark_verifier_e2f4_rejects_wrong_order_tag() {
         data.advice_map
     );
     assert!(test.execute_for_output().is_err(), "wrong order tag should fail");
+}
+
+#[test]
+fn stark_verifier_e2f4_rejects_missing_ace_registry() {
+    let mut data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, fib_stack_inputs(), None);
+    let registry_root = Word::new(config::RELATION_DIGEST);
+    let mut store = MerkleStore::new();
+    store.extend(data.store.inner_nodes().filter(|node| node.value != registry_root));
+    data.store = store;
+
+    let source = "
+        use miden::core::sys::vm
+        begin
+            exec.vm::verify_proof
+        end
+        ";
+    let test = build_test!(
+        source,
+        &data.initial_stack,
+        &data.advice_stack,
+        data.store.clone(),
+        data.advice_map
+    );
+
+    assert!(test.execute_for_output().is_err(), "missing ACE registry should fail");
 }
 
 pub fn generate_recursive_verifier_data(
@@ -843,12 +870,12 @@ fn eidos_hash_elements_advice_map_loop_matches_masm_bcompress_loop() {
 
     let source = format!(
         "
-        adv_map CIRCUIT_COMMITMENT([{key0}, {key1}, {key2}, {key3}]) = [
+        adv_map HASH_OUTPUT([{key0}, {key1}, {key2}, {key3}]) = [
             {map_values}
         ]
 
         begin
-            push.CIRCUIT_COMMITMENT
+            push.HASH_OUTPUT
             adv.push_mapval
             push.{STREAM_PTR}
             push.{cv3}.{cv2}.{cv1}.{cv0}
