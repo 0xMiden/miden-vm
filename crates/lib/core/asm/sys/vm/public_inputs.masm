@@ -8,8 +8,9 @@ use miden::core::crypto::hashes::poseidon2
 #
 # This module handles the Miden VM-specific public input processing for the recursive verifier.
 # It (a) computes the outer-LogUp boundary correction `c_total` (using non-deterministic α, β
-# verified later), (b) computes `kernel_H`, the Poseidon2 summary of all kernel-procedure
-# digests, (c) populates the caller-facing reduced-inputs block and the FLPI section of the ACE
+# verified later), (b) computes `kernel_H`, the Poseidon2 hash (`hash_elements`) of all
+# kernel-procedure digests, (c) populates the caller-facing reduced-inputs block and the FLPI
+# section of the ACE
 # READ region, and (d) absorbs every public input into the Fiat-Shamir transcript in a
 # rate-aligned schedule mirroring `MidenMultiAir::observe` on the Rust side.
 #
@@ -109,16 +110,14 @@ pub proc process_public_inputs
     exec.compute_bus_gamma
     # => [...]
 
-    # 3) Initialise c_total to zero and the kernel_H sponge state (on the stack) to zero.
+    # 3) Initialise c_total to zero.
     push.0 exec.constants::c_total_ptr mem_store
     push.0 exec.constants::c_total_ptr add.1 mem_store
-    padw padw padw
-    # => [R0_kH=0, R1_kH=0, C_kH=0, ...]
+    # => [...]
 
-    # 4) Phase 1 — stream kernel digests. For each digest, one Poseidon2 permute absorbs
-    #    `[digest | zero_pad]` into the kernel_H sponge while a Horner fold updates c_total
-    #    by `1 / ((α + γ) + msg(d))`. After the loop, squeeze kernel_H, store canonically at
-    #    reduced_inputs+0, and write a zero pad at reduced_inputs+4.
+    # 4) Phase 1 — materialize the kernel digests from advice, recompute the kernel commitment
+    #    `kernel_H = hash_elements(digests)`, store it at reduced_inputs+0 with a zero pad at
+    #    reduced_inputs+4, and fold each digest into c_total by `1 / ((α + γ) + msg(d))`.
     exec.stream_kernel_digests
     # => [...]
 
@@ -252,24 +251,21 @@ proc add_into_c_total
     # => [...]
 end
 
-#! Phase 1 — streams the kernel-procedure digests from advice. Per digest:
-#!   - `adv_loadw` reads the 4 canonical digest felts onto the stack;
-#!   - the digest is duplicated, with one copy folded via Horner into `msg(d)` and the
-#!     fraction `1 / ((α + γ) + msg(d))` added into c_total;
-#!   - the other copy becomes the sponge rate `[digest | zero_pad]` for one Poseidon2
-#!     permute into the kernel_H sponge.
+#! Phase 1 — materializes the kernel-procedure digests, recomputes the kernel commitment, and
+#! folds the digests into the outer-LogUp boundary correction.
 #!
-#! The full sponge state lives on the stack across iterations: capacity carries between
-#! iterations, the rate words are rebuilt from advice each iter, and the final rate word is
-#! squeezed after the loop. No memory writes inside the loop (the digests are not exposed
-#! to callers; `kernel_H` is their commitment).
+#! Steps:
+#!   1. Read `N` (the number of digests) from advice and bound it by
+#!      `Kernel::MAX_NUM_PROCEDURES`.
+#!   2. Stream `N` canonical digests `[d0, d1, d2, d3]` from advice and write them, in order,
+#!      into the `KERNEL_DIGESTS_PTR` scratch region.
+#!   3. Recompute `kernel_H = hash_elements(region, 4·N)`, the canonical Poseidon2 hash of the
+#!      flattened digests, matching `MidenMultiAir::observe` / `Kernel::commitment` on the Rust
+#!      side. An empty digest list yields `hash_elements` of zero elements.
+#!   4. Hand `(kernel_H, region, N)` to `observe_and_fold_kernel`, which stores `kernel_H` for
+#!      the FS observation and folds each digest into c_total.
 #!
-#! After the loop: squeezes `kernel_H` (the first rate word of the final sponge state),
-#! stores it canonically at `reduced_inputs_ptr + 0`, and writes a zero word at
-#! `reduced_inputs_ptr + 4` so the FS observation can absorb `[kernel_H | 0_pad]` as a
-#! single rate-aligned 8-felt chunk. An empty digest list yields the zero word.
-#!
-#! Input:  [R0_kH=0, R1_kH=0, C_kH=0, ...]   sponge state from `process_public_inputs`
+#! Input:  [...]
 #! Output: [...]
 proc stream_kernel_digests
     # Read N; mirror Statement::new's `aux_inputs.len() <= max_aux_inputs()` bound: at most
@@ -278,62 +274,92 @@ proc stream_kernel_digests
     u32assert.err="number of kernel procedure digests must fit in a u32"
     dup u32lt.256 assert.err="number of kernel procedure digests exceeds MultiAir::max_aux_inputs"
     exec.constants::tmp3 mem_store
-    # => [R0_kH, R1_kH, C_kH, ...]
+    # => [...]
 
+    # --- Materialize: write N canonical digests from advice into the scratch region. ---
+    exec.constants::kernel_digests_ptr
     exec.constants::tmp3 mem_load
-    push.0 neq
+    # => [N, base, ...]
+    dup push.0 neq
     while.true
-        # Loop invariant entry: [R0_old, R1_old, C, ...]
-
-        # --- 1a) Build the sponge pre-image directly on the stack. ---
-        # Drop the old rate words; capacity carries.
-        dropw dropw
-        # => [C, ...]
-
-        # padw padw + adv_loadw lands the digest on top (d_0 at depth 0) and leaves a zero
-        # pad word at depths 4-7 — exactly the sponge rate layout required.
-        padw padw
-        adv_loadw
-        # => [d0, d1, d2, d3, 0, 0, 0, 0, C, ...]
-
-        # --- 1b) Duplicate the digest for the c_total fold. ---
-        dupw
-        # => [d_dup, d_orig, 0_pad, C, ...]
-
-        # --- 1c) c_total += 1 / ((α + γ) + msg(d)). ---
-        exec.fold_digest_word
-        # => [msg0, msg1, d_orig, 0_pad, C, ...]
-        push.BUS_ID_KERNEL_ROM_INIT_PLUS_ONE
-        exec.push_alpha_plus_i_gamma
-        # => [p0, p1, msg0, msg1, d_orig, 0_pad, C, ...]
-        ext2add ext2inv
-        # => [t0, t1, d_orig, 0_pad, C, ...]
-        exec.add_into_c_total
-        # => [d_orig, 0_pad, C, ...]   <- exact sponge layout
-
-        # --- 1d) One permute per digest. ---
-        exec.poseidon2::permute
-        # => [R0', R1', C', ...]
-
-        # --- 1e) Decrement N and update loop flag. ---
-        exec.constants::tmp3 mem_load sub.1
-        dup exec.constants::tmp3 mem_store
-        push.0 neq
+        # Loop entry: [N, base, ...]
+        padw adv_loadw
+        # => [d0, d1, d2, d3, N, base, ...]
+        dup.5 mem_storew_le
+        # => [d0, d1, d2, d3, N, base, ...]   (written canonically at base)
+        dropw
+        # => [N, base, ...]
+        swap add.4 swap
+        # => [N, base+4, ...]
+        sub.1
+        dup push.0 neq
+        # => [N-1 != 0, N-1, base+4, ...]
     end
-    # => [R0_final, R1_final, C_final, ...]
+    drop drop
+    # => [...]
 
-    # Squeeze kernel_H = the first rate word of the final sponge state, store canonically
-    # at reduced_inputs+0; then drop the rest of the sponge state.
+    # --- Recompute kernel_H = hash_elements(region, 4·N). ---
+    exec.constants::tmp3 mem_load mul.4
+    exec.constants::kernel_digests_ptr
+    # => [base, 4·N, ...]
+    exec.poseidon2::hash_elements
+    # => [kH0, kH1, kH2, kH3, ...]
+
+    # --- Hand (kernel_H, region, N) to the core fold/observe step. ---
+    exec.constants::tmp3 mem_load
+    exec.constants::kernel_digests_ptr
+    movdn.5 movdn.5
+    # => [kH0, kH1, kH2, kH3, base, N, ...]
+    exec.observe_and_fold_kernel
+    # => [...]
+end
+
+#! Core kernel step: stores the kernel commitment for the FS observation and folds each
+#! kernel digest into the outer-LogUp boundary correction.
+#!
+#! `kernel_H` is stored canonically at `reduced_inputs_ptr + 0`, with a zero pad word at
+#! `reduced_inputs_ptr + 4` so the FS observation can absorb `[kernel_H | 0_pad]` as a single
+#! rate-aligned 8-felt chunk. Each digest in `[ptr, ptr + 4·N)` is then folded into c_total by
+#! `1 / ((α + γ) + msg(d))` via Horner evaluation. The commitment is given by the caller (it is
+#! independent of how it was obtained), and the digests are read from memory.
+#!
+#! Input:  [kH0, kH1, kH2, kH3, ptr, N, ...]
+#! Output: [...]
+proc observe_and_fold_kernel
+    # Store kernel_H canonically at reduced_inputs+0.
     exec.constants::reduced_inputs_address_ptr mem_load
     mem_storew_le
-    dropw dropw dropw
-    # => [...]
+    dropw
+    # => [ptr, N, ...]
 
     # Write the zero pad word at reduced_inputs+4 (the FS-alignment pad).
     padw
     exec.constants::reduced_inputs_address_ptr mem_load add.4
     mem_storew_le
     dropw
+    # => [ptr, N, ...]
+
+    # Fold each digest from memory into c_total.
+    dup.1 push.0 neq
+    while.true
+        # Loop entry: [ptr, N, ...]
+        padw dup.4 mem_loadw_le
+        # => [d0, d1, d2, d3, ptr, N, ...]
+        exec.fold_digest_word
+        # => [msg0, msg1, ptr, N, ...]
+        push.BUS_ID_KERNEL_ROM_INIT_PLUS_ONE
+        exec.push_alpha_plus_i_gamma
+        # => [p0, p1, msg0, msg1, ptr, N, ...]
+        ext2add ext2inv
+        # => [t0, t1, ptr, N, ...]
+        exec.add_into_c_total
+        # => [ptr, N, ...]
+        add.4 swap sub.1 swap
+        # => [ptr+4, N-1, ...]
+        dup.1 push.0 neq
+        # => [N-1 != 0, ptr+4, N-1, ...]
+    end
+    drop drop
     # => [...]
 end
 

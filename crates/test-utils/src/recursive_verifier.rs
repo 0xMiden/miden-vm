@@ -376,8 +376,8 @@ where
 }
 
 /// Build kernel digest advice data: 4 canonical felts per digest, in order. The MASM
-/// `stream_kernel_digests` procedure reads each digest with a single `adv_loadw` and pads
-/// the sponge rate with zeros itself.
+/// `stream_kernel_digests` procedure reads each digest with a single `adv_loadw` and writes
+/// it into the kernel-digest scratch region before hashing the region with `hash_elements`.
 fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
     let mut result = Vec::with_capacity(kernel_digests.len() * 4);
     for digest in kernel_digests {

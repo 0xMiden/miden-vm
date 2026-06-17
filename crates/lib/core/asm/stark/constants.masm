@@ -156,6 +156,12 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 ### smaller AIR's main block during the swap.
 const SWAP_SCRATCH_PTR = 3223322764
 
+### Scratch region for the kernel-procedure digests streamed from advice during
+### `process_public_inputs`. Holds up to `Kernel::MAX_NUM_PROCEDURES` = 255 word-aligned
+### digests (1020 felts). The verifier hashes this region with `hash_elements` to recompute
+### the kernel commitment and folds each digest into the outer-LogUp boundary correction.
+const KERNEL_DIGESTS_PTR = 3223322836
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
@@ -545,6 +551,10 @@ end
 
 pub proc c_total_ptr
     push.C_TOTAL_PTR
+end
+
+pub proc kernel_digests_ptr
+    push.KERNEL_DIGESTS_PTR
 end
 
 pub proc aux_rand_nd_ptr

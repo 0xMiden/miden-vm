@@ -15,13 +15,9 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::{
-    hash::poseidon2::Poseidon2Permutation256,
-    stark::{
-        air::{ReductionError, WindowAccess},
-        challenger::CanObserve,
-        symmetric::Permutation,
-    },
+use miden_crypto::stark::{
+    air::{ReductionError, WindowAccess},
+    challenger::CanObserve,
 };
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
@@ -710,28 +706,21 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
 /// Computes `kernel_H`, the fixed-size Poseidon2 commitment to the kernel-procedure digests.
 ///
-/// Plain 12-wide Poseidon2 sponge with zero initial state: each 4-felt digest is absorbed as
-/// one rate block `[d0, d1, d2, d3, 0, 0, 0, 0]` (one permutation per digest, capacity
-/// carried between blocks); the result is the first rate word of the final state. The empty
-/// digest list yields the zero word (no permutation is applied).
+/// This is the canonical [`Kernel::commitment`] value expressed over the flattened digest
+/// felts: the Poseidon2 linear hash (`hash_elements`) of `kernel_felts`, packing eight felts
+/// (two digests) per permutation. The empty digest list yields `hash_elements(&[])`.
 ///
-/// The MASM recursive verifier computes the same value on the fly while streaming the
-/// digests from the advice tape (`sys/vm/public_inputs.masm`); both sides absorb `kernel_H`
-/// into the Fiat-Shamir transcript in place of the unbounded digest list, and callers of the
-/// recursive verifier read it back as the kernel commitment of the verified statement.
+/// The MASM recursive verifier recomputes the same value from the materialized digests
+/// (`sys/vm/public_inputs.masm`); both sides absorb `kernel_H` into the Fiat-Shamir transcript
+/// in place of the unbounded digest list, and callers of the recursive verifier read it back
+/// as the kernel commitment of the verified statement.
 pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
     assert!(
         kernel_felts.len().is_multiple_of(WORD_SIZE),
         "kernel digest felts must be whole words"
     );
 
-    let mut state = [Felt::ZERO; 12];
-    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
-        state[0..WORD_SIZE].copy_from_slice(digest);
-        state[WORD_SIZE..2 * WORD_SIZE].fill(Felt::ZERO);
-        state = Poseidon2Permutation256.permute(state);
-    }
-    [state[0], state[1], state[2], state[3]]
+    miden_core::chiplets::hasher::hash_elements(kernel_felts).into()
 }
 
 // REDUCED-AUX BOUNDARY BUILDER
