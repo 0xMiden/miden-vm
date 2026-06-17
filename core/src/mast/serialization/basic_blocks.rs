@@ -12,8 +12,8 @@
 //! The total encoded size is:
 //! `encoded_operations_len + size_of::<u32>() + (5 * num_batches)`.
 //!
-//! This matches [`basic_block_data_len`], which is used for size accounting in stripped and
-//! hashless serialization.
+//! This matches [`basic_block_data_len`], which is used for size accounting in normal and hashless
+//! serialization.
 
 use alloc::vec::Vec;
 

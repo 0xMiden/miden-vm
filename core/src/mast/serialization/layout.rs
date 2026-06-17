@@ -1,8 +1,6 @@
 use alloc::{format, string::ToString, vec::Vec};
 
-use super::{
-    FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
-};
+use super::{FLAG_HASHLESS, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION};
 use crate::{
     mast::MastNodeId,
     serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
@@ -148,23 +146,12 @@ impl ForestLayout {
 // ================================================================================================
 
 impl WireFlags {
-    pub(super) fn new(bits: u8) -> Result<Self, DeserializationError> {
-        let flags = Self(bits);
-        if flags.is_hashless() && !flags.is_stripped() {
-            return Err(DeserializationError::InvalidValue(
-                "HASHLESS flag requires STRIPPED flag to be set".to_string(),
-            ));
-        }
-
-        Ok(flags)
+    pub(super) fn new(bits: u8) -> Self {
+        Self(bits)
     }
 
     pub(super) fn bits(self) -> u8 {
         self.0
-    }
-
-    pub(super) fn is_stripped(self) -> bool {
-        self.0 & FLAG_STRIPPED != 0
     }
 
     pub(super) fn is_hashless(self) -> bool {
@@ -183,7 +170,7 @@ pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
     // policy for counts: e.g. `SliceReader` for trusted inspection versus `BudgetedReader` for the
     // untrusted deserialization path.
     let (raw_flags, _version) = read_and_validate_header(source)?;
-    let flags = WireFlags::new(raw_flags)?;
+    let flags = WireFlags::new(raw_flags);
     if flags.is_hashless() && !allow_hashless {
         return Err(DeserializationError::InvalidValue(
             "HASHLESS flag is set; use UntrustedMastForest for untrusted input".to_string(),
