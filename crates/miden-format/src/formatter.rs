@@ -37,7 +37,7 @@ struct NodeLayout {
     node: SyntaxNode,
     same_line_with_prev: bool,
     blank_lines_before: usize,
-    leading_comments: Vec<String>,
+    leading_comments: Vec<LeadingComment>,
     trailing_comment: Option<String>,
     trailing_comments: Vec<String>,
 }
@@ -45,7 +45,13 @@ struct NodeLayout {
 #[derive(Debug, Default)]
 struct ContainerTail {
     blank_lines_before: usize,
-    leading_comments: Vec<String>,
+    leading_comments: Vec<LeadingComment>,
+}
+
+#[derive(Debug)]
+struct LeadingComment {
+    blank_lines_before: usize,
+    text: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,7 +68,7 @@ struct Interstice {
     state: IntersticeState,
     same_line_with_prev: bool,
     blank_lines: usize,
-    leading_comments: Vec<String>,
+    leading_comments: Vec<LeadingComment>,
     trailing_comment: Option<String>,
     trailing_comments: Vec<String>,
 }
@@ -127,7 +133,11 @@ impl Interstice {
                 },
                 IntersticeState::StartOfLine => {
                     self.same_line_with_prev = false;
-                    self.leading_comments.push(trimmed_comment(token));
+                    self.leading_comments.push(LeadingComment {
+                        blank_lines_before: self.blank_lines.min(1),
+                        text: trimmed_comment(token),
+                    });
+                    self.blank_lines = 0;
                     self.state = IntersticeState::AfterLeadingComment;
                 },
                 IntersticeState::AfterLeadingComment | IntersticeState::AfterTrailingComment => (),
@@ -1573,13 +1583,8 @@ fn emit_trailing_comments(lines: &mut Vec<String>, comments: &[String], indent: 
 }
 
 fn emit_leading_layout(lines: &mut Vec<String>, entry: &NodeLayout, indent: usize) {
-    if entry.blank_lines_before > 0 && !lines.is_empty() {
-        push_blank_line(lines);
-    }
-
-    for comment in &entry.leading_comments {
-        lines.push(format!("{}{}", indent_string(indent), comment));
-    }
+    emit_leading_comments(lines, &entry.leading_comments, indent);
+    emit_blank_lines_before_syntax(lines, entry.blank_lines_before);
 }
 
 fn emit_tail_layout(lines: &mut Vec<String>, tail: ContainerTail, indent: usize) {
@@ -1587,12 +1592,22 @@ fn emit_tail_layout(lines: &mut Vec<String>, tail: ContainerTail, indent: usize)
         return;
     }
 
-    if tail.blank_lines_before > 0 && !lines.is_empty() {
-        push_blank_line(lines);
-    }
+    emit_leading_comments(lines, &tail.leading_comments, indent);
+    emit_blank_lines_before_syntax(lines, tail.blank_lines_before);
+}
 
-    for comment in tail.leading_comments {
-        lines.push(format!("{}{}", indent_string(indent), comment));
+fn emit_leading_comments(lines: &mut Vec<String>, comments: &[LeadingComment], indent: usize) {
+    for comment in comments {
+        if comment.blank_lines_before > 0 && !lines.is_empty() {
+            push_blank_line(lines);
+        }
+        lines.push(format!("{}{}", indent_string(indent), comment.text));
+    }
+}
+
+fn emit_blank_lines_before_syntax(lines: &mut Vec<String>, blank_lines_before: usize) {
+    if blank_lines_before > 0 && !lines.is_empty() {
+        push_blank_line(lines);
     }
 }
 
@@ -2499,6 +2514,35 @@ pub proc set_item
 
     swapw movup.8
     # => [slot_ptr, VALUE, OLD_VALUE]
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let config = Config::default();
+        let formatted = format_syntax(&config, &parse.syntax());
+        assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&config, &reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn preserves_blank_lines_between_root_comment_blocks() {
+        let source = "\
+# PROCEDURES
+# =================================================================================================
+
+# DELTA COMPUTATION
+# -------------------------------------------------------------------------------------------------
+
+#! Computes the commitment to the native account's delta.
+begin
+    nop
 end
 ";
 

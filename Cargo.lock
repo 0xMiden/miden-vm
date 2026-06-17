@@ -1518,9 +1518,11 @@ dependencies = [
  "miden-assembly-syntax-cst",
  "miden-debug-types",
  "serde",
+ "tempfile",
  "thiserror",
  "toml",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1650,6 +1652,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1773,6 +1776,7 @@ dependencies = [
  "env_logger",
  "miden-air",
  "miden-assembly",
+ "miden-assembly-syntax",
  "miden-core",
  "miden-crypto",
  "miden-mast-package",

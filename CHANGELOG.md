@@ -4,6 +4,7 @@
 
 #### Changes
 
+- [BREAKING] Unified `OnceLockCompat` behavior across `std` and `no_std` ([#3188](https://github.com/0xMiden/miden-vm/pull/3188)).
 - Added an event-based `miden::core::debug` module providing `print_*` procedures for print-style debugging of the operand stack, memory, advice stack, and advice map ([#3169](https://github.com/0xMiden/miden-vm/issues/3169)).
 - [BREAKING] Removed `debug.*` decorators in favor of `miden::core::debug` procedures, and bumped the MAST wire format to `0.0.4` ([#3201](https://github.com/0xMiden/miden-vm/pull/3201)).
 - Added `miden::core::debug::print_mem_addr` for printing a single memory cell (combine with `locaddr` to print a procedure local) ([#3203](https://github.com/0xMiden/miden-vm/issues/3203)).
@@ -44,6 +45,7 @@
 - Preserved `LOGPRECOMPILE` tail stack slots in the AIR, preventing forged values in `stack[12..15]` ([#3244](https://github.com/0xMiden/miden-vm/pull/3244)).
 - Bound memory AIR word addresses to their range-checked decomposition limbs ([#3245](https://github.com/0xMiden/miden-vm/pull/3245)).
 - Rejected oversized AEAD decrypt outputs before reading ciphertext or running host-side decryption ([#3252](https://github.com/0xMiden/miden-vm/pull/3252)).
+- Fixed MASM tooling edge cases around atomic file writes, source URI paths, package loading, local registry state, diagnostics, generated MASM memory addresses, and CST `$...` special identifiers ([#3178](https://github.com/0xMiden/miden-vm/pull/3178)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
 - [BREAKING] Made `miden-vm run` and `miden-vm prove` fail when the inferred `.inputs` file is missing ([#3236](https://github.com/0xMiden/miden-vm/pull/3236)).
 - [BREAKING] Replaced the Poseidon2 sponge precompile transcript with a 2-to-1 hash folding scheme; the rolling state is itself a complete digest at every step, removing `finalize()` and `PrecompileTranscriptDigest`. The `log_precompile` opcode is reshaped accordingly (helper/stack rename, STMNT placed at stack[4..8]) and the MASM `log_precompile_request` wrapper now computes STMNT via `hmerge`. RELATION_DIGEST bumped ([#3100](https://github.com/0xMiden/miden-vm/pull/3100)).

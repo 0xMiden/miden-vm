@@ -14,7 +14,12 @@ pub enum ConfigError {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// The width of an indent (in spaces)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "indent_width",
+        alias = "indent_size",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub indent_size: Option<u8>,
     /// The maximum length (in characters) of any line before line breaks are introduced
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,8 +94,8 @@ impl clap::builder::TypedValueParser for ConfigValueParser {
             let opt = opt.trim();
             let kv = opt.split_once('=').map(|(k, v)| (k.trim(), v.trim()));
             match kv {
-                Some(("indent_size", value)) => {
-                    config.indent_size = Some(parse_u8(value, "indent_size")?);
+                Some(("indent_width" | "indent_size", value)) => {
+                    config.indent_size = Some(parse_u8(value, "indent_width")?);
                 },
                 Some(("max_line_length", value)) => {
                     config.max_line_length = Some(parse_u8(value, "max_line_length")?);
@@ -113,4 +118,36 @@ fn parse_u8(input: &str, prop: &str) -> Result<u8, clap::Error> {
     input.parse::<u8>().map_err(|err| {
         clap::Error::raw(ErrorKind::ValueValidation, format!("invalid value for {prop}: {err}"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use clap::builder::TypedValueParser;
+
+    use super::*;
+
+    #[test]
+    fn toml_config_accepts_documented_indent_width() {
+        let config: Config = toml::from_str("indent_width = 2").unwrap();
+        assert_eq!(config.indent_size(), 2);
+    }
+
+    #[test]
+    fn toml_config_keeps_indent_size_as_legacy_alias() {
+        let config: Config = toml::from_str("indent_size = 2").unwrap();
+        assert_eq!(config.indent_size(), 2);
+    }
+
+    #[test]
+    fn cli_config_accepts_documented_indent_width() {
+        let command = clap::Command::new("miden-format");
+        let config = ConfigValueParser
+            .parse_ref(&command, None, OsStr::new("indent_width=2,max_line_length=80"))
+            .unwrap();
+
+        assert_eq!(config.indent_size(), 2);
+        assert_eq!(config.max_line_length(), 80);
+    }
 }
