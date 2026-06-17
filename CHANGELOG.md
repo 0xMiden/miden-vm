@@ -4,6 +4,7 @@
 
 #### Changes
 
+- [BREAKING] Unified `OnceLockCompat` behavior across `std` and `no_std` ([#3188](https://github.com/0xMiden/miden-vm/pull/3188)).
 - Added an event-based `miden::core::debug` module providing `print_*` procedures for print-style debugging of the operand stack, memory, advice stack, and advice map ([#3169](https://github.com/0xMiden/miden-vm/issues/3169)).
 - [BREAKING] Removed `debug.*` decorators in favor of `miden::core::debug` procedures, and bumped the MAST wire format to `0.0.4` ([#3201](https://github.com/0xMiden/miden-vm/pull/3201)).
 - Added `miden::core::debug::print_mem_addr` for printing a single memory cell (combine with `locaddr` to print a procedure local) ([#3203](https://github.com/0xMiden/miden-vm/issues/3203)).
