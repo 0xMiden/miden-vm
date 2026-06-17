@@ -143,6 +143,13 @@ impl PublicInputs {
         self.pc_transcript_state
     }
 
+    /// Returns the canonical commitment to the kernel of the verified statement: the value the
+    /// recursive verifier observes into the transcript in place of the raw kernel-procedure
+    /// digest list. See [`Kernel::commitment`](miden_core::program::Kernel::commitment).
+    pub fn kernel_commitment(&self) -> Word {
+        self.program_info.kernel_commitment()
+    }
+
     /// Returns the fixed-length public values and the variable-length kernel procedure digests
     /// as a flat slice of `Felt`s.
     ///
