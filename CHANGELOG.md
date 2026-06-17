@@ -47,6 +47,7 @@
 - Preserved `LOGPRECOMPILE` tail stack slots in the AIR, preventing forged values in `stack[12..15]` ([#3244](https://github.com/0xMiden/miden-vm/pull/3244)).
 - Bound memory AIR word addresses to their range-checked decomposition limbs ([#3245](https://github.com/0xMiden/miden-vm/pull/3245)).
 - Rejected oversized AEAD decrypt outputs before reading ciphertext or running host-side decryption ([#3252](https://github.com/0xMiden/miden-vm/pull/3252)).
+- [BREAKING] Bounded deferred precompile request growth by request count and total calldata bytes in `AdviceProvider` ([#3260](https://github.com/0xMiden/miden-vm/pull/3260)).
 - Fixed MASM tooling edge cases around atomic file writes, source URI paths, package loading, local registry state, diagnostics, generated MASM memory addresses, and CST `$...` special identifiers ([#3178](https://github.com/0xMiden/miden-vm/pull/3178)).
 - [BREAKING] Removed the public `eddsa_ed25519::verify_prehash` entrypoint and bound EdDSA precompile verification to the signed message ([#3254](https://github.com/0xMiden/miden-vm/pull/3254)).
 - Replaced `bincode` proof serialization with `wincode` and bounded verifier-side STARK proof deserialization to 64 MiB ([#3148](https://github.com/0xMiden/miden-vm/pull/3148)).
