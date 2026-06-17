@@ -55,11 +55,20 @@ pub const BYTE_LOOKUP_KIND_BLAKEG_ROT7: [usize; BYTE_LOOKUP_ROTATION_POSITIONS] 
 /// Number of byte-pair lookup kinds represented in the table.
 pub const BYTE_LOOKUP_KIND_COUNT: usize = 1 + 2 * BYTE_LOOKUP_ROTATION_POSITIONS;
 
+/// Dynamic multiplicity column used by 16-bit range-check table inserts.
+pub const RANGE_CHECK_LOOKUP_COL: usize = BYTE_LOOKUP_KIND_COUNT;
+
+/// Number of dynamic multiplicity columns in the byte-pair lookup AIR.
+pub const BYTE_LOOKUP_COLUMN_COUNT: usize = BYTE_LOOKUP_KIND_COUNT + 1;
+
 /// Number of real byte-pair table rows.
 pub const AND8_TABLE_ROWS: usize = BYTE_PAIR_ROWS;
 
-/// Number of per-kind dynamic multiplicity counters filled by consumers.
-pub const BYTE_LOOKUP_COUNT_LEN: usize = BYTE_PAIR_ROWS * BYTE_LOOKUP_KIND_COUNT;
+/// Offset in the consumer count vector where range-check multiplicities start.
+pub const RANGE_CHECK_COUNT_OFFSET: usize = BYTE_PAIR_ROWS * BYTE_LOOKUP_KIND_COUNT;
+
+/// Number of dynamic multiplicity counters filled by consumers.
+pub const BYTE_LOOKUP_COUNT_LEN: usize = BYTE_PAIR_ROWS * BYTE_LOOKUP_COLUMN_COUNT;
 
 /// Log2 of [`AND8_LOOKUP_TRACE_HEIGHT`].
 pub const LOG_AND8_LOOKUP_TRACE_HEIGHT: u8 = (2 * BITS_PER_BYTE) as u8;
@@ -72,8 +81,9 @@ pub const AND8_LOOKUP_TRACE_HEIGHT: usize = 1 << LOG_AND8_LOOKUP_TRACE_HEIGHT;
 
 /// Dynamic byte-pair table columns.
 ///
-/// `multiplicity` is filled by consumers of the table. A zero-multiplicity row is still a valid
-/// table row; it just contributes nothing to the lookup bus.
+/// Multiplicities are filled by consumers of the table. A zero-multiplicity row remains a valid
+/// table row; it just contributes nothing to the lookup bus. The final column serves the
+/// `RangeCheck` bus by interpreting the fixed `(a, b)` row as the 16-bit value `256 * a + b`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct And8LookupCols<T> {
@@ -86,6 +96,7 @@ pub struct And8LookupCols<T> {
     pub rot7_pos1_multiplicity: T,
     pub rot7_pos2_multiplicity: T,
     pub rot7_pos3_multiplicity: T,
+    pub range_multiplicity: T,
 }
 
 /// Number of dynamic columns in the byte-pair table AIR.
@@ -141,10 +152,10 @@ impl<T> Borrow<And8LookupPreprocessedCols<T>> for [T] {
 impl And8LookupPreprocessedCols<Felt> {
     /// Builds the fixed byte-pair table.
     ///
-    /// The row order is `(a << 8) + b`. Each row serves ordinary byte AND and
-    /// the eight BlakeG rotation-contribution buses. A rotation contribution is
-    /// the u32 value obtained by placing `(a xor b)` at one byte position and
-    /// rotating the word by 12 or 7 bits.
+    /// The row order is `(a << 8) + b`. Each row serves ordinary byte AND, the
+    /// eight BlakeG rotation-contribution buses, and the range-check table side for
+    /// `value = 256 * a + b`. A rotation contribution is the u32 value obtained by placing
+    /// `(a xor b)` at one byte position and rotating the word by 12 or 7 bits.
     pub fn preprocessed_trace() -> RowMajorMatrix<Felt> {
         let mut values =
             Vec::with_capacity(AND8_LOOKUP_TRACE_HEIGHT * NUM_AND8_LOOKUP_PREPROCESSED_COLS);
@@ -197,7 +208,7 @@ const fn byte_rotation_contribution(a: u8, b: u8, byte_pos: usize, rot: u32) -> 
 }
 
 const _: () = {
-    assert!(NUM_AND8_LOOKUP_COLS == BYTE_LOOKUP_KIND_COUNT);
+    assert!(NUM_AND8_LOOKUP_COLS == BYTE_LOOKUP_COLUMN_COUNT);
     assert!(
         NUM_AND8_LOOKUP_PREPROCESSED_COLS
             == BYTE_LOOKUP_BASE_PREPROCESSED_COLS + 2 * BYTE_LOOKUP_ROTATION_POSITIONS

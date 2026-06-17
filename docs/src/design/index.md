@@ -29,7 +29,7 @@ Miden VM consists of several interconnected components, each providing a specifi
 * **System**, which is responsible for managing system data, including the current VM cycle (`clk`), and the current and parent execution contexts.
 * **Program decoder**, which is responsible for computing a commitment to the executing program and converting the program into a sequence of operations executed by the VM.
 * **Operand stack**, which is a push-down stack which provides operands for all operations executed by the VM.
-* **Range checker**, which is responsible for providing 16-bit range checks needed by other components.
+* **Byte-pair lookup**, which provides bytewise lookup tables, including the table side of 16-bit range checks.
 * **Chiplets**, which is a set of specialized circuits used to accelerate commonly-used complex computations. Currently, the VM relies on 5 chiplets:
   - Hash chiplet, used to compute native VM hashes both for sequential hashing and for Merkle tree hashing.
   - Bitwise chiplet, used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
@@ -40,11 +40,17 @@ Miden VM consists of several interconnected components, each providing a specifi
 The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
 
 ## VM execution trace
-The execution trace of Miden VM consists of $72$ main trace columns and $8$ auxiliary columns (running products / LogUp accumulators), as shown in the diagram below.
+Miden VM uses a multi-AIR execution trace. The Core trace contains the system, decoder, and stack
+columns; the Chiplets trace stacks the chiplet components in one shared segment; additional AIRs,
+such as the BlakeG compression AIR and byte-pair lookup AIR, carry specialized table traces with
+their own lookup accumulators. The diagram below shows the high-level organization rather than an
+exhaustive column count.
 
 ![vm_trace.png](../img/design/vm_trace.png)
 
-As can be seen from the above, the system, decoder, stack, and range checker components use dedicated sets of columns, while all chiplets share the same $18$ columns. To differentiate between chiplets, we use a set of binary selector columns, a combination of which uniquely identifies each chiplet.
+The system, decoder, and stack components use dedicated sets of columns, while all chiplets share
+one chiplet trace segment. To differentiate between chiplets, we use selector columns, a
+combination of which uniquely identifies each chiplet.
 
 The system component does not yet have a dedicated documentation section, since the design is likely to change. However, the following column is not expected to change:
 

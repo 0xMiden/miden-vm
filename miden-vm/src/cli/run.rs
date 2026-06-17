@@ -88,31 +88,39 @@ impl RunCmd {
             println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
         }
 
-        // calculate the percentage of padded rows
-        let padding_percentage = (trace.trace_len_summary().padded_trace_len()
-            - trace.trace_len_summary().trace_len())
-            * 100
-            / trace.trace_len_summary().padded_trace_len();
+        let summary = trace.trace_len_summary();
+        let chiplets = summary.chiplets();
+        let padding_percentage =
+            |rows: usize, height: usize| (height.saturating_sub(rows)) * 100 / height;
+
         // print the required cycles for each component
         println!(
-            "VM cycles: {} extended to {} steps ({}% padding).
-├── Stack rows: {}
-├── Range checker rows: {}
-└── Chiplets rows: {}
+            "VM trace rows:
+├── Core rows: {} extended to {} ({}% padding)
+├── Chiplets rows: {} extended to {} ({}% padding)
     ├── Hash chiplet rows: {}
     ├── Bitwise chiplet rows: {}
     ├── Memory chiplet rows: {}
-    └── Kernel ROM rows: {}",
-            trace.trace_len_summary().trace_len(),
-            trace.trace_len_summary().padded_trace_len(),
-            padding_percentage,
-            trace.trace_len_summary().core_trace_len(),
-            trace.trace_len_summary().range_trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().trace_len(),
-            trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().bitwise_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().memory_chiplet_len(),
-            trace.trace_len_summary().chiplets_trace_len().kernel_rom_len(),
+    └── Kernel ROM rows: {}
+├── BlakeG compression rows: {} extended to {} ({}% padding)
+└── Byte-pair lookup rows: {} (fixed table)",
+            summary.core_rows(),
+            summary.core_height(),
+            padding_percentage(summary.core_rows(), summary.core_height()),
+            summary.chiplets_rows(),
+            summary.chiplets_height(),
+            padding_percentage(summary.chiplets_rows(), summary.chiplets_height()),
+            chiplets.hash_chiplet_len(),
+            chiplets.bitwise_chiplet_len(),
+            chiplets.memory_chiplet_len(),
+            chiplets.kernel_rom_len(),
+            summary.blakeg_compression_rows(),
+            summary.blakeg_compression_height(),
+            padding_percentage(
+                summary.blakeg_compression_rows(),
+                summary.blakeg_compression_height()
+            ),
+            summary.byte_pair_lookup_rows(),
         );
 
         Ok(())

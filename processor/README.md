@@ -41,15 +41,16 @@ The `FastProcessor` is designed for fast program execution with minimal overhead
 ### Trace generation with `build_trace()`
 After execution with `FastProcessor::execute_trace_inputs*()`, the `build_trace()` function uses the returned `TraceBuildInputs` bundle to construct the full execution trace. When the `concurrent` feature is enabled, trace generation is parallelized for improved performance.
 
-The trace consists of several sections:
-* The decoder, which tracks instruction decoding and control flow.
-* The stack, which records stack state transitions.
-* The range-checker, which validates that values fit into 16 bits.
-* The chiplets module, which handles complex computations (e.g., hashing) and random access memory.
+The trace consists of several AIR-specific sections:
+* The Core trace, which contains the system, decoder, and stack columns.
+* The Chiplets trace, which handles accelerator rows such as memory, bitwise, ACE, and kernel ROM.
+* The BlakeG compression trace, which proves native hash compression steps.
+* The byte-pair lookup trace, which serves bytewise AND, BlakeG rotation, and 16-bit range-check
+  table lookups.
 
-These sections are connected via two buses:
-* The range-checker bus, which links stack and chiplets modules with the range-checker.
-* The chiplet bus, which links stack and the decoder with the chiplets module.
+These sections are connected via lookup buses. For example, the range-check bus balances
+range-check requests from Core, Memory, and BlakeG against the byte-pair lookup AIR, while the
+chiplet bus links Core requests with chiplet rows.
 
 A much more in-depth description of Miden VM design is available [here](https://docs.miden.xyz/miden-vm/design).
 

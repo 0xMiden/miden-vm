@@ -19,7 +19,6 @@ use super::{
 use crate::constraints::{
     columns::{ChipletCols, CoreCols, NUM_CHIPLETS_COLS, NUM_CORE_COLS},
     decoder::columns::DecoderCols,
-    range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
@@ -34,7 +33,6 @@ pub struct MainTraceRow<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
-    pub range: RangeCols<T>,
     pub chiplets: ChipletCols<T>,
 }
 
@@ -72,7 +70,7 @@ struct TraceStorage {
     chiplets_rm: RowMajorMatrix<Felt>,
     /// BlakeG compression matrix, at its own per-AIR height.
     blakeg_compression_rm: RowMajorMatrix<Felt>,
-    /// Byte-AND lookup matrix, at its own fixed table height.
+    /// Byte-pair lookup matrix, at its fixed table height.
     and8_lookup_rm: RowMajorMatrix<Felt>,
 }
 
@@ -82,8 +80,7 @@ pub struct MainTrace {
     last_program_row: RowIndex,
 }
 
-/// Physical row width of `core_rm`: the full per-AIR Core matrix width (`NUM_CORE_COLS`),
-/// i.e. system+decoder+stack columns plus the two trailing range-checker columns.
+/// Physical row width of `core_rm`: the full per-AIR Core matrix width (`NUM_CORE_COLS`).
 const CORE_STORAGE_WIDTH: usize = NUM_CORE_COLS;
 
 impl MainTrace {
@@ -208,7 +205,7 @@ impl MainTrace {
         self.core_height()
             .max(self.chiplets_height())
             .max(self.blakeg_compression_height())
-            .max(self.and8_lookup_height())
+            .max(self.byte_pair_lookup_height())
     }
 
     /// Returns the Core-AIR trace height.
@@ -231,7 +228,7 @@ impl MainTrace {
 
     /// Returns the byte-pair lookup AIR trace height.
     #[inline]
-    pub fn and8_lookup_height(&self) -> usize {
+    pub fn byte_pair_lookup_height(&self) -> usize {
         self.storage.and8_lookup_rm.height()
     }
 
@@ -904,7 +901,7 @@ mod tests {
     /// holds `Felt::from_u32(row * TRACE_WIDTH + col)` for col positions matching the
     /// equivalent unified-trace column index.
     fn deterministic_parts_trace(num_rows: usize) -> MainTrace {
-        // `core_rm` is the full per-AIR Core matrix (range columns in trailing slots).
+        // `core_rm` is the full per-AIR Core matrix.
         let mut core_rm = Vec::with_capacity(num_rows * CORE_STORAGE_WIDTH);
         let mut chiplets_rm = Vec::with_capacity(num_rows * CHIPLETS_WIDTH);
         let mut blakeg_rm = Vec::with_capacity(num_rows * NUM_BLAKEG_COMPRESSION_COLS);

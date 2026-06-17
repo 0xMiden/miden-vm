@@ -5,8 +5,8 @@ use itertools::Itertools;
 use miden_air::{
     CoreCols, Felt, StackCols, SystemCols,
     trace::{
-        DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RANGE_CHECK_TRACE_WIDTH, RowIndex,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex, STACK_TRACE_WIDTH,
+        SYS_TRACE_WIDTH,
         and8_lookup::{AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS},
         decoder::NUM_OP_BITS,
     },
@@ -37,11 +37,8 @@ use crate::{
 /// Per-row payload written by the core tracer (system + decoder + stack).
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
-/// Physical row width of the core buffer: the [`CORE_TRACE_WIDTH`] payload plus the two
-/// trailing range-checker columns, which together form the per-AIR Core matrix
-/// (`NUM_CORE_COLS`) consumed directly by proving. The range columns are filled in-place
-/// after padding (see `write_range_into_core`).
-pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH + RANGE_CHECK_TRACE_WIDTH;
+/// Physical row width of the core buffer: the per-AIR Core matrix consumed directly by proving.
+pub const CORE_STORAGE_WIDTH: usize = CORE_TRACE_WIDTH;
 
 /// `build_trace()` uses this as a hard cap on trace rows.
 ///
@@ -173,51 +170,36 @@ pub fn build_trace_with_max_len(
 
     let core_trace_len = core_trace_data.len() / CORE_STORAGE_WIDTH;
 
-    // Get the number of rows for the range checker
-    let range_table_len = range_checker.get_number_range_checker_rows();
-
-    let core_height = pad_to_trace_length(core_trace_len.max(range_table_len));
+    let core_height = pad_to_trace_length(core_trace_len);
     let chiplets_height = pad_to_trace_length(chiplets.trace_len());
-    let and8_lookup_trace_len = AND8_LOOKUP_TRACE_HEIGHT;
-    let and8_lookup_height = AND8_LOOKUP_TRACE_HEIGHT;
-    let padded_trace_len = core_height
+    let byte_pair_lookup_rows = AND8_LOOKUP_TRACE_HEIGHT;
+    let max_trace_height = core_height
         .max(chiplets_height)
         .max(blakeg_compression_height)
-        .max(and8_lookup_height);
+        .max(byte_pair_lookup_rows);
 
     // Cap check against the padded height: pad-up can push over MAX_TRACE_LEN even
     // when the unpadded check above passed.
-    if padded_trace_len > max_trace_len {
+    if max_trace_height > max_trace_len {
         return Err(ExecutionError::TraceLenExceeded(max_trace_len));
     }
 
-    let trace_len_summary = TraceLenSummary::new_with_padded(
+    let trace_len_summary = TraceLenSummary::new(
         core_trace_len,
-        range_table_len,
         ChipletsLengths::new(&chiplets),
         blakeg_compression_trace_len,
-        and8_lookup_trace_len,
-        padded_trace_len,
+        byte_pair_lookup_rows,
     );
 
     // Each segment is built at its own per-AIR height (no cross-padding to the unified max).
-    let ((chiplets_trace, blakeg_compression_trace, and8_counts), ()) = rayon::join(
+    let ((chiplets_trace, blakeg_compression_trace, mut and8_counts), ()) = rayon::join(
         || chiplets.into_traces(chiplets_height, blakeg_compression_height),
         || pad_core_row_major(&mut core_trace_data, core_height),
     );
 
+    range_checker.write_range_counts(&mut and8_counts);
     let and8_lookup_trace = chiplets::build_and8_lookup_trace(&and8_counts);
-    debug_assert_eq!(and8_lookup_trace.len(), and8_lookup_height * NUM_AND8_LOOKUP_COLS);
-
-    // The range checker occupies the two trailing columns of the core buffer.
-    range_checker.write_range_into_core(
-        &mut core_trace_data,
-        CORE_STORAGE_WIDTH,
-        CORE_TRACE_WIDTH,
-        CORE_TRACE_WIDTH + 1,
-        range_table_len,
-        core_height,
-    );
+    debug_assert_eq!(and8_lookup_trace.len(), byte_pair_lookup_rows * NUM_AND8_LOOKUP_COLS);
 
     // Create the MainTrace
     let main_trace = {
@@ -450,11 +432,7 @@ fn push_halt_opcode_row(
     core_trace_data.extend_from_slice(&row_data);
 }
 
-/// Initializes the ranger checker from the recorded range checks during execution and returns it.
-///
-/// Note that the maximum number of rows that the range checker can produce is 2^16, which is less
-/// than the maximum trace length (2^29). Hence, we can safely generate the entire range checker
-/// trace and then pad it to the final trace length, without worrying about hitting memory limits.
+/// Initializes the range-check multiplicity collector from recorded execution and chiplet requests.
 fn initialize_range_checker(
     range_checker_replay: RangeCheckerReplay,
     chiplets: &Chiplets,

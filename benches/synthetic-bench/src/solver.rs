@@ -72,7 +72,6 @@ pub fn solve(calibration: &Calibration, target: &TraceShape) -> Plan {
             Component::Hasher => target.totals.blakeg_compression_rows as f64,
             Component::Bitwise => target.breakdown.bitwise_rows as f64,
             Component::Memory => target.breakdown.memory_target() as f64,
-            Component::Range => target.totals.range_rows as f64,
         }
     };
 
@@ -131,13 +130,7 @@ mod tests {
         snapshot::{TraceBreakdown, TraceTotals},
     };
 
-    fn shape_of(
-        core_rows: u64,
-        range_rows: u64,
-        blakeg_compression: u64,
-        bitwise: u64,
-        memory: u64,
-    ) -> TraceShape {
+    fn shape_of(core_rows: u64, blakeg_compression: u64, bitwise: u64, memory: u64) -> TraceShape {
         let breakdown = TraceBreakdown {
             hasher_rows: 0,
             bitwise_rows: bitwise,
@@ -149,8 +142,6 @@ mod tests {
             core_rows,
             chiplets_rows: breakdown.chiplets_sum(),
             blakeg_compression_rows: blakeg_compression,
-            and8_lookup_rows: crate::snapshot::DEFAULT_AND8_LOOKUP_ROWS,
-            range_rows,
         };
         TraceShape::new(totals, breakdown)
     }
@@ -158,13 +149,13 @@ mod tests {
     fn low_hasher_target() -> TraceShape {
         // The core target is in the 2^18 bracket. Its baseline BlakeG leakage already exceeds the
         // requested hasher rows, so the solver should not add explicit bcompress work.
-        shape_of(131100, 40000, 8200, 0, 2300)
+        shape_of(131100, 8200, 0, 2300)
     }
 
     fn high_hasher_target() -> TraceShape {
         // Hasher rows exceed the baseline leakage from the core target, so explicit bcompress work
         // is required.
-        shape_of(16000, 0, 20000, 0, 0)
+        shape_of(16000, 20000, 0, 0)
     }
 
     #[test]
@@ -190,18 +181,32 @@ mod tests {
     }
 
     #[test]
-    fn emitted_program_matches_padded_bracket() {
+    fn emitted_program_matches_target_padded_brackets() {
         let cal = calibrate().expect("calibrate");
-        let target = shape_of(131100, 40000, 300000, 0, 2300);
+        let target = shape_of(180000, 300000, 0, 10000);
         let plan = solve(&cal, &target);
         let source = emit(&plan);
         let actual = measure_program(&source).expect("measure emitted program");
         assert_eq!(
-            actual.totals.padded_total(),
-            target.totals.padded_total(),
-            "padded trace length must match target bracket (got {} vs {}); plan={:?}, actual={:?}, target={:?}",
-            actual.totals.padded_total(),
-            target.totals.padded_total(),
+            actual.totals.padded_core(),
+            target.totals.padded_core(),
+            "core bracket mismatch; plan={:?}, actual={:?}, target={:?}",
+            plan,
+            actual,
+            target,
+        );
+        assert_eq!(
+            actual.totals.padded_chiplets(),
+            target.totals.padded_chiplets(),
+            "chiplets bracket mismatch; plan={:?}, actual={:?}, target={:?}",
+            plan,
+            actual,
+            target,
+        );
+        assert_eq!(
+            actual.totals.padded_blakeg_compression(),
+            target.totals.padded_blakeg_compression(),
+            "BlakeG-compression bracket mismatch; plan={:?}, actual={:?}, target={:?}",
             plan,
             actual,
             target,
@@ -211,7 +216,7 @@ mod tests {
     #[test]
     fn zero_target_yields_empty_program() {
         let cal = calibrate().expect("calibrate");
-        let target = shape_of(0, 0, 0, 0, 0);
+        let target = shape_of(0, 0, 0, 0);
         let plan = solve(&cal, &target);
         for snippet in SNIPPETS {
             assert_eq!(plan.iters(snippet.name), 0, "{}", snippet.name);

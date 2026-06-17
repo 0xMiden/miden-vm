@@ -161,11 +161,11 @@ impl TraceBuildInputs {
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
+/// - Per-AIR main traces for Core, Chiplets, BlakeG compression, and byte-pair lookup.
 /// - Information about the program (program hash and the kernel).
 /// - Information about execution outputs (stack state, deferred precompile requests, and the final
 ///   precompile transcript).
-/// - Summary of trace lengths of the main trace components.
+/// - Summary of per-AIR trace lengths.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     main_trace: MainTrace,
@@ -301,7 +301,7 @@ impl ExecutionTrace {
         self.get_trace_len()
     }
 
-    /// Returns a summary of the lengths of main, range and chiplet traces.
+    /// Returns a summary of the per-AIR trace lengths.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
     }

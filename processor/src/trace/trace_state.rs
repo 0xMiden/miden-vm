@@ -863,7 +863,8 @@ impl IntoIterator for AceReplay {
 
 /// Replay data for range checking operations.
 ///
-/// This currently only records
+/// Only u32 stack-operation range checks need replay data. Memory and BlakeG range checks are
+/// derived later from their finalized chiplet and compression traces.
 #[derive(Debug, Default)]
 pub struct RangeCheckerReplay {
     range_checks_u32_ops: VecDeque<[u16; 4]>,

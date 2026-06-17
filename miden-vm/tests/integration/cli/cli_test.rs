@@ -35,8 +35,8 @@ fn bin_under_test() -> escargot::CargoRun {
 }
 
 #[test]
-// Tt test might be an overkill to test only that the 'run' cli command
-// outputs steps and ms.
+// The exact row counts and elapsed time can change, so this checks only the stable labels printed
+// by the `run` command.
 fn cli_run() {
     let mut cmd = bin_under_test().command();
 
@@ -51,10 +51,12 @@ fn cli_run() {
 
     let output = cmd.unwrap();
 
-    // This tests what we want. Actually it outputs X steps in Y ms.
-    // However we the X and the Y can change in future versions.
-    // There is no other 'steps in' in the output
-    output.assert().stdout(predicate::str::contains("VM cycles"));
+    output
+        .assert()
+        .stdout(predicate::str::contains("Executed the program with hash"))
+        .stdout(predicate::str::contains("VM trace rows:"))
+        .stdout(predicate::str::contains("Core rows:"))
+        .stdout(predicate::str::contains("Byte-pair lookup rows:"));
 }
 
 #[test]

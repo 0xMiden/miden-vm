@@ -51,27 +51,24 @@ single file in `SYNTH_SNAPSHOT`):
    concatenate, and enclose in `begin ... end`. The output is the MASM
    program that Criterion actually runs.
 5. **Verify** -- execute the emitted program, measure its real row
-   counts, and assert that `padded_core_side` and `padded_chiplets`
-   match the scenario's. A bracket miss fails the bench; smaller drift
-   inside the same bracket is reported but tolerated, because proving
-   cost is driven by the padded length, not the raw count.
+   counts, and assert that every dynamic AIR lands in the scenario's
+   padded bracket. A bracket miss fails the bench; smaller drift inside
+   the same bracket is reported but tolerated, because proving cost is
+   driven by the padded length, not the raw count.
 
 ## Snippets
 
-Five patterns cover every component the solver targets:
+Four patterns cover the row brackets the solver can shape directly:
 
 | Snippet       | Body                                         | Drives                        |
 |---------------|----------------------------------------------|-------------------------------|
 | `hasher`      | `bcompress`                                  | BlakeG compression AIR        |
 | `bitwise`     | `u32split u32xor`                            | bitwise chiplet               |
-| `u32arith`    | `u32assert2 push.65537 add swap push.65537 add swap` | range chiplet |
 | `memory`      | `dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4` | memory chiplet |
 | `decoder_pad` | `swap dup.1 add`                             | core (decoder + stack)        |
 
-`u32arith` and `memory` use banded counters (strides of 65537 and
-262148) so that their 16-bit limbs form disjoint contiguous bands,
-keeping the range chiplet from deduplicating limb values across
-iterations.
+The memory snippet uses a banded address counter so its address-limb range checks stay
+representative across iterations.
 
 The solver has no snippets targeting the ACE or kernel-ROM chiplets.
 
@@ -98,10 +95,15 @@ visibility limitation, not as proof that the VM emitted no ACE rows.
 A producer JSON file is a map of scenario keys to entries. Each entry
 must carry a `trace` section; any sibling fields (cycle counts,
 metadata, ...) are silently ignored. Inside `trace`, the AIR-side
-totals (`core_rows`, `chiplets_rows`, `range_rows`) are the verifier's
-hard contract; nested `chiplets_shape` is an advisory per-chiplet
-breakdown. The loader checks
-`trace.chiplets_rows == sum(trace.chiplets_shape) + 1`.
+totals (`core_rows`, `chiplets_rows`, `blakeg_compression_rows`) are
+the verifier's dynamic hard contract; nested `chiplets_shape` is an
+advisory per-chiplet breakdown. The loader checks `trace.chiplets_rows
+== sum(trace.chiplets_shape) + 1`.
+
+For compatibility with older producer snapshots, the loader uses
+`chiplets_shape.hasher_rows` when `blakeg_compression_rows` is absent.
+Refreshing a producer snapshot should replace that fallback with an
+explicit `blakeg_compression_rows` value.
 
 ```json
 {
@@ -109,7 +111,7 @@ breakdown. The loader checks
     "trace": {
       "core_rows": 77699,
       "chiplets_rows": 123129,
-      "range_rows": 20203,
+      "blakeg_compression_rows": 65536,
       "chiplets_shape": {
         "hasher_rows": 120352,
         "bitwise_rows": 416,
@@ -138,24 +140,23 @@ Once the emitted program has run, the verifier compares its actual
 row counts against the scenario's targets and decides whether the
 bench passed. The checks come in three tiers -- **hard**, **soft**,
 and **info** -- graded by how directly each number maps to proving
-cost. There's also one free-standing **warning** for snippet-balance
-regressions.
+cost.
 
 ### Hard checks -- fail the bench
 
 Proving cost is dominated by the padded (power-of-two) length of each
 trace segment, not by the raw row count. So the only assertions that
-can fail the bench are on two padded proxies:
+can fail the bench are on the padded dynamic AIR brackets:
 
-- `padded_core_side = max(64, next_pow2(max(core_rows, range_rows)))`
-  -- the non-chiplets side of the AIR.
-- `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
+- `padded_core = max(64, next_pow2(core_rows))`.
+- `padded_chiplets = max(64, next_pow2(chiplets_rows))`.
+- `padded_blakeg_compression = max(64, next_pow2(blakeg_compression_rows))`.
 
-These two can land in *different* brackets on the same workload --
-`consume two P2ID notes`, for example, has `padded_core_side = 131072`
+These can land in *different* brackets on the same workload --
+`consume two P2ID notes`, for example, has `padded_core = 131072`
 but `padded_chiplets = 262144`. Checking them independently catches a
-bracket miss on either side that a single global `padded_total` check
-would hide.
+bracket miss on any dynamic AIR that an aggregate height check would
+hide.
 
 ### Soft checks -- report, don't fail
 
@@ -175,14 +176,6 @@ that the synthetic program can't suppress, so a snapshot with
 `core_rows / hasher_rows > 4` cannot be per-chiplet-matched even
 though it still matches both padded brackets. See `src/snippets.rs`
 for the cases where this structural mismatch shows up.
-
-### Warning -- range dominates
-
-If `range_rows` turns out to be the largest unpadded component in
-either the target or the actual shape, the bench prints a warning.
-The solver treats range as a derived quantity driven mostly by u32
-arithmetic; if it starts setting the bracket, snippet balance has
-drifted and should be revisited.
 
 ## Refreshing snapshots from a producer
 
@@ -219,7 +212,7 @@ Env vars:
   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
   inspection.
 
-The `prove` and `verify` axes use `HashFunction::Poseidon2` for STARK
+The `prove` and `verify` axes use `HashFunction::Eidos` for STARK
 proof generation (see the `BENCH_HASH` constant in `benches/synthetic_bench.rs`).
 
 ## License

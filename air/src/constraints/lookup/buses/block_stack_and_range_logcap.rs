@@ -1,28 +1,21 @@
-//! Packs four buses onto one main-trace lookup column:
+//! Packs three bus families onto one main-trace lookup column:
 //!
 //! - Block-stack table: control-flow block nesting.
 //! - u32 range-check removes: gated by u32 opcodes.
 //! - Log-precompile transcript-state: gated by the log precompile opcode.
-//! - Range-table response: always active and isolated in its own group.
 //!
-//! Soundness of the merge relies on the three buses using distinct `bus_prefix[bus]` bases
+//! Soundness of the merge relies on the bus families using distinct `bus_prefix[bus]` bases
 //! (so their rationals remain linearly independent in the extension field) and on all
-//! opcode-gated interactions being mutually exclusive in the main group.
+//! interactions being mutually exclusive by opcode.
 //!
 //! # Structure
 //!
-//! One [`super::super::LookupBuilder::column`] call with two sibling
-//! [`super::super::LookupColumn::group`] calls:
+//! One [`super::super::LookupBuilder::column`] call with one opcode-gated group:
 //!
-//! - **Main group** (opcode-gated, mutually exclusive by opcode):
-//!   - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
-//!     batch (7 branches, mutually exclusive via decoder opcode flags).
-//!   - u32 range-check batch: 4 removes gated by `u32_rc_op`.
-//!   - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
-//! - **Sibling group** (always on):
-//!   - Range-table response: a single insert with runtime multiplicity `range_m`, gated by `ONE` so
-//!     it fires on every row. Lives in its own group because it overlaps (row-wise) with every
-//!     opcode-gated interaction above and would break the simple-group mutual-exclusion invariant.
+//! - Block-stack table: JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL, CALL/SYSCALL, two END cases, RESPAN
+//!   batch (7 branches, mutually exclusive via decoder opcode flags).
+//! - u32 range-check batch: 4 removes gated by `u32_rc_op`.
+//! - Log-precompile transcript-state batch: 1 remove + 1 add gated by `log_precompile`.
 //!
 //! # Mutual exclusivity
 //!
@@ -32,11 +25,11 @@
 //!
 //! - Block-stack: {JOIN, SPLIT, SPAN, DYN, LOOP, DYNCALL, CALL, SYSCALL, END, RESPAN}
 //! - u32: {U32SPLIT, U32ASSERT2, U32ADD, U32SUB, U32MUL, U32DIV, U32MOD, U32AND, U32XOR, U32ADD3,
-//!   U32MADD, …} — prefix_100 in the opcode encoding.
-//! - LOGPRECOMPILE: {LOGPRECOMPILE} — a single opcode.
+//!   U32MADD, ...} - prefix_100 in the opcode encoding.
+//! - LOGPRECOMPILE: {LOGPRECOMPILE} - a single opcode.
 //!
 //! No row can fire two of these simultaneously. The END-simple / END-call/syscall split
-//! inside block-stack is mutually exclusive via the `is_call + is_syscall ≤ 1` end-flag
+//! inside block-stack is mutually exclusive via the `is_call + is_syscall <= 1` end-flag
 //! invariant.
 //!
 //! # Degree budget
@@ -51,20 +44,11 @@
 //! | CALL/SYSCALL simple add (Full msg) | 4 | Full, denom 1 | 5 | 4 |
 //! | END simple remove | 5 | Simple, denom 1 | 6 | 5 |
 //! | END call/syscall remove (Full msg) | 5 | Full, denom 1 | 6 | 5 |
-//! | RESPAN batch (k=2, f=respan deg 4) | — | Simple | 6 | 5 |
-//! | u32rc batch (k=4, f=u32_rc_op deg 3) | — | Range, denom 1 | **7** | **6** |
-//! | logpre batch (k=2, f=log_precompile deg 5) | — | LogPrecompile, denom 1 | **7** | **6** |
+//! | RESPAN batch (k=2, f=respan deg 4) | - | Simple | 6 | 5 |
+//! | u32rc batch (k=4, f=u32_rc_op deg 3) | - | Range, denom 1 | **7** | **6** |
+//! | logpre batch (k=2, f=log_precompile deg 5) | - | LogPrecompile, denom 1 | **7** | **6** |
 //!
-//! Main group max: `U_g = 7, V_g = 6`.
-//!
-//! Sibling range-table group: `g.insert(ONE, range_m, RangeMsg)` — gate deg 0, mult deg 1,
-//! denom deg 1. `U_g = 1, V_g = 1`.
-//!
-//! Column fold (cross-mul rule `U_col = ∏ U_gi`, `V_col = Σᵢ V_gi · ∏_{j≠i} U_gj`):
-//!
-//! - `deg(U_col) = 7 + 1 = 8`
-//! - `deg(V_col) = max(6 + 1, 1 + 7) = 8`
-//! - **Transition = `max(1 + 8, 8) = 9`**, 0 headroom.
+//! Column max: `U = 7, V = 6`; transition degree is `max(1 + 7, 6) = 8`.
 
 use core::array;
 
@@ -82,14 +66,10 @@ use crate::{
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
 /// Main group per-row max is `max(1, 1, 1, 1, 1, 1, 2 (RESPAN), 4 (u32rc), 2 (logpre)) = 4`
-/// — the u32rc 4-remove batch is the dominant branch.
-/// Sibling range-table group always contributes 1 fraction.
-/// Both groups run unconditionally (the main group fires at most one branch per row but
-/// the per-column accumulator allocates the worst-case slot budget), so the per-row max is
-/// the sum: `4 + 1 = 5`.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
+/// - the u32rc 4-remove batch is the dominant branch.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the merged block-stack + u32rc + logpre + range-table column.
+/// Emit the merged block-stack + u32rc + logpre column.
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,
@@ -131,10 +111,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let fn_hash = local.system.fn_hash;
     let fn_hash_next = next.system.fn_hash;
 
-    let range_m = local.range.multiplicity;
-    let range_v = local.range.value;
-
-    // ---- u32rc + logpre captures (from range_logcap.rs) ----
+    // ---- u32rc + logpre captures ----
 
     let user_helpers = dec.user_op_helpers();
     let f_u32rc = op_flags.u32_rc_op();
@@ -150,7 +127,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
 
     builder.next_column(
         |col| {
-            // ──────────── Main group: all opcode-gated interactions ────────────
+            // Main group: all opcode-gated interactions.
             col.group(
                 "main_interactions",
                 |g| {
@@ -278,7 +255,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                         Deg { v: 5, u: 6 },
                     );
 
-                    // RESPAN: simultaneous push + pop — one batch under the RESPAN flag.
+                    // RESPAN: simultaneous push + pop - one batch under the RESPAN flag.
                     g.batch(
                         "respan",
                         op_flags.respan(),
@@ -352,28 +329,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
                 },
                 Deg { v: 6, u: 7 },
             );
-
-            // Always-active insertion with multiplicity `range_m`. Lives in its own group
-            // because its gate (`ONE`) makes it fire on every row, overlapping with every
-            // opcode-gated interaction in the main group — which would break the simple-group
-            // mutual-exclusion invariant if they shared a group.
-            col.group(
-                "range_table",
-                |g| {
-                    g.insert(
-                        "range_response",
-                        LB::Expr::ONE,
-                        range_m.into(),
-                        || {
-                            let value = range_v.into();
-                            RangeMsg { value }
-                        },
-                        Deg { v: 1, u: 1 },
-                    );
-                },
-                Deg { v: 1, u: 1 },
-            );
         },
-        Deg { v: 8, u: 8 },
+        Deg { v: 6, u: 7 },
     );
 }

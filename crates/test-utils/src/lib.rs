@@ -13,7 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{CoreCols, DecoderCols, RangeCols, StackCols, SystemCols};
+use miden_air::{CoreCols, DecoderCols, StackCols, SystemCols};
 use miden_assembly::{Linkage, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     Path,
@@ -890,10 +890,6 @@ const CORE_COL_NAMES: CoreCols<&'static str> = CoreCols {
         b0: "stack_b0",
         b1: "stack_b1",
         h0: "stack_h0",
-    },
-    range: RangeCols {
-        multiplicity: "range_check[0]",
-        value: "range_check[1]",
     },
 };
 

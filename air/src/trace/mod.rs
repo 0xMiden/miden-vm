@@ -10,15 +10,15 @@ pub use main_trace::{MainTrace, MainTraceRow};
 // CONSTANTS
 // ================================================================================================
 
-/// The minimum length of the execution trace. This is the minimum required to support range checks.
+/// The minimum length of the execution trace.
 pub const MIN_TRACE_LEN: usize = 64;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------
 
-//      system          decoder           stack      range checks       chiplets
-//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (24 columns)
-// ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
+//      system          decoder           stack          chiplets
+//    (6 columns)     (24 columns)    (19 columns)    (24 columns)
+// ├───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_WIDTH: usize = 6;
 
@@ -63,9 +63,6 @@ pub mod log_precompile {
     pub const STACK_STATE_NEW_RANGE: Range<usize> = Hasher::RATE0_RANGE;
 }
 
-// Range check trace
-pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
-
 // Chiplets trace
 // 23 shared chiplet cells + chip_clk = 24.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
@@ -94,17 +91,15 @@ pub mod blakeg_compression {
 
 pub mod and8_lookup {
     pub use crate::constraints::and8_lookup::columns::{
-        AND8_LOOKUP_TRACE_HEIGHT, AND8_TABLE_ROWS, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8,
-        BYTE_LOOKUP_KIND_BLAKEG_ROT7, BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_LOOKUP_KIND_COUNT,
-        BYTE_PAIR_ROWS, LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS, byte_lookup_result,
+        AND8_LOOKUP_TRACE_HEIGHT, AND8_TABLE_ROWS, BYTE_LOOKUP_COLUMN_COUNT, BYTE_LOOKUP_COUNT_LEN,
+        BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_BLAKEG_ROT7, BYTE_LOOKUP_KIND_BLAKEG_ROT12,
+        BYTE_LOOKUP_KIND_COUNT, BYTE_PAIR_ROWS, LOG_AND8_LOOKUP_TRACE_HEIGHT, NUM_AND8_LOOKUP_COLS,
+        RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL, byte_lookup_result,
     };
 }
 
-pub const TRACE_WIDTH: usize = SYS_TRACE_WIDTH
-    + DECODER_TRACE_WIDTH
-    + STACK_TRACE_WIDTH
-    + RANGE_CHECK_TRACE_WIDTH
-    + CHIPLETS_WIDTH;
+pub const TRACE_WIDTH: usize =
+    SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH + CHIPLETS_WIDTH;
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------

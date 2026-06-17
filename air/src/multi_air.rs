@@ -50,7 +50,7 @@ use constraints::lookup::{
 
 /// Core-trace AIR.
 ///
-/// Owns the system, decoder, stack, and range-check segments.
+/// Owns the system, decoder, and stack segments.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct CoreAir;
 

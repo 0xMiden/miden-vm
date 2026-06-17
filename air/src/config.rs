@@ -87,10 +87,10 @@ pub fn pcs_params() -> PcsParams {
 /// `H(PROTOCOL_ID, tag_0, commitment_0, tag_1, commitment_1, ...)`.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(6810660316801314888),
-    Felt::new_unchecked(6213860245220189005),
-    Felt::new_unchecked(6554477247421276298),
-    Felt::new_unchecked(6260924967251647046),
+    Felt::new_unchecked(1199619484997873143),
+    Felt::new_unchecked(5688213066924362118),
+    Felt::new_unchecked(6656086923748495762),
+    Felt::new_unchecked(5598657386983264081),
 ];
 
 /// Observes PCS protocol parameters into the challenger.

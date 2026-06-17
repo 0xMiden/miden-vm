@@ -121,12 +121,19 @@ fn prove_execution_trace(
     trace: ExecutionTrace,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let summary = trace.trace_len_summary();
     tracing::event!(
         tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps (padded from {})",
+        "Generated execution trace of {} columns; rows: core={}, chiplets={}, blakeg={}, byte_pair={}; AIR heights: core={}, chiplets={}, blakeg={}, byte_pair={}",
         miden_air::trace::TRACE_WIDTH,
-        trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().trace_len()
+        summary.core_rows(),
+        summary.chiplets_rows(),
+        summary.blakeg_compression_rows(),
+        summary.byte_pair_lookup_rows(),
+        summary.core_height(),
+        summary.chiplets_height(),
+        summary.blakeg_compression_height(),
+        summary.byte_pair_lookup_rows(),
     );
 
     let stack_outputs = *trace.stack_outputs();

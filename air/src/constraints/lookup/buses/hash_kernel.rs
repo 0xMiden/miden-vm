@@ -23,9 +23,8 @@
 //!
 //! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
 //! gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, stream rows
-//! use the derived AEAD stream flag, and the memory row gate is `chiplet_active.memory`. Hasher sub-selectors,
-//! hasher state,
-//! `node_index`, and `mrupdate_id` come from the typed
+//! use the derived AEAD stream flag, and the memory row gate is `chiplet_active.memory`. Hasher
+//! sub-selectors, hasher state, `node_index`, and `mrupdate_id` come from the typed
 //! [`local.controller()`](crate::constraints::columns::ChipletCols::controller) overlay;
 //! memory delta limbs come from
 //! [`local.memory()`](crate::constraints::columns::ChipletCols::memory).

@@ -317,8 +317,8 @@ pub trait Tracer {
     /// Called by: `U32XOR`.
     fn record_u32xor(&mut self, _a: Felt, _b: Felt) {}
 
-    /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
-    /// the range checker. This is expected to result in four 16-bit range checks.
+    /// Records the high and low 32-bit limbs of the result of a u32 operation. This is expected to
+    /// result in four 16-bit range-check requests.
     ///
     /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
     /// `U32ASSERT2`.

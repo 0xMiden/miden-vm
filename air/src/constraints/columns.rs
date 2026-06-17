@@ -17,7 +17,6 @@ use super::{
         ControllerCols, KernelRomCols, MemoryCols,
     },
     decoder::columns::DecoderCols,
-    range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
@@ -28,9 +27,9 @@ use crate::trace::{CHIPLETS_DATA_WIDTH, CHIPLETS_MODE_COL, TRACE_WIDTH};
 
 /// Column layout of the core execution trace.
 ///
-/// `CoreCols` covers the system, decoder, stack, and range-check segments - the columns owned
-/// by `CoreAir`. It is also the layout of the leading `NUM_CORE_COLS` columns of the unified
-/// `TRACE_WIDTH`-wide main trace, so it can be borrowed from either a per-AIR
+/// `CoreCols` covers the system, decoder, and stack segments - the columns owned by `CoreAir`.
+/// It is also the layout of the leading `NUM_CORE_COLS` columns of the unified `TRACE_WIDTH`-wide
+/// main trace, so it can be borrowed from either a per-AIR
 /// `[T; NUM_CORE_COLS]` slice or the prefix of a `[T; TRACE_WIDTH]` row via
 /// `Borrow<CoreCols<T>>`.
 #[repr(C)]
@@ -39,10 +38,9 @@ pub struct CoreCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
-    pub range: RangeCols<T>,
 }
 
-/// Number of columns in the core trace (51), derived from the struct layout.
+/// Number of columns in the core trace (49), derived from the struct layout.
 pub const NUM_CORE_COLS: usize = size_of::<CoreCols<u8>>();
 
 impl<T> Borrow<CoreCols<T>> for [T] {
@@ -255,7 +253,6 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
 pub const NUM_STACK_COLS: usize = size_of::<StackCols<u8>>();
-pub const NUM_RANGE_COLS: usize = size_of::<RangeCols<u8>>();
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 pub const NUM_AEAD_STREAM_COLS: usize = size_of::<AeadStreamCols<u8>>();
 pub const NUM_AEAD_STREAM_READ_COLS: usize = size_of::<AeadStreamReadCols<u8>>();
@@ -271,7 +268,6 @@ pub const NUM_KERNEL_ROM_COLS: usize = size_of::<KernelRomCols<u8>>();
 const _: () = assert!(NUM_SYSTEM_COLS == 6);
 const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
-const _: () = assert!(NUM_RANGE_COLS == 2);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
 const _: () = assert!(NUM_AEAD_STREAM_COLS == 20);
 const _: () = assert!(NUM_AEAD_STREAM_READ_COLS == 20);
@@ -291,8 +287,7 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 mod tests {
     use super::*;
     use crate::trace::{
-        CHIPLETS_CLK_COL, CHIPLETS_MODE_COL, CHIPLETS_WIDTH, DECODER_TRACE_WIDTH,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        CHIPLETS_CLK_COL, CHIPLETS_MODE_COL, CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, SYS_TRACE_WIDTH,
     };
 
     /// Per-AIR index maps used only by the column-layout tests below. Each field holds its
@@ -314,9 +309,6 @@ mod tests {
     const DECODER_OFFSET: usize = SYS_TRACE_WIDTH;
     /// Column offset of the stack section within the unified main trace.
     const STACK_OFFSET: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH;
-    /// Column offset of the range-check section within the unified main trace.
-    const RANGE_OFFSET: usize = STACK_OFFSET + STACK_TRACE_WIDTH;
-
     // --- Core trace column map vs offset constants -------------------------------------------
     //
     // `CoreCols` starts at offset 0 of the unified main trace, so its per-AIR indices match
@@ -352,12 +344,6 @@ mod tests {
         assert_eq!(CORE_COL_MAP.stack.h0, STACK_OFFSET + 18);
     }
 
-    #[test]
-    fn col_map_range() {
-        assert_eq!(CORE_COL_MAP.range.multiplicity, RANGE_OFFSET);
-        assert_eq!(CORE_COL_MAP.range.value, RANGE_OFFSET + 1);
-    }
-
     // --- Chiplet trace column map -------------------------------------------------------------
     //
     // `CHIPLET_COL_MAP` is 0-based within `ChipletCols`.
@@ -374,10 +360,7 @@ mod tests {
     /// `NUM_CORE_COLS` matches the sum of the segment widths it covers.
     #[test]
     fn core_cols_width() {
-        assert_eq!(
-            NUM_CORE_COLS,
-            NUM_SYSTEM_COLS + NUM_DECODER_COLS + NUM_STACK_COLS + NUM_RANGE_COLS,
-        );
+        assert_eq!(NUM_CORE_COLS, NUM_SYSTEM_COLS + NUM_DECODER_COLS + NUM_STACK_COLS,);
     }
 
     /// `NUM_CHIPLETS_COLS` matches the chiplets segment width.

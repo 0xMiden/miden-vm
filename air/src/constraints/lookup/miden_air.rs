@@ -22,7 +22,7 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = MIDEN_AIR_COUNT;
 /// Block-hash seed and log-precompile transcript terminals both cancel against bus
 /// accumulators on Core columns:
 /// - `BlockHashTable` lives on `MAIN_COLUMN_SHAPE[1]` (block_hash + op_group merged column).
-/// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
+/// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block-stack + u32rc + log-cap
 ///   merged column).
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     let pv = boundary.public_values();
@@ -42,13 +42,13 @@ pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     //
     // The boundary correction emits a `Child` payload while the in-trace removal at the
-    // root END row (in `block_hash_and_op_group.rs`) emits an `End` payload — the two
+    // root END row (in `block_hash_and_op_group.rs`) emits an `End` payload. The two
     // collapse to the same denominator by the algebra below, so a single `Child` here
     // cancels the root END's `-1/d`:
     //
     //   - At the root END row, the next op is HALT, so the decoder forces `addr_next = 0`, hence
     //     `parent = addr_next = 0`.
-    //   - `halt_next() = 1` ⇒ `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
+    //   - `halt_next() = 1`, so `is_first_child = 1 - end_next - repeat_next - halt_next = 0`.
     //   - The root block is not a loop body, so `is_loop_body = 0`.
     //   - `child_hash = h_0 = program_hash` by the decoder's program-hash boundary.
     //
@@ -114,7 +114,7 @@ mod tests {
         trace::AUX_TRACE_RAND_CHALLENGES,
     };
 
-    /// Pin the `BlockHashMsg::End → Child` boundary collapse: at the root END row, the
+    /// Pin the `BlockHashMsg::End` to `Child` boundary collapse: at the root END row, the
     /// algebra forces `is_first_child = 0`, `is_loop_body = 0`, `parent = 0`, and
     /// `child_hash = program_hash`, so the in-trace `End` removal encodes identically to
     /// the boundary `Child` seed. If a future change to either side breaks the collapse
@@ -148,8 +148,8 @@ mod tests {
         };
 
         // In-trace side: the root END row's removal, with the four conditions documented in
-        // `emit_core_boundary` (addr_next=0 via HALT; halt_next=1 ⇒ is_first_child=0; root
-        // not a loop ⇒ is_loop_body=0; child_hash = h_0 = program_hash).
+        // `emit_core_boundary` (addr_next=0 via HALT; halt_next=1 so is_first_child=0; root
+        // not a loop so is_loop_body=0; child_hash = h_0 = program_hash).
         let root_end = BlockHashMsg::End {
             parent: Felt::ZERO,
             child_hash: program_hash,
@@ -164,7 +164,7 @@ mod tests {
         );
     }
 
-    /// Lookup-structure validation for `CoreAir` — the standalone Core-half AIR used by the
+    /// Lookup-structure validation for `CoreAir`, the standalone Core-half AIR used by the
     /// multi-AIR proving path.
     #[test]
     fn core_air_lookup_validates() {
@@ -182,7 +182,7 @@ mod tests {
             .unwrap_or_else(|err| panic!("CoreAir LookupAir validation failed: {err}"));
     }
 
-    /// Lookup-structure validation for `ChipletsAir` — the standalone Chiplets-half AIR.
+    /// Lookup-structure validation for `ChipletsAir`, the standalone Chiplets-half AIR.
     /// Symmetric to `core_air_lookup_validates`: 21-col main trace, 3 LogUp accumulator
     /// columns, 1 committed final, all periodic columns owned here.
     #[test]

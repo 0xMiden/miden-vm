@@ -1,5 +1,6 @@
 ---
 source: air/src/constraints/columns.rs
+assertion_line: 394
 expression: CORE_COL_MAP
 ---
 CoreCols {
@@ -69,9 +70,5 @@ CoreCols {
         b0: 46,
         b1: 47,
         h0: 48,
-    },
-    range: RangeCols {
-        multiplicity: 49,
-        value: 50,
     },
 }

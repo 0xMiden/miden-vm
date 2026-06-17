@@ -281,7 +281,13 @@ $$
 f_{mem\_nl} \cdot \left(n_0 \cdot \Delta ctx + (1 - n_0) \cdot (n_1 \cdot \Delta a + (1 - n_1) \cdot \Delta clk) - (2^{16} \cdot d_1' + d_0') \right) = 0 \text{ | degree} = 8
 $$
 
-In addition to this constraint, we also need to make sure that the values in registers $d_0$ and $d_1$ are less than $2^{16}$, and this can be done with [range checks](../range.md).
+In addition to this constraint, we range-check $d_0$ and $d_1$. The chiplet also range-checks the word-address decomposition values $w_0$, $w_1$, and $4 \cdot w_1$, where:
+
+$$
+word\_addr = 4 \cdot (w_0 + 2^{16} \cdot w_1)
+$$
+
+Checking $4 \cdot w_1 < 2^{16}$ forces $w_1 < 2^{14}$, so the word-aligned address is bounded by the 32-bit memory address space.
 
 Next, we need to ensure that when the context and word address are unchanged and the clock does not advance, both rows are reads.
 

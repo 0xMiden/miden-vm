@@ -36,14 +36,14 @@ use miden_vm::{
 };
 use miden_vm_synthetic_bench::{
     calibrator::{Calibration, calibrate, measure_program},
-    snapshot::{TraceShape, TraceSnapshot},
-    snippets::{SNIPPETS, memory_max_iters, u32arith_max_iters},
+    snapshot::TraceSnapshot,
+    snippets::{SNIPPETS, memory_max_iters},
     solver::{Plan, emit, solve},
     verifier::VerificationReport,
 };
 
 /// Hash function used for STARK `prove` and `verify` axes.
-const BENCH_HASH: HashFunction = HashFunction::Poseidon2;
+const BENCH_HASH: HashFunction = HashFunction::Eidos;
 const ALL_AXES: [&str; 4] = ["exec", "trace_prep", "prove", "verify"];
 type ProofFixture = (StackOutputs, ExecutionProof);
 
@@ -165,8 +165,8 @@ fn synthetic_bench(c: &mut Criterion) {
     for snippet in SNIPPETS {
         let cost = calibration[snippet.name];
         println!(
-            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} memory={:6.3} range={:6.3}",
-            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.memory, cost.range,
+            "    {:<14} core={:7.3} hasher={:6.3} bitwise={:6.3} memory={:6.3}",
+            snippet.name, cost.core, cost.hasher, cost.bitwise, cost.memory,
         );
     }
 
@@ -219,11 +219,16 @@ fn bench_one_scenario(
 ) {
     println!("\n=== scenario: {producer_stem} / {scenario_key}");
     println!(
-        "    trace:   core={} chiplets={} range={} (padded_total={})",
+        "    trace:   core={} chiplets={} blakeg={}",
         snapshot.trace.core_rows,
         snapshot.trace.chiplets_rows,
-        snapshot.trace.range_rows,
-        snapshot.trace.padded_total(),
+        snapshot.trace.blakeg_compression_rows,
+    );
+    println!(
+        "    padded:  core={} chiplets={} blakeg={}",
+        snapshot.trace.padded_core(),
+        snapshot.trace.padded_chiplets(),
+        snapshot.trace.padded_blakeg_compression(),
     );
     println!(
         "    shape:   hasher={} bitwise={} memory={} kernel_rom={} ace={}",
@@ -243,8 +248,7 @@ fn bench_one_scenario(
     }
 
     let target_shape = snapshot.shape();
-    let mut plan = solve(calibration, &target_shape);
-    range_correction_pass(&mut plan, &target_shape);
+    let plan = solve(calibration, &target_shape);
     assert_counters_fit(&plan);
 
     println!("\n=== plan");
@@ -381,18 +385,8 @@ fn bench_one_scenario(
     group.finish();
 }
 
-/// Panic if any snippet's plan iteration count would overflow its counter beyond `u32::MAX` (which
-/// would trip `u32assert2` or a memory op at runtime). Cheap safeguard in case a snapshot with
-/// unusually large range or memory targets gets fed in.
+/// Panic if the memory snippet's address counter would overflow `u32::MAX`.
 fn assert_counters_fit(plan: &Plan) {
-    let u32arith = plan.iters("u32arith");
-    assert!(
-        u32arith <= u32arith_max_iters(),
-        "u32arith iters ({}) would overflow its u32 counter (max {}); \
-         revisit the banded-counter start constants",
-        u32arith,
-        u32arith_max_iters(),
-    );
     let memory = plan.iters("memory");
     assert!(
         memory <= memory_max_iters(),
@@ -401,130 +395,6 @@ fn assert_counters_fit(plan: &Plan) {
         memory,
         memory_max_iters(),
     );
-}
-
-// RANGE CORRECTION PASS
-// ------------------------------------------------------------------------
-//
-// Range's trace length is not perfectly linear under composition, so the primary solver can leave
-// a few-percent residual. This pass closes it by measuring marginal rates and applying a combo of
-// `+u32arith -hasher -decoder_pad` that lifts range while keeping core and chiplets approximately
-// fixed. Memory is deliberately left alone so the emitted memory-chiplet workload stays
-// representative.
-
-#[derive(Debug, Clone, Copy)]
-struct MarginalRates {
-    core: f64,
-    chiplets: f64,
-    range: f64,
-}
-
-const CORRECTION_PROBE_DELTA: u64 = 256;
-const CORRECTION_TOLERANCE: f64 = 0.01;
-const CORRECTION_MAX_PASSES: usize = 2;
-
-fn measure_plan(plan: &Plan) -> TraceShape {
-    let source = emit(plan);
-    measure_program(&source).expect("measure emitted plan")
-}
-
-fn measure_marginal(
-    base_plan: &Plan,
-    base_shape: TraceShape,
-    snippet: &'static str,
-    delta: u64,
-) -> MarginalRates {
-    let mut probe = base_plan.clone();
-    probe.add(snippet, delta);
-    let shape = measure_plan(&probe);
-    let d = delta as f64;
-    MarginalRates {
-        core: (shape.totals.core_rows as f64 - base_shape.totals.core_rows as f64) / d,
-        chiplets: (shape.totals.chiplets_rows as f64 - base_shape.totals.chiplets_rows as f64) / d,
-        range: (shape.totals.range_rows as f64 - base_shape.totals.range_rows as f64) / d,
-    }
-}
-
-/// Solve for `(add_u32arith, sub_hasher, sub_pad)` that lifts range by `range_residual` while
-/// holding core and chiplets approximately fixed. Returns `None` if the 2x2 system for the two
-/// subtractions is degenerate, any coefficient comes out negative, or the net range gain is
-/// non-positive.
-fn solve_range_correction(
-    range_residual: f64,
-    u32arith: MarginalRates,
-    hasher: MarginalRates,
-    decoder_pad: MarginalRates,
-) -> Option<(u64, u64, u64)> {
-    if range_residual <= 0.0 {
-        return None;
-    }
-    // Solve per unit of u32arith:
-    //   hasher.core * y     + decoder_pad.core * z     = u32arith.core
-    //   hasher.chiplets * y + decoder_pad.chiplets * z = u32arith.chiplets
-    let det = hasher.core * decoder_pad.chiplets - decoder_pad.core * hasher.chiplets;
-    if det.abs() < 1e-9 {
-        return None;
-    }
-    let y_per_x =
-        (u32arith.core * decoder_pad.chiplets - decoder_pad.core * u32arith.chiplets) / det;
-    let z_per_x = (hasher.core * u32arith.chiplets - u32arith.core * hasher.chiplets) / det;
-    if y_per_x < 0.0 || z_per_x < 0.0 {
-        return None;
-    }
-    let net_range_per_x = u32arith.range - hasher.range * y_per_x - decoder_pad.range * z_per_x;
-    if net_range_per_x <= 0.0 {
-        return None;
-    }
-    let x = (range_residual / net_range_per_x).round();
-    if x <= 0.0 {
-        return None;
-    }
-    Some((x as u64, (x * y_per_x).round() as u64, (x * z_per_x).round() as u64))
-}
-
-fn range_correction_pass(plan: &mut Plan, target: &TraceShape) {
-    let target_range = target.totals.range_rows;
-    if target_range == 0 {
-        return;
-    }
-    let tolerance = (target_range as f64 * CORRECTION_TOLERANCE) as u64;
-    for pass in 0..CORRECTION_MAX_PASSES {
-        let actual = measure_plan(plan);
-        let actual_range = actual.totals.range_rows;
-        let residual = target_range as i64 - actual_range as i64;
-        println!(
-            "\n=== range correction pass {}: target={} actual={} residual={}",
-            pass + 1,
-            target_range,
-            actual_range,
-            residual,
-        );
-        if residual <= tolerance as i64 {
-            // Already within band, or overshoot (residual <= 0).
-            return;
-        }
-
-        let u32arith = measure_marginal(plan, actual, "u32arith", CORRECTION_PROBE_DELTA);
-        let hasher = measure_marginal(plan, actual, "hasher", CORRECTION_PROBE_DELTA);
-        let decoder_pad = measure_marginal(plan, actual, "decoder_pad", CORRECTION_PROBE_DELTA);
-
-        match solve_range_correction(residual as f64, u32arith, hasher, decoder_pad) {
-            Some((add_u32arith, sub_hasher, sub_pad)) => {
-                let sub_hasher = sub_hasher.min(plan.iters("hasher"));
-                let sub_pad = sub_pad.min(plan.iters("decoder_pad"));
-                println!(
-                    "    applying: +u32arith {add_u32arith}  -hasher {sub_hasher}  -decoder_pad {sub_pad}"
-                );
-                plan.add("u32arith", add_u32arith);
-                plan.sub_saturating("hasher", sub_hasher);
-                plan.sub_saturating("decoder_pad", sub_pad);
-            },
-            None => {
-                println!("    no valid local correction found");
-                return;
-            },
-        }
-    }
 }
 
 criterion_group!(benches, synthetic_bench);

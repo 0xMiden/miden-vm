@@ -61,7 +61,7 @@ pub struct TraceGenerationContext {
     /// [`MastForestId`]s into this vector.
     pub mast_forest_store: Vec<Arc<SparseMastForest>>,
 
-    // Replays that contain additional data needed to generate the range checker and chiplets
+    // Replays that contain additional data needed for range-check multiplicities and chiplet
     // columns.
     pub range_checker_replay: RangeCheckerReplay,
     pub memory_writes: MemoryWritesReplay,
@@ -114,7 +114,7 @@ pub struct ExecutionTracer {
     advice: AdviceReplay,
     external: MastForestResolutionReplay,
 
-    // Replays that contain additional data needed to generate the range checker and chiplets
+    // Replays that contain additional data needed for range-check multiplicities and chiplet
     // columns.
     range_checker: RangeCheckerReplay,
     memory_writes: MemoryWritesReplay,

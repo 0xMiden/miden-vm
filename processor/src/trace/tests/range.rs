@@ -2,15 +2,20 @@
 //!
 //! Verifies that every expected `RangeMsg` interaction fires at the right row, whether it
 //! comes from a u32 stack op (decoder-side `user_op_helpers`) or a memory chiplet row (delta
-//! limbs + word-address decomposition). The test is column-blind — since both call sites are
-//! currently packed into different aux columns (M1 for u32rc, C2 for memory range checks),
-//! the subset-based [`InteractionLog`] happens to pick up both without the test having to
-//! know where each one landed.
+//! limbs + word-address decomposition). The test is column-blind: the subset-based
+//! [`InteractionLog`] picks up both call sites without the test having to know which aux column
+//! carries each one.
 
 use alloc::vec::Vec;
 
-use miden_air::{logup::RangeMsg, trace::MainTrace};
-use miden_core::{Felt, operations::Operation};
+use miden_air::{
+    logup::RangeMsg,
+    trace::{
+        MainTrace,
+        and8_lookup::{NUM_AND8_LOOKUP_COLS, RANGE_CHECK_LOOKUP_COL},
+    },
+};
+use miden_core::{Felt, operations::Operation, utils::Matrix};
 use miden_utils_testing::stack;
 
 use super::{
@@ -45,18 +50,18 @@ fn u32_stack_op_emits_range_check_removes() {
 
 /// Two memory ops (`MStoreW` + `MLoadW`) on the same word address emit 5 `RangeMsg` removes
 /// per memory chiplet row: `d0`, `d1` (the 16-bit delta limbs used for sorted-access
-/// constraints) and `w0`, `w1`, `4·w1` (the word-address decomposition).
+/// constraints) and `w0`, `w1`, `4 * w1` (the word-address decomposition).
 ///
-/// The address `262148 = 4 · 65537` is word-aligned with `word_index = 65537 = 0x10001`, so
-/// `w0 = 1`, `w1 = 1`, `4·w1 = 4` — a non-trivial decomposition that exercises the full
+/// The address `262148 = 4 * 65537` is word-aligned with `word_index = 65537 = 0x10001`, so
+/// `w0 = 1`, `w1 = 1`, `4 * w1 = 4` - a non-trivial decomposition that exercises the full
 /// five-way range-check batch.
 #[test]
 fn memory_chiplet_row_emits_range_check_removes() {
     let addr: u64 = 262148;
     let stack_input = stack![addr, 1, 2, 3, 4, addr];
 
-    // MStoreW + 4×Drop + MLoadW, then 60 Noops so the memory chiplet segment does not overlap
-    // with the range checker's table segment at the end of the chiplet trace.
+    // MStoreW + 4xDrop + MLoadW, followed by enough Noops to keep the memory-row checks
+    // separated from the byte-pair table rows used later in this file.
     let mut operations = vec![
         Operation::MStoreW,
         Operation::Drop,
@@ -70,7 +75,7 @@ fn memory_chiplet_row_emits_range_check_removes() {
     let log = InteractionLog::new(&trace);
     let main = trace.main_trace();
 
-    // Collect every memory chiplet row — we expect exactly two for the two memory ops.
+    // Collect every memory chiplet row; we expect exactly two for the two memory ops.
     let mut mem_rows: Vec<RowIndex> = Vec::new();
     for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
@@ -100,40 +105,34 @@ fn memory_chiplet_row_emits_range_check_removes() {
     log.assert_contains(&exp);
 }
 
-/// Rows with nonzero range-check multiplicity emit a `RangeMsg { value: v }` add with
-/// runtime multiplicity `m`. This test verifies the per-row add side of the bus using
-/// hardcoded request demand: a `U32add` requests 4 values (helper columns), and each
-/// range-check table row with demand adds its `m` copies of that value to the bus.
+/// Byte-pair rows with nonzero range-check multiplicity emit a `RangeMsg { value: v }` add with
+/// runtime multiplicity `m`. This test verifies the table add side of the range-check bus.
 ///
-/// Catches regressions where the range-checker add-back emitter misreads the multiplicity
-/// column, the value column, or drops the always-active gate — bugs that the per-request
-/// removes-only tests above cannot detect.
+/// Catches regressions where the byte-pair add-back emitter misreads the multiplicity column or
+/// the `value = 256 * a + b` row mapping; bugs that the per-request removes-only tests
+/// above cannot detect.
 #[test]
 fn range_checker_table_emits_per_row_adds() {
     // U32add issues 4 range-check requests for values {0, 256, 0, 0} on 1 + 255 = 256. The
-    // range-checker chiplet will then add back four multiplicities of those values distributed
-    // across its trace rows. We don't need to predict where — subset semantics lets us verify
-    // that every emitted add matches its `(m, v)` columns.
+    // byte-pair lookup AIR then adds back four multiplicities of those values from row 0 and row
+    // 256. We scan all rows so the test also catches accidental extra nonzero range counts.
     let stack = [1, 255];
     let operations = vec![Operation::U32add];
     let trace = build_trace_from_ops(operations, &stack);
     let log = InteractionLog::new(&trace);
-    let main = trace.main_trace();
+    let (_, _, _, and8_matrix) = trace.main_trace().to_air_matrices();
 
     let mut nonzero_mult_rows = 0usize;
     let mut exp = Expectations::new(&log);
-    for row in 0..main.core_height() {
-        let idx = RowIndex::from(row);
-        let range = &main.core_row(idx).range;
-        let m = range.multiplicity;
-        let v = range.value;
+    for row in 0..and8_matrix.height() {
+        let m = and8_matrix.values[row * NUM_AND8_LOOKUP_COLS + RANGE_CHECK_LOOKUP_COL];
         if m != Felt::from_u8(0) {
             nonzero_mult_rows += 1;
-            exp.push(row, m, &RangeMsg { value: v });
+            exp.push(row, m, &RangeMsg { value: Felt::from_u32(row as u32) });
         }
     }
 
-    assert!(nonzero_mult_rows > 0, "range checker table is empty — test is vacuous");
+    assert!(nonzero_mult_rows > 0, "range-check table side is empty - test is vacuous");
     log.assert_contains(&exp);
 }
 

@@ -1,9 +1,10 @@
 //! Byte-pair lookup table AIR.
 //!
 //! The fixed preprocessed trace enumerates one row per byte pair. The row serves
-//! nine semantic buses: ordinary `(a, b, a & b)` plus one BlakeG
-//! rotation-contribution bus for each `(rotation, byte-position)` pair. The
-//! dynamic main trace carries one multiplicity column per bus.
+//! ten lookup domains: ordinary `(a, b, a & b)`, one BlakeG rotation-contribution
+//! domain for each `(rotation, byte-position)` pair, and `RangeCheck` for the
+//! 16-bit value `256 * a + b`. The dynamic main trace carries one multiplicity
+//! column per domain.
 
 use miden_core::{Felt, utils::RowMajorMatrix};
 

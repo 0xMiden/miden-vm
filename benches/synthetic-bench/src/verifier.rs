@@ -1,23 +1,19 @@
 //! Verification helpers for synthetic-trace matching.
 //!
 //! Hard checks:
-//! - `padded_core_side(actual) == padded_core_side(target)` -- the current AIR's non-chiplets-side
-//!   bracket, `next_pow2(max(core_rows, range_rows))`. If a future AIR split gives range its own
-//!   segment, this check can be revised to assert separate brackets.
+//! - `padded_core(actual) == padded_core(target)`
 //! - `padded_chiplets(actual) == padded_chiplets(target)`
 //! - `padded_blakeg_compression(actual) == padded_blakeg_compression(target)`
-//! - `padded_and8_lookup(actual) == padded_and8_lookup(target)`
 //!
 //! Soft reporting:
-//! - unpadded totals (`core_rows`, `chiplets_rows`) within [`PER_COMPONENT_TOLERANCE`]
+//! - dynamic AIR totals within [`PER_COMPONENT_TOLERANCE`]
 //! - advisory breakdown deltas (info only)
-//! - warning if `range_rows` dominates
 
 use std::fmt::{self, Display};
 
 use crate::snapshot::TraceShape;
 
-/// Reporting tolerance for unpadded totals; never used for pass/fail.
+/// Reporting tolerance for raw row totals; never used for pass/fail.
 pub const PER_COMPONENT_TOLERANCE: f64 = 0.02;
 
 /// Result of comparing an emitted program's measured shape against the snapshot target.
@@ -70,19 +66,6 @@ impl VerificationReport {
                 actual.totals.blakeg_compression_rows,
                 DeltaStatus::Enforced,
             ),
-            (
-                "and8_lookup_rows",
-                target.totals.and8_lookup_rows,
-                actual.totals.and8_lookup_rows,
-                DeltaStatus::Informational,
-            ),
-            (
-                // range_rows is derived, not independently driven.
-                "range_rows",
-                target.totals.range_rows,
-                actual.totals.range_rows,
-                DeltaStatus::Informational,
-            ),
         ];
         let breakdown_rows: &[(&'static str, u64, u64, DeltaStatus)] = &[
             (
@@ -112,19 +95,12 @@ impl VerificationReport {
         }
     }
 
-    /// True when both padded proxies match their targets exactly.
+    /// True when all dynamic AIR padded brackets match their targets exactly.
     pub fn brackets_match(&self) -> bool {
-        self.target.totals.padded_core_side() == self.actual.totals.padded_core_side()
+        self.target.totals.padded_core() == self.actual.totals.padded_core()
             && self.target.totals.padded_chiplets() == self.actual.totals.padded_chiplets()
             && self.target.totals.padded_blakeg_compression()
                 == self.actual.totals.padded_blakeg_compression()
-            && self.target.totals.padded_and8_lookup() == self.actual.totals.padded_and8_lookup()
-    }
-
-    /// True if `range_rows` is the largest unpadded component in either side, which means snippet
-    /// balance should be revisited.
-    pub fn range_dominates(&self) -> bool {
-        self.target.totals.range_dominates() || self.actual.totals.range_dominates()
     }
 }
 
@@ -149,9 +125,9 @@ impl Display for VerificationReport {
         writeln!(f, "-- hard brackets (padded power-of-two) --")?;
         write_bracket_row(
             f,
-            "padded_core_side",
-            self.target.totals.padded_core_side(),
-            self.actual.totals.padded_core_side(),
+            "padded_core",
+            self.target.totals.padded_core(),
+            self.actual.totals.padded_core(),
         )?;
         write_bracket_row(
             f,
@@ -165,13 +141,6 @@ impl Display for VerificationReport {
             self.target.totals.padded_blakeg_compression(),
             self.actual.totals.padded_blakeg_compression(),
         )?;
-        write_bracket_row(
-            f,
-            "padded_and8_lookup",
-            self.target.totals.padded_and8_lookup(),
-            self.actual.totals.padded_and8_lookup(),
-        )?;
-
         writeln!(f, "\n-- totals (soft: {:.0}% band) --", PER_COMPONENT_TOLERANCE * 100.0)?;
         write_delta_header(f)?;
         for d in &self.total_deltas {
@@ -190,12 +159,6 @@ impl Display for VerificationReport {
         } else {
             writeln!(f, "=> BRACKET MISS")?;
         }
-        if self.range_dominates() {
-            writeln!(
-                f,
-                "!! WARNING: range_rows dominates -- \"ignore range\" assumption is breaking"
-            )?;
-        }
         Ok(())
     }
 }
@@ -212,7 +175,7 @@ fn write_delta_row(f: &mut fmt::Formatter<'_>, d: &ComponentDelta) -> fmt::Resul
     let delta_str = if d.delta_pct.is_finite() {
         format!("{:+6.2}%", d.delta_pct * 100.0)
     } else {
-        "+∞".to_string()
+        "+inf".to_string()
     };
     let status = match d.status {
         DeltaStatus::Enforced => {
@@ -244,7 +207,7 @@ fn write_bracket_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::snapshot::{DEFAULT_AND8_LOOKUP_ROWS, TraceBreakdown, TraceTotals};
+    use crate::snapshot::{TraceBreakdown, TraceTotals};
 
     fn shape(core: u64, hasher: u64, memory: u64) -> TraceShape {
         let breakdown = TraceBreakdown {
@@ -258,8 +221,6 @@ mod tests {
             core_rows: core,
             chiplets_rows: breakdown.chiplets_sum(),
             blakeg_compression_rows: hasher,
-            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
-            range_rows: 0,
         };
         TraceShape::new(totals, breakdown)
     }
@@ -275,7 +236,7 @@ mod tests {
 
     #[test]
     fn bracket_miss_is_reported_when_core_bracket_differs() {
-        // target.core=68000 → 131072; actual.core=30000 → 32768 (different bracket)
+        // target.core=68000 -> 131072; actual.core=30000 -> 32768.
         let target = shape(68000, 8000, 12000);
         let actual = shape(30000, 2000, 1000);
         let r = VerificationReport::new(target, actual);
@@ -286,38 +247,16 @@ mod tests {
     #[test]
     fn chiplets_bracket_can_miss_independently_of_core() {
         // core is the same (same padded bracket); chiplets_rows lands in different brackets.
-        // target chiplets = 8000 + 12000 + 1 = 20001 → 32768
-        // actual chiplets = 20000 + 30000 + 1 = 50001 → 65536
+        // target chiplets = 8000 + 12000 + 1 = 20001 -> 32768
+        // actual chiplets = 20000 + 30000 + 1 = 50001 -> 65536
         let target = shape(40000, 8000, 12000);
         let actual = shape(40000, 20000, 30000);
         let r = VerificationReport::new(target, actual);
-        // padded_core_side: both 40000 → 65536 (same)
-        assert_eq!(target.totals.padded_core_side(), actual.totals.padded_core_side());
+        // padded_core: both 40000 -> 65536.
+        assert_eq!(target.totals.padded_core(), actual.totals.padded_core());
         // padded_chiplets differs
         assert_ne!(target.totals.padded_chiplets(), actual.totals.padded_chiplets());
         assert!(!r.brackets_match());
-    }
-
-    #[test]
-    fn range_dominates_is_warned() {
-        let breakdown = TraceBreakdown {
-            hasher_rows: 100,
-            bitwise_rows: 0,
-            memory_rows: 0,
-            kernel_rom_rows: 0,
-            ace_rows: 0,
-        };
-        let totals = TraceTotals {
-            core_rows: 100,
-            chiplets_rows: breakdown.chiplets_sum(),
-            blakeg_compression_rows: 0,
-            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
-            range_rows: DEFAULT_AND8_LOOKUP_ROWS + 1,
-        };
-        let t = TraceShape::new(totals, breakdown);
-        let r = VerificationReport::new(t, t);
-        assert!(r.range_dominates());
-        assert!(r.to_string().contains("range_rows dominates"));
     }
 
     #[test]

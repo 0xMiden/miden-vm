@@ -23,7 +23,8 @@ use miden_air::trace::{
     and8_lookup::{
         AND8_LOOKUP_TRACE_HEIGHT, BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8,
         BYTE_LOOKUP_KIND_BLAKEG_ROT7, BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_LOOKUP_KIND_COUNT,
-        BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, byte_lookup_result,
+        BYTE_PAIR_ROWS, NUM_AND8_LOOKUP_COLS, RANGE_CHECK_COUNT_OFFSET, RANGE_CHECK_LOOKUP_COL,
+        byte_lookup_result,
     },
     blakeg_compression::{
         AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL,
@@ -778,6 +779,8 @@ pub(crate) fn build_and8_lookup_trace(counts: &[u64]) -> Vec<Felt> {
             trace[pair * NUM_AND8_LOOKUP_COLS + kind] =
                 Felt::new_unchecked(counts[kind * BYTE_PAIR_ROWS + pair]);
         }
+        trace[pair * NUM_AND8_LOOKUP_COLS + RANGE_CHECK_LOOKUP_COL] =
+            Felt::new_unchecked(counts[RANGE_CHECK_COUNT_OFFSET + pair]);
     }
     trace
 }

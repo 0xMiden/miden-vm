@@ -6,8 +6,8 @@ AIR is a STARK-specific format of describing a computation. It consists of defin
 Internally, Miden VM AIR is separated into several components:
 * AIR for the [decoder](https://docs.miden.xyz/miden-vm/design/decoder), which is responsible for decoding instructions and managing control flow.
 * AIR for the [stack](https://docs.miden.xyz/miden-vm/design/stack), which is responsible for executing instructions against the operand stack.
-* AIR for the [range checker](https://docs.miden.xyz/miden-vm/design/range), which is responsible for checking if field elements contain values smaller than $2^{16}$.
 * AIR for the [chiplets module](https://docs.miden.xyz/miden-vm/design/chiplets), which contains specialized circuits responsible for handling complex computations (e.g., hashing) as well as random access memory.
+* AIR for lookup tables such as the byte-pair table used by [range checks](https://docs.miden.xyz/miden-vm/design/range), bytewise AND, and BlakeG rotation lookups.
 
 These different components are tied together using multiset checks similar to the ones used in [PLONK](https://hackmd.io/@relgabizon/ByFgSDA7D).
 

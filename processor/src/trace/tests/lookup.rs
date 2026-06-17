@@ -30,7 +30,7 @@ use miden_air::{
     },
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
-        and8_lookup::{AND8_TABLE_ROWS, NUM_AND8_LOOKUP_COLS},
+        and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
         chiplets::hasher::HASH_CYCLE_LEN,
     },
 };
@@ -251,12 +251,19 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     }
 
     let block_count = blakeg_matrix.height() / HASH_CYCLE_LEN;
-    let expected_byte_lookup_total = block_count as u64 * BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK;
-    let actual_byte_lookup_total: u64 =
-        and8_matrix.values.iter().map(|value| value.as_canonical_u64()).sum();
+    let expected_blakeg_byte_lookup_total =
+        block_count as u64 * BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK;
+    let mut actual_blakeg_byte_lookup_total = 0;
+    for row in 0..AND8_TABLE_ROWS {
+        let row_start = row * NUM_AND8_LOOKUP_COLS;
+        for col in 0..BYTE_LOOKUP_KIND_COUNT {
+            actual_blakeg_byte_lookup_total +=
+                and8_matrix.values[row_start + col].as_canonical_u64();
+        }
+    }
     assert_eq!(
-        actual_byte_lookup_total, expected_byte_lookup_total,
-        "byte-pair dynamic multiplicities do not match BlakeG byte lookup requests",
+        actual_blakeg_byte_lookup_total, expected_blakeg_byte_lookup_total,
+        "BlakeG byte-lookup multiplicities do not match BlakeG requests",
     );
 
     let padding_start = AND8_TABLE_ROWS * NUM_AND8_LOOKUP_COLS;

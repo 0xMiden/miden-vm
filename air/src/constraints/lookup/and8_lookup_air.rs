@@ -5,11 +5,11 @@ use core::borrow::Borrow;
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::WindowAccess;
 
-use super::messages::And8Msg;
+use super::messages::{And8Msg, RangeMsg};
 use crate::{
     Felt,
     constraints::and8_lookup::columns::{
-        And8LookupCols, And8LookupPreprocessedCols, BYTE_LOOKUP_KIND_COUNT,
+        And8LookupCols, And8LookupPreprocessedCols, BYTE_LOOKUP_COLUMN_COUNT,
     },
     lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
 };
@@ -18,8 +18,8 @@ use crate::{
 pub(crate) trait And8LookupBuilder: LookupBuilder<F = Felt> {}
 
 /// Per-column fraction stride for the byte-pair table AIR.
-pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; BYTE_LOOKUP_KIND_COUNT] =
-    [1; BYTE_LOOKUP_KIND_COUNT];
+pub(crate) const AND8_LOOKUP_COLUMN_SHAPE: [usize; BYTE_LOOKUP_COLUMN_COUNT] =
+    [1; BYTE_LOOKUP_COLUMN_COUNT];
 
 const BYTE_TABLE_DEG: Deg = Deg { v: 1, u: 1 };
 
@@ -105,4 +105,15 @@ where
             And8Msg::blakeg_rot7(pos, a.clone(), b.clone(), result.clone())
         });
     }
+
+    emit_byte_table_column(
+        builder,
+        "range_table",
+        "range_row",
+        local.range_multiplicity.into(),
+        || {
+            let value = a.clone() * LB::Expr::from_u16(256) + b;
+            RangeMsg { value }
+        },
+    );
 }

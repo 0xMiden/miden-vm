@@ -35,7 +35,7 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
     let trace =
         build_trace(trace_inputs).map_err(|e| MeasurementError::TraceBuild(format!("{e}")))?;
     let summary = trace.trace_len_summary();
-    let chiplets = summary.chiplets_trace_len();
+    let chiplets = summary.chiplets();
 
     let breakdown = TraceBreakdown {
         hasher_rows: chiplets.hash_chiplet_len() as u64,
@@ -45,11 +45,9 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         ace_rows: chiplets.ace_chiplet_len() as u64,
     };
     let totals = TraceTotals {
-        core_rows: summary.core_trace_len() as u64,
-        chiplets_rows: chiplets.trace_len() as u64,
-        blakeg_compression_rows: summary.blakeg_compression_trace_len() as u64,
-        and8_lookup_rows: summary.and8_lookup_trace_len() as u64,
-        range_rows: summary.range_trace_len() as u64,
+        core_rows: summary.core_rows() as u64,
+        chiplets_rows: summary.chiplets_rows() as u64,
+        blakeg_compression_rows: summary.blakeg_compression_rows() as u64,
     };
 
     // Cross-check our derived formulas against the processor's authoritative values; a drift here
@@ -63,13 +61,31 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
             derived: derived_chiplets,
         });
     }
-    let derived_padded = totals.padded_total();
-    let processor_padded = summary.padded_trace_len() as u64;
-    if derived_padded != processor_padded {
+    let derived_core_height = totals.padded_core();
+    let processor_core_height = summary.core_height() as u64;
+    if derived_core_height != processor_core_height {
         return Err(MeasurementError::InvariantDrift {
-            quantity: "padded_total",
-            processor: processor_padded,
-            derived: derived_padded,
+            quantity: "core_height",
+            processor: processor_core_height,
+            derived: derived_core_height,
+        });
+    }
+    let derived_chiplets_height = totals.padded_chiplets();
+    let processor_chiplets_height = summary.chiplets_height() as u64;
+    if derived_chiplets_height != processor_chiplets_height {
+        return Err(MeasurementError::InvariantDrift {
+            quantity: "chiplets_height",
+            processor: processor_chiplets_height,
+            derived: derived_chiplets_height,
+        });
+    }
+    let derived_blakeg_height = totals.padded_blakeg_compression();
+    let processor_blakeg_height = summary.blakeg_compression_height() as u64;
+    if derived_blakeg_height != processor_blakeg_height {
+        return Err(MeasurementError::InvariantDrift {
+            quantity: "blakeg_compression_height",
+            processor: processor_blakeg_height,
+            derived: derived_blakeg_height,
         });
     }
 
@@ -106,7 +122,6 @@ pub struct IterCost {
     pub hasher: f64,
     pub bitwise: f64,
     pub memory: f64,
-    pub range: f64,
 }
 
 impl IterCost {
@@ -116,7 +131,6 @@ impl IterCost {
             Component::Hasher => self.hasher,
             Component::Bitwise => self.bitwise,
             Component::Memory => self.memory,
-            Component::Range => self.range,
         }
     }
 }
@@ -144,7 +158,6 @@ fn per_iter_cost(shape: TraceShape, iters: u64) -> IterCost {
         hasher: shape.totals.blakeg_compression_rows as f64 / k,
         bitwise: shape.breakdown.bitwise_rows as f64 / k,
         memory: shape.breakdown.memory_rows as f64 / k,
-        range: shape.totals.range_rows as f64 / k,
     }
 }
 
@@ -163,7 +176,9 @@ mod tests {
         // authoritative values; this test just smoke-checks basic measurement.
         let shape = measure_program("begin push.1 drop end").expect("measure");
         assert!(shape.totals.core_rows > 0, "main trace should include framing rows");
-        assert!(shape.totals.padded_total().is_power_of_two());
+        assert!(shape.totals.padded_core().is_power_of_two());
+        assert!(shape.totals.padded_chiplets().is_power_of_two());
+        assert!(shape.totals.padded_blakeg_compression().is_power_of_two());
     }
 
     #[test]
@@ -228,19 +243,6 @@ mod tests {
         let memory = c["memory"];
         assert!(memory.memory >= 1.5, "memory per-iter ({}) too low", memory.memory);
         assert!(memory.memory <= 2.5, "memory per-iter ({}) too high", memory.memory);
-    }
-
-    #[test]
-    fn u32arith_snippet_drives_range() {
-        let c = cal();
-        let arith = c["u32arith"];
-        let pad = c["decoder_pad"];
-        assert!(
-            arith.range > pad.range * 5.0,
-            "u32arith range/iter ({}) should dominate the baseline decoder_pad range/iter ({})",
-            arith.range,
-            pad.range,
-        );
     }
 
     #[test]

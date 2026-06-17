@@ -167,108 +167,78 @@ impl<'a> ChipletTraceFragment<'a> {
 // TRACE LENGTH SUMMARY
 // ================================================================================================
 
-/// Contains the data about lengths of the trace parts.
+/// Row counts for the AIR segments produced by trace generation.
 ///
-/// - `core_trace_len` contains the length of the core trace (system + decoder + stack).
-/// - `range_trace_len` contains the length of the range checker trace.
-/// - `chiplets_trace_len` contains the trace lengths of the all chiplets (hash, bitwise, memory,
-///   kernel ROM)
+/// Dynamic AIRs store their unpadded row counts. Use the `*_height()` accessors for their padded
+/// power-of-two AIR matrix heights. The byte-pair lookup stores its fixed physical row count.
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 pub struct TraceLenSummary {
-    core_trace_len: usize,
-    range_trace_len: usize,
-    chiplets_trace_len: ChipletsLengths,
-    blakeg_compression_trace_len: usize,
-    and8_lookup_trace_len: usize,
-    /// Set by the trace builder when known. `None` falls back to deriving from the
-    /// unpadded component lengths via `next_power_of_two`.
-    padded_trace_len: Option<usize>,
+    core_rows: usize,
+    chiplets: ChipletsLengths,
+    blakeg_compression_rows: usize,
+    byte_pair_lookup_rows: usize,
 }
 
 impl TraceLenSummary {
     pub fn new(
-        core_trace_len: usize,
-        range_trace_len: usize,
-        chiplets_trace_len: ChipletsLengths,
-        blakeg_compression_trace_len: usize,
-        and8_lookup_trace_len: usize,
+        core_rows: usize,
+        chiplets: ChipletsLengths,
+        blakeg_compression_rows: usize,
+        byte_pair_lookup_rows: usize,
     ) -> Self {
         TraceLenSummary {
-            core_trace_len,
-            range_trace_len,
-            chiplets_trace_len,
-            blakeg_compression_trace_len,
-            and8_lookup_trace_len,
-            padded_trace_len: None,
+            core_rows,
+            chiplets,
+            blakeg_compression_rows,
+            byte_pair_lookup_rows,
         }
     }
 
-    /// Like `new` but with the actual padded trace length supplied by the trace builder
-    /// (under per-AIR heights this is `max(core_height, chiplets_height)`, not a
-    /// single `next_power_of_two(max(...))`).
-    pub fn new_with_padded(
-        core_trace_len: usize,
-        range_trace_len: usize,
-        chiplets_trace_len: ChipletsLengths,
-        blakeg_compression_trace_len: usize,
-        and8_lookup_trace_len: usize,
-        padded_trace_len: usize,
-    ) -> Self {
-        TraceLenSummary {
-            core_trace_len,
-            range_trace_len,
-            chiplets_trace_len,
-            blakeg_compression_trace_len,
-            and8_lookup_trace_len,
-            padded_trace_len: Some(padded_trace_len),
-        }
+    /// Returns the unpadded core AIR rows (system + decoder + stack).
+    pub fn core_rows(&self) -> usize {
+        self.core_rows
     }
 
-    /// Returns length of the core trace (system + decoder + stack).
-    pub fn core_trace_len(&self) -> usize {
-        self.core_trace_len
+    /// Returns the chiplet row-count breakdown.
+    pub fn chiplets(&self) -> ChipletsLengths {
+        self.chiplets
     }
 
-    /// Returns length of the range checker trace.
-    pub fn range_trace_len(&self) -> usize {
-        self.range_trace_len
+    /// Returns the unpadded chiplets AIR rows.
+    pub fn chiplets_rows(&self) -> usize {
+        self.chiplets.trace_len()
     }
 
-    /// Returns [ChipletsLengths] which contains trace lengths of all chilplets.
-    pub fn chiplets_trace_len(&self) -> ChipletsLengths {
-        self.chiplets_trace_len
+    /// Returns the unpadded BlakeG-compression AIR rows.
+    pub fn blakeg_compression_rows(&self) -> usize {
+        self.blakeg_compression_rows
     }
 
-    /// Returns the unpadded BlakeG-compression AIR trace length.
-    pub fn blakeg_compression_trace_len(&self) -> usize {
-        self.blakeg_compression_trace_len
+    /// Returns the fixed byte-pair lookup AIR rows.
+    ///
+    /// This table has one row per byte pair, so its row count is already its physical AIR height.
+    pub fn byte_pair_lookup_rows(&self) -> usize {
+        self.byte_pair_lookup_rows
     }
 
-    /// Returns the fixed byte-pair lookup table trace length.
-    pub fn and8_lookup_trace_len(&self) -> usize {
-        self.and8_lookup_trace_len
+    /// Returns the padded height of the core AIR.
+    pub fn core_height(&self) -> usize {
+        padded_height(self.core_rows)
     }
 
-    /// Returns the maximum of all component lengths.
-    pub fn trace_len(&self) -> usize {
-        self.range_trace_len
-            .max(self.core_trace_len)
-            .max(self.chiplets_trace_len.trace_len())
-            .max(self.blakeg_compression_trace_len)
-            .max(self.and8_lookup_trace_len)
+    /// Returns the padded height of the chiplets AIR.
+    pub fn chiplets_height(&self) -> usize {
+        padded_height(self.chiplets_rows())
     }
 
-    /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.
-    pub fn padded_trace_len(&self) -> usize {
-        self.padded_trace_len
-            .unwrap_or_else(|| self.trace_len().next_power_of_two().max(MIN_TRACE_LEN))
+    /// Returns the padded height of the BlakeG-compression AIR.
+    pub fn blakeg_compression_height(&self) -> usize {
+        padded_height(self.blakeg_compression_rows)
     }
+}
 
-    /// Returns the percent (0 - 100) of the steps that were added to the trace to pad it to the
-    /// next power of tow.
-    pub fn padding_percentage(&self) -> usize {
-        (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
-    }
+fn padded_height(rows: usize) -> usize {
+    rows.next_power_of_two().max(MIN_TRACE_LEN)
 }
 
 // CHIPLET LENGTHS

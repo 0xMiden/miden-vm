@@ -3,20 +3,21 @@
 //! A producer JSON file (e.g. `bench-tx.json` from `protocol/bin/bench-transaction/`) maps
 //! scenario keys to entries; only the `trace` section of each entry is consumed.
 //!
-//! `trace` carries the AIR-side row totals used by the verifier (`core_rows`, `chiplets_rows`,
-//! `blakeg_compression_rows`, `and8_lookup_rows`, `range_rows`). `shape` (nested under `trace`) is
-//! an advisory per-chiplet breakdown used by the solver. The loader checks `trace.chiplets_rows ==
-//! shape.chiplets_sum()`.
+//! `trace` carries the dynamic AIR-side row totals used by the verifier (`core_rows`,
+//! `chiplets_rows`, `blakeg_compression_rows`). `trace.chiplets_shape` is an advisory
+//! per-chiplet breakdown used by the solver. The loader checks `trace.chiplets_rows ==
+//! chiplets_shape.chiplets_sum()`.
+//!
+//! For compatibility with older producer snapshots, the loader uses `chiplets_shape.hasher_rows`
+//! when `blakeg_compression_rows` is absent.
 
 use std::{collections::BTreeMap, path::Path};
 
-use miden_air::trace::and8_lookup::AND8_LOOKUP_TRACE_HEIGHT;
 use serde::Deserialize;
 
 /// Mirrors `miden_air::trace::MIN_TRACE_LEN`. Keep in sync when the processor's minimum padded
 /// length changes.
 const MIN_TRACE_LEN: u64 = 64;
-pub const DEFAULT_AND8_LOOKUP_ROWS: u64 = AND8_LOOKUP_TRACE_HEIGHT as u64;
 
 /// A single scenario's trace snapshot, extracted from a producer JSON file.
 ///
@@ -27,13 +28,13 @@ pub const DEFAULT_AND8_LOOKUP_ROWS: u64 = AND8_LOOKUP_TRACE_HEIGHT as u64;
 /// layouts at deserialization time.
 #[derive(Debug, Clone)]
 pub struct TraceSnapshot {
-    /// Hard-target totals. The verifier's bracket check operates on these.
+    /// Row-count totals used for dynamic AIR bracket checks.
     pub trace: TraceTotals,
     /// Advisory per-chiplet breakdown used by the solver for shaping.
     pub shape: TraceBreakdown,
 }
 
-/// Hard-target aggregates -- the verifier's primary contract.
+/// Row-count aggregates for the AIR segments observed by the benchmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TraceTotals {
     /// System + decoder + stack trace length.
@@ -43,11 +44,6 @@ pub struct TraceTotals {
     pub chiplets_rows: u64,
     /// Standalone BlakeG-compression AIR length.
     pub blakeg_compression_rows: u64,
-    /// Fixed byte-pair lookup-table AIR length.
-    pub and8_lookup_rows: u64,
-    /// Range-checker trace length. Derived from memory + bitwise activity; not independently
-    /// targeted but tracked so the verifier can warn if it ever dominates.
-    pub range_rows: u64,
 }
 
 /// Per-chiplet row counts. Advisory only -- the solver uses these to size individual snippets so
@@ -75,15 +71,12 @@ pub struct TraceShape {
 }
 
 impl TraceTotals {
-    /// Padded power-of-two bracket for the non-chiplet side of the trace:
-    /// `next_pow2(max(core_rows, range_rows))`. Under the current AIR this covers core
-    /// (system/decoder/stack) and range together; if a future AIR separates them, this accessor
-    /// can be revisited.
-    pub fn padded_core_side(&self) -> u64 {
-        self.core_rows.max(self.range_rows).next_power_of_two().max(MIN_TRACE_LEN)
+    /// Padded power-of-two bracket for the Core AIR.
+    pub fn padded_core(&self) -> u64 {
+        self.core_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
 
-    /// Padded power-of-two bracket for the chiplets side of the trace.
+    /// Padded power-of-two bracket for the Chiplets AIR.
     pub fn padded_chiplets(&self) -> u64 {
         self.chiplets_rows.next_power_of_two().max(MIN_TRACE_LEN)
     }
@@ -91,32 +84,6 @@ impl TraceTotals {
     /// Padded power-of-two bracket for the BlakeG-compression AIR.
     pub fn padded_blakeg_compression(&self) -> u64 {
         self.blakeg_compression_rows.next_power_of_two().max(MIN_TRACE_LEN)
-    }
-
-    /// Padded power-of-two bracket for the fixed byte-pair lookup table.
-    pub fn padded_and8_lookup(&self) -> u64 {
-        self.and8_lookup_rows.next_power_of_two().max(MIN_TRACE_LEN)
-    }
-
-    /// Single global padded length as reported by the processor's
-    /// `TraceLenSummary::padded_trace_len`. Used by the calibrator to cross-check our derived
-    /// formulas against the prover.
-    pub fn padded_total(&self) -> u64 {
-        self.core_rows
-            .max(self.range_rows)
-            .max(self.chiplets_rows)
-            .max(self.blakeg_compression_rows)
-            .max(self.and8_lookup_rows)
-            .next_power_of_two()
-            .max(MIN_TRACE_LEN)
-    }
-
-    /// True iff `range_rows` is the largest unpadded component.
-    pub fn range_dominates(&self) -> bool {
-        self.range_rows > self.core_rows
-            && self.range_rows > self.chiplets_rows
-            && self.range_rows > self.blakeg_compression_rows
-            && self.range_rows > self.and8_lookup_rows
     }
 }
 
@@ -167,9 +134,10 @@ impl TraceSnapshot {
             let trace = TraceTotals {
                 core_rows: entry.trace.core_rows,
                 chiplets_rows: entry.trace.chiplets_rows,
-                blakeg_compression_rows: entry.trace.blakeg_compression_rows,
-                and8_lookup_rows: entry.trace.and8_lookup_rows.unwrap_or(DEFAULT_AND8_LOOKUP_ROWS),
-                range_rows: entry.trace.range_rows,
+                blakeg_compression_rows: entry
+                    .trace
+                    .blakeg_compression_rows
+                    .unwrap_or(entry.trace.chiplets_shape.hasher_rows),
             };
             let shape = entry.trace.chiplets_shape;
             let expected = shape.chiplets_sum();
@@ -202,11 +170,9 @@ struct RawScenarioEntry {
 struct RawTrace {
     core_rows: u64,
     chiplets_rows: u64,
+    // Older snapshots used this name before BlakeG compression became a standalone AIR.
     #[serde(default, alias = "poseidon2_permutation_rows")]
-    blakeg_compression_rows: u64,
-    #[serde(default)]
-    and8_lookup_rows: Option<u64>,
-    range_rows: u64,
+    blakeg_compression_rows: Option<u64>,
     chiplets_shape: TraceBreakdown,
 }
 
@@ -243,46 +209,53 @@ mod tests {
     struct CommittedScenarioExpectation {
         producer_stem: &'static str,
         scenario_key: &'static str,
-        padded_core_side: u64,
+        padded_core: u64,
         padded_chiplets: u64,
+        padded_blakeg_compression: u64,
     }
 
     const COMMITTED_SCENARIO_EXPECTATIONS: &[CommittedScenarioExpectation] = &[
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume single P2ID note",
-            padded_core_side: 131_072,
+            padded_core: 131_072,
             padded_chiplets: 131_072,
+            padded_blakeg_compression: 131_072,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume two P2ID notes",
-            padded_core_side: 131_072,
+            padded_core: 131_072,
             padded_chiplets: 262_144,
+            padded_blakeg_compression: 262_144,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "create single P2ID note",
-            padded_core_side: 131_072,
+            padded_core: 131_072,
             padded_chiplets: 131_072,
+            padded_blakeg_compression: 131_072,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume CLAIM note (L1 to Miden)",
-            padded_core_side: 65_536,
+            padded_core: 65_536,
             padded_chiplets: 262_144,
+            padded_blakeg_compression: 262_144,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume CLAIM note (L2 to Miden)",
-            padded_core_side: 65_536,
+            padded_core: 65_536,
             padded_chiplets: 262_144,
+            padded_blakeg_compression: 262_144,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume B2AGG note (bridge-out)",
-            padded_core_side: 262_144,
+            padded_core: 262_144,
             padded_chiplets: 1_048_576,
+            padded_blakeg_compression: 1_048_576,
         },
     ];
 
@@ -307,8 +280,6 @@ mod tests {
             core_rows: 1000,
             chiplets_rows: breakdown.chiplets_sum(),
             blakeg_compression_rows: 700,
-            and8_lookup_rows: DEFAULT_AND8_LOOKUP_ROWS,
-            range_rows: 100,
         };
         (totals, breakdown)
     }
@@ -323,52 +294,26 @@ mod tests {
     }
 
     #[test]
-    fn padded_totals_match_processor_formula() {
+    fn padded_brackets_match_processor_formula() {
         let (t, _) = sample_shape();
-        // The fixed AND8 table dominates this small sample.
-        assert_eq!(t.padded_total(), DEFAULT_AND8_LOOKUP_ROWS);
-        // core + range: max(1000, 100) = 1000 -> 1024
-        assert_eq!(t.padded_core_side(), 1024);
+        // core alone: 1000 -> 1024
+        assert_eq!(t.padded_core(), 1024);
         // chiplets alone: 651 -> 1024
         assert_eq!(t.padded_chiplets(), 1024);
         // BlakeG alone: 700 -> 1024
         assert_eq!(t.padded_blakeg_compression(), 1024);
-        assert_eq!(t.padded_and8_lookup(), DEFAULT_AND8_LOOKUP_ROWS);
     }
 
     #[test]
-    fn padded_total_clamps_to_min_trace_len() {
+    fn dynamic_padded_brackets_clamp_to_min_trace_len() {
         let totals = TraceTotals {
             core_rows: 1,
             chiplets_rows: 1,
             blakeg_compression_rows: 1,
-            and8_lookup_rows: 1,
-            range_rows: 0,
         };
-        assert_eq!(totals.padded_total(), MIN_TRACE_LEN);
-        assert_eq!(totals.padded_core_side(), MIN_TRACE_LEN);
+        assert_eq!(totals.padded_core(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_chiplets(), MIN_TRACE_LEN);
         assert_eq!(totals.padded_blakeg_compression(), MIN_TRACE_LEN);
-    }
-
-    #[test]
-    fn range_dominates_is_detected() {
-        let totals = TraceTotals {
-            core_rows: 100,
-            chiplets_rows: 200,
-            blakeg_compression_rows: 300,
-            and8_lookup_rows: 400,
-            range_rows: 500,
-        };
-        assert!(totals.range_dominates());
-        let totals = TraceTotals {
-            core_rows: 500,
-            chiplets_rows: 200,
-            blakeg_compression_rows: 300,
-            and8_lookup_rows: 400,
-            range_rows: 100,
-        };
-        assert!(!totals.range_dominates());
     }
 
     #[test]
@@ -405,9 +350,9 @@ mod tests {
                 match expectation_for(&producer_stem, key) {
                     Some(expected) => {
                         assert_eq!(
-                            snap.trace.padded_core_side(),
-                            expected.padded_core_side,
-                            "{producer_stem}/{key}: padded_core_side moved to a different bracket; \
+                            snap.trace.padded_core(),
+                            expected.padded_core,
+                            "{producer_stem}/{key}: padded_core moved to a different bracket; \
                              refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
                         );
                         assert_eq!(
@@ -415,6 +360,12 @@ mod tests {
                             expected.padded_chiplets,
                             "{producer_stem}/{key}: padded_chiplets moved to a different bracket; \
                              refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
+                        );
+                        assert_eq!(
+                            snap.trace.padded_blakeg_compression(),
+                            expected.padded_blakeg_compression,
+                            "{producer_stem}/{key}: padded_blakeg_compression moved to a different \
+                             bracket; refresh the snapshot and update COMMITTED_SCENARIO_EXPECTATIONS",
                         );
                         discovered.insert((producer_stem.clone(), key.clone()));
                     },
@@ -439,13 +390,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_optional_fields_default_to_zero() {
+    fn missing_blakeg_rows_use_hasher_rows_fallback() {
         let minimal = r#"{
             "consume single P2ID note": {
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 11,
-                    "range_rows": 50,
                     "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
                 }
             }
@@ -457,8 +407,7 @@ mod tests {
         let (_, snap) = &scenarios[0];
         assert_eq!(snap.shape.kernel_rom_rows, 0);
         assert_eq!(snap.shape.ace_rows, 0);
-        assert_eq!(snap.trace.blakeg_compression_rows, 0);
-        assert_eq!(snap.trace.and8_lookup_rows, DEFAULT_AND8_LOOKUP_ROWS);
+        assert_eq!(snap.trace.blakeg_compression_rows, snap.shape.hasher_rows);
     }
 
     #[test]
@@ -469,7 +418,6 @@ mod tests {
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 500,
-                    "range_rows": 0,
                     "chiplets_shape": { "hasher_rows": 10, "bitwise_rows": 0, "memory_rows": 0 }
                 }
             }
@@ -493,7 +441,6 @@ mod tests {
                 "trace": {
                     "core_rows": 77699,
                     "chiplets_rows": 123129,
-                    "range_rows": 20203,
                     "chiplets_shape": {
                         "hasher_rows": 120352,
                         "bitwise_rows": 416,
@@ -513,5 +460,6 @@ mod tests {
         assert_eq!(key, "consume single P2ID note");
         assert_eq!(snap.trace.core_rows, 77_699);
         assert_eq!(snap.shape.hasher_rows, 120_352);
+        assert_eq!(snap.trace.blakeg_compression_rows, snap.shape.hasher_rows);
     }
 }

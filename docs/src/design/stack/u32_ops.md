@@ -9,15 +9,15 @@ In this section we describe semantics and AIR constraints of operations over u32
 ### Range checks
 Most operations described below require some number of 16-bit range checks (i.e., verifying that the value of a field element is smaller than $2^{16}$). The number of required range checks varies between $2$ and $4$, depending on the operation. However, to simplify the constraint system, we force each relevant operation to consume exactly $4$ range checks.
 
-To perform these range checks, the prover puts the values to be range-checked into helper registers $h_0, ..., h_3$, and then updates the range checker bus column $b_{range}$ according to the LogUp construction described in the [range checker](../range.md) documentation, using multiplicity $1$ for each value.
+To perform these range checks, the prover puts the values to be range-checked into helper registers $h_0, ..., h_3$, and emits `RangeMsg` removals on the range-check bus described in the [range checker](../range.md) documentation, using multiplicity $1$ for each value.
 
-This operation is enforced via the following constraint. Note that since constraints cannot include divisions, the actual constraint which is enforced will be expressed equivalently with all denominators multiplied through, resulting in a constraint of degree 5.
+Let $D_{range}(v)$ denote the domain-separated LogUp denominator for `RangeMsg { value: v }`. This operation is enforced via the following accumulator update. Since constraints cannot include divisions, the actual constraint is expressed with all denominators multiplied through, resulting in a constraint of degree 5.
 
 $$
-b_{range}' = b_{range} - \frac{1}{(\alpha - h_0)} - \frac{1}{(\alpha - h_1)} - \frac{1}{(\alpha - h_2)} - \frac{1}{(\alpha - h_3)} \text{ | degree} = 5
+b_{range}' = b_{range} - \frac{1}{D_{range}(h_0)} - \frac{1}{D_{range}(h_1)} - \frac{1}{D_{range}(h_2)} - \frac{1}{D_{range}(h_3)} \text{ | degree} = 5
 $$
 
-The above is just a partial constraint as it does not show the range checker's part of the constraint, which adds the required values into the bus column. It also omits the [selector flag](./op_constraints.md#operation-flags) which is used to turn this constraint on only when executing relevant operations.
+The above is just the stack-side remove contribution. The matching table-side inserts are emitted by the byte-pair lookup AIR, whose fixed rows enumerate all 16-bit values. The expression also omits the [selector flag](./op_constraints.md#operation-flags) which is used to turn this constraint on only when executing relevant operations.
 
 ### Checking element validity
 Another primitive which is required by most of the operations described below is checking whether four 16-bit values form a valid field element. Assume $t_0$, $t_1$, $t_2$, and $t_3$ are known to be 16-bit values, and we want to verify that $2^{48} \cdot t_3 + 2^{32} \cdot t_2 + 2^{16} \cdot t_1 + t_0$ is a valid field element.

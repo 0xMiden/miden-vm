@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Range Checker
 
-Miden VM relies very heavily on 16-bit range-checks (checking if a value of a field element is between $0$ and $2^{16}$). For example, most of the [u32 operations](./stack/u32_ops.md) need to perform between two and four 16-bit range-checks per operation. Similarly, operations involving memory (e.g. load and store) require two 16-bit range-checks per operation.
+Miden VM relies very heavily on 16-bit range-checks (checking if a field element is in $[0, 2^{16})$). For example, most of the [u32 operations](./stack/u32_ops.md) need to perform between two and four 16-bit range-checks per operation. Memory rows range-check both sorted-access deltas and word-address decomposition values.
 
 Thus, it is very important for the VM to be able to perform a large number of 16-bit range checks very efficiently. In this note we describe how this can be achieved using the [LogUp](./lookups/logup.md) lookup argument.
 
@@ -70,108 +70,55 @@ Additionally, the constraint degree has not increased versus the naive approach,
 
 ## 16-bit range checks
 
-To support 16-bit range checks, let's try to extend the idea of the 8-bit table. Our 16-bit table would look like so (the only difference is that column $v$ now has to end with value $65535$):
-
-![rc_16_bit_logup](../img/design/range/rc_16_bit_logup.png)
-
-While this works, it is rather wasteful. In the worst case, we'd need to enumerate over 65K values, most of which we may not actually need. It would be nice if we could "skip over" the values that we don't want. One way to do this could be to add bridge rows between two values to be range checked and add constraints to enforce the consistency of the gap between these bridge rows.
-
-If we allow gaps between two consecutive rows to only be 0 or powers of 2, we could enforce a constraint:
+The VM implements 16-bit range checks with a fixed byte-pair table. The table has one row for
+each pair $(a, b) \in [0, 256)^2$ and interprets that row as the 16-bit value:
 
 $$
-\Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 2)  \cdot (\Delta v - 4)  \cdot (\Delta v - 8)  \cdot (\Delta v - 16)  \cdot (\Delta v - 32)  \cdot (\Delta v - 64)  \cdot (\Delta v - 128) = 0
+v = 256 \cdot a + b
 $$
 
-This constraint has a degree 9. This construction allows the minimum trace length to be 1024.
-
-We could go even further and allow the gaps between two consecutive rows to only be 0 or powers of 3. In this case we would enforce the constraint:
-
-$$
-\Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81)  \cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0
-$$
-
-This allows us to reduce the minimum trace length to 64.
-
-To find out the number of bridge rows to be added in between two values to be range checked, we represent the gap between them as a linear combination of powers of 3, ie,
-
-$$
-(r' - r) = \sum_{i=0}^{7} x_i \cdot 3^i
-$$
-
-Then for each $x_i$ except the first, we add a bridge row at a gap of $3^i$.
-
-## Miden approach
-
-This construction is implemented in Miden with the following requirements, capabilities and constraints.
+The byte-pair table is also used for bytewise AND and BlakeG rotation-contribution lookups. Its
+preprocessed columns hold the fixed byte pair and the derived values for those relations. The
+range-check relation adds one dynamic multiplicity column $m_{range}$ to the same table.
 
 ### Requirements
 
-- 2 columns of the main trace: $m, v$, where $v$ contains the value being range-checked and $m$ is the number of times the value is checked (its multiplicity).
-- 1 [bus](./lookups/index.md#communication-buses-in-miden-vm) $b_{range}$ to ensure that the range checks performed in the range checker match those requested by other VM components (the [stack](./stack/u32_ops.md#range-checks) and the [memory chiplet](./chiplets/memory.md)).
-
-### Capabilities
-
-The construction gives us the following capabilities:
-- For long traces (when $n > 2^{16}$), we can do an essentially unlimited number of arbitrary 16-bit range-checks.
-- For short traces ($2^5 < n \le 2^{16}$), we can range-check slightly fewer than $n$ unique values, but there is essentially no practical limit to the total number of range checks.
-
+- A fixed byte-pair table containing all $2^{16}$ possible 16-bit values.
+- One dynamic multiplicity column $m_{range}$ in the byte-pair lookup AIR.
+- One [LogUp bus](./lookups/index.md#communication-buses-in-miden-vm) domain for
+  `RangeMsg { value }`.
 
 ### Execution trace
 
-The range checker's execution trace looks as follows:
+Range checks do not have a separate trace segment. During trace generation, the processor counts
+every requested 16-bit range check by value. These counts are written into the range multiplicity
+column of the byte-pair lookup AIR:
 
-![rc_with_bridge_rows.png](../img/design/range/rc_with_bridge_rows.png)
+$$
+m_{range}[v] = \text{number of range checks requested for } v
+$$
 
-The columns have the following meanings:
-- $m$ is the multiplicity column that indicates the number of times the value in that row should be range checked (included into the computation of the logarithmic derivative).
-- $v$ contains the values to be range checked.
-  - These values go from $0$ to $65535$. Values must either stay the same or increase by powers of 3 less than or equal to $3^7$.
-  - The final 2 rows of the 16-bit section of the trace must both equal $65535$. The extra value of $65535$ is required in order to [pad the trace](./lookups/index.md#length-of-auxiliary-columns-for-lookup-arguments) so the [$b_{range}$](#communication-bus) bus column can be computed correctly.
-
-### Execution trace constraints
-
-First, we need to constrain that the consecutive values in the range checker are either the same or differ by powers of 3 that are less than or equal to $3^7$.
-
-> $$
-> \Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81) 
-> \cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0 \text{ | degree} = 9
-> $$
-
-In addition to the transition constraints described above, we also need to enforce the following boundary constraints:
-
-- The value of $v$ in the first row is $0$.
-- The value of $v$ in the last row is $65535$.
+The table row itself determines $v$ from the fixed byte pair, so no transition constraints are
+needed to prove that the values cover the 16-bit range. The full range is provided by the
+preprocessed table.
 
 ### Communication bus
 
-$b_{range}$ is the [bus](./lookups/index.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
+Components which require 16-bit range checks remove `RangeMsg { value }` messages from the range
+bus. The byte-pair lookup AIR inserts the same messages with multiplicity $m_{range}$.
 
-Requests are sent to the range checker bus by the following components:
-- The Stack sends requests for 16-bit range checks during some [`u32` operations](./stack/u32_ops.md#range-checks).
-- The [Memory chiplet](./chiplets/memory.md) sends requests for 16-bit range checks against the values in the $d_0$ and $d_1$ trace columns to enforce internal consistency.
+Requests are emitted by:
 
-Responses are provided by the range checker using the transition constraint for the LogUp construction described above.
+- The Stack during some [`u32` operations](./stack/u32_ops.md#range-checks).
+- The [Memory chiplet](./chiplets/memory.md), for address and clock-delta decompositions.
+- The BlakeG compression AIR, for range checks routed out of its message schedule.
 
-> $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
-> $$
-
-To describe the complete transition constraint for the bus, we'll define the following variables:
-
-- $f_{stack}$: the boolean flag that indicates whether or not a stack operation requiring range checks is occurring. This flag has degree 3.
-- $f_{mem}$: the boolean flag that indicates whether or not a memory operation requiring range checks is occurring. This flag has degree 3.
-- $s_0, s_1, s_2, s_3$: the values for which range checks are requested from the stack when $f_{stack}$ is set.
-- $m_0, m_1$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
+The byte-pair lookup side contributes the LogUp term:
 
 > $$
-> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)}  - \frac{f_{mem}}{(\alpha - m_0)} - \frac{f_{mem}}{(\alpha - m_1)} \text{ | degree} = 9
+> \frac{m_{range}}{\alpha - v} \text{ | degree} = 2
 > $$
 
-As previously mentioned, constraints cannot include divisions, so the actual constraint which is applied will be the equivalent expression in which all denominators have been multiplied through, which is degree 9.
-
-If $b_{range}$ is initialized to $0$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 0$.
-
-Therefore, in addition to the transition constraint described above, we also need to enforce the following boundary constraints:
-
-- The value of $b_{range}$ in the first row $0$.
-- The value of $b_{range}$ in the last row $0$.
+The LogUp accumulator enforces that the multiset of table inserts matches the multiset of requests
+from the components above. If a prover omits a requested value or inserts a value with the wrong
+multiplicity, the range bus does not balance.

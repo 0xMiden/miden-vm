@@ -185,7 +185,7 @@ impl Chiplets {
     /// Adds all range checks required by the memory chiplet to the provided `RangeChecker`
     /// instance.
     pub fn append_range_checks(&self, range_checker: &mut RangeChecker) {
-        self.memory.append_range_checks(self.memory_start(), range_checker);
+        self.memory.append_range_checks(range_checker);
     }
 
     /// Adds range checks emitted by the standalone BlakeG compression AIR.

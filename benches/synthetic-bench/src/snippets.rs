@@ -7,12 +7,8 @@
 //!   iterations (one `padw padw padw` as setup, no reset), so each compression has a distinct input
 //!   and the compression AIR's multiplicity column does not collapse them.
 //! - **bitwise** drives the bitwise chiplet via `u32split + u32xor`.
-//! - **u32arith** drives the range checker via two banded u32 counters, advancing each by 65537 per
-//!   iter so their 16-bit halves evolve as disjoint contiguous bands. `u32assert2` issues fresh
-//!   range-check values each iter without cross-dedup.
 //! - **memory** drives the memory chiplet. The address advances by `4 * 65537 = 262148` per iter so
-//!   the two 16-bit halves of the word index form disjoint contiguous bands, which also feeds the
-//!   range chiplet via address-limb decomposition.
+//!   the two 16-bit halves of the word index form disjoint contiguous bands.
 //! - **decoder_pad** drives only the core (system/decoder/stack) trace so the solver can top up
 //!   core-trace budget without adding chiplet rows.
 //!
@@ -20,11 +16,10 @@
 //! wrapped in a `repeat.N ... end` block. The body must leave stack depth unchanged -- the repeat
 //! block would otherwise drift the stack each iteration.
 //!
-//! Note: on current `next`, decoder-only programs still incur hasher rows due to MAST hashing, so
-//! low hasher targets may be unreachable; the solver clamps `hasher` iterations to zero in that
-//! case.
+//! Decoder-only programs also incur hasher rows from MAST hashing, so low hasher targets may be
+//! unreachable; the solver clamps `hasher` iterations to zero in that case.
 
-/// A VM component the solver targets.
+/// A workload category in the snippet catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum Component {
     /// System + decoder + stack.
@@ -32,9 +27,6 @@ pub enum Component {
     Hasher,
     Bitwise,
     Memory,
-    /// Range checker. Not currently a hard bracket target but the solver still sizes the
-    /// `u32arith` snippet against it so the synthetic's range workload is representative.
-    Range,
 }
 
 /// A MASM fragment that dominantly drives one component.
@@ -69,29 +61,10 @@ pub const SNIPPETS: &[Snippet] = &[
         dominant: Component::Bitwise,
     },
     Snippet {
-        name: "u32arith",
-        // Two u32 counters, each advanced by `65537 = 0x0001_0001` per iter, so their four 16-bit
-        // half-limbs form disjoint contiguous bands at 45500+i, 50500+i, 55500+i, 60500+i (clear
-        // of the memory snippet's 4*w1 band, which tops out near 44800). Counters update with
-        // plain field `add` so only the `u32assert2` emits range-check values -- carry limbs don't
-        // pollute the bands. See `u32arith_max_iters` for the counter bound.
-        setup: "push.3637308500 push.2981938500",
-        body: "u32assert2 push.65537 add swap push.65537 add swap",
-        cleanup: "drop drop",
-        dominant: Component::Range,
-    },
-    Snippet {
         name: "memory",
         // Advance the word-aligned address by `4 * 65537 = 262148` each iter so that both 16-bit
-        // halves of the word index evolve as disjoint contiguous bands. This makes the memory
-        // chiplet feed fresh range-check values rather than deduplicating, so the snippet also
-        // contributes meaningfully to the range chiplet.
-        //
-        // The start address `4 * ((10000 << 16) | 20000)` puts the address-limb bands in a high
-        // region that doesn't overlap u32arith's bands. The counter advances with plain field
-        // `add` so only the memory chiplet emits range-check values -- the update doesn't pollute
-        // the bands with carry-limb checks. Safe as long as the address stays below `u32::MAX`;
-        // see `assert_counters_fit`.
+        // halves of the word index evolve as disjoint contiguous bands. This keeps address-derived
+        // range-check multiplicities representative; `assert_counters_fit` guards the u32 bound.
         setup: "padw push.2621520000",
         body: "dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4",
         cleanup: "drop dropw",
@@ -140,26 +113,15 @@ pub fn wrap_program(body: &str) -> String {
 // COUNTER SAFETY
 // ------------------------------------------------------------------------
 //
-// Both `u32arith` and `memory` advance a counter with plain field `add`, so `u32assert2` / the
-// memory chiplet would fail at runtime if the counter crossed `u32::MAX`. These helpers expose the
-// per-snippet limits so callers can validate a plan before emitting.
-
-/// Starting value of `u32arith`'s higher counter -- the one closer to `u32::MAX` and therefore the
-/// binding constraint.
-const U32ARITH_COUNTER_START: u64 = 3_637_308_500;
-const U32ARITH_COUNTER_STRIDE: u64 = 65_537;
+// The memory snippet advances its address counter with plain field `add`; memory ops would fail at
+// runtime if the address crossed `u32::MAX`. This helper exposes the limit so callers can validate
+// a plan before emitting.
 
 /// Starting value of `memory`'s address counter.
 const MEMORY_COUNTER_START: u64 = 2_621_520_000;
 const MEMORY_COUNTER_STRIDE: u64 = 262_148;
 
 const U32_MAX: u64 = u32::MAX as u64;
-
-/// Maximum iterations of `u32arith` before the `y` counter would exceed `u32::MAX` and trip the
-/// next iteration's `u32assert2`.
-pub fn u32arith_max_iters() -> u64 {
-    (U32_MAX - U32ARITH_COUNTER_START) / U32ARITH_COUNTER_STRIDE
-}
 
 /// Maximum iterations of `memory` before the address counter would exceed `u32::MAX`.
 pub fn memory_max_iters() -> u64 {
@@ -174,13 +136,7 @@ mod tests {
 
     #[test]
     fn catalog_has_one_snippet_per_solver_component() {
-        let targets = [
-            Component::Core,
-            Component::Hasher,
-            Component::Bitwise,
-            Component::Memory,
-            Component::Range,
-        ];
+        let targets = [Component::Core, Component::Hasher, Component::Bitwise, Component::Memory];
         for target in targets {
             let count = SNIPPETS.iter().filter(|s| s.dominant == target).count();
             assert_eq!(count, 1, "expected exactly one snippet for {target:?}");
@@ -201,9 +157,8 @@ mod tests {
 
     #[test]
     fn counter_limits_cover_realistic_plans() {
-        // Realistic plans for consume/create P2ID transactions produce ~5k u32arith iters and
-        // ~1.2k memory iters. These guards have plenty of headroom for that regime.
-        assert!(u32arith_max_iters() >= 10_000);
+        // Realistic plans for consume/create P2ID transactions produce ~1.2k memory iters.
+        // This guard has plenty of headroom for that regime.
         assert!(memory_max_iters() >= 6_000);
     }
 

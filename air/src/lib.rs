@@ -45,7 +45,6 @@ pub use constraints::{
     columns::{ChipletCols, CoreCols},
     decoder::columns::DecoderCols,
     ext_field::QuadFeltExpr,
-    range::columns::RangeCols,
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
@@ -246,7 +245,7 @@ pub const NUM_VAR_LEN_PUBLIC_INPUT_GROUPS: usize = 1;
 /// Maximum number of kernel-digest field elements in the Miden VM statement.
 pub const MAX_KERNEL_PROC_DIGEST_INPUTS: usize = Kernel::MAX_NUM_PROCEDURES * WORD_SIZE;
 
-/// Legacy LogUp aux trace width for the unified core/chiplets/AND8 path.
+/// Aux trace width for callers that consume the flattened LogUp trace.
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 9;
 
 // Public-value layout offsets used by LogUp boundary corrections.
