@@ -85,7 +85,7 @@ pub fn pcs_params() -> PcsParams {
 
 /// Root of the ACE circuit registry accepted by the recursive verifier.
 ///
-/// Active leaves are order-specific ACE circuit commitments indexed by `ProofOrder::tag()`.
+/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 /// This root is absorbed into Fiat-Shamir as the recursive relation identifier. The recursive
 /// advice builder also seeds the corresponding tree.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
@@ -101,7 +101,7 @@ pub const ACE_CIRCUIT_REGISTRY_DEPTH: usize = 5;
 
 /// Leaves in the ACE circuit registry tree.
 ///
-/// Active leaves are order-specific ACE circuit commitments indexed by `ProofOrder::tag()`.
+/// Active leaves are ACE circuit commitments indexed by `ProofOrder::tag()`.
 /// Inactive leaves are deterministic padding.
 pub const ACE_CIRCUIT_REGISTRY_LEAVES: [[Felt; 4]; 1 << ACE_CIRCUIT_REGISTRY_DEPTH] = [
     [

@@ -17,7 +17,7 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # RELATION_DIGEST is the root of the ACE circuit registry. It binds the
 # Fiat-Shamir transcript to the recursive relation; recursive advice also carries
-# the corresponding tree for order-specific ACE circuit authentication.
+# the corresponding tree for order-selected ACE circuit authentication.
 const RELATION_DIGEST_0 = 2510026394581042689
 const RELATION_DIGEST_1 = 5394882770041513920
 const RELATION_DIGEST_2 = 7244246892549217641

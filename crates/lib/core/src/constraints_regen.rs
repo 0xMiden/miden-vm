@@ -36,7 +36,7 @@ const ACE_REGISTRY_DEPTH: usize = 5;
 const ACE_REGISTRY_LEAF_COUNT: usize = 1 << ACE_REGISTRY_DEPTH;
 const ACE_REGISTRY_PADDING_DOMAIN: u64 = 0xace;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
-const CONSTRAINTS_EVAL_DISPATCHER_PATH: &str = "asm/sys/vm/constraints_eval.masm";
+const CONSTRAINTS_EVAL_PATH: &str = "asm/sys/vm/constraints_eval.masm";
 const RELATION_DIGEST_PATH: &str = "asm/sys/vm/mod.masm";
 
 /// Builds one recursive-verifier ACE circuit for a specific proof order.
@@ -120,14 +120,6 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             circuit_elements[3],
         ];
 
-        let masm = render_constraints_eval_file(
-            &order,
-            num_inputs,
-            num_eval_gates,
-            circuit_commitment,
-            instructions,
-        );
-
         order_artifacts.push(OrderArtifact {
             order,
             num_inputs,
@@ -135,7 +127,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             stream_len,
             adv_pipe_rows,
             circuit_commitment,
-            constraints_eval: masm,
+            instructions: instructions.to_vec(),
         });
     }
 
@@ -144,7 +136,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let relation_digest = registry.root;
     let registry_leaves = registry.leaves.iter().copied().map(word_to_array).collect::<Vec<_>>();
     let and8_preprocessed_commitment = compute_and8_preprocessed_commitment();
-    let dispatcher = render_constraints_eval_dispatcher(&order_artifacts);
+    let constraints_eval = render_constraints_eval_file(&order_artifacts)?;
 
     let mut relation_mod = read_file(RELATION_DIGEST_PATH);
     for (i, elem) in relation_digest.iter().enumerate() {
@@ -209,11 +201,10 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     air_config.replace_range(block_start..block_end, &render_registry_leaves(&registry_leaves));
 
     Ok(ComputedArtifacts {
-        order_artifacts,
         relation_digest,
         registry_leaves,
         and8_preprocessed_commitment,
-        dispatcher,
+        constraints_eval,
         relation_mod,
         air_config,
     })
@@ -346,21 +337,19 @@ fn render_registry_leaves(leaves: &[[Felt; 4]]) -> String {
     block
 }
 
-fn render_constraints_eval_file(
-    order: &ProofOrder,
-    num_inputs: usize,
-    num_eval_gates: usize,
-    circuit_commitment: [Felt; 4],
-    instructions: &[Felt],
-) -> String {
-    let order_label = order.label();
+fn render_constraints_eval_file(order_artifacts: &[OrderArtifact]) -> io::Result<String> {
+    let Some(first) = order_artifacts.first() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "at least one ACE circuit is required",
+        ));
+    };
     assert!(
-        instructions.len().is_multiple_of(8),
+        first.stream_len.is_multiple_of(8),
         "ACE circuit stream must be 8-felt aligned for adv_pipe"
     );
-    let adv_pipe_rows = instructions.len() / 8;
     let circuit_len =
-        u32::try_from(instructions.len()).expect("ACE circuit stream length must fit in u32");
+        u32::try_from(first.stream_len).expect("ACE circuit stream length must fit in u32");
     let circuit_stream_init_cv = Eidos::init_chaining_word(0, circuit_len);
     let max_cycle_len_log = max_periodic_cycle_len_log();
 
@@ -388,11 +377,12 @@ fn render_constraints_eval_file(
             "const ERR_CIRCUIT_COMMITMENT_MISMATCH = \"hashed ACE circuit stream does not match registry commitment\"\n\n",
             "# CONSTRAINT EVALUATION CHECKER\n",
             "# =================================================================================================\n\n",
-            "#! Executes the constraints evaluation check for proof order: {order_label}.\n",
+            "#! Executes the constraints evaluation check for the proof order selected by ORDER_TAG.\n",
             "#!\n",
             "#! Inputs:  []\n",
             "#! Outputs: []\n",
             "pub proc execute_constraint_evaluation_check()\n",
+            "    exec.constants::assert_valid_order_tag\n\n",
             "    push.MAX_CYCLE_LEN_LOG\n",
             "    exec.utils::set_up_auxiliary_inputs_ace\n\n",
             "    exec.load_and_authenticate_ace_circuit\n\n",
@@ -402,7 +392,7 @@ fn render_constraints_eval_file(
             "    eval_circuit\n",
             "    drop drop drop\n",
             "end\n\n",
-            "#! Loads and authenticates this order-specific ACE circuit.\n",
+            "#! Loads and authenticates the ACE circuit selected by ORDER_TAG.\n",
             "proc load_and_authenticate_ace_circuit\n",
             "    exec.load_ace_registry_commitment\n",
             "    # => [C]\n",
@@ -440,37 +430,49 @@ fn render_constraints_eval_file(
             "    swapw dropw\n",
             "    # => [C]\n",
             "end\n\n",
-            "# COMMITTED ACE CIRCUIT STREAM\n",
+            "# COMMITTED ACE CIRCUIT STREAMS\n",
             "# =================================================================================================\n\n",
-            "adv_map CIRCUIT_COMMITMENT([{commitment_0}, {commitment_1}, {commitment_2}, {commitment_3}]) = [\n",
         ),
-        num_inputs = num_inputs,
-        num_eval_gates = num_eval_gates,
-        order_label = order_label,
+        num_inputs = first.num_inputs,
+        num_eval_gates = first.num_eval_gates,
         max_cycle_len_log = max_cycle_len_log,
         ace_registry_depth = ACE_REGISTRY_DEPTH,
-        adv_pipe_rows = adv_pipe_rows,
+        adv_pipe_rows = first.adv_pipe_rows,
         init_cv_0 = circuit_stream_init_cv[0].as_canonical_u64(),
         init_cv_1 = circuit_stream_init_cv[1].as_canonical_u64(),
         init_cv_2 = circuit_stream_init_cv[2].as_canonical_u64(),
         init_cv_3 = circuit_stream_init_cv[3].as_canonical_u64(),
-        commitment_0 = circuit_commitment[0].as_canonical_u64(),
-        commitment_1 = circuit_commitment[1].as_canonical_u64(),
-        commitment_2 = circuit_commitment[2].as_canonical_u64(),
-        commitment_3 = circuit_commitment[3].as_canonical_u64(),
     );
 
-    for (i, chunk) in instructions.chunks(8).enumerate() {
+    for (index, artifact) in order_artifacts.iter().enumerate() {
+        render_circuit_adv_map(&mut masm, artifact);
+        if index + 1 != order_artifacts.len() {
+            masm.push('\n');
+        }
+    }
+    Ok(masm)
+}
+
+fn render_circuit_adv_map(masm: &mut String, artifact: &OrderArtifact) {
+    masm.push_str(&format!("# Proof order: {}\n", artifact.order.label()));
+    masm.push_str(&format!(
+        "adv_map ACE_CIRCUIT_{}([{}, {}, {}, {}]) = [\n",
+        artifact.order.tag(),
+        artifact.circuit_commitment[0].as_canonical_u64(),
+        artifact.circuit_commitment[1].as_canonical_u64(),
+        artifact.circuit_commitment[2].as_canonical_u64(),
+        artifact.circuit_commitment[3].as_canonical_u64(),
+    ));
+    for (i, chunk) in artifact.instructions.chunks(8).enumerate() {
         let vals: Vec<String> = chunk.iter().map(|f| f.as_canonical_u64().to_string()).collect();
         let line = vals.join(",");
-        if i < adv_pipe_rows - 1 {
+        if i < artifact.adv_pipe_rows - 1 {
             masm.push_str(&format!("    {line},\n"));
         } else {
             masm.push_str(&format!("    {line}\n"));
         }
     }
     masm.push_str("]\n");
-    masm
 }
 
 fn max_periodic_cycle_len_log() -> u32 {
@@ -488,174 +490,56 @@ fn max_periodic_cycle_len_log() -> u32 {
     max_len.ilog2()
 }
 
-fn render_constraints_eval_dispatcher(orders: &[OrderArtifact]) -> String {
-    assert!(!orders.is_empty(), "at least one proof order is required");
-
-    let mut masm = String::new();
-    for order in orders {
-        masm.push_str(&format!("use miden::core::sys::vm::{}\n", order.order.file_stem()));
-    }
-    masm.push_str("use miden::core::stark::constants\n\n");
-    masm.push_str("# CONSTRAINT EVALUATION CHECK DISPATCHER\n");
-    masm.push_str(
-        "# =================================================================================================\n\n",
-    );
-    masm.push_str("#! Runs the order-specific recursive-verifier ACE circuit.\n");
-    masm.push_str("#!\n");
-    masm.push_str(
-        "#! `ORDER_TAG_PTR` is derived from the per-AIR trace heights during transcript\n",
-    );
-    masm.push_str("#! initialization and compared against each generated proof-order tag.\n");
-    masm.push_str("#!\n");
-    masm.push_str("#! Inputs:  []\n");
-    masm.push_str("#! Outputs: []\n");
-    masm.push_str("pub proc execute_constraint_evaluation_check\n");
-    masm.push_str("    exec.constants::assert_valid_order_tag\n");
-
-    render_dispatch_branch(&mut masm, orders, 0);
-    masm.push_str("end\n");
-    masm
-}
-
-fn render_dispatch_branch(masm: &mut String, orders: &[OrderArtifact], index: usize) {
-    let order = &orders[index].order;
-    let indent = "    ".repeat(index + 1);
-    if index == orders.len() - 1 {
-        masm.push_str(&format!(
-            "{indent}exec.{}::execute_constraint_evaluation_check\n",
-            order.file_stem(),
-        ));
-        return;
-    }
-
-    masm.push_str(&format!("{indent}exec.constants::get_order_tag\n"));
-    masm.push_str(&format!("{indent}{} eq\n", order_tag_expr(order)));
-    masm.push_str(&format!("{indent}if.true\n"));
-    masm.push_str(&format!(
-        "{indent}    exec.{}::execute_constraint_evaluation_check\n",
-        order.file_stem(),
-    ));
-    masm.push_str(&format!("{indent}else\n"));
-    render_dispatch_branch(masm, orders, index + 1);
-    masm.push_str(&format!("{indent}end\n"));
-}
-
 fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
-    for order_artifact in &artifact.order_artifacts {
-        write_file(
-            &constraints_eval_path(&order_artifact.order),
-            &order_artifact.constraints_eval,
-        )?;
-        println!(
-            "wrote asm/sys/vm/{}.masm ({} inputs, {} eval gates, repeat.{})",
-            order_artifact.order.file_stem(),
-            order_artifact.num_inputs,
-            order_artifact.num_eval_gates,
-            order_artifact.adv_pipe_rows,
-        );
-    }
-    write_file(CONSTRAINTS_EVAL_DISPATCHER_PATH, &artifact.dispatcher)?;
+    remove_legacy_constraints_eval_files()?;
+    write_file(CONSTRAINTS_EVAL_PATH, &artifact.constraints_eval)?;
     write_file(RELATION_DIGEST_PATH, &artifact.relation_mod)?;
     write_file(AIR_CONFIG_PATH, &artifact.air_config)?;
-    println!("wrote asm/sys/vm/constraints_eval.masm (dispatcher)");
+    println!("wrote asm/sys/vm/constraints_eval.masm (generic evaluator)");
     println!("wrote asm/sys/vm/mod.masm (RELATION_DIGEST)");
     println!("wrote air/src/config.rs (ACE registry)");
     println!("done - run `cargo test -p miden-air --lib` to update the insta snapshot");
     Ok(())
 }
 
-/// Verify that the order-specific ACE circuit constants match the current AIR.
-pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
-    let artifact = compute_artifacts().map_err(|e| e.to_string())?;
-    for order_artifact in &artifact.order_artifacts {
-        check_constraints_eval_file(order_artifact)?;
-    }
-    let dispatcher = read_file(CONSTRAINTS_EVAL_DISPATCHER_PATH);
-    if dispatcher != artifact.dispatcher {
-        return Err(format!("{CONSTRAINTS_EVAL_DISPATCHER_PATH} is stale"));
+fn remove_legacy_constraints_eval_files() -> io::Result<()> {
+    for order in ProofOrder::variants() {
+        remove_file_if_exists(&format!("asm/sys/vm/{}.masm", order.file_stem()))?;
+        remove_file_if_exists(&format!("docs/sys/vm/{}.md", order.file_stem()))?;
     }
     Ok(())
 }
 
-fn check_constraints_eval_file(artifact: &OrderArtifact) -> Result<(), String> {
-    let path = constraints_eval_path(&artifact.order);
-    let masm = read_file(&path);
-    let actual_num_inputs: usize = parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", &path)?;
-    let actual_num_eval: usize = parse_masm_const(&masm, "NUM_EVAL_GATES_CIRCUIT", &path)?;
-    if masm.contains("push.CIRCUIT_COMMITMENT") {
-        return Err(format!("{path} loads ACE circuit commitment directly"));
+fn remove_file_if_exists(rel_path: &str) -> io::Result<()> {
+    let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io::Error::new(err.kind(), format!("failed to remove {path}: {err}"))),
     }
-    if !masm.contains("proc load_ace_registry_commitment")
-        || !masm.contains("exec.constants::relation_digest_ptr mem_loadw_le")
-        || !masm.contains("mtree_get")
-    {
-        return Err(format!("{path} does not authenticate ACE circuit through the registry"));
-    }
-    let proc_start = masm
-        .find("proc load_and_authenticate_ace_circuit")
-        .ok_or_else(|| format!("load_and_authenticate_ace_circuit proc not found in {path}"))?;
-    let actual_adv_pipe: usize = masm[proc_start..]
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("repeat.").and_then(|v| v.parse::<usize>().ok()))
-        .ok_or_else(|| {
-            format!("repeat.N not found in load_and_authenticate_ace_circuit of {path}")
-        })?;
+}
 
-    let adv_start = masm
-        .find("adv_map CIRCUIT_COMMITMENT([")
-        .ok_or_else(|| format!("adv_map CIRCUIT_COMMITMENT not found in {path}"))?;
-    let key_start = adv_start + "adv_map CIRCUIT_COMMITMENT([".len();
-    let key_end = masm[key_start..]
-        .find("]) = [")
-        .map(|idx| idx + key_start)
-        .ok_or_else(|| format!("adv_map CIRCUIT_COMMITMENT key terminator not found in {path}"))?;
-    let data_start = key_end + "]) = [".len();
-    let adv_end = masm[data_start..]
-        .find(']')
-        .map(|idx| idx + data_start)
-        .ok_or_else(|| format!("adv_map data block terminator not found in {path}"))?;
-    let actual_commitment = parse_u64_list(&masm[key_start..key_end], &path)?;
-    let data_str = &masm[data_start..adv_end];
-    let actual_data: Vec<Felt> = data_str
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            s.parse::<u64>()
-                .map(Felt::new_unchecked)
-                .map_err(|_| format!("invalid u64 in adv_map of {path}"))
-        })
-        .collect::<Result<_, _>>()?;
-    let actual_hash = Eidos::hash_elements(&actual_data);
+/// Verify that the generated ACE evaluator matches the current AIR.
+pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
+    let artifact = compute_artifacts().map_err(|e| e.to_string())?;
+    check_legacy_constraints_eval_files_absent()?;
+    let constraints_eval = read_file(CONSTRAINTS_EVAL_PATH);
+    if constraints_eval != artifact.constraints_eval {
+        return Err(format!("{CONSTRAINTS_EVAL_PATH} is stale"));
+    }
+    Ok(())
+}
 
-    let actual_hash_u64: Vec<u64> =
-        actual_hash.as_elements().iter().map(Felt::as_canonical_u64).collect();
-    let expected_hash_u64: Vec<u64> =
-        artifact.circuit_commitment.iter().map(Felt::as_canonical_u64).collect();
-
-    if actual_num_inputs != artifact.num_inputs {
-        return Err(format!(
-            "NUM_INPUTS_CIRCUIT is stale in {path} ({actual_num_inputs} != {})",
-            artifact.num_inputs,
-        ));
-    }
-    if actual_num_eval != artifact.num_eval_gates {
-        return Err(format!(
-            "NUM_EVAL_GATES_CIRCUIT is stale in {path} ({actual_num_eval} != {})",
-            artifact.num_eval_gates,
-        ));
-    }
-    if actual_adv_pipe != artifact.adv_pipe_rows {
-        return Err(format!(
-            "repeat.N in {path} is stale ({actual_adv_pipe} != {})",
-            artifact.adv_pipe_rows,
-        ));
-    }
-    if actual_hash_u64 != expected_hash_u64 {
-        return Err(format!("Circuit data in adv_map of {path} is stale (hash mismatch)"));
-    }
-    if actual_commitment.as_slice() != expected_hash_u64.as_slice() {
-        return Err(format!("CIRCUIT_COMMITMENT adv_map key in {path} is stale"));
+fn check_legacy_constraints_eval_files_absent() -> Result<(), String> {
+    for order in ProofOrder::variants() {
+        let path = format!("asm/sys/vm/{}.masm", order.file_stem());
+        if file_exists(&path) {
+            return Err(format!("{path} is a legacy order-specific evaluator"));
+        }
+        let doc_path = format!("docs/sys/vm/{}.md", order.file_stem());
+        if file_exists(&doc_path) {
+            return Err(format!("{doc_path} is a legacy order-specific evaluator doc"));
+        }
     }
     Ok(())
 }
@@ -699,14 +583,6 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-fn constraints_eval_path(order: &ProofOrder) -> String {
-    format!("asm/sys/vm/{}.masm", order.file_stem())
-}
-
-fn order_tag_expr(order: &ProofOrder) -> String {
-    format!("push.{}", order.tag())
-}
-
 fn parse_masm_const<T: core::str::FromStr>(
     masm: &str,
     name: &str,
@@ -719,15 +595,6 @@ where
     masm.lines()
         .find_map(|line| line.trim().strip_prefix(&prefix).and_then(|v| v.parse::<T>().ok()))
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
-}
-
-fn parse_u64_list(values: &str, file_label: &str) -> Result<Vec<u64>, String> {
-    values
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.parse::<u64>().map_err(|_| format!("invalid u64 in {file_label}")))
-        .collect()
 }
 
 fn replace_masm_const(content: &mut String, name: &str, new_value: &str) {
@@ -745,6 +612,11 @@ fn read_file(rel_path: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
 }
 
+fn file_exists(rel_path: &str) -> bool {
+    let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
+    fs::metadata(path).is_ok()
+}
+
 fn write_file(rel_path: &str, contents: &str) -> io::Result<()> {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
     fs::write(&path, contents)
@@ -758,15 +630,14 @@ struct OrderArtifact {
     stream_len: usize,
     adv_pipe_rows: usize,
     circuit_commitment: [Felt; 4],
-    constraints_eval: String,
+    instructions: Vec<Felt>,
 }
 
 struct ComputedArtifacts {
-    order_artifacts: Vec<OrderArtifact>,
     relation_digest: [Felt; 4],
     registry_leaves: Vec<[Felt; 4]>,
     and8_preprocessed_commitment: [Felt; 4],
-    dispatcher: String,
+    constraints_eval: String,
     relation_mod: String,
     air_config: String,
 }
