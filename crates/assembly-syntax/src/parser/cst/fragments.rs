@@ -764,7 +764,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
         let lparen =
             self.expect_kind(SyntaxKind::LParen, "expected `(` after struct annotation")?;
-        if name_text != "align" {
+        if name_text != "align" && name_text != "packed" {
             let span = self.consume_balanced_suffix(
                 self.context.parse().span_for_token(&at),
                 SyntaxKind::LParen,
@@ -787,14 +787,15 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 )?;
                 return Err(ParsingError::InvalidStructRepr {
                     span,
-                    message: "invalid alignment expresssion, expected an integer".to_string(),
+                    message: format!("invalid {name_text} expression, expected an integer"),
                 });
             },
             None => {
                 return Err(ParsingError::InvalidStructRepr {
                     span: join_spans(self.token_span(&at), self.token_span(&lparen)),
-                    message: "expected a single element in this meta list, e.g. 'align(16)'"
-                        .to_string(),
+                    message: format!(
+                        "expected a single element in this meta list, e.g. '{name_text}(16)'"
+                    ),
                 });
             },
         };
@@ -805,17 +806,20 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close `align(...)` annotation")?;
             return Err(ParsingError::InvalidStructRepr {
                 span,
-                message: "expected a single element in this meta list, e.g. 'align(16)'"
-                    .to_string(),
+                message: format!(
+                    "expected a single element in this meta list, e.g. '{name_text}(16)'"
+                ),
             });
         }
 
         let rparen =
             self.expect_kind(SyntaxKind::RParen, "expected `)` to close `align(...)` annotation")?;
-        Ok(Span::new(
-            join_spans(self.token_span(&at), self.token_span(&rparen)),
-            TypeRepr::align(value),
-        ))
+        let repr = match name_text {
+            "align" => TypeRepr::align(value),
+            "packed" => TypeRepr::packed(value),
+            _ => unreachable!("unsupported struct annotation should have been rejected"),
+        };
+        Ok(Span::new(join_spans(self.token_span(&at), self.token_span(&rparen)), repr))
     }
 
     fn parse_positive_alignment(&self, token: &SyntaxToken) -> Result<u16, ParsingError> {

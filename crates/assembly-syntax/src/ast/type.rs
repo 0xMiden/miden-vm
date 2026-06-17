@@ -363,7 +363,7 @@ impl TypeExpr {
                 for field in t.fields.iter() {
                     let field_ty = field.ty.resolve_type_with_depth(resolver, depth + 1)?;
                     if let Some(field_ty) = field_ty {
-                        fields.push(field_ty);
+                        fields.push((field.name.clone().into_inner(), field_ty));
                     } else {
                         return Ok(None);
                     }
@@ -652,9 +652,9 @@ impl crate::prettier::PrettyPrint for StructType {
 
         let repr = match &*self.repr {
             TypeRepr::Default => Document::Empty,
-            TypeRepr::BigEndian => const_text("@bigendian "),
+            TypeRepr::BigEndian => const_text(" @bigendian"),
             repr @ (TypeRepr::Align(_) | TypeRepr::Packed(_) | TypeRepr::Transparent) => {
-                text(format!("@{repr} "))
+                text(format!(" @{repr}"))
             },
         };
 
@@ -675,7 +675,7 @@ impl crate::prettier::PrettyPrint for StructType {
         ) + nl();
         let body = singleline_body | multiline_body;
 
-        repr + const_text("struct") + const_text(" { ") + body + const_text(" }")
+        const_text("struct") + repr + const_text(" { ") + body + const_text(" }")
     }
 }
 
@@ -1186,12 +1186,13 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{string::ToString, sync::Arc};
     use core::str::FromStr;
 
-    use miden_debug_types::DefaultSourceManager;
+    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
 
     use super::*;
+    use crate::{ast::Form, prettier::PrettyPrint};
 
     struct DummyResolver {
         source_manager: Arc<dyn SourceManager>,
@@ -1257,6 +1258,46 @@ mod tests {
         expr
     }
 
+    fn test_source_file(source: &str) -> Arc<SourceFile> {
+        Arc::new(SourceFile::new(
+            SourceId::default(),
+            SourceLanguage::Masm,
+            Uri::new("memory:///type-expr-test.masm"),
+            source.to_string().into_boxed_str(),
+        ))
+    }
+
+    fn parse_type_alias_expr(source: &str) -> TypeExpr {
+        let mut forms =
+            crate::parser::parse_forms(test_source_file(source)).expect("type alias should parse");
+        assert_eq!(forms.len(), 1, "expected exactly one parsed form");
+        match forms.pop().expect("expected parsed form") {
+            Form::Type(alias) => alias.ty,
+            form => panic!("expected type alias form, got {form:?}"),
+        }
+    }
+
+    fn repr_round_trip_struct(repr: TypeRepr) -> TypeExpr {
+        TypeExpr::Struct(
+            StructType::new(
+                None,
+                [
+                    StructField {
+                        span: SourceSpan::UNKNOWN,
+                        name: Ident::from_str("prefix").expect("valid ident"),
+                        ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
+                    },
+                    StructField {
+                        span: SourceSpan::UNKNOWN,
+                        name: Ident::from_str("suffix").expect("valid ident"),
+                        ty: TypeExpr::Primitive(Span::unknown(Type::U32)),
+                    },
+                ],
+            )
+            .with_repr(Span::unknown(repr)),
+        )
+    }
+
     #[test]
     fn type_expr_depth_boundary() {
         let mut resolver = DummyResolver::new();
@@ -1270,6 +1311,31 @@ mod tests {
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)
         );
+    }
+
+    #[test]
+    fn struct_type_expr_render_round_trips_non_default_reprs() {
+        for repr in [
+            TypeRepr::BigEndian,
+            TypeRepr::align(16),
+            TypeRepr::packed(1),
+            TypeRepr::packed(2),
+            TypeRepr::Transparent,
+        ] {
+            let rendered = repr_round_trip_struct(repr).to_pretty_string();
+            assert!(
+                rendered.starts_with("struct @"),
+                "non-default struct repr should render after `struct`: {rendered}"
+            );
+
+            let parsed = parse_type_alias_expr(&format!("type RoundTrip = {rendered}\n"));
+            let TypeExpr::Struct(parsed) = parsed else {
+                panic!("expected rendered type to parse back as a struct");
+            };
+            assert_eq!(*parsed.repr, repr);
+            assert_eq!(parsed.fields[0].name.as_str(), "prefix");
+            assert_eq!(parsed.fields[1].name.as_str(), "suffix");
+        }
     }
 
     #[test]
@@ -1304,5 +1370,31 @@ mod tests {
         assert_eq!(*actual.repr, TypeRepr::BigEndian);
         assert_eq!(actual.fields[0].name.as_str(), "prefix");
         assert_eq!(actual.fields[1].name.as_str(), "suffix");
+    }
+
+    #[test]
+    fn parsed_struct_type_preserves_field_names_through_resolution() {
+        let expr = parse_type_alias_expr(
+            "type AccountId = struct @bigendian { prefix: felt, suffix: felt }\n",
+        );
+
+        let mut resolver = DummyResolver::new();
+        let resolved = expr
+            .resolve_type(&mut resolver)
+            .expect("struct type should resolve")
+            .expect("struct type should be concrete");
+        let Type::Struct(resolved_struct) = &resolved else {
+            panic!("expected resolved struct type, got {resolved:?}");
+        };
+        assert_eq!(resolved_struct.repr(), TypeRepr::BigEndian);
+        assert_eq!(resolved_struct.fields()[0].name.as_deref(), Some("prefix"));
+        assert_eq!(resolved_struct.fields()[1].name.as_deref(), Some("suffix"));
+
+        let TypeExpr::Struct(converted) = TypeExpr::from(resolved) else {
+            panic!("expected concrete struct to convert back to struct type expression");
+        };
+        assert_eq!(*converted.repr, TypeRepr::BigEndian);
+        assert_eq!(converted.fields[0].name.as_str(), "prefix");
+        assert_eq!(converted.fields[1].name.as_str(), "suffix");
     }
 }
