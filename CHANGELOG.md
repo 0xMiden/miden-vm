@@ -58,6 +58,7 @@
 - Made AEAD decrypt verify the input ciphertext as well as the tag ([#3147](https://github.com/0xMiden/miden-vm/pull/3147)).
 - Removed overly aggressive validation check that prevented defining virtual executable targets in Miden projects
 - Constrained Core AIR stack routes for control and stream operations, preventing unconstrained stack values across `SYSCALL`, `EVALCIRCUIT`, `CALLER`, `MSTREAM`, `PIPE`, `REPEAT`, `SWAPW2`, and `SWAPW3` ([#3249](https://github.com/0xMiden/miden-vm/pull/3249)).
+- Stack depth limits now properly include all active contexts' overflow stacks ([#3261](https://github.com/0xMiden/miden-vm/pull/3261)).
 
 #### Enhancements
 - Improved O(n²) to O(log n) name conflict checks in `Module::define_*` methods by introducing a `BTreeMap` name index; also narrowed `items_mut()` to return an iterator instead of `&mut Vec<Export>` to preserve the index invariant ([#3218](https://github.com/0xMiden/miden-vm/pull/3218)).

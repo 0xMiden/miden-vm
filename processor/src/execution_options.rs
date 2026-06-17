@@ -27,8 +27,14 @@ pub struct ExecutionOptions {
     max_precompile_requests: usize,
     /// Maximum total number of calldata bytes allowed across deferred precompile requests.
     max_precompile_request_calldata_bytes: usize,
-    /// Maximum number of field elements allowed on the operand stack in the active execution
-    /// context.
+    /// Maximum number of field elements allowed on the operand stack across the active execution
+    /// context and all suspended contexts.
+    ///
+    /// A `call`, `dyncall`, or `syscall` context switch hides the caller's operand-stack overflow
+    /// (everything below the top 16 elements) until the callee returns. This limit bounds the
+    /// aggregate of the active context's depth plus all such suspended overflow, so nesting
+    /// context switches cannot accumulate hidden operand-stack memory beyond the configured
+    /// budget.
     max_stack_depth: usize,
     /// Maximum number of field elements allowed in the processor's memory at any point during
     /// execution, rounded up to the nearest multiple of 4.
@@ -264,8 +270,8 @@ impl ExecutionOptions {
         self.max_precompile_request_calldata_bytes
     }
 
-    /// Returns the maximum number of field elements allowed on the operand stack in the active
-    /// execution context.
+    /// Returns the maximum number of field elements allowed on the operand stack across the active
+    /// execution context and all suspended contexts.
     #[inline]
     pub fn max_stack_depth(&self) -> usize {
         self.max_stack_depth
@@ -301,8 +307,8 @@ impl ExecutionOptions {
         self
     }
 
-    /// Sets the maximum number of field elements allowed on the operand stack in the active
-    /// execution context.
+    /// Sets the maximum number of field elements allowed on the operand stack across the active
+    /// execution context and all suspended contexts.
     pub fn with_max_stack_depth(
         mut self,
         max_stack_depth: usize,
