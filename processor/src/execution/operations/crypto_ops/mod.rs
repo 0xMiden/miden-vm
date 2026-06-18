@@ -7,7 +7,6 @@ use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
-    mast::ExecutableMastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -93,15 +92,11 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mpverify<P: Processor, T: Tracer, F>(
+pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
-    program: &F,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError>
-where
-    F: ExecutableMastForest + ?Sized,
-{
+) -> Result<OperationHelperRegisters, CryptoError> {
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -117,14 +112,13 @@ where
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
-        let err_msg = program.resolve_error_message(err_code);
         OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: node,
                 index,
                 root,
                 err_code,
-                err_msg,
+                err_msg: None,
             }),
         }
     })?;

@@ -1,5 +1,6 @@
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
+mod error;
 mod id;
 mod manifest;
 mod section;
@@ -9,6 +10,7 @@ mod serialization;
 mod target_type;
 
 use alloc::{
+    borrow::Cow,
     boxed::Box,
     collections::BTreeMap,
     format,
@@ -22,16 +24,19 @@ use miden_assembly_syntax::{
     ast::{self, QualifiedProcedureName},
     module::ModuleInfo,
 };
+#[cfg(feature = "std")]
+use miden_core::serde::DeserializationError;
 use miden_core::{
     Word,
     advice::AdviceMap,
     crypto::hash::Poseidon2,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     program::Kernel,
-    serde::{ByteWriter, Deserializable, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, Serializable, SliceReader},
 };
 
 pub use self::{
+    error::{PackageDebugInfoError, PackageStripError},
     id::PackageId,
     manifest::{
         ConstantExport, ManifestValidationError, PackageExport, PackageManifest, PackageModule,
@@ -40,7 +45,13 @@ pub use self::{
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
 };
-use crate::{Dependency, Version};
+use crate::{
+    Dependency, Version,
+    debug_info::{
+        DebugFunctionInfo, DebugFunctionsSection, DebugSourceNodeId, DebugSourcesSection,
+        DebugTypeIdx, DebugTypeInfo, DebugTypesSection, PackageDebugInfo,
+    },
+};
 
 // PACKAGE
 // ================================================================================================
@@ -84,6 +95,13 @@ pub struct Package {
     /// The set of custom sections included with the package, e.g. debug information, account
     /// metadata, etc.
     pub sections: Vec<Section>,
+    /// Whether package-owned debug sections may be decoded as trusted debug info.
+    ///
+    /// Normal package deserialization validates the embedded MAST forest, warns on package debug
+    /// sections, and discards those sections as untrusted metadata. Trusted local/cache readers
+    /// and in-process package construction preserve package debug sections and expose them through
+    /// [`Package::debug_info`].
+    debug_sections_trusted: bool,
 }
 
 /// Construction
@@ -139,6 +157,7 @@ impl Package {
             mast,
             manifest,
             sections: Vec::new(),
+            debug_sections_trusted: true,
         };
 
         package.recompute_mast_commitment()?;
@@ -178,6 +197,28 @@ impl Package {
     /// Extends the advice map of this library
     pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
         self.mast = Arc::new(self.mast.as_ref().clone().with_advice_map(advice_map));
+    }
+
+    /// Removes all package-owned debug information from this package.
+    ///
+    /// This removes well-known package debug sections and recursively strips an embedded kernel
+    /// package if one is present.
+    pub fn strip_debug_info(&mut self) -> Result<(), PackageStripError> {
+        for section in self.sections.iter_mut().filter(|section| section.id == SectionId::KERNEL) {
+            let mut kernel_package = Self::read_from_bytes(section.data.as_ref())
+                .map_err(|source| PackageStripError::DecodeEmbeddedKernel { source })?;
+            kernel_package.strip_debug_info()?;
+            section.data = Cow::Owned(kernel_package.to_bytes());
+        }
+
+        self.sections.retain(|section| !section.id.is_debug());
+        Ok(())
+    }
+
+    /// Returns this package with package-owned debug information removed.
+    pub fn without_debug_info(mut self) -> Result<Self, PackageStripError> {
+        self.strip_debug_info()?;
+        Ok(self)
     }
 }
 
@@ -262,6 +303,16 @@ impl Package {
         self.manifest.entrypoint()
     }
 
+    /// Returns the source/debug occurrence for the executable entrypoint, if recorded.
+    #[inline]
+    pub fn entrypoint_source_node(&self) -> Option<DebugSourceNodeId> {
+        self.entrypoint()
+            .as_deref()
+            .and_then(|entrypoint| self.get_export_by_lookup_path(entrypoint))
+            .and_then(PackageExport::as_procedure)
+            .and_then(|procedure| procedure.source_node)
+    }
+
     /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
     pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
         self.try_module_infos()
@@ -293,16 +344,36 @@ impl Package {
         Ok(Some(kernel_dependency))
     }
 
-    /// Returns the procedure name for the given MAST root digest, if present.
+    /// Decodes trusted package-owned debug sections, if any are present.
     ///
-    /// This allows debuggers to resolve human-readable procedure names during execution.
-    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
-        self.mast.procedure_name(digest)
-    }
+    /// Package debug sections are trusted only for packages constructed in-process or read via the
+    /// trusted same-domain readers such as [`Self::read_from_trusted`],
+    /// [`Self::read_from_bytes_trusted`], [`Self::read_from_unchecked`], and
+    /// [`Self::read_from_bytes_unchecked`]. Normal untrusted readers discard debug sections before
+    /// returning the package.
+    ///
+    /// This does not read legacy debug metadata from the embedded [`MastForest`].
+    pub fn debug_info(&self) -> Result<Option<PackageDebugInfo>, PackageDebugInfoError> {
+        if !self.debug_sections_trusted && self.sections.iter().any(|section| section.id.is_debug())
+        {
+            return Err(PackageDebugInfoError::UntrustedSections);
+        }
 
-    /// Returns an iterator over all (digest, name) pairs of procedure names.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
-        self.mast.procedure_names()
+        let debug_info = PackageDebugInfo {
+            types: self.read_debug_section(SectionId::DEBUG_TYPES)?,
+            sources: self.read_debug_section(SectionId::DEBUG_SOURCES)?,
+            functions: self.read_debug_section(SectionId::DEBUG_FUNCTIONS)?,
+            source_graph: self.read_debug_section(SectionId::DEBUG_SOURCE_GRAPH)?,
+            source_map: self.read_debug_section(SectionId::DEBUG_SOURCE_MAP)?,
+            error_messages: self.read_debug_section(SectionId::DEBUG_ERROR_MESSAGES)?,
+        };
+
+        if debug_info.is_empty() {
+            return Ok(None);
+        }
+
+        self.validate_debug_info(&debug_info)?;
+        Ok(Some(debug_info))
     }
 
     /// Returns a MAST node ID associated with the specified exported procedure.
@@ -378,6 +449,7 @@ impl Package {
             match export {
                 PackageExport::Procedure(ProcedureExport {
                     node,
+                    source_node,
                     digest,
                     path,
                     signature,
@@ -390,6 +462,7 @@ impl Package {
                         signature.clone().map(Arc::new),
                         attributes.clone(),
                         *node,
+                        source_node.map(u32::from),
                         Some(self.mast.commitment()),
                     );
                 },
@@ -470,6 +543,7 @@ impl Package {
             match export {
                 PackageExport::Procedure(ProcedureExport {
                     node,
+                    source_node,
                     digest,
                     path,
                     signature,
@@ -482,6 +556,7 @@ impl Package {
                         signature.clone().map(Arc::new),
                         attributes.clone(),
                         *node,
+                        source_node.map(u32::from),
                         Some(self.mast.commitment()),
                     );
                 },
@@ -498,6 +573,454 @@ impl Package {
 
         Ok(modules_by_path.into_values().collect())
     }
+
+    fn read_debug_section<T>(&self, id: SectionId) -> Result<Option<T>, PackageDebugInfoError>
+    where
+        T: Deserializable,
+    {
+        let mut sections = self.sections.iter().filter(|section| section.id == id);
+        let Some(section) = sections.next() else {
+            return Ok(None);
+        };
+        if sections.next().is_some() {
+            return Err(PackageDebugInfoError::DuplicateSection { id });
+        }
+
+        read_section_payload(&id, section.data.as_ref()).map(Some)
+    }
+
+    fn validate_debug_info(
+        &self,
+        debug_info: &PackageDebugInfo,
+    ) -> Result<(), PackageDebugInfoError> {
+        if let Some(types) = debug_info.types.as_ref() {
+            self.validate_debug_types(types)?;
+        }
+        if let Some(sources) = debug_info.sources.as_ref() {
+            self.validate_debug_sources(sources)?;
+        }
+        if let Some(functions) = debug_info.functions.as_ref() {
+            self.validate_debug_functions(
+                debug_info.types.as_ref(),
+                debug_info.sources.as_ref(),
+                functions,
+            )?;
+        }
+
+        let source_graph = debug_info.source_graph.as_ref();
+        if let Some(source_map) = debug_info.source_map.as_ref()
+            && source_graph.is_none()
+            && !source_map.is_empty()
+        {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: "debug source map is present without a debug source graph".to_string(),
+            });
+        }
+
+        let Some(source_graph) = source_graph else {
+            return Ok(());
+        };
+
+        for root in source_graph.roots().iter().copied() {
+            if debug_info.source_node(root).is_none() {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!("debug source root {root:?} is not present in the graph"),
+                });
+            }
+        }
+
+        for (source_index, source_node) in source_graph.nodes().iter().enumerate() {
+            let source_id = DebugSourceNodeId::from(source_index as u32);
+            let Some(exec_node) = self.mast.get_node_by_id(source_node.exec_node) else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} references missing execution node {:?}",
+                        source_node.exec_node,
+                    ),
+                });
+            };
+            if source_node.op_start > source_node.op_end {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} has invalid operation range {}..{}",
+                        source_node.op_start, source_node.op_end,
+                    ),
+                });
+            }
+            if let MastNode::Block(block) = exec_node {
+                let num_ops = block.num_operations();
+                if source_node.op_end > num_ops {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} has operation range {}..{}, outside execution node {:?} operation count {num_ops}",
+                            source_node.op_start, source_node.op_end, source_node.exec_node,
+                        ),
+                    });
+                }
+            }
+
+            let mut exec_children = Vec::new();
+            exec_node.for_each_child(|child_id| exec_children.push(child_id));
+            if exec_children.len() != source_node.children.len() {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "debug source node {source_id:?} has {} children, expected {} from execution node {:?}",
+                        source_node.children.len(),
+                        exec_children.len(),
+                        source_node.exec_node,
+                    ),
+                });
+            }
+
+            for (child_index, child_source_id) in source_node.children.iter().copied().enumerate() {
+                let Some(child_source_node) = debug_info.source_node(child_source_id) else {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} references missing child source node {child_source_id:?}",
+                        ),
+                    });
+                };
+                if child_source_node.exec_node != exec_children[child_index] {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug source node {source_id:?} child {child_index} maps to {:?}, expected {:?}",
+                            child_source_node.exec_node, exec_children[child_index],
+                        ),
+                    });
+                }
+            }
+        }
+
+        if let Some(source_map) = debug_info.source_map.as_ref() {
+            for row in source_map.asm_ops() {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "assembly op",
+                )?;
+            }
+            for row in source_map.debug_vars() {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "debug variable",
+                )?;
+            }
+            let function_count =
+                debug_info.functions.as_ref().map_or(0, |section| section.functions.len());
+            let file_count = debug_info.sources.as_ref().map_or(0, |section| section.files.len());
+            for row in source_map.inline_calls() {
+                self.validate_source_map_row(
+                    source_graph,
+                    row.source_node,
+                    row.op_idx,
+                    "inline call",
+                )?;
+                if row.callee_idx as usize >= function_count {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug inline call callee index {} is outside debug function table length {function_count}",
+                            row.callee_idx,
+                        ),
+                    });
+                }
+                if row.file_idx as usize >= file_count {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug inline call file index {} is outside debug source file table length {file_count}",
+                            row.file_idx,
+                        ),
+                    });
+                }
+            }
+        }
+
+        for export in self.manifest.exports() {
+            let Some(procedure) = export.as_procedure() else {
+                continue;
+            };
+            let Some(source_node_id) = procedure.source_node else {
+                continue;
+            };
+            let Some(source_node) = debug_info.source_node(source_node_id) else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' references missing source node {source_node_id:?}",
+                        procedure.path,
+                    ),
+                });
+            };
+            let Some(export_node) =
+                procedure.node.or_else(|| self.mast.find_procedure_root(procedure.digest))
+            else {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' does not resolve to an execution node",
+                        procedure.path,
+                    ),
+                });
+            };
+            if source_node.exec_node != export_node {
+                return Err(PackageDebugInfoError::InvalidReference {
+                    message: format!(
+                        "procedure export '{}' source node {source_node_id:?} maps to {:?}, expected {export_node:?}",
+                        procedure.path, source_node.exec_node,
+                    ),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_debug_types(&self, types: &DebugTypesSection) -> Result<(), PackageDebugInfoError> {
+        let type_count = types.types.len();
+        let string_count = types.strings.len();
+        for (type_index, ty) in types.types.iter().enumerate() {
+            self.validate_debug_type(ty, type_index, type_count, string_count)?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_type(
+        &self,
+        ty: &DebugTypeInfo,
+        type_index: usize,
+        type_count: usize,
+        string_count: usize,
+    ) -> Result<(), PackageDebugInfoError> {
+        match ty {
+            DebugTypeInfo::Primitive(_) | DebugTypeInfo::Unknown => Ok(()),
+            DebugTypeInfo::Pointer { pointee_type_idx } => self.validate_type_index(
+                *pointee_type_idx,
+                type_count,
+                format!("debug type {type_index} pointer target"),
+            ),
+            DebugTypeInfo::Array { element_type_idx, .. } => self.validate_type_index(
+                *element_type_idx,
+                type_count,
+                format!("debug type {type_index} array element"),
+            ),
+            DebugTypeInfo::Struct { name_idx, fields, .. } => {
+                self.validate_string_index(
+                    *name_idx,
+                    string_count,
+                    format!("debug type {type_index} struct name"),
+                )?;
+                for (field_index, field) in fields.iter().enumerate() {
+                    self.validate_string_index(
+                        field.name_idx,
+                        string_count,
+                        format!("debug type {type_index} field {field_index} name"),
+                    )?;
+                    self.validate_type_index(
+                        field.type_idx,
+                        type_count,
+                        format!("debug type {type_index} field {field_index} type"),
+                    )?;
+                }
+                Ok(())
+            },
+            DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
+                if let Some(return_type_idx) = return_type_idx {
+                    self.validate_type_index(
+                        *return_type_idx,
+                        type_count,
+                        format!("debug type {type_index} function return type"),
+                    )?;
+                }
+                for (param_index, param_type_idx) in param_type_indices.iter().copied().enumerate()
+                {
+                    self.validate_type_index(
+                        param_type_idx,
+                        type_count,
+                        format!("debug type {type_index} function parameter {param_index}"),
+                    )?;
+                }
+                Ok(())
+            },
+            DebugTypeInfo::Enum {
+                name_idx,
+                discriminant_type_idx,
+                variants,
+                ..
+            } => {
+                self.validate_string_index(
+                    *name_idx,
+                    string_count,
+                    format!("debug type {type_index} enum name"),
+                )?;
+                self.validate_type_index(
+                    *discriminant_type_idx,
+                    type_count,
+                    format!("debug type {type_index} enum discriminant"),
+                )?;
+                for (variant_index, variant) in variants.iter().enumerate() {
+                    self.validate_string_index(
+                        variant.name_idx,
+                        string_count,
+                        format!("debug type {type_index} variant {variant_index} name"),
+                    )?;
+                    if let Some(type_idx) = variant.type_idx {
+                        self.validate_type_index(
+                            type_idx,
+                            type_count,
+                            format!("debug type {type_index} variant {variant_index} payload"),
+                        )?;
+                    }
+                }
+                Ok(())
+            },
+        }
+    }
+
+    fn validate_debug_sources(
+        &self,
+        sources: &DebugSourcesSection,
+    ) -> Result<(), PackageDebugInfoError> {
+        let string_count = sources.strings.len();
+        for (file_index, file) in sources.files.iter().enumerate() {
+            self.validate_string_index(
+                file.path_idx,
+                string_count,
+                format!("debug source file {file_index} path"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_functions(
+        &self,
+        types: Option<&DebugTypesSection>,
+        sources: Option<&DebugSourcesSection>,
+        functions: &DebugFunctionsSection,
+    ) -> Result<(), PackageDebugInfoError> {
+        let string_count = functions.strings.len();
+        let file_count = sources.map_or(0, |sources| sources.files.len());
+        let type_count = types.map_or(0, |types| types.types.len());
+
+        for (function_index, function) in functions.functions.iter().enumerate() {
+            self.validate_debug_function(
+                function,
+                function_index,
+                string_count,
+                file_count,
+                type_count,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_debug_function(
+        &self,
+        function: &DebugFunctionInfo,
+        function_index: usize,
+        string_count: usize,
+        file_count: usize,
+        type_count: usize,
+    ) -> Result<(), PackageDebugInfoError> {
+        self.validate_string_index(
+            function.name_idx,
+            string_count,
+            format!("debug function {function_index} name"),
+        )?;
+        if let Some(linkage_name_idx) = function.linkage_name_idx {
+            self.validate_string_index(
+                linkage_name_idx,
+                string_count,
+                format!("debug function {function_index} linkage name"),
+            )?;
+        }
+        if function.file_idx as usize >= file_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "debug function {function_index} file index {} is outside debug source file table length {file_count}",
+                    function.file_idx,
+                ),
+            });
+        }
+        if let Some(type_idx) = function.type_idx {
+            self.validate_type_index(
+                type_idx,
+                type_count,
+                format!("debug function {function_index} type"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_string_index(
+        &self,
+        index: u32,
+        string_count: usize,
+        context: String,
+    ) -> Result<(), PackageDebugInfoError> {
+        if index as usize >= string_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{context} string index {index} is outside string table length {string_count}",
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_type_index(
+        &self,
+        index: DebugTypeIdx,
+        type_count: usize,
+        context: String,
+    ) -> Result<(), PackageDebugInfoError> {
+        if index.as_u32() as usize >= type_count {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{context} type index {} is outside type table length {type_count}",
+                    index.as_u32(),
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_source_map_row(
+        &self,
+        source_graph: &crate::debug_info::DebugSourceGraphSection,
+        source_node_id: DebugSourceNodeId,
+        op_idx: u32,
+        row_kind: &'static str,
+    ) -> Result<(), PackageDebugInfoError> {
+        let Some(source_node) = source_graph.nodes().get(source_node_id.as_u32() as usize) else {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{row_kind} row references missing source node {source_node_id:?}"
+                ),
+            });
+        };
+        if op_idx < source_node.op_start || op_idx >= source_node.op_end {
+            return Err(PackageDebugInfoError::InvalidReference {
+                message: format!(
+                    "{row_kind} row for source node {source_node_id:?} has op index {op_idx}, outside source range {}..{}",
+                    source_node.op_start, source_node.op_end,
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn read_section_payload<T>(id: &SectionId, bytes: &[u8]) -> Result<T, PackageDebugInfoError>
+where
+    T: Deserializable,
+{
+    let mut reader = SliceReader::new(bytes);
+    let section = T::read_from(&mut reader)
+        .map_err(|source| PackageDebugInfoError::DecodeSection { id: id.clone(), source })?;
+    if reader.has_more_bytes() {
+        return Err(PackageDebugInfoError::TrailingBytes { id: id.clone() });
+    }
+    Ok(section)
 }
 
 /// Conversions
@@ -712,6 +1235,7 @@ impl Package {
                     .map_err(Report::msg)?;
                     package.description = self.description.clone();
                     package.sections = self.sections.clone();
+                    package.debug_sections_trusted = self.debug_sections_trusted;
                     Ok(package)
                 },
             }
@@ -750,21 +1274,41 @@ impl Package {
     }
 
     #[cfg(feature = "std")]
+    /// Reads a package file from an untrusted path.
+    ///
+    /// This validates the embedded MAST forest and discards package-owned debug sections before
+    /// returning the package. Use this for user-provided paths or bytes received across a trust
+    /// boundary.
     pub fn deserialize_from_file(
         path: impl AsRef<std::path::Path>,
-    ) -> Result<Self, miden_core::serde::DeserializationError> {
-        use miden_core::serde::DeserializationError;
-
-        let path = path.as_ref();
-        let bytes = std::fs::read(path).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "failed to open file at {}: {err}",
-                path.to_string_lossy()
-            ))
-        })?;
-
+    ) -> Result<Self, DeserializationError> {
+        let bytes = read_package_file(path)?;
         Self::read_from_bytes(&bytes)
     }
+
+    #[cfg(feature = "std")]
+    /// Reads a trusted local package file.
+    ///
+    /// This preserves package-owned debug sections and should be used only for files/cache entries
+    /// controlled by the same trusted build or execution system. Use [`Self::read_from_bytes`] for
+    /// bytes received across a trust boundary.
+    pub fn deserialize_from_file_trusted(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, DeserializationError> {
+        let bytes = read_package_file(path)?;
+        Self::read_from_bytes_trusted(&bytes)
+    }
+}
+
+#[cfg(feature = "std")]
+fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, DeserializationError> {
+    let path = path.as_ref();
+    std::fs::read(path).map_err(|err| {
+        DeserializationError::InvalidValue(format!(
+            "failed to open file at {}: {err}",
+            path.to_string_lossy()
+        ))
+    })
 }
 
 // TESTS
@@ -780,17 +1324,26 @@ mod tests {
     };
     use miden_core::{
         advice::AdviceMap,
+        assert_matches,
         mast::{
-            BasicBlockNodeBuilder, DebugInfo, MastForest, MastForestContributor, MastNode,
-            MastNodeExt, MastNodeId,
+            BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
+            MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,
         },
-        operations::{AssemblyOp, Operation},
+        operations::Operation,
         serde::Serializable,
         utils::IndexVec,
     };
+    use miden_debug_types::{ColumnNumber, LineNumber};
 
     use super::*;
-    use crate::{Dependency, Version};
+    use crate::{
+        Dependency, Version,
+        debug_info::{
+            DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugSourceAsmOp,
+            DebugSourceGraphSection, DebugSourceInlineCall, DebugSourceMapSection, DebugSourceNode,
+            DebugSourceNodeId, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+        },
+    };
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
@@ -799,6 +1352,21 @@ mod tests {
             .expect("failed to build basic block");
         forest.make_root(node_id);
         (forest, node_id)
+    }
+
+    fn build_split_forest() -> (MastForest, MastNodeId, MastNodeId, MastNodeId) {
+        let mut forest = MastForest::new();
+        let left_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .expect("failed to build left basic block");
+        let right_id = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .expect("failed to build right basic block");
+        let root_id = SplitNodeBuilder::new([left_id, right_id])
+            .add_to_forest(&mut forest)
+            .expect("failed to build split node");
+        forest.make_root(root_id);
+        (forest, root_id, left_id, right_id)
     }
 
     fn absolute_path(name: &str) -> Arc<AstPath> {
@@ -821,41 +1389,75 @@ mod tests {
         (Arc::new(forest), vec![PackageExport::Procedure(export)])
     }
 
+    fn build_split_package_exports(
+        export: &str,
+        source_node: Option<DebugSourceNodeId>,
+    ) -> (Arc<MastForest>, Vec<PackageExport>, MastNodeId, MastNodeId, MastNodeId) {
+        let (forest, root_id, left_id, right_id) = build_split_forest();
+        let root = forest[root_id].digest();
+        let path = absolute_path(export);
+        let export = ProcedureExport::new(Arc::clone(&path), Some(root_id), root, None)
+            .with_source_node(source_node);
+
+        (
+            Arc::new(forest),
+            vec![PackageExport::Procedure(export)],
+            root_id,
+            left_id,
+            right_id,
+        )
+    }
+
     fn build_same_digest_package_exports(
         exports: &[(&str, &str)],
-    ) -> (Arc<MastForest>, Vec<PackageExport>) {
+    ) -> (Arc<MastForest>, Vec<PackageExport>, Vec<Section>) {
         let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
         let mut roots = Vec::new();
-        let mut debug_info = DebugInfo::new();
         let mut new_exports = vec![];
+        let mut source_nodes = Vec::new();
+        let mut asm_ops = Vec::new();
 
-        for (path_str, context_name) in exports {
-            let asm_op_id = debug_info
-                .add_asm_op(AssemblyOp::new(None, (*context_name).into(), 1, "add".into()))
-                .expect("failed to add asm op");
+        for (source_idx, (path_str, context_name)) in exports.iter().enumerate() {
             let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
                 .build()
                 .expect("failed to build basic block");
             let num_ops = node.num_operations() as usize;
             let digest = node.digest();
             let node_id = nodes.push(node.into()).expect("failed to add basic block");
-            debug_info
-                .register_asm_ops(node_id, num_ops, vec![(0, asm_op_id)])
-                .expect("failed to register asm ops");
+            let source_node = DebugSourceNodeId::from(source_idx as u32);
+            source_nodes.push(DebugSourceNode::new(node_id, Vec::new(), 0, num_ops as u32));
+            asm_ops.push(DebugSourceAsmOp::new(
+                source_node,
+                0,
+                None,
+                (*context_name).into(),
+                "add".into(),
+                1,
+            ));
             roots.push(node_id);
 
             let path = absolute_path(path_str);
-            new_exports.push(PackageExport::Procedure(ProcedureExport::new(
-                path,
-                Some(node_id),
-                digest,
-                None,
-            )));
+            new_exports.push(PackageExport::Procedure(
+                ProcedureExport::new(path, Some(node_id), digest, None)
+                    .with_source_node(Some(source_node)),
+            ));
         }
 
-        let forest = MastForest::from_raw_parts(nodes, roots, AdviceMap::default(), debug_info)
+        let source_graph = DebugSourceGraphSection::from_parts(
+            source_nodes,
+            (0..exports.len())
+                .map(|source_idx| DebugSourceNodeId::from(source_idx as u32))
+                .collect(),
+        );
+        let source_map = DebugSourceMapSection::from_parts(asm_ops, Vec::new());
+        let sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let forest = MastForest::from_raw_parts(nodes, roots, AdviceMap::default())
             .expect("failed to build forest");
-        (Arc::new(forest), new_exports)
+        (Arc::new(forest), new_exports, sections)
     }
 
     fn build_package(
@@ -881,6 +1483,307 @@ mod tests {
 
     fn build_kernel_package(name: &str) -> Package {
         build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    fn build_debug_package(name: &str, kind: TargetType, export: &str, context: &str) -> Package {
+        let (mast, exports, sections) = build_same_digest_package_exports(&[(export, context)]);
+        let mut package = Package::create(
+            PackageId::from(name),
+            Version::new(1, 0, 0),
+            kind,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        package.sections = sections;
+        package
+    }
+
+    fn debug_sections() -> Vec<Section> {
+        vec![
+            Section::new(SectionId::DEBUG_SOURCES, vec![1, 2, 3]),
+            Section::new(SectionId::DEBUG_FUNCTIONS, vec![4, 5, 6]),
+            Section::new(SectionId::DEBUG_TYPES, vec![7, 8, 9]),
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![10, 11, 12]),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, vec![13, 14, 15]),
+            Section::new(SectionId::DEBUG_ERROR_MESSAGES, vec![16, 17, 18]),
+        ]
+    }
+
+    #[test]
+    fn package_without_debug_sections_has_no_package_debug_info() {
+        let package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+
+        assert!(package.debug_info().unwrap().is_none());
+    }
+
+    #[test]
+    fn package_debug_info_decodes_source_graph_and_map() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceNodeId::from(0);
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(
+                source_node,
+                0,
+                None,
+                "app::entry".into(),
+                "add".into(),
+                1,
+            )],
+            Vec::new(),
+        );
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let debug_info = package
+            .debug_info()
+            .expect("debug sections should decode")
+            .expect("debug sections should be present");
+
+        assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, exec_node);
+        assert_eq!(
+            debug_info.asm_op_for_operation(source_node, 0).unwrap().context_name,
+            "app::entry"
+        );
+    }
+
+    #[test]
+    fn package_debug_info_rejects_duplicate_debug_sections() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_MAP, DebugSourceMapSection::new().to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, DebugSourceMapSection::new().to_bytes()),
+        ];
+
+        let error = package.debug_info().expect_err("duplicate debug sections should be rejected");
+
+        assert!(matches!(
+            error,
+            PackageDebugInfoError::DuplicateSection { id } if id == SectionId::DEBUG_SOURCE_MAP
+        ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_malformed_debug_sections() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, vec![u8::MAX])];
+
+        let error = package.debug_info().expect_err("malformed debug sections should be rejected");
+
+        assert!(matches!(
+            error,
+            PackageDebugInfoError::DecodeSection { id, .. } if id == SectionId::DEBUG_SOURCE_GRAPH
+        ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_non_source_graph_table_indices() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+
+        let mut types = DebugTypesSection::new();
+        types
+            .types
+            .push(DebugTypeInfo::Pointer { pointee_type_idx: DebugTypeIdx::from(99) });
+        package.sections = vec![Section::new(SectionId::DEBUG_TYPES, types.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
+        ));
+
+        let mut sources = DebugSourcesSection::new();
+        sources.files.push(DebugFileInfo::new(0));
+        package.sections = vec![Section::new(SectionId::DEBUG_SOURCES, sources.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
+        ));
+
+        let mut functions = DebugFunctionsSection::new();
+        let name_idx = functions.add_string(Arc::from("app::entry"));
+        functions.add_function(DebugFunctionInfo::new(
+            name_idx,
+            0,
+            LineNumber::new(1).unwrap(),
+            ColumnNumber::new(1).unwrap(),
+        ));
+        package.sections = vec![Section::new(SectionId::DEBUG_FUNCTIONS, functions.to_bytes())];
+        assert!(matches!(
+            package.debug_info(),
+            Err(PackageDebugInfoError::InvalidReference { .. })
+        ));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_inline_call_indices() {
+        let source_node = DebugSourceNodeId::from(0);
+        let mut sources = DebugSourcesSection::new();
+        let path_idx = sources.add_string(Arc::from("app.masm"));
+        sources.add_file(DebugFileInfo::new(path_idx));
+
+        let mut functions = DebugFunctionsSection::new();
+        let name_idx = functions.add_string(Arc::from("app::entry"));
+        functions.add_function(DebugFunctionInfo::new(
+            name_idx,
+            0,
+            LineNumber::new(1).unwrap(),
+            ColumnNumber::new(1).unwrap(),
+        ));
+
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceNode::new(MastNodeId::new_unchecked(0), vec![], 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts_with_inline_calls(
+            Vec::new(),
+            Vec::new(),
+            vec![DebugSourceInlineCall::new(
+                source_node,
+                0,
+                1,
+                0,
+                LineNumber::new(1).unwrap(),
+                ColumnNumber::new(1).unwrap(),
+            )],
+        );
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCES, sources.to_bytes()),
+            Section::new(SectionId::DEBUG_FUNCTIONS, functions.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let err = package.debug_info().expect_err("bad inline call index should be rejected");
+        assert!(matches!(err, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_source_graph_child_exec_mismatch() {
+        let source_root = DebugSourceNodeId::from(0);
+        let source_left = DebugSourceNodeId::from(1);
+        let source_right = DebugSourceNodeId::from(2);
+        let (mast, exports, root_id, left_id, right_id) =
+            build_split_package_exports("app::entry", Some(source_root));
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![
+                DebugSourceNode::new(root_id, vec![source_right, source_left], 0, 1),
+                DebugSourceNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(right_id, Vec::new(), 0, 1),
+            ],
+            vec![source_root],
+        );
+        package.sections =
+            vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+        let error = package.debug_info().expect_err("mismatched source child should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_invalid_source_node_operation_ranges() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceNodeId::from(0);
+
+        for (op_start, op_end) in [(1, 0), (0, 2)] {
+            let source_graph = DebugSourceGraphSection::from_parts(
+                vec![DebugSourceNode::new(exec_node, Vec::new(), op_start, op_end)],
+                vec![source_node],
+            );
+            package.sections =
+                vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+            let error = package
+                .debug_info()
+                .expect_err("invalid source node operation range should be rejected");
+
+            assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+        }
+    }
+
+    #[test]
+    fn package_debug_info_rejects_source_map_missing_source_node() {
+        let mut package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
+        let exec_node = package.get_export_node_id("app::entry");
+        let source_node = DebugSourceNodeId::from(0);
+        let missing_source_node = DebugSourceNodeId::from(1);
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceNode::new(exec_node, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(
+                missing_source_node,
+                0,
+                None,
+                "app::entry".into(),
+                "add".into(),
+                1,
+            )],
+            Vec::new(),
+        );
+        package.sections = vec![
+            Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+            Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+        ];
+
+        let error = package
+            .debug_info()
+            .expect_err("source map row with missing source node should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn package_debug_info_rejects_export_source_node_exec_mismatch() {
+        let source_root = DebugSourceNodeId::from(0);
+        let source_left = DebugSourceNodeId::from(1);
+        let source_right = DebugSourceNodeId::from(2);
+        let (mast, exports, root_id, left_id, right_id) =
+            build_split_package_exports("app::entry", Some(source_left));
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .unwrap();
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![
+                DebugSourceNode::new(root_id, vec![source_left, source_right], 0, 1),
+                DebugSourceNode::new(left_id, Vec::new(), 0, 1),
+                DebugSourceNode::new(right_id, Vec::new(), 0, 1),
+            ],
+            vec![source_root],
+        );
+        package.sections =
+            vec![Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes())];
+
+        let error = package
+            .debug_info()
+            .expect_err("export source node mapped to child exec node should be rejected");
+
+        assert!(matches!(error, PackageDebugInfoError::InvalidReference { .. }));
     }
 
     #[test]
@@ -955,6 +1858,107 @@ mod tests {
     }
 
     #[test]
+    fn untrusted_embedded_kernel_decode_discards_nested_debug_info() {
+        let kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        assert!(kernel.debug_info().unwrap().is_some());
+
+        let package = build_package(
+            "app",
+            TargetType::Executable,
+            "app::entry",
+            vec![kernel_dependency(&kernel)],
+            vec![Section::new(SectionId::KERNEL, kernel.to_bytes())],
+        );
+
+        let round_tripped = Package::read_from_bytes(&package.to_bytes())
+            .expect("untrusted package read should succeed");
+        let raw_kernel_bytes = round_tripped
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .expect("kernel section should remain available as opaque bytes")
+            .data
+            .as_ref();
+        let trusted_kernel = Package::read_from_bytes_trusted(raw_kernel_bytes)
+            .expect("trusted direct kernel read should succeed");
+        assert!(
+            trusted_kernel.debug_info().unwrap().is_some(),
+            "opaque kernel bytes may still contain trusted-cache debug metadata"
+        );
+
+        let untrusted_kernel = round_tripped
+            .try_embedded_kernel_package()
+            .expect("embedded kernel should decode")
+            .expect("kernel should be present");
+        assert!(
+            !untrusted_kernel.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted embedded-kernel decode should discard nested debug sections"
+        );
+        assert!(untrusted_kernel.debug_info().unwrap().is_none());
+    }
+
+    #[test]
+    fn strip_debug_info_removes_package_and_embedded_kernel_debug() {
+        let mut kernel =
+            build_debug_package("kernel", TargetType::Kernel, "kernel::boot", "kernel_ctx");
+        kernel.sections = debug_sections();
+        kernel
+            .sections
+            .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![42, 43, 44]));
+        assert!(kernel.sections.iter().any(|section| section.id.is_debug()));
+
+        let mut package =
+            build_debug_package("app", TargetType::Executable, "app::entry", "app_ctx");
+        let digest = package.digest();
+        package.sections = debug_sections();
+        package
+            .sections
+            .push(Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 3, 5]));
+        package.sections.push(Section::new(SectionId::KERNEL, kernel.to_bytes()));
+        let content_digest = package.content_digest();
+        assert!(package.sections.iter().any(|section| section.id.is_debug()));
+
+        package.strip_debug_info().expect("strip should succeed");
+
+        assert_eq!(package.digest(), digest);
+        assert_eq!(package.content_digest(), content_digest);
+        assert!(!package.sections.iter().any(|section| section.id.is_debug()));
+        assert!(
+            package
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+        );
+
+        let stripped_kernel = package
+            .embedded_kernel_package()
+            .unwrap()
+            .expect("kernel should remain embedded");
+        assert!(!stripped_kernel.sections.iter().any(|section| section.id.is_debug()));
+        assert!(
+            stripped_kernel
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+        );
+
+        let raw_kernel_bytes = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .expect("kernel section should remain embedded")
+            .data
+            .as_ref();
+        let trusted_stripped_kernel = Package::read_from_bytes_trusted(raw_kernel_bytes)
+            .expect("trusted stripped kernel read should succeed");
+        assert!(
+            !trusted_stripped_kernel.sections.iter().any(|section| section.id.is_debug()),
+            "stripping should remove nested debug sections from raw kernel bytes"
+        );
+    }
+
+    #[test]
     fn malformed_procedure_lookup_paths_are_not_exported() {
         let package = build_package("app", TargetType::Library, "app::entry", [], Vec::new());
         let invalid_path = alloc::format!("::{}", "a".repeat(AstPath::MAX_COMPONENT_LENGTH + 1));
@@ -992,11 +1996,11 @@ mod tests {
 
     #[test]
     fn make_executable_preserves_selected_same_digest_root_metadata() {
-        let (mast, exports) = build_same_digest_package_exports(&[
+        let (mast, exports, sections) = build_same_digest_package_exports(&[
             ("app::alias_a", "alias_a"),
             ("app::alias_b", "alias_b"),
         ]);
-        let package = Package::create(
+        let mut package = Package::create(
             PackageId::from("app"),
             Version::new(1, 0, 0),
             TargetType::Library,
@@ -1005,32 +2009,58 @@ mod tests {
             None,
         )
         .expect("package should be valid");
+        package.sections = sections;
 
         let entrypoint = QualifiedProcedureName::from_str("app::alias_b").unwrap();
         let executable = package.make_executable(&entrypoint).unwrap();
 
         let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
         let entrypoint_node = executable.get_procedure_node_by_path(&main_path).unwrap();
+        let main_export = executable
+            .manifest
+            .get_export(&main_path)
+            .and_then(PackageExport::as_procedure)
+            .expect("main export should exist");
+        let source_node = main_export.source_node.expect("main export should retain source node");
+        let debug_info = executable
+            .debug_info()
+            .expect("debug sections should decode")
+            .expect("debug sections should be present");
+
+        assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, entrypoint_node);
         assert_eq!(
-            executable
-                .mast_forest()
-                .debug_info()
-                .first_asm_op_for_node(entrypoint_node)
-                .unwrap()
-                .context_name(),
+            debug_info.first_asm_op_for_source_node(source_node).unwrap().context_name,
             "alias_b"
         );
 
         let program = executable.try_into_program().unwrap();
-        assert_eq!(
-            program
-                .mast_forest()
-                .debug_info()
-                .first_asm_op_for_node(program.entrypoint())
-                .unwrap()
-                .context_name(),
-            "alias_b"
-        );
+        assert_eq!(program.entrypoint(), entrypoint_node);
+    }
+
+    #[test]
+    fn make_executable_preserves_debug_section_trust_state() {
+        let (mast, exports, sections) = build_same_digest_package_exports(&[
+            ("app::alias_a", "alias_a"),
+            ("app::alias_b", "alias_b"),
+        ]);
+        let mut package = Package::create(
+            PackageId::from("app"),
+            Version::new(1, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("package should be valid");
+        package.sections = sections;
+        package.debug_sections_trusted = false;
+
+        let executable = package
+            .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
+            .unwrap();
+
+        assert!(!executable.debug_sections_trusted);
+        assert_matches!(executable.debug_info(), Err(PackageDebugInfoError::UntrustedSections));
     }
 
     #[test]
@@ -1056,5 +2086,130 @@ mod tests {
         let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
         assert_eq!(executable.get_procedure_root_by_path(&main_path), Some(digest));
         assert_eq!(executable.get_procedure_node_by_path(&main_path), Some(node_id));
+    }
+
+    #[test]
+    fn merge_source_debug_keeps_concrete_metadata_distinct_from_external_placeholder() {
+        fn debug_info_for_root(root: MastNodeId, context: &str) -> PackageDebugInfo {
+            let source_node = DebugSourceNodeId::from(0);
+            PackageDebugInfo {
+                source_graph: Some(DebugSourceGraphSection::from_parts(
+                    vec![DebugSourceNode::new(root, vec![], 0, 1)],
+                    vec![source_node],
+                )),
+                source_map: Some(DebugSourceMapSection::from_parts(
+                    vec![DebugSourceAsmOp::new(
+                        source_node,
+                        0,
+                        None,
+                        context.into(),
+                        "add".into(),
+                        1,
+                    )],
+                    Vec::new(),
+                )),
+                ..PackageDebugInfo::default()
+            }
+        }
+
+        let mut concrete_forest = MastForest::new();
+        let concrete_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut concrete_forest)
+            .unwrap();
+        concrete_forest.make_root(concrete_root);
+        let concrete_digest = concrete_forest[concrete_root].digest();
+
+        let mut placeholder_forest = MastForest::new();
+        let placeholder_root = ExternalNodeBuilder::new(concrete_digest)
+            .add_to_forest(&mut placeholder_forest)
+            .unwrap();
+        placeholder_forest.make_root(placeholder_root);
+
+        let placeholder_debug = debug_info_for_root(placeholder_root, "placeholder");
+        let concrete_debug = debug_info_for_root(concrete_root, "concrete");
+
+        let (_merged_forest, root_map) =
+            MastForest::merge([&placeholder_forest, &concrete_forest]).unwrap();
+        let merged_placeholder = root_map.map_root(0, &placeholder_root).unwrap();
+        let merged_concrete = root_map.map_root(1, &concrete_root).unwrap();
+        assert_eq!(merged_placeholder, merged_concrete);
+
+        let merged_debug = PackageDebugInfo::merge_source_debug(
+            [(0, &placeholder_debug), (1, &concrete_debug)],
+            &root_map,
+        )
+        .unwrap();
+        let source_graph = merged_debug.source_graph.as_ref().unwrap();
+        assert_eq!(source_graph.nodes().len(), 2);
+        assert!(source_graph.nodes().iter().all(|node| node.exec_node == merged_concrete));
+
+        let placeholder_source = source_graph.roots()[0];
+        let concrete_source = source_graph.roots()[1];
+        assert_ne!(placeholder_source, concrete_source);
+        assert_eq!(
+            merged_debug
+                .first_asm_op_for_source_node(placeholder_source)
+                .unwrap()
+                .context_name,
+            "placeholder",
+        );
+        assert_eq!(
+            merged_debug.first_asm_op_for_source_node(concrete_source).unwrap().context_name,
+            "concrete",
+        );
+    }
+
+    #[test]
+    fn make_executable_same_digest_selection_is_export_order_independent() {
+        fn selected_context_for_alias_b(exports: &[(&str, &str)]) -> String {
+            let (mast, exports, sections) = build_same_digest_package_exports(exports);
+            let mut package = Package::create(
+                PackageId::from("app"),
+                Version::new(1, 0, 0),
+                TargetType::Library,
+                mast,
+                exports,
+                None,
+            )
+            .expect("package should be valid");
+            package.sections = sections;
+
+            let executable = package
+                .make_executable(&QualifiedProcedureName::from_str("app::alias_b").unwrap())
+                .unwrap();
+            let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+            let main_export = executable
+                .manifest
+                .get_export(&main_path)
+                .and_then(PackageExport::as_procedure)
+                .expect("main export should exist");
+            let source_node =
+                main_export.source_node.expect("main export should retain source node");
+            let debug_info = executable
+                .debug_info()
+                .expect("debug sections should decode")
+                .expect("debug sections should be present");
+
+            debug_info
+                .first_asm_op_for_source_node(source_node)
+                .unwrap()
+                .context_name
+                .clone()
+        }
+
+        assert_eq!(
+            selected_context_for_alias_b(&[
+                ("app::alias_a", "alias_a"),
+                ("app::alias_b", "alias_b")
+            ]),
+            "alias_b",
+        );
+        assert_eq!(
+            selected_context_for_alias_b(&[
+                ("app::alias_b", "alias_b"),
+                ("app::alias_a", "alias_a")
+            ]),
+            "alias_b",
+        );
     }
 }

@@ -1,7 +1,6 @@
 use crate::{
     ExecutionError, Felt, ONE,
     errors::OperationError,
-    mast::ExecutableMastForest,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::OperationHelperRegisters,
 };
@@ -17,18 +16,15 @@ mod tests;
 /// # Errors
 /// Returns an error if the popped value is not ONE.
 #[inline(always)]
-pub(super) fn op_assert<P, F>(
+pub(super) fn op_assert<P>(
     processor: &mut P,
     err_code: Felt,
-    program: &F,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    F: ExecutableMastForest,
 {
     if processor.stack().get(0) != ONE {
-        let err_msg = program.resolve_error_message(err_code);
-        return Err(OperationError::FailedAssertion { err_code, err_msg });
+        return Err(OperationError::FailedAssertion { err_code, err_msg: None });
     }
     processor.stack_mut().decrement_size()?;
     Ok(OperationHelperRegisters::Empty)

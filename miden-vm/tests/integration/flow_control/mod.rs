@@ -611,7 +611,7 @@ fn dyncall_with_syscall_and_caller() {
     let test = build_debug_test!(program_source).with_kernel(kernel_source);
 
     // Compile to get the hash of `bar`
-    let (program, _kernel) = test.compile().unwrap();
+    let (program, _kernel, _debug_info) = test.compile().unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     // bar is the first procedure root in the forest (index 0)
     let bar_digest = procedure_digests[0];
