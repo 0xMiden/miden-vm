@@ -19,7 +19,9 @@ use super::{
 use crate::{
     ExecutionError, ExecutionOutput, Host, LoadedMastForest, Stopper, SyncHost, TraceBuildInputs,
     continuation_stack::ContinuationStack,
-    errors::{MapExecErr, MapExecErrNoCtx, OperationError, PackageSourceDebugContext},
+    errors::{
+        MapExecErr, MapExecErrNoCtx, PackageSourceDebugContext, malformed_mast_forest_with_context,
+    },
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
@@ -1004,15 +1006,13 @@ impl FastProcessor {
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let err = OperationError::MalformedMastForestInHost { root_digest: node_digest };
-            match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
-                    PackageSourceDebugContext::new(debug_info, source_node_id),
-                    host,
-                    None,
-                ),
-                _ => Err::<(), _>(err).map_exec_err().unwrap_err(),
-            }
+            let context = match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => {
+                    Some(PackageSourceDebugContext::new(debug_info, source_node_id))
+                },
+                _ => None,
+            };
+            malformed_mast_forest_with_context(node_digest, context, host)
         })?;
 
         self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;
@@ -1060,15 +1060,13 @@ impl FastProcessor {
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let err = OperationError::MalformedMastForestInHost { root_digest: node_digest };
-            match (package_debug_info, source_node_id) {
-                (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
-                    PackageSourceDebugContext::new(debug_info, source_node_id),
-                    host,
-                    None,
-                ),
-                _ => Err::<(), _>(err).map_exec_err().unwrap_err(),
-            }
+            let context = match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => {
+                    Some(PackageSourceDebugContext::new(debug_info, source_node_id))
+                },
+                _ => None,
+            };
+            malformed_mast_forest_with_context(node_digest, context, host)
         })?;
 
         self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;

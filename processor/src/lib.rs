@@ -90,7 +90,7 @@ pub mod event {
 pub mod operation {
     pub use miden_core::operations::*;
 
-    pub use crate::errors::OperationError;
+    pub use crate::errors::{BinaryValueErrorContext, OperationError};
 }
 
 pub mod trace;

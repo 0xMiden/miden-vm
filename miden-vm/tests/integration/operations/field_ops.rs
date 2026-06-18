@@ -544,7 +544,7 @@ fn not_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -572,19 +572,19 @@ fn and_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new_unchecked(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == Felt::new_unchecked(2_u64)
     );
 }
 
@@ -613,19 +613,19 @@ fn or_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 }
 
@@ -656,21 +656,21 @@ fn xor_fail() {
     let test = build_op_test!(asm_op, &[3, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 
     // Stack [0, 2] - position 1 is 2, error for value 2
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 
     // Stack [2, 0] - position 1 is 0 (valid), position 0 is 2, error for value 2
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value, .. }, .. } if value == expected_value
     );
 }
 

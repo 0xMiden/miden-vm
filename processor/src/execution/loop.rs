@@ -5,7 +5,7 @@ use crate::{
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{ExecutableMastForest, LoopNode, MastNodeId},
-    operation::OperationError,
+    operation::{BinaryValueErrorContext, OperationError},
     option_map_break_reason,
     processor::{Processor, StackInterface},
     tracer::Tracer,
@@ -193,7 +193,10 @@ where
             current_forest,
         )
     } else {
-        let err = OperationError::NotBinaryValueLoop { value: condition };
+        let err = OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::Loop,
+            value: condition,
+        };
         ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(err)))
     }
 }
@@ -270,7 +273,10 @@ where
             current_forest,
         )
     } else {
-        let err = OperationError::NotBinaryValueLoop { value: condition };
+        let err = OperationError::NotBinaryValue {
+            context: BinaryValueErrorContext::Loop,
+            value: condition,
+        };
         ControlFlow::Break(BreakReason::Err(state.operation_error_with_current_context(err)))
     }
 }

@@ -214,10 +214,9 @@ pub enum MemoryError {
         "memory range start address cannot exceed end address, but was ({start_addr}, {end_addr})"
     )]
     InvalidMemoryRange { start_addr: u64, end_addr: u64 },
-    #[error("word access at memory address {addr} in context {ctx} is unaligned")]
-    #[diagnostic(help(
-        "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
-    ))]
+    #[error(
+        "word access at memory address {addr} in context {ctx} is unaligned: word accesses require addresses that are multiples of 4"
+    )]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
     #[error("failed to read from memory: {0}")]
     MemoryReadFailed(String),
@@ -284,10 +283,7 @@ pub enum CryptoError {
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
-    #[error("division by zero")]
-    #[diagnostic(help(
-        "ensure the divisor (second stack element) is non-zero before division or modulo operations"
-    ))]
+    #[error("division by zero: divisor must be non-zero for division or modulo operations")]
     DivideByZero,
     #[error(
         "assertion failed with error {}",
@@ -296,23 +292,17 @@ pub enum OperationError {
             None => format!("code: {err_code}"),
         }
     )]
-    #[diagnostic(help(
-        "assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
-    ))]
     FailedAssertion {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
     #[error(
-        "u32 assertion failed with error {}: invalid values: {invalid_values:?}",
+        "u32 assertion failed: u32assert2 requires both stack values to be valid 32-bit unsigned integers; error {}; invalid values: {invalid_values:?}",
         match err_msg {
             Some(msg) => format!("message: {msg}"),
             None => format!("code: {err_code}"),
         }
     )]
-    #[diagnostic(help(
-        "u32assert2 requires both stack values to be valid 32-bit unsigned integers"
-    ))]
     U32AssertionFailed {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
@@ -326,8 +316,7 @@ pub enum OperationError {
     InvalidMerklePathLength { path_len: usize, depth: Felt },
     #[error("when returning from a call, stack depth must be {MIN_STACK_DEPTH}, but was {depth}")]
     InvalidStackDepthOnReturn { depth: usize },
-    #[error("attempted to calculate integer logarithm with zero argument")]
-    #[diagnostic(help("ilog2 requires a non-zero argument"))]
+    #[error("ilog2 requires a non-zero argument")]
     LogArgumentZero,
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
@@ -345,21 +334,36 @@ pub enum OperationError {
     MerklePathVerificationFailed {
         inner: Box<MerklePathVerificationFailedInner>,
     },
-    #[error("operation expected a binary value, but got {value}")]
-    NotBinaryValue { value: Felt },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
-    NotBinaryValueIf { value: Felt },
-    #[error("loop condition must be a binary value, but got {value}")]
-    #[diagnostic(help(
-        "this could happen either when first entering the loop, or any subsequent iteration"
-    ))]
-    NotBinaryValueLoop { value: Felt },
+    #[error("{message}, but got {value}", message = context.message())]
+    NotBinaryValue {
+        context: BinaryValueErrorContext,
+        value: Felt,
+    },
     #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values { values: Vec<Felt> },
     #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
     SyscallTargetNotInKernel { proc_root: Word },
     #[error("failed to execute the operation for internal reason: {0}")]
     Internal(&'static str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryValueErrorContext {
+    Operation,
+    If,
+    Loop,
+}
+
+impl BinaryValueErrorContext {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Operation => "operation expected a binary value",
+            Self::If => "if statement expected a binary value on top of the stack",
+            Self::Loop => {
+                "loop condition must be a binary value on entry and each subsequent iteration"
+            },
+        }
+    }
 }
 
 impl OperationError {
@@ -575,6 +579,19 @@ pub fn procedure_not_found_with_package_source_context(
     let (label, source_file) =
         label_and_source_file_from_location(context.assembly_location(None), host);
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
+}
+
+/// Creates a `MalformedMastForestInHost` operation error with execution context.
+pub fn malformed_mast_forest_with_context(
+    root_digest: Word,
+    context: Option<PackageSourceDebugContext<'_>>,
+    host: &impl BaseHost,
+) -> ExecutionError {
+    let err = OperationError::MalformedMastForestInHost { root_digest };
+    match context {
+        Some(context) => err.with_package_source_context(context, host, None),
+        None => err.with_context(),
+    }
 }
 
 // CONSOLIDATED EXTENSION TRAITS (plafer's approach)
