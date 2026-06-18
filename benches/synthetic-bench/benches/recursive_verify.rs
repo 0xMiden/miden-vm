@@ -355,33 +355,33 @@ fn print_case_shape(case: &RecursionCase) {
     let trace = build_trace(trace_inputs).expect("build recursive verifier trace");
     let summary = trace.trace_len_summary();
     let chiplets = summary.chiplets();
-    let trace_rows = summary
+    let max_trace_rows = summary
         .core_rows()
         .max(summary.chiplets_rows())
         .max(summary.blakeg_compression_rows())
         .max(summary.byte_pair_lookup_rows());
-    let padded_rows = summary
+    let max_padded_rows = summary
         .core_height()
         .max(summary.chiplets_height())
         .max(summary.blakeg_compression_height())
         .max(summary.byte_pair_lookup_rows());
 
     println!(
-        "    proofs={} core={} range={} chiplets={} hash_ctrl={} trace={} padded={}",
+        "    proofs={} core={} range={} chiplets={} hash_ctrl={} max_trace={} max_padded={}",
         case.proof_count,
         summary.core_rows(),
         0,
         chiplets.trace_len(),
         chiplets.hash_chiplet_len(),
-        trace_rows,
-        padded_rows,
+        max_trace_rows,
+        max_padded_rows,
     );
     println!(
         concat!(
             "BENCH_RECURSION_SHAPE proofs={} ",
             "core_rows={} range_rows={} chiplets_rows={} ",
             "hash_chiplet_rows={} bitwise_rows={} memory_rows={} ace_rows={} kernel_rows={} ",
-            "native_hash_rows={} and8_lookup_rows={} trace_rows={} padded_rows={}"
+            "native_hash_rows={} and8_lookup_rows={} max_trace_rows={} max_padded_rows={}"
         ),
         case.proof_count,
         summary.core_rows(),
@@ -394,8 +394,8 @@ fn print_case_shape(case: &RecursionCase) {
         chiplets.kernel_rom_len(),
         summary.blakeg_compression_rows(),
         summary.byte_pair_lookup_rows(),
-        trace_rows,
-        padded_rows,
+        max_trace_rows,
+        max_padded_rows,
     );
 }
 
