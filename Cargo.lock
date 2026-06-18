@@ -1931,6 +1931,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-type"
 version = "0.7.0"
+source = "git+https://github.com/Al-Kindi-0/midenc-hir-type.git?branch=al-blakeg-final#77e99245a2c0c9af1c35f24b3160d0879172fcfc"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",

@@ -76,7 +76,7 @@ miden-verifier          = { path = "./verifier", version = "0.24", default-featu
 # Miden crates
 miden-crypto     = { git = "https://github.com/0xMiden/crypto.git", branch = "al-blakeg-final", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type  = { version = "0.7.0", default-features = false }
+midenc-hir-type  = { git = "https://github.com/Al-Kindi-0/midenc-hir-type.git", branch = "al-blakeg-final", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
@@ -116,7 +116,6 @@ walkdir = "2.5"
 
 [patch.crates-io]
 miden-serde-utils = { git = "https://github.com/0xMiden/crypto.git", branch = "al-blakeg-final" }
-midenc-hir-type = { path = "../midenc-hir-type-blakeg-final" }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
