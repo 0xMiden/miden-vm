@@ -354,7 +354,7 @@ fn print_case_shape(case: &RecursionCase) {
     let chiplets = summary.chiplets_trace_len();
 
     println!(
-        "    proofs={} core={} range={} chiplets={} hash_ctrl={} trace={} padded={}",
+        "    proofs={} core={} range={} chiplets={} hash_ctrl={} max_trace={} max_padded={}",
         case.proof_count,
         summary.core_trace_len(),
         summary.range_trace_len(),
@@ -368,7 +368,7 @@ fn print_case_shape(case: &RecursionCase) {
             "BENCH_RECURSION_SHAPE proofs={} ",
             "core_rows={} range_rows={} chiplets_rows={} ",
             "hash_chiplet_rows={} bitwise_rows={} memory_rows={} ace_rows={} kernel_rows={} ",
-            "native_hash_rows=0 and8_lookup_rows=0 trace_rows={} padded_rows={}"
+            "native_hash_rows=0 and8_lookup_rows=0 max_trace_rows={} max_padded_rows={}"
         ),
         case.proof_count,
         summary.core_trace_len(),

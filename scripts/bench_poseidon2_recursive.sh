@@ -127,7 +127,7 @@ META_FILE="$RUN_DIR/metadata.txt"
 SUMMARY_MD="$RUN_DIR/summary.md"
 
 cat > "$RESULTS_TSV" <<'EOF'
-fixture	run	proof_count	prove_ms	recursive_proof_bytes	tx_proof_bytes	core_rows	range_rows	chiplets_rows	hash_chiplet_rows	bitwise_rows	memory_rows	ace_rows	kernel_rows	native_hash_rows	and8_lookup_rows	trace_rows	padded_rows	log_file
+fixture	run	proof_count	prove_ms	recursive_proof_bytes	tx_proof_bytes	core_rows	range_rows	chiplets_rows	hash_chiplet_rows	bitwise_rows	memory_rows	ace_rows	kernel_rows	native_hash_rows	and8_lookup_rows	max_trace_rows	max_padded_rows	log_file
 EOF
 
 cat > "$FIXTURE_PATHS_TSV" <<'EOF'
@@ -248,8 +248,8 @@ parse_run_log() {
       "$(extract_field kernel_rows "$shape_line")" \
       "$(extract_field native_hash_rows "$shape_line")" \
       "$(extract_field and8_lookup_rows "$shape_line")" \
-      "$(extract_field trace_rows "$shape_line")" \
-      "$(extract_field padded_rows "$shape_line")" \
+      "$(extract_field max_trace_rows "$shape_line")" \
+      "$(extract_field max_padded_rows "$shape_line")" \
       "$log_file" \
       >> "$RESULTS_TSV"
   done
@@ -357,7 +357,7 @@ done
   echo "- Build jobs: \`$BUILD_JOBS\`"
   echo "- System monitoring: \`$MONITOR_SYSTEM\`"
   echo
-  echo "| Fixture | Proofs | Runs | Median | Average | Min-Max | Recursive proof | Input tx proofs | Padded |"
+  echo "| Fixture | Proofs | Runs | Median | Average | Min-Max | Recursive proof | Input tx proofs | Max padded |"
   echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|"
 
   for raw_fixture in "${FIXTURES[@]}"; do
