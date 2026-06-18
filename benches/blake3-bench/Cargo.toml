@@ -1,0 +1,38 @@
+[package]
+name = "miden-vm-blake3-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "std"] }
+miden-core-lib = { workspace = true }
+miden-vm = { path = "../../miden-vm", features = ["internal", "concurrent"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tracing = { workspace = true, features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["registry", "std"] }
+
+[dev-dependencies]
+criterion = { package = "codspeed-criterion-compat", version = "4.6.0" }
+
+[lib]
+doctest = false
+test = false
+
+[[bin]]
+name = "blake3-nonregression"
+path = "src/bin/blake3-nonregression.rs"
+bench = false
+test = false
+
+[[bench]]
+name = "blake3_bench"
+harness = false

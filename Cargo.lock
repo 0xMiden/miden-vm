@@ -1885,6 +1885,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-vm-blake3-bench"
+version = "0.24.0"
+dependencies = [
+ "clap",
+ "codspeed-criterion-compat",
+ "miden-core-lib",
+ "miden-vm",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "miden-vm-synthetic-bench"
 version = "0.24.0"
 dependencies = [
