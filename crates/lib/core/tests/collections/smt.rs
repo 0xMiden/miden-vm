@@ -138,7 +138,10 @@ fn test_smt_get_rejects_authenticated_duplicate_keys() {
     push_word(&mut initial_stack, &key);
 
     let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
-    crate::expect_assert_error_message!(test, contains "invalid multi-leaf preimage");
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
 }
 
 #[test]
@@ -170,7 +173,10 @@ fn test_smt_set_rejects_authenticated_duplicate_keys() {
     push_word(&mut initial_stack, &EMPTY_WORD);
 
     let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
-    crate::expect_assert_error_message!(test, contains "invalid multi-leaf preimage");
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
 }
 
 /// Tests inserting and removing key-value pairs to an SMT. We do the insert/removal twice to ensure
