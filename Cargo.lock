@@ -1909,7 +1909,11 @@ version = "0.24.0"
 dependencies = [
  "codspeed-criterion-compat",
  "miden-air",
+ "miden-core",
+ "miden-core-lib",
  "miden-processor",
+ "miden-prover",
+ "miden-test-utils",
  "miden-vm",
  "serde",
  "serde_json",

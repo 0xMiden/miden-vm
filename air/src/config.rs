@@ -63,6 +63,9 @@ pub const FOLDING_POW_BITS: usize = 4;
 pub const DEEP_POW_BITS: usize = 12;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
+/// Local benchmark override for the number of FRI query repetitions.
+#[cfg(feature = "std")]
+const BENCH_NUM_QUERIES_ENV: &str = "MIDEN_BENCH_NUM_FRI_QUERIES";
 /// Proof-of-work bits for query phase.
 const QUERY_POW_BITS: usize = 16;
 
@@ -74,10 +77,24 @@ pub fn pcs_params() -> PcsParams {
         LOG_FINAL_DEGREE,
         FOLDING_POW_BITS,
         DEEP_POW_BITS,
-        NUM_QUERIES,
+        num_queries(),
         QUERY_POW_BITS,
     )
     .expect("invalid PCS parameters")
+}
+
+fn num_queries() -> usize {
+    #[cfg(feature = "std")]
+    {
+        if let Some(raw) = std::env::var(BENCH_NUM_QUERIES_ENV).ok().filter(|raw| !raw.is_empty()) {
+            let value = raw
+                .parse::<usize>()
+                .unwrap_or_else(|_| panic!("{BENCH_NUM_QUERIES_ENV} must be a positive integer"));
+            assert!(value > 0, "{BENCH_NUM_QUERIES_ENV} must be positive");
+            return value;
+        }
+    }
+    NUM_QUERIES
 }
 
 // DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
@@ -312,7 +329,7 @@ pub fn ace_circuit_registry_tree() -> MerkleTree {
 /// protocol parameters.
 pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     // Batch 1: PCS parameters, zero-padded to SPONGE_RATE.
-    challenger.observe(Felt::new_unchecked(NUM_QUERIES as u64));
+    challenger.observe(Felt::new_unchecked(num_queries() as u64));
     challenger.observe(Felt::new_unchecked(QUERY_POW_BITS as u64));
     challenger.observe(Felt::new_unchecked(DEEP_POW_BITS as u64));
     challenger.observe(Felt::new_unchecked(FOLDING_POW_BITS as u64));

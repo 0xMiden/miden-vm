@@ -1,0 +1,20 @@
+begin
+    padw padw padw
+    repeat.7119
+        hperm
+    end
+    dropw dropw dropw
+    push.1 neg
+    repeat.328
+        u32split u32xor
+    end
+    drop
+    padw push.2621520000
+    repeat.1668
+        dup.4 mem_storew_le dup.4 mem_loadw_le movup.4 push.262148 add movdn.4
+    end
+    drop dropw
+    repeat.4495
+        swap dup.1 add
+    end
+end
