@@ -4,6 +4,7 @@
 #! derive BlakeG-XOF blocks from `K_CTR` and a counter. The chip XORs the stream
 #! with plaintext felts and writes expanded ciphertext limbs.
 #! Authentication covers expanded ciphertext with empty associated data.
+#! The MAC pairs adjacent Felts as quadratic-extension coefficients.
 #!
 #! Security contract:
 #! - callers must never reuse `(key, nonce)`;
@@ -70,19 +71,19 @@ pub proc derive_mac_key
     exec.eidos::digest
 end
 
-#! Folds `num_pairs` consecutive 8-Felt memory batches into the Horner accumulator.
+#! Folds `num_batches` consecutive 8-Felt memory batches into the MAC accumulator.
 #!
-#! Input:  [alpha_ptr, acc0, acc1, stream_ptr, num_pairs, ...]
-#! Output: [alpha_ptr, acc0, acc1, stream_ptr + 8*num_pairs, ...]
-proc auth_horner_stream_pairs
-    # Shape the stack once for the `mem_stream` + `horner_eval_base` loop:
-    # [Y, Y, C, stream_ptr, alpha_ptr, acc0, acc1, ...], with `num_pairs`
+#! Input:  [alpha_ptr, acc0, acc1, stream_ptr, num_batches, ...]
+#! Output: [alpha_ptr, acc0, acc1, stream_ptr + 8*num_batches, ...]
+proc auth_horner_stream_batches
+    # Shape the stack once for the `mem_stream` + `horner_eval_ext` loop:
+    # [Y, Y, C, stream_ptr, alpha_ptr, acc0, acc1, ...], with `num_batches`
     # stored in C[3]. `mem_stream` preserves C and advances stream_ptr.
     movup.3
     movup.4
     push.0.0.0
     padw padw
-    # => [Y, Y, 0, 0, 0, num_pairs, stream_ptr, alpha_ptr, acc0, acc1, ...]
+    # => [Y, Y, 0, 0, 0, num_batches, stream_ptr, alpha_ptr, acc0, acc1, ...]
 
     # Process leading batches until the count is divisible by eight, then run
     # the hot loop in eight-batch chunks to amortize `while.true` overhead.
@@ -93,7 +94,7 @@ proc auth_horner_stream_pairs
         movdn.11
 
         mem_stream
-        horner_eval_base
+        horner_eval_ext
     end
 
     dup.11 u32mod.4 eq.2
@@ -104,7 +105,7 @@ proc auth_horner_stream_pairs
 
         repeat.2
             mem_stream
-            horner_eval_base
+            horner_eval_ext
         end
     end
 
@@ -116,7 +117,7 @@ proc auth_horner_stream_pairs
 
         repeat.4
             mem_stream
-            horner_eval_base
+            horner_eval_ext
         end
     end
 
@@ -128,7 +129,7 @@ proc auth_horner_stream_pairs
 
         repeat.8
             mem_stream
-            horner_eval_base
+            horner_eval_ext
         end
 
         dup.11 neq.0
@@ -328,6 +329,8 @@ end
 #! MAC input:
 #! `nonce(4) || ciphertext(ciphertext_len) || [ad_len=0, ciphertext_len]`
 #!
+#! Adjacent Felts in the MAC input form one quadratic-extension coefficient.
+#!
 #! `scratch_ptr` is temporary workspace for the initial partial batch and for
 #! the final tail plus length fields.
 #!
@@ -369,7 +372,7 @@ pub proc auth_empty_ad_expanded_with_scratch
 
         loc_load.10 movdn.3
         push.1 movdn.4
-        exec.auth_horner_stream_pairs
+        exec.auth_horner_stream_batches
         movup.3 drop
         # => [alpha_ptr, acc0, acc1, ...]
 
@@ -389,7 +392,7 @@ pub proc auth_empty_ad_expanded_with_scratch
 
         loc_load.8 add.4 movdn.3
         loc_load.11 movdn.4
-        exec.auth_horner_stream_pairs
+        exec.auth_horner_stream_batches
         movup.3 drop
         # => [alpha_ptr, acc0, acc1, ...]
 
@@ -431,7 +434,7 @@ pub proc auth_empty_ad_expanded_with_scratch
 
         loc_load.10 movdn.3
         loc_load.14 movdn.4
-        exec.auth_horner_stream_pairs
+        exec.auth_horner_stream_batches
         movup.3 drop
         # => [alpha_ptr, acc0, acc1, ...]
     else
@@ -476,7 +479,7 @@ pub proc auth_empty_ad_expanded_with_scratch
 
         loc_load.10 movdn.3
         loc_load.14 movdn.4
-        exec.auth_horner_stream_pairs
+        exec.auth_horner_stream_batches
         movup.3 drop
         # => [alpha_ptr, acc0, acc1, ...]
     end
@@ -493,6 +496,8 @@ end
 #!
 #! MAC input:
 #! `nonce(4) || ciphertext(8*num_blocks) || [ad_len=0, ct_len=8*num_blocks]`
+#!
+#! Adjacent Felts in the MAC input form one quadratic-extension coefficient.
 #!
 #! Input:  [K_MAC(4), nonce(4), ct_ptr, num_blocks, ...]
 #! Output: [tag0, tag1, ...]
@@ -516,7 +521,7 @@ pub proc auth_empty_ad_expanded
 
     dup.1 neq.0
     if.true
-        # Accumulator state for `horner_eval_base`: [alpha_ptr, acc0, acc1, ...].
+        # Accumulator state for `horner_eval_ext`: [alpha_ptr, acc0, acc1, ...].
         push.0.0
         locaddr.0
         # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
@@ -527,7 +532,7 @@ pub proc auth_empty_ad_expanded
         mem_loadw_le
         padw
         loc_loadw_le.4
-        horner_eval_base
+        horner_eval_ext
         dropw dropw dropw drop
         # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
 
@@ -540,7 +545,7 @@ pub proc auth_empty_ad_expanded
         movdn.4
         # => [alpha_ptr, acc0, acc1, stream_ptr, remaining_middle, ...]
 
-        exec.auth_horner_stream_pairs
+        exec.auth_horner_stream_batches
         # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
 
         # Final batch: last ciphertext word || [0, ct_len] || zero(2).
@@ -550,7 +555,7 @@ pub proc auth_empty_ad_expanded
         padw
         loc_loadw_le.8
         swapw
-        horner_eval_base
+        horner_eval_ext
         dropw dropw dropw drop
         # => [alpha_ptr, acc0, acc1, final_word_ptr, ...]
 
@@ -566,7 +571,7 @@ pub proc auth_empty_ad_expanded
 
         padw padw padw push.0
         loc_loadw_le.4
-        horner_eval_base
+        horner_eval_ext
         dropw dropw dropw drop
         # => [alpha_ptr, acc0, acc1, ct_ptr, num_blocks, ...]
 

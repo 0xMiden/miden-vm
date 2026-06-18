@@ -23,7 +23,8 @@ wrap.
 
 The production tag direction is Encrypt-then-MAC: authenticate the expanded
 ciphertext-limb stream with `auth_empty_ad_expanded` or the exact-length
-scratch helper. This construction is not nonce-misuse-resistant.
+scratch helper. The MAC pairs adjacent Felts as quadratic-extension
+coefficients. This construction is not nonce-misuse-resistant.
 
 ## Procedures
 
