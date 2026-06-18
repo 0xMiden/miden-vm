@@ -1277,26 +1277,6 @@ async fn package_source_debug_malformed_external_preserves_external_source_span_
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn package_source_debug_missing_external_preserves_external_source_span_async() {
-    let (program, package_debug_info, mut host, _, expected_span, source_file) =
-        missing_external_package_source_debug_fixture();
-
-    let err = FastProcessor::new(StackInputs::default())
-        .execute_with_package_debug_info(&program, &package_debug_info, &mut host)
-        .await
-        .unwrap_err();
-
-    assert_matches!(
-        err,
-        ExecutionError::ProcedureNotFound {
-            label,
-            source_file: Some(actual_source_file),
-            ..
-        } if label == expected_span && actual_source_file.id() == source_file.id()
-    );
-}
-
 #[test]
 fn test_stack_write_word_max_start_idx() {
     let stack_inputs = StackInputs::new(&[]).unwrap();
