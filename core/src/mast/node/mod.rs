@@ -35,7 +35,10 @@ pub use loop_node::{LoopNode, LoopNodeBuilder};
 mod mast_forest_contributor;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
-use crate::mast::{ExecutableMastForest, MastForest, MastNodeId};
+use crate::mast::{MastForest, MastNodeId};
+
+#[cfg(debug_assertions)]
+use crate::mast::ExecutableMastForest;
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.

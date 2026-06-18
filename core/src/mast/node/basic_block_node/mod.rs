@@ -4,7 +4,7 @@ use core::{fmt, iter::repeat_n};
 use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
-    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{MastForest, MastForestError, MastNode, MastNodeId},
     operations::Operation,
     prettier::PrettyPrint,
     utils::LookupByIdx,
@@ -16,6 +16,9 @@ use op_batch::OpBatchAccumulator;
 pub(crate) use op_batch::collect_immediate_placements;
 
 use super::{MastForestContributor, MastNodeExt};
+
+#[cfg(debug_assertions)]
+use crate::mast::ExecutableMastForest;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;

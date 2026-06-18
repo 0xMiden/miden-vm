@@ -19,8 +19,10 @@
 //! - `SYNTH_SAMPLE_SIZE`: Criterion sample size. Defaults to 30.
 //! - `SYNTH_MEASUREMENT_TIME_SECS`: Criterion measurement time per benchmark. Defaults to 30.
 //! - `SYNTH_WARM_UP_TIME_SECS`: Criterion warm-up time per benchmark. Defaults to 1.
-//! - `SYNTH_MASM_WRITE`: if set, write the emitted MASM to
-//!   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm`.
+//! - `SYNTH_MASM_WRITE`: if set, write emitted MASM files. The value may be an output directory;
+//!   empty and `1` use `target/`.
+//! - `SYNTH_EMIT_ONLY`: if set with `SYNTH_MASM_WRITE`, emit and bracket-check MASM without
+//!   running Criterion.
 
 use std::{
     cell::RefCell, collections::BTreeSet, hint::black_box, path::PathBuf, rc::Rc, time::Duration,
@@ -129,6 +131,15 @@ fn resolve_snapshot_paths() -> Vec<PathBuf> {
     paths.sort();
     assert!(!paths.is_empty(), "no snapshots found under {}", snapshots_dir.display());
     paths
+}
+
+fn masm_output_dir() -> Option<PathBuf> {
+    let raw = std::env::var("SYNTH_MASM_WRITE").ok()?;
+    if raw.is_empty() || raw == "1" {
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"))
+    } else {
+        Some(PathBuf::from(raw))
+    }
 }
 
 /// Lower-case ASCII slug; non-alphanumerics collapse to single `-` separators.
@@ -253,15 +264,14 @@ fn bench_one_scenario(
     }
 
     let source = emit(&plan);
-    if std::env::var("SYNTH_MASM_WRITE").is_ok() {
-        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join(format!("synthetic_bench_{producer_stem}__{scenario_slug}.masm"));
+    let masm_dump = masm_output_dir().map(|dir| {
+        let out = dir.join(format!("synthetic_bench_{producer_stem}__{scenario_slug}.masm"));
         std::fs::create_dir_all(out.parent().expect("parent"))
             .expect("create target dir for MASM dump");
         std::fs::write(&out, &source).expect("write MASM dump");
         println!("\n=== wrote MASM dump to {}", out.display());
-    }
+        out
+    });
 
     let actual = measure_program(&source).expect("measure emitted program");
     let report = VerificationReport::new(target_shape, actual);
@@ -270,6 +280,25 @@ fn bench_one_scenario(
         report.brackets_match(),
         "emitted program lands in a different padded-trace bracket than the scenario target",
     );
+
+    if let Some(path) = &masm_dump {
+        println!(
+            "SYNTH_EMIT producer={producer_stem} scenario={scenario_slug} masm={} core_rows={} chiplets_rows={} range_rows={} padded_rows={}",
+            path.display(),
+            actual.totals.core_rows,
+            actual.totals.chiplets_rows,
+            actual.totals.range_rows,
+            actual.totals.padded_total(),
+        );
+    }
+
+    if std::env::var_os("SYNTH_EMIT_ONLY").is_some() {
+        assert!(
+            masm_dump.is_some(),
+            "SYNTH_EMIT_ONLY requires SYNTH_MASM_WRITE so generated MASM is preserved",
+        );
+        return;
+    }
 
     let program = Assembler::default()
         .assemble_program("program", &source)

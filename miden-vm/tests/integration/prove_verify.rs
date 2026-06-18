@@ -283,6 +283,152 @@ fn test_rpx_prove_verify() {
     assert_prove_verify(source, HashFunction::Rpx256, "RPX", true, false);
 }
 
+const DEFAULT_BENCH_MAX_PADDED_ROWS: usize = 1_000_000;
+
+fn benchmark_max_padded_rows() -> usize {
+    std::env::var("MIDEN_BENCH_MAX_PADDED_ROWS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(DEFAULT_BENCH_MAX_PADDED_ROWS)
+}
+
+fn benchmark_guard_padded_rows(expected_padded_rows: Option<usize>) -> Option<usize> {
+    std::env::var("MIDEN_BENCH_GUARD_PADDED_ROWS")
+        .ok()
+        .map(|value| value.parse::<usize>().expect("MIDEN_BENCH_GUARD_PADDED_ROWS must be a usize"))
+        .or(expected_padded_rows)
+}
+
+fn bench_single_scenario(name: &str, source: &str, expected_padded_rows: Option<usize>) {
+    use miden_processor::{
+        FastProcessor,
+        trace::{RowIndex, build_trace},
+    };
+    use std::time::Instant;
+
+    let max_padded_rows = benchmark_max_padded_rows();
+    let guard_padded_rows = benchmark_guard_padded_rows(expected_padded_rows);
+    if let Some(guard) = guard_padded_rows {
+        if guard > max_padded_rows {
+            eprintln!("=== {name} ===");
+            eprintln!(
+                "  skipped: guard padded rows {guard} exceeds \
+                 MIDEN_BENCH_MAX_PADDED_ROWS={max_padded_rows}"
+            );
+            return;
+        }
+    }
+
+    let program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
+    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+
+    let fast_proc = FastProcessor::new(stack_inputs);
+    let mut trace_host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let trace_inputs = fast_proc
+        .execute_trace_inputs_sync(&program, &mut trace_host)
+        .expect("execution failed");
+    let trace = build_trace(trace_inputs).expect("trace build failed");
+    let summary = trace.trace_len_summary();
+    let chiplets = summary.chiplets_trace_len();
+    let padded_rows = summary.padded_trace_len();
+
+    assert!(
+        padded_rows <= max_padded_rows,
+        "{name} padded trace length {padded_rows} exceeds \
+         MIDEN_BENCH_MAX_PADDED_ROWS={max_padded_rows}"
+    );
+
+    let hasher_rows = chiplets.hash_chiplet_len();
+    let poseidon2_perm_rows = (0..hasher_rows)
+        .filter(|&row| {
+            trace.main_trace().chiplet_s_perm(RowIndex::from(row)).as_canonical_u64() == 1
+        })
+        .count();
+    let poseidon2_unique_perms = poseidon2_perm_rows / 16;
+    let poseidon2_controller_rows = hasher_rows - poseidon2_perm_rows;
+
+    eprintln!("=== {name} ===");
+    if let Some(expected) = expected_padded_rows {
+        eprintln!("  expected_padded_origin_next={expected}");
+    }
+    if guard_padded_rows != expected_padded_rows {
+        if let Some(guard) = guard_padded_rows {
+            eprintln!("  guard_padded_rows={guard}");
+        }
+    }
+    eprintln!(
+        "  rows: core={} range={} chiplets={} hash_ctrl={} bitwise={} memory={} padded={}",
+        summary.core_trace_len(),
+        summary.range_trace_len(),
+        chiplets.trace_len(),
+        chiplets.hash_chiplet_len(),
+        chiplets.bitwise_chiplet_len(),
+        chiplets.memory_chiplet_len(),
+        padded_rows,
+    );
+    eprintln!(
+        "  poseidon2_perm_rows={} poseidon2_unique_perms={} poseidon2_controller_rows={} \
+         proof_hash=Poseidon2",
+        poseidon2_perm_rows, poseidon2_unique_perms, poseidon2_controller_rows,
+    );
+
+    let advice_inputs = AdviceInputs::default();
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let options = ProvingOptions::new(HashFunction::Poseidon2);
+
+    let t0 = Instant::now();
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("proving failed");
+    let prove_time = t0.elapsed();
+
+    eprintln!("  prove_time:  {prove_time:.2?}");
+    eprintln!("  proof_size:  {} bytes", proof.to_bytes().len());
+
+    let t1 = Instant::now();
+    let security =
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("verification failed");
+    let verify_time = t1.elapsed();
+
+    eprintln!("  verify_time: {verify_time:.2?}");
+    eprintln!("  security:    {security}");
+}
+
+#[test]
+#[ignore = "benchmark: run via scripts/bench_poseidon2_synthetic.sh"]
+fn bench_prove_masm_file() {
+    use std::{fs, path::Path};
+
+    let path =
+        std::env::var("MIDEN_BENCH_MASM").expect("MIDEN_BENCH_MASM must point to the MASM fixture");
+    let expected_padded_rows =
+        std::env::var("MIDEN_BENCH_EXPECTED_PADDED_ROWS").ok().map(|value| {
+            value
+                .parse::<usize>()
+                .expect("MIDEN_BENCH_EXPECTED_PADDED_ROWS must be a usize")
+        });
+
+    let source =
+        fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    let name = Path::new(&path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(path.as_str());
+
+    bench_single_scenario(name, &source, expected_padded_rows);
+}
+
 // ================================================================================================
 // FAST PROCESSOR + PARALLEL TRACE GENERATION TESTS
 // ================================================================================================

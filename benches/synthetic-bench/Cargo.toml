@@ -20,7 +20,16 @@ thiserror       = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "4.6.0" }
+miden-assembly = { workspace = true, features = ["std"] }
+miden-core = { workspace = true, features = ["std"] }
+miden-core-lib = { workspace = true, features = ["std"] }
+miden-prover = { workspace = true, features = ["std"] }
+miden-utils-testing = { workspace = true }
 
 [[bench]]
 name = "synthetic_bench"
+harness = false
+
+[[bench]]
+name = "recursive_verify"
 harness = false

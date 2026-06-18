@@ -28,3 +28,7 @@ book/
 # Constraint analysis tooling
 .constraint-tooling/
 scripts/__pycache__/
+
+# Benchmark output
+/bench-results/
+/bench-baselines/results/
