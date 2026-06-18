@@ -35,7 +35,7 @@ authors = ["Miden contributors"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
-rust-version = "1.90"
+rust-version = "1.96"
 version = "0.24.0"
 
 [profile.optimized]

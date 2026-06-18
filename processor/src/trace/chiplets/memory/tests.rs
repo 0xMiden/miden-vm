@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::assert_matches;
 use core::ops::Range;
 
 use miden_air::trace::{
@@ -9,7 +10,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    ONE, WORD_SIZE, Word, ZERO, assert_matches,
+    ONE, WORD_SIZE, Word, ZERO,
     field::{Field, PrimeCharacteristicRing},
 };
 

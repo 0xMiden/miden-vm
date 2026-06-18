@@ -825,6 +825,7 @@ mod tests {
         vec,
         vec::Vec,
     };
+    use core::assert_matches;
     use std::collections::BTreeMap;
     #[cfg(feature = "std")]
     use std::fs;
@@ -833,7 +834,6 @@ mod tests {
     use miden_core::{
         Felt, Word,
         advice::AdviceMap,
-        assert_matches,
         mast::{
             BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
             MastNodeId,

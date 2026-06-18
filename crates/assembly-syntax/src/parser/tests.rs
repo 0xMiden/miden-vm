@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_core::assert_matches;
+use core::assert_matches;
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
 use super::*;

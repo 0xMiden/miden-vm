@@ -1099,11 +1099,12 @@ mod tests {
     use alloc::{boxed::Box, string::ToString};
     use std::{collections::BTreeMap, fs, sync::Arc};
 
+    use core::assert_matches;
     use miden_assembly_syntax::{
         ast::Path as AstPath,
         debuginfo::{DefaultSourceManager, Span},
     };
-    use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
+    use miden_core::{serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
     use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
