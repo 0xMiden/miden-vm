@@ -23,6 +23,8 @@ pub struct ExecutionOptions {
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
+    /// Maximum number of internal nodes allowed in the advice provider's Merkle store.
+    max_merkle_store_nodes: usize,
     /// Maximum number of deferred precompile requests allowed during execution.
     max_precompile_requests: usize,
     /// Maximum total number of calldata bytes allowed across deferred precompile requests.
@@ -51,6 +53,7 @@ impl Default for ExecutionOptions {
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
             max_precompile_request_calldata_bytes:
                 Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
@@ -87,6 +90,12 @@ impl ExecutionOptions {
     /// Default maximum number of continuations allowed on the continuation stack.
     /// Set to 2^16 (65536).
     pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
+
+    /// Default maximum number of internal nodes allowed in the advice provider's Merkle store.
+    ///
+    /// Set to 2^20 so the default allows large Merkle inputs and repeated updates while still
+    /// providing a finite host-memory backstop.
+    pub const DEFAULT_MAX_MERKLE_STORE_NODES: usize = 1 << 20;
 
     /// Default maximum number of deferred precompile requests allowed during execution.
     /// Set to 2^16 (65536).
@@ -170,6 +179,7 @@ impl ExecutionOptions {
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
             max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
             max_precompile_request_calldata_bytes:
                 Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
@@ -258,6 +268,12 @@ impl ExecutionOptions {
         self.max_num_continuations
     }
 
+    /// Returns the maximum number of internal nodes allowed in the advice provider's Merkle store.
+    #[inline]
+    pub fn max_merkle_store_nodes(&self) -> usize {
+        self.max_merkle_store_nodes
+    }
+
     /// Returns the maximum number of deferred precompile requests allowed during execution.
     #[inline]
     pub fn max_precompile_requests(&self) -> usize {
@@ -289,6 +305,12 @@ impl ExecutionOptions {
     /// Sets the maximum number of continuations allowed on the continuation stack.
     pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
         self.max_num_continuations = max_num_continuations;
+        self
+    }
+
+    /// Sets the maximum number of internal nodes allowed in the advice provider's Merkle store.
+    pub fn with_max_merkle_store_nodes(mut self, max_merkle_store_nodes: usize) -> Self {
+        self.max_merkle_store_nodes = max_merkle_store_nodes;
         self
     }
 
