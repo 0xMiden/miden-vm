@@ -24,9 +24,9 @@ pub enum InputKey {
     },
     /// Aux bus boundary value at the given index.
     AuxBusBoundary(usize),
-    /// Auxiliary batching challenge. The stark-vars slot is reserved (e.g. for future
-    /// multi-root folding) but is not referenced by the production circuit.
-    Gamma,
+    /// Reserved stark-vars slot, kept zero. Provides word-alignment padding for the base
+    /// stark-vars block; not referenced by the production circuit.
+    Reserved,
     /// Composition challenge used to fold constraints.
     Alpha,
     /// `zeta^N`, where `N` is the trace length.
@@ -112,7 +112,7 @@ impl InputKeyMapper<'_> {
             InputKey::IsTransitionAir(air) => {
                 layout.stark.multi_air.as_ref().and_then(|m| m.selector(air, 2))
             },
-            InputKey::Gamma => Some(layout.stark.gamma),
+            InputKey::Reserved => Some(layout.stark.reserved),
             // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),
             InputKey::F => Some(layout.stark.f),

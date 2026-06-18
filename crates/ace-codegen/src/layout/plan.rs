@@ -83,8 +83,8 @@ pub(crate) struct StarkVarIndices {
     pub is_last: usize,
     /// Precomputed transition selector: `z - g^{-1}`.
     pub is_transition: usize,
-    /// Batching challenge `gamma` for reduced_aux_values.
-    pub gamma: usize,
+    /// Reserved word-alignment slot for the base stark-vars block (kept zero).
+    pub reserved: usize,
 
     // -- Base-field values stored as (val, 0) in EF slots --
     /// First barycentric weight `1 / (k * s0^{k-1})`.
@@ -210,7 +210,7 @@ impl InputLayout {
         check("is_first", self.stark.is_first);
         check("is_last", self.stark.is_last);
         check("is_transition", self.stark.is_transition);
-        check("gamma", self.stark.gamma);
+        check("reserved", self.stark.reserved);
         // Base-field slots (stored as (val, 0) in the EF slot).
         check("weight0", self.stark.weight0);
         check("f", self.stark.f);

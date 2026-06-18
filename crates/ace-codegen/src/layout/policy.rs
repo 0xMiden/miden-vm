@@ -137,7 +137,7 @@ impl InputLayout {
         //   3    is_first            EF      Precomputed: (z^N - 1) / (z - 1)
         //   4    is_last             EF      Precomputed: (z^N - 1) / (z - g^{-1})
         //   5    is_transition       EF      Precomputed: z - g^{-1}
-        //   6    gamma               EF      Reserved (zero)
+        //   6    reserved            EF      Alignment padding (zero)
         //   7    weight0             base    First barycentric weight
         //   8    f                   base    Chunk shift ratio h^N
         //   9    s0                  base    First coset shift offset^N
@@ -148,7 +148,7 @@ impl InputLayout {
         let is_first = b + 3;
         let is_last = b + 4;
         let is_transition = b + 5;
-        let gamma = b + 6;
+        let reserved = b + 6;
         let weight0 = b + 7;
         let f = b + 8;
         let s0 = b + 9;
@@ -183,7 +183,7 @@ impl InputLayout {
                 is_first,
                 is_last,
                 is_transition,
-                gamma,
+                reserved,
                 weight0,
                 f,
                 s0,

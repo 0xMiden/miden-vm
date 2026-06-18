@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn from_nodes_accepts_published_root_shape() {
         let mut builder = DagBuilder::<QuadFelt>::new();
-        let a = builder.input(InputKey::Gamma);
+        let a = builder.input(InputKey::Reserved);
         let b = builder.constant(felt(2));
         let root = builder.add(a, b);
         let dag = builder.build(root);
@@ -384,7 +384,7 @@ mod tests {
     #[should_panic(expected = "DAG node must come from this DagBuilder")]
     fn from_nodes_rejects_foreign_node_from_another_builder() {
         let mut source_builder = DagBuilder::<QuadFelt>::new();
-        let a = source_builder.input(InputKey::Gamma);
+        let a = source_builder.input(InputKey::Reserved);
         let b = source_builder.constant(felt(2));
         let root = source_builder.add(a, b);
         let dag = source_builder.build(root);
@@ -400,7 +400,7 @@ mod tests {
     #[should_panic(expected = "DAG root must refer to a node built by this DagBuilder")]
     fn from_nodes_rejects_foreign_root_from_another_builder() {
         let mut source_builder = DagBuilder::<QuadFelt>::new();
-        let a = source_builder.input(InputKey::Gamma);
+        let a = source_builder.input(InputKey::Reserved);
         let b = source_builder.constant(felt(2));
         let root = source_builder.add(a, b);
         let dag = source_builder.build(root);

@@ -128,7 +128,7 @@ end
 #!   Word 0 (slots 0-1): alpha, z^N                (EF: composition challenge, trace-length power)
 #!   Word 1 (slots 2-3): z_k, is_first             (EF: periodic eval point, first-row selector)
 #!   Word 2 (slots 4-5): is_last, is_transition    (EF: last-row selector, transition selector)
-#!   Word 3 (slots 6-7): gamma, weight0            (EF: reserved slot, zero; base as EF: barycentric weight)
+#!   Word 3 (slots 6-7): reserved, weight0         (EF: alignment padding, zero; base as EF: barycentric weight)
 #!   Word 4 (slots 8-9): f, s0                     (base as EF: chunk shift ratio h^N, first shift)
 #!
 #! Multi-AIR appends 8 more EF slots (4 words):
@@ -276,7 +276,7 @@ pub proc set_up_auxiliary_inputs_ace
     # => [weight0, ...]
 
     # Store Word 3: [0, 0, weight0, 0]
-    # The gamma slot (slot 6) is reserved and unreferenced by the circuit; write zero.
+    # Slot 6 is reserved alignment padding, unreferenced by the circuit; write zero.
     # weight0 is still on the stack -- assemble the word.
     push.0.0
     # => [0, 0, weight0, ...]

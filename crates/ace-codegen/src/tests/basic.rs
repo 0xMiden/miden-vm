@@ -104,7 +104,7 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::IsFirst, ef(47));
     set(InputKey::IsLast, ef(43));
     set(InputKey::IsTransition, ef(2) - ef(3));
-    set(InputKey::Gamma, ef(53));
+    set(InputKey::Reserved, ef(53));
     set(InputKey::Weight0, ef(31));
     set(InputKey::F, ef(37));
     set(InputKey::S0, ef(41));

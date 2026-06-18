@@ -224,7 +224,7 @@ const OOD_EVALUATIONS_PTR = 3225419784        # AUX_RAND_ELEM_PTR + 4 (rand word
 const AUX_BUS_BOUNDARY_PTR = 3225420232       # OOD_EVALUATIONS_PTR + 448
 
 ### Auxiliary inputs for ACE (stark vars), 18 EF slots = 36 base felts (Word-aligned):
-###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, gamma (reserved, zero),
+###   slots 0-9:   alpha, z^N, z_k, is_first, is_last, is_transition, reserved (zero),
 ###                weight0, f, s0
 ###   slots 10-11: multi_air_beta_{core,chip}
 ###   slots 12-14: is_{first,last,transition}_core
