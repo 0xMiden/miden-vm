@@ -24,7 +24,11 @@ pub(super) fn maybe_use_caller_error_context<F>(
     package_debug_info: Option<&PackageDebugInfo>,
     host: &impl BaseHost,
 ) -> ExecutionError {
-    if matches!(original_err, ExecutionError::ProcedureNotFound { source_file: Some(_), .. }) {
+    if matches!(
+        original_err,
+        ExecutionError::ProcedureNotFound { source_file: Some(_), .. }
+            | ExecutionError::OperationError { source_file: Some(_), .. }
+    ) {
         return original_err;
     }
 
@@ -54,7 +58,7 @@ pub(super) fn maybe_use_caller_error_context<F>(
         _ => return original_err,
     }
 
-    // We found a caller continuation, so rebuild the error through the legacy no-context path.
+    // We found a caller continuation, so rebuild the error with caller source context when present.
     match &original_err {
         ExecutionError::ProcedureNotFound { .. } => match (package_debug_info, source_node_id) {
             (Some(debug_info), Some(source_node_id)) => {
@@ -66,7 +70,14 @@ pub(super) fn maybe_use_caller_error_context<F>(
             },
             _ => procedure_not_found_with_context(root_digest),
         },
-        ExecutionError::OperationError { err, .. } => err.clone().with_context(),
+        ExecutionError::OperationError { err, .. } => match (package_debug_info, source_node_id) {
+            (Some(debug_info), Some(source_node_id)) => err.clone().with_package_source_context(
+                PackageSourceDebugContext::new(debug_info, source_node_id),
+                host,
+                None,
+            ),
+            _ => err.clone().with_context(),
+        },
         _ => original_err,
     }
 }

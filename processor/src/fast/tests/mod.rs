@@ -32,7 +32,9 @@ use rstest::rstest;
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost,
+    AdviceInputs, BaseHost, DefaultHost, LoadedMastForest, ProcessorState, SyncHost,
+    advice::AdviceMutation,
+    event::EventError,
     operation::OperationError,
     processor::{StackInterface, SystemInterface},
 };
@@ -1119,8 +1121,14 @@ fn same_digest_entrypoint_fixture(
     }
 }
 
-fn missing_external_package_source_debug_fixture()
--> (Program, PackageDebugInfo, DefaultHost, SourceSpan, Arc<SourceFile>) {
+fn missing_external_package_source_debug_fixture() -> (
+    Program,
+    PackageDebugInfo,
+    DefaultHost,
+    Arc<DefaultSourceManager>,
+    SourceSpan,
+    Arc<SourceFile>,
+) {
     let mut forest = MastForest::new();
     let missing_digest = Word::from([ONE, ONE, ONE, ONE]);
     let external_id = ExternalNodeBuilder::new(missing_digest).add_to_forest(&mut forest).unwrap();
@@ -1134,7 +1142,7 @@ fn missing_external_package_source_debug_fixture()
         uri.clone(),
         SourceContent::new("masm", uri.clone(), "begin\n    call.missing::proc\nend\n"),
     );
-    let host = DefaultHost::default().with_source_manager(source_manager);
+    let host = DefaultHost::default().with_source_manager(source_manager.clone());
 
     let source_root = DebugSourceNodeId::from(0);
     let source_external = DebugSourceNodeId::from(1);
@@ -1160,12 +1168,38 @@ fn missing_external_package_source_debug_fixture()
         ),
     );
 
-    (program, package_debug_info, host, expected_span, source_file)
+    (program, package_debug_info, host, source_manager, expected_span, source_file)
+}
+
+struct MalformedExternalHost {
+    source_manager: Arc<DefaultSourceManager>,
+    loaded_mast_forest: LoadedMastForest,
+}
+
+impl BaseHost for MalformedExternalHost {
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let source_file = self.source_manager.get_by_uri(location.uri());
+        let label = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (label, source_file)
+    }
+}
+
+impl SyncHost for MalformedExternalHost {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
+        Some(self.loaded_mast_forest.clone())
+    }
+
+    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
 }
 
 #[test]
 fn package_source_debug_missing_external_preserves_external_source_span() {
-    let (program, package_debug_info, mut host, expected_span, source_file) =
+    let (program, package_debug_info, mut host, _, expected_span, source_file) =
         missing_external_package_source_debug_fixture();
 
     let err = FastProcessor::new(StackInputs::default())
@@ -1182,9 +1216,70 @@ fn package_source_debug_missing_external_preserves_external_source_span() {
     );
 }
 
+#[test]
+fn package_source_debug_malformed_external_preserves_external_source_span() {
+    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
+        missing_external_package_source_debug_fixture();
+
+    let mut wrong_forest = MastForest::new();
+    let wrong_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut wrong_forest)
+        .unwrap();
+    wrong_forest.make_root(wrong_root);
+
+    let mut host = MalformedExternalHost {
+        source_manager,
+        loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
+    };
+
+    let err = FastProcessor::new(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
+        .execute_with_package_debug_info_sync(&program, &package_debug_info, &mut host)
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::MalformedMastForestInHost { .. },
+        } if label == expected_span && actual_source_file.id() == source_file.id()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn package_source_debug_malformed_external_preserves_external_source_span_async() {
+    let (program, package_debug_info, _, source_manager, expected_span, source_file) =
+        missing_external_package_source_debug_fixture();
+
+    let mut wrong_forest = MastForest::new();
+    let wrong_root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut wrong_forest)
+        .unwrap();
+    wrong_forest.make_root(wrong_root);
+
+    let mut host = MalformedExternalHost {
+        source_manager,
+        loaded_mast_forest: LoadedMastForest::new(Arc::new(wrong_forest)),
+    };
+
+    let err = FastProcessor::new(StackInputs::new(&[Felt::ONE, Felt::ONE]).unwrap())
+        .execute_with_package_debug_info(&program, &package_debug_info, &mut host)
+        .await
+        .unwrap_err();
+
+    assert_matches!(
+        err,
+        ExecutionError::OperationError {
+            label,
+            source_file: Some(actual_source_file),
+            err: OperationError::MalformedMastForestInHost { .. },
+        } if label == expected_span && actual_source_file.id() == source_file.id()
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn package_source_debug_missing_external_preserves_external_source_span_async() {
-    let (program, package_debug_info, mut host, expected_span, source_file) =
+    let (program, package_debug_info, mut host, _, expected_span, source_file) =
         missing_external_package_source_debug_fixture();
 
     let err = FastProcessor::new(StackInputs::default())

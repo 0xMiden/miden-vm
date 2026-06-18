@@ -1004,9 +1004,15 @@ impl FastProcessor {
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
-                .map_exec_err()
-                .unwrap_err()
+            let err = OperationError::MalformedMastForestInHost { root_digest: node_digest };
+            match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
+                    PackageSourceDebugContext::new(debug_info, source_node_id),
+                    host,
+                    None,
+                ),
+                _ => Err::<(), _>(err).map_exec_err().unwrap_err(),
+            }
         })?;
 
         self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;
@@ -1054,9 +1060,15 @@ impl FastProcessor {
         let mast_forest = loaded_mast_forest.mast_forest().clone();
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
-                .map_exec_err()
-                .unwrap_err()
+            let err = OperationError::MalformedMastForestInHost { root_digest: node_digest };
+            match (package_debug_info, source_node_id) {
+                (Some(debug_info), Some(source_node_id)) => err.with_package_source_context(
+                    PackageSourceDebugContext::new(debug_info, source_node_id),
+                    host,
+                    None,
+                ),
+                _ => Err::<(), _>(err).map_exec_err().unwrap_err(),
+            }
         })?;
 
         self.advice.extend_map(mast_forest.advice_map()).map_exec_err()?;
