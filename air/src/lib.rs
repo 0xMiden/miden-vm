@@ -644,19 +644,19 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 
     /// Absorb statement-owned public inputs into the Fiat-Shamir challenger.
     ///
-    /// Replaces the default length-prefixed stream with the rate-aligned schedule
-    /// the MASM recursive verifier mirrors (six 8-felt blocks, 48 felts total):
+    /// Replaces the default length-prefixed stream with a rate-aligned schedule (six 8-felt
+    /// blocks, 48 felts total) that the recursive verifier mirrors:
     ///
     /// ```text
-    /// [ kernel_H (4) | 0,0,0,0 ]      Poseidon2 summary of the kernel digests
-    /// [ program_hash (4) | transcript_state (4) ]
-    /// [ stack_inputs (16) ]           two blocks
-    /// [ stack_outputs (16) ]          two blocks
+    /// [ kernel_H (4) | program_hash (4) ]
+    /// [ transcript_state (4) | 0,0,0,0 ]      trailing pad keeps the schedule rate-aligned
+    /// [ stack_inputs (16) ]                   two blocks
+    /// [ stack_outputs (16) ]                  two blocks
     /// ```
     ///
     /// The kernel digests enter the transcript only through `kernel_H`
-    /// (see [`hash_kernel_digests`]), giving callers of the recursive verifier a
-    /// fixed-size commitment to the kernel instead of the unbounded digest list.
+    /// (see [`hash_kernel_digests`]), committing to the kernel with a fixed-size value instead
+    /// of the unbounded digest list.
     fn observe<C: CanObserve<Felt>>(
         &self,
         challenger: &mut C,
@@ -667,16 +667,21 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
         assert_eq!(air_inputs.len(), NUM_PUBLIC_VALUES, "unexpected public-value count");
 
         let kernel_h = hash_kernel_digests(aux_inputs);
-        for v in kernel_h {
+        let program_hash = &air_inputs[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE];
+        let transcript_state = &air_inputs[PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE];
+        let stack_io = &air_inputs[PV_PROGRAM_HASH + WORD_SIZE..PV_TRANSCRIPT_STATE];
+
+        // Block 1: kernel_H | program_hash. Block 2: transcript_state | zero pad.
+        for &v in kernel_h.iter().chain(program_hash) {
+            challenger.observe(v);
+        }
+        for &v in transcript_state {
             challenger.observe(v);
         }
         for _ in 0..WORD_SIZE {
             challenger.observe(Felt::ZERO);
         }
-        let program_hash = &air_inputs[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE];
-        let transcript_state = &air_inputs[PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE];
-        let stack_io = &air_inputs[PV_PROGRAM_HASH + WORD_SIZE..PV_TRANSCRIPT_STATE];
-        for &v in program_hash.iter().chain(transcript_state).chain(stack_io) {
+        for &v in stack_io {
             challenger.observe(v);
         }
     }
@@ -711,16 +716,14 @@ impl<EF: ExtensionField<Felt>> MultiAir<Felt, EF> for MidenMultiAir {
 // KERNEL DIGEST SUMMARY HASH
 // ================================================================================================
 
-/// Computes `kernel_H`, the fixed-size Poseidon2 commitment to the kernel-procedure digests.
+/// Computes `kernel_H`, the fixed-size commitment to the kernel-procedure digests.
 ///
 /// This is the canonical [`Kernel::commitment`] value expressed over the flattened digest
-/// felts: the Poseidon2 linear hash (`hash_elements`) of `kernel_felts`, packing eight felts
-/// (two digests) per permutation. The empty digest list yields `hash_elements(&[])`.
+/// felts: the linear hash (`hash_elements`) of `kernel_felts`. The empty digest list yields
+/// `hash_elements(&[])`.
 ///
-/// The MASM recursive verifier recomputes the same value from the materialized digests
-/// (`sys/vm/public_inputs.masm`); both sides absorb `kernel_H` into the Fiat-Shamir transcript
-/// in place of the unbounded digest list, and callers of the recursive verifier read it back
-/// as the kernel commitment of the verified statement.
+/// `kernel_H` is absorbed into the Fiat-Shamir transcript in place of the unbounded kernel
+/// digest list, committing to the kernel with a fixed-size value.
 pub fn hash_kernel_digests(kernel_felts: &[Felt]) -> [Felt; WORD_SIZE] {
     assert!(
         kernel_felts.len().is_multiple_of(WORD_SIZE),

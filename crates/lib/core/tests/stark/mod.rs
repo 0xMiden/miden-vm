@@ -259,8 +259,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let pi_ptr = read_elem(3223322671) as u32;
     let c_total_ptr = 3223322704_u32;
 
-    // 4) kernel_H at reduced_inputs+0..4 must match the Rust mirror; the pad word at +4..8 must be
-    //    zero.
+    // 4) kernel_H at reduced_inputs+0..4 must match the Rust mirror.
     let digest_felts: Vec<Felt> =
         kernel_digest_felts.iter().map(|&v| Felt::new_unchecked(v)).collect();
     let expected_kernel_h = miden_air::hash_kernel_digests(&digest_felts);
@@ -271,17 +270,18 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
             "kernel_H felt {i} mismatch (nk={num_kernel_proc_digests})"
         );
     }
-    for i in 4..8 {
-        assert_eq!(read_elem(reduced_ptr + i), 0, "kernel_H pad felt {i} must be zero");
-    }
 
-    // 5) program_digest / transcript_state pass through to reduced_inputs+8..16.
+    // 5) program_digest / transcript_state pass through to reduced_inputs+4..12; the trailing pad
+    //    word at +12..16 must be zero.
     for (i, &v) in program_digest.iter().chain(transcript_state.iter()).enumerate() {
         assert_eq!(
-            read_elem(reduced_ptr + 8 + i as u32),
+            read_elem(reduced_ptr + 4 + i as u32),
             v,
             "reduced-inputs window felt {i} mismatch"
         );
+    }
+    for i in 12..16 {
+        assert_eq!(read_elem(reduced_ptr + i), 0, "reduced-inputs pad felt {i} must be zero");
     }
 
     // 6) FLPI region holds the stack i/o as EF elements ([val, 0] per slot).

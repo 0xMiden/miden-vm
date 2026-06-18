@@ -15,10 +15,11 @@ use miden::core::stark::constants
 #!         beta0, beta1, alpha0, alpha1, <pad>, OOD-start, ...]
 #!
 #! where:
-#!   a) `reduced_inputs` holds [kernel_H (4) | zero_pad (4) | program_digest (4) |
-#!      transcript_state (4)] — the caller-facing summary of the variable-length public
-#!      inputs. `kernel_H` is the Poseidon2 hash of all kernel-procedure digests;
-#!      `program_digest` and `transcript_state` are passed through unchanged.
+#!   a) `reduced_inputs` holds [kernel_H (4) | program_digest (4) | transcript_state (4) |
+#!      zero_pad (4)] — the caller-facing summary of the variable-length public inputs.
+#!      `kernel_H` is the hash of all kernel-procedure digests; `program_digest` and
+#!      `transcript_state` are passed through unchanged. The trailing pad rate-aligns the FS
+#!      observation.
 #!   b) `pi` holds the fixed-length public inputs (stack i/o) as extension field elements.
 #!      Each base felt sits at `pi + 2*i`, with zero in the high coordinate.
 #!   c) `[beta0, beta1, alpha0, alpha1]` is the auxiliary randomness (loaded
@@ -54,19 +55,10 @@ end
 #!   pi_ptr             = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
 #!   reduced_inputs_ptr = pi_ptr - 16
 #!
-#! The `* 2` for FLPI converts the base felt count to EF slots (each base felt is stored as
-#! `[val, 0]`). The `-8` accounts for the 2 words between FLPI end and OOD start:
-#!   - aux_rand word `[beta0, beta1, alpha0, alpha1]` at AUX_RAND_ELEM_PTR (4 felts);
-#!   - codegen alignment padding (4 felts) — the ACE codegen MASM layout policy double-word-
-#!     aligns the main-trace OOD region, which forces a 1-word gap after the word-aligned
-#!     randomness slot.
-#! The `-16` reserves the 16-felt caller-facing reduced-inputs block immediately below FLPI:
-#! `[kernel_H | zero_pad | program_digest | transcript_state]`. The zero pad keeps the FS
-#! observation rate-aligned (8-felt chunks) when `kernel_H` and the single-word VLPI messages
-#! are absorbed.
-#!
-#! The reduced-inputs block is NOT consumed by the ACE circuit; it sits there as a stable
-#! caller-readable summary of the variable-length public inputs after `verify_proof` returns.
+#! The `* 2` converts the FLPI base-felt count to EF slots (each base felt is stored as
+#! `[val, 0]`). The `-8` skips the two words between FLPI and OOD: the auxiliary randomness word
+#! and the codegen alignment pad. The `-16` reserves the caller-facing reduced-inputs block,
+#! `[kernel_H | program_digest | transcript_state | pad]` (see `stark/constants.masm`).
 #!
 #! Inputs:  [num_fixed_len_pi, ...]
 #! Outputs: [...]

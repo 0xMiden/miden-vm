@@ -1,6 +1,6 @@
-//! ACE circuit integration for the multi-AIR (CoreAir + ChipletsAir) proof.
+//! ACE circuit integration for the multi-AIR proof.
 //!
-//! The circuit checks the β-folded constraint composition of the two AIRs. The
+//! The circuit checks the β-folded constraint composition of the AIRs. The
 //! LogUp auxiliary-trace boundary identity
 //!
 //! ```text
@@ -10,9 +10,7 @@
 //!         + c_kernel_rom
 //! ```
 //!
-//! is *not* part of the circuit: the MASM verifier asserts it directly on the
-//! operand stack (see `sys/vm/public_inputs.masm` / `sys/vm/aux_trace.masm`),
-//! mirroring the native verifier's `MidenMultiAir::eval_external` check.
+//! is checked outside the circuit, against the absorbed per-AIR LogUp finals.
 
 use alloc::vec::Vec;
 
@@ -37,8 +35,7 @@ use crate::MidenAir;
 ///   `combined = 0`
 /// where `combined = chip_acc · β_multi + core_acc - q·v` is the β-folded sum of the per-AIR
 /// alpha-folded constraint roots minus the shared quotient binding. The cross-AIR LogUp
-/// boundary identity is asserted separately by the MASM verifier (it is not batched into
-/// the circuit).
+/// boundary identity is checked separately, outside the circuit.
 ///
 /// Implementation strategy:
 /// 1. Build per-AIR sub-DAGs with their own (single-AIR) layouts via [`build_ace_dag_for_air`].

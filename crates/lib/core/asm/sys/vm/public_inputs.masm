@@ -17,30 +17,39 @@ use miden::core::crypto::hashes::poseidon2
 # Memory layout populated (low -> high addresses):
 #
 #   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]   caller-facing reduced-inputs
-#                           [ zero word         (4 felts) ]   block (16 felts; the zero pad
-#                           [ program_digest    (4 felts) ]   keeps FS observation rate-aligned)
-#                           [ transcript_state  (4 felts) ]
+#                           [ program_digest    (4 felts) ]   block (16 felts). The trailing
+#                           [ transcript_state  (4 felts) ]   pad keeps the FS observation
+#                           [ zero pad          (4 felts) ]   rate-aligned (two 8-felt chunks).
 #
 #   pi_ptr             -->  [ FLPI: 32 base felts as 32 EF slots ]   stack i/o
 #
 #   anchor             -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   AUX_RAND_ND_PTR (loaded ND
 #                                                                     here, verified in step II)
 #
-# The outer-LogUp boundary correction accumulated at `C_TOTAL_PTR` is
-#     c_total = Σ_i 1 / ((α + γ) + msg(kernel_digest_i))    (KernelRomInit)
-#             +     1 / ((α + 2γ) + msg(program_digest))    (BlockHashTable)
-#             +     1 / (α + 3γ)                            (LogPrecompileTranscript init)
-#             −     1 / ((α + 3γ) + msg(transcript_state))  (LogPrecompileTranscript final)
-# with `γ = β^16` and `msg(w) = Σ_{i<4} w_i·β^i`, computed using the non-deterministically
-# supplied `α, β` (verified against the FS-sampled values by `generate_aux_randomness` in
-# step II). The step-II `observe_aux_trace` then asserts the boundary identity
-# `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals, mirroring
-# `MidenMultiAir::eval_external` on the Rust side.
+# The trailing pad slot is read back zero from the VM's zero-initialized memory; nothing writes
+# it, so no explicit store is needed.
+#
+# The outer-LogUp boundary correction accumulated at `C_TOTAL_PTR` is the signed sum of one
+# inverted bus term per boundary interaction:
+#
+#     c_total = Σ_i 1 / d(KernelRomInit,           kernel_digest_i)   (request,  +1)
+#             +     1 / d(BlockHashTable,           program_digest)   (request,  +1)
+#             +     1 / d(LogPrecompileTranscript,  <empty>)          (request,  +1)
+#             −     1 / d(LogPrecompileTranscript,  transcript_state) (response, −1)
+#
+# where the bus-message denominator is `d(bus, w) = (α + (bus + 1)·γ) + msg(w)`, the prefix
+# scale `bus + 1` is the matching `BUS_ID_*_PLUS_ONE` constant, `γ = β^MAX_MESSAGE_WIDTH`, and
+# `msg(w) = Σ_{j<4} w_j·β^j` (the empty message of the init term gives `msg = 0`). It is
+# computed from the non-deterministically supplied `α, β` (verified against the FS-sampled
+# values by `generate_aux_randomness` in step II); the step-II `observe_aux_trace` then asserts
+# the boundary identity `c_total + aux_sum == 0` against the absorbed per-AIR LogUp finals.
+# Requests (multiplicity +1) are added and the single response (−1) is subtracted, so `c_total`
+# is accumulated as `requests − response`.
 #
 # Fiat-Shamir absorption order (rate-aligned, 6 permutes total, mirrors
 # `MidenMultiAir::observe`):
-#   1. kernel_H + zero word                           (8 felts)
-#   2. program_digest + transcript_state              (4 + 4 = 8 felts)
+#   1. kernel_H + program_digest                      (4 + 4 = 8 felts)
+#   2. transcript_state + zero pad                    (4 + 4 = 8 felts)
 #   3. stack_inputs[0..8]                             (8 felts)
 #   4. stack_inputs[8..16]                            (8 felts)
 #   5. stack_outputs[0..8]                            (8 felts)
@@ -71,6 +80,11 @@ const MAX_AUX_INPUTS = 1020
 const BUS_ID_KERNEL_ROM_INIT_PLUS_ONE           = 1   # KernelRomInit (0) + 1
 const BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE          = 2   # BlockHashTable (1) + 1
 const BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE = 3   # LogPrecompileTranscript (2) + 1
+
+# Word offsets into the 16-felt reduced-inputs block at `reduced_inputs_ptr`:
+#   [ kernel_H (+0) | program_digest (+4) | transcript_state (+8) | zero pad (+12) ].
+const REDUCED_INPUTS_PROGRAM_OFFSET    = 4
+const REDUCED_INPUTS_TRANSCRIPT_OFFSET = 8
 
 
 # CONSTANTS GETTERS
@@ -110,42 +124,54 @@ pub proc process_public_inputs
     exec.compute_bus_gamma
     # => [...]
 
-    # 3) Initialise c_total to zero.
-    push.0 exec.constants::c_total_ptr mem_store
-    push.0 exec.constants::c_total_ptr add.1 mem_store
-    # => [...]
+    # 3) Materialize the kernel digests from advice, recompute the kernel commitment
+    #    `kernel_H = hash_elements(digests)`, and store it at reduced_inputs+0 for the FS
+    #    observation. Leaves the digest region pointer and count for the fold below.
+    exec.stream_and_store_kernel_digests
+    # => [base, N, ...]
 
-    # 4) Phase 1 — materialize the kernel digests from advice, recompute the kernel commitment
-    #    `kernel_H = hash_elements(digests)`, store it at reduced_inputs+0 with a zero pad at
-    #    reduced_inputs+4, and fold each digest into c_total by `1 / ((α + γ) + msg(d))`.
-    exec.stream_kernel_digests
-    # => [...]
+    # 4) Outer-LogUp boundary correction `c_total`, kept as a running extension-field value on
+    #    the stack. Request contributions (multiplicity +1) are added; the single response
+    #    contribution (transcript state, multiplicity −1) is subtracted once at the end.
+    push.0.0
+    # => [acc0, acc1, base, N, ...]   (acc = 0)
 
-    # 5) Phase 2 — single-word small messages.
-    #    Read program_digest (4 felts canonical), fold +1/d_block_hash into c_total, store
-    #    at reduced_inputs+8. Stack input convention: [bus_id_plus_one (top), offset, ...].
-    push.8 push.BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE
-    exec.consume_small_message_add_to_c_total
-    # => [...]
+    #    Request a) kernel digests: Σ_i 1 / ((α + γ) + msg(digest_i)).
+    exec.fold_kernel_digests_into_acc
+    # => [acc0, acc1, ...]
 
-    #    Read transcript_state (4 felts), fold −1/d_lp_final into c_total, store at +12.
-    push.12 push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
-    exec.consume_small_message_sub_from_c_total
-    # => [...]
+    #    Request b) program digest: + 1 / ((α + 2γ) + msg(program)). Stored at reduced_inputs+4.
+    #    Stack input convention: [bus_id_plus_one (top), offset, ...].
+    push.REDUCED_INPUTS_PROGRAM_OFFSET push.BUS_ID_BLOCK_HASH_TABLE_PLUS_ONE
+    exec.consume_small_message_compute_inv_term
+    ext2add
+    # => [acc0, acc1, ...]
 
-    #    Constant lp_init term: c_total += 1/(α + 3γ) (the init message is all zeros).
+    #    Request c) log-precompile init: + 1 / (α + 3γ) (the init message is all zeros).
     push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
     exec.push_alpha_plus_i_gamma
     ext2inv
-    exec.add_into_c_total
+    ext2add
+    # => [acc0, acc1, ...]
+
+    #    Response) transcript state: − 1 / ((α + 3γ) + msg(transcript)). Stored at reduced_inputs+8.
+    push.REDUCED_INPUTS_TRANSCRIPT_OFFSET push.BUS_ID_LOG_PRECOMPILE_TRANSCRIPT_PLUS_ONE
+    exec.consume_small_message_compute_inv_term
+    # => [t0, t1, acc0, acc1, ...]
+    neg swap neg swap
+    ext2add
+    # => [acc0, acc1, ...]   (acc = requests − response)
+
+    #    Store c_total once.
+    exec.constants::c_total_ptr mem_store
+    exec.constants::c_total_ptr add.1 mem_store
     # => [...]
 
-    # 6) Phase 3a — observe the 16-felt reduced-inputs window into FS as two rate-aligned
-    #    chunks.
+    # 5) Observe the 16-felt reduced-inputs window into FS as two rate-aligned chunks.
     exec.absorb_reduced_inputs_window_into_fs
     # => [...]
 
-    # 7) Phase 3b — load FLPI (stack i/o) into the FLPI region and absorb into FS.
+    # 6) Load FLPI (stack i/o) into the FLPI region and absorb into FS.
     exec.load_public_inputs
     # => [...]
 end
@@ -165,8 +191,11 @@ proc load_aux_rand_nd
     dropw
 end
 
-#! Computes `γ = β^16` for per-bus domain separation and stores it at BUS_GAMMA_PTR as
-#! `[γ0, γ1, 0, 0]`.
+#! Computes `γ = β^MAX_MESSAGE_WIDTH` for per-bus domain separation and stores it at
+#! BUS_GAMMA_PTR as `[γ0, γ1, 0, 0]`.
+#!
+#! The four squarings below reach `β^16`; `MAX_MESSAGE_WIDTH` is hardcoded as 16 here, guarded
+#! by the `MIDEN_MAX_MESSAGE_WIDTH` tripwire in `air/src/constraints/lookup/messages.rs`.
 #!
 #! Input:  [...]
 #! Output: [...]
@@ -215,59 +244,37 @@ end
 #! Input:  [m0, m1, m2, m3, ...]
 #! Output: [msg0, msg1, ...]
 proc fold_digest_word
-    # acc = m3 (lifted to EF)
     movup.3 push.0 swap
     # => [m3, 0, m0, m1, m2, ...]
-
-    # acc = acc·β + m2
     exec.push_beta ext2mul
     movup.4 add
     # => [acc0, acc1, m0, m1, ...]
-
-    # acc = acc·β + m1
     exec.push_beta ext2mul
     movup.3 add
     # => [acc0, acc1, m0, ...]
-
-    # acc = acc·β + m0
     exec.push_beta ext2mul
     movup.2 add
     # => [msg0, msg1, ...]
 end
 
-#! Adds the extension field element on top of the stack into the running boundary
-#! correction at C_TOTAL_PTR.
-#!
-#! Input:  [v0, v1, ...]
-#! Output: [...]
-proc add_into_c_total
-    exec.constants::c_total_ptr add.1 mem_load
-    exec.constants::c_total_ptr mem_load
-    # => [c0, c1, v0, v1, ...]
-    ext2add
-    # => [s0, s1, ...]
-    exec.constants::c_total_ptr mem_store
-    exec.constants::c_total_ptr add.1 mem_store
-    # => [...]
-end
-
-#! Phase 1 — materializes the kernel-procedure digests, recomputes the kernel commitment, and
-#! folds the digests into the outer-LogUp boundary correction.
+#! Materializes the kernel-procedure digests and recomputes the kernel commitment for the FS
+#! observation.
 #!
 #! Steps:
 #!   1. Read `N` (the number of digests) from advice and bound it by
 #!      `Kernel::MAX_NUM_PROCEDURES`.
 #!   2. Stream `N` canonical digests `[d0, d1, d2, d3]` from advice and write them, in order,
 #!      into the `KERNEL_DIGESTS_PTR` scratch region.
-#!   3. Recompute `kernel_H = hash_elements(region, 4·N)`, the canonical Poseidon2 hash of the
-#!      flattened digests, matching `MidenMultiAir::observe` / `Kernel::commitment` on the Rust
-#!      side. An empty digest list yields `hash_elements` of zero elements.
-#!   4. Hand `(kernel_H, region, N)` to `observe_and_fold_kernel`, which stores `kernel_H` for
-#!      the FS observation and folds each digest into c_total.
+#!   3. Recompute `kernel_H = hash_elements(region, 4·N)`, the canonical hash of the flattened
+#!      digests, matching `MidenMultiAir::observe` / `Kernel::commitment` on the Rust side. An
+#!      empty digest list yields `hash_elements` of zero elements.
+#!   4. Store `kernel_H` canonically at `reduced_inputs_ptr + 0` for the FS observation.
+#!
+#! The boundary fold over the digests is performed separately by `fold_kernel_digests_into_acc`.
 #!
 #! Input:  [...]
-#! Output: [...]
-proc stream_kernel_digests
+#! Output: [base, N, ...]   (`base` = KERNEL_DIGESTS_PTR, `N` = number of digests)
+proc stream_and_store_kernel_digests
     # Read N; mirror Statement::new's `aux_inputs.len() <= max_aux_inputs()` bound: at most
     # MAX_AUX_INPUTS / WORD_SIZE = 255 kernel digests.
     adv_push
@@ -298,104 +305,66 @@ proc stream_kernel_digests
     drop drop
     # => [...]
 
-    # --- Recompute kernel_H = hash_elements(region, 4·N). ---
+    # --- Recompute kernel_H = hash_elements(region, 4·N) and store it at reduced_inputs+0. ---
     exec.constants::tmp3 mem_load mul.4
     exec.constants::kernel_digests_ptr
     # => [base, 4·N, ...]
     exec.poseidon2::hash_elements
     # => [kH0, kH1, kH2, kH3, ...]
-
-    # --- Hand (kernel_H, region, N) to the core fold/observe step. ---
-    exec.constants::tmp3 mem_load
-    exec.constants::kernel_digests_ptr
-    movdn.5 movdn.5
-    # => [kH0, kH1, kH2, kH3, base, N, ...]
-    exec.observe_and_fold_kernel
-    # => [...]
-end
-
-#! Core kernel step: stores the kernel commitment for the FS observation and folds each
-#! kernel digest into the outer-LogUp boundary correction.
-#!
-#! `kernel_H` is stored canonically at `reduced_inputs_ptr + 0`, with a zero pad word at
-#! `reduced_inputs_ptr + 4` so the FS observation can absorb `[kernel_H | 0_pad]` as a single
-#! rate-aligned 8-felt chunk. Each digest in `[ptr, ptr + 4·N)` is then folded into c_total by
-#! `1 / ((α + γ) + msg(d))` via Horner evaluation. The commitment is given by the caller (it is
-#! independent of how it was obtained), and the digests are read from memory.
-#!
-#! Input:  [kH0, kH1, kH2, kH3, ptr, N, ...]
-#! Output: [...]
-proc observe_and_fold_kernel
-    # Store kernel_H canonically at reduced_inputs+0.
     exec.constants::reduced_inputs_address_ptr mem_load
     mem_storew_le
     dropw
-    # => [ptr, N, ...]
+    # => [...]
 
-    # Write the zero pad word at reduced_inputs+4 (the FS-alignment pad).
-    padw
-    exec.constants::reduced_inputs_address_ptr mem_load add.4
-    mem_storew_le
-    dropw
-    # => [ptr, N, ...]
+    # --- Return (base, N) for the boundary fold. ---
+    exec.constants::kernel_digests_ptr
+    exec.constants::tmp3 mem_load
+    swap
+    # => [base, N, ...]
+end
 
-    # Fold each digest from memory into c_total.
-    dup.1 push.0 neq
+#! Folds each kernel digest into the running boundary-correction accumulator on the stack.
+#!
+#! Each digest in `[base, base + 4·N)` contributes `1 / ((α + γ) + msg(d))` (KernelRomInit, a
+#! request) via Horner evaluation. The accumulator is kept on the stack across the loop (no
+#! per-term memory round-trip).
+#!
+#! Input:  [acc0, acc1, base, N, ...]
+#! Output: [acc0, acc1, ...]   (acc += Σ_i 1 / ((α + γ) + msg(digest_i)))
+proc fold_kernel_digests_into_acc
+    dup.3 push.0 neq
     while.true
-        # Loop entry: [ptr, N, ...]
-        padw dup.4 mem_loadw_le
-        # => [d0, d1, d2, d3, ptr, N, ...]
+        # Loop entry: [acc0, acc1, base, N, ...]
+        padw dup.6 mem_loadw_le
+        # => [d0, d1, d2, d3, acc0, acc1, base, N, ...]
         exec.fold_digest_word
-        # => [msg0, msg1, ptr, N, ...]
+        # => [msg0, msg1, acc0, acc1, base, N, ...]
         push.BUS_ID_KERNEL_ROM_INIT_PLUS_ONE
         exec.push_alpha_plus_i_gamma
-        # => [p0, p1, msg0, msg1, ptr, N, ...]
+        # => [p0, p1, msg0, msg1, acc0, acc1, base, N, ...]
         ext2add ext2inv
-        # => [t0, t1, ptr, N, ...]
-        exec.add_into_c_total
-        # => [ptr, N, ...]
-        add.4 swap sub.1 swap
-        # => [ptr+4, N-1, ...]
-        dup.1 push.0 neq
-        # => [N-1 != 0, ptr+4, N-1, ...]
+        # => [t0, t1, acc0, acc1, base, N, ...]
+        ext2add
+        # => [acc0, acc1, base, N, ...]   (acc += t)
+        movup.2 add.4 movdn.2
+        # => [acc0, acc1, base+4, N, ...]
+        movup.3 sub.1 movdn.3
+        # => [acc0, acc1, base+4, N-1, ...]
+        dup.3 push.0 neq
+        # => [N-1 != 0, acc0, acc1, base+4, N-1, ...]
     end
-    drop drop
-    # => [...]
-end
-
-#! Phase 2 helper — reads a single 4-felt message (canonical) from advice, computes
-#!     inv_term = 1 / ((α + i·γ) + msg(d))
-#! adds it to c_total, and stores the message word canonically at
-#! `reduced_inputs_ptr + offset`.
-#!
-#! Input:  [bus_id_plus_one, offset, ...]
-#! Output: [...]
-proc consume_small_message_add_to_c_total
-    exec.consume_small_message_compute_inv_term
-    # => [inv_term0, inv_term1, ...]
-    exec.add_into_c_total
-end
-
-#! Like `consume_small_message_add_to_c_total`, but **subtracts** `1/term` from c_total.
-#! Used for `transcript_state` (the LogPrecompile final boundary, multiplicity −1).
-#!
-#! Input:  [bus_id_plus_one, offset, ...]
-#! Output: [...]
-proc consume_small_message_sub_from_c_total
-    exec.consume_small_message_compute_inv_term
-    # => [inv_term0, inv_term1, ...]
-    neg swap neg swap
-    # => [-inv_term0, -inv_term1, ...]
-    exec.add_into_c_total
+    movup.3 drop movup.2 drop
+    # => [acc0, acc1, ...]
 end
 
 #! Reads a 4-felt canonical word `[d0, d1, d2, d3]` from advice, stores it canonically at
-#! `reduced_inputs_ptr + offset`, and computes
+#! `reduced_inputs_ptr + offset`, and computes the inverted bus term
 #!     inv_term = 1 / ((α + i·γ) + msg(d))
+#! where `i = bus_id_plus_one` and `msg(d) = Σ_{j<4} d_j·β^j`. The caller adds (request) or
+#! subtracts (response) the result from the boundary accumulator.
 #!
-#! `adv_loadw` lands the word with `d0` on top, which is the input shape both
-#! `mem_storew_le` (canonical write) and `fold_digest_word` (Horner reduction) expect, so
-#! the word stays on the stack throughout — no scratch slot or memory reload.
+#! `adv_loadw` lands the word with `d0` on top, the shape both the canonical write and the
+#! Horner reduction expect, so the word stays on the stack throughout — no scratch slot.
 #!
 #! Input:  [bus_id_plus_one, offset, ...]
 #! Output: [inv_term0, inv_term1, ...]
@@ -403,21 +372,15 @@ proc consume_small_message_compute_inv_term
     padw adv_loadw
     # => [d0, d1, d2, d3, bus_id, offset, ...]
 
-    # Store the word canonically at reduced_inputs + offset; the word stays on the stack
-    # (mem_storew_le pops only the address). `offset` sits at depth 6 once `base` is on
-    # top, so `dup.6 add` builds the target address.
     exec.constants::reduced_inputs_address_ptr mem_load
-    # => [base, d0, d1, d2, d3, bus_id, offset, ...]
     dup.6 add
     # => [target, d0, d1, d2, d3, bus_id, offset, ...]
     mem_storew_le
-    # => [d0, d1, d2, d3, bus_id, offset, ...]   (mem written canonical)
+    # => [d0, d1, d2, d3, bus_id, offset, ...]
 
-    # msg(d) via Horner; consumes the digest copy.
     exec.fold_digest_word
     # => [msg0, msg1, bus_id, offset, ...]
 
-    # Add the bus prefix (α + i·γ) and invert.
     movup.2
     # => [bus_id, msg0, msg1, offset, ...]
     exec.push_alpha_plus_i_gamma
@@ -425,15 +388,15 @@ proc consume_small_message_compute_inv_term
     ext2add ext2inv
     # => [inv_term0, inv_term1, offset, ...]
 
-    # Drop offset from beneath the result.
     movup.2 drop
     # => [inv_term0, inv_term1, ...]
 end
 
-#! Phase 3a — observes the 16-felt reduced-inputs window at `reduced_inputs_ptr + 0..+15`
-#! into the FS transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
-#!   Chunk 1: `[kernel_H | zero_pad]` at reduced_inputs+0..+7.
-#!   Chunk 2: `[program_digest | transcript_state]` at reduced_inputs+8..+15.
+#! Observes the 16-felt reduced-inputs window at `reduced_inputs_ptr + 0..+15` into the FS
+#! transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
+#!   Chunk 1: `[kernel_H | program_digest]`   at reduced_inputs+0..+7.
+#!   Chunk 2: `[transcript_state | zero_pad]` at reduced_inputs+8..+15.
+#! The trailing pad word is read back zero from the VM's zero-initialized memory.
 #!
 #! POSTCONDITION: random coin input_len=0, output_len=8 on return.
 #!
@@ -444,13 +407,11 @@ proc absorb_reduced_inputs_window_into_fs
     exec.random_coin::load_random_coin_state
     # => [R1, R2, C, ...]
 
-    # Place the mem_stream pointer at stack[12] = reduced_inputs+0.
+    # `mem_stream` consumes its pointer from stack[12].
     exec.constants::reduced_inputs_address_ptr mem_load
     movdn.12
     # => [R1, R2, C, base, ...]
 
-    # Each `mem_stream` reads 8 felts from memory at stack[12], advances the pointer by 8,
-    # and overwrites the two rate words; `permute` then absorbs them.
     repeat.2
         mem_stream
         exec.poseidon2::permute

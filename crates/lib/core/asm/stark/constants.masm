@@ -176,10 +176,10 @@ const KERNEL_DIGESTS_PTR = 3223322836
 ##
 ## Caller-facing public-input layout (low address -> high address):
 ##
-##   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]  Poseidon2 hash of all kernel digests
-##                           [ zero word         (4 felts) ]  pad for rate-aligned FS observation
+##   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]  hash of all kernel digests
 ##                           [ program_digest    (4 felts) ]  natural order
 ##                           [ transcript_state  (4 felts) ]  natural order
+##                           [ zero pad          (4 felts) ]  rate-aligns the FS observation
 ##
 ##   pi_ptr             -->  [ FLPI (m EF)               ]  fixed-length public inputs (stack i/o)
 ##
