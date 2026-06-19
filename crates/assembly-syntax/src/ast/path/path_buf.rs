@@ -451,7 +451,6 @@ impl fmt::Display for PathBuf {
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
-
     use core::assert_matches;
 
     use super::{PathBuf, PathError};

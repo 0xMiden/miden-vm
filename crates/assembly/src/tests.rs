@@ -4,8 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::assert_matches;
-use core::{fmt::Write, str::FromStr};
+use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{

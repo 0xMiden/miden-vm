@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
-use core::assert_matches;
-use core::ops::Range;
+use core::{assert_matches, ops::Range};
 
 use miden_air::trace::{
     RowIndex,

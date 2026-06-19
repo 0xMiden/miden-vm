@@ -1097,9 +1097,9 @@ fn package_requirements(
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, string::ToString};
+    use core::assert_matches;
     use std::{collections::BTreeMap, fs, sync::Arc};
 
-    use core::assert_matches;
     use miden_assembly_syntax::{
         ast::Path as AstPath,
         debuginfo::{DefaultSourceManager, Span},

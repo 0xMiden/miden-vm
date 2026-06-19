@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
-
 use core::assert_matches;
+
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
 use miden_processor::{

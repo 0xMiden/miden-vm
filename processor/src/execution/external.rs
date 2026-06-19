@@ -111,8 +111,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::sync::Arc;
-    use core::assert_matches;
-    use core::ops::ControlFlow;
+    use core::{assert_matches, ops::ControlFlow};
 
     use miden_core::{
         Felt,

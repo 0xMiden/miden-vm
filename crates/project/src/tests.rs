@@ -1,6 +1,6 @@
+use core::assert_matches;
 use std::{boxed::Box, fs, path::Path, sync::Arc};
 
-use core::assert_matches;
 use miden_assembly_syntax::{
     Path as MasmPath,
     debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt},

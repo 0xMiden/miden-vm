@@ -1,6 +1,7 @@
+use core::assert_matches;
+
 use super::*;
 use crate::{ExecutionError, MemoryError, fast::Memory};
-use core::assert_matches;
 
 #[test]
 fn test_memory_word_access_alignment() {

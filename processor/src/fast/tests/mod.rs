@@ -1,6 +1,5 @@
 use alloc::{format, string::ToString, sync::Arc, vec};
-use core::assert_matches;
-use core::str::FromStr;
+use core::{assert_matches, str::FromStr};
 
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{
