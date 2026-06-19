@@ -9,7 +9,7 @@
 //! The advice stack ordering must match the MASM consumption order exactly:
 //!
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   aux randomness -> num_kernel_proc_digests -> kernel_digests ->
+//!   num_kernel_proc_digests -> kernel_digests ->
 //!   fixed-length PI -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
@@ -165,79 +165,60 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Auxiliary randomness [beta0, beta1, alpha0, alpha1] — consumed first by
-    //    `process_public_inputs` so the kernel-digest stream can be folded into the outer-LogUp
-    //    correction on the fly.
-    assert!(
-        stark.randomness.len() >= 2,
-        "expected at least 2 randomness challenges (alpha, beta), got {}",
-        stark.randomness.len()
-    );
-    let alpha = stark.randomness[0];
-    let beta = stark.randomness[1];
-    let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
-    let alpha_coeffs: &[Felt] = alpha.as_basis_coefficients_slice();
-    advice_stack.extend_from_slice(&[
-        beta_coeffs[0].as_canonical_u64(),
-        beta_coeffs[1].as_canonical_u64(),
-        alpha_coeffs[0].as_canonical_u64(),
-        alpha_coeffs[1].as_canonical_u64(),
-    ]);
-
-    // 2. Number of kernel procedure digests.
+    // 1. Number of kernel procedure digests.
     let num_kernel_proc_digests = kernel_digests.len();
     advice_stack.push(num_kernel_proc_digests as u64);
 
-    // 3. Kernel procedure digest elements (4 canonical felts per digest).
+    // 2. Kernel procedure digest elements (4 canonical felts per digest).
     let kernel_advice = build_kernel_digest_advice(kernel_digests);
     advice_stack.extend_from_slice(&kernel_advice);
 
-    // 4. Variable-length window messages and fixed-length public inputs, in the order
+    // 3. Variable-length window messages and fixed-length public inputs, in the order
     //    `process_public_inputs` consumes them: program digest, transcript state, stack i/o.
     let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
     advice_stack.extend_from_slice(&fixed_len_inputs);
 
-    // 5. Main trace commitment (4 felts).
+    // 4. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
 
-    // 6. Aux trace commitment.
+    // 5. Aux trace commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
 
-    // 7. Aux finals (bus boundary values), one slot per AIR in proof_order; MASM swaps to
+    // 6. Aux finals (bus boundary values), one slot per AIR in proof_order; MASM swaps to
     //    caller_order if needed.
     for aux_values in &stark.all_aux_values {
         advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
     }
 
-    // 8. Quotient commitment.
+    // 7. Quotient commitment.
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.quotient_commit));
 
-    // 9. Deep alpha (2 felts) -- the DEEP column-batching challenge.
+    // 8. Deep alpha (2 felts) -- the DEEP column-batching challenge.
     let deep_alpha = pcs.deep_proof.challenge_columns;
     let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
     advice_stack
         .extend_from_slice(&[deep_coeffs[1].as_canonical_u64(), deep_coeffs[0].as_canonical_u64()]);
 
-    // 10. OOD evaluations.
+    // 9. OOD evaluations.
     append_ood_evaluations(&mut advice_stack, pcs);
 
-    // 11. DEEP PoW witness.
+    // 10. DEEP PoW witness.
     advice_stack.push(pcs.deep_proof.pow_witness.as_canonical_u64());
 
-    // 12. FRI layer commitments + per-round PoW witnesses.
+    // 11. FRI layer commitments + per-round PoW witnesses.
     for round in &pcs.fri_proof.rounds {
         advice_stack.extend_from_slice(&commitment_to_u64s(round.commitment));
         advice_stack.push(round.pow_witness.as_canonical_u64());
     }
 
-    // 13. FRI remainder polynomial (already in descending degree order from the prover, matching
+    // 12. FRI remainder polynomial (already in descending degree order from the prover, matching
     //     the order observed into the Fiat-Shamir transcript).
     let final_poly = &pcs.fri_proof.final_poly;
     let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
     let remainder_u64s: Vec<u64> = remainder_base.iter().map(Felt::as_canonical_u64).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
 
-    // 14. Query PoW witness.
+    // 13. Query PoW witness.
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---

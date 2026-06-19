@@ -1,6 +1,7 @@
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::random_coin
+use miden::core::sys::vm::public_inputs
 
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
@@ -11,13 +12,11 @@ use miden::core::stark::random_coin
 #!   [commitment, W0]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
-#! aux_bus_boundary_ptr. Once the per-AIR LogUp finals are absorbed, this procedure asserts
-#! the outer-LogUp boundary identity `c_total + aux_sum == 0`, where `c_total` was computed
-#! at `C_TOTAL_PTR` during step I (`process_public_inputs`) and `aux_sum` is the sum of the
-#! two absorbed finals (order-independent, so the proof_order shuffle does not matter).
-#! `generate_aux_randomness` (called first) verifies the non-deterministic `α, β` that
-#! `c_total` was computed with, making the assertion sound. This mirrors the native
-#! verifier's `MidenMultiAir::eval_external` check.
+#! aux_bus_boundary_ptr. After drawing the aux randomness, this procedure computes the
+#! outer-LogUp boundary correction `c_total` from it (and the statement values materialized in
+#! step I), then once the per-AIR LogUp finals are absorbed asserts the boundary identity
+#! `c_total + aux_sum == 0`, where `aux_sum` is the sum of the two absorbed finals
+#! (order-independent, so the proof_order shuffle does not matter).
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -27,6 +26,11 @@ use miden::core::stark::random_coin
 pub proc observe_aux_trace
     # Draw random extension field elements for the auxiliary trace.
     exec.random_coin::generate_aux_randomness
+    # => [...]
+
+    # Compute the outer-LogUp boundary correction `c_total` from the sampled aux randomness
+    # and the statement values materialized in step I (`process_public_inputs`).
+    exec.public_inputs::compute_outer_logup_correction
     # => [...]
 
     # Assert precondition: input buffer must be empty.

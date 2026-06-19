@@ -307,14 +307,9 @@ mod fast_parallel {
 
         // Generate proof using Blake3_256
         let blake3_config = config::blake3_256_config(config::pcs_params());
-        let proof_bytes = prove_stark(
-            &blake3_config,
-            core_matrix,
-            chiplets_matrix,
-            &public_values,
-            &aux_inputs,
-        )
-        .expect("Proving failed");
+        let proof_bytes =
+            prove_stark(&blake3_config, core_matrix, chiplets_matrix, &public_values, &aux_inputs)
+                .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
 

@@ -218,17 +218,19 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let kernel_digest_felts = generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
-    // 2) Build the advice stack in `process_public_inputs` consumption order: [aux_rand(4), N,
-    //    digests(4N), program_digest(4), transcript_state(4), stack_inputs(16), stack_outputs(16)].
-    let mut advice_stack = auxiliary_rand_values.to_vec();
-    advice_stack.push(num_kernel_proc_digests as u64);
+    // 2) Build the advice stack in `process_public_inputs` consumption order: [N, digests(4N),
+    //    program_digest(4), transcript_state(4), stack_inputs(16), stack_outputs(16)], then the aux
+    //    randomness consumed by the test prologue that drives `compute_outer_logup_correction`.
+    let mut advice_stack = vec![num_kernel_proc_digests as u64];
     advice_stack.extend_from_slice(&kernel_digest_felts);
     advice_stack.extend_from_slice(&program_digest);
     advice_stack.extend_from_slice(&transcript_state);
     advice_stack.extend_from_slice(&stack_inputs);
     advice_stack.extend_from_slice(&stack_outputs);
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
 
-    // 3) Run process_public_inputs.
+    // 3) Run process_public_inputs, then emulate step II: place the aux randomness at
+    //    AUX_RAND_ELEM_PTR (where `generate_aux_randomness` samples it) and compute `c_total`.
     let source = "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
@@ -237,6 +239,9 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         begin
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
+
+            padw adv_loadw exec.constants::aux_rand_elem_ptr mem_storew_le dropw
+            exec.public_inputs::compute_outer_logup_correction
         end
         ";
 
@@ -355,10 +360,8 @@ fn rejects_too_many_kernel_proc_digests() {
 
     let num_kernel_proc_digests = 256; // one over the maximum (255)
     let kernel_digest_felts = generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
-    let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
-    let mut advice_stack = auxiliary_rand_values.to_vec();
-    advice_stack.push(num_kernel_proc_digests as u64);
+    let mut advice_stack = vec![num_kernel_proc_digests as u64];
     advice_stack.extend_from_slice(&kernel_digest_felts);
 
     let source = "
