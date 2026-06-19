@@ -790,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn comparison_summary_keeps_readme_metric_names_visible() {
+    fn comparison_summary_matches_snapshot() {
         let comparison = compare_results(
             &result_with_metric("base", "prove", 1_000.0),
             &result_with_metric("head", "prove", 1_100.0),
@@ -800,8 +800,7 @@ mod tests {
         let summary = summary_markdown(&comparison);
 
         assert!(comparison.regression);
-        assert!(summary.contains("Primary metric: `prove`"));
-        assert!(summary.contains("| prove | criterion |"));
+        insta::assert_snapshot!("comparison_summary", summary);
     }
 
     fn result_with_metric(git_ref: &str, name: &str, mean_ms: f64) -> BenchmarkResult {

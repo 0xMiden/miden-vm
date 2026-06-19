@@ -22,6 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["registry", "std"] }
 
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "4.6.0" }
+insta = { workspace = true }
 
 [lib]
 doctest = false

@@ -1890,6 +1890,7 @@ version = "0.24.0"
 dependencies = [
  "clap",
  "codspeed-criterion-compat",
+ "insta",
  "miden-core-lib",
  "miden-vm",
  "serde",
