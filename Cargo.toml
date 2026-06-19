@@ -30,7 +30,7 @@ miden-crypto-derive    = { path = "miden-crypto-derive", version = "0.27" }
 miden-field            = { path = "miden-field", version = "0.27" }
 miden-lifted-air       = { default-features = false, path = "stark/miden-lifted-air", version = "0.27" }
 miden-lifted-stark     = { default-features = false, path = "stark/miden-lifted-stark", version = "0.27" }
-miden-serde-utils      = { path = "miden-serde-utils", version = "0.27" }
+miden-serde-utils      = { path = "miden-serde-utils", version = "0.26" }
 miden-stark-transcript = { default-features = false, path = "stark/miden-stark-transcript", version = "0.27" }
 miden-stateful-hasher  = { default-features = false, path = "stark/miden-stateful-hasher", version = "0.27" }
 

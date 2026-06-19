@@ -10,7 +10,7 @@ name                   = "miden-serde-utils"
 readme                 = "README.md"
 repository.workspace   = true
 rust-version.workspace = true
-version.workspace      = true
+version                = "0.26.0"
 
 [features]
 default = ["std"]
