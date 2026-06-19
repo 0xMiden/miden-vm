@@ -75,19 +75,6 @@ impl AdviceMap {
         self.0.is_empty()
     }
 
-    /// Returns the exact serialized size of this AdviceMap in bytes.
-    pub(crate) fn serialized_size_hint(&self) -> usize {
-        let mut size = self.0.len().get_size_hint();
-        for (key, values) in self.0.iter() {
-            size += key.get_size_hint();
-            size += values.len().get_size_hint();
-            for value in values.iter() {
-                size += value.get_size_hint();
-            }
-        }
-        size
-    }
-
     /// Returns the total number of field elements stored in this advice map's keys and values.
     ///
     /// Each key is a word, so every entry contributes [`WORD_SIZE`] key elements plus the number
