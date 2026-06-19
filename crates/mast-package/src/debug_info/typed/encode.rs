@@ -8,8 +8,8 @@ use alloc::{
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     Felt, MAX_TYPE_DEPTH, TypedDebugInfoError, TypedView, WitScalarCodec, WordCodec,
-    count::count_units,
-    introspect::{type_name_raw, wit_type_name},
+    lookup::{type_name_raw, wit_type_name},
+    sizing::count_units,
 };
 
 /// Encodes the tokens for a value of type `idx` into its stack felts.
@@ -31,11 +31,7 @@ fn encode_tokens_at<I: Iterator<Item = String>>(
     if depth > MAX_TYPE_DEPTH {
         return Err(TypedDebugInfoError::RecursionLimit);
     }
-    let ty = view
-        .types
-        .types
-        .get(idx.as_u32() as usize)
-        .ok_or(TypedDebugInfoError::MissingType(idx.as_u32()))?;
+    let ty = view.types.get_type(idx).ok_or(TypedDebugInfoError::MissingType(idx.as_u32()))?;
     match ty {
         DebugTypeInfo::Primitive(DebugPrimitiveType::Void) => Ok(Vec::new()),
         DebugTypeInfo::Primitive(p) => encode_primitive(next_token(tokens)?, *p),
@@ -115,8 +111,9 @@ fn encode_primitive(
     }
 }
 
-/// Decimal or `0x..` hex token to a `Felt`. Shared between the typed and raw arg parsers.
-pub fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
+/// Decimal or `0x..` hex token to a `Felt`. Used by the primitive encoder; the CLI's raw
+/// (untyped) path has its own parser.
+fn parse_felt_token(s: &str) -> Result<Felt, TypedDebugInfoError> {
     let v: u64 = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u64::from_str_radix(hex, 16).map_err(|_| TypedDebugInfoError::InvalidHex(s.to_string()))?
     } else {

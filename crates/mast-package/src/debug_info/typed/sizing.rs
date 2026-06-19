@@ -7,7 +7,7 @@
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     MAX_TYPE_DEPTH, TypedView, WitScalarCodec,
-    introspect::{type_name_raw, wit_type_name},
+    lookup::{type_name_raw, wit_type_name},
 };
 
 /// Sums a per-leaf unit count over `idx`. `primitive` weights a primitive leaf; `codec` weights a
@@ -34,7 +34,7 @@ fn count_units_at(
     if depth > MAX_TYPE_DEPTH {
         return None;
     }
-    let ty = view.types.types.get(idx.as_u32() as usize)?;
+    let ty = view.types.get_type(idx)?;
     match ty {
         DebugTypeInfo::Primitive(p) => Some(primitive(*p)),
         DebugTypeInfo::Array { element_type_idx, count } => {
@@ -52,8 +52,13 @@ fn count_units_at(
             }
             let mut total = 0usize;
             for f in fields {
-                total =
-                    total.checked_add(count_units_at(view, f.type_idx, depth + 1, primitive, codec)?)?;
+                total = total.checked_add(count_units_at(
+                    view,
+                    f.type_idx,
+                    depth + 1,
+                    primitive,
+                    codec,
+                )?)?;
             }
             Some(total)
         },

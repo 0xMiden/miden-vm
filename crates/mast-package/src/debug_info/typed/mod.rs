@@ -25,31 +25,31 @@ use miden_core::Felt;
 use self::{
     decode::{decode_value, stack_felt_count},
     encode::{arg_token_count, encode_tokens},
-    format::format_type,
-    introspect::{find_debug_fn, proc_display_name, read_debug_sections},
+    lookup::{find_debug_fn, proc_display_name, read_debug_sections},
+    signature::format_type,
 };
 use super::{
     DebugFunctionInfo, DebugFunctionsSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DebugVariableInfo,
 };
 use crate::Package;
 
 mod codec;
-mod count;
 mod decode;
 mod encode;
 mod errors;
-mod format;
-mod introspect;
+mod lookup;
+mod signature;
+mod sizing;
 
-/// Bounds recursion through the type graph in the encode/decode/count helpers. The
-/// [`DebugTypesSection`] is read from a package and is not validated to be acyclic, so a cyclic
-/// (`A -> B -> A`) or pathologically deep type chain could otherwise overflow the stack. Mirrors
-/// the depth guard `format` applies when rendering signatures.
+/// Maximum recursion depth when walking the type graph in the encode/decode/sizing helpers.
+///
+/// The [`DebugTypesSection`] comes from a package and is not checked for cycles, so a cyclic
+/// (`A -> B -> A`) or very deep type could otherwise recurse until the stack overflows.
 pub(super) const MAX_TYPE_DEPTH: usize = 64;
 
 pub use self::{
     codec::{WitScalarCodec, WordCodec},
-    encode::parse_felt_token,
     errors::TypedDebugInfoError,
 };
 
@@ -136,8 +136,8 @@ impl TypedProcInfo {
     ///
     /// Exposed per parameter rather than as a whole-signature call so the caller owns the argument
     /// policy — how many are expected (see [`Self::expected_arg_count`] and
-    /// [`Self::param_type_indices`]) and how a wrong count is reported — since turning user-supplied
-    /// strings into arguments is an application concern.
+    /// [`Self::param_type_indices`]) and how a wrong count is reported — since turning
+    /// user-supplied strings into arguments is an application concern.
     pub fn encode_arg<I: Iterator<Item = String>>(
         &self,
         tokens: &mut I,
@@ -166,7 +166,7 @@ impl TypedProcInfo {
             return None;
         }
         let slice = &stack[..n];
-        let return_ty = self.types.types.get(return_idx.as_u32() as usize);
+        let return_ty = self.types.get_type(return_idx);
         let (rendered, rest) = decode_value(slice, &view, return_idx)?;
         if !rest.is_empty() {
             return None;
@@ -239,7 +239,7 @@ fn extract_signature_types(
     func: &DebugFunctionInfo,
     types: &DebugTypesSection,
 ) -> (Option<DebugTypeIdx>, Vec<DebugTypeIdx>) {
-    match func.type_idx.and_then(|i| types.types.get(i.as_u32() as usize)) {
+    match func.type_idx.and_then(|i| types.get_type(i)) {
         Some(DebugTypeInfo::Function { return_type_idx, param_type_indices }) => {
             (*return_type_idx, param_type_indices.clone())
         },
@@ -249,25 +249,28 @@ fn extract_signature_types(
 
 /// Builds the parameter list. When the function-type signature is available its positional indices
 /// are authoritative for arity and parameter types; names are overlaid from the debug variables
-/// (`arg_index > 0`, 1-based) where present, falling back to `arg1`, `arg2`, .... Only when there is
-/// no function-type signature do the argument variables themselves stand in as the parameters.
+/// (`arg_index > 0`, 1-based) where present, falling back to `arg1`, `arg2`, .... Only when there
+/// is no function-type signature do the argument variables themselves stand in as the parameters.
 fn build_params(
     func: &DebugFunctionInfo,
     funcs: &DebugFunctionsSection,
     fallback_indices: &[DebugTypeIdx],
 ) -> Vec<TypedParam> {
+    // Display name of an argument variable: its string-table name, or `arg<n>` as a fallback.
+    let var_name = |v: &DebugVariableInfo| {
+        funcs
+            .strings
+            .get(v.name_idx as usize)
+            .map_or_else(|| format!("arg{}", v.arg_index), |s| s.as_ref().to_string())
+    };
+
     // Name of the argument at 0-based `position`, from the matching debug variable if any.
     // `DebugVariableInfo` entries are not necessarily in `arg_index` order, hence the search.
     let name_for = |position: usize| -> Option<String> {
         func.variables
             .iter()
             .find(|v| v.arg_index as usize == position + 1)
-            .map(|v| {
-                funcs
-                    .strings
-                    .get(v.name_idx as usize)
-                    .map_or_else(|| format!("arg{}", v.arg_index), |s| s.as_ref().to_string())
-            })
+            .map(&var_name)
     };
 
     if !fallback_indices.is_empty() {
@@ -287,14 +290,8 @@ fn build_params(
     let mut named: Vec<(u32, String, DebugTypeIdx)> = func
         .variables
         .iter()
-        .filter(|v| v.arg_index > 0)
-        .map(|v| {
-            let n = funcs
-                .strings
-                .get(v.name_idx as usize)
-                .map_or_else(|| format!("arg{}", v.arg_index), |s| s.as_ref().to_string());
-            (v.arg_index, n, v.type_idx)
-        })
+        .filter(|v| v.is_parameter())
+        .map(|v| (v.arg_index, var_name(v), v.type_idx))
         .collect();
     named.sort_by_key(|(i, ..)| *i);
     named
@@ -346,8 +343,10 @@ mod tests {
         felts
     }
 
-    /// Stand-in for a consumer-registered scalar codec (the real `account-id` codec lives with
-    /// the protocol types). One `<prefix>:<suffix>` token, two felts.
+    /// Minimal stand-in codec for exercising registration and the struct-override path. The real
+    /// protocol-aware `account-id` codec lives downstream in the CLI (`miden-cli`'s
+    /// `AccountIdCodec`); this crate can't depend on it, so the tests use this stub. It only does
+    /// enough to be observable: one `<a>:<b>` token in, two felts out.
     struct TestIdCodec;
 
     impl WitScalarCodec for TestIdCodec {
@@ -360,26 +359,13 @@ mod tests {
         }
 
         fn encode(&self, token: &str) -> Result<Vec<Felt>, TypedDebugInfoError> {
-            let invalid = || TypedDebugInfoError::InvalidScalar {
-                wit_name: self.wit_name().to_string(),
-                token: token.to_string(),
-                reason: "expected <prefix>:<suffix>".to_string(),
-            };
-            let (prefix, suffix) = token.split_once(':').ok_or_else(invalid)?;
-            let prefix = prefix.parse::<u64>().map_err(|_| invalid())?;
-            let suffix = suffix.parse::<u64>().map_err(|_| invalid())?;
-            Ok(vec![felt(prefix), felt(suffix)])
+            let (a, b) = token.split_once(':').expect("test tokens are always `<a>:<b>`");
+            Ok(vec![felt(a.parse().unwrap()), felt(b.parse().unwrap())])
         }
 
         fn decode(&self, felts: &[Felt]) -> Option<String> {
-            if felts.len() < 2 {
-                return None;
-            }
-            Some(format!(
-                "account-id({}:{})",
-                felts[0].as_canonical_u64(),
-                felts[1].as_canonical_u64()
-            ))
+            let [a, b, ..] = felts else { return None };
+            Some(format!("account-id({}:{})", a.as_canonical_u64(), b.as_canonical_u64()))
         }
     }
 
@@ -674,7 +660,11 @@ mod tests {
         let idx = types.add_type(DebugTypeInfo::Struct {
             name_idx: name,
             size: 8,
-            fields: vec![DebugFieldInfo { name_idx: f_n, type_idx: self_ref, offset: 0 }],
+            fields: vec![DebugFieldInfo {
+                name_idx: f_n,
+                type_idx: self_ref,
+                offset: 0,
+            }],
         });
         assert_eq!(idx, self_ref, "struct must be self-referential for this test");
 
@@ -697,8 +687,10 @@ mod tests {
     fn huge_array_of_zero_width_elements_terminates() {
         let mut types = DebugTypesSection::new();
         let void_t = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void));
-        let arr = types
-            .add_type(DebugTypeInfo::Array { element_type_idx: void_t, count: Some(u32::MAX) });
+        let arr = types.add_type(DebugTypeInfo::Array {
+            element_type_idx: void_t,
+            count: Some(u32::MAX),
+        });
 
         let codecs: Vec<Box<dyn WitScalarCodec>> = vec![Box::new(WordCodec)];
         let view = TypedView { types: &types, codecs: &codecs };

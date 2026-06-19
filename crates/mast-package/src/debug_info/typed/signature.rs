@@ -8,7 +8,7 @@ use alloc::{
 
 use super::{
     super::{DebugFieldInfo, DebugTypeIdx, DebugTypeInfo, DebugTypesSection},
-    introspect::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    lookup::{field_name, is_anonymous, type_name_raw, wit_type_name},
 };
 
 // Stops infinite recursion if a type refers back to itself.
@@ -18,7 +18,7 @@ pub(super) fn format_type(types: &DebugTypesSection, idx: DebugTypeIdx, depth: u
     if depth > MAX_DEPTH {
         return "...".into();
     }
-    let Some(ty) = types.types.get(idx.as_u32() as usize) else {
+    let Some(ty) = types.get_type(idx) else {
         return format!("?#{}", idx.as_u32());
     };
     match ty {
