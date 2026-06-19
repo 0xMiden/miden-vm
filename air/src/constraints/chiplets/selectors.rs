@@ -11,14 +11,22 @@
 //! rows into three top-level regions. The remaining selectors `s1..s4` subdivide the
 //! `s0` region into the remaining chiplets.
 //!
-//! | Chiplet     | Active when                    |
-//! |-------------|--------------------------------|
-//! | Permutation | `s_00`                         |
-//! | Controller  | `s_01`                         |
-//! | Bitwise     | `s0 * !s1`                     |
-//! | Memory      | `s0 * s1 * !s2`                |
-//! | ACE         | `s0 * s1 * s2 * !s3`           |
-//! | Kernel ROM  | `s0 * s1 * s2 * s3 * !s4`      |
+//! Each chiplet is gated by a named *activation flag* `f_<chiplet>`, defined once in terms of
+//! the raw selectors below. Constraint and LogUp code refers to these flags rather than to the
+//! raw selectors directly: the constraint path reads them from [`ChipletFlags::is_active`] (built
+//! here) and the LogUp path from [`ChipletActiveFlags`], which mirrors the same algebra. The raw
+//! selectors are therefore only ever referenced at those two mapping sites.
+//!
+//! [`ChipletActiveFlags`]: crate::constraints::lookup::buses::ChipletActiveFlags
+//!
+//! | Chiplet     | Flag          | Active when                    |
+//! |-------------|---------------|--------------------------------|
+//! | Permutation | `f_perm`      | `s_00`                         |
+//! | Controller  | `f_ctrl`      | `s_01`                         |
+//! | Bitwise     | `f_bitwise`   | `s0 * !s1`                     |
+//! | Memory      | `f_memory`    | `s0 * s1 * !s2`                |
+//! | ACE         | `f_ace`       | `s0 * s1 * s2 * !s3`           |
+//! | Kernel ROM  | `f_kernel_rom`| `s0 * s1 * s2 * s3 * !s4`      |
 //!
 //! ## Selector Transition Rules
 //!
