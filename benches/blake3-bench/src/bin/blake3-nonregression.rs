@@ -409,8 +409,8 @@ fn selected_criterion_axes(bench_axes: &str) -> Option<BTreeSet<String>> {
     Some(
         axes.into_iter()
             .map(|axis| {
-                if axis == "prove_program_sync" {
-                    "prove".to_string()
+                if matches!(axis.as_str(), "prove" | "prove_program_sync") {
+                    PRIMARY_METRIC.to_string()
                 } else {
                     axis
                 }
@@ -433,9 +433,9 @@ fn report_span_metric_name(name: &str) -> Option<String> {
         | "evaluate constraints"
         | "commit to quotient poly chunks"
         | "open"
-        | "prove"
-        | "prove_program_sync"
         | "prove_trace_sync" => Some(name.replace(' ', "_")),
+        "prove" => Some("prove_span".to_string()),
+        "prove_program_sync" => Some("e2e_prove_wall".to_string()),
         _ => None,
     }
 }
@@ -684,7 +684,10 @@ fn should_collect_proof_spans(bench_axes: &str) -> bool {
     let axes = split_csv(bench_axes);
     axes.is_empty()
         || axes.iter().any(|axis| {
-            matches!(axis.as_str(), "all" | "prove" | "prove_program_sync" | "prove_trace_sync")
+            matches!(
+                axis.as_str(),
+                "all" | "e2e_prove" | "prove" | "prove_program_sync" | "prove_trace_sync"
+            )
         })
 }
 
@@ -769,7 +772,7 @@ mod tests {
     fn selected_axes_filter_normalizes_legacy_prove_name() {
         let axes = selected_criterion_axes("prove_program_sync,build_trace").unwrap();
 
-        assert!(axes.contains("prove"));
+        assert!(axes.contains("e2e_prove"));
         assert!(axes.contains("build_trace"));
         assert!(!axes.contains("prove_program_sync"));
     }
@@ -792,8 +795,8 @@ mod tests {
     #[test]
     fn comparison_summary_matches_snapshot() {
         let comparison = compare_results(
-            &result_with_metric("base", "prove", 1_000.0),
-            &result_with_metric("head", "prove", 1_100.0),
+            &result_with_metric("base", "e2e_prove", 1_000.0),
+            &result_with_metric("head", "e2e_prove", 1_100.0),
             5.0,
         )
         .unwrap();

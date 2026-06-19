@@ -107,7 +107,7 @@ RAYON_NUM_THREADS=16 cargo run --profile optimized -p miden-vm-blake3-bench --bi
   --git-ref "$(git rev-parse HEAD)"
 ```
 
-The result is written to `target/blake3-nonregression/result.json`; the harness does not parse the `miden-vm run` or `miden-vm prove` text output. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `prove`. The `prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
+The result is written to `target/blake3-nonregression/result.json`; the harness does not parse the `miden-vm run` or `miden-vm prove` text output. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `e2e_prove`. The `e2e_prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
 
 ### Single-core prover performance
 

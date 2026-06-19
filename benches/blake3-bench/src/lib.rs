@@ -26,7 +26,7 @@ use tracing_subscriber::{
 };
 
 pub const BENCH_GROUP: &str = "blake3_1to1";
-pub const PRIMARY_METRIC: &str = "prove";
+pub const PRIMARY_METRIC: &str = "e2e_prove";
 
 const PROGRAM_RELATIVE_PATH: &str = "miden-vm/masm-examples/hashing/blake3_1to1/blake3_1to1.masm";
 

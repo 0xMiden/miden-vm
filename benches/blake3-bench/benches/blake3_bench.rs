@@ -7,8 +7,8 @@ use miden_vm_blake3_bench::{
 };
 
 const ALL_AXES: [&str; 4] =
-    ["execute_trace_inputs_sync", "build_trace", "prove_trace_sync", "prove"];
-const PROOF_AXES: [&str; 2] = ["prove", "prove_trace_sync"];
+    ["execute_trace_inputs_sync", "build_trace", "prove_trace_sync", "e2e_prove"];
+const PROOF_AXES: [&str; 2] = ["e2e_prove", "prove_trace_sync"];
 const LIGHT_AXES: [&str; 2] = ["execute_trace_inputs_sync", "build_trace"];
 
 fn env_usize(name: &str, default: usize) -> usize {
@@ -47,7 +47,7 @@ fn resolve_axes() -> Vec<&'static str> {
     for axis in raw.split(',').map(str::trim).filter(|axis| !axis.is_empty()) {
         match axis {
             "all" => requested.extend(ALL_AXES),
-            "prove" | "prove_program_sync" => requested.push("prove"),
+            "e2e_prove" | "prove" | "prove_program_sync" => requested.push("e2e_prove"),
             "execute_trace_inputs_sync" => requested.push("execute_trace_inputs_sync"),
             "prove_trace_sync" => requested.push("prove_trace_sync"),
             "build_trace" => requested.push("build_trace"),
@@ -85,8 +85,8 @@ fn blake3_bench(c: &mut Criterion) {
         let mut group = c.benchmark_group(BENCH_GROUP);
         configure_group(&mut group, proof_sample_size, measurement_time_secs, warm_up_time_secs);
 
-        if has_axis(&axes, "prove") {
-            group.bench_function("prove", |b| {
+        if has_axis(&axes, "e2e_prove") {
+            group.bench_function("e2e_prove", |b| {
                 b.iter_custom(|iterations| {
                     let mut total = Duration::ZERO;
                     for _ in 0..iterations {
