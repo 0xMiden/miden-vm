@@ -110,7 +110,7 @@ tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
-tracing-subscriber = { version = "0.3", default-features = false }
+tracing-subscriber = { version = "0.3" }
 trybuild        = { version = "1.0" }
 windows-sys     = { version = "0.61.2" }
 

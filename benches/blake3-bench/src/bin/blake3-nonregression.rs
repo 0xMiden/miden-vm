@@ -648,7 +648,7 @@ fn run_logged_command(
     let start = Instant::now();
     let output = command.output()?;
     let elapsed = duration_ms(start.elapsed());
-    let mut log = format!("$ {:?}\n", command);
+    let mut log = format!("$ {command:?}\n");
     log.push_str(&String::from_utf8_lossy(&output.stdout));
     log.push_str(&String::from_utf8_lossy(&output.stderr));
     write_text(log_path, &log)?;
@@ -707,7 +707,9 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Box<dyn std::e
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_string_pretty(value)? + "\n")?;
+    let mut json = serde_json::to_string_pretty(value)?;
+    json.push('\n');
+    fs::write(path, json)?;
     Ok(())
 }
 
