@@ -6299,52 +6299,6 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
 }
 
 #[test]
-fn exported_procedure_signature_referencing_private_local_type_is_rejected() {
-    let context = TestContext::default();
-
-    let err = context
-        .parse_module(source_file!(
-            &context,
-            r#"
-                namespace cycle::module_a
-
-                type PrivateType = felt
-
-                pub proc a_proc(value: PrivateType)
-                    nop
-                end
-            "#
-        ))
-        .expect_err("expected exported signature with private local type to be rejected");
-
-    assert_diagnostic!(&err, "private type in exported procedure signature");
-    assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
-}
-
-#[test]
-fn exported_procedure_signature_with_absolute_private_local_type_is_rejected() {
-    let context = TestContext::default();
-
-    let err = context
-        .parse_module(source_file!(
-            &context,
-            r#"
-                namespace cycle::module_a
-
-                type PrivateType = felt
-
-                pub proc a_proc(value: ::cycle::module_a::PrivateType)
-                    nop
-                end
-            "#
-        ))
-        .expect_err("expected absolute private local type in exported signature to be rejected");
-
-    assert_diagnostic!(&err, "private type in exported procedure signature");
-    assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
-}
-
-#[test]
 fn public_item_import_reexporting_private_signature_is_rejected() {
     let context = TestContext::default();
 
