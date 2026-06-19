@@ -104,15 +104,13 @@ where
     // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen layout matches
     //   the wire byte order exactly. Padding slots within each AIR's subregion are unreferenced by
     //   the constraints (each AIR's eval body only addresses columns up to its original width).
-    // - `num_public` covers only the circuit-referenced window of the statement's public values:
-    //   the 32 stack-i/o felts at `pv[4..36]`. The program hash and transcript state are consumed
-    //   outside the circuit, so they are kept out of the ACE READ section; `Public` keys are
-    //   shifted by `-PV_WINDOW_START` during re-emit below.
+    // - `num_public` is the AIRs' shared public-value count (the stack-i/o felts). The program
+    //   hash and transcript state are statement `aux_inputs`, not read by any AIR constraint, so
+    //   they never enter the ACE READ section.
     // - `num_aux_boundary` sums each AIR's boundary slot count.
     // - `num_periodic` comes from the single AIR that declares periodic columns (the others
     //   contribute none); the combined `LiftedAir` wrapper exposes them once.
-    const PV_WINDOW_START: usize = 4;
-    const PV_WINDOW_LEN: usize = 32;
+    let num_public = <MidenAir as BaseAir<Felt>>::num_public_values(&airs[0]);
     let combined_aux_coord_w: usize = parts.iter().map(|p| p.aligned_aux_coord).sum();
     assert!(
         combined_aux_coord_w.is_multiple_of(miden_ace_codegen::EXT_DEGREE),
@@ -122,22 +120,20 @@ where
         width: parts.iter().map(|p| p.aligned_main).sum(),
         aux_width: combined_aux_coord_w / miden_ace_codegen::EXT_DEGREE,
         num_aux_boundary: parts.iter().map(|p| p.aux_n).sum(),
-        num_public: PV_WINDOW_LEN,
+        num_public,
         num_randomness: 2,
         num_periodic: parts.iter().map(|p| p.num_periodic).max().unwrap_or(0),
         num_quotient_chunks: config.num_quotient_chunks,
     };
 
-    // Shift a `Public` key into the circuit-referenced window, failing loudly if a
-    // constraint ever references a public value outside the stack-i/o range.
-    let remap_public = |index: usize| -> InputKey {
+    // Every constraint references a public value within the AIRs' shared public window; fail
+    // loudly if one ever addresses a slot outside it.
+    let check_public = |index: usize| -> InputKey {
         assert!(
-            (PV_WINDOW_START..PV_WINDOW_START + PV_WINDOW_LEN).contains(&index),
-            "constraint references public value {index} outside the stack-i/o window; \
-             the ACE READ section only carries pv[{PV_WINDOW_START}..{}]",
-            PV_WINDOW_START + PV_WINDOW_LEN,
+            index < num_public,
+            "constraint references public value {index} outside the {num_public}-felt window",
         );
-        InputKey::Public(index - PV_WINDOW_START)
+        InputKey::Public(index)
     };
 
     // Build combined layout via the multi-air constructors so the stark-vars region
@@ -182,7 +178,7 @@ where
                 InputKey::IsFirst => InputKey::IsFirstAir(air_index),
                 InputKey::IsLast => InputKey::IsLastAir(air_index),
                 InputKey::IsTransition => InputKey::IsTransitionAir(air_index),
-                InputKey::Public(i) => remap_public(i),
+                InputKey::Public(i) => check_public(i),
                 other => other,
             },
             true, // skip each sub-DAG's `Sub(acc, q*v)` root — the combined formula shares one q*v

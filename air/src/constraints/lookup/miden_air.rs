@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::messages::{BlockHashMsg, KernelRomMsg, LogPrecompileMsg};
-use crate::{PV_PROGRAM_HASH, PV_TRANSCRIPT_STATE, lookup::BoundaryBuilder};
+use crate::lookup::BoundaryBuilder;
 
 // COMMITTED-FINALS COUNT
 // ================================================================================================
@@ -26,19 +26,14 @@ pub const NUM_LOGUP_COMMITTED_FINALS: usize = 2;
 /// - `LogPrecompileTranscript` lives on `MAIN_COLUMN_SHAPE[0]` (block_stack + range + log-cap
 ///   merged column).
 pub(crate) fn emit_core_boundary<B: BoundaryBuilder>(boundary: &mut B) {
-    let pv = boundary.public_values();
-    let program_hash: [B::F; 4] = [
-        pv[PV_PROGRAM_HASH],
-        pv[PV_PROGRAM_HASH + 1],
-        pv[PV_PROGRAM_HASH + 2],
-        pv[PV_PROGRAM_HASH + 3],
-    ];
-    let final_state: [B::F; 4] = [
-        pv[PV_TRANSCRIPT_STATE],
-        pv[PV_TRANSCRIPT_STATE + 1],
-        pv[PV_TRANSCRIPT_STATE + 2],
-        pv[PV_TRANSCRIPT_STATE + 3],
-    ];
+    // The core boundary's statement inputs arrive as the single var-len slice
+    // `[program_hash (4) | transcript_state (4)]`. Absent inputs (debug walker on a bare trace)
+    // default to zero, mirroring `emit_chiplets_boundary`'s handling of an empty digest group.
+    let stmt = boundary.var_len_public_inputs().first().copied().unwrap_or_default();
+    let program_hash: [B::F; 4] =
+        core::array::from_fn(|i| stmt.get(i).copied().unwrap_or(B::F::ZERO));
+    let final_state: [B::F; 4] =
+        core::array::from_fn(|i| stmt.get(WORD_SIZE + i).copied().unwrap_or(B::F::ZERO));
 
     // Block-hash seed: +1 / encode(BLOCK_HASH_TABLE, [ph, 0, 0, 0]).
     //

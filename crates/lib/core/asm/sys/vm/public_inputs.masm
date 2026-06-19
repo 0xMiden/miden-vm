@@ -72,8 +72,9 @@ use miden::core::crypto::hashes::poseidon2
 # digest and transcript state live in the caller-facing reduced-inputs block instead.
 const NUM_FIXED_LEN_PUBLIC_INPUTS = 32
 
-# Upper bound on the kernel-digest statement inputs (`MultiAir::max_aux_inputs`), in field
-# elements: `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`.
+# Upper bound on the kernel-digest portion of the statement `aux_inputs`, in field elements:
+# `Kernel::MAX_NUM_PROCEDURES (255) * WORD_SIZE (4)`. The fixed program hash and transcript
+# state occupy the rest of `aux_inputs` and are bounded separately.
 const MAX_AUX_INPUTS = 1020
 
 # Bus prefix scale factors: `prefix_id = α + (BusId + 1)·γ` with `γ = β^16`.

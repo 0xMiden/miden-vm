@@ -300,7 +300,7 @@ mod fast_parallel {
         let trace = build_trace(trace_inputs).unwrap();
 
         // Build public inputs
-        let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+        let (public_values, aux_inputs) = trace.public_inputs().to_air_inputs();
 
         // Multi-AIR splitting: derive Core + Chiplets matrices for prove_multi.
         let (core_matrix, chiplets_matrix) = trace.to_core_chiplets_matrices();
@@ -312,7 +312,7 @@ mod fast_parallel {
             core_matrix,
             chiplets_matrix,
             &public_values,
-            &kernel_felts,
+            &aux_inputs,
         )
         .expect("Proving failed");
 

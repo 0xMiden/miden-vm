@@ -93,17 +93,14 @@ pub fn generate_advice_inputs(
     // 2. Build domain-separated challenger. Statement-owned inputs (fixed public values and kernel
     //    digests) plus the per-AIR trace heights are absorbed by the lifted verifier internally
     //    when the transcript is parsed.
-    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+    let (public_values, aux_inputs) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
 
     // 3. Build the statement and verifier instance.
-    let statement = Statement::<Felt, QuadFelt, _>::new(
-        MidenMultiAir::new(),
-        public_values,
-        kernel_felts.clone(),
-    )
-    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let statement =
+        Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, aux_inputs)
+            .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
     let verifier_instance = VerifierInstance::new(&config, &statement, None)
         .expect("Miden AIRs declare no preprocessed columns");
 
@@ -115,11 +112,8 @@ pub fn generate_advice_inputs(
     let log_core_trace_height = log_heights[0] as usize;
     let log_chiplets_trace_height = log_heights[1] as usize;
 
-    // 5. Reconstruct kernel digests as Words for advice building.
-    let kernel_digests: Vec<Word> = kernel_felts
-        .chunks_exact(4)
-        .map(|c| Word::new([c[0], c[1], c[2], c[3]]))
-        .collect();
+    // 5. Kernel digests as Words for advice building.
+    let kernel_digests: Vec<Word> = pub_inputs.program_info().kernel_procedures().to_vec();
 
     // 6. Build advice from parsed transcript.
     build_advice(
