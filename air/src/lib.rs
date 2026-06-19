@@ -257,8 +257,8 @@ impl Deserializable for PublicInputs {
 ///   [16..32] stack outputs
 ///
 /// The program hash and precompile transcript state are not read by any AIR constraint, so they
-/// are carried as `aux_inputs` (see [`AUX_PROGRAM_HASH`] / [`AUX_TRANSCRIPT_STATE`]) and consumed
-/// only by [`MidenMultiAir::observe`] and [`MidenMultiAir::eval_external`].
+/// are carried as `aux_inputs` and consumed only by [`MidenMultiAir::observe`] and
+/// [`MidenMultiAir::eval_external`].
 pub const NUM_PUBLIC_VALUES: usize = MIN_STACK_DEPTH + MIN_STACK_DEPTH;
 
 /// LogUp aux trace width: 4 main-trace columns + 3 chiplet-trace columns.
