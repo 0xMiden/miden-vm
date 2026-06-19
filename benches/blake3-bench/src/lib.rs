@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -182,7 +182,7 @@ struct SpanTiming {
 
 #[derive(Clone, Default)]
 struct SpanRecorder {
-    records: std::sync::Arc<std::sync::Mutex<Vec<SpanRecord>>>,
+    records: Arc<Mutex<Vec<SpanRecord>>>,
 }
 
 impl SpanRecorder {

@@ -1,5 +1,6 @@
 use std::{hint::black_box, time::Duration};
 
+use codspeed_criterion_compat as criterion;
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm_blake3_bench::{
     BENCH_GROUP, Blake3Fixture, build_trace, execute_trace_inputs, prove_and_verify_once,
@@ -101,7 +102,10 @@ fn blake3_bench(c: &mut Criterion) {
             group.bench_function("prove_trace_sync", |b| {
                 b.iter_batched(
                     || execute_trace_inputs(&fixture),
-                    |trace_inputs| black_box(prove_trace(trace_inputs)),
+                    |trace_inputs| {
+                        let trace_inputs = black_box(trace_inputs);
+                        prove_trace(trace_inputs);
+                    },
                     BatchSize::SmallInput,
                 );
             });
@@ -128,7 +132,10 @@ fn blake3_bench(c: &mut Criterion) {
             group.bench_function("build_trace", |b| {
                 b.iter_batched(
                     || execute_trace_inputs(&fixture),
-                    |trace_inputs| black_box(build_trace(trace_inputs)),
+                    |trace_inputs| {
+                        let trace_inputs = black_box(trace_inputs);
+                        build_trace(trace_inputs);
+                    },
                     BatchSize::SmallInput,
                 );
             });
