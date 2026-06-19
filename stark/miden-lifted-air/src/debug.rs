@@ -29,7 +29,7 @@ use crate::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, WindowAccess};
 /// - All AIRs agree on [`BaseAir::num_public_values`].
 /// - [`MultiAir::num_air_inputs`] agrees with the per-AIR public value count.
 /// - Each AIR has positive auxiliary width.
-/// - Each AIR's [`LiftedAir::preprocessed_width`] agrees with [`BaseAir::preprocessed_trace`]
+/// - Each AIR's [`BaseAir::preprocessed_width`] agrees with [`BaseAir::preprocessed_trace`]
 ///   presence and width.
 /// - Each periodic column is non-empty and has power-of-two length.
 /// - [`LiftedAir::max_periodic_length`] agrees with the raw periodic columns.

@@ -7,10 +7,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
-use p3_field::{ExtensionField, TwoAdicField};
-
-use crate::util::horner::horner_acc;
+use p3_dft::{Radix2DFTSmallBatch, TwoAdicSubgroupDft};
+use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 
 /// Verifier-side periodic polynomials for OOD evaluation.
 ///
@@ -33,7 +31,7 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
     /// [`assert_multi_air_valid`](miden_lifted_air::debug::assert_multi_air_valid) for the
     /// debug-only check).
     pub fn new(column_evals: &[Vec<F>]) -> Self {
-        let dft = NaiveDft;
+        let dft = Radix2DFTSmallBatch::<F>::default();
         let mut polys = Vec::with_capacity(column_evals.len());
 
         for (i, column) in column_evals.iter().enumerate() {
@@ -74,9 +72,9 @@ impl<F: TwoAdicField> PeriodicPolys<F> {
         for coeffs in &self.polys {
             let period = coeffs.len();
             let y = z.exp_u64((trace_height / period) as u64);
-            // Coefficients are stored in ascending degree (idft output): [c₀, c₁, ..., cₙ₋₁].
-            // Horner needs descending order (highest degree first), hence `.rev()`.
-            result.push(horner_acc(EF::ZERO, y, coeffs.iter().rev().copied()));
+            // Coefficients are stored in ascending degree (idft output): [c₀, c₁, ..., cₙ₋₁],
+            // which is the order `HornerIter` consumes directly.
+            result.push(coeffs.iter().copied().horner(y));
         }
 
         result

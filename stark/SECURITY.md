@@ -41,19 +41,26 @@ Assume:
 - Hash/compression primitives are collision-resistant.
 - Fiat-Shamir is modeled as a random oracle (or an appropriate heuristic).
 
-Caller-provided "statement data" is *not* consistently observed into the
-challenger by these libraries. In particular, **public inputs** are passed
-out-of-band to prover/verifier APIs. If an input can vary per statement, the
-application must bind it into Fiat-Shamir on *both* prover and verifier.
+With the default `MultiAir::observe` implementation, statement-owned inputs
+(`air_inputs` and `aux_inputs`) are observed into the challenger by
+`Statement::observe` before the prover/verifier derives challenges. The runnable
+Rustdoc example on `Statement::observe` asserts that default binding sequence.
+Custom `MultiAir::observe` implementations can extend or replace that sequence.
+
+The remaining caller-owned binding gap is the trusted AIR identity and
+configuration: the default binding does not canonically bind the `MultiAir` AIR
+collection, AIR versions/configuration, or `eval_external` logic.
 
 ## Normative Requirements (MUST)
 
 These are requirements on *applications* composing these crates.
 
-- You MUST bind all per-statement out-of-band inputs (notably `public_values`,
-  AIR identity/version tags, commitment roots, widths/heights metadata, and any
-  statement metadata) into the Fiat-Shamir challenger state, identically on both
-  prover and verifier.
+- You MUST bind AIR identity/version tags, commitment roots, widths/heights
+  metadata, and any other statement metadata not owned by `Statement::observe`
+  into the Fiat-Shamir challenger state, identically on both prover and verifier.
+- If you override `MultiAir::observe`, you MUST preserve equivalent binding of
+  `air_inputs`, `air_inputs.len()`, `max_aux_inputs`, `aux_inputs.len()`, and
+  `aux_inputs` before challenges are derived.
 - You MUST enforce transcript boundaries / canonicality at the protocol boundary.
   The lifted STARK verifier rejects trailing data; if you compose the PCS
   separately, use `verify_strict` or check `channel.is_empty()` at
@@ -69,7 +76,7 @@ These are requirements on *applications* composing these crates.
 
 Concrete examples of statement data that the application must treat explicitly:
 
-- `public_values`
+- Extra application public data not passed through `Statement::air_inputs`
 - AIR identity / version tags (if multiple AIRs exist)
 - configuration choices not already committed inside the transcript
 

@@ -113,6 +113,106 @@ where
     /// `log_trace_heights` in instance order after this call. Heights are passed
     /// here only so custom `MultiAir` bindings can include height-dependent
     /// statement data.
+    ///
+    /// The default [`MultiAir::observe`] implementation absorbs, in order, the
+    /// `air_inputs` length, `air_inputs`, [`MultiAir::max_aux_inputs`], the
+    /// `aux_inputs` length, and `aux_inputs`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_field::Felt;
+    /// use miden_lifted_air::{BaseAir, LiftedAir, LiftedAirBuilder, MultiAir, Statement};
+    /// use p3_challenger::CanObserve;
+    /// use p3_matrix::{Matrix, dense::RowMajorMatrix};
+    ///
+    /// #[derive(Clone)]
+    /// struct ExampleAir;
+    ///
+    /// impl BaseAir<Felt> for ExampleAir {
+    ///     fn width(&self) -> usize {
+    ///         1
+    ///     }
+    ///
+    ///     fn num_public_values(&self) -> usize {
+    ///         2
+    ///     }
+    /// }
+    ///
+    /// impl LiftedAir<Felt, Felt> for ExampleAir {
+    ///     fn num_randomness(&self) -> usize {
+    ///         0
+    ///     }
+    ///
+    ///     fn aux_width(&self) -> usize {
+    ///         1
+    ///     }
+    ///
+    ///     fn num_aux_values(&self) -> usize {
+    ///         0
+    ///     }
+    ///
+    ///     fn build_aux_trace(
+    ///         &self,
+    ///         main: &RowMajorMatrix<Felt>,
+    ///         _air_inputs: &[Felt],
+    ///         _aux_inputs: &[Felt],
+    ///         _challenges: &[Felt],
+    ///     ) -> (RowMajorMatrix<Felt>, Vec<Felt>) {
+    ///         (RowMajorMatrix::new(vec![Felt::ZERO; main.height()], 1), Vec::new())
+    ///     }
+    ///
+    ///     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+    /// }
+    ///
+    /// struct ExampleMultiAir {
+    ///     airs: [ExampleAir; 1],
+    /// }
+    ///
+    /// impl MultiAir<Felt, Felt> for ExampleMultiAir {
+    ///     type Air = ExampleAir;
+    ///
+    ///     fn airs(&self) -> &[Self::Air] {
+    ///         &self.airs
+    ///     }
+    ///
+    ///     fn max_aux_inputs(&self) -> usize {
+    ///         3
+    ///     }
+    /// }
+    ///
+    /// #[derive(Default)]
+    /// struct RecordingChallenger(Vec<Felt>);
+    ///
+    /// impl CanObserve<Felt> for RecordingChallenger {
+    ///     fn observe(&mut self, value: Felt) {
+    ///         self.0.push(value);
+    ///     }
+    /// }
+    ///
+    /// let statement = Statement::<Felt, Felt, _>::new(
+    ///     ExampleMultiAir { airs: [ExampleAir] },
+    ///     vec![Felt::new_unchecked(10), Felt::new_unchecked(11)],
+    ///     vec![Felt::new_unchecked(20), Felt::new_unchecked(21)],
+    /// )
+    /// .unwrap();
+    ///
+    /// let mut challenger = RecordingChallenger::default();
+    /// statement.observe(&mut challenger, &[3]);
+    ///
+    /// assert_eq!(
+    ///     challenger.0,
+    ///     vec![
+    ///         Felt::new_unchecked(2),
+    ///         Felt::new_unchecked(10),
+    ///         Felt::new_unchecked(11),
+    ///         Felt::new_unchecked(3),
+    ///         Felt::new_unchecked(2),
+    ///         Felt::new_unchecked(20),
+    ///         Felt::new_unchecked(21),
+    ///     ],
+    /// );
+    /// ```
     pub fn observe<C: CanObserve<F>>(&self, challenger: &mut C, log_trace_heights: &[u8]) {
         self.multi_air
             .observe(challenger, &self.air_inputs, &self.aux_inputs, log_trace_heights);

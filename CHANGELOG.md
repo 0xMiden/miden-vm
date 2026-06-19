@@ -1,3 +1,15 @@
+## 0.27.0 (2026-06-19)
+
+- [BREAKING] Upgraded the RustCrypto and dalek stack: `der`, `hkdf`, `sha2`, `sha3`, `k256`, `curve25519-dalek`, `ed25519-dalek`, and `x25519-dalek` ([#1045](https://github.com/0xMiden/crypto/pull/1045)).
+- Added `Display` (`0x`-prefixed lowercase hex) for the public key and signature types of all DSA schemes ([#1048](https://github.com/0xMiden/crypto/pull/1048)).
+- Added doctests for ECDSA signature serialization, sponge state sizing, SMT sorted entries, and lifted AIR Fiat-Shamir docs ([#1049](https://github.com/0xMiden/crypto/pull/1049)).
+- Upgraded `chacha20poly1305` to the current RustCrypto AEAD release line and added Wycheproof checks for ECDH and Ed25519 paths ([#1052](https://github.com/0xMiden/crypto/pull/1052)).
+- [BREAKING] Bumped Plonky3 upstream dependencies to v0.6.0 ([#1053](https://github.com/0xMiden/crypto/pull/1053)).
+- Use faster DFT algorithm for `PeriodicPolys` ([#1054](https://github.com/0xMiden/crypto/pull/1054)).
+- Improved LargeSmt RocksDB defaults, added per-DB memory-budget controls, and exposed durability mode selection ([#1056](https://github.com/0xMiden/crypto/pull/1056)).
+- [BREAKING] Make `Felt::Packing` resolve to the SIMD-packed `PackedFelt` from Plonky3 ([#1060](https://github.com/0xMiden/crypto/pull/1060)).
+- perf: factor the DEEP barycentric inner loop to drop the per-row `xᵢ · qᵢ` base×extension multiplication ([#1064](https://github.com/0xMiden/crypto/issues/1064)).
+
 ## 0.26.0 (06-02-2026)
 
 - [BREAKING] Extracted `BackendReader`, allowing `LargeSmtForest<S>` to work with read-only storage backends ([#986](https://github.com/0xMiden/crypto/pull/986)).

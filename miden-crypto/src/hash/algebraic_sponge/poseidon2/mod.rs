@@ -36,6 +36,18 @@ fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
     P3_POSEIDON2.permute_mut(gl_state);
 }
 
+/// Applies Plonky3's optimized Poseidon2 permutation to a packed `[PackedFelt; 12]` state,
+/// running one independent sponge state per SIMD lane.
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+#[inline(always)]
+pub(super) fn p3_permute_packed(state: &mut [miden_field::PackedFelt; STATE_WIDTH]) {
+    P3_POSEIDON2.permute_mut(miden_field::PackedFelt::as_goldilocks_array_mut(state));
+}
+
 /// Implementation of the Poseidon2 hash function with 256-bit output.
 ///
 /// The permutation is delegated to Plonky3's optimized `Poseidon2Goldilocks<12>`, which provides
@@ -118,8 +130,20 @@ impl Poseidon2 {
     /// Number of internal rounds.
     pub const NUM_INTERNAL_ROUNDS: usize = NUM_INTERNAL_ROUNDS;
 
-    /// Sponge state is set to 12 field elements or 768 bytes; 8 elements are reserved for the
-    /// rate and the remaining 4 elements are reserved for the capacity.
+    /// Sponge state is set to 12 field elements, or 96 bytes / 768 bits; 8 elements are
+    /// reserved for the rate and the remaining 4 elements are reserved for the capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_crypto::{Word, hash::poseidon2::Poseidon2};
+    ///
+    /// const FELT_SERIALIZED_SIZE: usize = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    ///
+    /// assert_eq!(Poseidon2::STATE_WIDTH * FELT_SERIALIZED_SIZE, 96);
+    /// assert_eq!(Poseidon2::RATE_RANGE.len(), 8);
+    /// assert_eq!(Poseidon2::CAPACITY_RANGE.len(), 4);
+    /// ```
     pub const STATE_WIDTH: usize = STATE_WIDTH;
 
     /// The rate portion of the state is located in elements 0 through 7 (inclusive).
@@ -324,8 +348,8 @@ impl Poseidon2Permutation256 {
     /// Number of internal rounds.
     pub const NUM_INTERNAL_ROUNDS: usize = Poseidon2::NUM_INTERNAL_ROUNDS;
 
-    /// Sponge state is set to 12 field elements or 768 bytes; 8 elements are reserved for rate and
-    /// the remaining 4 elements are reserved for capacity.
+    /// Sponge state is set to 12 field elements, or 96 bytes / 768 bits; 8 elements are
+    /// reserved for rate and the remaining 4 elements are reserved for capacity.
     pub const STATE_WIDTH: usize = STATE_WIDTH;
 
     /// The rate portion of the state is located in elements 0 through 7 (inclusive).

@@ -14,7 +14,7 @@ use alloc::{string::ToString, vec::Vec};
 
 use chacha20poly1305::{
     XChaCha20Poly1305,
-    aead::{Aead, AeadCore, KeyInit},
+    aead::{Aead, KeyInit, Payload},
 };
 use rand::CryptoRng;
 #[cfg(any(test, feature = "testing"))]
@@ -23,7 +23,6 @@ use subtle::ConstantTimeEq;
 use crate::{
     Felt,
     aead::{AeadScheme, DataType, EncryptionError},
-    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_elements_exact, elements_to_bytes,
@@ -67,10 +66,9 @@ pub struct Nonce {
 impl Nonce {
     /// Creates a new random nonce using the provided random number generator
     pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        Nonce {
-            inner: XChaCha20Poly1305::generate_nonce(&mut compat_rng),
-        }
+        let mut bytes = [0u8; NONCE_SIZE_BYTES];
+        rng.fill_bytes(&mut bytes);
+        Self::from_slice(&bytes)
     }
 
     /// Creates a new nonce from the provided array of bytes
@@ -108,9 +106,9 @@ impl SecretKey {
 
     /// Creates a new random secret key using the provided random number generator
     pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        let key = XChaCha20Poly1305::generate_key(&mut compat_rng);
-        Self(key.into())
+        let mut key = [0u8; SK_SIZE_BYTES];
+        rng.fill_bytes(&mut key);
+        Self(key)
     }
 
     // BYTE ENCRYPTION
@@ -144,7 +142,7 @@ impl SecretKey {
         associated_data: &[u8],
         nonce: Nonce,
     ) -> Result<EncryptedData, EncryptionError> {
-        let payload = chacha20poly1305::aead::Payload { msg: data, aad: associated_data };
+        let payload = Payload { msg: data, aad: associated_data };
 
         let cipher = XChaCha20Poly1305::new(&self.0.into());
 
@@ -240,7 +238,7 @@ impl SecretKey {
         associated_data: &[u8],
     ) -> Result<Vec<u8>, EncryptionError> {
         let EncryptedData { ciphertext, nonce, data_type: _ } = encrypted_data;
-        let payload = chacha20poly1305::aead::Payload { msg: ciphertext, aad: associated_data };
+        let payload = Payload { msg: ciphertext, aad: associated_data };
 
         let cipher = XChaCha20Poly1305::new(&self.0.into());
 

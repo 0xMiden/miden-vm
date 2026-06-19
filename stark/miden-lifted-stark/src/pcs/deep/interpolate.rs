@@ -19,11 +19,15 @@
 //! wᵢ(z) = xᵢ / (z − xᵢ)
 //! ```
 //!
+//! The implementation factors `wᵢ(z) = xᵢ/(z − xᵢ) = z · (1/(z − xᵢ) − 1/z)`, replacing
+//! each base×extension product `xᵢ · qᵢ(z)` with an extension subtraction `qᵢ(z) − 1/z`
+//! and pulling the shared `z` into the scaling `s(z)`. This requires `z ≠ 0`.
+//!
 //! # Point quotients
 //! We precompute `qᵢ(zⱼ) = 1/(zⱼ − xᵢ)` for all domain points `xᵢ` and all
 //! opening points `zⱼ` using batch inversion (Montgomery's trick). This single
 //! table is reused for:
-//! - barycentric weights: `wᵢ(zⱼ) = xᵢ · qᵢ(zⱼ)`
+//! - barycentric weights: `wᵢ(zⱼ) = zⱼ · (qᵢ(zⱼ) − 1/zⱼ)`
 //! - DEEP quotients: `(f(zⱼ) − f(X)) / (zⱼ − X)`
 //!
 //! # Lifting and weight folding
@@ -74,7 +78,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
     ///
     /// Preconditions: all evaluation points must be outside the LDE evaluation coset
     /// `gK` represented by `coset_points` (i.e., `zⱼ ≠ xᵢ` for all i, j). Otherwise
-    /// division by zero occurs in the barycentric weights and DEEP quotient.
+    /// division by zero occurs in the barycentric weights and DEEP quotient. Points must
+    /// also be nonzero, since [`Self::batch_eval_lifted`] inverts them.
     ///
     /// In the common case where the trace domain `H` is a sub-coset of `gK`, avoiding
     /// `gK` also avoids `H`. If a caller uses a different domain relationship, it must
@@ -133,12 +138,12 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
         let shift = coset_points[0]; // g in bit-reversed order
         let shift_inverse = shift.inverse();
 
-        // Compute barycentric scaling factors for each point:
-        // sⱼ(zⱼ) = ((zⱼ/g)ᵈ − 1) / d
+        // Compute barycentric scaling factors for each point, folding in the `zⱼ` shared by
+        // the factored weights below: zⱼ · sⱼ(zⱼ) = zⱼ · ((zⱼ/g)ᵈ − 1) / d
         let barycentric_scalings = self.points.map(|point| {
             let z_over_shift = point * shift_inverse;
             let t = z_over_shift.exp_power_of_2(log_d) - EF::ONE;
-            t.div_2exp_u64(log_d as u64)
+            point * t.div_2exp_u64(log_d as u64)
         });
 
         let used_degrees: BTreeSet<usize> = matrices_groups
@@ -146,18 +151,17 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, const N: usize> PointQuotients<F, E
             .flat_map(|g| g.iter().map(|m| m.height() >> log_blowup as usize))
             .collect();
 
-        // Compute barycentric weights for each point at each height:
-        // wᵢⱼ(zⱼ) = xᵢ / (zⱼ − xᵢ) = xᵢ · point_quotient[i][j]
+        // Compute factored barycentric weights for each point at each height:
+        // aᵢⱼ(zⱼ) = point_quotient[i][j] − 1/zⱼ, with the shared zⱼ carried by
+        // `barycentric_scalings` so that zⱼ · aᵢⱼ = xᵢ / (zⱼ − xᵢ).
         // For smaller domains, sum chunks (weight folding).
+        let inv_points = self.points.map(|point| point.inverse());
         let barycentric_weights: LinearMap<usize, Vec<FieldArray<EF, N>>> =
             debug_span!("barycentric_weights", d).in_scope(|| {
                 assert_eq!(*used_degrees.last().unwrap(), d);
                 // Initial weights at full domain size
-                let top_weights: Vec<FieldArray<EF, N>> = coset_points[..d]
-                    .par_iter()
-                    .zip(self.point_quotient[..d].par_iter())
-                    .map(|(&x, invs)| (*invs).map(|inv| inv * x))
-                    .collect();
+                let top_weights: Vec<FieldArray<EF, N>> =
+                    self.point_quotient[..d].par_iter().map(|invs| *invs - inv_points).collect();
 
                 let mut weights = Vec::with_capacity(used_degrees.len());
                 weights.push(top_weights);
@@ -206,8 +210,11 @@ mod tests {
 
     use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
     use p3_field::PrimeCharacteristicRing;
-    use p3_interpolation::{interpolate_coset, interpolate_coset_with_precomputation};
-    use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
+    use p3_matrix::{
+        bitrev::BitReversibleMatrix,
+        dense::RowMajorMatrix,
+        interpolation::{Interpolate, compute_adjusted_weights},
+    };
     use p3_util::reverse_slice_index_bits;
     use rand::{RngExt, SeedableRng, distr::StandardUniform, prelude::SmallRng};
 
@@ -286,7 +293,7 @@ mod tests {
                 result.as_slice()[1..].iter().map(|arr| arr[0]).collect();
 
             // Standard interpolation on the lifted coset
-            let expected_evals = interpolate_coset(&evals_std, lifted_shift, z_lifted);
+            let expected_evals = evals_std.interpolate_coset(lifted_shift, z_lifted);
 
             assert_eq!(
                 our_evals.len(),
@@ -312,10 +319,8 @@ mod tests {
         let domain = canonical_domain::<Felt>(log_n, 0);
         let shift = domain.lde_shift();
 
-        // Coset points in both orderings
+        // Coset points in bit-reversed order
         let coset_points_br = domain.lde_coset().bit_reversed_points();
-        let mut coset_points_std = coset_points_br.clone();
-        reverse_slice_index_bits(&mut coset_points_std); // Convert to standard order
 
         // Random out-of-domain evaluation point
         let z: QuadFelt = rng.sample(StandardUniform);
@@ -349,14 +354,10 @@ mod tests {
             quotient.point_quotient[..lde_height].iter().map(|arr| arr[0]).collect();
         reverse_slice_index_bits(&mut diff_invs_std);
 
-        // Interpolation with precomputation (both in standard order)
-        let expected_evals = interpolate_coset_with_precomputation(
-            &evals_std,
-            shift,
-            z,
-            &coset_points_std[..lde_height],
-            &diff_invs_std,
-        );
+        // Interpolation with precomputation (standard order)
+        let adjusted_weights = compute_adjusted_weights(z, &diff_invs_std);
+        let expected_evals =
+            evals_std.interpolate_coset_with_precomputation(shift, z, &adjusted_weights);
 
         assert_eq!(our_evals.len(), expected_evals.len(), "length mismatch");
         for (col, (&our, &expected)) in our_evals.iter().zip(expected_evals.iter()).enumerate() {
@@ -504,14 +505,14 @@ mod tests {
             [(0, "z1", z1), (1, "z2", z2)].into_iter().map(|(i, l, z)| (i, (l, z)))
         {
             // Matrix 1 (no lifting): evaluate at z directly
-            let expected1 = interpolate_coset(&evals1_std, lifted_shift_1, z);
+            let expected1 = evals1_std.interpolate_coset(lifted_shift_1, z);
             for (col, (&our, &exp)) in rows[0].iter().zip(expected1.iter()).enumerate() {
                 assert_eq!(our[point_idx], exp, "{label}, mat1, col={col}: mismatch");
             }
 
             // Matrix 2 (lift factor 2): evaluate at z^2
             let z_lifted = z.square();
-            let expected2 = interpolate_coset(&evals2_std, lifted_shift_2, z_lifted);
+            let expected2 = evals2_std.interpolate_coset(lifted_shift_2, z_lifted);
             for (col, (&our, &exp)) in rows[1].iter().zip(expected2.iter()).enumerate() {
                 assert_eq!(our[point_idx], exp, "{label}, mat2, col={col}: mismatch");
             }

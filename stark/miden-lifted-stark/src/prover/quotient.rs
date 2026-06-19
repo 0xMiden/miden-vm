@@ -8,13 +8,14 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use p3_dft::TwoAdicSubgroupDft;
+use p3_dft::{Layout, TwoAdicSubgroupDft};
 use p3_field::{
     BasedVectorSpace, ExtensionField, Field, TwoAdicField, par_add_scaled_slice_in_place,
     par_scale_slice_in_place,
 };
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
+use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
 use crate::{
@@ -22,7 +23,6 @@ use crate::{
     domain::{Coset, EvaluationDomain},
     lmcs::Lmcs,
     prover::commit::Committed,
-    util::bitrev::materialize_bitrev,
 };
 
 // ============================================================================
@@ -158,89 +158,59 @@ where
     // D ≤ B (i.e. lde_height ≥ N · D) is enforced by `EvaluationDomain::new`.
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Step 0: Reshape to N × D matrix
+    // Step 0: Reshape to N × D and flatten EF → F
     // ═══════════════════════════════════════════════════════════════════════
-    // q_evals[r·D + t] = Q(g·ω_Jᵗ·ω_Hʳ), so column t gives
-    // qₜ evaluated on the coset g·ω_Jᵗ·H.
-    let m = RowMajorMatrix::new(q_evals, d);
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 1: Batched iDFT over H
-    // ═══════════════════════════════════════════════════════════════════════
-    // iDFT treats each column as evaluations on H (not the actual coset
-    // g·ω_Jᵗ·H), producing shifted coefficients:
-    //   c_hat[t, k] = a[t, k]·(g·ω_Jᵗ)ᵏ
-    // where a[t, k] are the true coefficients of qₜ.
-    let mut coeffs = info_span!("quotient iDFT", dims = %format!("{n}x{d}"))
-        .in_scope(|| config.dft().idft_algebra_batch(m));
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 2: Fused coefficient scaling
-    // ═══════════════════════════════════════════════════════════════════════
-    // Multiply c_hat[t, k] by (ω_Jᵗ)⁻ᵏ → a[t, k]·gᵏ.
-    // This removes the per-coset shift ω_Jᵗ while keeping gᵏ baked in.
-    info_span!("quotient scaling", n).in_scope(|| {
-        let omega_j_inv = domain.subgroup().generator_inverse();
-
-        // Precompute ω_J⁻ᵏ for k = 0..N with sequential multiplications
-        let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();
-
-        // Row k, column t: multiply by (ω_J⁻ᵏ)ᵗ
-        coeffs.par_rows_mut().zip(row_bases.par_iter()).for_each(|(row, &row_base)| {
-            for (val, scale) in row.iter_mut().zip(row_base.powers()) {
-                *val *= scale;
-            }
-        });
-    });
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // Step 3: Flatten EF → F, zero-pad to LDE height (N·B rows)
-    // ═══════════════════════════════════════════════════════════════════════
-    // We flatten before the DFT (rather than using dft_algebra_batch) because
-    // we need base field for commitment anyway — this skips the reconstitute.
-    //
-    // Zero-padding from N to lde_height rows is needed because `dft_batch`
-    // expects the full target-size buffer. The extra rows are zero because each
-    // qₜ has degree < N. We pad here (after iDFT + scaling) so those two steps
-    // work on the smaller N-row buffer.
-    //
-    // PERF: the full N·B-size DFT processes N·(B−1) zero rows through every
-    // butterfly stage, costing O(N·B·log(N·B)) instead of O(N·B·log N). For
-    // B = 4, N = 2^20 that is ≈ 9% overhead on this step (small relative to
-    // total proving time since the quotient matrix has only D·DIM columns).
-    //
-    // The existing `lde_batch`/`coset_lde_batch` APIs cannot help: they take
-    // *evaluations*, not coefficients. Using them would add a redundant DFT(N)
-    // → iDFT(N) round-trip.
-    //
-    // What is conceptually missing from `TwoAdicSubgroupDft` is an
-    // `added_bits` parameter on `dft_batch` / `coset_dft_batch` that evaluates
-    // degree-< N coefficients on a larger domain of size N·2^added_bits. The
-    // default would be zero-pad + the existing same-size DFT, but an optimized
-    // implementation (like `Radix2DftParallel`) could run B separate N-size
-    // DFTs — one per coset of H inside K — matching what its `coset_lde_batch`
-    // already does internally after the iDFT phase.
+    // q_evals[r·D + t] = Q(g·ω_Jᵗ·ω_Hʳ), so column t gives qₜ evaluated on the
+    // coset g·ω_Jᵗ·H. The commitment is base-valued and the iDFT/DFT are
+    // F-linear, so flattening to the base field commutes with both.
     let base_width = d * EF::DIMENSION;
-    let mut base_coeffs = <EF as BasedVectorSpace<F>>::flatten_to_base(coeffs.values);
-    base_coeffs.resize(lde_height * base_width, F::ZERO);
-    let coeffs_padded = RowMajorMatrix::new(base_coeffs, base_width);
+    let coeffs =
+        RowMajorMatrix::new(<EF as BasedVectorSpace<F>>::flatten_to_base(q_evals), base_width);
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Step 4: Plain DFT (not coset DFT) on base field
+    // Steps 1–4: fused iDFT over H → coefficient scaling → coset LDE onto gK
     // ═══════════════════════════════════════════════════════════════════════
-    // Because gᵏ is baked into the coefficients, the plain DFT evaluates
-    // on gK directly: entry (i, t) gives qₜ(g·ω_Kⁱ).
-    let quotient_matrix = info_span!("quotient DFT", dims = %format!("{lde_height}x{base_width}"))
-        .in_scope(|| {
-            let lde = config.dft().dft_batch(coeffs_padded);
+    // `coset_lde_batch_with_transform` runs the iDFT, applies `transform` to the
+    // coefficient buffer, zero-pads by `added_bits`, then evaluates on the
+    // coset. The iDFT treats each column as evaluations on H, producing shifted
+    // coefficients c_hat[k, t] = a[k, t]·(g·ω_Jᵗ)ᵏ. `transform` multiplies by
+    // (ω_Jᵗ)⁻ᵏ, removing the per-coset shift ω_Jᵗ while keeping gᵏ baked in, so a
+    // shift-1 LDE then evaluates directly on the shifted coset gK.
+    let added_bits = log2_strict_usize(lde_height) - log2_strict_usize(n);
+    let omega_j_inv = domain.subgroup().generator_inverse();
+    let row_bases: Vec<F> = omega_j_inv.powers().take(n).collect();
+    let log_n = log2_strict_usize(n);
 
-            // ═══════════════════════════════════════════════════════════════
-            // Step 5: Wrap for commitment
-            // ═══════════════════════════════════════════════════════════════
-            materialize_bitrev(lde)
+    let lde =
+        info_span!("quotient LDE", dims = %format!("{lde_height}x{base_width}")).in_scope(|| {
+            config.dft().coset_lde_batch_with_transform(
+                coeffs,
+                added_bits,
+                F::ONE,
+                |buf, layout| {
+                    // Row r holds coefficient index k — bit-reversed when the buffer is in
+                    // bit-reversed layout. Multiply column t (each spanning `EF::DIMENSION`
+                    // flattened base columns) by (ω_J⁻ᵏ)ᵗ.
+                    let width = buf.width;
+                    buf.values.par_chunks_mut(width).enumerate().for_each(|(r, row)| {
+                        let k = match layout {
+                            Layout::Natural => r,
+                            Layout::BitReversed => reverse_bits_len(r, log_n),
+                        };
+                        let row_base = row_bases[k];
+                        let mut scale = F::ONE;
+                        for chunk in row.chunks_exact_mut(EF::DIMENSION) {
+                            for val in chunk {
+                                *val *= scale;
+                            }
+                            scale *= row_base;
+                        }
+                    });
+                },
+            )
         });
 
-    let tree = config.lmcs().build_aligned_tree(vec![quotient_matrix]);
+    let tree = config.lmcs().build_aligned_tree(vec![lde]);
 
     // The quotient is committed on the same LDE coset as the trace commits.
     Committed::new(tree)

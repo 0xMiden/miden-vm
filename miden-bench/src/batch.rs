@@ -1,23 +1,16 @@
 //! Batch STARK AIR wrappers, lookup implementations, and prove/verify runner.
 
-use miden_lifted_stark::{
-    air::{BaseAir, log2_strict_u8},
-    testing::airs::poseidon2::NUM_POSEIDON2_COLS,
-};
-use p3_air::{Air, AirBuilder, AirLayout, BaseLeaf, SymbolicExpression, WindowAccess};
+use miden_lifted_stark::{air::BaseAir, testing::airs::poseidon2::NUM_POSEIDON2_COLS};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_batch_stark::{ProverData, StarkInstance, prove_batch, verify_batch};
 use p3_blake3_air::{Blake3Air, NUM_BLAKE3_COLS};
 use p3_commit::ExtensionMmcs;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::PrimeCharacteristicRing;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS};
-use p3_lookup::{
-    LookupAir,
-    lookup_traits::{Direction, Kind, Lookup},
-};
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_lookup::InteractionBuilder;
+use p3_matrix::dense::RowMajorMatrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_uni_stark::SymbolicAirBuilder;
 use tracing::info_span;
 
 use crate::{
@@ -33,9 +26,7 @@ use crate::{
 /// extension-field permutation column. Matches the lifted prover's unconditional
 /// 1-column EF aux trace.
 #[derive(Clone)]
-struct KeccakWithLookup {
-    num_lookups: usize,
-}
+struct KeccakWithLookup;
 
 impl<F> BaseAir<F> for KeccakWithLookup {
     fn width(&self) -> usize {
@@ -43,28 +34,15 @@ impl<F> BaseAir<F> for KeccakWithLookup {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for KeccakWithLookup {
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for KeccakWithLookup {
     fn eval(&self, builder: &mut AB) {
         Air::eval(&KeccakAir {}, builder);
-    }
-}
 
-impl<F: Field> LookupAir<F> for KeccakWithLookup {
-    fn add_lookup_columns(&mut self) -> Vec<usize> {
-        let idx = self.num_lookups;
-        self.num_lookups += 1;
-        vec![idx]
-    }
-
-    fn get_lookups(&mut self) -> Vec<Lookup<F>> {
-        self.num_lookups = 0;
-        let col0 = SymbolicExpression::Leaf(BaseLeaf::Constant(F::ONE));
-        let one = SymbolicExpression::Leaf(BaseLeaf::Constant(F::ONE));
-        let lookup_inputs = vec![
-            (vec![col0.clone()], one.clone(), Direction::Send),
-            (vec![col0], one, Direction::Receive),
-        ];
-        vec![LookupAir::register_lookup(self, Kind::Local, &lookup_inputs)]
+        // Single balanced local LogUp lookup, producing one EF permutation column.
+        builder.push_local_interaction(vec![
+            (vec![AB::Expr::ONE], AB::Expr::ONE),
+            (vec![AB::Expr::ONE], -AB::Expr::ONE),
+        ]);
     }
 }
 
@@ -78,7 +56,6 @@ impl<F: Field> LookupAir<F> for KeccakWithLookup {
 struct MidenWithLookups {
     width: usize,
     num_lookups_target: usize,
-    num_lookups: usize,
 }
 
 impl<F> BaseAir<F> for MidenWithLookups {
@@ -87,40 +64,23 @@ impl<F> BaseAir<F> for MidenWithLookups {
     }
 }
 
-impl<AB: AirBuilder> Air<AB> for MidenWithLookups {
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MidenWithLookups {
     fn eval(&self, builder: &mut AB) {
         // Same degree-9 constraint as DummyMidenAir.
         let main = builder.main();
         let local = main.current_slice();
         let product = (0..9).fold(AB::Expr::ONE, |acc, j| acc * local[j].into());
         builder.assert_zero(product);
-    }
-}
 
-impl<F: Field> LookupAir<F> for MidenWithLookups {
-    fn add_lookup_columns(&mut self) -> Vec<usize> {
-        let idx = self.num_lookups;
-        self.num_lookups += 1;
-        vec![idx]
-    }
-
-    fn get_lookups(&mut self) -> Vec<Lookup<F>> {
-        self.num_lookups = 0;
-        let symbolic = SymbolicAirBuilder::<F>::new(AirLayout {
-            main_width: self.width,
-            ..AirLayout::default()
-        });
-        let main = symbolic.main();
-        let local = main.current_slice();
-        let col0: SymbolicExpression<F> = local[0].into();
-        let one = SymbolicExpression::Leaf(BaseLeaf::Constant(F::ONE));
-        let lookup_inputs = vec![
-            (vec![col0.clone()], one.clone(), Direction::Send),
-            (vec![col0], one, Direction::Receive),
-        ];
-        (0..self.num_lookups_target)
-            .map(|_| LookupAir::register_lookup(self, Kind::Local, &lookup_inputs))
-            .collect()
+        // `num_lookups_target` balanced local LogUp lookups on column 0, each
+        // producing one EF permutation column.
+        let col0: AB::Expr = local[0].into();
+        for _ in 0..self.num_lookups_target {
+            builder.push_local_interaction(vec![
+                (vec![col0.clone()], AB::Expr::ONE),
+                (vec![col0.clone()], -AB::Expr::ONE),
+            ]);
+        }
     }
 }
 
@@ -147,31 +107,13 @@ impl<F> BaseAir<F> for BatchBenchAir {
     }
 }
 
-impl<AB: AirBuilder<F = Felt>> Air<AB> for BatchBenchAir {
+impl<AB: AirBuilder<F = Felt> + InteractionBuilder> Air<AB> for BatchBenchAir {
     fn eval(&self, builder: &mut AB) {
         match self {
             Self::Keccak(a) => Air::eval(a, builder),
             Self::Poseidon2(a) => Air::eval(a.as_ref(), builder),
             Self::Blake3 => Air::eval(&Blake3Air {}, builder),
             Self::Miden(a) => Air::eval(a, builder),
-        }
-    }
-}
-
-impl<F: Field> LookupAir<F> for BatchBenchAir {
-    fn add_lookup_columns(&mut self) -> Vec<usize> {
-        match self {
-            Self::Keccak(a) => <KeccakWithLookup as LookupAir<F>>::add_lookup_columns(a),
-            Self::Miden(a) => <MidenWithLookups as LookupAir<F>>::add_lookup_columns(a),
-            Self::Poseidon2(_) | Self::Blake3 => vec![],
-        }
-    }
-
-    fn get_lookups(&mut self) -> Vec<Lookup<F>> {
-        match self {
-            Self::Keccak(a) => <KeccakWithLookup as LookupAir<F>>::get_lookups(a),
-            Self::Miden(a) => <MidenWithLookups as LookupAir<F>>::get_lookups(a),
-            Self::Poseidon2(_) | Self::Blake3 => vec![],
         }
     }
 }
@@ -226,13 +168,16 @@ pub(crate) fn run_batch<SC>(
 ) -> RunResult
 where
     SC: p3_uni_stark::StarkGenericConfig<Challenge = QuadFelt>,
+    SC::Pcs: Sync,
     <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::Domain:
-        p3_commit::PolynomialSpace<Val = Felt>,
+        p3_commit::PolynomialSpace<Val = Felt> + Send + Sync,
+    <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::ProverData: Sync,
+    <SC::Pcs as p3_commit::Pcs<QuadFelt, SC::Challenger>>::Commitment: Sync,
 {
-    let mut airs: Vec<BatchBenchAir> = specs
+    let airs: Vec<BatchBenchAir> = specs
         .iter()
         .map(|spec| match spec.air_type {
-            AirType::Keccak => BatchBenchAir::Keccak(KeccakWithLookup { num_lookups: 0 }),
+            AirType::Keccak => BatchBenchAir::Keccak(KeccakWithLookup),
             AirType::Poseidon2 => {
                 let c = constants.as_ref().expect("poseidon2 constants required");
                 BatchBenchAir::Poseidon2(Box::new(BatchPoseidon2Air::new(c.clone())))
@@ -241,20 +186,17 @@ where
             AirType::Miden => BatchBenchAir::Miden(MidenWithLookups {
                 width: spec.width,
                 num_lookups_target: spec.num_aux_cols,
-                num_lookups: 0,
             }),
         })
         .collect();
 
-    let degree_bits: Vec<usize> =
-        traces.iter().map(|t| log2_strict_u8(t.height()) as usize).collect();
-    let prover_data = ProverData::from_airs_and_degrees(config, &mut airs, &degree_bits);
-    let common = &prover_data.common;
-
     let trace_refs: Vec<&RowMajorMatrix<Felt>> = traces.iter().collect();
     let pvs: Vec<Vec<Felt>> = specs.iter().map(|_| vec![]).collect();
 
-    let instances = StarkInstance::new_multiple(&airs, &trace_refs, &pvs, common);
+    let instances = StarkInstance::new_multiple(&airs, &trace_refs, &pvs);
+
+    let prover_data = ProverData::from_instances(config, &instances);
+    let common = &prover_data.common;
 
     let proof = info_span!("prove").in_scope(|| prove_batch(config, &instances, &prover_data));
 

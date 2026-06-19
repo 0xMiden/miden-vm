@@ -235,7 +235,7 @@ impl TraceOrder {
     /// AIR instance index backing each committed preprocessed trace.
     ///
     /// The preprocessed commitment contains one committed LDE trace per AIR with
-    /// [`preprocessed_width`](miden_lifted_air::LiftedAir::preprocessed_width)
+    /// [`preprocessed_width`](miden_lifted_air::BaseAir::preprocessed_width)
     /// `> 0`, in proof order (the LMCS height-monotone committed-trace order). The result
     /// length is the number of preprocessed AIRs, which is `<= len()`.
     pub(crate) fn preprocessed_air_for_trace_index<F, EF, A>(&self, airs: &[A]) -> Vec<u8>

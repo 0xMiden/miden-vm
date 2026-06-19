@@ -4,9 +4,9 @@ use rand::{
     Rng,
     rand_core::{Infallible, TryRng, utils},
 };
-use sha3::{
-    Shake256, Shake256ReaderCore,
-    digest::{ExtendableOutput, Update, XofReader, core_api::XofReaderCoreWrapper},
+use shake::{
+    Shake256, Shake256Reader,
+    digest::{ExtendableOutput, Update, XofReader},
 };
 
 use super::data::SYNC_DATA;
@@ -19,7 +19,7 @@ pub(crate) const CHACHA_SEED_LEN: usize = 56;
 // ================================================================================================
 
 /// A PRNG based on SHAKE256 used for testing.
-pub struct Shake256Testing(XofReaderCoreWrapper<Shake256ReaderCore>);
+pub struct Shake256Testing(Shake256Reader);
 
 impl Shake256Testing {
     pub fn new(data: Vec<u8>) -> Self {

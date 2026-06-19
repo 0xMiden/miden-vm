@@ -4,16 +4,13 @@ use core::{array, mem};
 use miden_stark_transcript::ProverChannel;
 use miden_stateful_hasher::StatefulHasher;
 use p3_field::PackedValue;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_matrix::{Matrix, bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::prelude::*;
 use p3_symmetric::{Hash, PseudoCompressionFunction};
 use p3_util::{log2_strict_usize, reverse_bits_len};
 use tracing::info_span;
 
-use crate::{
-    lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices},
-    util::bitrev::BitReversibleMatrix,
-};
+use crate::lmcs::{LmcsTree, proof::LeafOpening, row_list::RowList, tree_indices::TreeIndices};
 
 /// A uniform binary Merkle tree whose leaves are constructed from matrices with power-of-two
 /// heights.

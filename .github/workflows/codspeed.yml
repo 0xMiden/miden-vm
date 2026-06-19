@@ -1,0 +1,64 @@
+name: codspeed
+
+on:
+  push:
+    branches:
+      - main
+      - next
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codspeed:
+    name: Run CodSpeed benchmarks
+    runs-on: codspeed-macro
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CRYPTO_SMT_MEASUREMENT_TIME_MILLIS: "1000"
+      CRYPTO_SMT_SAMPLE_SIZE: "10"
+      CRYPTO_SMT_WARM_UP_TIME_MILLIS: "250"
+      RAYON_NUM_THREADS: "8"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(awk -F '"' '/^channel[[:space:]]*=/{ print $2; exit }' rust-toolchain.toml)"
+          rustup toolchain install --profile minimal "${toolchain}"
+
+      - name: Install LLVM/Clang
+        uses: ./.github/actions/install-llvm
+        with:
+          version: "17"
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install cargo-codspeed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-codspeed --version 4.6.0 --locked
+
+      - name: Build benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo codspeed build --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
+
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@9d332c4d90b43981c3e55ae8e38e68709996240f # v4.17.0
+        with:
+          mode: walltime
+          run: cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed

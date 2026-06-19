@@ -2,11 +2,13 @@
 //! curve using Keccak to hash the messages when signing.
 
 use alloc::{string::ToString, vec::Vec};
+use core::fmt;
 
 use k256::{
     ecdh::diffie_hellman,
     ecdsa,
     ecdsa::{RecoveryId, VerifyingKey, signature::hazmat::PrehashVerifier},
+    elliptic_curve::{Generate, scalar::IsHigh},
     pkcs8::DecodePublicKey,
 };
 use miden_crypto_derive::{SilentDebug, SilentDisplay};
@@ -16,7 +18,6 @@ use thiserror::Error;
 use crate::{
     Felt, SequentialCommit, Word,
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
-    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         bytes_to_packed_u32_elements,
@@ -52,8 +53,7 @@ struct SecretKey {
 impl SecretKey {
     /// Generates a new secret key using the provided random number generator.
     fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        let signing_key = ecdsa::SigningKey::random(&mut compat_rng);
+        let signing_key = ecdsa::SigningKey::generate_from_rng(rng);
 
         Self { inner: signing_key }
     }
@@ -311,7 +311,7 @@ pub enum PublicKeyError {
 ///
 /// This implementation supports 2 serialization formats:
 ///
-/// ### Custom Format (66 bytes):
+/// ### Custom Format (65 bytes):
 /// - Bytes 0-31: r component (32 bytes, big-endian)
 /// - Bytes 32-63: s component (32 bytes, big-endian)
 /// - Byte 64: recovery ID (v) - values 0-3
@@ -320,6 +320,32 @@ pub enum PublicKeyError {
 /// - Bytes 0-31: r component (32 bytes, big-endian)
 /// - Bytes 32-63: s component (32 bytes, big-endian)
 /// - Note: Recovery ID
+///
+/// # Examples
+///
+/// ```
+/// use miden_crypto::{
+///     Felt, Word,
+///     dsa::ecdsa_k256_keccak::{Signature, SigningKey},
+///     rand::test_utils::seeded_rng,
+/// };
+/// use miden_serde_utils::{Deserializable, Serializable};
+///
+/// let mut rng = seeded_rng([7; 32]);
+/// let signing_key = SigningKey::with_rng(&mut rng);
+/// let message = Word::new([
+///     Felt::new_unchecked(1),
+///     Felt::new_unchecked(2),
+///     Felt::new_unchecked(3),
+///     Felt::new_unchecked(4),
+/// ]);
+///
+/// let signature = signing_key.sign(message);
+/// let encoded = signature.to_bytes();
+///
+/// assert_eq!(encoded.len(), 65);
+/// assert_eq!(Signature::read_from_bytes(&encoded).unwrap(), signature);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
     r: [u8; SCALARS_SIZE_BYTES],
@@ -394,22 +420,21 @@ impl Signature {
 
         // Normalize signature into "low s" form.
         // See https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki.
-        let sig = if let Some(norm) = sig.normalize_s() {
+        let high_s = sig.s().is_high();
+        if bool::from(high_s) {
             // Replacing s with (n - s) corresponds to negating the ephemeral point R
             // (i.e. R -> -R), which flips the y-parity of R. A recoverable signature's
             // `v` encodes that y-parity in its LSB, so we must toggle only that bit to
             // preserve recoverability.
             recovery_id ^= 1;
-            norm
-        } else {
-            sig
-        };
+        }
+        let sig = sig.normalize_s();
 
         let (r, s) = sig.split_scalars();
 
         Ok(Signature {
-            r: r.to_bytes().into(),
-            s: s.to_bytes().into(),
+            r: <[u8; SCALARS_SIZE_BYTES]>::from(r.to_bytes()),
+            s: <[u8; SCALARS_SIZE_BYTES]>::from(s.to_bytes()),
             v: recovery_id,
         })
     }
@@ -443,7 +468,7 @@ impl Deserializable for SecretKey {
 impl Serializable for PublicKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Compressed format
-        let encoded = self.inner.to_encoded_point(true);
+        let encoded = self.inner.to_sec1_point(true);
 
         target.write_bytes(encoded.as_bytes());
     }
@@ -457,6 +482,12 @@ impl Deserializable for PublicKey {
             .map_err(|_| DeserializationError::InvalidValue("Invalid public key".to_string()))?;
 
         Ok(Self { inner: verifying_key })
+    }
+}
+
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
     }
 }
 
@@ -481,6 +512,12 @@ impl Deserializable for Signature {
         } else {
             Ok(Signature { r, s, v })
         }
+    }
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
     }
 }
 

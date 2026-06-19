@@ -28,7 +28,7 @@ jobs:
     name: Generate and deploy crate documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
 
@@ -47,7 +47,7 @@ jobs:
           make doc
 
       - name: Deploy documentation
-        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # pin@v3
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # pin@v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./target/doc

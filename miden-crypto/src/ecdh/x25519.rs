@@ -14,15 +14,14 @@
 
 use alloc::vec::Vec;
 
-use hkdf::{Hkdf, hmac::SimpleHmac};
-use k256::sha2::Sha256;
+use hkdf::Hkdf;
 use rand::CryptoRng;
+use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 use crate::{
     dsa::eddsa_25519_sha512::{KeyExchangeKey, PublicKey},
     ecdh::KeyAgreementScheme,
-    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         zeroize::{Zeroize, ZeroizeOnDrop},
@@ -44,7 +43,7 @@ impl SharedSecret {
     }
 
     /// Returns a HKDF that can be used to derive uniform keys from the shared secret.
-    pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256, SimpleHmac<Sha256>> {
+    pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256> {
         Hkdf::new(salt, self.inner.as_bytes())
     }
 }
@@ -109,8 +108,7 @@ impl EphemeralSecretKey {
 
     /// Generates a new random ephemeral secret key using the provided RNG.
     pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        let sk = x25519_dalek::EphemeralSecret::random_from_rng(&mut compat_rng);
+        let sk = x25519_dalek::EphemeralSecret::random_from_rng(rng);
         Self { inner: sk }
     }
 
@@ -214,11 +212,7 @@ impl KeyAgreementScheme for X25519 {
         length: usize,
         info: &[u8],
     ) -> Result<Vec<u8>, super::KeyAgreementError> {
-        let hkdf = shared_secret.extract(None);
-        let mut buf = vec![0_u8; length];
-        hkdf.expand(info, &mut buf)
-            .map_err(|_| super::KeyAgreementError::HkdfExpansionFailed)?;
-        Ok(buf)
+        super::extract_key_material(shared_secret.as_ref(), None, length, info)
     }
 }
 

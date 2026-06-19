@@ -14,14 +14,17 @@
 
 use alloc::{string::ToString, vec::Vec};
 
-use hkdf::{Hkdf, hmac::SimpleHmac};
-use k256::{AffinePoint, elliptic_curve::sec1::ToEncodedPoint, sha2::Sha256};
+use hkdf::Hkdf;
+use k256::{
+    AffinePoint,
+    elliptic_curve::{Generate, sec1::ToSec1Point},
+};
 use rand::CryptoRng;
+use sha2::Sha256;
 
 use crate::{
     dsa::ecdsa_k256_keccak::{KeyExchangeKey, PUBLIC_KEY_BYTES, PublicKey},
     ecdh::KeyAgreementScheme,
-    rand::compat::RandCore06,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         zeroize::{Zeroize, ZeroizeOnDrop},
@@ -48,7 +51,7 @@ impl SharedSecret {
     ///
     /// This basically converts a shared secret into uniformly random values that are appropriate
     /// for use as key material.
-    pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256, SimpleHmac<Sha256>> {
+    pub fn extract(&self, salt: Option<&[u8]>) -> Hkdf<Sha256> {
         self.inner.extract(salt)
     }
 }
@@ -111,8 +114,7 @@ impl EphemeralSecretKey {
 
     /// Generates a new ephemeral secret key using the provided random number generator.
     pub fn with_rng<R: CryptoRng>(rng: &mut R) -> Self {
-        let mut compat_rng = RandCore06::new(rng);
-        let sk_e = k256::ecdh::EphemeralSecret::random(&mut compat_rng);
+        let sk_e = k256::ecdh::EphemeralSecret::generate_from_rng(rng);
         Self { inner: sk_e }
     }
 
@@ -153,7 +155,7 @@ impl EphemeralPublicKey {
 impl Serializable for EphemeralPublicKey {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Compressed format
-        let encoded = self.inner.to_encoded_point(true);
+        let encoded = self.inner.to_sec1_point(true);
 
         target.write_bytes(encoded.as_bytes());
     }
@@ -212,11 +214,7 @@ impl KeyAgreementScheme for K256 {
         length: usize,
         info: &[u8],
     ) -> Result<Vec<u8>, super::KeyAgreementError> {
-        let hkdf = shared_secret.extract(None);
-        let mut buf = vec![0_u8; length];
-        hkdf.expand(info, &mut buf)
-            .map_err(|_| super::KeyAgreementError::HkdfExpansionFailed)?;
-        Ok(buf)
+        super::extract_key_material(shared_secret.as_ref(), None, length, info)
     }
 }
 

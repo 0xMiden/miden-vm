@@ -59,13 +59,13 @@ impl BaseAir<Felt> for TinyAir {
     fn num_public_values(&self) -> usize {
         1
     }
-}
 
-impl LiftedAir<Felt, QuadFelt> for TinyAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
         self.periodic_cols.clone()
     }
+}
 
+impl LiftedAir<Felt, QuadFelt> for TinyAir {
     fn num_randomness(&self) -> usize {
         1
     }

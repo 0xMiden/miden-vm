@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::{iter::zip, marker::PhantomData};
 
 use miden_stark_transcript::{TranscriptError, VerifierChannel};
-use p3_field::{ExtensionField, TwoAdicField};
+use p3_field::{ExtensionField, HornerIter, TwoAdicField};
 use p3_matrix::Matrix;
 use thiserror::Error;
 
@@ -13,7 +13,6 @@ use crate::{
         deep::{DeepParams, proof::OpenedValues, read_eval_matrices},
         verifier::CommitmentGroup,
     },
-    util::horner::horner_acc,
 };
 
 /// Verifier's view of the DEEP quotient as a point-query oracle.
@@ -97,11 +96,8 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
             .map(|(p, &point)| {
                 let val = evals.iter().flat_map(|g| g.iter()).fold(EF::ZERO, |acc, mat| {
                     // mat has num_eval_points rows (one per z), p < num_eval_points.
-                    horner_acc(
-                        acc,
-                        challenge_columns,
-                        mat.row(p).expect("eval point index in range"),
-                    )
+                    let row = mat.row_slice(p).expect("eval point index in range");
+                    row.iter().copied().rev().horner_acc(acc, challenge_columns)
                 });
                 (point, val)
             })
@@ -166,7 +162,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
                 let rows_for_query = opened_rows
                     .get(tree_idx)
                     .ok_or(DeepError::InvalidOpening { tree: group_idx, tree_index: *tree_idx })?;
-                *acc = horner_acc(*acc, self.challenge_columns, rows_for_query.iter_values());
+                *acc = rows_for_query.iter_values().rev().horner_acc(*acc, self.challenge_columns);
             }
         }
 

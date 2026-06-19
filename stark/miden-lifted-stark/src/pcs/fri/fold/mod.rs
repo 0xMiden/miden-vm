@@ -21,11 +21,9 @@ mod arity8;
 
 use alloc::vec::Vec;
 
-use p3_field::{ExtensionField, PackedValue, TwoAdicField};
+use p3_field::{ExtensionField, PackedFieldExtension, PackedValue, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrixView};
 use p3_maybe_rayon::prelude::*;
-
-use crate::util::packing::PackedFieldExtensionExt;
 
 /// FRI folding strategy.
 ///
@@ -167,13 +165,13 @@ impl FriFold {
             .zip(s_invs.par_chunks_exact(width))
             .for_each(|((new_evals_chunk, evals_chunk), s_inv_chunk)| {
                 let evals_packed =
-                    <EF::ExtensionPacking as PackedFieldExtensionExt<F, EF>>::pack_ext_columns::<
-                        ARITY,
-                    >(evals_chunk);
+                    <EF::ExtensionPacking as PackedFieldExtension<F, EF>>::pack_ext_columns::<ARITY>(
+                        evals_chunk,
+                    );
                 let s_invs_packed = F::Packing::from_slice(s_inv_chunk);
                 let new_evals_packed =
                     self.fold_evals_packed::<F, EF>(&evals_packed, *s_invs_packed, beta);
-                <EF::ExtensionPacking as PackedFieldExtensionExt<F, EF>>::to_ext_slice(
+                <EF::ExtensionPacking as PackedFieldExtension<F, EF>>::to_ext_slice(
                     &new_evals_packed,
                     new_evals_chunk,
                 );
@@ -191,7 +189,7 @@ pub mod tests {
     use alloc::vec::Vec;
 
     use p3_dft::{NaiveDft, Radix2DFTSmallBatch, TwoAdicSubgroupDft};
-    use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+    use p3_field::{ExtensionField, Field, HornerIter, PrimeCharacteristicRing, TwoAdicField};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_util::reverse_slice_index_bits;
     use rand::{
@@ -207,7 +205,6 @@ pub mod tests {
             configs::goldilocks_poseidon2::{Felt, QuadFelt},
             params::{FRI_FOLD_ARITY_2, FRI_FOLD_ARITY_4, FRI_FOLD_ARITY_8},
         },
-        util::horner::horner,
     };
 
     // Type alias for tests using packed fields
@@ -241,7 +238,7 @@ pub mod tests {
         let result = fold.fold_evals(&evals, s_inv, beta);
 
         // Expected: direct Horner evaluation at beta
-        let expected = horner(beta, coeffs.iter().rev().copied());
+        let expected = coeffs.iter().copied().horner(beta);
         assert_eq!(result, expected, "fold_evals mismatch for arity {arity}");
     }
 
@@ -271,10 +268,10 @@ pub mod tests {
 
         // Evaluate polynomial at coset points: [f(s·root) for root in roots]
         let evals: Vec<Ext> =
-            roots.iter().map(|&root| horner(root * s, poly.iter().rev().copied())).collect();
+            roots.iter().map(|&root| poly.iter().copied().horner(root * s)).collect();
 
         // Expected: f(beta)
-        let expected = horner(beta, poly.iter().rev().copied());
+        let expected = poly.iter().copied().horner(beta);
 
         // Test fold_evals
         let result = fold.fold_evals(&evals, s_inv, beta);

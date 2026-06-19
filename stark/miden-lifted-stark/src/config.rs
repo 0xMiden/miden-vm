@@ -14,6 +14,7 @@ use core::marker::PhantomData;
 use miden_stark_transcript::TranscriptChallenger;
 use p3_dft::TwoAdicSubgroupDft;
 use p3_field::{ExtensionField, TwoAdicField};
+use p3_matrix::{bitrev::BitReversibleMatrix, dense::RowMajorMatrix};
 
 use crate::{lmcs::Lmcs, pcs::params::PcsParams};
 
@@ -26,7 +27,10 @@ pub trait StarkConfig<F: TwoAdicField, EF: ExtensionField<F>>: Clone {
     /// LMCS (Merkle commitment scheme).
     type Lmcs: Lmcs<F = F>;
     /// DFT for LDE computation.
-    type Dft: TwoAdicSubgroupDft<F>;
+    ///
+    /// Its evaluations must bit-reverse to an owned [`RowMajorMatrix`] so committed LDEs are
+    /// stored in a single concrete layout (e.g. `Radix2DitParallel`).
+    type Dft: TwoAdicSubgroupDft<F, Evaluations: BitReversibleMatrix<F, BitRev = RowMajorMatrix<F>>>;
     /// Fiat-Shamir challenger.
     type Challenger: TranscriptChallenger<F, <Self::Lmcs as Lmcs>::Commitment>;
 
@@ -83,7 +87,8 @@ where
     F: TwoAdicField,
     EF: ExtensionField<F>,
     L: Lmcs<F = F>,
-    Dft: TwoAdicSubgroupDft<F> + Clone,
+    Dft: TwoAdicSubgroupDft<F, Evaluations: BitReversibleMatrix<F, BitRev = RowMajorMatrix<F>>>
+        + Clone,
     Ch: TranscriptChallenger<F, L::Commitment>,
 {
     type Lmcs = L;

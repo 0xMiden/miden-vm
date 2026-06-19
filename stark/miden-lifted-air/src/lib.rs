@@ -25,7 +25,7 @@ pub use builder::LiftedAirBuilder;
 // directly.
 pub use p3_air::{
     Air, AirBuilder, AirBuilderWithContext, BaseAir, ExtensionBuilder, FilteredAirBuilder,
-    PeriodicAirBuilder, PermutationAirBuilder, RowWindow, WindowAccess,
+    PermutationAirBuilder, RowWindow, WindowAccess,
 };
 pub use statement::{InstanceError, ProverStatement, Statement};
 pub use util::{log2_ceil_u8, log2_strict_u8};

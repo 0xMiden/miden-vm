@@ -17,7 +17,9 @@ use p3_challenger::UniformSamplingField;
 use p3_field::{
     Field, InjectiveMonomial, Packable, PermutationMonomial, PrimeCharacteristicRing, PrimeField,
     PrimeField64, RawDataSerializable, TwoAdicField,
-    extension::{BinomiallyExtendable, BinomiallyExtendableAlgebra, HasTwoAdicBinomialExtension},
+    extension::{
+        Binomial, BinomiallyExtendable, ExtensionAlgebra, HasTwoAdicBinomialExtension, binomial_mul,
+    },
     impl_raw_serializable_primefield64,
     integers::QuotientMap,
     quotient_map_large_iint, quotient_map_large_uint, quotient_map_small_int,
@@ -29,6 +31,19 @@ use rand::{
     distr::{Distribution, StandardUniform},
 };
 use subtle::{ConditionallySelectable, ConstantTimeLess};
+
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+mod packed;
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "avx2"),
+    all(target_arch = "aarch64", target_feature = "neon"),
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+pub use packed::PackedFelt;
 
 #[cfg(test)]
 mod tests;
@@ -186,8 +201,24 @@ impl Hash for Felt {
 // ================================================================================================
 
 impl Field for Felt {
-    // TODO: This should only be the case for WASM targets.
-    // Native targets should be able to leverage AVX2 / NEON optimizations from Plonky3.
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
+    type Packing = PackedFelt;
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    type Packing = PackedFelt;
+
+    #[cfg(not(any(
+        all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")),
+        all(target_arch = "x86_64", target_feature = "avx512f"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     type Packing = Self;
 
     const GENERATOR: Self = Self(Goldilocks::GENERATOR);
@@ -353,7 +384,12 @@ impl TwoAdicField for Felt {
 // EXTENSION FIELDS
 // ================================================================================================
 
-impl BinomiallyExtendableAlgebra<Self, 2> for Felt {}
+impl ExtensionAlgebra<Self, 2, Binomial<Self>> for Felt {
+    #[inline]
+    fn ext_mul(a: &[Self; 2], b: &[Self; 2], res: &mut [Self; 2]) {
+        binomial_mul::<Self, Self, Self, 2>(a, b, res, <Self as BinomiallyExtendable<2>>::W);
+    }
+}
 
 impl BinomiallyExtendable<2> for Felt {
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<2>>::W);
@@ -376,7 +412,12 @@ impl HasTwoAdicBinomialExtension<2> for Felt {
     }
 }
 
-impl BinomiallyExtendableAlgebra<Self, 5> for Felt {}
+impl ExtensionAlgebra<Self, 5, Binomial<Self>> for Felt {
+    #[inline]
+    fn ext_mul(a: &[Self; 5], b: &[Self; 5], res: &mut [Self; 5]) {
+        binomial_mul::<Self, Self, Self, 5>(a, b, res, <Self as BinomiallyExtendable<5>>::W);
+    }
+}
 
 impl BinomiallyExtendable<5> for Felt {
     const W: Self = Self(<Goldilocks as BinomiallyExtendable<5>>::W);

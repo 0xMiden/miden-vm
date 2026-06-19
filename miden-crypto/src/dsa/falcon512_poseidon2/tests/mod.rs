@@ -1,3 +1,5 @@
+use alloc::string::{String, ToString};
+
 use data::{
     DETERMINISTIC_SIGNATURE, EXPECTED_SIG, EXPECTED_SIG_POLYS, NUM_TEST_VECTORS, SK_POLYS,
     SYNC_DATA_FOR_TEST_VECTOR,
@@ -110,6 +112,33 @@ fn test_signature_determinism() {
     let serialized_signature = signature.to_bytes();
 
     assert_eq!(serialized_signature, DETERMINISTIC_SIGNATURE);
+}
+
+#[test]
+fn test_public_key_and_signature_display_hex() {
+    let seed = [0_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let sk = SecretKey::with_rng(&mut rng);
+    let pk = sk.public_key();
+    let signature = sk.sign(b"data".into());
+
+    // `Display` must render the canonical serialized bytes as `0x`-prefixed lowercase hex.
+    // `Serializable` is implemented for `&PublicKey`, so the borrow is required here.
+    assert_eq!(pk.to_string(), canonical_hex(&(&pk).to_bytes()));
+    assert_eq!(signature.to_string(), canonical_hex(&signature.to_bytes()));
+    assert!(pk.to_string().starts_with("0x"));
+    assert!(signature.to_string().starts_with("0x"));
+}
+
+/// Renders `bytes` as a `0x`-prefixed lowercase hex string, mirroring the expected `Display`
+/// output.
+fn canonical_hex(bytes: &[u8]) -> String {
+    let mut s = String::from("0x");
+    for byte in bytes {
+        s.push_str(&format!("{byte:02x}"));
+    }
+    s
 }
 
 #[test]

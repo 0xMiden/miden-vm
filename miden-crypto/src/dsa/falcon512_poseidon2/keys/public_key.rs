@@ -1,7 +1,7 @@
 //! Public key types for the Poseidon2 Falcon 512 digital signature scheme used in Miden VM.
 
 use alloc::{string::ToString, vec::Vec};
-use core::ops::Deref;
+use core::{fmt, ops::Deref};
 
 use num::Zero;
 
@@ -83,6 +83,12 @@ impl Serializable for &PublicKey {
         }
 
         target.write(buf);
+    }
+}
+
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
     }
 }
 

@@ -54,7 +54,7 @@ pub fn hash_to_point_poseidon2(message: Word, nonce: &Nonce) -> Polynomial<Falco
 /// nonce using SHAKE256. This is the hash-to-point algorithm used in the reference implementation.
 #[cfg(test)]
 pub fn hash_to_point_shake256(message: &[u8], nonce: &Nonce) -> Polynomial<FalconFelt> {
-    use sha3::{
+    use shake::{
         Shake256,
         digest::{ExtendableOutput, Update, XofReader},
     };

@@ -92,8 +92,20 @@ impl Rpo256 {
     /// The number of rounds is set to 7 to target 128-bit security level.
     pub const NUM_ROUNDS: usize = NUM_ROUNDS;
 
-    /// Sponge state is set to 12 field elements or 768 bytes; 8 elements are reserved for the
-    /// rate and the remaining 4 elements are reserved for the capacity.
+    /// Sponge state is set to 12 field elements, or 96 bytes / 768 bits; 8 elements are
+    /// reserved for the rate and the remaining 4 elements are reserved for the capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_crypto::{Word, hash::rpo::Rpo256};
+    ///
+    /// const FELT_SERIALIZED_SIZE: usize = Word::SERIALIZED_SIZE / Word::NUM_ELEMENTS;
+    ///
+    /// assert_eq!(Rpo256::STATE_WIDTH * FELT_SERIALIZED_SIZE, 96);
+    /// assert_eq!(Rpo256::RATE_RANGE.len(), 8);
+    /// assert_eq!(Rpo256::CAPACITY_RANGE.len(), 4);
+    /// ```
     pub const STATE_WIDTH: usize = STATE_WIDTH;
 
     /// The rate portion of the state is located in elements 0 through 7 (inclusive).
@@ -233,8 +245,8 @@ impl RpoPermutation256 {
     /// The number of rounds is set to 7 to target 128-bit security level.
     pub const NUM_ROUNDS: usize = Rpo256::NUM_ROUNDS;
 
-    /// Sponge state is set to 12 field elements or 768 bytes; 8 elements are reserved for rate and
-    /// the remaining 4 elements are reserved for capacity.
+    /// Sponge state is set to 12 field elements, or 96 bytes / 768 bits; 8 elements are
+    /// reserved for rate and the remaining 4 elements are reserved for capacity.
     pub const STATE_WIDTH: usize = STATE_WIDTH;
 
     /// The rate portion of the state is located in elements 0 through 7 (inclusive).

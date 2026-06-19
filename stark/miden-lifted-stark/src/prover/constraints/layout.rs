@@ -6,8 +6,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{
-    AirBuilder, ExtensionBuilder, LiftedAir, PeriodicAirBuilder, PermutationAirBuilder,
-    WindowAccess,
+    AirBuilder, ExtensionBuilder, LiftedAir, PermutationAirBuilder, WindowAccess,
     symbolic::{AirLayout, ConstraintLayout},
 };
 use p3_field::{ExtensionField, Field};
@@ -118,6 +117,7 @@ impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
     type PreprocessedWindow = OwnedRowWindow<F>;
     type MainWindow = RowMajorMatrix<F>;
     type PublicVar = F;
+    type PeriodicVar = F;
 
     fn main(&self) -> Self::MainWindow {
         self.main.clone()
@@ -135,7 +135,7 @@ impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
         F::ZERO
     }
 
-    fn is_transition_window(&self, _size: usize) -> Self::Expr {
+    fn is_transition(&self) -> Self::Expr {
         F::ZERO
     }
 
@@ -146,6 +146,10 @@ impl<F: Field> AirBuilder for ConstraintLayoutBuilder<F> {
 
     fn public_values(&self) -> &[Self::PublicVar] {
         &self.public_values
+    }
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
     }
 }
 
@@ -178,13 +182,5 @@ impl<F: Field> PermutationAirBuilder for ConstraintLayoutBuilder<F> {
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         &self.permutation_values
-    }
-}
-
-impl<F: Field> PeriodicAirBuilder for ConstraintLayoutBuilder<F> {
-    type PeriodicVar = F;
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
     }
 }

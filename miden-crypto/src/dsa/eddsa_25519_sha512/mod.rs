@@ -2,6 +2,7 @@
 //! the messages when signing.
 
 use alloc::{string::ToString, vec::Vec};
+use core::fmt;
 
 use der::{Decode, asn1::BitStringRef};
 use ed25519_dalek::{Signer, Verifier};
@@ -538,6 +539,12 @@ impl Deserializable for PublicKey {
     }
 }
 
+impl fmt::Display for PublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
+    }
+}
+
 impl Serializable for Signature {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_bytes(&self.inner.to_bytes())
@@ -549,5 +556,11 @@ impl Deserializable for Signature {
         let bytes: [u8; SIGNATURE_BYTES] = source.read_array()?;
         let inner = ed25519_dalek::Signature::from_bytes(&bytes);
         Ok(Self { inner })
+    }
+}
+
+impl fmt::Display for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::utils::write_hex(f, &self.to_bytes())
     }
 }

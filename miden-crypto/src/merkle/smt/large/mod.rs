@@ -265,7 +265,10 @@ pub use storage::{
     StorageResult, StorageUpdateParts, StorageUpdates, SubtreeUpdate,
 };
 #[cfg(feature = "rocksdb")]
-pub use storage::{RocksDbConfig, RocksDbSnapshotStorage, RocksDbStorage};
+pub use storage::{
+    RocksDbBloomFilterBitsPerKey, RocksDbConfig, RocksDbDurabilityMode, RocksDbMemoryBudget,
+    RocksDbSnapshotStorage, RocksDbStorage, RocksDbTuningOptions, RocksDbWriteBufferManagerBudget,
+};
 
 mod iter;
 pub use iter::LargeSmtInnerNodeIterator;

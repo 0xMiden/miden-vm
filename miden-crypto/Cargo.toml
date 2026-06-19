@@ -100,7 +100,7 @@ miden-serde-utils   = { workspace = true }
 
 # External dependencies
 blake3           = { workspace = true }
-chacha20poly1305 = { features = ["alloc", "rand_core", "stream"], workspace = true }
+chacha20poly1305 = { features = ["alloc"], workspace = true }
 clap             = { features = ["derive"], optional = true, workspace = true }
 curve25519-dalek = { workspace = true }
 der              = { workspace = true }
@@ -115,7 +115,7 @@ proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { workspace = true }
 rand_chacha      = { workspace = true }
 rayon            = { optional = true, workspace = true }
-rocksdb          = { features = ["bindgen-runtime", "lz4"], optional = true, workspace = true }
+rocksdb          = { features = ["bindgen-runtime", "lz4", "zstd"], optional = true, workspace = true }
 serde            = { features = ["derive"], optional = true, workspace = true }
 sha2             = { workspace = true }
 sha3             = { workspace = true }
@@ -142,6 +142,7 @@ itertools      = { workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 seq-macro      = { workspace = true }
+shake          = { workspace = true }
 tempfile       = { workspace = true }
 
 [build-dependencies]
