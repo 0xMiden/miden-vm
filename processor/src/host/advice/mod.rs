@@ -3,7 +3,10 @@ use alloc::{collections::VecDeque, vec::Vec};
 use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    crypto::{
+        hash::Poseidon2,
+        merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
+    },
     precompile::PrecompileRequest,
 };
 #[cfg(test)]
@@ -19,6 +22,52 @@ use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInt
 
 /// Maximum number of elements allowed on the advice stack. Set to 2^17.
 pub const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+
+trait MerkleStoreBudget {
+    fn contains_internal_node(&self, root: Word) -> bool;
+
+    fn new_internal_node_count<I>(&self, roots: I) -> usize
+    where
+        I: IntoIterator<Item = Word>;
+
+    fn new_path_node_count(
+        &self,
+        index: u64,
+        node: Word,
+        path: &MerklePath,
+    ) -> Result<usize, MerkleError>;
+}
+
+impl MerkleStoreBudget for MerkleStore {
+    fn contains_internal_node(&self, root: Word) -> bool {
+        self.get_node(root, NodeIndex::root()).is_ok()
+    }
+
+    fn new_internal_node_count<I>(&self, roots: I) -> usize
+    where
+        I: IntoIterator<Item = Word>,
+    {
+        let mut new_roots = Vec::new();
+
+        for root in roots {
+            if !self.contains_internal_node(root) && !new_roots.contains(&root) {
+                new_roots.push(root);
+            }
+        }
+
+        new_roots.len()
+    }
+
+    fn new_path_node_count(
+        &self,
+        index: u64,
+        node: Word,
+        path: &MerklePath,
+    ) -> Result<usize, MerkleError> {
+        path.authenticated_nodes(index, node)
+            .map(|nodes| self.new_internal_node_count(nodes.map(|node| node.value)))
+    }
+}
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -457,9 +506,16 @@ impl AdviceProvider {
         Ok(())
     }
 
-    fn commit_merkle_store(&mut self, store: MerkleStore) {
-        self.merkle_store_node_count = store.num_internal_nodes();
-        self.store = store;
+    fn check_merkle_store_node_addition(&self, added: usize) -> Result<(), AdviceError> {
+        let Some(node_count) = self.merkle_store_node_count.checked_add(added) else {
+            return Err(AdviceError::MerkleStoreNodeBudgetExceeded {
+                current: self.merkle_store_node_count,
+                added,
+                max: self.max_merkle_store_nodes,
+            });
+        };
+
+        self.check_merkle_store_node_budget(node_count)
     }
 
     /// Inserts the provided value into the advice map under the specified key.
@@ -604,9 +660,6 @@ impl AdviceProvider {
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;
     /// returns the Merkle path from the updated node to the new root, together with the new root.
     ///
-    /// The tree is cloned prior to the update. Thus, the advice provider retains the original and
-    /// the updated tree.
-    ///
     /// # Errors
     /// Returns an error if:
     /// - A Merkle tree for the specified root cannot be found in this advice provider.
@@ -623,13 +676,28 @@ impl AdviceProvider {
     ) -> Result<(MerklePath, Word), AdviceError> {
         let node_index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
-        let mut store = self.store.clone();
-        let root_path = store
-            .set_node(root, node_index, value)
+        let proof = self
+            .store
+            .get_path(root, node_index)
             .map_err(AdviceError::MerkleStoreUpdateFailed)?;
-        self.check_merkle_store_node_budget(store.num_internal_nodes())?;
-        self.commit_merkle_store(store);
-        Ok((root_path.path, root_path.root))
+        let path = proof.path;
+
+        if proof.value == value {
+            return Ok((path, root));
+        }
+
+        let added = self
+            .store
+            .new_path_node_count(node_index.position(), value, &path)
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        self.check_merkle_store_node_addition(added)?;
+
+        let new_root = self
+            .store
+            .add_merkle_path(node_index.position(), value, path.clone())
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        self.merkle_store_node_count += added;
+        Ok((path, new_root))
     }
 
     /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -641,10 +709,12 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        let mut store = self.store.clone();
-        let root = store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)?;
-        self.check_merkle_store_node_budget(store.num_internal_nodes())?;
-        self.commit_merkle_store(store);
+        let root = Poseidon2::merge(&[lhs, rhs]);
+        let added = self.store.new_internal_node_count([root]);
+        self.check_merkle_store_node_addition(added)?;
+
+        let root = self.store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)?;
+        self.merkle_store_node_count += added;
         Ok(root)
     }
 
@@ -658,12 +728,12 @@ impl AdviceProvider {
     where
         I: IntoIterator<Item = InnerNodeInfo>,
     {
-        let mut store = self.store.clone();
-        for info in iter {
-            store.extend([info]);
-            self.check_merkle_store_node_budget(store.num_internal_nodes())?;
-        }
-        self.commit_merkle_store(store);
+        let nodes = iter.into_iter().collect::<Vec<_>>();
+        let added = self.store.new_internal_node_count(nodes.iter().map(|node| node.value));
+        self.check_merkle_store_node_addition(added)?;
+
+        self.store.extend(nodes);
+        self.merkle_store_node_count += added;
         Ok(())
     }
 
@@ -1020,6 +1090,23 @@ mod tests {
         let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
 
         provider.extend_merkle_store(tree.inner_nodes()).unwrap();
+
+        assert_eq!(provider.merkle_store_node_count, base_node_count + 1);
+        assert!(provider.has_merkle_root(tree.root()));
+    }
+
+    #[test]
+    fn merkle_store_extend_counts_only_new_unique_nodes() {
+        let base_node_count = MerkleStore::default().num_internal_nodes();
+        let tree = merkle_tree_from_leaves(0..2);
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(base_node_count + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let nodes = tree.inner_nodes().collect::<Vec<_>>();
+
+        provider
+            .extend_merkle_store(nodes.iter().cloned().chain(nodes.iter().cloned()))
+            .unwrap();
+        provider.extend_merkle_store(nodes).unwrap();
 
         assert_eq!(provider.merkle_store_node_count, base_node_count + 1);
         assert!(provider.has_merkle_root(tree.root()));
