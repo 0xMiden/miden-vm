@@ -37,11 +37,10 @@ fn reduce_kernel_digests_upper_bound() {
     //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
     //
     // process_public_inputs advice stack (consumed in order):
-    //   1. aux randomness (4 felts)
-    //   2. num_kernel_proc_digests (1 felt)
-    //   3. kernel digests (4 canonical felts each)
+    //   1. num_kernel_proc_digests (1 felt)
+    //   2. kernel digests (4 canonical felts each)
     //   ...
-    // stream_kernel_digests asserts num_kernel_proc_digests < 256 (mirroring
+    // process_public_inputs asserts num_kernel_proc_digests < 256 (mirroring
     // `MultiAir::max_aux_inputs`).
     let source = "
         use miden::core::stark::random_coin
@@ -60,12 +59,10 @@ fn reduce_kernel_digests_upper_bound() {
 
     let num_kernel_proc_digests = 256_usize; // one over the maximum (255)
     let kernel_procedures_digests = vec![0_u64; num_kernel_proc_digests * WORD_SIZE];
-    let auxiliary_rand_values = [0_u64; 4];
 
     // Advice layout (consumed top-to-bottom):
-    //   4 aux rand, 1 num_kernel_proc_digests, 1024 digest felts
+    //   1 num_kernel_proc_digests, 1024 digest felts
     let mut advice_stack = Vec::new();
-    advice_stack.extend_from_slice(&auxiliary_rand_values);
     advice_stack.push(num_kernel_proc_digests as u64);
     advice_stack.extend_from_slice(&kernel_procedures_digests);
 
