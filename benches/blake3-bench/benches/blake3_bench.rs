@@ -1,13 +1,13 @@
-use std::{collections::BTreeSet, hint::black_box, time::Duration};
+use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize, Criterion, SamplingMode, criterion_group, criterion_main};
 use miden_vm_blake3_bench::{
-    BENCH_GROUP, Blake3Fixture, build_trace, execute_trace_inputs, prove_span_duration,
-    prove_trace, repo_root_from_manifest,
+    BENCH_GROUP, Blake3Fixture, build_trace, execute_trace_inputs, prove_and_verify_once,
+    prove_span_duration, prove_trace, repo_root_from_manifest,
 };
 
 const ALL_AXES: [&str; 4] =
-    ["prove", "execute_trace_inputs_sync", "prove_trace_sync", "build_trace"];
+    ["execute_trace_inputs_sync", "build_trace", "prove_trace_sync", "prove"];
 const PROOF_AXES: [&str; 2] = ["prove", "prove_trace_sync"];
 const LIGHT_AXES: [&str; 2] = ["execute_trace_inputs_sync", "build_trace"];
 
@@ -36,40 +36,32 @@ fn env_u64(name: &str, default: u64) -> u64 {
     }
 }
 
-fn resolve_axes() -> BTreeSet<&'static str> {
+fn resolve_axes() -> Vec<&'static str> {
     let Some(raw) =
         std::env::var("BLAKE3_BENCH_AXES").ok().filter(|value| !value.trim().is_empty())
     else {
-        return ALL_AXES.into_iter().collect();
+        return ALL_AXES.to_vec();
     };
 
-    let mut axes = BTreeSet::new();
+    let mut requested = Vec::new();
     for axis in raw.split(',').map(str::trim).filter(|axis| !axis.is_empty()) {
         match axis {
-            "all" => axes.extend(ALL_AXES),
-            "prove" => {
-                axes.insert("prove");
-            },
-            "prove_program_sync" => {
-                axes.insert("prove");
-            },
-            "execute_trace_inputs_sync" => {
-                axes.insert("execute_trace_inputs_sync");
-            },
-            "prove_trace_sync" => {
-                axes.insert("prove_trace_sync");
-            },
-            "build_trace" => {
-                axes.insert("build_trace");
-            },
+            "all" => requested.extend(ALL_AXES),
+            "prove" | "prove_program_sync" => requested.push("prove"),
+            "execute_trace_inputs_sync" => requested.push("execute_trace_inputs_sync"),
+            "prove_trace_sync" => requested.push("prove_trace_sync"),
+            "build_trace" => requested.push("build_trace"),
             _ => panic!(
                 "unsupported BLAKE3_BENCH_AXES value `{axis}`; supported values: {}",
                 ALL_AXES.join(", ")
             ),
         }
     }
-    assert!(!axes.is_empty(), "BLAKE3_BENCH_AXES did not select any axes");
-    axes
+    ALL_AXES.into_iter().filter(|axis| requested.contains(axis)).collect()
+}
+
+fn has_axis(axes: &[&str], axis: &str) -> bool {
+    axes.contains(&axis)
 }
 
 fn blake3_bench(c: &mut Criterion) {
@@ -79,18 +71,21 @@ fn blake3_bench(c: &mut Criterion) {
     let light_sample_size = env_usize("BLAKE3_LIGHT_SAMPLE_SIZE", 100);
     let measurement_time_secs = env_u64("BLAKE3_MEASUREMENT_TIME_SECS", 1);
     let warm_up_time_secs = env_u64("BLAKE3_WARM_UP_TIME_SECS", 1);
-    println!("\n=== Blake3 axes: {}", axes.iter().copied().collect::<Vec<_>>().join(", "));
+    assert!(!axes.is_empty(), "BLAKE3_BENCH_AXES did not select any axes");
+    println!("\n=== Blake3 axes: {}", axes.join(", "));
     println!(
         "=== Criterion: proof_sample_size={proof_sample_size} light_sample_size={light_sample_size} measurement_time={measurement_time_secs}s warm_up={warm_up_time_secs}s"
     );
 
     let fixture = Blake3Fixture::load_from_repo(&repo_root_from_manifest());
 
-    if PROOF_AXES.iter().any(|axis| axes.contains(axis)) {
+    if PROOF_AXES.iter().any(|axis| has_axis(&axes, axis)) {
+        prove_and_verify_once(&fixture);
+
         let mut group = c.benchmark_group(BENCH_GROUP);
         configure_group(&mut group, proof_sample_size, measurement_time_secs, warm_up_time_secs);
 
-        if axes.contains("prove") {
+        if has_axis(&axes, "prove") {
             group.bench_function("prove", |b| {
                 b.iter_custom(|iterations| {
                     let mut total = Duration::ZERO;
@@ -102,7 +97,7 @@ fn blake3_bench(c: &mut Criterion) {
             });
         }
 
-        if axes.contains("prove_trace_sync") {
+        if has_axis(&axes, "prove_trace_sync") {
             group.bench_function("prove_trace_sync", |b| {
                 b.iter_batched(
                     || execute_trace_inputs(&fixture),
@@ -115,11 +110,11 @@ fn blake3_bench(c: &mut Criterion) {
         group.finish();
     }
 
-    if LIGHT_AXES.iter().any(|axis| axes.contains(axis)) {
+    if LIGHT_AXES.iter().any(|axis| has_axis(&axes, axis)) {
         let mut group = c.benchmark_group(BENCH_GROUP);
         configure_group(&mut group, light_sample_size, measurement_time_secs, warm_up_time_secs);
 
-        if axes.contains("execute_trace_inputs_sync") {
+        if has_axis(&axes, "execute_trace_inputs_sync") {
             group.bench_function("execute_trace_inputs_sync", |b| {
                 b.iter_batched(
                     || fixture.clone(),
@@ -129,7 +124,7 @@ fn blake3_bench(c: &mut Criterion) {
             });
         }
 
-        if axes.contains("build_trace") {
+        if has_axis(&axes, "build_trace") {
             group.bench_function("build_trace", |b| {
                 b.iter_batched(
                     || execute_trace_inputs(&fixture),

@@ -92,6 +92,23 @@ A few general notes on performance:
 - Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
 - Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
 
+To refresh the Blake3 results below, run the same Criterion benchmark used by CI:
+
+```bash
+RAYON_NUM_THREADS=16 cargo run --profile optimized -p miden-vm-blake3-bench --bin blake3-nonregression -- run \
+  --repo-root . \
+  --output-dir target/blake3-nonregression \
+  --rayon-num-threads 16 \
+  --sample-size 10 \
+  --light-sample-size 100 \
+  --measurement-time-secs 1 \
+  --warm-up-time-secs 1 \
+  --bench-axes all \
+  --git-ref "$(git rev-parse HEAD)"
+```
+
+The result is written to `target/blake3-nonregression/result.json`. The benchmark records `execute_trace_inputs_sync`, `build_trace`, `prove_trace_sync`, and `prove`. The `prove` metric runs execution and trace generation on each sample, but only measures the prover span. The harness also proves and verifies the program once before timing proof-heavy axes.
+
 ### Single-core prover performance
 
 When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.

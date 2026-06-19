@@ -41,22 +41,6 @@ enum Commands {
         #[arg(long, default_value = "")]
         git_ref: String,
     },
-    Collect {
-        #[arg(long)]
-        repo_root: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
-        #[arg(long)]
-        bench_wall_ms: Option<f64>,
-        #[arg(long)]
-        trace_wall_ms: Option<f64>,
-        #[arg(long)]
-        rayon_num_threads: Option<usize>,
-        #[arg(long, default_value = "")]
-        bench_axes: String,
-        #[arg(long, default_value = "")]
-        git_ref: String,
-    },
     CollectSpans {
         #[arg(long)]
         repo_root: PathBuf,
@@ -173,30 +157,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &git_ref,
             )?;
         },
-        Commands::Collect {
-            repo_root,
-            output,
-            bench_wall_ms,
-            trace_wall_ms,
-            rayon_num_threads,
-            bench_axes,
-            git_ref,
-        } => {
-            let result = collect_result(
-                &repo_root,
-                &git_ref,
-                bench_wall_ms,
-                trace_wall_ms,
-                rayon_num_threads,
-                &bench_axes,
-                None,
-                None,
-                None,
-                None,
-                Vec::new(),
-            )?;
-            write_json(&output, &result)?;
-        },
         Commands::CollectSpans { repo_root, output } => {
             let fixture = Blake3Fixture::load_from_repo(&repo_root);
             write_json(&output, &collect_trace_spans(&fixture))?;
@@ -254,13 +214,13 @@ fn cmd_run(
     }
 
     run_logged_command(
-        command("cargo").arg("clean"),
+        Command::new("cargo").arg("clean"),
         repo_root,
         &envs,
         &output_dir.join("clean.log"),
     )?;
 
-    let mut bench_command = command("cargo");
+    let mut bench_command = Command::new("cargo");
     bench_command.args([
         "bench",
         "--profile",
@@ -283,7 +243,7 @@ fn cmd_run(
 
     let spans_path = output_dir.join("spans.json");
     let (trace_wall_ms, spans) = if should_collect_proof_spans(bench_axes) {
-        let mut spans_command = command("cargo");
+        let mut spans_command = Command::new("cargo");
         spans_command
             .args([
                 "run",
@@ -673,10 +633,6 @@ fn estimate_ms(payload: &serde_json::Value, name: &str) -> Option<(f64, f64, f64
     let low = interval.get("lower_bound")?.as_f64()? / 1_000_000.0;
     let high = interval.get("upper_bound")?.as_f64()? / 1_000_000.0;
     Some((point, low, high))
-}
-
-fn command(program: &str) -> Command {
-    Command::new(program)
 }
 
 fn run_logged_command(
