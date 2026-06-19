@@ -397,13 +397,17 @@ end
 #! transcript as two rate-aligned 8-felt chunks via `mem_stream + permute`:
 #!   Chunk 1: `[kernel_H | program_digest]`   at reduced_inputs+0..+7.
 #!   Chunk 2: `[transcript_state | zero_pad]` at reduced_inputs+8..+15.
-#! The trailing pad word is read back zero from the VM's zero-initialized memory.
+#! The trailing pad word is written to zero here so the absorption does not depend on the scratch
+#! region being zero-initialized.
 #!
 #! POSTCONDITION: random coin input_len=0, output_len=8 on return.
 #!
 #! Input:  [...]
 #! Output: [...]
 proc absorb_reduced_inputs_window_into_fs
+    # Explicitly zero the trailing pad word at reduced_inputs+12 before absorbing the window.
+    padw exec.constants::reduced_inputs_address_ptr mem_load add.12 mem_storew_le dropw
+
     push.0 exec.constants::random_coin_output_len_ptr mem_store
     exec.random_coin::load_random_coin_state
     # => [R1, R2, C, ...]

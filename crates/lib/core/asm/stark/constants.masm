@@ -87,7 +87,7 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
 ### Address storing a pointer to the caller-facing reduced-inputs block
-### [kernel_H | zero_pad | program_digest | transcript_state] (16 felts, just below FLPI).
+### [kernel_H | program_digest | transcript_state | zero_pad] (16 felts, just below FLPI).
 const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 
 ### Address storing a pointer to the public inputs
