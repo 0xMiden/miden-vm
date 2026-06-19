@@ -150,6 +150,16 @@ pub enum SemanticAnalysisError {
         #[label("this type is private")]
         defined: SourceSpan,
     },
+    #[error("private type in exported type declaration")]
+    #[diagnostic(help(
+        "exported type declarations may only reference public types, including nested type dependencies"
+    ))]
+    PrivateTypeInExportedType {
+        #[label("this exported type declaration references a private type")]
+        span: SourceSpan,
+        #[label("this type is private")]
+        defined: SourceSpan,
+    },
     #[error("unused import")]
     #[diagnostic(severity(Warning), help("this import is never used and can be safely removed"))]
     UnusedImport {

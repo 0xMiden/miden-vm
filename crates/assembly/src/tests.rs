@@ -6303,19 +6303,18 @@ fn exported_procedure_signature_referencing_private_local_type_is_rejected() {
     let context = TestContext::default();
 
     let err = context
-        .parse_module_with_path(
-            "cycle::module_a",
-            source_file!(
-                &context,
-                r#"
+        .parse_module(source_file!(
+            &context,
+            r#"
+                namespace cycle::module_a
+
                 type PrivateType = felt
 
                 pub proc a_proc(value: PrivateType)
                     nop
                 end
             "#
-            ),
-        )
+        ))
         .expect_err("expected exported signature with private local type to be rejected");
 
     assert_diagnostic!(&err, "private type in exported procedure signature");
@@ -6327,19 +6326,18 @@ fn exported_procedure_signature_with_absolute_private_local_type_is_rejected() {
     let context = TestContext::default();
 
     let err = context
-        .parse_module_with_path(
-            "cycle::module_a",
-            source_file!(
-                &context,
-                r#"
+        .parse_module(source_file!(
+            &context,
+            r#"
+                namespace cycle::module_a
+
                 type PrivateType = felt
 
                 pub proc a_proc(value: ::cycle::module_a::PrivateType)
                     nop
                 end
             "#
-            ),
-        )
+        ))
         .expect_err("expected absolute private local type in exported signature to be rejected");
 
     assert_diagnostic!(&err, "private type in exported procedure signature");
@@ -6347,75 +6345,57 @@ fn exported_procedure_signature_with_absolute_private_local_type_is_rejected() {
 }
 
 #[test]
-fn exported_procedure_signature_with_cross_module_private_alias_dependency_is_rejected()
--> TestResult {
+fn public_item_import_reexporting_private_signature_is_rejected() {
     let context = TestContext::default();
 
-    let module_a = context.parse_module_with_path(
-        "cycle::module_a",
-        source_file!(
+    let module = context
+        .parse_module(source_file!(
             &context,
             r#"
-            type PrivateType = felt
-            pub type PublicAlias = PrivateType
-        "#
-        ),
-    )?;
+                namespace cycle::module_a
 
-    let module_b = context.parse_module_with_path(
-        "cycle::module_b",
-        source_file!(
-            &context,
-            r#"
-            use cycle::module_a
+                type PrivateType = felt
 
-            pub proc b_proc(value: module_a::PublicAlias)
-                nop
-            end
-        "#
-        ),
-    )?;
+                pub use {hidden as exposed} from self
+
+                proc hidden(value: PrivateType)
+                    nop
+                end
+            "#
+        ))
+        .expect("private procedure signature should be valid before public re-export");
 
     let err = Assembler::new(context.source_manager())
-        .assemble_library("library", module_a, [module_b])
-        .expect_err(
-            "expected exported signature with cross-module private alias dependency to be rejected",
-        );
+        .assemble_library("library", module, None::<Box<Module>>)
+        .expect_err("expected public re-export of private signature to be rejected");
+
     assert_diagnostic!(&err, "private type in exported procedure signature");
     assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
-
-    Ok(())
 }
 
 #[test]
-fn exported_procedure_alias_signature_with_private_local_type_is_rejected() -> TestResult {
+fn public_item_import_reexporting_private_type_is_rejected() {
     let context = TestContext::default();
 
-    let module = context.parse_module_with_path(
-        "cycle::module_a",
-        source_file!(
+    let module = context
+        .parse_module(source_file!(
             &context,
             r#"
-            type PrivateType = felt
+                namespace cycle::module_a
 
-            proc hidden(value: PrivateType)
-                nop
-            end
+                type PrivateType = felt
 
-            pub use ::cycle::module_a::hidden->exposed
-        "#
-        ),
-    )?;
+                pub use {PrivateType as PublicType} from self
+            "#
+        ))
+        .expect("private type should be valid before public re-export");
 
     let err = Assembler::new(context.source_manager())
-        .assemble_library("library", module, [])
-        .expect_err(
-            "expected exported procedure alias with private local type in signature to be rejected",
-        );
-    assert_diagnostic!(&err, "private type in exported procedure signature");
-    assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
+        .assemble_library("library", module, None::<Box<Module>>)
+        .expect_err("expected public re-export of private type to be rejected");
 
-    Ok(())
+    assert_diagnostic!(&err, "private type in exported type declaration");
+    assert_diagnostic!(&err, "exported type declarations may only reference public types");
 }
 
 #[test]

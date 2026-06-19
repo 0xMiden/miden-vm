@@ -386,6 +386,8 @@ fn exported_proc_signature_rejects_private_local_type() {
     let error = context
         .parse_module(
             "
+namespace test
+
 type PrivateType = felt
 
 pub proc check(value: PrivateType)
@@ -399,30 +401,29 @@ end
 }
 
 #[test]
-fn exported_proc_signature_rejects_private_type_via_public_alias() {
+fn exported_type_alias_rejects_private_type() {
     let context = SyntaxTestContext::default();
     let error = context
         .parse_module(
             "
+namespace test
+
 type PrivateType = felt
 pub type PublicAlias = PrivateType
-
-pub proc check(value: PublicAlias)
-    nop
-end
 ",
         )
-        .expect_err("expected exported procedure signature to reject transitive private type");
+        .expect_err("expected exported type alias to reject private type");
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
-    assert!(rendered.contains("private type in exported procedure signature"));
+    assert!(rendered.contains("private type in exported type declaration"));
 }
 
 #[test]
 fn exported_proc_signature_rejects_private_local_type_via_absolute_path() {
     let context = SyntaxTestContext::default();
-    let error = context
-        .parse_module_with_path(
-            "wallet::memory",
+    let mut parser = Module::parser(None);
+    let error = parser
+        .parse_str(
+            Some(Path::new("wallet::memory")),
             "
 type PrivateType = felt
 
@@ -430,6 +431,7 @@ pub proc check(value: ::wallet::memory::PrivateType)
     nop
 end
 ",
+            context.source_manager(),
         )
         .expect_err(
             "expected exported procedure signature to reject private local type via absolute path",
@@ -444,6 +446,8 @@ fn private_proc_signature_allows_private_local_type() {
     context
         .parse_module(
             "
+namespace test
+
 type PrivateType = felt
 
 proc check(value: PrivateType)

@@ -57,6 +57,25 @@ use crate::{
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
 
+#[derive(Clone, Copy)]
+enum ExportedTypeUse {
+    ProcedureSignature,
+    TypeDeclaration,
+}
+
+impl ExportedTypeUse {
+    fn private_type_error(self, span: SourceSpan, defined: SourceSpan) -> SemanticAnalysisError {
+        match self {
+            Self::ProcedureSignature => {
+                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
+            },
+            Self::TypeDeclaration => {
+                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
+            },
+        }
+    }
+}
+
 #[derive(Debug)]
 enum PendingPackageExport {
     Procedure(PendingProcedureExport),
@@ -820,64 +839,66 @@ impl Assembler {
                     continue;
                 }
 
-                match symbol.item() {
-                    SymbolItem::Procedure(proc) => {
-                        let proc = proc.borrow();
-                        self.verify_exported_signature(&resolver, module_index, proc.signature())?;
-                    },
-                    SymbolItem::Compiled(ItemInfo::Procedure(proc)) => {
-                        self.verify_exported_signature(
-                            &resolver,
-                            module_index,
-                            proc.signature.as_deref(),
-                        )?;
-                    },
-                    SymbolItem::Constant(_)
-                    | SymbolItem::Type(_)
-                    | SymbolItem::Compiled(ItemInfo::Constant(_))
-                    | SymbolItem::Compiled(ItemInfo::Type(_)) => (),
-                };
+                self.verify_exported_item(&resolver, module_index, symbol, None)?;
             }
 
             for import in module.imports() {
-                if !import.visibility().is_public() || !matches!(import.kind(), ast::ImportKind::Item)
+                if !import.visibility().is_public()
+                    || !matches!(import.kind(), ast::ImportKind::Item)
                 {
                     continue;
                 }
 
-                let target = import.target_path();
-                let context = SymbolResolutionContext {
-                    span: target.span(),
-                    module: module_index,
-                    kind: Some(InvokeKind::ProcRef),
-                };
-                let resolution =
-                    resolver.resolve_path(&context, target.as_deref()).map_err(Report::from)?;
-                let Some(gid) = resolution.into_global_id() else {
+                let Some(gid) = import.resolved() else {
                     continue;
                 };
 
-                match self.linker[gid].item() {
-                    SymbolItem::Procedure(proc) => {
-                        let proc = proc.borrow();
-                        self.verify_exported_signature(&resolver, gid.module, proc.signature())?;
-                    },
-                    SymbolItem::Compiled(ItemInfo::Procedure(proc)) => {
-                        self.verify_exported_signature(
-                            &resolver,
-                            gid.module,
-                            proc.signature.as_deref(),
-                        )?;
-                    },
-                    SymbolItem::Constant(_)
-                    | SymbolItem::Type(_)
-                    | SymbolItem::Compiled(ItemInfo::Constant(_))
-                    | SymbolItem::Compiled(ItemInfo::Type(_)) => (),
-                }
+                self.verify_exported_item(
+                    &resolver,
+                    gid.module,
+                    &self.linker[gid],
+                    Some(import.span()),
+                )?;
             }
         }
 
         Ok(())
+    }
+
+    fn verify_exported_item(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        module_index: ModuleIndex,
+        symbol: &crate::linker::Symbol,
+        export_span: Option<SourceSpan>,
+    ) -> Result<(), Report> {
+        match symbol.item() {
+            SymbolItem::Procedure(proc) => {
+                let proc = proc.borrow();
+                self.verify_exported_signature(resolver, module_index, proc.signature())
+            },
+            SymbolItem::Type(type_decl) => {
+                if !symbol.visibility().is_public() {
+                    return Err(Report::new(SemanticAnalysisError::PrivateTypeInExportedType {
+                        span: export_span.unwrap_or_else(|| type_decl.name().span()),
+                        defined: type_decl.name().span(),
+                    }));
+                }
+
+                let mut visiting_types = BTreeSet::default();
+                self.verify_exported_type_decl(
+                    resolver,
+                    module_index,
+                    type_decl,
+                    &mut visiting_types,
+                    ExportedTypeUse::TypeDeclaration,
+                )
+            },
+            SymbolItem::Constant(_)
+            | SymbolItem::Compiled(
+                ItemInfo::Procedure(_) | ItemInfo::Constant(_) | ItemInfo::Type(_),
+            ) => Ok(()),
+        }
     }
 
     fn verify_exported_signature(
@@ -892,45 +913,86 @@ impl Assembler {
 
         for ty in signature.args.iter().chain(signature.results.iter()) {
             let mut visiting_types = BTreeSet::default();
-            self.verify_exported_signature_type_expr(
+            self.verify_exported_type_expr(
                 resolver,
                 current_module,
                 ty,
                 &mut visiting_types,
+                ExportedTypeUse::ProcedureSignature,
             )?;
         }
 
         Ok(())
     }
 
-    fn verify_exported_signature_type_expr(
+    fn verify_exported_type_decl(
+        &self,
+        resolver: &SymbolResolver<'_>,
+        current_module: ModuleIndex,
+        type_decl: &ast::TypeDecl,
+        visiting_types: &mut BTreeSet<GlobalItemIndex>,
+        usage: ExportedTypeUse,
+    ) -> Result<(), Report> {
+        match type_decl {
+            ast::TypeDecl::Alias(alias) => {
+                self.verify_exported_type_expr(
+                    resolver,
+                    current_module,
+                    &alias.ty,
+                    visiting_types,
+                    usage,
+                )?;
+            },
+            ast::TypeDecl::Enum(ty) => {
+                for variant in ty.variants() {
+                    if let Some(payload_ty) = variant.value_ty.as_ref() {
+                        self.verify_exported_type_expr(
+                            resolver,
+                            current_module,
+                            payload_ty,
+                            visiting_types,
+                            usage,
+                        )?;
+                    }
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    fn verify_exported_type_expr(
         &self,
         resolver: &SymbolResolver<'_>,
         current_module: ModuleIndex,
         ty: &ast::TypeExpr,
         visiting_types: &mut BTreeSet<GlobalItemIndex>,
+        usage: ExportedTypeUse,
     ) -> Result<(), Report> {
         match ty {
             ast::TypeExpr::Primitive(_) => Ok(()),
-            ast::TypeExpr::Ptr(ty) => self.verify_exported_signature_type_expr(
+            ast::TypeExpr::Ptr(ty) => self.verify_exported_type_expr(
                 resolver,
                 current_module,
                 &ty.pointee,
                 visiting_types,
+                usage,
             ),
-            ast::TypeExpr::Array(ty) => self.verify_exported_signature_type_expr(
+            ast::TypeExpr::Array(ty) => self.verify_exported_type_expr(
                 resolver,
                 current_module,
                 &ty.elem,
                 visiting_types,
+                usage,
             ),
             ast::TypeExpr::Struct(ty) => {
                 for field in ty.fields.iter() {
-                    self.verify_exported_signature_type_expr(
+                    self.verify_exported_type_expr(
                         resolver,
                         current_module,
                         &field.ty,
                         visiting_types,
+                        usage,
                     )?;
                 }
 
@@ -960,10 +1022,7 @@ impl Assembler {
 
                 if !symbol.visibility().is_public() {
                     return Err(Report::new(
-                        SemanticAnalysisError::PrivateTypeInExportedSignature {
-                            span: path.span(),
-                            defined: type_decl.name().span(),
-                        },
+                        usage.private_type_error(path.span(), type_decl.name().span()),
                     ));
                 }
 
@@ -971,28 +1030,13 @@ impl Assembler {
                     return Ok(());
                 }
 
-                match type_decl {
-                    ast::TypeDecl::Alias(alias) => {
-                        self.verify_exported_signature_type_expr(
-                            resolver,
-                            gid.module,
-                            &alias.ty,
-                            visiting_types,
-                        )?;
-                    },
-                    ast::TypeDecl::Enum(ty) => {
-                        for variant in ty.variants() {
-                            if let Some(payload_ty) = variant.value_ty.as_ref() {
-                                self.verify_exported_signature_type_expr(
-                                    resolver,
-                                    gid.module,
-                                    payload_ty,
-                                    visiting_types,
-                                )?;
-                            }
-                        }
-                    },
-                }
+                self.verify_exported_type_decl(
+                    resolver,
+                    gid.module,
+                    type_decl,
+                    visiting_types,
+                    usage,
+                )?;
 
                 visiting_types.remove(&gid);
                 Ok(())

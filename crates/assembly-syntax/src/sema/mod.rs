@@ -308,32 +308,101 @@ fn verify_exported_signature_type_visibility(module: &Module, analyzer: &mut Ana
 
         for ty in signature.args.iter().chain(signature.results.iter()) {
             let mut visiting_types = BTreeSet::default();
-            verify_exported_signature_type_expr(module, analyzer, ty, &mut visiting_types);
+            verify_exported_type_expr(
+                module,
+                analyzer,
+                ty,
+                &mut visiting_types,
+                ExportedTypeUse::ProcedureSignature,
+            );
+        }
+    }
+
+    for item in module.items() {
+        let Item::Type(type_decl) = item else {
+            continue;
+        };
+        if !type_decl.visibility().is_public() {
+            continue;
+        }
+
+        let mut visiting_types = BTreeSet::default();
+        verify_exported_type_decl(
+            module,
+            analyzer,
+            type_decl,
+            &mut visiting_types,
+            ExportedTypeUse::TypeDeclaration,
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ExportedTypeUse {
+    ProcedureSignature,
+    TypeDeclaration,
+}
+
+impl ExportedTypeUse {
+    fn private_type_error(self, span: SourceSpan, defined: SourceSpan) -> SemanticAnalysisError {
+        match self {
+            Self::ProcedureSignature => {
+                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
+            },
+            Self::TypeDeclaration => {
+                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
+            },
         }
     }
 }
 
-fn verify_exported_signature_type_expr(
+fn verify_exported_type_decl(
+    module: &Module,
+    analyzer: &mut AnalysisContext,
+    type_decl: &TypeDecl,
+    visiting_types: &mut BTreeSet<ItemIndex>,
+    usage: ExportedTypeUse,
+) {
+    match type_decl {
+        TypeDecl::Alias(alias) => {
+            verify_exported_type_expr(module, analyzer, &alias.ty, visiting_types, usage);
+        },
+        TypeDecl::Enum(ty) => {
+            for variant in ty.variants() {
+                if let Some(payload_ty) = variant.value_ty.as_ref() {
+                    verify_exported_type_expr(module, analyzer, payload_ty, visiting_types, usage);
+                }
+            }
+        },
+    }
+}
+
+fn verify_exported_type_expr(
     module: &Module,
     analyzer: &mut AnalysisContext,
     ty: &TypeExpr,
     visiting_types: &mut BTreeSet<ItemIndex>,
+    usage: ExportedTypeUse,
 ) {
     match ty {
         TypeExpr::Primitive(_) => (),
         TypeExpr::Ptr(ty) => {
-            verify_exported_signature_type_expr(module, analyzer, &ty.pointee, visiting_types);
+            verify_exported_type_expr(module, analyzer, &ty.pointee, visiting_types, usage);
         },
         TypeExpr::Array(ty) => {
-            verify_exported_signature_type_expr(module, analyzer, &ty.elem, visiting_types);
+            verify_exported_type_expr(module, analyzer, &ty.elem, visiting_types, usage);
         },
         TypeExpr::Struct(ty) => {
             for field in ty.fields.iter() {
-                verify_exported_signature_type_expr(module, analyzer, &field.ty, visiting_types);
+                verify_exported_type_expr(module, analyzer, &field.ty, visiting_types, usage);
             }
         },
         TypeExpr::Ref(path) => {
-            let resolution = match module.resolve_path(path.as_deref(), analyzer.source_manager()) {
+            let resolver = match LocalSymbolResolver::new(module, analyzer.source_manager()) {
+                Ok(resolver) => resolver,
+                Err(_) => return,
+            };
+            let resolution = match resolver.resolve_path(path.as_deref()) {
                 Ok(resolution) => resolution,
                 Err(_) => return,
             };
@@ -363,10 +432,7 @@ fn verify_exported_signature_type_expr(
             };
 
             if !type_decl.visibility().is_public() {
-                analyzer.error(SemanticAnalysisError::PrivateTypeInExportedSignature {
-                    span: path.span(),
-                    defined: type_decl.name().span(),
-                });
+                analyzer.error(usage.private_type_error(path.span(), type_decl.name().span()));
                 return;
             }
 
@@ -374,23 +440,7 @@ fn verify_exported_signature_type_expr(
                 return;
             }
 
-            match type_decl {
-                TypeDecl::Alias(alias) => {
-                    verify_exported_signature_type_expr(module, analyzer, &alias.ty, visiting_types)
-                },
-                TypeDecl::Enum(ty) => {
-                    for variant in ty.variants() {
-                        if let Some(payload_ty) = variant.value_ty.as_ref() {
-                            verify_exported_signature_type_expr(
-                                module,
-                                analyzer,
-                                payload_ty,
-                                visiting_types,
-                            );
-                        }
-                    }
-                },
-            }
+            verify_exported_type_decl(module, analyzer, type_decl, visiting_types, usage);
 
             visiting_types.remove(&item);
         },
