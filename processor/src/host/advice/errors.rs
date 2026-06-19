@@ -33,6 +33,10 @@ pub enum AdviceError {
     )]
     AdvMapElementBudgetExceeded { current: usize, added: usize, max: usize },
     #[error(
+        "Merkle store node budget exceeded: adding {added} nodes to the current {current} would exceed the maximum of {max}"
+    )]
+    MerkleStoreNodeBudgetExceeded { current: usize, added: usize, max: usize },
+    #[error(
         "precompile request count budget exceeded: adding {added} requests to the current {current} would exceed the maximum of {max}"
     )]
     PrecompileRequestCountExceeded { current: usize, added: usize, max: usize },
