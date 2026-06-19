@@ -1,4 +1,7 @@
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{
+    collections::{BTreeSet, VecDeque},
+    vec::Vec,
+};
 
 use miden_core::{
     Felt, WORD_SIZE, Word,
@@ -47,15 +50,16 @@ impl MerkleStoreBudget for MerkleStore {
     where
         I: IntoIterator<Item = Word>,
     {
-        let mut new_roots = Vec::new();
+        let mut seen_roots = BTreeSet::new();
+        let mut count = 0;
 
         for root in roots {
-            if !self.contains_internal_node(root) && !new_roots.contains(&root) {
-                new_roots.push(root);
+            if seen_roots.insert(root) && !self.contains_internal_node(root) {
+                count += 1;
             }
         }
 
-        new_roots.len()
+        count
     }
 
     fn new_path_node_count(
