@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.26.0"
+version = "0.27.0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
