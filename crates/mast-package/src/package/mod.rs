@@ -1322,9 +1322,9 @@ mod tests {
     use miden_assembly_syntax::ast::{
         Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
+    use core::assert_matches;
     use miden_core::{
         advice::AdviceMap,
-        assert_matches,
         mast::{
             BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
             MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,

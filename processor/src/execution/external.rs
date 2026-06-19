@@ -111,10 +111,11 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::sync::Arc;
+    use core::assert_matches;
     use core::ops::ControlFlow;
 
     use miden_core::{
-        Felt, assert_matches,
+        Felt,
         mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor},
         operations::Operation,
         program::Program,

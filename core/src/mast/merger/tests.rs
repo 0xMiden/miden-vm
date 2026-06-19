@@ -1,9 +1,4 @@
-<<<<<<< HEAD
-=======
-use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use core::assert_matches;
-
->>>>>>> 1a9638dcc (refactor: use std assert_matches macro (closes #3265))
 use super::*;
 use crate::{
     Felt, ONE, Word,
