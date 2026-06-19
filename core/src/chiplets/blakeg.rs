@@ -15,7 +15,6 @@ pub const RATE_WIDTH: usize = 8;
 /// Number of Felts in the packed chaining value.
 pub const DIGEST_WIDTH: usize = 4;
 
-const ODD_LANE_MASK: u32 = 0x7fff_ffff;
 const STATE_WORDS: usize = 8;
 const BLOCK_WORDS: usize = 16;
 
@@ -44,7 +43,9 @@ pub fn unpack_block(block: [Felt; RATE_WIDTH]) -> [u32; BLOCK_WORDS] {
 
 #[inline]
 pub fn pack(lo: u32, hi: u32) -> Felt {
-    Felt::new_unchecked((((hi & ODD_LANE_MASK) as u64) << 32) | lo as u64)
+    let value = ((hi as u64) << 32) | lo as u64;
+    debug_assert!(value < Felt::ORDER, "u32 pair must encode a canonical field element");
+    Felt::new_unchecked(value)
 }
 
 #[inline]
@@ -175,21 +176,13 @@ mod tests {
     }
 
     #[test]
-    fn pack_word_masks_odd_lanes() {
-        let word = pack_word([
-            0xffff_ffff,
-            0xffff_ffff,
-            0x0123_4567,
-            0x89ab_cdef,
-            0xdead_beef,
-            0xffff_ffff,
-            0xa5a5_a5a5,
-            0xffff_ffff,
-        ]);
+    fn pack_word_preserves_canonical_pairs() {
+        let limbs = [0, 0, 0xffff_ffff, 0xffff_fffe, 0, 0xffff_ffff, 0xa5a5_a5a5, 0x7fff_ffff];
+        let word = pack_word(limbs);
 
-        for felt in word.as_slice() {
-            let (_, hi) = unpack(*felt);
-            assert_eq!(hi & !ODD_LANE_MASK, 0);
+        for (idx, felt) in word.as_slice().iter().enumerate() {
+            let (lo, hi) = unpack(*felt);
+            assert_eq!((lo, hi), (limbs[2 * idx], limbs[2 * idx + 1]));
         }
     }
 

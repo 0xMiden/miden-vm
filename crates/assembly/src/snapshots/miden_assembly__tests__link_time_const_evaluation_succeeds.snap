@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1707
 expression: program
 ---
 begin
@@ -14,7 +15,7 @@ begin
                 incr
                 noop
             end
-            external.0x5db8dd734c7c4533414b2067c4f1fa557ec027bdc959bf0fb03d84b84e050375
+            external.0x185ec9a5c1af082d0fb68c27267bb29f27b562cacb788b917fc25e6e7fef2195
         end
         basic_block add add end
     end

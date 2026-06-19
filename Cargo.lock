@@ -1472,7 +1472,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "blake3",
  "cc",
@@ -1513,7 +1513,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -1541,7 +1541,7 @@ dependencies = [
 [[package]]
 name = "miden-field"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -1581,7 +1581,7 @@ dependencies = [
 [[package]]
 name = "miden-lifted-air"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -1594,7 +1594,7 @@ dependencies = [
 [[package]]
 name = "miden-lifted-stark"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -1769,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1778,7 +1778,7 @@ dependencies = [
 [[package]]
 name = "miden-stark-transcript"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1789,7 +1789,7 @@ dependencies = [
 [[package]]
 name = "miden-stateful-hasher"
 version = "0.27.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-final#a8cb932806cb3052c69ff85e23ca945940d612bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-blakeg-finalizer-modred#46b0a58ac8637e67dcce1611c2ae5df3da2509b0"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1931,7 +1931,7 @@ dependencies = [
 [[package]]
 name = "midenc-hir-type"
 version = "0.7.0"
-source = "git+https://github.com/Al-Kindi-0/midenc-hir-type.git?branch=al-blakeg-final#77e99245a2c0c9af1c35f24b3160d0879172fcfc"
+source = "git+https://github.com/Al-Kindi-0/midenc-hir-type.git?branch=al-blakeg-finalizer-modred#6d7e075db3a4334a43afbae8e0216f7a809a54bd"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",

@@ -310,7 +310,7 @@ fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
         shape_log(data, 0),
         shape_log(data, 1),
         shape_log(data, 2),
-        shape_log(data, 3),
+        AND8_LOOKUP_LOG_HEIGHT as u8,
     ])
 }
 
@@ -705,7 +705,7 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
 
         begin
             exec.vm::init_miden_air_shape_state
-            push.6225836997093344009.6615246172502583955.3539038439026260303.4361500420518448919
+            push.15449209033948119817.15838618209357359763.12762410475881036111.13584872457373224727
             padw exec.constants::relation_digest_ptr mem_loadw_le
             exec.random_coin::eidos_init_challenger
             exec.random_coin::eidos_squeeze_word

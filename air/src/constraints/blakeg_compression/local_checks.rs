@@ -1,5 +1,5 @@
-//! Per-row local constraints: carry checks, message binding, mask_bit Boolean,
-//! footer accumulator zero-init, and IV initialization.
+//! Per-row local constraints: carry checks, message binding, footer accumulator
+//! zero-init, and IV initialization.
 //!
 //! These are the "no transition needed, same row" constraints. Splitting them
 //! out makes the row-by-row sanity checks easy to audit independently of the
@@ -9,7 +9,7 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow, NUM_G};
+use super::views::{ACRow, BDRow, NUM_G};
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL,
 };
@@ -123,21 +123,6 @@ pub fn enforce_first_b_hin_matches_b_words<AB>(
     builder.assert_zero(bd_local.first_b_hin_pair_index(3) - three);
     builder.assert_zero(bd_local.first_b_hin_even_word(3) - bd_local.b_word(2));
     builder.assert_zero(bd_local.first_b_hin_odd_word(3) - bd_local.b_word(3));
-}
-
-/// Footer `mask_bit` Boolean check.
-///
-/// `mask_bit in {0, 1}` on every footer row. The Boolean form is enforced here; the AND8 lookup
-/// binds it to the actual top bit of `Out_odd[3]`.
-pub fn enforce_footer_mask_bit_boolean<AB>(
-    builder: &mut AB,
-    footer_local: &FooterRow<AB>,
-    sel: &Selectors<AB>,
-) where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let m = footer_local.mask_bit();
-    builder.when(sel.is_footer()).assert_zero(m.clone() * (AB::Expr::ONE - m));
 }
 
 /// `v[8..16] = IV[0..8]` initialization on row 0 (the first A-col row of a

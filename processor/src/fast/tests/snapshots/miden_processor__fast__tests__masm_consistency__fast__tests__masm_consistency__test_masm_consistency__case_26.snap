@@ -1,13 +1,14 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
+assertion_line: 279
 expression: fast_stack_outputs
 ---
 StackOutputs {
     elements: [
-        1826725788261344142,
-        5745686517887189318,
-        7690334986172122972,
-        2503522819339285771,
+        3716326770972511689,
+        15596980740874522436,
+        5592514544567956134,
+        17734884316513709300,
         5,
         6,
         7,

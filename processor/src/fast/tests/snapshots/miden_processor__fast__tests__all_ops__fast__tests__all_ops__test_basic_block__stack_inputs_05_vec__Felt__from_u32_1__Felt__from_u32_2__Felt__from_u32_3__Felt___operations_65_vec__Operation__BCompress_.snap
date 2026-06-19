@@ -1,5 +1,6 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 134
 expression: fast_stack_outputs
 ---
 Ok(
@@ -16,7 +17,7 @@ Ok(
             8818988656427576494,
             1283449346801699930,
             3438527706125916930,
-            3414600733395779191,
+            12637972770250554999,
             0,
             0,
             0,

@@ -19,10 +19,7 @@ use core::marker::PhantomData;
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{
-    FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
-    FOOTER_OUT_ODD_TOP_BYTE_COL,
-};
+use super::{FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL};
 
 // ===================================================================
 // Layout constants
@@ -36,9 +33,6 @@ pub const BYTES_PER_WORD: usize = 4;
 
 const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
-
-// Inverse of the footer top-bit mask, 128.
-const FOOTER_TOP_BIT_MASK_INV: Felt = Felt::new_unchecked(18302628881372282881);
 
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
 const AC_A_BASE_COL: usize = 60;
@@ -485,22 +479,6 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(FOOTER_H_CANON_Z_COL)
     }
 
-    /// Duplicated `Out_odd[3]` field used by the output top-bit lookup.
-    pub fn out_odd_top_byte(&self) -> AB::Expr {
-        self.col(FOOTER_OUT_ODD_TOP_BYTE_COL)
-    }
-
-    /// Masked top-bit field `Out_odd[3] & 128`.
-    pub fn masked_top_bit(&self) -> AB::Expr {
-        self.col(FOOTER_OUT_MASKED_TOP_BIT_COL)
-    }
-
-    /// Top bit of `Out_odd[3]`. Constrained Boolean and bound to the actual
-    /// top bit by the footer mask lookup.
-    pub fn mask_bit(&self) -> AB::Expr {
-        self.masked_top_bit() * AB::Expr::from(FOOTER_TOP_BIT_MASK_INV)
-    }
-
     // --- computed expressions --------------------------------------------
 
     /// `Vlo_even` packed into a u32 word.
@@ -543,7 +521,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         )
     }
 
-    /// `H_even` packed into a u32 word (raw, no top-bit mask).
+    /// `H_even` packed into a u32 word.
     pub fn h_even_word(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.h_even_byte(0),
@@ -553,7 +531,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         )
     }
 
-    /// `H_odd` packed into a u32 word (raw, no top-bit mask).
+    /// `H_odd` packed into a u32 word.
     pub fn h_odd_word(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.h_odd_byte(0),
@@ -573,15 +551,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         )
     }
 
-    /// `Out_odd` packed into a u32 word, with the top bit stripped into the
-    /// `mask_bit` witness.
-    pub fn out_odd_masked_word(&self) -> AB::Expr {
-        let masked_msb = self.out_odd_byte(3) - self.masked_top_bit();
+    /// `Out_odd` packed into a u32 word.
+    pub fn out_odd_word(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.out_odd_byte(0),
             self.out_odd_byte(1),
             self.out_odd_byte(2),
-            masked_msb,
+            self.out_odd_byte(3),
         )
     }
 
@@ -591,24 +567,12 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.h_even_word_field() + self.h_odd_word_field() * felt::<AB>(1u64 << 32)
     }
 
-    /// Felt-level packing of `Out_even || Out_odd_masked` for `D[t]`.
-    /// `D[t] = Out_even_word + 2^32 * Out_odd_masked_word`.
+    /// Field-level packing of `Out_even || Out_odd` for `D[t]`.
+    ///
+    /// The equality is in the Goldilocks field, so this is the raw 64-bit pair
+    /// reduced modulo the field prime.
     pub fn d_value_from_out(&self) -> AB::Expr {
-        self.out_even_word() + self.out_odd_masked_word() * felt::<AB>(1u64 << 32)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::FOOTER_TOP_BIT_MASK;
-    use super::*;
-
-    #[test]
-    fn precomputed_footer_mask_inverse_is_correct() {
-        assert_eq!(
-            Felt::new_unchecked(FOOTER_TOP_BIT_MASK as u64) * FOOTER_TOP_BIT_MASK_INV,
-            Felt::ONE
-        );
+        self.out_even_word() + self.out_odd_word() * felt::<AB>(1u64 << 32)
     }
 }
 

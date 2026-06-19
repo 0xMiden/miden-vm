@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2987
 expression: program
 ---
 begin
@@ -8,10 +9,10 @@ begin
         push(4294967294)
         mstore
         drop
-        push(5323528994882627547)
-        push(7289169267038393752)
-        push(7782723391083855904)
-        push(2091619473819975598)
+        push(17512621350160690181)
+        push(10798274485451202200)
+        push(18010197938825998776)
+        push(6338018128506282451)
         noop
         noop
         push(17843484659000820118)

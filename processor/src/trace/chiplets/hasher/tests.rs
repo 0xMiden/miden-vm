@@ -43,7 +43,7 @@ use super::{
 fn hasher_bcompress_one() {
     // --- test one controller compression ---
     let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    let init_state = random_state();
 
     let (addr, final_state) = hasher.bcompress(init_state);
     assert_eq!(ONE, addr);
@@ -66,8 +66,8 @@ fn hasher_bcompress_one() {
 #[test]
 fn hasher_bcompress_two() {
     let mut hasher = Hasher::default();
-    let init_state1 = random_state_with_packed_cv();
-    let init_state2 = random_state_with_packed_cv();
+    let init_state1 = random_state();
+    let init_state2 = random_state();
 
     let (addr1, final_state1) = hasher.bcompress(init_state1);
     let (addr2, final_state2) = hasher.bcompress(init_state2);
@@ -209,7 +209,7 @@ fn hasher_update_merkle_root() {
 fn compression_segment_structure() {
     // One BCOMPRESS yields one 64-row compression block with multiplicity 1.
     let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    let init_state = random_state();
     let (addr, result) = hasher.bcompress(init_state);
 
     // Verify returned address and compressed state
@@ -230,7 +230,7 @@ fn compression_segment_structure() {
 fn compression_deduplication() {
     // Two identical BCOMPRESS inputs collapse to one compression block with multiplicity 2.
     let mut hasher = Hasher::default();
-    let init_state = random_state_with_packed_cv();
+    let init_state = random_state();
     let (addr1, result1) = hasher.bcompress(init_state);
     let (addr2, result2) = hasher.bcompress(init_state); // same state
 
@@ -672,12 +672,8 @@ fn compress_state(mut state: HasherState) -> HasherState {
     state
 }
 
-fn random_state_with_packed_cv() -> HasherState {
-    let mut state: HasherState = rand_array();
-    for value in &mut state[RATE_LEN..] {
-        *value = Felt::new_unchecked(value.as_canonical_u64() & 0x7fff_ffff_ffff_ffff);
-    }
-    state
+fn random_state() -> HasherState {
+    rand_array()
 }
 
 fn compute_path_root(value: Digest, path: &MerklePath, mut index: u64) -> Digest {

@@ -38,18 +38,18 @@ impl DynNode {
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(5706978796851611107),
-        Felt::new_unchecked(235194503132262270),
-        Felt::new_unchecked(7926812099875368772),
-        Felt::new_unchecked(953384645560394145),
+        Felt::new_unchecked(15682917041006906903),
+        Felt::new_unchecked(4835446995842553020),
+        Felt::new_unchecked(2576958996631775459),
+        Felt::new_unchecked(4329176498595323930),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new_unchecked(1732190322224389342),
-        Felt::new_unchecked(447282728462497244),
-        Felt::new_unchecked(8921475445352376918),
-        Felt::new_unchecked(5447870517289685873),
+        Felt::new_unchecked(2752163741487076208),
+        Felt::new_unchecked(17037459709967324990),
+        Felt::new_unchecked(6965781384575003625),
+        Felt::new_unchecked(2274795323711774217),
     ]);
 }
 

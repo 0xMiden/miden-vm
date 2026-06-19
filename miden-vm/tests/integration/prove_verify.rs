@@ -303,10 +303,7 @@ fn bench_single_scenario(name: &str, source: &str, expected_padded_rows: Option<
         summary.byte_pair_lookup_rows(),
         padded_rows,
     );
-    eprintln!(
-        "  blakeg_comp={} proof_hash=Eidos",
-        summary.blakeg_compression_rows() / 64
-    );
+    eprintln!("  blakeg_comp={} proof_hash=Eidos", summary.blakeg_compression_rows() / 64);
 
     let advice_inputs = AdviceInputs::default();
     let mut host =

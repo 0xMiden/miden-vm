@@ -124,7 +124,7 @@ pub enum HashFunction {
     Poseidon2 = 0x04,
     /// Keccak hash function with 256-bit output.
     Keccak = 0x05,
-    /// Eidos hash function with 252-bit packed output.
+    /// Eidos hash function with four Goldilocks field elements of output.
     Eidos = 0x06,
 }
 
@@ -137,7 +137,7 @@ impl HashFunction {
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
-            HashFunction::Eidos => 126,
+            HashFunction::Eidos => 128,
         }
     }
 }

@@ -24,8 +24,7 @@ use super::selectors::Selectors;
 use super::views::{BYTES_PER_WORD, FooterRow};
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
-    FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL,
-    MSG_D_BASE_COL,
+    FOOTER_H_CANON_SPARE_COL, FOOTER_OUTPUT_REDUCTION_SPARE_COLS, MSG_C_BASE_COL, MSG_D_BASE_COL,
 };
 
 /// Future-W queue continuity across F0 -> F1 -> F2 -> F3.
@@ -129,7 +128,6 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
 {
     let gates_ft = [sel.is_f(0), sel.is_f(1), sel.is_f(2), sel.is_f(3)];
     let is_footer = sel.is_footer();
-    let top_bit_mask = AB::Expr::from(Felt::new_unchecked(FOOTER_TOP_BIT_MASK as u64));
 
     {
         let builder = &mut builder.when(is_footer.clone());
@@ -140,11 +138,10 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
             builder.assert_zero(footer_local.vhi_odd_byte(j) - footer_local.vhi_odd_output_byte(j));
         }
 
-        builder.assert_zero(footer_local.out_odd_top_byte() - footer_local.out_odd_byte(3));
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL].clone()) - top_bit_mask,
-        );
         builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL].clone()));
+        for col in FOOTER_OUTPUT_REDUCTION_SPARE_COLS {
+            builder.assert_zero(Into::<AB::Expr>::into(local[col].clone()));
+        }
         builder.assert_zero(footer_local.h_even_word_field() - footer_local.h_even_word());
         builder.assert_zero(footer_local.h_odd_word_field() - footer_local.h_odd_word());
     }
@@ -199,10 +196,10 @@ pub fn enforce_footer_c_canonicality<AB>(
     builder.assert_zero(z * footer_local.h_even_word_field());
 }
 
-/// `D[t] = pack(Out_even) + 2^32 * pack(Out_odd_masked)` on row `F_t`.
+/// `D[t] = Out_even + 2^32 * Out_odd` on row `F_t`.
 ///
-/// `Out_odd_masked[3] = Out_odd[3] - mask_bit * 128`, so the top bit of `Out_odd[3]` is captured
-/// by the Boolean witness `mask_bit`. The AND-with-128 lookup binds `mask_bit` to that top bit.
+/// The equality is in the Goldilocks field, so this is exactly the raw
+/// 64-bit output pair reduced modulo the field prime.
 pub fn enforce_footer_d_definition<AB>(
     builder: &mut AB,
     footer_local: &FooterRow<AB>,

@@ -365,7 +365,7 @@ fn advice_insert_hdword() {
         # manually compute the hash of the two words with domain
         # Eidos init chaining word for domain 9 and 8 input felts.
         movup.8 drop
-        push.6620516959492505608.1947077364412317705.2688637133034287986.4280581858871862887
+        push.6620516959492505608.11170449401267093513.11912009169889063794.13503953895726638695
         movdnw.2
         bcompress
         dropw dropw
@@ -396,7 +396,7 @@ fn advice_insert_hqword() {
         adv.insert_hqword
 
         # Hash the four words with Eidos length binding for 16 input felts.
-        push.6620516959492505616.1947077364412317696.2688637133034287986.4280581858871862887
+        push.6620516959492505616.11170449401267093504.11912009169889063794.13503953895726638695
         movdnw.2
         bcompress
         dropw dropw

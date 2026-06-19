@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2665
 expression: program
 ---
 begin
@@ -17,8 +18,8 @@ begin
                 noop
                 noop
             end
-            external.0x7215a23e4799f634f00964564e9a8d2b80e56aa5fb4ad048a267201e40b3ba74
+            external.0x83e30a4ef2bcf0f24f82d270800285b22e84264cc1aabfe06b92e9152da77644
         end
-        external.0x5589ea83e6e7a90fba0622b7a365410af06ab787e1017a3d89a13bd433c3ef7c
+        external.0x3bbc1238536465cc1794f17409d6cb2ade04ef07edcdb8ee0a9785698113e932
     end
 end

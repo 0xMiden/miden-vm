@@ -59,9 +59,6 @@ use self::views::{ACRow, BDRow, FooterRow};
 /// Number of BlakeG compression trace columns.
 pub const NUM_BLAKEG_COMPRESSION_COLS: usize = 80;
 
-/// Top-bit mask used by the footer `mask_bit` witness.
-pub const FOOTER_TOP_BIT_MASK: u8 = 128;
-
 /// AEAD-XOF selector in the footer/message/interface tail rows.
 pub const AEAD_XOF_MODE_COL: usize = 78;
 
@@ -98,14 +95,8 @@ pub const FOOTER_H_CANON_Z_COL: usize = 49;
 /// Footer spare column beside the input-CV canonicality witnesses.
 pub const FOOTER_H_CANON_SPARE_COL: usize = 50;
 
-/// Footer top-bit lookup field for `Out_odd[3]`.
-pub const FOOTER_OUT_ODD_TOP_BYTE_COL: usize = 51;
-
-/// Footer top-bit lookup mask field for `Out_odd[3]`.
-pub const FOOTER_OUT_TOP_MASK_COL: usize = 52;
-
-/// Footer top-bit lookup masked-result field for `Out_odd[3] & 128`.
-pub const FOOTER_OUT_MASKED_TOP_BIT_COL: usize = 53;
+/// Footer columns unused by modular output reduction. Constrained to zero on footer rows.
+pub const FOOTER_OUTPUT_REDUCTION_SPARE_COLS: [usize; 3] = [51, 52, 53];
 
 /// First A/C column for the low bit of the ternary `k3` carry.
 pub const AC_K3_BIT0_BASE_COL: usize = 72;
@@ -320,7 +311,7 @@ pub fn enforce_blakeg_constraints<AB>(
 
     // 4. Footer body: W continuity, accumulator continuity, zero-init,
     //    Vlo/Vhi binding, output byte-XOR identity, C/D definitions,
-    //    input-CV canonicality, and mask_bit Boolean.
+    //    and input-CV canonicality.
     footer::enforce_footer_w_continuity(builder, local, next, &sel);
     footer::enforce_footer_accumulator_continuity(builder, local, next, &sel);
     footer::enforce_footer_aead_label_continuity(builder, local, next, &sel);
@@ -329,7 +320,6 @@ pub fn enforce_blakeg_constraints<AB>(
     footer::enforce_footer_c_definition(builder, &footer_local, &sel);
     footer::enforce_footer_c_canonicality(builder, &footer_local, &sel);
     footer::enforce_footer_d_definition(builder, &footer_local, &sel);
-    local_checks::enforce_footer_mask_bit_boolean(builder, &footer_local, &sel);
 
     // 5. F3 -> M0 forwarding (C, D accumulators).
     footer::enforce_f3_to_m0(builder, local, next, &sel);

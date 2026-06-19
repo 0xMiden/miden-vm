@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2737
 expression: program
 ---
 begin
@@ -15,6 +16,6 @@ begin
             push(2)
             pad
         end
-        external.0xc385d42c449d3e66d0939ee887b03f4a2e2a0216d98df67b0ead518848733f63
+        external.0xf9395494d7e84ebb14d803800d8ede51132a277ff2efd7a78bf5ae977893e2f0
     end
 end

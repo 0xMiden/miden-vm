@@ -209,7 +209,7 @@ fn lookup_global_balance_closes_for_fibonacci_span() {
 
 #[test]
 fn blakeg_lookup_row_shape_matches_expected_interactions() {
-    const BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK: u64 = 964;
+    const BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK: u64 = 960;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, blakeg_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
@@ -288,8 +288,8 @@ fn expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row: usize) ->
         2..=54 if cycle_row % 2 == 0 => 20,
         // B/D rows use one fused byte-pair lookup per rotated byte.
         3..=55 if cycle_row % 2 == 1 => 16,
-        // Footer rows use byte-pair folds for the compression output.
-        56..=59 => 18,
+        // Footer rows use byte-pair folds for the input-high and output words.
+        56..=59 => 17,
         // The two message rows receive the full message schedule and range-check the
         // non-routed message limbs. M1 routes four more limb checks to I than M0.
         // The canonicality rem-limb checks have been replaced by an inverse zero-test.
@@ -308,7 +308,7 @@ fn expected_blakeg_degree3_fraction_entry_range_at_cycle_row(
     cycle_row: usize,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
-        56..=59 => 18..=20,
+        56..=59 => 17..=19,
         // Padding blocks skip the interface links because their multiplicity is zero.
         62 => 16..=18,
         _ => {
@@ -329,7 +329,7 @@ fn blakeg_degree3_annex_interactions_at_cycle_row(cycle_row: usize) -> usize {
 #[test]
 fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const CURRENT_DENOMINATORS_PER_BLOCK: usize = 1138;
+    const CURRENT_DENOMINATORS_PER_BLOCK: usize = 1134;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, blakeg_matrix, _) = trace.main_trace().to_air_matrices();
