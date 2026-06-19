@@ -9,23 +9,16 @@ use alloc::{
 use miden_core::serde::Deserializable;
 
 use super::super::{DebugFunctionInfo, DebugFunctionsSection, DebugTypesSection};
-use crate::{Package, Section, SectionId};
+use crate::{Package, SectionId};
 
 /// Reads both debug sections from `package`. `None` if either is missing or fails to decode.
 pub(super) fn read_debug_sections(
     package: &Package,
 ) -> Option<(DebugFunctionsSection, DebugTypesSection)> {
-    let mut funcs_section: Option<&Section> = None;
-    let mut types_section: Option<&Section> = None;
-    for s in &package.sections {
-        if s.id == SectionId::DEBUG_FUNCTIONS {
-            funcs_section = Some(s);
-        } else if s.id == SectionId::DEBUG_TYPES {
-            types_section = Some(s);
-        }
-    }
-    let funcs = DebugFunctionsSection::read_from_bytes(&funcs_section?.data).ok()?;
-    let types = DebugTypesSection::read_from_bytes(&types_section?.data).ok()?;
+    let funcs_section = package.sections.iter().find(|s| s.id == SectionId::DEBUG_FUNCTIONS)?;
+    let types_section = package.sections.iter().find(|s| s.id == SectionId::DEBUG_TYPES)?;
+    let funcs = DebugFunctionsSection::read_from_bytes(&funcs_section.data).ok()?;
+    let types = DebugTypesSection::read_from_bytes(&types_section.data).ok()?;
     Some((funcs, types))
 }
 

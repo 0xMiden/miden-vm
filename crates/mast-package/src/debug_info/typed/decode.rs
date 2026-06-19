@@ -1,14 +1,18 @@
 //! Decodes felts into a structured string using debug type info.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use miden_core::Word;
 
 use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     Felt, MAX_TYPE_DEPTH, TypedView, WitScalarCodec,
-    count::count_units,
-    introspect::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    lookup::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    sizing::count_units,
 };
 
 /// How many felts a value of type `idx` takes on the stack. The decoder reads exactly this many
@@ -45,7 +49,7 @@ fn decode_value_at<'a>(
     if depth > MAX_TYPE_DEPTH {
         return None;
     }
-    let ty = view.types.types.get(idx.as_u32() as usize)?;
+    let ty = view.types.get_type(idx)?;
     match ty {
         DebugTypeInfo::Primitive(p) => decode_primitive(felts, *p),
         DebugTypeInfo::Struct { name_idx, fields, .. } => {
@@ -127,7 +131,7 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
         },
         DebugPrimitiveType::Felt => {
             let (head, rest) = felts.split_first()?;
-            Some((format!("{head}"), rest))
+            Some((head.to_string(), rest))
         },
         DebugPrimitiveType::Bool => {
             let (head, rest) = felts.split_first()?;
@@ -143,7 +147,7 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
         | DebugPrimitiveType::U32
         | DebugPrimitiveType::U64 => {
             let (head, rest) = felts.split_first()?;
-            Some((format!("{}", head.as_canonical_u64()), rest))
+            Some((head.as_canonical_u64().to_string(), rest))
         },
         DebugPrimitiveType::I128
         | DebugPrimitiveType::U128

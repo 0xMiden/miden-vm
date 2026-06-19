@@ -31,7 +31,7 @@ pub enum TypedDebugInfoError {
     #[error("not enough arguments")]
     NotEnoughArgs,
 
-    #[error("missing type at index {0} in DebugTypesSection")]
+    #[error("missing type at index {0} in the debug type table")]
     MissingType(u32),
 
     #[error("type with shape '{0}' cannot be encoded as an argument")]
