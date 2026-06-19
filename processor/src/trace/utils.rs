@@ -53,27 +53,14 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
 /// Physical column of the `s_00` permutation selector within the chiplets trace.
 pub const S_00_COL: usize = 0;
 
+/// Physical column of the `s_01` controller selector within the chiplets trace.
+pub const S_01_COL: usize = 1;
+
 /// Physical column of the `chip_clk` counter within the chiplets trace.
 pub const CHIP_CLK_COL: usize = 2;
 
 /// Physical column where the chiplet data band begins.
 pub const DATA_COL_START: usize = 3;
-
-/// Typed view of the selector and counter columns at the front of every chiplets-trace row.
-///
-/// Borrowed zero-copy from the leading [`DATA_COL_START`] cells of a row via
-/// [`ChipletTraceFragment::prefix_mut`].
-#[repr(C)]
-pub struct ChipletPrefix {
-    /// Permutation segment selector.
-    pub s_00: Felt,
-    /// Controller segment selector.
-    pub s_01: Felt,
-    /// Chiplet-trace row counter.
-    pub chip_clk: Felt,
-}
-
-const _: () = assert!(size_of::<ChipletPrefix>() == DATA_COL_START * size_of::<Felt>());
 
 /// A writable, row-major view over one chiplet's region of the chiplets trace.
 ///
@@ -196,20 +183,15 @@ impl<'a> ChipletTraceFragment<'a> {
         self.num_rows
     }
 
-    /// Typed mutable view of the front selector/counter columns of `row`, for chiplets whose
-    /// prefix selectors vary per row (e.g. the hasher's `s_01`).
+    /// Sets the `s_01` controller selector to [`ONE`] on `row`.
     ///
-    /// Returns `None` when this fragment has no prefix space (`col_start < DATA_COL_START`),
-    /// i.e. the band starts inside the data columns.
-    pub fn prefix_mut(&mut self, row: usize) -> Option<&mut ChipletPrefix> {
+    /// No-op when this fragment has no prefix space (`col_start < DATA_COL_START`), i.e. the band
+    /// starts inside the prefix columns.
+    pub fn set_s_01(&mut self, row: usize) {
         if self.col_start < DATA_COL_START {
-            return None;
+            return;
         }
-        let row_start = row * self.stride;
-        let cells = &mut self.band[row_start..row_start + DATA_COL_START];
-        let (head, view, tail) = unsafe { cells.align_to_mut::<ChipletPrefix>() };
-        debug_assert!(head.is_empty() && tail.is_empty() && view.len() == 1);
-        Some(&mut view[0])
+        self.band[row * self.stride + S_01_COL] = ONE;
     }
 
     // DATA MUTATORS

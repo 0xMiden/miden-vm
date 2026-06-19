@@ -250,12 +250,10 @@ impl HasherTrace {
             trace.copy_rows_into(row_idx, &chunk[..n * TRACE_WIDTH]);
 
             // Write `s_01 = ONE` on controller/padding rows; perm rows stay ZERO.
-            // Skipped when the fragment has no prefix space.
+            // No-op when the fragment has no prefix space.
             if is_ctrl {
                 for i in 0..n {
-                    if let Some(prefix) = trace.prefix_mut(row_idx + i) {
-                        prefix.s_01 = ONE;
-                    }
+                    trace.set_s_01(row_idx + i);
                 }
             }
 
