@@ -1,125 +1,126 @@
 ---
 source: air/src/config.rs
+assertion_line: 567
 expression: snapshot
 ---
 constraints_eval_core_then_chiplets_then_blakeg_compression_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [24783171865739857, 7127553265361334048, 3897334861478314898, 6313249570395089577]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [3284838478586860231, 8232327716635689983, 14492474651656057973, 3617571028416963960]
 constraints_eval_core_then_chiplets_then_and8_lookup_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [4987354328664649769, 7459591106023001916, 1803738333602139636, 5533595785845610778]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [14999470832778431774, 16338692871960670055, 7486166740348511793, 7968169965125511279]
 constraints_eval_core_then_blakeg_compression_then_chiplets_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [4560213744455813332, 2516539659880451217, 7295353875824411556, 6823967295387362732]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [17626942931138273661, 9641969350857076660, 3726361883488520174, 12167571597253502546]
 constraints_eval_core_then_blakeg_compression_then_and8_lookup_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [9068359012062704689, 4375400920796157652, 4752807284711163154, 6545185574479929215]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [16764146759572462378, 8835548805675777424, 12098980756995274780, 5710208936271153852]
 constraints_eval_core_then_and8_lookup_then_chiplets_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [1940058479946711481, 1824788694997684264, 3826113870241805208, 6189194500583241759]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [11172305658942209659, 16750643941991940918, 737183258017013874, 11265667129682603802]
 constraints_eval_core_then_and8_lookup_then_blakeg_compression_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [5376296098277867667, 2279247683192561201, 4165339443840289077, 5953199880825682748]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [5634965743159046719, 12396116446558257450, 17221241174698218516, 16906240663064599987]
 constraints_eval_chiplets_then_core_then_blakeg_compression_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [670174752197946447, 8777273628572171981, 3182135647718276022, 6500380144083189635]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [5747323512867845891, 7696311494306557210, 9601531929971738781, 7880928119084984071]
 constraints_eval_chiplets_then_core_then_and8_lookup_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [5688202359777958495, 8950320572981376836, 169295229138000877, 813683314524007896]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [5220442492693135099, 161882851065045101, 2227773874899443479, 719229046909750173]
 constraints_eval_chiplets_then_blakeg_compression_then_core_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [7459022767144147087, 1284507349382510269, 2913010915955959351, 7688816131515155717]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [12192842105620037190, 4051954424589187278, 15824699122862223817, 14292937904266885453]
 constraints_eval_chiplets_then_blakeg_compression_then_and8_lookup_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [5876459623316323053, 6478672378196721431, 4860158924472234562, 7844170213133680083]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [1986270238447846979, 8058692629402128367, 11734397551617350333, 471133004851934002]
 constraints_eval_chiplets_then_and8_lookup_then_core_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [1462974323255506686, 4764297051194385386, 8058475597577822155, 6430736171429724940]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [18058471820018850982, 14008620573591798061, 5482659571790487915, 11478335926312559286]
 constraints_eval_chiplets_then_and8_lookup_then_blakeg_compression_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [2627201360353621778, 7329292033977909963, 7945871357391416908, 8192894564389532598]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [11559798179723589656, 9793832407932460582, 6599593512639147462, 5387203255119893723]
 constraints_eval_blakeg_compression_then_core_then_chiplets_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [444071982357061604, 1507421276840253337, 2445227410041689601, 2077807362638314557]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [7616237007768146399, 10162089181177310913, 10037674794776672928, 13049712342733755804]
 constraints_eval_blakeg_compression_then_core_then_and8_lookup_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [2115271293535918628, 2672558495035767491, 2173296295116527099, 2602413378715255737]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [4245163160822647077, 14698926430022299808, 5809998870772720246, 1818335536045579315]
 constraints_eval_blakeg_compression_then_chiplets_then_core_then_and8_lookup:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [8855646018226049523, 2620492606346593023, 3369264810658607833, 7827380711855103607]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [12670406199081729387, 4263198030977457197, 7085457351823891439, 11236915207535375980]
 constraints_eval_blakeg_compression_then_chiplets_then_and8_lookup_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [3559749311310619785, 8797888172761233653, 2283075626316096186, 2076776437459269287]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [12210663953284959782, 17432933388776690194, 1541199398698269878, 2701915002594721111]
 constraints_eval_blakeg_compression_then_and8_lookup_then_core_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [1831532800345224520, 4139000888622613552, 3770742239376038027, 3355700179076123135]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [3965138373977168769, 17686745238937450626, 17497267036209737666, 2907279949022015269]
 constraints_eval_blakeg_compression_then_and8_lookup_then_chiplets_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [7586160116672304370, 819131209041478454, 6526679717919125309, 6873345247549161101]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [8181151974637978326, 12625716703926527934, 17699584242582462297, 6013882103569589367]
 constraints_eval_and8_lookup_then_core_then_chiplets_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [6409917364437054035, 5615404520408491724, 8926533714486737478, 9199994691999453020]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [4700760021765627407, 15407164875925528530, 1124895392189103001, 16866460596100722944]
 constraints_eval_and8_lookup_then_core_then_blakeg_compression_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [7057347802672919026, 1556162801603290262, 381398572779282273, 8532226683583302727]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [18008074142451515375, 17406631712111833234, 2638119604550440017, 12597437237086773778]
 constraints_eval_and8_lookup_then_chiplets_then_core_then_blakeg_compression:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [7870317909490551631, 5241698646483758846, 7796460540832491111, 3214945569031738465]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [2569358352645593853, 17137246889451027791, 17699542830564869176, 8966001766339937364]
 constraints_eval_and8_lookup_then_chiplets_then_blakeg_compression_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [7396030441601927045, 5230264052281969776, 1693747729902269158, 6451164568584936718]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [18174578201305493398, 17606000125734894409, 14278237781914845653, 15270738840942168065]
 constraints_eval_and8_lookup_then_blakeg_compression_then_core_then_chiplets:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [8888891091737108966, 2027989918597121137, 3020926807366775306, 2961979088400517537]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [15913438484969350600, 7247248616757736971, 5183523852640584742, 12981604196870114509]
 constraints_eval_and8_lookup_then_blakeg_compression_then_chiplets_then_core:
-  num_inputs: 1184
-  num_eval_gates: 9760
-  stream_len: 10888
-  commitment: [5360769381928880853, 5637637519408356149, 9133415409598736497, 102911608469655880]
-relation_digest: [2510026394581042689, 5394882770041513920, 7244246892549217641, 4733287224461634308]
+  num_inputs: 1246
+  num_eval_gates: 9956
+  stream_len: 11208
+  commitment: [1146450102480005663, 6683586138477005238, 8690626808590712322, 13529136462229423300]
+relation_digest: [13902732461197489073, 6888932983199554608, 8977543948613743056, 15805306244985801009]

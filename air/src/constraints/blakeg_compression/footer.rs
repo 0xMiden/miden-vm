@@ -9,23 +9,22 @@
 //! - progressive C/D accumulators;
 //! - HIN-pair fields and AEAD-XOF labels.
 //!
-//! On `F_t`, the per-row witnesses correspond to lane `t`. `C[t]` and `D[t]`
-//! are *defined* on `F_t` (from the H bytes and Out bytes respectively). The
-//! other slots of `C` / `D` are either copied forward from the previous footer
-//! row or constrained to zero (see `local_checks::enforce_footer_accumulator_zero_init`).
+//! On `F_t`, the per-row witnesses correspond to lane pair `t`. `C[t]` is
+//! defined from the H bytes on that row. `D[0..4]` are running sums for the
+//! four matrix-finalizer outputs; each footer row contributes four raw XOF
+//! lanes to all four sums.
 //!
 //! Row F3 is the last footer row; its `C[0..4]` and `D[0..4]` are forwarded
 //! into M0, then through M1 into the input interface row I.
 
-use miden_core::{Felt, field::PrimeCharacteristicRing};
+use miden_core::{Felt, chiplets::blakeg::FINALIZER_MATRIX, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
 use super::views::{BYTES_PER_WORD, FooterRow};
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
-    FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL,
-    MSG_D_BASE_COL,
+    FOOTER_H_CANON_SPARE_COL, MSG_C_BASE_COL, MSG_D_BASE_COL,
 };
 
 /// Future-W queue continuity across F0 -> F1 -> F2 -> F3.
@@ -65,12 +64,33 @@ pub fn enforce_footer_w_continuity<AB>(
     }
 }
 
+#[inline]
+fn raw_xof_lane_index(footer_row: usize, local_idx: usize) -> usize {
+    debug_assert!(footer_row < 4);
+    debug_assert!(local_idx < 4);
+    if local_idx < 2 {
+        2 * footer_row + local_idx
+    } else {
+        8 + 2 * footer_row + (local_idx - 2)
+    }
+}
+
+fn matrix_partial<AB>(footer: &FooterRow<AB>, footer_row: usize, output: usize) -> AB::Expr
+where
+    AB: LiftedAirBuilder<F = Felt>,
+{
+    debug_assert!(output < 4);
+    (0..4).fold(AB::Expr::ZERO, |acc, local_idx| {
+        let lane_idx = raw_xof_lane_index(footer_row, local_idx);
+        let coeff = AB::Expr::from(Felt::new_unchecked(FINALIZER_MATRIX[output][lane_idx]));
+        acc + coeff * footer.raw_xof_word(local_idx)
+    })
+}
+
 /// `C[*]` and `D[*]` accumulator continuity F0 -> F1, F1 -> F2, F2 -> F3.
 ///
-/// On row `F_t` we *write* `C[t]` and `D[t]`; everything written on a prior
-/// row must propagate forward unchanged. Combined with the zero-init on
-/// not-yet-written slots (`local_checks`), this pins down the full
-/// accumulator content row by row.
+/// C is filled one word at a time. D is the matrix-finalizer running sum: every
+/// footer row contributes four raw XOF lanes to every output word.
 pub fn enforce_footer_accumulator_continuity<AB>(
     builder: &mut AB,
     local: &[AB::Var],
@@ -79,21 +99,35 @@ pub fn enforce_footer_accumulator_continuity<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
+    let local_footer = FooterRow::<AB>::new(local);
+    let next_footer = FooterRow::<AB>::new(next);
     let is_f0 = sel.is_f(0);
     let is_f1 = sel.is_f(1);
     let is_f2 = sel.is_f(2);
-    let gates = [is_f0.clone() + is_f1.clone() + is_f2.clone(), is_f1 + is_f2.clone(), is_f2];
+    let c_gates = [
+        is_f0.clone() + is_f1.clone() + is_f2.clone(),
+        is_f1.clone() + is_f2.clone(),
+        is_f2.clone(),
+    ];
 
-    for (t, gate) in gates.iter().enumerate() {
+    for (t, gate) in c_gates.iter().enumerate() {
         let builder = &mut builder.when(gate.clone());
         builder.assert_zero(
             Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t].clone())
                 - Into::<AB::Expr>::into(next[FOOTER_C_BASE_COL + t].clone()),
         );
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t].clone())
-                - Into::<AB::Expr>::into(next[FOOTER_D_BASE_COL + t].clone()),
-        );
+    }
+
+    let d_gates = [is_f0, is_f1, is_f2];
+    for (footer_row, gate) in d_gates.iter().enumerate() {
+        let builder = &mut builder.when(gate.clone());
+        for output in 0..4 {
+            builder.assert_zero(
+                next_footer.d(output)
+                    - local_footer.d(output)
+                    - matrix_partial(&next_footer, footer_row + 1, output),
+            );
+        }
     }
 }
 
@@ -129,7 +163,6 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
 {
     let gates_ft = [sel.is_f(0), sel.is_f(1), sel.is_f(2), sel.is_f(3)];
     let is_footer = sel.is_footer();
-    let top_bit_mask = AB::Expr::from(Felt::new_unchecked(FOOTER_TOP_BIT_MASK as u64));
 
     {
         let builder = &mut builder.when(is_footer.clone());
@@ -140,10 +173,6 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
             builder.assert_zero(footer_local.vhi_odd_byte(j) - footer_local.vhi_odd_output_byte(j));
         }
 
-        builder.assert_zero(footer_local.out_odd_top_byte() - footer_local.out_odd_byte(3));
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL].clone()) - top_bit_mask,
-        );
         builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL].clone()));
         builder.assert_zero(footer_local.h_even_word_field() - footer_local.h_even_word());
         builder.assert_zero(footer_local.h_odd_word_field() - footer_local.h_odd_word());
@@ -199,10 +228,7 @@ pub fn enforce_footer_c_canonicality<AB>(
     builder.assert_zero(z * footer_local.h_even_word_field());
 }
 
-/// `D[t] = pack(Out_even) + 2^32 * pack(Out_odd_masked)` on row `F_t`.
-///
-/// `Out_odd_masked[3] = Out_odd[3] - mask_bit * 128`, so the top bit of `Out_odd[3]` is captured
-/// by the Boolean witness `mask_bit`. The AND-with-128 lookup binds `mask_bit` to that top bit.
+/// Initialize the matrix-finalizer D accumulator on F0.
 pub fn enforce_footer_d_definition<AB>(
     builder: &mut AB,
     footer_local: &FooterRow<AB>,
@@ -210,11 +236,10 @@ pub fn enforce_footer_d_definition<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let d_val = footer_local.d_value_from_out();
-    builder.when(sel.is_f(0)).assert_zero(footer_local.d(0) - d_val.clone());
-    builder.when(sel.is_f(1)).assert_zero(footer_local.d(1) - d_val.clone());
-    builder.when(sel.is_f(2)).assert_zero(footer_local.d(2) - d_val.clone());
-    builder.when(sel.is_f(3)).assert_zero(footer_local.d(3) - d_val);
+    let builder = &mut builder.when(sel.is_f(0));
+    for output in 0..4 {
+        builder.assert_zero(footer_local.d(output) - matrix_partial(footer_local, 0, output));
+    }
 }
 
 /// F3 -> M0: forward the final accumulators into the first message row.

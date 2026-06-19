@@ -15,9 +15,84 @@ pub const RATE_WIDTH: usize = 8;
 /// Number of Felts in the packed chaining value.
 pub const DIGEST_WIDTH: usize = 4;
 
-const ODD_LANE_MASK: u32 = 0x7fff_ffff;
 const STATE_WORDS: usize = 8;
 const BLOCK_WORDS: usize = 16;
+
+/// Matrix used to finalize the 16-lane BlakeG XOF output into a 4-Felt CV.
+pub const FINALIZER_MATRIX: [[u64; 16]; DIGEST_WIDTH] = [
+    [
+        15904662775280568261,
+        11248103468244892543,
+        9896915777956725816,
+        185045353106015793,
+        8500216796624591099,
+        8360920247338155255,
+        10180691449194265163,
+        9837003373551522125,
+        17467273734926731113,
+        2417479524490811079,
+        11233314090082918225,
+        2233533576056214764,
+        17209626757598516148,
+        1311325837214623087,
+        17541990409531268444,
+        8778650702833371576,
+    ],
+    [
+        10351818539131852076,
+        16011254545682850612,
+        17088821416796162493,
+        288129510519252377,
+        13610881561350213016,
+        3540193630759490816,
+        6810056141036989685,
+        2582601007098108630,
+        12095802721559781052,
+        4693227732633196995,
+        7475118991187684203,
+        3613121121392294874,
+        4075547714329698345,
+        133921402081467462,
+        2232830006922210412,
+        9983172029845936448,
+    ],
+    [
+        43492802588642506,
+        3224823005913593020,
+        16350268760635732189,
+        3235941269094163408,
+        12211684808931190196,
+        11036966493196891711,
+        18142572304476028282,
+        8994326269973484641,
+        13283425880831860268,
+        858512574931661773,
+        2994039940363751996,
+        1639666242891561583,
+        10544831527494131096,
+        5657627761754840060,
+        8399352252962716189,
+        7729055846046801067,
+    ],
+    [
+        5791738195767590909,
+        8616178313052031618,
+        9917353469636318118,
+        5622607317059886827,
+        9180561841259757438,
+        8570780836823824523,
+        10644109930340636559,
+        5023452280734745604,
+        16936908147648204300,
+        13390427418905232145,
+        167198939826968494,
+        14327318216038165875,
+        5175145684803592810,
+        1063676696373794935,
+        7285040222901297781,
+        9407507053369299131,
+    ],
+];
 
 #[inline]
 pub fn unpack(felt: Felt) -> (u32, u32) {
@@ -44,7 +119,7 @@ pub fn unpack_block(block: [Felt; RATE_WIDTH]) -> [u32; BLOCK_WORDS] {
 
 #[inline]
 pub fn pack(lo: u32, hi: u32) -> Felt {
-    Felt::new_unchecked((((hi & ODD_LANE_MASK) as u64) << 32) | lo as u64)
+    Felt::new(((hi as u64) << 32) | lo as u64).expect("packed BlakeG CV word must be canonical")
 }
 
 #[inline]
@@ -142,6 +217,23 @@ pub fn compress_raw_xof_lanes(state: &[Felt; STATE_WIDTH]) -> [u32; 16] {
 mod tests {
     use super::*;
 
+    fn matrix_finalize(raw_xof: &[u32; 16]) -> [u32; STATE_WORDS] {
+        let values: [Felt; DIGEST_WIDTH] = core::array::from_fn(|row| {
+            raw_xof.iter().enumerate().fold(Felt::ZERO, |acc, (idx, &word)| {
+                acc + Felt::new_unchecked(FINALIZER_MATRIX[row][idx]) * Felt::from_u32(word)
+            })
+        });
+
+        core::array::from_fn(|idx| {
+            let value = values[idx / 2].as_canonical_u64();
+            if idx % 2 == 0 {
+                value as u32
+            } else {
+                (value >> 32) as u32
+            }
+        })
+    }
+
     #[test]
     fn compress_state_preserves_block_and_writes_new_cv() {
         let block = [
@@ -175,22 +267,38 @@ mod tests {
     }
 
     #[test]
-    fn pack_word_masks_odd_lanes() {
-        let word = pack_word([
-            0xffff_ffff,
-            0xffff_ffff,
-            0x0123_4567,
-            0x89ab_cdef,
-            0xdead_beef,
-            0xffff_ffff,
-            0xa5a5_a5a5,
-            0xffff_ffff,
+    fn finalizer_matrix_matches_crypto_compress() {
+        let block = [
+            Felt::new_unchecked(0x0000_0002_0000_0001),
+            Felt::new_unchecked(0x0000_0004_0000_0003),
+            Felt::new_unchecked(0x0000_0006_0000_0005),
+            Felt::new_unchecked(0x0000_0008_0000_0007),
+            Felt::new_unchecked(0x8000_000a_0000_0009),
+            Felt::new_unchecked(0x0000_000c_8000_000b),
+            Felt::new_unchecked(0x0000_000e_0000_000d),
+            Felt::new_unchecked(0x0000_0010_0000_000f),
+        ];
+        let cv_word = Word::new([
+            Felt::new_unchecked(0x8000_0001_0000_0021),
+            Felt::new_unchecked(0x0000_0043_8000_0022),
+            Felt::new_unchecked(0x0000_0065_0000_0023),
+            Felt::new_unchecked(0x0000_0087_0000_0024),
         ]);
+        let mut state = [
+            block[0], block[1], block[2], block[3], block[4], block[5], block[6], block[7],
+            cv_word[0], cv_word[1], cv_word[2], cv_word[3],
+        ];
 
-        for felt in word.as_slice() {
-            let (_, hi) = unpack(*felt);
-            assert_eq!(hi & !ODD_LANE_MASK, 0);
-        }
+        let expected = matrix_finalize(&compress_raw_xof_lanes(&state));
+        let actual = compress_state(&mut state);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pack_word_rejects_non_canonical_words() {
+        let result = std::panic::catch_unwind(|| pack(1, u32::MAX));
+        assert!(result.is_err());
     }
 
     #[test]

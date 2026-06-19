@@ -705,7 +705,7 @@ fn eidos_relation_digest_seed_matches_rust_challenger() {
 
         begin
             exec.vm::init_miden_air_shape_state
-            push.6225836997093344009.6615246172502583955.3539038439026260303.4361500420518448919
+            push.4806505917737869168.4185465761435974916.12071551080374466668.11435064271194531720
             padw exec.constants::relation_digest_ptr mem_loadw_le
             exec.random_coin::eidos_init_challenger
             exec.random_coin::eidos_squeeze_word

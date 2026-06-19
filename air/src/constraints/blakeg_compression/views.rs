@@ -19,10 +19,7 @@ use core::marker::PhantomData;
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{
-    FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
-    FOOTER_OUT_ODD_TOP_BYTE_COL,
-};
+use super::{FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL};
 
 // ===================================================================
 // Layout constants
@@ -36,9 +33,6 @@ pub const BYTES_PER_WORD: usize = 4;
 
 const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
-
-// Inverse of the footer top-bit mask, 128.
-const FOOTER_TOP_BIT_MASK_INV: Felt = Felt::new_unchecked(18302628881372282881);
 
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
 const AC_A_BASE_COL: usize = 60;
@@ -437,6 +431,30 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(3 * (4 + j))
     }
 
+    /// `j`-th byte of `High_even = Vhi_even XOR H_even`.
+    pub fn high_even_byte(&self, j: usize) -> AB::Expr {
+        debug_assert!(j < BYTES_PER_WORD);
+        self.vhi_even_byte(j) + self.h_even_byte(j) - felt::<AB>(2) * self.high_even_and(j)
+    }
+
+    /// `j`-th byte of `High_odd = Vhi_odd XOR H_odd`.
+    pub fn high_odd_byte(&self, j: usize) -> AB::Expr {
+        debug_assert!(j < BYTES_PER_WORD);
+        self.vhi_odd_byte(j) + self.h_odd_byte(j) - felt::<AB>(2) * self.high_odd_and(j)
+    }
+
+    /// `j`-th byte of the high-lane AND witness `Vhi_even & H_even`.
+    pub fn high_even_and(&self, j: usize) -> AB::Expr {
+        debug_assert!(j < BYTES_PER_WORD);
+        self.col(3 * j + 2)
+    }
+
+    /// `j`-th byte of the high-lane AND witness `Vhi_odd & H_odd`.
+    pub fn high_odd_and(&self, j: usize) -> AB::Expr {
+        debug_assert!(j < BYTES_PER_WORD);
+        self.col(3 * (4 + j) + 2)
+    }
+
     /// `j`-th duplicated `Vhi_even` byte used by the output AND slot.
     pub fn vhi_even_output_byte(&self, j: usize) -> AB::Expr {
         debug_assert!(j < BYTES_PER_WORD);
@@ -485,22 +503,6 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(FOOTER_H_CANON_Z_COL)
     }
 
-    /// Duplicated `Out_odd[3]` field used by the output top-bit lookup.
-    pub fn out_odd_top_byte(&self) -> AB::Expr {
-        self.col(FOOTER_OUT_ODD_TOP_BYTE_COL)
-    }
-
-    /// Masked top-bit field `Out_odd[3] & 128`.
-    pub fn masked_top_bit(&self) -> AB::Expr {
-        self.col(FOOTER_OUT_MASKED_TOP_BIT_COL)
-    }
-
-    /// Top bit of `Out_odd[3]`. Constrained Boolean and bound to the actual
-    /// top bit by the footer mask lookup.
-    pub fn mask_bit(&self) -> AB::Expr {
-        self.masked_top_bit() * AB::Expr::from(FOOTER_TOP_BIT_MASK_INV)
-    }
-
     // --- computed expressions --------------------------------------------
 
     /// `Vlo_even` packed into a u32 word.
@@ -543,6 +545,26 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         )
     }
 
+    /// High XOF even word, `Vhi_even XOR H_even`.
+    pub fn high_even_word(&self) -> AB::Expr {
+        pack4_bytes::<AB>(
+            self.high_even_byte(0),
+            self.high_even_byte(1),
+            self.high_even_byte(2),
+            self.high_even_byte(3),
+        )
+    }
+
+    /// High XOF odd word, `Vhi_odd XOR H_odd`.
+    pub fn high_odd_word(&self) -> AB::Expr {
+        pack4_bytes::<AB>(
+            self.high_odd_byte(0),
+            self.high_odd_byte(1),
+            self.high_odd_byte(2),
+            self.high_odd_byte(3),
+        )
+    }
+
     /// `H_even` packed into a u32 word (raw, no top-bit mask).
     pub fn h_even_word(&self) -> AB::Expr {
         pack4_bytes::<AB>(
@@ -573,15 +595,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         )
     }
 
-    /// `Out_odd` packed into a u32 word, with the top bit stripped into the
-    /// `mask_bit` witness.
-    pub fn out_odd_masked_word(&self) -> AB::Expr {
-        let masked_msb = self.out_odd_byte(3) - self.masked_top_bit();
+    /// `Out_odd` packed into a u32 word.
+    pub fn out_odd_word(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.out_odd_byte(0),
             self.out_odd_byte(1),
             self.out_odd_byte(2),
-            masked_msb,
+            self.out_odd_byte(3),
         )
     }
 
@@ -591,24 +611,15 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.h_even_word_field() + self.h_odd_word_field() * felt::<AB>(1u64 << 32)
     }
 
-    /// Felt-level packing of `Out_even || Out_odd_masked` for `D[t]`.
-    /// `D[t] = Out_even_word + 2^32 * Out_odd_masked_word`.
-    pub fn d_value_from_out(&self) -> AB::Expr {
-        self.out_even_word() + self.out_odd_masked_word() * felt::<AB>(1u64 << 32)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::FOOTER_TOP_BIT_MASK;
-    use super::*;
-
-    #[test]
-    fn precomputed_footer_mask_inverse_is_correct() {
-        assert_eq!(
-            Felt::new_unchecked(FOOTER_TOP_BIT_MASK as u64) * FOOTER_TOP_BIT_MASK_INV,
-            Felt::ONE
-        );
+    /// Raw XOF word for this footer row.
+    pub fn raw_xof_word(&self, idx: usize) -> AB::Expr {
+        match idx {
+            0 => self.out_even_word(),
+            1 => self.out_odd_word(),
+            2 => self.high_even_word(),
+            3 => self.high_odd_word(),
+            _ => unreachable!("footer raw-XOF index out of range"),
+        }
     }
 }
 

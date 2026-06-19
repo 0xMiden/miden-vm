@@ -1,5 +1,5 @@
-//! Per-row local constraints: carry checks, message binding, mask_bit Boolean,
-//! footer accumulator zero-init, and IV initialization.
+//! Per-row local constraints: carry checks, message binding, footer C zero-init,
+//! and IV initialization.
 //!
 //! These are the "no transition needed, same row" constraints. Splitting them
 //! out makes the row-by-row sanity checks easy to audit independently of the
@@ -9,9 +9,10 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow, NUM_G};
+use super::views::{ACRow, BDRow, NUM_G};
 use super::{
-    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL,
+    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_SPARE_COL, FOOTER_SPARE0_COL,
+    FOOTER_SPARE1_COL, FOOTER_SPARE2_COL,
 };
 
 /// BlakeG IV (the 8 fractional-bit constants of `sqrt(p)` for the first eight
@@ -125,21 +126,6 @@ pub fn enforce_first_b_hin_matches_b_words<AB>(
     builder.assert_zero(bd_local.first_b_hin_odd_word(3) - bd_local.b_word(3));
 }
 
-/// Footer `mask_bit` Boolean check.
-///
-/// `mask_bit in {0, 1}` on every footer row. The Boolean form is enforced here; the AND8 lookup
-/// binds it to the actual top bit of `Out_odd[3]`.
-pub fn enforce_footer_mask_bit_boolean<AB>(
-    builder: &mut AB,
-    footer_local: &FooterRow<AB>,
-    sel: &Selectors<AB>,
-) where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let m = footer_local.mask_bit();
-    builder.when(sel.is_footer()).assert_zero(m.clone() * (AB::Expr::ONE - m));
-}
-
 /// `v[8..16] = IV[0..8]` initialization on row 0 (the first A-col row of a
 /// compression block).
 ///
@@ -180,18 +166,22 @@ where
     builder.assert_zero(mode.clone() * inactive.clone());
     builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL].clone()));
     builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE_COL].clone()));
+    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE0_COL].clone()));
+    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE1_COL].clone()));
+    builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_SPARE2_COL].clone()));
 }
 
-/// Footer accumulator zero-initialization on F0, F1, F2.
+/// Footer C accumulator zero-initialization on F0, F1, F2.
 ///
-/// The C[*] and D[*] accumulators are filled progressively across F0..F3.
-/// On any row before the slot is written, that slot must read zero, so an
-/// adversary cannot smuggle a non-zero "initial" accumulator value.
+/// `C[t]` is filled one word at a time. On any row before a C slot is written,
+/// that slot must be zero, so an adversary cannot smuggle a non-zero initial
+/// accumulator value. The D columns are matrix-finalizer running sums, so all
+/// four D slots are live starting at F0.
 ///
-/// - F0 writes C[0] and D[0]; C[1..4] and D[1..4] must be zero on F0.
-/// - F1 writes C[1] and D[1]; C[2..4] and D[2..4] must be zero on F1.
-/// - F2 writes C[2] and D[2]; C[3] and D[3] must be zero on F2.
-/// - F3 writes C[3] and D[3]; nothing is required to be zero on F3.
+/// - F0 writes C[0]; C[1..4] must be zero on F0.
+/// - F1 writes C[1]; C[2..4] must be zero on F1.
+/// - F2 writes C[2]; C[3] must be zero on F2.
+/// - F3 writes C[3]; no C slot is required to be zero on F3.
 pub fn enforce_footer_accumulator_zero_init<AB>(
     builder: &mut AB,
     local: &[AB::Var],
@@ -208,6 +198,5 @@ pub fn enforce_footer_accumulator_zero_init<AB>(
         let t = idx + 1;
         let builder = &mut builder.when(gate.clone());
         builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_C_BASE_COL + t].clone()));
-        builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_D_BASE_COL + t].clone()));
     }
 }

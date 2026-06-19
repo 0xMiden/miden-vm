@@ -5,10 +5,10 @@ use miden::core::sys::vm::constraints_eval_inputs
 # =================================================================================================
 
 # Number of READ variables (inputs + constants) for the constraint evaluation circuit.
-const NUM_INPUTS_CIRCUIT = 1184
+const NUM_INPUTS_CIRCUIT = 1246
 
 # Number of evaluation gates in the constraint evaluation circuit.
-const NUM_EVAL_GATES_CIRCUIT = 9760
+const NUM_EVAL_GATES_CIRCUIT = 9956
 
 # Max cycle length for periodic columns.
 const MAX_CYCLE_LEN_LOG = 6
@@ -17,7 +17,7 @@ const MAX_CYCLE_LEN_LOG = 6
 const ACE_REGISTRY_DEPTH = 5
 
 # Initial chaining value for hashing the ACE circuit stream.
-const CIRCUIT_STREAM_INIT_CV = [4280581858871862887, 2688637133034287986, 1947077364412317696, 6620516959492516488]
+const CIRCUIT_STREAM_INIT_CV = [13503953895726638695, 11912009169889063794, 11170449401267093504, 6620516959492516808]
 
 # ERRORS
 # =================================================================================================
@@ -58,7 +58,7 @@ proc load_and_authenticate_ace_circuit
     # => [CV, ptr, C]
     padw padw
     # => [BLOCK_SLOTS, CV, ptr, C]
-    repeat.1361
+    repeat.1401
         adv_pipe
         # => [BLOCK, CV, ptr_next, C]
         bcompress

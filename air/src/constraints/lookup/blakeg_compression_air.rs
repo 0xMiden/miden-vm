@@ -31,11 +31,11 @@ const NARROW_SLOT_COUNT: usize = 2 * NARROW_BATCH_COLUMNS;
 const BYTE_SLOT_LAST: usize = 19;
 const BYTE_COMMON_SLOT_LAST: usize = 13;
 const BYTE_M0_SLOT_LAST: usize = 15;
-const M0_ROUTE_OR_FIRST_B_HIN_SLOT: usize = 16;
-const FOOTER_OUT_MASK_SLOT: usize = 17;
+const M0_ROUTE_OR_FIRST_B_HIN_SLOT_BASE: usize = 16;
+const M0_ROUTE_OR_FIRST_B_HIN_SLOT_LAST: usize = 17;
 const AC_FOOTER_HIN_SLOT: usize = 18;
 const AC_ONLY_SLOT: usize = 19;
-const FOOTER_BYTE_SLOT_COUNT: usize = 18;
+const FOOTER_BYTE_SLOT_COUNT: usize = 16;
 const FOOTER_HIGH_EVEN_SLOT_BASE: usize = 0;
 const FOOTER_HIGH_ODD_SLOT_BASE: usize = 4;
 const FOOTER_OUTPUT_EVEN_SLOT_BASE: usize = 8;
@@ -48,20 +48,18 @@ const WORD_BYTE_COUNT: usize = 4;
 const ACTIVITY_COMMON_BYTE: usize = 0;
 const ACTIVITY_M0_BYTE: usize = 1;
 const ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN: usize = 2;
-const ACTIVITY_FOOTER_OUT_MASK: usize = 3;
-const ACTIVITY_AC_FOOTER_HIN: usize = 4;
-const ACTIVITY_AC_ONLY: usize = 5;
-const ACTIVITY_GROUP_COUNT: usize = 6;
+const ACTIVITY_AC_FOOTER_HIN: usize = 3;
+const ACTIVITY_AC_ONLY: usize = 4;
+const ACTIVITY_GROUP_COUNT: usize = 5;
 
 const MULTIPLICITY_INPUT_WORD_BYTE: usize = 0;
 const MULTIPLICITY_LOW_MESSAGE_BYTE: usize = 1;
 const MULTIPLICITY_COMMON_BYTE: usize = 2;
 const MULTIPLICITY_M0_BYTE: usize = 3;
 const MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN: usize = 4;
-const MULTIPLICITY_FOOTER_OUT_MASK: usize = 5;
-const MULTIPLICITY_AC_FOOTER_HIN: usize = 6;
-const MULTIPLICITY_AC_ONLY: usize = 7;
-const MULTIPLICITY_GROUP_COUNT: usize = 8;
+const MULTIPLICITY_AC_FOOTER_HIN: usize = 5;
+const MULTIPLICITY_AC_ONLY: usize = 6;
+const MULTIPLICITY_GROUP_COUNT: usize = 7;
 
 const BATCH_2: Deg = Deg { v: 2, u: 2 };
 const AEAD_XOF_PAIR: Deg = Deg { v: 2, u: 2 };
@@ -271,9 +269,6 @@ where
             ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN => {
                 is_ac.clone() + is_msg_row0.clone() + is_first_b.clone()
             },
-            ACTIVITY_FOOTER_OUT_MASK => {
-                byte_lookup_rows.clone() + is_msg_row0.clone() + is_first_b.clone()
-            },
             ACTIVITY_AC_FOOTER_HIN => is_ac.clone() + is_footer.clone(),
             ACTIVITY_AC_ONLY => is_ac.clone(),
             _ => unreachable!("invalid BlakeG activity group"),
@@ -320,12 +315,6 @@ where
                     + scale_expr(is_msg_row0.clone(), -1)
                     + scale_expr(is_first_b.clone(), -1)
             },
-            MULTIPLICITY_FOOTER_OUT_MASK => {
-                is_ac.clone()
-                    + scale_expr(is_footer.clone(), -1)
-                    + scale_expr(is_msg_row0.clone(), -1)
-                    + scale_expr(is_first_b.clone(), -1)
-            },
             MULTIPLICITY_AC_FOOTER_HIN => is_ac.clone() + scale_expr(is_footer.clone(), -1),
             MULTIPLICITY_AC_ONLY => is_ac.clone(),
             _ => unreachable!("invalid BlakeG multiplicity group"),
@@ -356,8 +345,9 @@ fn slot_activity_group(slot: usize) -> Option<usize> {
     match slot {
         0..=BYTE_COMMON_SLOT_LAST => Some(ACTIVITY_COMMON_BYTE),
         14..=BYTE_M0_SLOT_LAST => Some(ACTIVITY_M0_BYTE),
-        M0_ROUTE_OR_FIRST_B_HIN_SLOT => Some(ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN),
-        FOOTER_OUT_MASK_SLOT => Some(ACTIVITY_FOOTER_OUT_MASK),
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT_BASE..=M0_ROUTE_OR_FIRST_B_HIN_SLOT_LAST => {
+            Some(ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN)
+        },
         AC_FOOTER_HIN_SLOT => Some(ACTIVITY_AC_FOOTER_HIN),
         AC_ONLY_SLOT => Some(ACTIVITY_AC_ONLY),
         _ => unreachable_narrow_slot(slot),
@@ -371,8 +361,9 @@ fn slot_multiplicity_group(slot: usize) -> Option<usize> {
         4..=5 => Some(MULTIPLICITY_LOW_MESSAGE_BYTE),
         6..=BYTE_COMMON_SLOT_LAST => Some(MULTIPLICITY_COMMON_BYTE),
         14..=BYTE_M0_SLOT_LAST => Some(MULTIPLICITY_M0_BYTE),
-        M0_ROUTE_OR_FIRST_B_HIN_SLOT => Some(MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN),
-        FOOTER_OUT_MASK_SLOT => Some(MULTIPLICITY_FOOTER_OUT_MASK),
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT_BASE..=M0_ROUTE_OR_FIRST_B_HIN_SLOT_LAST => {
+            Some(MULTIPLICITY_M0_ROUTE_OR_FIRST_B_HIN)
+        },
         AC_FOOTER_HIN_SLOT => Some(MULTIPLICITY_AC_FOOTER_HIN),
         AC_ONLY_SLOT => Some(MULTIPLICITY_AC_ONLY),
         _ => unreachable_narrow_slot(slot),
@@ -474,14 +465,8 @@ where
             add_byte_slot_buses::<LB, G>(&mut encoded, group, slot, selectors);
             add_bus(&mut encoded, group, BusId::RangeCheck, selectors.m0_or_iface_rows.clone());
         },
-        M0_ROUTE_OR_FIRST_B_HIN_SLOT => {
+        M0_ROUTE_OR_FIRST_B_HIN_SLOT_BASE..=M0_ROUTE_OR_FIRST_B_HIN_SLOT_LAST => {
             add_bus(&mut encoded, group, BusId::BlakeGMessageWord, selectors.is_ac.clone());
-            add_bus(&mut encoded, group, BusId::RangeCheck, selectors.is_msg_row0.clone());
-            add_bus(&mut encoded, group, BusId::BlakeGInputWord, selectors.is_first_b.clone());
-        },
-        FOOTER_OUT_MASK_SLOT => {
-            add_bus(&mut encoded, group, BusId::BlakeGMessageWord, selectors.is_ac.clone());
-            add_bus(&mut encoded, group, BusId::And8Lookup, selectors.is_footer.clone());
             add_bus(&mut encoded, group, BusId::RangeCheck, selectors.is_msg_row0.clone());
             add_bus(&mut encoded, group, BusId::BlakeGInputWord, selectors.is_first_b.clone());
         },

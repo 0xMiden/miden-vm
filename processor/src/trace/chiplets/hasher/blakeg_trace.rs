@@ -29,18 +29,18 @@ use miden_air::trace::{
     blakeg_compression::{
         AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL, AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL,
         FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_SPARE_COL,
-        FOOTER_H_CANON_Z_COL, FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_WORD_COL,
-        FOOTER_OUT_MASKED_TOP_BIT_COL, FOOTER_OUT_ODD_TOP_BYTE_COL, FOOTER_OUT_TOP_MASK_COL,
-        FOOTER_ROW_INDEX_COL, FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL,
-        IFACE_D_BASE_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
-        MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS,
-        ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT, footer_future_w_col, iface_h_word_col,
-        iface_m0_route_col, iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col,
-        msg_m1_range_col, msg_word_col,
+        FOOTER_H_CANON_Z_COL, FOOTER_H_EVEN_WORD_COL, FOOTER_H_ODD_WORD_COL, FOOTER_ROW_INDEX_COL,
+        FOOTER_SPARE_COL, FOOTER_SPARE0_COL, FOOTER_SPARE1_COL, FOOTER_SPARE2_COL,
+        IFACE_C_BASE_COL, IFACE_D_BASE_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL,
+        MSG_D_BASE_COL, MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL,
+        NUM_BLAKEG_COMPRESSION_COLS, ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT,
+        footer_future_w_col, iface_h_word_col, iface_m0_route_col, iface_m1_route_col,
+        msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
     },
 };
 use miden_core::{
     Felt,
+    chiplets::blakeg::FINALIZER_MATRIX,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
 };
 
@@ -84,7 +84,7 @@ pub const IFACE_OUTPUT_ROW: usize = 63;
 const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
 const FOOTER_BYTE_SLOT_COUNT: usize = 18;
-const RAW_OUT_LEN: usize = 8;
+const RAW_OUT_LEN: usize = 16;
 const FIRST_B_HIN_PAIR2_SLOT: usize = 16;
 const FIRST_B_HIN_PAIR3_SLOT: usize = 17;
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
@@ -114,6 +114,17 @@ fn footer_slot_base(slot: usize) -> usize {
     BYTE_SLOT_WIDTH * slot
 }
 
+#[inline]
+fn raw_xof_lane_index(footer_row: usize, local_idx: usize) -> usize {
+    debug_assert!(footer_row < 4);
+    debug_assert!(local_idx < 4);
+    if local_idx < 2 {
+        2 * footer_row + local_idx
+    } else {
+        8 + 2 * footer_row + (local_idx - 2)
+    }
+}
+
 fn write_first_b_hin_pairs(
     rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
     row: usize,
@@ -136,11 +147,6 @@ fn write_first_b_hin_pairs(
 #[inline]
 fn u32_to_bytes(val: u32) -> [u8; 4] {
     val.to_le_bytes()
-}
-
-#[inline]
-fn bytes_to_u32(bytes: &[u8; 4]) -> u32 {
-    u32::from_le_bytes(*bytes)
 }
 
 // ---- Row writer ----
@@ -293,8 +299,14 @@ fn generate_footer_rows(
 ) -> ([u64; 4], [u64; 4], [u64; RAW_OUT_LEN]) {
     let footer_start = start_row + COMPUTATION_ROWS;
     let mut c_accum = [0u64; 4];
-    let mut d_accum = [0u64; 4];
-    let raw_out: [u64; 8] = core::array::from_fn(|i| (v[i] ^ v[i + 8]) as u64);
+    let mut d_accum = [Felt::ZERO; 4];
+    let raw_out: [u64; RAW_OUT_LEN] = core::array::from_fn(|i| {
+        if i < 8 {
+            (v[i] ^ v[i + 8]) as u64
+        } else {
+            (v[i] ^ h_in[i - 8]) as u64
+        }
+    });
     let mut h_canon_inv: [Felt; 4] =
         core::array::from_fn(|t| Felt::from_u32(h_in[2 * t + 1]) - Felt::from_u32(u32::MAX));
     let h_canon_z: [Felt; 4] = core::array::from_fn(|t| {
@@ -339,29 +351,17 @@ fn generate_footer_rows(
             count_and8(and8_counts, v_hi_odd_bytes[j], h_odd_bytes[j], high_and_odd[j]);
         }
 
-        let out_even = raw_out[2 * t] as u32;
-        let out_odd = raw_out[2 * t + 1] as u32;
-        let out_odd_bytes = u32_to_bytes(out_odd);
-
-        let mask_bit = (out_odd_bytes[3] >> 7) as u64;
-        let masked_out_odd_msb = out_odd_bytes[3] & 0x7f;
-
-        let out_odd_masked = bytes_to_u32(&[
-            out_odd_bytes[0],
-            out_odd_bytes[1],
-            out_odd_bytes[2],
-            masked_out_odd_msb,
-        ]);
-
         c_accum[t] = h_even as u64 + (h_odd as u64) * (1u64 << 32);
-        d_accum[t] = out_even as u64 + (out_odd_masked as u64) * (1u64 << 32);
+        let local_raw =
+            [raw_out[2 * t], raw_out[2 * t + 1], raw_out[8 + 2 * t], raw_out[8 + 2 * t + 1]];
+        for output in 0..4 {
+            for (local_idx, word) in local_raw.into_iter().enumerate() {
+                let lane_idx = raw_xof_lane_index(t, local_idx);
+                d_accum[output] += Felt::new_unchecked(FINALIZER_MATRIX[output][lane_idx])
+                    * Felt::new_unchecked(word);
+            }
+        }
 
-        count_and8(
-            and8_counts,
-            out_odd_bytes[3],
-            FOOTER_TOP_BIT_MASK,
-            (mask_bit as u8) * FOOTER_TOP_BIT_MASK,
-        );
         let mut w = RowWriter::new(rows, row);
         for j in 0..4 {
             let high_even = footer_slot_base(j);
@@ -388,9 +388,9 @@ fn generate_footer_rows(
         w.set_abs(FOOTER_H_CANON_INV_COL, h_canon_inv[t]);
         w.set_abs(FOOTER_H_CANON_Z_COL, h_canon_z[t]);
         w.set_col(FOOTER_H_CANON_SPARE_COL, 0);
-        w.set_col(FOOTER_OUT_ODD_TOP_BYTE_COL, out_odd_bytes[3] as u64);
-        w.set_col(FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK as u64);
-        w.set_col(FOOTER_OUT_MASKED_TOP_BIT_COL, mask_bit * FOOTER_TOP_BIT_MASK as u64);
+        w.set_col(FOOTER_SPARE0_COL, 0);
+        w.set_col(FOOTER_SPARE1_COL, 0);
+        w.set_col(FOOTER_SPARE2_COL, 0);
 
         let future_w = match t {
             0 => &[2usize, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15][..],
@@ -405,7 +405,7 @@ fn generate_footer_rows(
 
         for i in 0..4 {
             w.set_abs(FOOTER_C_BASE_COL + i, Felt::new_unchecked(c_accum[i]));
-            w.set_abs(FOOTER_D_BASE_COL + i, Felt::new_unchecked(d_accum[i]));
+            w.set_abs(FOOTER_D_BASE_COL + i, d_accum[i]);
         }
         w.set_col(FOOTER_SPARE_COL, 0);
         w.set_col(FOOTER_ROW_INDEX_COL, t as u64);
@@ -420,7 +420,7 @@ fn generate_footer_rows(
         }
     }
 
-    (c_accum, d_accum, raw_out)
+    (c_accum, d_accum.map(|value| value.as_canonical_u64()), raw_out)
 }
 
 // ---- Interface rows ----
@@ -602,7 +602,7 @@ fn footer_high_word_from_row(row: &[Felt; NUM_BLAKEG_COMPRESSION_COLS], odd: boo
         debug_assert!(and <= u8::MAX as u64);
         (vhi + h - 2 * and) as u8
     });
-    bytes_to_u32(&bytes)
+    u32::from_le_bytes(bytes)
 }
 
 #[cfg(debug_assertions)]
@@ -618,7 +618,7 @@ fn debug_assert_aead_xof_footer_output(
     for i in 0..RAW_OUT_LEN {
         debug_assert_eq!(
             raw_out[i], expected[i] as u64,
-            "AEAD-XOF low lane {i} mismatch at block starting row {start_row}"
+            "AEAD-XOF raw lane {i} mismatch at block starting row {start_row}"
         );
     }
 

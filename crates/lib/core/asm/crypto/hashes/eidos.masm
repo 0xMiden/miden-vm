@@ -5,9 +5,9 @@
 #! Procedures which operate on a three-word state use the layout `[R0, R1, C]`.
 #! After `bcompress`, `C` contains the new digest.
 
-const EIDOS_INIT_CV_0 = 4280581858871862887
-const EIDOS_INIT_CV_1 = 2688637133034287986
-const EIDOS_INIT_CV_2 = 1947077364412317696
+const EIDOS_INIT_CV_0 = 13503953895726638695
+const EIDOS_INIT_CV_1 = 11912009169889063794
+const EIDOS_INIT_CV_2 = 11170449401267093504
 const EIDOS_INIT_CV_3_BASE = 6620516959492505600
 
 #! Constructs `Eidos::init_chaining_word(0, n)`.
