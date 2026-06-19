@@ -831,6 +831,12 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 message: "invalid alignment, expected a value in the range 1..=65535".to_string(),
             });
         }
+        if !value.is_power_of_two() {
+            return Err(ParsingError::InvalidStructRepr {
+                span,
+                message: "invalid alignment, expected a power-of-two value".to_string(),
+            });
+        }
         Ok(value as u16)
     }
 
