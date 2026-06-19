@@ -50,6 +50,12 @@ debug = true
 debug-assertions = true
 overflow-checks = true
 
+# The fast processor's generated test code is large enough that optimizing it dominates CI build
+# time. Keeping this crate unoptimized gives most of the build-time win without slowing the rest
+# of the test suite enough to matter in practice.
+[profile.test-dev.package.miden-processor]
+opt-level = 0
+
 [workspace.dependencies]
 # Workspace crates
 miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.24", default-features = false }

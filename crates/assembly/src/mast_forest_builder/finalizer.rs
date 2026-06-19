@@ -1,32 +1,56 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     advice::AdviceMap,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DebugInfo, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
+        BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastForestError, MastNode, MastNodeBuilder, MastNodeId, SplitNodeBuilder,
     },
     operations::{AssemblyOp, DebugVarInfo},
     utils::IndexVec,
 };
 
 use super::{
-    AsmOpMergePolicy, AsmOpRef, DebugMetadataMergePolicy, DebugVarRef, MastNodeRef,
-    PendingMastNode, PendingMastNodeKind,
+    AsmOpRef, DebugVarRef, MastNodeRef, PendingMastNode, PendingMastNodeKind, PendingSourceNode,
+    SourceDebugGraph, SourceNode, SourceNodeId, SourceNodeRef,
+    compute_operations_and_adjust_mappings,
 };
 use crate::diagnostics::{Diagnostic, Report, miette};
 
 /// Result of finalizing a [`super::MastForestBuilder`].
 pub(crate) struct BuiltMastForest {
     mast_forest: MastForest,
+    source_graph: SourceDebugGraph,
     /// Final node IDs for builder refs retained in the finalized forest.
     node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
+    /// Final source occurrence IDs for builder refs retained in the source graph.
+    source_id_by_ref: BTreeMap<SourceNodeRef, SourceNodeId>,
 }
 
 impl BuiltMastForest {
+    #[cfg(test)]
     pub(crate) fn into_parts(self) -> (MastForest, BTreeMap<MastNodeRef, MastNodeId>) {
         (self.mast_forest, self.node_id_by_ref)
+    }
+
+    pub(crate) fn into_parts_with_source_graph(
+        self,
+    ) -> (
+        MastForest,
+        BTreeMap<MastNodeRef, MastNodeId>,
+        SourceDebugGraph,
+        BTreeMap<SourceNodeRef, SourceNodeId>,
+    ) {
+        (self.mast_forest, self.node_id_by_ref, self.source_graph, self.source_id_by_ref)
+    }
+
+    pub(crate) fn with_error_messages(
+        mut self,
+        error_messages: BTreeMap<u64, alloc::sync::Arc<str>>,
+    ) -> Self {
+        self.source_graph = self.source_graph.with_error_messages(error_messages);
+        self
     }
 }
 
@@ -61,24 +85,28 @@ pub(super) enum MastForestBuilderError {
         #[source]
         source: MastForestError,
     },
-    #[error("failed to add assembly op metadata for node {node_id:?}: {source}")]
-    AddAsmOp {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register assembly op metadata for node {node_id:?}: {source_msg}")]
-    RegisterAsmOps { node_id: MastNodeId, source_msg: String },
-    #[error("failed to add debug variable metadata for node {node_id:?}: {source}")]
-    AddDebugVar {
-        node_id: MastNodeId,
-        #[source]
-        source: MastForestError,
-    },
-    #[error("failed to register debug variable metadata for node {node_id:?}: {source_msg}")]
-    RegisterDebugVars { node_id: MastNodeId, source_msg: String },
     #[error("procedure root {root_ref} was not retained in final MAST forest")]
     MissingProcedureRoot { root_ref: MastNodeRef },
+    #[error(
+        "source occurrence {source_ref} references child {child_ref} before the child was finalized"
+    )]
+    MissingFinalSourceChild {
+        source_ref: SourceNodeRef,
+        child_ref: SourceNodeRef,
+    },
+    #[error(
+        "source occurrence {source_ref} references execution node {exec_ref} before it was finalized"
+    )]
+    MissingFinalSourceExec {
+        source_ref: SourceNodeRef,
+        exec_ref: MastNodeRef,
+    },
+    #[error("failed to add source occurrence {source_ref}: {source}")]
+    AddSourceNode {
+        source_ref: SourceNodeRef,
+        #[source]
+        source: MastForestError,
+    },
     #[error("failed to finalize MAST forest: {source}")]
     FinalizeForest {
         #[source]
@@ -90,13 +118,12 @@ pub(super) enum MastForestBuilderError {
 ///
 /// Methods are called in finalization order:
 /// 1. materialize live nodes;
-/// 2. register asm-op and debug-variable metadata for materialized node IDs;
+/// 2. finalize source/debug occurrence rows from builder-local source records;
 /// 3. assemble the final forest.
 ///
 /// The helper is private to finalization; keeping the order documented is sufficient because it is
 /// not exposed as a reusable API.
 pub(super) struct MastForestFinalizer {
-    debug_info: DebugInfo,
     nodes: IndexVec<MastNodeId, MastNode>,
     node_id_by_ref: BTreeMap<MastNodeRef, MastNodeId>,
 }
@@ -104,7 +131,6 @@ pub(super) struct MastForestFinalizer {
 impl MastForestFinalizer {
     pub(super) fn new() -> Self {
         Self {
-            debug_info: DebugInfo::new(),
             nodes: IndexVec::new(),
             node_id_by_ref: BTreeMap::new(),
         }
@@ -147,61 +173,14 @@ impl MastForestFinalizer {
         Ok(())
     }
 
-    pub(super) fn register_live_asm_ops(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
-    ) -> Result<(), Report> {
-        let mut asm_op_policy = AsmOpMergePolicy::new(asm_op_by_ref);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.asm_ops.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            asm_op_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.asm_ops,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    pub(super) fn register_live_debug_vars(
-        &mut self,
-        live_node_refs: &[MastNodeRef],
-        pending_nodes: &IndexVec<MastNodeRef, PendingMastNode>,
-        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
-    ) -> Result<(), Report> {
-        let mut debug_metadata_policy = DebugMetadataMergePolicy::new(debug_vars);
-        for &node_ref in live_node_refs {
-            let pending_node = &pending_nodes[node_ref];
-            if pending_node.debug_vars.is_empty() {
-                continue;
-            }
-
-            let node_id = self.node_id_by_ref[&node_ref];
-            debug_metadata_policy.register_node(
-                &mut self.debug_info,
-                &self.nodes[node_id],
-                node_id,
-                &pending_node.debug_vars,
-            )?;
-        }
-
-        Ok(())
-    }
-
     pub(super) fn into_built_forest(
-        mut self,
+        self,
         procedure_root_refs: &[MastNodeRef],
+        procedure_source_root_refs: &[SourceNodeRef],
+        source_nodes: &IndexVec<SourceNodeRef, PendingSourceNode>,
+        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
+        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
         advice_map: AdviceMap,
-        error_codes: BTreeMap<u64, Arc<str>>,
     ) -> Result<BuiltMastForest, Report> {
         let mut roots = Vec::with_capacity(procedure_root_refs.len());
         for &root_ref in procedure_root_refs {
@@ -211,15 +190,122 @@ impl MastForestFinalizer {
             roots.push(root_id);
         }
 
-        self.debug_info.extend_error_codes(error_codes);
-        let mast_forest =
-            MastForest::from_raw_parts(self.nodes, roots, advice_map, self.debug_info)
-                .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
+        let (source_graph, source_id_by_ref) = self.finalize_source_graph(
+            procedure_source_root_refs,
+            source_nodes,
+            asm_op_by_ref,
+            debug_vars,
+        )?;
+        let mast_forest = MastForest::from_raw_parts(self.nodes, roots, advice_map)
+            .map_err(|source| Report::new(MastForestBuilderError::FinalizeForest { source }))?;
 
         Ok(BuiltMastForest {
             mast_forest,
+            source_graph,
             node_id_by_ref: self.node_id_by_ref,
+            source_id_by_ref,
         })
+    }
+
+    fn finalize_source_graph(
+        &self,
+        procedure_source_root_refs: &[SourceNodeRef],
+        source_nodes: &IndexVec<SourceNodeRef, PendingSourceNode>,
+        asm_op_by_ref: &IndexVec<AsmOpRef, AssemblyOp>,
+        debug_vars: &IndexVec<DebugVarRef, DebugVarInfo>,
+    ) -> Result<(SourceDebugGraph, BTreeMap<SourceNodeRef, SourceNodeId>), Report> {
+        let live_source_refs = source_nodes
+            .as_slice()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, source_node)| {
+                self.node_id_by_ref
+                    .contains_key(&source_node.exec_ref)
+                    .then_some(SourceNodeRef::from(index as u32))
+            })
+            .collect::<Vec<_>>();
+
+        let mut source_id_by_ref = BTreeMap::new();
+        for &source_ref in &live_source_refs {
+            source_id_by_ref.insert(source_ref, SourceNodeId::from(source_id_by_ref.len() as u32));
+        }
+
+        let mut finalized_nodes = IndexVec::new();
+        for &source_ref in &live_source_refs {
+            let pending_source_node = &source_nodes[source_ref];
+            let exec_node =
+                *self.node_id_by_ref.get(&pending_source_node.exec_ref).ok_or_else(|| {
+                    Report::new(MastForestBuilderError::MissingFinalSourceExec {
+                        source_ref,
+                        exec_ref: pending_source_node.exec_ref,
+                    })
+                })?;
+            let children = pending_source_node
+                .child_refs
+                .iter()
+                .map(|child_ref| {
+                    source_id_by_ref.get(child_ref).copied().ok_or_else(|| {
+                        Report::new(MastForestBuilderError::MissingFinalSourceChild {
+                            source_ref,
+                            child_ref: *child_ref,
+                        })
+                    })
+                })
+                .collect::<Result<Vec<_>, Report>>()?;
+            let node = &self.nodes[exec_node];
+            let (_, asm_op_refs) =
+                compute_operations_and_adjust_mappings(node, pending_source_node.asm_ops.clone());
+            let asm_ops = asm_op_refs
+                .into_iter()
+                .map(|(op_idx, asm_op_ref)| (op_idx, asm_op_by_ref[asm_op_ref].clone()))
+                .collect();
+            let (_, debug_var_refs) = compute_operations_and_adjust_mappings(
+                node,
+                pending_source_node.debug_vars.clone(),
+            );
+            let debug_vars = debug_var_refs
+                .into_iter()
+                .map(|(op_idx, debug_var_ref)| (op_idx, debug_vars[debug_var_ref].clone()))
+                .collect();
+            let (op_start, op_end) = adjust_source_op_range(
+                node,
+                pending_source_node.op_start,
+                pending_source_node.op_end,
+            );
+            let inserted_id = finalized_nodes
+                .push(SourceNode::new(exec_node, children, op_start, op_end, asm_ops, debug_vars))
+                .map_err(|_| {
+                    Report::new(MastForestBuilderError::AddSourceNode {
+                        source_ref,
+                        source: MastForestError::TooManyNodes,
+                    })
+                })?;
+            debug_assert_eq!(inserted_id, source_id_by_ref[&source_ref]);
+        }
+
+        let roots = procedure_source_root_refs
+            .iter()
+            .filter_map(|source_ref| source_id_by_ref.get(source_ref).copied())
+            .collect();
+
+        Ok((SourceDebugGraph::new(finalized_nodes, roots), source_id_by_ref))
+    }
+}
+
+fn adjust_source_op_range(node: &MastNode, op_start: usize, op_end: usize) -> (usize, usize) {
+    if op_start == op_end {
+        return (op_start, op_end);
+    }
+
+    match node {
+        MastNode::Block(block) => {
+            let adjusted = BasicBlockNode::adjust_asm_op_indices(
+                vec![(op_start, ()), (op_end - 1, ())],
+                block.op_batches(),
+            );
+            (adjusted[0].0, adjusted[1].0 + 1)
+        },
+        _ => (op_start, op_end),
     }
 }
 

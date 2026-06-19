@@ -24,7 +24,7 @@ macro_rules! build_debug_test {
     }}
 }
 
-/// Asserts that executing the test fails with a FailedAssertion containing the expected message.
+/// Asserts that executing the test fails with a FailedAssertion.
 #[macro_export]
 macro_rules! expect_assert_error_message {
     ($test:expr $(,)?) => {
@@ -32,12 +32,10 @@ macro_rules! expect_assert_error_message {
             $test,
             ::miden_processor::ExecutionError::OperationError {
                 err: ::miden_processor::operation::OperationError::FailedAssertion {
-                    err_msg,
                     ..
                 },
                 ..
             }
-            if err_msg.as_deref().map(|msg| msg.len() > 5).unwrap_or(false)
         );
     };
     ($test:expr, $min_len:expr $(,)?) => {
@@ -71,6 +69,23 @@ macro_rules! expect_assert_error_message {
     };
 }
 
+#[macro_export]
+macro_rules! expect_assert_error_code_from_msg {
+    ($test:expr, $msg:expr $(,)?) => {
+        ::miden_utils_testing::expect_exec_error_matches!(
+            $test,
+            ::miden_processor::ExecutionError::OperationError {
+                err: ::miden_processor::operation::OperationError::FailedAssertion {
+                    err_code,
+                    err_msg,
+                },
+                ..
+            }
+            if err_code == ::miden_core::mast::error_code_from_msg($msg) && err_msg.is_none()
+        );
+    };
+}
+
 #[test]
 fn core_library_does_not_export_precompile_impl_helpers() {
     use miden_core_lib::CoreLibrary;
@@ -82,7 +97,7 @@ fn core_library_does_not_export_precompile_impl_helpers() {
         "::miden::core::crypto::hashes::keccak256::hash_bytes",
         "::miden::core::crypto::hashes::sha512::hash_bytes",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash",
-        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify",
     ];
     for path in public_paths {
         assert!(
@@ -95,7 +110,9 @@ fn core_library_does_not_export_precompile_impl_helpers() {
         "::miden::core::crypto::hashes::keccak256::hash_bytes_impl",
         "::miden::core::crypto::hashes::sha512::hash_bytes_impl",
         "::miden::core::crypto::dsa::ecdsa_k256_keccak::verify_prehash_impl",
-        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash_impl",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_message",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_message_impl",
+        "::miden::core::crypto::dsa::eddsa_ed25519::verify_prehash",
     ];
     for path in internal_paths {
         assert!(

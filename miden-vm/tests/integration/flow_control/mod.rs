@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionError, Word, operation::OperationError};
+use miden_processor::{
+    ExecutionError, Word,
+    operation::{BinaryValueErrorContext, OperationError},
+};
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
@@ -69,7 +72,10 @@ fn faulty_condition_from_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue {
+                context: BinaryValueErrorContext::Loop,
+                value: _,
+            },
             ..
         }
     );
@@ -123,7 +129,7 @@ fn faulty_condition_from_tail_controlled_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue { value: _, .. },
             ..
         }
     );
@@ -611,7 +617,7 @@ fn dyncall_with_syscall_and_caller() {
     let test = build_debug_test!(program_source).with_kernel(kernel_source);
 
     // Compile to get the hash of `bar`
-    let (program, _kernel) = test.compile().unwrap();
+    let (program, _kernel, _debug_info) = test.compile().unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     // bar is the first procedure root in the forest (index 0)
     let bar_digest = procedure_digests[0];

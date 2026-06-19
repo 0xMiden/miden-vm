@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use super::{AdviceMap, DebugInfo, MastForest, MastForestError, serialization};
-use crate::serde::{BudgetedReader, DeserializationError, SliceReader};
+use super::{AdviceMap, MastForest, MastForestError, serialization};
+use crate::serde::{BudgetedReader, ByteReader, DeserializationError, SliceReader};
 
 /// A [`MastForest`] deserialized from untrusted input that has not yet been validated.
 ///
@@ -27,8 +27,7 @@ use crate::serde::{BudgetedReader, DeserializationError, SliceReader};
 /// This type exists to provide type-level safety for untrusted deserialization. The validation
 /// performed by [`validate()`](Self::validate) includes:
 ///
-/// 1. **Structural validation**: Checks that basic block batch invariants are satisfied and
-///    procedure names reference valid roots.
+/// 1. **Structural validation**: Checks that basic block batch invariants are satisfied.
 /// 2. **Topological ordering**: Verifies that all node references point to nodes that appear
 ///    earlier in the forest (no forward references).
 /// 3. **Hash recomputation**: Recomputes the digest for every node and verifies it matches the
@@ -38,7 +37,6 @@ pub struct UntrustedMastForest {
     pub(super) bytes: Vec<u8>,
     pub(super) layout: serialization::ForestLayout,
     pub(super) advice_map: AdviceMap,
-    pub(super) debug_info: DebugInfo,
     pub(super) remaining_allocation_budget: Option<usize>,
 }
 
@@ -85,7 +83,7 @@ impl UntrustedMastForest {
     /// 1. If wire node hashes are present, recomputes all non-external node hashes and requires
     ///    them to match the serialized digests.
     /// 2. If the payload is hashless, uses the digests rebuilt during materialization.
-    /// 3. Validates structural invariants, topological ordering, and procedure-name roots.
+    /// 3. Validates structural invariants and topological ordering.
     ///
     /// # Returns
     ///
@@ -97,8 +95,6 @@ impl UntrustedMastForest {
     /// Returns an error if:
     /// - Deferred materialization from serialized form fails ([`MastForestError::Deserialization`])
     /// - Any basic block has invalid batch structure ([`MastForestError::InvalidBatchPadding`])
-    /// - Any procedure name references a non-root digest
-    ///   ([`MastForestError::InvalidProcedureNameDigest`])
     /// - Any node references a child that appears later in the forest
     ///   ([`MastForestError::ForwardReference`])
     /// - Any non-external wire digest does not match the recomputed digest
@@ -154,18 +150,22 @@ impl UntrustedMastForest {
     ///
     /// The wire byte budget limits wire-driven parsing and collection pre-sizing. The validation
     /// helper-allocation budget is derived from that wire budget and caps tracked stripped/hashless
-    /// helper allocations such as digest slot tables, empty debug-info scaffolding, and rebuilt
-    /// digest tables.
+    /// helper allocations such as digest slot tables and rebuilt digest tables.
     pub fn read_from_bytes_with_options(
         bytes: &[u8],
         options: UntrustedMastForestReadOptions,
     ) -> Result<Self, DeserializationError> {
         let wire_byte_budget = options.wire_byte_budget(bytes.len());
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), wire_byte_budget);
-        serialization::read_untrusted_with_flags_and_allocation_budget(
+        let (forest, _flags) = serialization::read_untrusted_with_flags_and_allocation_budget(
             &mut reader,
             options.validation_allocation_budget(wire_byte_budget),
-        )
-        .map(|(forest, _flags)| forest)
+        )?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::InvalidValue(
+                "extra bytes after stripped MastForest payload".into(),
+            ));
+        }
+        Ok(forest)
     }
 }

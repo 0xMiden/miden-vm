@@ -142,13 +142,12 @@ where
         Ok(Self { ast, source_manager })
     }
 
-    /// Compiles this program file into a [Program].
-    #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
+    /// Compiles this program file into an executable [Package].
+    #[instrument(name = "compile_package", skip_all)]
+    pub fn compile_package<I>(&self, libraries: I) -> Result<Box<Package>, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
     {
-        // compile program
         let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
             .link_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
@@ -160,12 +159,18 @@ where
                 .wrap_err("Failed to load libraries")?;
         }
 
-        let program: Program = assembler
+        assembler
             .assemble_program("program", self.ast.clone())
-            .wrap_err("Failed to compile program")?
-            .unwrap_program();
+            .wrap_err("Failed to compile program")
+    }
 
-        Ok(program)
+    /// Compiles this program file into a [Program].
+    #[instrument(name = "compile_program", skip_all)]
+    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
+    where
+        I: IntoIterator<Item = Arc<Package>>,
+    {
+        Ok(self.compile_package(libraries)?.unwrap_program())
     }
 
     /// Returns the source manager for this program file.

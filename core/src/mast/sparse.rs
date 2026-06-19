@@ -7,10 +7,9 @@ use alloc::{
 use miden_utils_indexing::newtype_id;
 
 use crate::{
-    Felt, Word,
+    Word,
     advice::AdviceMap,
-    mast::{DebugInfo, ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
-    operations::AssemblyOp,
+    mast::{ExecutableMastForest, MastForest, MastNode, MastNodeExt, MastNodeId},
 };
 
 // MAST FOREST ID
@@ -63,9 +62,6 @@ pub struct SparseMastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// Debug information, including source metadata and error codes.
-    debug_info: DebugInfo,
-
     /// Cached commitment to the original MAST forest (i.e. a commitment to all roots).
     commitment_cache: Word,
 }
@@ -92,11 +88,6 @@ impl SparseMastForest {
     /// Returns the advice map associated with this sparse forest.
     pub fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
-    }
-
-    /// Returns the debug info associated with this sparse forest.
-    pub fn debug_info(&self) -> &DebugInfo {
-        &self.debug_info
     }
 
     /// Returns the commitment to this sparse forest, computed from the procedure roots.
@@ -137,23 +128,6 @@ impl ExecutableMastForest for SparseMastForest {
     #[inline(always)]
     fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
-    }
-
-    #[inline(always)]
-    fn get_assembly_op(
-        &self,
-        node_id: MastNodeId,
-        target_op_idx: Option<usize>,
-    ) -> Option<&AssemblyOp> {
-        match target_op_idx {
-            Some(op_idx) => self.debug_info.asm_op_for_operation(node_id, op_idx),
-            None => self.debug_info.first_asm_op_for_node(node_id),
-        }
-    }
-
-    #[inline(always)]
-    fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        self.debug_info.error_message(code.as_canonical_u64())
     }
 }
 
@@ -270,7 +244,6 @@ impl SparseMastForestBuilder {
             num_nodes,
             roots: source.procedure_roots().to_vec(),
             advice_map: source.advice_map().clone(),
-            debug_info: source.debug_info().clone(),
             commitment_cache: source.commitment(),
         }
     }

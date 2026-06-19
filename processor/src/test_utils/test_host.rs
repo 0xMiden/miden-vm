@@ -6,8 +6,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    BaseHost, MastForestStore, MemMastForestStore, ProcessorState, SyncHost, Word,
-    advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
+    Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -135,7 +135,7 @@ impl<S> SyncHost for TestHost<S>
 where
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
     }
 

@@ -19,7 +19,7 @@ use proptest::prelude::{Strategy, any};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Dependency, PackageId};
+use crate::{Dependency, PackageId, debug_info::DebugSourceNodeId};
 
 // PACKAGE MANIFEST
 // ================================================================================================
@@ -538,6 +538,14 @@ pub struct ProcedureExport {
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub node: Option<MastNodeId>,
+    /// Source/debug occurrence corresponding to this exported procedure, when package debug info
+    /// is present.
+    ///
+    /// This disambiguates exports that collapse to the same executable [`MastNodeId`] but retain
+    /// distinct source/debug metadata in the package-owned source occurrence graph.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "None"))]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub source_node: Option<DebugSourceNodeId>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(value = "Word::default()"))]
     pub digest: Word,
@@ -561,10 +569,16 @@ impl ProcedureExport {
         Self {
             path,
             node,
+            source_node: None,
             digest,
             signature,
             attributes: Default::default(),
         }
+    }
+
+    pub fn with_source_node(mut self, source_node: Option<DebugSourceNodeId>) -> Self {
+        self.source_node = source_node;
+        self
     }
 }
 
@@ -573,6 +587,7 @@ impl fmt::Debug for ProcedureExport {
         let Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -580,6 +595,7 @@ impl fmt::Debug for ProcedureExport {
         f.debug_struct("PackageExport")
             .field("path", &format_args!("{path}"))
             .field("node", node)
+            .field("source_node", source_node)
             .field("digest", &format_args!("{}", DisplayHex::new(&digest.as_bytes())))
             .field("signature", signature)
             .field("attributes", attributes)

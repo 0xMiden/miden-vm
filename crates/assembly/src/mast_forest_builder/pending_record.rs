@@ -41,6 +41,34 @@ impl fmt::Display for MastNodeRef {
 
 impl Idx for MastNodeRef {}
 
+/// Stable assembly-time reference to a source/debug occurrence of a MAST node.
+///
+/// Multiple source occurrences may point at the same [`MastNodeRef`] when they have identical
+/// execution content but distinct source metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub(crate) struct SourceNodeRef(u32);
+
+impl From<u32> for SourceNodeRef {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<SourceNodeRef> for u32 {
+    fn from(value: SourceNodeRef) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for SourceNodeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SourceNodeRef({})", self.0)
+    }
+}
+
+impl Idx for SourceNodeRef {}
+
 /// Stable assembly-time reference to assembly operation metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(transparent)]
@@ -89,6 +117,17 @@ pub(super) struct PendingMastNode {
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,
     pub(super) child_refs: Vec<MastNodeRef>,
+    pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
+    pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
+}
+
+/// Builder-owned source/debug occurrence record used before final source IDs exist.
+#[derive(Clone, Debug)]
+pub(super) struct PendingSourceNode {
+    pub(super) exec_ref: MastNodeRef,
+    pub(super) child_refs: Vec<SourceNodeRef>,
+    pub(super) op_start: usize,
+    pub(super) op_end: usize,
     pub(super) asm_ops: Vec<(usize, AsmOpRef)>,
     pub(super) debug_vars: Vec<(usize, DebugVarRef)>,
 }
@@ -152,6 +191,7 @@ impl PendingMastNodeKind {
 /// Mutable node record used while deriving a new pending node from an existing one.
 ///
 /// A draft becomes immutable once it is interned as a [`PendingMastNode`].
+#[derive(Clone)]
 pub(super) struct PendingMastNodeDraft {
     pub(super) digest: Word,
     pub(super) kind: PendingMastNodeKind,
