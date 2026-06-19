@@ -31,7 +31,6 @@ test = false
 name = "blake3-nonregression"
 path = "src/bin/blake3-nonregression.rs"
 bench = false
-test = false
 
 [[bench]]
 name = "blake3_bench"

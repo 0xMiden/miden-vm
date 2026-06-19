@@ -752,3 +752,89 @@ fn join_code(values: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn criterion_estimate_path_yields_axis_name() {
+        let root = Path::new("target/criterion");
+        let path = root.join("blake3_1to1/build_trace/new/estimates.json");
+
+        assert_eq!(metric_name_from_estimate_path(root, &path).as_deref(), Some("build_trace"));
+    }
+
+    #[test]
+    fn selected_axes_filter_normalizes_legacy_prove_name() {
+        let axes = selected_criterion_axes("prove_program_sync,build_trace").unwrap();
+
+        assert!(axes.contains("prove"));
+        assert!(axes.contains("build_trace"));
+        assert!(!axes.contains("prove_program_sync"));
+    }
+
+    #[test]
+    fn estimate_parser_converts_nanoseconds_to_milliseconds() {
+        let payload = serde_json::json!({
+            "mean": {
+                "point_estimate": 2_000_000.0,
+                "confidence_interval": {
+                    "lower_bound": 1_000_000.0,
+                    "upper_bound": 3_000_000.0
+                }
+            }
+        });
+
+        assert_eq!(estimate_ms(&payload, "mean"), Some((2.0, 1.0, 3.0)));
+    }
+
+    #[test]
+    fn comparison_summary_keeps_readme_metric_names_visible() {
+        let comparison = compare_results(
+            &result_with_metric("base", "prove", 1_000.0),
+            &result_with_metric("head", "prove", 1_100.0),
+            5.0,
+        )
+        .unwrap();
+        let summary = summary_markdown(&comparison);
+
+        assert!(comparison.regression);
+        assert!(summary.contains("Primary metric: `prove`"));
+        assert!(summary.contains("| prove | criterion |"));
+    }
+
+    fn result_with_metric(git_ref: &str, name: &str, mean_ms: f64) -> BenchmarkResult {
+        let mut metrics = BTreeMap::new();
+        metrics.insert(
+            name.to_string(),
+            Metric {
+                name: name.to_string(),
+                source: "criterion".to_string(),
+                mean_ms: Some(mean_ms),
+                median_ms: None,
+                lower_bound_ms: None,
+                upper_bound_ms: None,
+                duration_ms: None,
+                span_path: None,
+                unit: "ms".to_string(),
+            },
+        );
+        BenchmarkResult {
+            repo_root: ".".to_string(),
+            git_ref: git_ref.to_string(),
+            git_sha: format!("{git_ref}-sha"),
+            bench_wall_ms: None,
+            trace_wall_ms: None,
+            rayon_num_threads: None,
+            bench_axes: vec![name.to_string()],
+            sample_size: None,
+            light_sample_size: None,
+            measurement_time_secs: None,
+            warm_up_time_secs: None,
+            primary_metric: name.to_string(),
+            metrics,
+            spans: Vec::new(),
+        }
+    }
+}
