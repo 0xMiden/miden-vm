@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.4 (TBD)
+
+#### Fixes
+
+- Preserved semantic struct and field names when emitting debug types, so debug dumps no longer fall back to anonymous struct metadata ([#3269](https://github.com/0xMiden/miden-vm/pull/3269)).
+
 ## v0.23.3 (2026-05-26)
 
 - Pure version bump to attach build artifacts to the release.

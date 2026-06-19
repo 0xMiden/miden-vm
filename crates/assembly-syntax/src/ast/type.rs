@@ -363,7 +363,7 @@ impl TypeExpr {
                 for field in t.fields.iter() {
                     let field_ty = field.ty.resolve_type_with_depth(resolver, depth + 1)?;
                     if let Some(field_ty) = field_ty {
-                        fields.push(field_ty);
+                        fields.push((field.name.clone().into_inner(), field_ty));
                     } else {
                         return Ok(None);
                     }
@@ -1178,7 +1178,7 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
+    use alloc::{sync::Arc, vec::Vec};
     use core::str::FromStr;
 
     use miden_debug_types::DefaultSourceManager;
@@ -1262,5 +1262,37 @@ mod tests {
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)
         );
+    }
+
+    #[test]
+    fn struct_type_expr_resolution_preserves_field_names() {
+        let mut resolver = DummyResolver::new();
+        let expr = TypeExpr::Struct(StructType::new(
+            Some(Ident::from_str("Pair").expect("valid ident")),
+            [
+                StructField {
+                    span: SourceSpan::UNKNOWN,
+                    name: Ident::from_str("left").expect("valid ident"),
+                    ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
+                },
+                StructField {
+                    span: SourceSpan::UNKNOWN,
+                    name: Ident::from_str("right").expect("valid ident"),
+                    ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
+                },
+            ],
+        ));
+
+        let Type::Struct(ty) = expr
+            .resolve_type(&mut resolver)
+            .expect("type resolution should succeed")
+            .expect("type should resolve")
+        else {
+            panic!("expected struct type");
+        };
+
+        assert_eq!(ty.name().as_deref(), Some("Pair"));
+        let field_names = ty.fields().iter().map(|field| field.name.as_deref()).collect::<Vec<_>>();
+        assert_eq!(field_names, [Some("left"), Some("right")]);
     }
 }
