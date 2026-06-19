@@ -310,7 +310,7 @@ fn expected_order_from_shape(data: &VerifierData) -> ProofOrder {
         shape_log(data, 0),
         shape_log(data, 1),
         shape_log(data, 2),
-        shape_log(data, 3),
+        AND8_LOOKUP_LOG_HEIGHT as u8,
     ])
 }
 
