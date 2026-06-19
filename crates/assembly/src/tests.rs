@@ -16,7 +16,7 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{MastNode, MastNodeExt, MastNodeId},
+    mast::{MastNode, MastNodeExt},
     operations::{AssemblyOp, Operation},
     program::Program,
     serde::{Deserializable, Serializable},
@@ -57,6 +57,17 @@ fn assert_all_nodes_reachable_from_roots(forest: &MastForest) {
         forest.num_nodes() as usize,
         "finalized MAST forest contains nodes unreachable from any procedure root",
     );
+}
+
+fn assert_package_has_source_asm_ops(package: &Package, message: &str) {
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info");
+    let has_source_asm_ops = debug_info
+        .source_map()
+        .is_some_and(|source_map| !source_map.asm_ops().is_empty());
+    assert!(has_source_asm_ops, "{message}");
 }
 
 // Note: where possible, prefer insta to pretty_assertions for snapshot testing.
@@ -3194,8 +3205,8 @@ fn repeat_count_constant_at_limit_allowed() {
         format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end")
     );
     context
-        .assemble(source)
-        .expect("expected repeat count at limit from constant to be accepted");
+        .parse_program(source)
+        .expect("expected repeat count at limit from constant to parse and analyze");
 }
 
 #[test]
@@ -3736,7 +3747,6 @@ fn mast_builder_acceptance_corpus() -> TestResult {
 
 fn append_program_acceptance_summary(output: &mut String, case_name: &str, program: &Program) {
     let forest = program.mast_forest();
-    let debug_info = forest.debug_info();
     let serialized_program_len = program.to_bytes().len();
     let serialized_forest_len = forest.to_bytes().len();
 
@@ -3759,51 +3769,6 @@ fn append_program_acceptance_summary(output: &mut String, case_name: &str, progr
     writeln!(output, "roots={roots:?}").unwrap();
     writeln!(output, "procedure_digests={procedure_digests:?}").unwrap();
     writeln!(output, "node_digests={node_digests:?}").unwrap();
-
-    writeln!(
-        output,
-        "debug_counts=asm_ops:{} debug_vars:{} procedure_names:{}",
-        debug_info.num_asm_ops(),
-        debug_info.num_debug_vars(),
-        debug_info.num_procedure_names(),
-    )
-    .unwrap();
-
-    let asm_ops = debug_info
-        .asm_ops()
-        .iter()
-        .map(|asm_op| {
-            format!(
-                "{}:{}:{}:loc={}",
-                asm_op.context_name(),
-                asm_op.op(),
-                asm_op.num_cycles(),
-                asm_op.location().is_some(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let debug_vars = debug_info.debug_vars().iter().map(ToString::to_string).collect::<Vec<_>>();
-    writeln!(output, "asm_ops={asm_ops:?}").unwrap();
-    writeln!(output, "debug_vars={debug_vars:?}").unwrap();
-
-    for node_idx in 0..forest.num_nodes() {
-        let node_id = MastNodeId::new_unchecked(node_idx);
-        let asm_op_links = debug_info
-            .asm_ops_for_node(node_id)
-            .into_iter()
-            .map(|(op_idx, asm_op_id)| (op_idx, u32::from(asm_op_id)))
-            .collect::<Vec<_>>();
-        let debug_var_links = debug_info
-            .debug_vars_for_node(node_id)
-            .into_iter()
-            .map(|(op_idx, debug_var_id)| (op_idx, u32::from(debug_var_id)))
-            .collect::<Vec<_>>();
-
-        if !asm_op_links.is_empty() || !debug_var_links.is_empty() {
-            writeln!(output, "node[{node_idx}]=asm:{asm_op_links:?} debug:{debug_var_links:?}",)
-                .unwrap();
-        }
-    }
 }
 
 #[test]
@@ -3856,10 +3821,10 @@ pub proc foo exec.::test::mod1::bar end"
             .unwrap()
     };
 
-    // 3. Verify that the expected library (which has push.1) has AssemblyOps
-    assert!(
-        expected_lib.mast_forest().debug_info().num_asm_ops() > 0,
-        "Expected library should have AssemblyOps for instruction tracking"
+    // 3. Verify that the expected library (which has push.1) has package-owned AssemblyOps.
+    assert_package_has_source_asm_ops(
+        &expected_lib,
+        "Expected library should have package-owned AssemblyOps for instruction tracking",
     );
 
     // 4. Verify we can create an assembler that successfully links the vendored library
@@ -3883,10 +3848,10 @@ pub proc foo exec.::test::mod1::bar end"
     );
     let assembled_program = assemble_result.unwrap();
 
-    // Verify the assembled program has debug info (AssemblyOps)
-    assert!(
-        assembled_program.mast_forest().debug_info().num_asm_ops() > 0,
-        "Assembled program with library should have AssemblyOps for instruction tracking"
+    // Verify the assembled program has package-owned debug info (AssemblyOps).
+    assert_package_has_source_asm_ops(
+        &assembled_program,
+        "Assembled program with library should have package-owned AssemblyOps for instruction tracking",
     );
 
     // 6. Verify the vendored library contains the expected structure
@@ -4590,7 +4555,6 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         "test input must create at least one padded basic block"
     );
 
-    let forest = forest.without_debug_info();
     let stripped_size = forest.to_bytes().len();
     let stripped_without_debug_info_size = {
         let mut bytes = Vec::new();
@@ -6141,12 +6105,12 @@ fn test_assembler_debug_info_present() {
     // Test: With debug mode always enabled (issue #1821), debug info should always be present
     let assembler = Assembler::default();
     let library = assembler.assemble_library("test", module, None::<Box<Module>>).unwrap();
-    let mast_forest = library.mast_forest();
-
-    // Debug info should be present since debug mode is always enabled.
-    // AssemblyOps are stored separately in DebugInfo.
-    let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
-    assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
+    // Debug info should be present since debug mode is enabled by default.
+    // AssemblyOps are stored in package-owned source debug metadata.
+    assert_package_has_source_asm_ops(
+        &library,
+        "Package-owned AssemblyOps should be present for tracking instructions",
+    );
 }
 
 #[test]
@@ -7088,6 +7052,53 @@ end
         None,
     )
     .expect_err("duplicate export paths must be rejected");
+}
+
+#[test]
+fn executable_package_main_export_points_to_entrypoint_source_root() -> TestResult {
+    let context = TestContext::default();
+    let lib_module = context.parse_module(
+        r#"
+        namespace lib::lib
+
+        pub proc lib_proc
+            push.1
+        end
+        "#,
+    )?;
+    let lib = Assembler::new(context.source_manager().clone())
+        .assemble_library("lib", lib_module, None::<Box<Module>>)
+        .map(Arc::<Package>::from)?;
+    let package = Assembler::new(context.source_manager())
+        .with_package(lib, Linkage::Static)?
+        .assemble_program(
+            "program",
+            r#"
+            use lib::lib
+
+            begin
+                exec.lib::lib_proc
+            end
+            "#,
+        )?;
+
+    let main_path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME);
+    let entrypoint = package
+        .get_procedure_node_by_path(&main_path)
+        .expect("main procedure should have an execution node");
+    let main_export = package
+        .manifest
+        .get_export(&main_path)
+        .and_then(PackageExport::as_procedure)
+        .expect("main export should exist");
+    let source_node = main_export.source_node.expect("main export should retain source debug root");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain source debug info");
+
+    assert_eq!(debug_info.source_node(source_node).unwrap().exec_node, entrypoint);
+    Ok(())
 }
 
 #[test]

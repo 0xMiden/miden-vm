@@ -24,7 +24,7 @@ macro_rules! build_debug_test {
     }}
 }
 
-/// Asserts that executing the test fails with a FailedAssertion containing the expected message.
+/// Asserts that executing the test fails with a FailedAssertion.
 #[macro_export]
 macro_rules! expect_assert_error_message {
     ($test:expr $(,)?) => {
@@ -32,12 +32,10 @@ macro_rules! expect_assert_error_message {
             $test,
             ::miden_processor::ExecutionError::OperationError {
                 err: ::miden_processor::operation::OperationError::FailedAssertion {
-                    err_msg,
                     ..
                 },
                 ..
             }
-            if err_msg.as_deref().map(|msg| msg.len() > 5).unwrap_or(false)
         );
     };
     ($test:expr, $min_len:expr $(,)?) => {
@@ -67,6 +65,23 @@ macro_rules! expect_assert_error_message {
                 .as_deref()
                 .map(|msg| msg.len() > 5 && msg.contains($needle))
                 .unwrap_or(false)
+        );
+    };
+}
+
+#[macro_export]
+macro_rules! expect_assert_error_code_from_msg {
+    ($test:expr, $msg:expr $(,)?) => {
+        ::miden_utils_testing::expect_exec_error_matches!(
+            $test,
+            ::miden_processor::ExecutionError::OperationError {
+                err: ::miden_processor::operation::OperationError::FailedAssertion {
+                    err_code,
+                    err_msg,
+                },
+                ..
+            }
+            if err_code == ::miden_core::mast::error_code_from_msg($msg) && err_msg.is_none()
         );
     };
 }

@@ -416,7 +416,10 @@ fn test_smt_set_single_to_multi_rejects_forged_preimage() {
     push_word(&mut initial_stack, &v_new);
 
     let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
-    crate::expect_assert_error_message!(test, contains "invalid single-leaf preimage");
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid single-leaf preimage: hash does not match node value"
+    );
 }
 
 /// Regression test for the multi-leaf no-op deletion bypass.

@@ -2,7 +2,6 @@ use alloc::vec;
 
 use miden_core::{
     Felt, ONE, ZERO,
-    mast::MastForest,
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 
@@ -18,12 +17,10 @@ use crate::{
 
 #[test]
 fn test_op_assert() {
-    let program = MastForest::default();
-
     // Calling assert with a minimum stack should be ok, as long as the top value is ONE.
     let mut processor = FastProcessor::new(StackInputs::new(&[ONE]).unwrap());
 
-    assert!(op_assert(&mut processor, ZERO, &program).is_ok());
+    assert!(op_assert(&mut processor, ZERO).is_ok());
 }
 
 #[test]

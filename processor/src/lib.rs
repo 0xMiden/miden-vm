@@ -15,6 +15,8 @@ use core::{
     ops::ControlFlow,
 };
 
+use miden_mast_package::debug_info::DebugSourceNodeId;
+
 mod continuation_stack;
 mod errors;
 mod execution;
@@ -46,11 +48,16 @@ mod tests;
 // ================================================================================================
 
 pub use continuation_stack::Continuation;
-pub use errors::{AceError, ExecutionError, HostError, MemoryError};
+pub use errors::{
+    AceError, ExecutionError, HostError, MemoryError, PackageSourceDebugContext,
+    advice_error_with_package_source_context, event_error_with_package_source_context,
+    procedure_not_found_with_package_source_context,
+};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
+    BaseHost, FutureMaybeSend, Host, LoadedMastForest, MastForestStore, MemMastForestStore,
+    SyncHost,
     debug::{StdoutWriter, format_value, write_interval, write_stack},
     default::{DefaultHost, HostLibrary},
 };
@@ -83,7 +90,7 @@ pub mod event {
 pub mod operation {
     pub use miden_core::operations::*;
 
-    pub use crate::errors::OperationError;
+    pub use crate::errors::{BinaryValueErrorContext, OperationError};
 }
 
 pub mod trace;
@@ -290,7 +297,10 @@ pub trait Stopper {
         &self,
         processor: &Self::Processor,
         continuation_stack: &ContinuationStack<Self::Forest>,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation<Self::Forest>>,
+        continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Self::Forest>,
+            Option<DebugSourceNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Self::Forest>>;
 }
 

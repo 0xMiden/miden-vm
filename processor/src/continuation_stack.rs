@@ -1,6 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{mast::MastNodeId, program::Program};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
@@ -54,7 +55,10 @@ pub enum Continuation<F> {
     ///
     /// When we encounter an `ExternalNode`, we enter the corresponding MAST forest directly, and
     /// push an `EnterForest` continuation to restore the previous forest when done.
-    EnterForest(F),
+    EnterForest {
+        forest: F,
+        package_debug_info: Option<Arc<PackageDebugInfo>>,
+    },
 }
 
 impl<F> Continuation<F> {
@@ -81,7 +85,23 @@ impl<F> Continuation<F> {
             | Respan { node_id: _, batch_index: _ }
             | FinishBasicBlock(_) => true,
 
-            EnterForest(_) => false,
+            EnterForest { .. } => false,
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn exec_node(&self) -> Option<MastNodeId> {
+        match self {
+            Self::StartNode(node_id)
+            | Self::FinishJoin(node_id)
+            | Self::FinishSplit(node_id)
+            | Self::FinishLoop(node_id)
+            | Self::FinishCall(node_id)
+            | Self::FinishDyn(node_id)
+            | Self::ResumeBasicBlock { node_id, .. }
+            | Self::Respan { node_id, .. }
+            | Self::FinishBasicBlock(node_id) => Some(*node_id),
+            Self::EnterForest { .. } => None,
         }
     }
 }
@@ -98,11 +118,12 @@ impl<F> Continuation<F> {
 #[derive(Debug, Clone)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
+    source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
 }
 
 impl<F> Default for ContinuationStack<F> {
     fn default() -> Self {
-        Self { stack: Vec::new() }
+        Self { stack: Vec::new(), source_node_ids: None }
     }
 }
 
@@ -115,7 +136,30 @@ impl<F> ContinuationStack<F> {
         let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
         stack.push(Continuation::StartNode(program.entrypoint()));
 
-        Self { stack }
+        Self { stack, source_node_ids: None }
+    }
+
+    pub(crate) fn new_with_source_node_id(
+        program: &Program,
+        source_node_id: DebugSourceNodeId,
+    ) -> Self {
+        Self::new_with_optional_source_node_id(program, Some(source_node_id))
+    }
+
+    pub(crate) fn new_with_optional_source_node_id(
+        program: &Program,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) -> Self {
+        let mut stack = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
+        stack.push(Continuation::StartNode(program.entrypoint()));
+
+        let mut source_node_ids = Vec::with_capacity(CONTINUATION_STACK_SIZE_HINT);
+        source_node_ids.push(source_node_id);
+
+        Self {
+            stack,
+            source_node_ids: Some(source_node_ids),
+        }
     }
 
     // STATE MUTATORS
@@ -124,6 +168,16 @@ impl<F> ContinuationStack<F> {
     /// Pushes a continuation onto the continuation stack.
     pub fn push_continuation(&mut self, continuation: Continuation<F>) {
         self.stack.push(continuation);
+        self.push_source_node_id(None);
+    }
+
+    pub(crate) fn push_with_source_node_id(
+        &mut self,
+        continuation: Continuation<F>,
+        source_node_id: Option<DebugSourceNodeId>,
+    ) {
+        self.stack.push(continuation);
+        self.push_source_node_id(source_node_id);
     }
 
     /// Pushes a continuation to enter the given MAST forest on the continuation stack.
@@ -131,32 +185,46 @@ impl<F> ContinuationStack<F> {
     /// # Arguments
     /// * `forest` - The MAST forest to enter
     pub fn push_enter_forest(&mut self, forest: F) {
-        self.stack.push(Continuation::EnterForest(forest));
+        self.push_enter_forest_with_package_debug_info(forest, None);
+    }
+
+    pub(crate) fn push_enter_forest_with_package_debug_info(
+        &mut self,
+        forest: F,
+        package_debug_info: Option<Arc<PackageDebugInfo>>,
+    ) {
+        self.stack.push(Continuation::EnterForest { forest, package_debug_info });
+        self.push_source_node_id(None);
     }
 
     /// Pushes a join finish continuation onto the stack.
     pub fn push_finish_join(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishJoin(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pushes a split finish continuation onto the stack.
     pub fn push_finish_split(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishSplit(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pushes a loop finish continuation onto the stack.
     pub fn push_finish_loop(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishLoop(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pushes a call finish continuation onto the stack.
     pub fn push_finish_call(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishCall(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pushes a dyn finish continuation onto the stack.
     pub fn push_finish_dyn(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishDyn(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pushes a continuation to start processing the given node.
@@ -165,18 +233,50 @@ impl<F> ContinuationStack<F> {
     /// * `node_id` - The ID of the node to process
     pub fn push_start_node(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::StartNode(node_id));
+        self.push_source_node_id(None);
     }
 
     /// Pops the next continuation from the continuation stack, and returns it along with its
     /// associated MAST forest.
     pub fn pop_continuation(&mut self) -> Option<Continuation<F>> {
-        self.stack.pop()
+        let continuation = self.stack.pop()?;
+        if let Some(source_node_ids) = &mut self.source_node_ids {
+            source_node_ids.pop();
+        }
+        Some(continuation)
+    }
+
+    pub(crate) fn pop_continuation_with_source_node_id(
+        &mut self,
+    ) -> Option<(Continuation<F>, Option<DebugSourceNodeId>)> {
+        let continuation = self.stack.pop()?;
+        let source_node_id = self.source_node_ids.as_mut().and_then(Vec::pop).flatten();
+        Some((continuation, source_node_id))
     }
 
     /// Consumes this stack and returns its continuations in bottom-to-top order (i.e. the order in
     /// which they were originally pushed).
     pub fn into_inner(self) -> Vec<Continuation<F>> {
         self.stack
+    }
+
+    fn push_source_node_id(&mut self, source_node_id: Option<DebugSourceNodeId>) {
+        if let Some(source_node_ids) = &mut self.source_node_ids {
+            source_node_ids.push(source_node_id);
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn start_tracking_source_nodes(
+        &mut self,
+        next_source_node_id: Option<DebugSourceNodeId>,
+    ) {
+        let mut source_node_ids = Vec::with_capacity(self.stack.len());
+        source_node_ids.resize(self.stack.len(), None);
+        if let Some(source_node_id) = source_node_ids.last_mut() {
+            *source_node_id = next_source_node_id;
+        }
+        self.source_node_ids = Some(source_node_ids);
     }
 
     // PUBLIC ACCESSORS
@@ -194,6 +294,21 @@ impl<F> ContinuationStack<F> {
     /// [`Self::iter_continuations_for_next_clock`].
     pub fn peek_continuation(&self) -> Option<&Continuation<F>> {
         self.stack.last()
+    }
+
+    pub(crate) fn peek_continuation_with_source_node_id(
+        &self,
+    ) -> Option<(&Continuation<F>, Option<DebugSourceNodeId>)> {
+        let continuation = self.stack.last()?;
+        let source_node_id = self
+            .source_node_ids
+            .as_ref()
+            .and_then(|source_node_ids| source_node_ids.last().copied().flatten());
+        Some((continuation, source_node_id))
+    }
+
+    pub(crate) fn tracks_source_nodes(&self) -> bool {
+        self.source_node_ids.is_some()
     }
 
     /// Returns an iterator over the continuations on the stack that will execute in the next clock
@@ -260,12 +375,15 @@ mod tests {
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push a non-incrementing continuation on top
-        stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
+        stack.push_continuation(Continuation::EnterForest {
+            forest: Arc::new(MastForest::new()),
+            package_debug_info: None,
+        });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
         // Should return: EnterForest (non-incrementing), then StartNode (first incrementing)
         assert_eq!(result.len(), 2);
-        assert!(matches!(result[0], Continuation::EnterForest(_)));
+        assert!(matches!(result[0], Continuation::EnterForest { .. }));
         assert!(matches!(result[1], Continuation::StartNode(_)));
     }
 
@@ -275,14 +393,20 @@ mod tests {
         // Push an incrementing continuation first (bottom of stack)
         stack.push_continuation(Continuation::StartNode(MastNodeId::new_unchecked(0)));
         // Push two non-incrementing continuations on top
-        stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
-        stack.push_continuation(Continuation::EnterForest(Arc::new(MastForest::new())));
+        stack.push_continuation(Continuation::EnterForest {
+            forest: Arc::new(MastForest::new()),
+            package_debug_info: None,
+        });
+        stack.push_continuation(Continuation::EnterForest {
+            forest: Arc::new(MastForest::new()),
+            package_debug_info: None,
+        });
 
         let result: Vec<_> = stack.iter_continuations_for_next_clock().collect();
         // Should return: EnterForest, EnterForest, StartNode
         assert_eq!(result.len(), 3);
-        assert!(matches!(result[0], Continuation::EnterForest(_)));
-        assert!(matches!(result[1], Continuation::EnterForest(_)));
+        assert!(matches!(result[0], Continuation::EnterForest { .. }));
+        assert!(matches!(result[1], Continuation::EnterForest { .. }));
         assert!(matches!(result[2], Continuation::StartNode(_)));
     }
 }

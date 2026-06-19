@@ -147,13 +147,6 @@ impl MastNodeExt for SplitNode {
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         SplitNodeBuilder::new(self.branches).with_digest(self.digest)
     }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
-    }
 }
 
 // ARBITRARY IMPLEMENTATION

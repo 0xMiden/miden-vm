@@ -5,7 +5,6 @@ use miden_core::{
     chiplets::hasher::{STATE_WIDTH, apply_permutation},
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
-    mast::MastForest,
     program::StackInputs,
 };
 use proptest::prelude::*;
@@ -564,10 +563,8 @@ proptest! {
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap())
             .with_advice(advice_inputs).expect("advice inputs should fit advice map limits");
         let mut tracer = NoopTracer;
-        let program = MastForest::default();
-
         // Execute the operation
-        let result = op_mpverify(&mut processor, ZERO, &program, &mut tracer);
+        let result = op_mpverify(&mut processor, ZERO, &mut tracer);
         prop_assert!(result.is_ok(), "op_mpverify failed: {:?}", result.err());
         processor.system_mut().increment_clock();
 

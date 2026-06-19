@@ -4,7 +4,7 @@ use core::{fmt, iter::repeat_n};
 use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
-    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{MastForest, MastForestError, MastNode, MastNodeId},
     operations::Operation,
     prettier::PrettyPrint,
     serde::Serializable,
@@ -503,14 +503,6 @@ impl MastNodeExt for BasicBlockNode {
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         // Use from_op_batches to avoid re-batching existing operation batches.
         BasicBlockNodeBuilder::from_op_batches(self.op_batches, self.digest)
-    }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        let _ = forest;
     }
 }
 

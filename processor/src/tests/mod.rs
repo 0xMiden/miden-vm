@@ -3,22 +3,36 @@ use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
 use miden_assembly::{
     Assembler, DefaultSourceManager, Path, PathBuf,
     ast::{Module, ModuleKind},
-    testing::{TestContext, assert_diagnostic_lines, regex, source_file},
+    testing::{Pattern, TestContext, regex, source_file},
 };
 use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, error_code_from_msg},
 };
-use miden_debug_types::SourceManager;
+use miden_debug_types::{Location, SourceFile, SourceManager, SourceSpan};
 use miden_utils_testing::crypto::{init_merkle_leaves, init_merkle_store};
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    DefaultHost, FastProcessor, Kernel, ONE, ProcessorState, Program, StackInputs, Word, ZERO,
+    BaseHost, DefaultHost, FastProcessor, Kernel, LoadedMastForest, ONE, ProcessorState, Program,
+    StackInputs, SyncHost, Word, ZERO,
     advice::{AdviceInputs, AdviceMap, AdviceMutation},
     event::{EventError, EventHandler, EventName},
     operation::Operation,
 };
+
+macro_rules! assert_diagnostic_lines {
+    ($diagnostic:expr, $($expected:expr),+ $(,)?) => {{
+        let actual = format!(
+            "{}",
+            miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color(&$diagnostic)
+        );
+
+        $(
+            Pattern::from($expected).assert_match_with_context(&actual, &actual);
+        )+
+    }};
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("dummy host event failure")]
@@ -75,6 +89,32 @@ macro_rules! build_test_by_mode {
     ($mode:expr, $source:expr, $($tail:tt)+) => {{
         miden_utils_testing::build_test_by_mode!($mode, $source, $($tail)+)
     }};
+}
+
+struct MalformedMastForestHost {
+    source_manager: Arc<DefaultSourceManager>,
+    mast_forest: Arc<MastForest>,
+}
+
+impl BaseHost for MalformedMastForestHost {
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
+    }
+}
+
+impl SyncHost for MalformedMastForestHost {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<LoadedMastForest> {
+        Some(LoadedMastForest::new(self.mast_forest.clone()))
+    }
+
+    fn on_event(&mut self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
 }
 
 // AdviceMap inlined in the script
@@ -141,8 +181,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle",
-        "x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
-        "help: previous values at key were '[0]'. Operation would have replaced them with '[1]'"
+        "x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'"
     );
 }
 
@@ -204,17 +243,20 @@ fn test_diagnostic_host_event_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .assemble_program("program", source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event.clone(), Arc::new(AlwaysFailEventHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
@@ -239,28 +281,30 @@ fn test_diagnostic_host_event_advice_error_uses_emit_location() {
             push.1 emit.event(\"{event}\")
         end"
     );
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .assemble_program("program", source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.register_handler(event, Arc::new(DuplicateMapMutationHandler)).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default().with_map([(Word::default(), vec![ZERO])]))
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).expect_err("expected error");
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .expect_err("expected error");
     #[rustfmt::skip]
     assert_diagnostic_lines!(
         err,
-        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map",
+        "  x value for key 0x0000000000000000000000000000000000000000000000000000000000000000 already present in the advice map: previous values were '[0]', attempted replacement values were '[1]'",
         regex!(r#",-\[.*:3:20\]"#),
         " 2 |         begin",
       r#" 3 |             push.1 emit.event("test::host_event_advice_error")"#,
         "   :                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "help: previous values at key were '[0]'. Operation would have replaced them with '[1]'"
+        "   `----"
     );
 }
 
@@ -302,14 +346,13 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero",
+        "  x division by zero: divisor must be non-zero for division or modulo operations",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             div",
         "   :             ^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
+        "   `----"
     );
 }
 
@@ -324,14 +367,13 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x division by zero",
+        "  x division by zero: divisor must be non-zero for division or modulo operations",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32div",
         "   :             ^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
+        "   `----"
     );
 }
 
@@ -403,8 +445,7 @@ fn test_diagnostic_failed_assertion() {
         " 4 |             assertz",
         "   :             ^^^^^^^",
         " 5 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 
     // With error message
@@ -416,17 +457,24 @@ fn test_diagnostic_failed_assertion() {
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
+    let (_, _, debug_info) = build_test.compile().expect("test source should compile");
+    let debug_info = debug_info.expect("debug-mode assembly should emit package debug info");
+    assert_eq!(
+        debug_info
+            .error_message(error_code_from_msg("some error message").as_canonical_u64())
+            .as_deref(),
+        Some("some error message")
+    );
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
         "  x assertion failed with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
-        " 4 |             assertz.err=\"some error message\"",
-        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        r#" 4 |             assertz.err="some error message""#,
+        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 5 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 
     // With error message as constant
@@ -448,8 +496,7 @@ fn test_diagnostic_failed_assertion() {
         " 5 |             assertz.err=ERR_MSG",
         "   :             ^^^^^^^^^^^^^^^^^^^",
         " 6 |             push.3.4",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        "   `----"
     );
 }
 
@@ -518,12 +565,48 @@ fn test_diagnostic_merkle_path_verification_failed() {
         leaves[index][3].as_canonical_u64(),
     ];
 
-    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
+    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store.clone());
+    let (_, _, debug_info) = build_test.compile().expect("test source should compile");
+    let debug_info = debug_info.expect("debug-mode assembly should emit package debug info");
+    assert_eq!(
+        debug_info
+            .error_message(error_code_from_msg("some error message").as_canonical_u64())
+            .as_deref(),
+        Some("some error message")
+    );
     let err = build_test.execute().expect_err("expected error");
-    // With LE sponge, the root hash changes and lookup fails at root level
     assert_diagnostic_lines!(
         err,
         "failed to lookup value in Merkle store",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
+        " 2 |         begin",
+        " 3 |             mtree_verify.err=\"some error message\"",
+        "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        " 4 |         end",
+        "   `----"
+    );
+
+    // With a node-first stack, the advice lookup succeeds and Merkle verification fails.
+    let stack_inputs = [
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
+        tree.depth() as u64,
+        // Intentionally choose the wrong index to trigger Merkle path verification failure.
+        (index + 1) as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
+    ];
+
+    let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
+    let err = build_test.execute().expect_err("expected error");
+    assert_diagnostic_lines!(
+        err,
+        "merkle path verification failed",
+        "error message: some error message",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
@@ -635,14 +718,13 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x attempted to calculate integer logarithm with zero argument",
+        "  x ilog2 requires a non-zero argument",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             ilog2",
         "   :             ^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ilog2 requires a non-zero argument"
+        "   `----"
     );
 }
 
@@ -663,14 +745,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word access at memory address 3 in context 0 is unaligned",
+        "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
         "   :                      ^^^^^^^^^^^^^^^",
         " 5 |         end",
-        "   `----",
-        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 
     // mem_loadw_be
@@ -684,14 +765,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word access at memory address 3 in context 0 is unaligned",
+        "word access at memory address 3 in context 0 is unaligned: word accesses require addresses that are multiples of 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
         "   :             ^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 }
 
@@ -852,19 +932,22 @@ fn test_diagnostic_procedure_not_found_call() {
         .assemble_library("lib", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -904,19 +987,22 @@ fn test_diagnostic_procedure_not_found_join() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -960,19 +1046,22 @@ fn test_diagnostic_procedure_not_found_loop() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -1017,19 +1106,22 @@ fn test_diagnostic_procedure_not_found_split() {
         .assemble_library("library", lib_module, None::<Box<Module>>)
         .unwrap();
 
-    let program = Assembler::new(source_manager.clone())
+    let package = Assembler::new(source_manager.clone())
         .with_package(library.into(), miden_assembly::Linkage::Dynamic)
         .unwrap()
         .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x6c0c95a9f04e21fe073801b42748ef0639eebd0467afd64c3d317b537451454d could not be found",
@@ -1042,6 +1134,49 @@ fn test_diagnostic_procedure_not_found_split() {
         " 10 | `->             end",
         " 11 |             end",
         "    `----"
+    );
+}
+
+#[test]
+fn test_diagnostic_malformed_mast_forest_in_host() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let package = Assembler::new(source_manager.clone())
+        .assemble_program(
+            "program",
+            "
+            begin
+                dyncall
+            end",
+        )
+        .unwrap();
+    let debug_info = package.debug_info().unwrap().unwrap();
+    let program = package.unwrap_program();
+
+    let mut malformed_forest = MastForest::new();
+    let unexpected_root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+        .add_to_forest(&mut malformed_forest)
+        .unwrap();
+    malformed_forest.make_root(unexpected_root);
+
+    let mut host = MalformedMastForestHost {
+        source_manager,
+        mast_forest: malformed_forest.into(),
+    };
+
+    let processor = FastProcessor::new(StackInputs::default());
+    let err = processor
+        .execute_with_package_debug_info_sync(&program, &debug_info, &mut host)
+        .unwrap_err();
+
+    assert_diagnostic_lines!(
+        err,
+        "  x MAST forest in host indexed by procedure root 0x0000000000000000000000000000000000000000000000000000000000000000 doesn't contain that root",
+        regex!(r#",-\[.*:3:17\]"#),
+        " 2 |             begin",
+        " 3 |                 dyncall",
+        "   :                 ^^^^^^^",
+        " 4 |             end",
+        "   `----"
     );
 }
 
@@ -1081,8 +1216,8 @@ fn test_diagnostic_not_binary_value_loop_node() {
     // The entry-check error originates from the SPLIT that the assembler wraps around the LOOP
     // when desugaring `while.true`, so the message reads "if statement". The source pointer is
     // still the `while.true` token because the SPLIT carries that asm_op. The iteration-check
-    // (REPEAT/END) still produces a `NotBinaryValueLoop` error — see masm_errors_consistency
-    // case_2 for that path.
+    // (REPEAT/END) still produces a loop-context `NotBinaryValue` error — see
+    // masm_errors_consistency case_2 for that path.
     assert_diagnostic_lines!(
         err,
         "  x if statement expected a binary value on top of the stack, but got 2",
@@ -1248,14 +1383,22 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .unwrap();
 
     let program = {
-        let program = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
+        let package = Assembler::with_kernel(source_manager.clone(), kernel_library.into())
             .unwrap()
             .assemble_program("program", program_source)
-            .unwrap()
-            .unwrap_program();
+            .unwrap();
+        let debug_info = package.debug_info().unwrap().unwrap();
+        let program = package.unwrap_program();
 
         // Note: we do not provide the kernel to trigger the error
-        Program::with_kernel(program.mast_forest().clone(), program.entrypoint(), Kernel::default())
+        (
+            Program::with_kernel(
+                program.mast_forest().clone(),
+                program.entrypoint(),
+                Kernel::default(),
+            ),
+            debug_info,
+        )
     };
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
@@ -1263,7 +1406,9 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .expect("advice inputs should fit advice map limits");
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor
+        .execute_with_package_debug_info_sync(&program.0, &program.1, &mut host)
+        .unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root 0xcf69b6e65f586c6957de45a4a4188a9582251aca77a7d441cd040bfbcdfb192a was not found in the kernel",
@@ -1276,10 +1421,9 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     );
 }
 
-// Tests that the original error message is reported to the user together with
-// the error code in case of assert failure.
+// Tests that assertion messages are not recovered without package debug info.
 #[test]
-fn test_assert_messages() {
+fn test_assert_message_without_debug_info_reports_error_code() {
     let source = "
         const NONZERO = \"Value is not zero\"
         begin
@@ -1287,18 +1431,23 @@ fn test_assert_messages() {
             assertz.err=NONZERO
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[1, 2]);
+    let build_test = build_test_by_mode!(false, source, &[1, 2]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
         err,
-        "  x assertion failed with error message: Value is not zero",
-        regex!(r#",-\[test[\d]+:5:13\]"#),
-        " 4 |             push.1",
-        " 5 |             assertz.err=NONZERO",
-        "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 6 |         end",
-        "   `----",
-        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+        format!(
+            "  x assertion failed with error code: {}",
+            error_code_from_msg("Value is not zero")
+        )
+    );
+
+    let diagnostic = format!(
+        "{}",
+        miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color(&err)
+    );
+    assert!(
+        !diagnostic.contains("assertion failed with error message: Value is not zero"),
+        "non-debug execution should not recover package debug assertion messages:\n{diagnostic}"
     );
 }

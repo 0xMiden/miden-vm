@@ -15,7 +15,8 @@ OperationError {
         ),
     },
     source_file: None,
-    err: NotBinaryValueIf {
+    err: NotBinaryValue {
+        context: If,
         value: 2,
     },
 }

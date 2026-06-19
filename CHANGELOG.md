@@ -37,6 +37,8 @@
 - [BREAKING] `ProjectAssembler::assemble_with_sources` has been removed - projects require assembly from the filesystem going forward ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - [BREAKING] `miden-vm bundle` now treats the `--kernel` option as a flag; when set, it expects the file path given to `bundle` to be the path to the root module of the kernel, and the support library for the kernel is derived from explicit submodule declarations in that module.
 - Reordered the chiplets trace columns and renamed the chiplet selectors to `s_00`/`s_01` ([#3266](https://github.com/0xMiden/miden-vm/pull/3266)).
+- [BREAKING] Moved debug info ownership out of `MastForest` and into package debug sections, adding source-node debug metadata that preserves distinct source occurrences after MAST node deduplication ([#3221](https://github.com/0xMiden/miden-vm/pull/3221)).
+- Cleaned up processor error handling for diagnostics, malformed MAST loading, and binary-value checks ([#3230](https://github.com/0xMiden/miden-vm/pull/3230)).
 
 #### Fixes
 

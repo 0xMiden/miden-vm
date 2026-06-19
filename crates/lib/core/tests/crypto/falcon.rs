@@ -6,6 +6,7 @@ use miden_core::{
     ZERO,
     events::EventName,
     field::PrimeField64,
+    mast::error_code_from_msg,
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
@@ -400,9 +401,10 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_msg, .. },
+            err: OperationError::FailedAssertion { err_code, err_msg },
             ..
-        } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
+        } if err_code == error_code_from_msg("comparison failed: quotient overflow")
+            && err_msg.is_none()
     );
 }
 
@@ -447,9 +449,10 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_msg, .. },
+            err: OperationError::FailedAssertion { err_code, err_msg },
             ..
-        } if err_msg.as_deref() == Some("comparison failed: addition overflow")
+        } if err_code == error_code_from_msg("comparison failed: addition overflow")
+            && err_msg.is_none()
     );
 }
 

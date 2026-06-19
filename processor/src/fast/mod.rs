@@ -286,6 +286,7 @@ impl FastProcessor {
             current_forest: program.mast_forest().clone(),
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
+            package_debug_info: None,
         })
     }
 
