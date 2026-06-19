@@ -58,6 +58,9 @@ pub struct AdviceProvider {
     max_map_elements: usize,
     store: MerkleStore,
     pc_requests: Vec<PrecompileRequest>,
+    pc_request_calldata_bytes: usize,
+    max_pc_requests: usize,
+    max_pc_request_calldata_bytes: usize,
 }
 
 impl Default for AdviceProvider {
@@ -88,6 +91,9 @@ impl AdviceProvider {
             max_map_elements: options.max_adv_map_elements(),
             store: MerkleStore::default(),
             pc_requests: Vec::new(),
+            pc_request_calldata_bytes: 0,
+            max_pc_requests: options.max_precompile_requests(),
+            max_pc_request_calldata_bytes: options.max_precompile_request_calldata_bytes(),
         }
     }
 
@@ -106,10 +112,26 @@ impl AdviceProvider {
                 max: options.max_adv_map_elements(),
             });
         }
+        if self.pc_requests.len() > options.max_precompile_requests() {
+            return Err(AdviceError::PrecompileRequestCountExceeded {
+                current: 0,
+                added: self.pc_requests.len(),
+                max: options.max_precompile_requests(),
+            });
+        }
+        if self.pc_request_calldata_bytes > options.max_precompile_request_calldata_bytes() {
+            return Err(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: 0,
+                added: self.pc_request_calldata_bytes,
+                max: options.max_precompile_request_calldata_bytes(),
+            });
+        }
 
         self.map_element_count = map_element_count;
         self.max_map_value_size = options.max_adv_map_value_size();
         self.max_map_elements = options.max_adv_map_elements();
+        self.max_pc_requests = options.max_precompile_requests();
+        self.max_pc_request_calldata_bytes = options.max_precompile_request_calldata_bytes();
         Ok(())
     }
 
@@ -139,7 +161,7 @@ impl AdviceProvider {
                 self.extend_merkle_store(infos);
             },
             AdviceMutation::ExtendPrecompileRequests { data } => {
-                self.extend_precompile_requests(data);
+                self.extend_precompile_requests(data)?;
             },
         }
         Ok(())
@@ -614,11 +636,55 @@ impl AdviceProvider {
     }
 
     /// Extends the precompile requests with the given entries.
-    pub fn extend_precompile_requests<I>(&mut self, iter: I)
+    pub fn extend_precompile_requests<I>(&mut self, iter: I) -> Result<(), AdviceError>
     where
         I: IntoIterator<Item = PrecompileRequest>,
     {
-        self.pc_requests.extend(iter);
+        let requests = Vec::from_iter(iter);
+        let added_calldata_bytes = requests
+            .iter()
+            .try_fold(0usize, |acc, request| acc.checked_add(request.calldata().len()));
+        let added_calldata_bytes =
+            added_calldata_bytes.ok_or(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: usize::MAX,
+                max: self.max_pc_request_calldata_bytes,
+            })?;
+
+        let request_count = self.pc_requests.len().checked_add(requests.len()).ok_or(
+            AdviceError::PrecompileRequestCountExceeded {
+                current: self.pc_requests.len(),
+                added: requests.len(),
+                max: self.max_pc_requests,
+            },
+        )?;
+        if request_count > self.max_pc_requests {
+            return Err(AdviceError::PrecompileRequestCountExceeded {
+                current: self.pc_requests.len(),
+                added: requests.len(),
+                max: self.max_pc_requests,
+            });
+        }
+
+        let calldata_bytes = self
+            .pc_request_calldata_bytes
+            .checked_add(added_calldata_bytes)
+            .ok_or(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: added_calldata_bytes,
+                max: self.max_pc_request_calldata_bytes,
+            })?;
+        if calldata_bytes > self.max_pc_request_calldata_bytes {
+            return Err(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: added_calldata_bytes,
+                max: self.max_pc_request_calldata_bytes,
+            });
+        }
+
+        self.pc_request_calldata_bytes = calldata_bytes;
+        self.pc_requests.extend(requests);
+        Ok(())
     }
 
     /// Moves all accumulated precompile requests out of this provider, leaving it empty.
@@ -626,6 +692,7 @@ impl AdviceProvider {
     /// Intended for proof packaging, where requests are serialized into the proof and no longer
     /// needed in the provider after consumption.
     pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
+        self.pc_request_calldata_bytes = 0;
         core::mem::take(&mut self.pc_requests)
     }
 
@@ -692,7 +759,7 @@ impl AdviceProviderInterface for AdviceProvider {
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-    use miden_core::WORD_SIZE;
+    use miden_core::{WORD_SIZE, events::EventId, precompile::PrecompileRequest};
 
     use super::AdviceProvider;
     use crate::{
@@ -816,6 +883,52 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn precompile_requests_extend_respects_count_budget_atomically() {
+        let options = ExecutionOptions::default().with_max_precompile_requests(2);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 1)]).unwrap();
+
+        let err = provider
+            .extend_precompile_requests([precompile_request(1, 1), precompile_request(2, 1)])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::PrecompileRequestCountExceeded { current: 1, added: 2, max: 2 }
+        ));
+
+        assert_eq!(provider.precompile_requests().len(), 1);
+        assert_eq!(provider.precompile_requests()[0], precompile_request(0, 1));
+    }
+
+    #[test]
+    fn precompile_requests_extend_respects_calldata_budget_atomically() {
+        let options = ExecutionOptions::default().with_max_precompile_request_calldata_bytes(3);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 2)]).unwrap();
+
+        let err = provider.extend_precompile_requests([precompile_request(1, 2)]).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::PrecompileRequestCalldataBudgetExceeded { current: 2, added: 2, max: 3 }
+        ));
+
+        assert_eq!(provider.precompile_requests().len(), 1);
+        assert_eq!(provider.precompile_requests()[0], precompile_request(0, 2));
+    }
+
+    #[test]
+    fn take_precompile_requests_resets_calldata_budget() {
+        let options = ExecutionOptions::default().with_max_precompile_request_calldata_bytes(2);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 2)]).unwrap();
+
+        assert_eq!(provider.take_precompile_requests(), vec![precompile_request(0, 2)]);
+
+        provider.extend_precompile_requests([precompile_request(1, 2)]).unwrap();
+        assert_eq!(provider.precompile_requests(), &[precompile_request(1, 2)]);
+    }
+
     fn advice_map_from_entries(keys: impl Iterator<Item = u64>, value_len: usize) -> AdviceMap {
         keys.map(|key| {
             let values = (0..value_len)
@@ -825,5 +938,10 @@ mod tests {
         })
         .collect::<BTreeMap<_, _>>()
         .into()
+    }
+
+    fn precompile_request(seed: u64, calldata_len: usize) -> PrecompileRequest {
+        let calldata = (0..calldata_len).map(|offset| seed as u8 + offset as u8).collect();
+        PrecompileRequest::new(EventId::from_u64(seed), calldata)
     }
 }
