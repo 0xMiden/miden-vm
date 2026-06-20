@@ -126,7 +126,7 @@ impl UntrustedMastForest {
     /// This method uses a [`BudgetedReader`] plus a bounded validation-allocation budget derived
     /// from the input size to protect against denial-of-service attacks from malicious input.
     /// The default validation budget includes room for the retained serialized copy used by the
-    /// deferred-validation path, in addition to stripped/hashless helper allocations. Concretely,
+    /// deferred-validation path, in addition to hashless helper allocations. Concretely,
     /// the default is `bytes.len()` for parsing and `bytes.len() * 7` for validation allocations.
     /// That `* 7` factor is a coarse convenience bound, not an exact peak-memory formula.
     ///
@@ -149,8 +149,8 @@ impl UntrustedMastForest {
     /// Deserializes an [`UntrustedMastForest`] from bytes with explicit options.
     ///
     /// The wire byte budget limits wire-driven parsing and collection pre-sizing. The validation
-    /// helper-allocation budget is derived from that wire budget and caps tracked stripped/hashless
-    /// helper allocations such as digest slot tables and rebuilt digest tables.
+    /// helper-allocation budget is derived from that wire budget and caps tracked hashless helper
+    /// allocations such as digest slot tables and rebuilt digest tables.
     pub fn read_from_bytes_with_options(
         bytes: &[u8],
         options: UntrustedMastForestReadOptions,
@@ -163,7 +163,7 @@ impl UntrustedMastForest {
         )?;
         if reader.has_more_bytes() {
             return Err(DeserializationError::InvalidValue(
-                "extra bytes after stripped MastForest payload".into(),
+                "extra bytes after MastForest payload".into(),
             ));
         }
         Ok(forest)

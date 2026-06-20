@@ -1709,6 +1709,9 @@ fn issue_2818_restore_context_grows_stack_buffer_for_suspended_caller() {
     processor
         .stack_overflow_save_stack
         .push(vec![Felt::from_u32(42); caller_overflow_len]);
+    // Keep the aggregate-overflow accounting consistent with the manually injected suspended
+    // caller, mirroring what `start_context` would have done.
+    processor.saved_overflow_len += caller_overflow_len;
     processor.system_call_state_stack.push(SystemCallState {
         ctx: processor.ctx,
         caller_hash: processor.caller_hash,
@@ -1974,6 +1977,153 @@ fn stack_depth_limit_exceeded() {
             max: MIN_STACK_DEPTH,
         } if depth == MIN_STACK_DEPTH + 1
     );
+}
+
+/// Nested `call` context switches park the caller's operand-stack overflow (everything below the
+/// top 16 elements) in `stack_overflow_save_stack` rather than freeing it. Before the fix, only the
+/// active context was charged against `max_stack_depth`, so a program could keep every live frame
+/// within the limit while accumulating `O(call_depth * (max_stack_depth - 16))` hidden overflow in
+/// heap memory. This test drives such a nested-call chain and asserts that the aggregate operand
+/// stack (active context plus all suspended overflow) is now bounded: execution fails with
+/// `StackDepthLimitExceeded`, and the aggregate never exceeds the configured limit at any step.
+#[test]
+fn nested_calls_enforce_aggregate_stack_depth_limit() {
+    let max_stack_depth = MIN_STACK_DEPTH + 2;
+
+    // Each frame pushes 2 elements (filling the active context to `max_stack_depth`) and then calls
+    // the next frame, which parks those 2 elements as hidden overflow. Without an aggregate bound
+    // the saved overflow would grow without limit as the chain deepens.
+    let source = "
+        proc leaf
+            push.0
+            drop
+        end
+
+        proc mid_3
+            push.0 push.0
+            call.leaf
+            drop drop
+        end
+
+        proc mid_2
+            push.0 push.0
+            call.mid_3
+            drop drop
+        end
+
+        proc mid_1
+            push.0 push.0
+            call.mid_2
+            drop drop
+        end
+
+        begin
+            push.0 push.0
+            call.mid_1
+            drop drop
+        end
+        ";
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", source)
+        .expect("program should assemble")
+        .unwrap_program();
+
+    let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+    let mut resume_ctx = processor
+        .get_initial_resume_context(&program)
+        .expect("initial resume context should be created");
+
+    // Step until execution halts. At every step the aggregate operand-stack depth (active context
+    // plus all suspended overflow) must stay within the configured limit, and execution must
+    // eventually fail with `StackDepthLimitExceeded` rather than silently accumulating overflow.
+    let err = loop {
+        let saved_hidden_values: usize =
+            processor.stack_overflow_save_stack.iter().map(Vec::len).sum();
+        assert!(
+            processor.stack_size() + saved_hidden_values <= max_stack_depth,
+            "aggregate operand-stack depth must never exceed the configured limit"
+        );
+
+        match processor.step_sync(&mut host, resume_ctx) {
+            Ok(Some(next_ctx)) => resume_ctx = next_ctx,
+            Ok(None) => panic!("nested-call chain should not complete within the aggregate limit"),
+            Err(err) => break err,
+        }
+    };
+
+    assert_matches!(
+        err,
+        ExecutionError::StackDepthLimitExceeded { depth, max }
+            if depth == max_stack_depth + 1 && max == max_stack_depth
+    );
+}
+
+/// Companion to [`nested_calls_enforce_aggregate_stack_depth_limit`]: the aggregate operand-stack
+/// budget must be *released* when a context returns. A nested-call chain whose peak aggregate
+/// (active context plus all suspended overflow) stays within the limit executes to completion, and
+/// the saved overflow is fully unwound by the end.
+#[test]
+fn nested_calls_within_aggregate_budget_succeed() {
+    // Four frames each park 2 elements of hidden overflow. The peak aggregate occurs in the deepest
+    // callee: 16 (active) + 4 * 2 (suspended) + 1 (its first push) = 25. Give exactly that budget.
+    let max_stack_depth = MIN_STACK_DEPTH + 9;
+
+    let source = "
+        proc leaf
+            push.0
+            drop
+        end
+
+        proc mid_3
+            push.0 push.0
+            call.leaf
+            drop drop
+        end
+
+        proc mid_2
+            push.0 push.0
+            call.mid_3
+            drop drop
+        end
+
+        proc mid_1
+            push.0 push.0
+            call.mid_2
+            drop drop
+        end
+
+        begin
+            push.0 push.0
+            call.mid_1
+            drop drop
+        end
+        ";
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program("program", source)
+        .expect("program should assemble")
+        .unwrap_program();
+
+    let options = ExecutionOptions::default().with_max_stack_depth(max_stack_depth).unwrap();
+    let mut processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options)
+            .expect("processor advice inputs should fit advice map limits");
+    let mut host = DefaultHost::default();
+
+    processor
+        .execute_mut_sync(&program, &mut host)
+        .expect("a nested-call chain within the aggregate budget should succeed");
+
+    // Every context returned, so the suspended-overflow budget is fully released.
+    assert!(processor.stack_overflow_save_stack.is_empty());
+    assert_eq!(processor.saved_overflow_len, 0);
 }
 
 /// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
