@@ -1550,10 +1550,11 @@ proc truncate_stack
 end
 ";
 
-    let source = if program.contains("proc truncate_stack") {
-        program.to_string()
+    let body = program.trim();
+    let source = if body.starts_with("begin") {
+        format!("{TRUNCATE_STACK}{body}")
     } else {
-        format!("{TRUNCATE_STACK}{program}")
+        format!("{TRUNCATE_STACK}begin\n{body}\nexec.truncate_stack\nend")
     };
 
     let mut test = Test::new("program", &source, false);

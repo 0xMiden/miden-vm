@@ -5,6 +5,6 @@
 id = "u32popcnt"
 doc = "docs/src/user_docs/assembly/u32_operations.md"
 marker = "u32popcnt"
-program = "begin clk push.7 u32popcnt drop clk swap sub exec.truncate_stack end"
-baseline_program = "begin clk push.7 drop clk swap sub exec.truncate_stack end"
+program = "clk push.7 u32popcnt drop clk swap sub"
+baseline_program = "clk push.7 drop clk swap sub"
 expected = "38 cycles"
