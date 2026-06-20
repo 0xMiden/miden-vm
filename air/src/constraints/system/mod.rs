@@ -100,9 +100,7 @@ pub fn enforce_main<AB>(
 
         {
             let builder = &mut builder.when(f_preserve);
-            for i in 0..4 {
-                builder.assert_eq(next.system.fn_hash[i], local.system.fn_hash[i]);
-            }
+            builder.assert_eq_arrays(next.system.fn_hash, local.system.fn_hash);
         }
     }
 }

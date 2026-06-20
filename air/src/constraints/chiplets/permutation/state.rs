@@ -106,9 +106,7 @@ pub fn enforce_permutation_steps<AB>(
     {
         let expected = apply_init_plus_ext(&h, &ark);
         let builder = &mut builder.when(perm_gate.clone() * is_init_ext);
-        for i in 0..STATE_WIDTH {
-            builder.assert_eq(h_next[i].clone(), expected[i].clone());
-        }
+        builder.assert_eq_arrays(h_next.clone(), expected);
     }
 
     // -------------------------------------------------------------------------
@@ -124,9 +122,7 @@ pub fn enforce_permutation_steps<AB>(
         let expected = apply_matmul_external(&ext_with_sbox);
 
         let builder = &mut builder.when(perm_gate.clone() * is_ext);
-        for i in 0..STATE_WIDTH {
-            builder.assert_eq(h_next[i].clone(), expected[i].clone());
-        }
+        builder.assert_eq_arrays(h_next.clone(), expected);
     }
 
     // -------------------------------------------------------------------------
@@ -146,9 +142,7 @@ pub fn enforce_permutation_steps<AB>(
             builder.assert_zero(wc.clone());
         }
         // 12 next-state constraints
-        for i in 0..STATE_WIDTH {
-            builder.assert_eq(h_next[i].clone(), expected[i].clone());
-        }
+        builder.assert_eq_arrays(h_next.clone(), expected);
     }
 
     // -------------------------------------------------------------------------
@@ -165,9 +159,7 @@ pub fn enforce_permutation_steps<AB>(
         // 1 witness constraint
         builder.assert_zero(witness_check);
         // 12 next-state constraints
-        for i in 0..STATE_WIDTH {
-            builder.assert_eq(h_next[i].clone(), expected[i].clone());
-        }
+        builder.assert_eq_arrays(h_next.clone(), expected);
     }
 }
 
