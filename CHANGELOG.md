@@ -3,7 +3,7 @@
 ## v0.24.0 (TBD)
 
 #### Changes
-
+- Bumped MSRV from 1.90 to 1.96 and replaced local `assert_matches!` macro with `core::assert_matches` ([#3267](https://github.com/0xMiden/miden-vm/pull/3267)).
 - [BREAKING] Unified `OnceLockCompat` behavior across `std` and `no_std` ([#3188](https://github.com/0xMiden/miden-vm/pull/3188)).
 - Added an event-based `miden::core::debug` module providing `print_*` procedures for print-style debugging of the operand stack, memory, advice stack, and advice map ([#3169](https://github.com/0xMiden/miden-vm/issues/3169)).
 - [BREAKING] Removed `debug.*` decorators in favor of `miden::core::debug` procedures, and bumped the MAST wire format to `0.0.4` ([#3201](https://github.com/0xMiden/miden-vm/pull/3201)).

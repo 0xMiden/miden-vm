@@ -4,7 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt::Write, str::FromStr};
+use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{
@@ -13,7 +13,7 @@ use miden_assembly_syntax::{
     diagnostics::WrapErr,
 };
 use miden_core::{
-    Felt, Word, assert_matches,
+    Felt, Word,
     events::EventId,
     field::PrimeField64,
     mast::{MastNode, MastNodeExt},

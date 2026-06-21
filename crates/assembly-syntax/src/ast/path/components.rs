@@ -453,7 +453,7 @@ impl<'a> DoubleEndedIterator for Components<'a> {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::assert_matches;
+    use core::assert_matches;
 
     use super::*;
 

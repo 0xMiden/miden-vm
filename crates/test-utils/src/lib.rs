@@ -151,7 +151,7 @@ macro_rules! expect_assembly_error {
         let error = $test.compile().expect_err("expected assembly to fail");
         match error.downcast::<::miden_assembly::AssemblyError>() {
             Ok(error) => {
-                ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
+                ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
             }
             Err(report) => {
                 panic!(r#"
@@ -170,7 +170,7 @@ macro_rules! expect_exec_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err(error) => ::core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
         }
     };
 }
