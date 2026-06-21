@@ -8,6 +8,113 @@ pub(crate) mod verifier_fri_e2f4;
 use miden_core::Word;
 pub use verifier_fri_e2f4::*;
 
+const FRI_PREPROCESS_SOURCE: &str = "
+    use miden::core::stark::constants
+
+    const MAX_FRI_QUERIES = 150
+    const MAX_FRI_LAYERS = 32
+    const MAX_FRI_REMAINDER_WORDS = 64
+
+    proc preprocess
+        adv_push
+        # => [num_queries, g, ...]
+        dup u32gt.0 assert.err=\"number of FRI queries must be nonzero\"
+        dup u32lte.MAX_FRI_QUERIES assert.err=\"number of FRI queries exceeds FRI workspace\"
+
+        exec.constants::fri_com_ptr
+        # => [layer_ptr, num_queries, g, ...]
+        dup.1 mul.4 sub
+        # => [query_ptr, num_queries, g, ...]
+        dup exec.constants::set_fri_queries_address
+        swap
+        sub.1
+        padw
+        push.1
+        while.true
+            adv_loadw
+            dup.5
+            u32wrapping_add.4
+            swap.6
+            mem_storew_le
+            dup.4
+            sub.1
+            swap.5
+            neq.0
+        end
+        #=> [X, x, layer_ptr, g]
+
+        drop
+        #=> [X, layer_ptr, g]
+
+        dup.4
+        movdn.5
+        #=> [X, layer_ptr, layer_ptr, g]
+
+        adv_push
+        dup u32lte.MAX_FRI_LAYERS assert.err=\"number of FRI layers exceeds FRI workspace\"
+
+        dup push.0 neq
+        if.true
+            mul.2
+            sub.1
+            movdn.4
+            #=> [X, num_layers, layer_ptr, layer_ptr, g]
+
+            push.1
+            while.true
+                adv_loadw
+                dup.5
+                u32wrapping_add.4
+                swap.6
+                mem_storew_le
+                dup.4
+                sub.1
+                swap.5
+                neq.0
+            end
+            #=> [X, x, remainder_poly_ptr, layer_ptr, g]
+
+            drop
+        else
+            drop
+        end
+        #=> [X, remainder_poly_ptr, layer_ptr, g]
+
+        dup.4
+        movdn.5
+        #=> [X, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
+
+        adv_push
+        dup u32gt.0 assert.err=\"FRI remainder polynomial must be nonzero\"
+        dup u32lte.MAX_FRI_REMAINDER_WORDS assert.err=\"FRI remainder polynomial exceeds FRI workspace\"
+
+        dup mul.2 exec.constants::set_remainder_poly_size
+
+        sub.1
+        movdn.4
+        #=> [X, len_remainder/2, remainder_poly_ptr, remainder_poly_ptr, layer_ptr, g]
+
+        push.1
+        while.true
+            adv_loadw
+            dup.5
+            u32wrapping_add.4
+            swap.6
+            mem_storew_le
+            dup.4
+            sub.1
+            swap.5
+            neq.0
+        end
+        #=> [X, x, x, remainder_poly_ptr, layer_ptr, g]
+        dropw drop drop
+        #=> [remainder_poly_ptr, layer_ptr, g]
+
+        exec.constants::set_remainder_poly_address
+        drop drop
+    end
+";
+
 #[test]
 fn fri_verify_rejects_empty_query_region() {
     let source = "
@@ -29,14 +136,16 @@ fn fri_verify_rejects_empty_query_region() {
 
 #[test]
 fn fri_fold4_ext2_remainder64() {
-    let source = "
+    let source = format!(
+        "{FRI_PREPROCESS_SOURCE}
         use miden::core::pcs::fri::frie2f4
 
         begin
-            exec.frie2f4::preprocess
+            exec.preprocess
             exec.frie2f4::verify
         end
-        ";
+        "
+    );
 
     let trace_len_e = 14;
     let blowup_exp = 3;
@@ -70,21 +179,23 @@ fn fri_fold4_ext2_remainder64() {
     for partial_tree in &partial_trees {
         store.extend(partial_tree.inner_nodes());
     }
-    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map.clone());
+    let test = build_test!(&source, &[domain_generator], &advice_stack, store, advice_map.clone());
 
     test.expect_stack(&[]);
 }
 
 #[test]
 fn fri_fold4_ext2_remainder128() {
-    let source = "
+    let source = format!(
+        "{FRI_PREPROCESS_SOURCE}
         use miden::core::pcs::fri::frie2f4
 
         begin
-            exec.frie2f4::preprocess
+            exec.preprocess
             exec.frie2f4::verify
         end
-        ";
+        "
+    );
 
     let trace_len_e = 13;
     let blowup_exp = 3;
@@ -118,7 +229,7 @@ fn fri_fold4_ext2_remainder128() {
     for partial_tree in &partial_trees {
         store.extend(partial_tree.inner_nodes());
     }
-    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map.clone());
+    let test = build_test!(&source, &[domain_generator], &advice_stack, store, advice_map.clone());
 
     test.expect_stack(&[]);
 }
