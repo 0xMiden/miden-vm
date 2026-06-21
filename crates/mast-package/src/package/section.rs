@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// A unique identifier for optional sections of the Miden package format
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 #[repr(transparent)]
@@ -121,6 +121,17 @@ impl fmt::Display for SectionId {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for SectionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = alloc::string::String::deserialize(deserializer)?;
+        s.parse::<SectionId>().map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Section {
@@ -177,7 +188,9 @@ impl Deserializable for Section {
         let id_str = core::str::from_utf8(id_bytes).map_err(|err| {
             DeserializationError::InvalidValue(format!("invalid utf-8 in section name: {err}"))
         })?;
-        let id = SectionId(Cow::Owned(id_str.to_owned()));
+        let id = id_str.parse::<SectionId>().map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid section id {id_str:?}: {err}"))
+        })?;
 
         let len = source.read_usize()?;
         let bytes = source.read_slice(len)?;
@@ -231,5 +244,61 @@ impl Arbitrary for SectionId {
             });
 
         proptest::prop_oneof![builtins, custom].boxed()
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn serde_rejects_invalid_section_id() {
+        let result: Result<SectionId, _> = serde_json::from_str(r#""1bad""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn serde_accepts_valid_section_id() {
+        let id: SectionId = serde_json::from_str(r#""my_section""#).unwrap();
+        assert_eq!(id, SectionId::custom("my_section").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::serde::{ByteWriter, Deserializable, Serializable, SliceReader};
+
+    use super::*;
+
+    fn section_bytes_with_id(id: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.write_usize(id.len());
+        buf.write_bytes(id.as_bytes());
+        buf.write_usize(0);
+        buf
+    }
+
+    #[test]
+    fn deserialize_rejects_invalid_section_id() {
+        for bad_id in ["", "1bad", "-bad", "bad id", "../etc"] {
+            let bytes = section_bytes_with_id(bad_id);
+            let mut reader = SliceReader::new(&bytes);
+            assert!(Section::read_from(&mut reader).is_err(), "expected error for {bad_id:?}",);
+        }
+    }
+
+    #[test]
+    fn deserialize_accepts_valid_section_id() {
+        let section = Section {
+            id: SectionId::custom("my_section").unwrap(),
+            data: Cow::Borrowed(&[]),
+        };
+        let bytes = section.to_bytes();
+        let mut reader = SliceReader::new(&bytes);
+        let result = Section::read_from(&mut reader);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().id, section.id);
     }
 }
