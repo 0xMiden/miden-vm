@@ -43,6 +43,7 @@
 
 #### Fixes
 
+- Validated `SectionId` on deserialization: `Section::read_from()` now rejects invalid identifiers and the `serde` path delegates to `FromStr`, keeping both readers on the same invariant ([#3277](https://github.com/0xMiden/miden-vm/pull/3277)).
 - Rejected empty query regions in the standalone FRI verifier ([#3237](https://github.com/0xMiden/miden-vm/pull/3237)).
 - [BREAKING] Removed the test-only `frie2f4::preprocess` helper from corelib exports ([#3248](https://github.com/0xMiden/miden-vm/pull/3248)).
 - Pinned the initial AIR system context and function hash to zero, preventing forged caller hashes at row 0 ([#3240](https://github.com/0xMiden/miden-vm/pull/3240)).
