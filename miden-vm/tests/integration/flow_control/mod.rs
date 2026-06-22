@@ -55,6 +55,21 @@ fn conditional_loop() {
 }
 
 #[test]
+fn unentered_loop_with_following_block() {
+    let source = "
+        begin
+            push.2 push.1 push.0
+            while.true
+                push.3 drop
+            end
+            drop drop
+        end";
+
+    let test = build_test!(source);
+    test.check_constraints();
+}
+
+#[test]
 fn faulty_condition_from_loop() {
     let source = "
         begin
