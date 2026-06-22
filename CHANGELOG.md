@@ -64,6 +64,7 @@
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
 - [BREAKING] Bump Plonky3 and miden-crypto related dependencies ([#3275](https://github.com/0xMiden/miden-vm/pull/3275)).
 - Imported `midenc-hir-type` as a released workspace crate.
+- Added release tooling for publishing selected workspace crates.
 
 #### Fixes
 
