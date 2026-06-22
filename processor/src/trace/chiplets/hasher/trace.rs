@@ -9,7 +9,7 @@ use miden_core::chiplets::hasher::Hasher;
 
 use super::{ChipletTraceFragment, Felt, HasherState, ONE, STATE_WIDTH, Selectors, ZERO};
 
-// The unified hasher row is wider than the typed overlay by one column (s_perm).
+// The hasher row is wider than the typed overlay by one column (s_00).
 const S_PERM_OFFSET: usize = TRACE_WIDTH - 1;
 
 // HASHER OPERATION
@@ -249,14 +249,11 @@ impl HasherTrace {
 
             trace.copy_rows_into(row_idx, &chunk[..n * TRACE_WIDTH]);
 
-            // Write `s_ctrl = ONE` on controller/padding rows; perm rows stay ZERO.
-            // Skipped when the fragment has no prefix space.
+            // Write `s_01 = ONE` on controller/padding rows; perm rows stay ZERO.
+            // No-op when the fragment has no prefix space.
             if is_ctrl {
                 for i in 0..n {
-                    let prefix = trace.prefix_mut(row_idx + i);
-                    if let Some(s_ctrl) = prefix.first_mut() {
-                        *s_ctrl = ONE;
-                    }
+                    trace.set_s_01(row_idx + i);
                 }
             }
 
