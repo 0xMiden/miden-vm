@@ -428,6 +428,7 @@ fn read_source_asm_op<R: ByteReader>(
 }
 
 fn min_source_map_asm_op_row_serialized_size() -> usize {
+    // The location index is conditional and is omitted for location-less rows.
     DebugSourceNodeId::min_serialized_size() + 4 + 1 + 4 + 4 + 1
 }
 
@@ -1084,6 +1085,26 @@ mod tests {
         );
 
         roundtrip(&section);
+    }
+
+    #[test]
+    fn test_debug_source_map_locationless_asm_op_min_size() {
+        let source_node = DebugSourceNodeId::from(0);
+        let section = DebugSourceMapSection::from_parts(
+            alloc::vec![DebugSourceAsmOp::new(
+                source_node,
+                2,
+                None,
+                "test::ctx".into(),
+                "add".into(),
+                1,
+            )],
+            alloc::vec![],
+        );
+
+        let bytes = section.to_bytes();
+        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized.asm_ops(), section.asm_ops());
     }
 
     #[test]
