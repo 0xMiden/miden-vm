@@ -1317,14 +1317,13 @@ fn read_package_file(path: impl AsRef<std::path::Path>) -> Result<Vec<u8>, Deser
 #[cfg(test)]
 mod tests {
     use alloc::{sync::Arc, vec, vec::Vec};
-    use core::str::FromStr;
+    use core::{assert_matches, str::FromStr};
 
     use miden_assembly_syntax::ast::{
         Path as AstPath, PathBuf, ProcedureName, QualifiedProcedureName,
     };
     use miden_core::{
         advice::AdviceMap,
-        assert_matches,
         mast::{
             BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor,
             MastNode, MastNodeExt, MastNodeId, SplitNodeBuilder,

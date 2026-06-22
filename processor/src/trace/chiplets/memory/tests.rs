@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{assert_matches, ops::Range};
 
 use miden_air::trace::{
     RowIndex,
@@ -9,7 +9,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    ONE, WORD_SIZE, Word, ZERO, assert_matches,
+    ONE, WORD_SIZE, Word, ZERO,
     field::{Field, PrimeCharacteristicRing},
 };
 

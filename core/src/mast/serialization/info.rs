@@ -376,6 +376,7 @@ impl Deserializable for MastNodeInfo {
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
+    use core::assert_matches;
 
     use super::*;
 

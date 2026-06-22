@@ -1,3 +1,4 @@
+use core::assert_matches;
 use std::{
     string::{String, ToString},
     sync::{Mutex, Once},
