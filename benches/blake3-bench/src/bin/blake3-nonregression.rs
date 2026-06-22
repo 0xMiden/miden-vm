@@ -177,22 +177,41 @@ mod tests {
         insta::assert_snapshot!("comparison_summary", summary);
     }
 
+    #[test]
+    fn comparison_fails_when_secondary_axis_crosses_threshold() {
+        let mut baseline = result_with_metric("base", "e2e_prove", 1_000.0);
+        baseline.metrics.insert(
+            "build_trace".to_string(),
+            metric("build_trace", "criterion", Some(100.0), None),
+        );
+        let mut current = result_with_metric("head", "e2e_prove", 1_010.0);
+        current.metrics.insert(
+            "build_trace".to_string(),
+            metric("build_trace", "criterion", Some(120.0), None),
+        );
+
+        let comparison = compare_results(&baseline, &current, 5.0).unwrap();
+
+        assert!(comparison.regression);
+    }
+
+    fn metric(name: &str, source: &str, mean_ms: Option<f64>, duration_ms: Option<f64>) -> Metric {
+        Metric {
+            name: name.to_string(),
+            source: source.to_string(),
+            mean_ms,
+            median_ms: None,
+            lower_bound_ms: None,
+            upper_bound_ms: None,
+            duration_ms,
+            span_path: None,
+            unit: "ms".to_string(),
+        }
+    }
+
     fn result_with_metric(git_ref: &str, name: &str, mean_ms: f64) -> BenchmarkResult {
         let mut metrics = BTreeMap::new();
-        metrics.insert(
-            name.to_string(),
-            Metric {
-                name: name.to_string(),
-                source: "criterion".to_string(),
-                mean_ms: Some(mean_ms),
-                median_ms: None,
-                lower_bound_ms: None,
-                upper_bound_ms: None,
-                duration_ms: None,
-                span_path: None,
-                unit: "ms".to_string(),
-            },
-        );
+        metrics.insert(name.to_string(), metric(name, "criterion", Some(mean_ms), None));
         BenchmarkResult {
             repo_root: ".".to_string(),
             git_ref: git_ref.to_string(),

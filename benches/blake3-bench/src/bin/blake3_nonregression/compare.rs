@@ -49,7 +49,7 @@ pub(crate) fn compare_results(
     }
     rows.sort_by(|a, b| b.delta_pct.partial_cmp(&a.delta_pct).unwrap_or(std::cmp::Ordering::Equal));
     let top_slowdowns = rows.iter().filter(|row| row.delta_pct > 0.0).take(5).cloned().collect();
-    let regression = program_delta_pct > threshold_pct;
+    let regression = rows.iter().any(|row| row.delta_pct > threshold_pct);
     Ok(Comparison {
         status: if regression { "regression" } else { "ok" }.to_string(),
         regression,
