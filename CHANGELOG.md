@@ -41,6 +41,7 @@
 - Cleaned up processor error handling for diagnostics, malformed MAST loading, and binary-value checks ([#3230](https://github.com/0xMiden/miden-vm/pull/3230)).
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
 - [BREAKING] Removed the stripped `MastForest` serialization mode. Normal forest bytes now describe execution data only ([#3268](https://github.com/0xMiden/miden-vm/pull/3268)).
+- [BREAKING] Bump Plonky3 and miden-crypto related dependencies ([#3275](https://github.com/0xMiden/miden-vm/pull/3275)).
 
 #### Fixes
 

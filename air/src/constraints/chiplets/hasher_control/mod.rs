@@ -217,9 +217,7 @@ pub fn enforce_controller_constraints<AB>(
         let cap_next = cols_next.capacity();
 
         let builder = &mut builder.when(gate);
-        for i in 0..4 {
-            builder.assert_eq(cap_next[i], cap[i]);
-        }
+        builder.assert_eq_arrays(cap_next, cap);
     }
 
     // =====================================================================

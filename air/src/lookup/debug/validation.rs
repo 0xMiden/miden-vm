@@ -22,7 +22,7 @@ use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 use miden_crypto::{
     rand::random_felt,
     stark::air::{
-        AirBuilder, PeriodicAirBuilder, PermutationAirBuilder,
+        AirBuilder, PermutationAirBuilder,
         symbolic::{
             BaseEntry, BaseLeaf, ExtEntry, ExtLeaf, SymbolicAirBuilder, SymbolicExpr,
             SymbolicExpression, SymbolicExpressionExt, SymbolicVariable, SymbolicVariableExt,

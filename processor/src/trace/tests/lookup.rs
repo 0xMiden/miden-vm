@@ -21,7 +21,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LiftedAir, MidenAir,
+    BaseAir, LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, accumulate, build_lookup_fractions, debug::collect_column_oracle_folds},
 };
@@ -102,7 +102,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
     let public_vals = trace.to_public_values();
     // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
-    let chip_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&MidenAir::CHIPLETS);
+    let chip_periodic = MidenAir::CHIPLETS.periodic_columns();
 
     // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
     // implement Randomizable, so we draw base-field elements and pair them).
