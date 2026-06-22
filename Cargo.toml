@@ -38,6 +38,9 @@ homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
 rust-version = "1.96"
+# Private workspace members inherit this version. Publishable crates keep their
+# own package versions so release tooling can publish only the crates selected
+# for a release.
 version = "0.25.0"
 
 [profile.optimized]
