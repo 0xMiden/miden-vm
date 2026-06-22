@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
 };
@@ -47,6 +47,26 @@ pub(crate) fn cmd_run(
         repo_root,
         &envs,
         &output_dir.join("clean.log"),
+        true,
+    )?;
+
+    let mut build_bench_command = Command::new("cargo");
+    build_bench_command.args([
+        "bench",
+        "--profile",
+        "optimized",
+        "-p",
+        "miden-vm-blake3-bench",
+        "--bench",
+        "blake3_bench",
+        "--no-run",
+        "--message-format=json",
+    ]);
+    let _bench_executable = build_executable(
+        &mut build_bench_command,
+        repo_root,
+        &envs,
+        &output_dir.join("bench-build.log"),
     )?;
 
     let mut bench_command = Command::new("cargo");
@@ -67,36 +87,51 @@ pub(crate) fn cmd_run(
     if let Some(warm_up_time_secs) = warm_up_time_secs {
         bench_command.args(["--warm-up-time", &warm_up_time_secs.to_string()]);
     }
-    let bench_build_and_run_wall_ms =
-        run_logged_command(&mut bench_command, repo_root, &envs, &output_dir.join("bench.log"))?;
+    let bench_wall_ms = run_logged_command(
+        &mut bench_command,
+        repo_root,
+        &envs,
+        &output_dir.join("bench.log"),
+        true,
+    )?
+    .elapsed_ms;
 
     let spans_path = output_dir.join("spans.json");
-    let (span_collection_build_and_run_wall_ms, spans) = if should_collect_proof_spans(bench_axes) {
-        let mut spans_command = Command::new("cargo");
+    let (span_collection_wall_ms, spans) = if should_collect_proof_spans(bench_axes) {
+        let mut build_spans_command = Command::new("cargo");
+        build_spans_command.args([
+            "build",
+            "--profile",
+            "optimized",
+            "-p",
+            "miden-vm-blake3-bench",
+            "--bin",
+            "blake3-nonregression",
+            "--message-format=json",
+        ]);
+        let spans_executable = build_executable(
+            &mut build_spans_command,
+            repo_root,
+            &envs,
+            &output_dir.join("spans-build.log"),
+        )?;
+
+        let mut spans_command = Command::new(spans_executable);
         spans_command
-            .args([
-                "run",
-                "--profile",
-                "optimized",
-                "-p",
-                "miden-vm-blake3-bench",
-                "--bin",
-                "blake3-nonregression",
-                "--",
-                "collect-spans",
-                "--repo-root",
-            ])
+            .args(["collect-spans", "--repo-root"])
             .arg(repo_root)
             .arg("--output")
             .arg(&spans_path);
-        let span_collection_build_and_run_wall_ms = run_logged_command(
+        let span_collection_wall_ms = run_logged_command(
             &mut spans_command,
             repo_root,
             &envs,
             &output_dir.join("spans.log"),
-        )?;
+            true,
+        )?
+        .elapsed_ms;
         let spans: Vec<SpanRecord> = serde_json::from_str(&fs::read_to_string(&spans_path)?)?;
-        (Some(span_collection_build_and_run_wall_ms), spans)
+        (Some(span_collection_wall_ms), spans)
     } else {
         let spans = Vec::new();
         write_json(&spans_path, &spans)?;
@@ -106,8 +141,8 @@ pub(crate) fn cmd_run(
     let result = collect_result(
         repo_root,
         git_ref,
-        Some(bench_build_and_run_wall_ms),
-        span_collection_build_and_run_wall_ms,
+        Some(bench_wall_ms),
+        span_collection_wall_ms,
         Some(rayon_num_threads),
         bench_axes,
         sample_size,
@@ -120,12 +155,46 @@ pub(crate) fn cmd_run(
     Ok(())
 }
 
+fn build_executable(
+    command: &mut Command,
+    cwd: &Path,
+    envs: &BTreeMap<String, String>,
+    log_path: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let output = run_logged_command(command, cwd, envs, log_path, false)?;
+    executable_from_json_messages(&output.stdout).ok_or_else(|| {
+        format!("Cargo did not report an executable in {}", log_path.display()).into()
+    })
+}
+
+pub(crate) fn executable_from_json_messages(stdout: &str) -> Option<PathBuf> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| {
+            message.get("reason").and_then(|reason| reason.as_str()) == Some("compiler-artifact")
+        })
+        .filter_map(|message| {
+            message
+                .get("executable")
+                .and_then(|executable| executable.as_str())
+                .map(PathBuf::from)
+        })
+        .next_back()
+}
+
+struct LoggedOutput {
+    elapsed_ms: f64,
+    stdout: String,
+}
+
 fn run_logged_command(
     command: &mut Command,
     cwd: &Path,
     envs: &BTreeMap<String, String>,
     log_path: &Path,
-) -> Result<f64, Box<dyn std::error::Error>> {
+    echo_output: bool,
+) -> Result<LoggedOutput, Box<dyn std::error::Error>> {
     command.current_dir(cwd);
     for (key, value) in envs {
         command.env(key, value);
@@ -133,16 +202,20 @@ fn run_logged_command(
     let start = Instant::now();
     let output = command.output()?;
     let elapsed = duration_ms(start.elapsed());
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let mut log = format!("$ {command:?}\n");
-    log.push_str(&String::from_utf8_lossy(&output.stdout));
-    log.push_str(&String::from_utf8_lossy(&output.stderr));
+    log.push_str(&stdout);
+    log.push_str(&stderr);
     write_text(log_path, &log)?;
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    if echo_output {
+        print!("{stdout}");
+        eprint!("{stderr}");
+    }
     if !output.status.success() {
         return Err(format!("command failed with status {}", output.status).into());
     }
-    Ok(elapsed)
+    Ok(LoggedOutput { elapsed_ms: elapsed, stdout })
 }
 
 fn should_collect_proof_spans(bench_axes: &str) -> bool {

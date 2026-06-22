@@ -129,6 +129,7 @@ mod tests {
         criterion_results::{estimate_ms, metric_name_from_estimate_path, selected_criterion_axes},
         model::{BenchmarkResult, Metric},
         report::summary_markdown,
+        runner::executable_from_json_messages,
     };
 
     #[test]
@@ -161,6 +162,19 @@ mod tests {
         });
 
         assert_eq!(estimate_ms(&payload, "mean"), Some((2.0, 1.0, 3.0)));
+    }
+
+    #[test]
+    fn cargo_json_parser_finds_executable_path() {
+        let messages = r#"
+{"reason":"compiler-artifact","target":{"kind":["bench"]},"executable":"/tmp/target/optimized/deps/blake3_bench-abc123"}
+{"reason":"build-finished","success":true}
+"#;
+
+        assert_eq!(
+            executable_from_json_messages(messages).as_deref(),
+            Some(Path::new("/tmp/target/optimized/deps/blake3_bench-abc123"))
+        );
     }
 
     #[test]
@@ -216,8 +230,8 @@ mod tests {
             repo_root: ".".to_string(),
             git_ref: git_ref.to_string(),
             git_sha: format!("{git_ref}-sha"),
-            bench_build_and_run_wall_ms: None,
-            span_collection_build_and_run_wall_ms: None,
+            bench_wall_ms: None,
+            span_collection_wall_ms: None,
             rayon_num_threads: None,
             bench_axes: vec![name.to_string()],
             sample_size: None,
