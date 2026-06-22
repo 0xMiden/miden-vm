@@ -1,12 +1,15 @@
 use alloc::{alloc::Layout, collections::VecDeque};
-use core::cmp::{self, Ordering};
+use core::{
+    cmp::{self, Ordering},
+    mem::size_of,
+};
 
 use smallvec::{SmallVec, smallvec};
 
 use super::*;
 
-const FELT_SIZE: usize = core::mem::size_of::<u32>();
-const WORD_SIZE: usize = core::mem::size_of::<[u32; 4]>();
+const FELT_SIZE: usize = size_of::<u32>();
+const WORD_SIZE: usize = size_of::<[u32; 4]>();
 
 impl Type {
     /// Convert this type into a vector of types corresponding to how this type
@@ -390,7 +393,7 @@ impl Type {
                 }
             },
             Type::List(_) => {
-                todo!("invalid type: list has no defined representation yet, so cannot be split")
+                panic!("invalid type: list has no defined representation yet, so cannot be split")
             }
             // These types either have no size, or are 1 byte in size, so must have
             // been handled above when checking if the size of the type is <= the
@@ -454,7 +457,7 @@ impl Type {
             Self::Struct(struct_ty) => struct_ty.size as usize * 8,
             Self::Enum(enum_ty) => enum_ty.size_in_bits(),
             Self::Array(array_ty) => array_ty.size_in_bits(),
-            Type::List(_) => todo!(
+            Type::List(_) => panic!(
                 "invalid type: list has no defined representation yet, so its size cannot be \
                  determined"
             ),
@@ -620,7 +623,7 @@ mod tests {
                 index: 0,
                 align: 4,
                 offset: 0,
-                ty: ptr_ty.clone()
+                ty: ptr_ty
             }
         );
         assert_eq!(
@@ -674,6 +677,6 @@ mod tests {
             TypeRepr::packed(1),
             [Type::U8, Type::from(ArrayType::new(Type::U8, 3))],
         ));
-        assert_eq!(ty.to_raw_parts(), Some(smallvec![ptr_ty.clone(), partial_ty, Type::U8]));
+        assert_eq!(ty.to_raw_parts(), Some(smallvec![ptr_ty, partial_ty, Type::U8]));
     }
 }

@@ -186,7 +186,7 @@ impl StructType {
         I: IntoIterator,
         <I as IntoIterator>::Item: Into<NameAndType>,
     {
-        let tys = fields.into_iter().map(|item| item.into()).collect::<SmallVec<[_; 2]>>();
+        let tys = fields.into_iter().map(Into::into).collect::<SmallVec<[_; 2]>>();
         let mut fields = SmallVec::<[_; 2]>::with_capacity(tys.len());
         let size = match repr {
             TypeRepr::Transparent => {
@@ -329,7 +329,7 @@ impl TryFrom<Type> for StructType {
 
     fn try_from(ty: Type) -> Result<Self, Self::Error> {
         match ty {
-            Type::Struct(ty) => Ok(alloc::sync::Arc::unwrap_or_clone(ty)),
+            Type::Struct(ty) => Ok(Arc::unwrap_or_clone(ty)),
             other => Err(other),
         }
     }
