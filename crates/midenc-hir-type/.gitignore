@@ -1,0 +1,18 @@
+target/
+.crates.toml
+.crates2.json
+
+# Docs platform ignores
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+.code
+.idea
+site/
+venv/
+env/
+*.out
+node_modules/
+*DS_Store
+*.iml
+book/

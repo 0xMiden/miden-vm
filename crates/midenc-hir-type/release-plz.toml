@@ -1,0 +1,9 @@
+[workspace]
+pr_branch_prefix = "release-plz-"
+# Only publish when the release PR is merged
+# https://release-plz.dev/docs/config#the-release_always-field
+release_always = false
+# Skip GitHub releases and git tags by default, individual crates can opt in.
+# We don't want release-plz creating tags for every published crate.
+git_release_enable = false
+git_tag_enable = false
