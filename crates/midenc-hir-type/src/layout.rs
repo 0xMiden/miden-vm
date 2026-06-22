@@ -38,7 +38,7 @@ impl Type {
                     rest = remaining;
                 }
                 Some(parts)
-            }
+            },
         }
     }
 
@@ -50,8 +50,8 @@ impl Type {
     ///   requested split size
     /// * The second part is Some if there is data left in the original type after the split. This
     ///   part will be a type that attempts to preserve, to the extent possible, the original type
-    ///   structure, but will fall back to an array of bytes if a larger type must be split down
-    ///   the middle somewhere.
+    ///   structure, but will fall back to an array of bytes if a larger type must be split down the
+    ///   middle somewhere.
     pub fn split(self, n: usize) -> (Type, Option<Type>) {
         if n == 0 {
             return (self, None);
@@ -85,23 +85,17 @@ impl Type {
                     (1, 1) => (Type::U8, Some(Type::U8)),
                     (1, remaining) => {
                         (Type::U8, Some(Type::from(ArrayType::new(Type::U8, remaining))))
-                    }
+                    },
                     (taken, 1) => (Type::from(ArrayType::new(Type::U8, taken)), Some(Type::U8)),
                     (taken, remaining) => (
                         Type::from(ArrayType::new(Type::U8, taken)),
                         Some(Type::from(ArrayType::new(Type::U8, remaining))),
                     ),
                 }
-            }
+            },
             Self::Array(array_type) => match &*array_type {
-                ArrayType {
-                    ty: elem_ty,
-                    len: 1,
-                } => elem_ty.clone().split(n),
-                ArrayType {
-                    ty: elem_ty,
-                    len: array_len,
-                } => {
+                ArrayType { ty: elem_ty, len: 1 } => elem_ty.clone().split(n),
+                ArrayType { ty: elem_ty, len: array_len } => {
                     let elem_size = elem_ty.size_in_bytes();
                     if n >= elem_size {
                         // The requested split consumes 1 or more elements..
@@ -120,8 +114,8 @@ impl Type {
                             };
                             (split, Some(rest))
                         } else {
-                            // The element type must be split somewhere in order to get the input type
-                            // down to the requested size
+                            // The element type must be split somewhere in order to get the input
+                            // type down to the requested size
                             let (partial1, partial2) = (*elem_ty).clone().split(elem_size - extra);
                             match array_len - take {
                                 0 => unreachable!(),
@@ -132,7 +126,7 @@ impl Type {
                                         [taken, partial1],
                                     ));
                                     (split, partial2)
-                                }
+                                },
                                 remaining => {
                                     let remaining_input =
                                         Self::from(ArrayType::new(elem_ty.clone(), remaining));
@@ -146,7 +140,7 @@ impl Type {
                                         [partial2.unwrap(), remaining_input],
                                     ));
                                     (split, Some(rest))
-                                }
+                                },
                             }
                         }
                     } else {
@@ -163,20 +157,16 @@ impl Type {
                         ));
                         (partial1, Some(rest))
                     }
-                }
+                },
             },
             Self::Struct(struct_ty) => match &*struct_ty {
-                StructType {
-                    repr: TypeRepr::Transparent,
-                    fields,
-                    ..
-                } => {
+                StructType { repr: TypeRepr::Transparent, fields, .. } => {
                     let underlying = fields
                         .into_iter()
                         .find(|f| !f.ty.is_zst())
                         .expect("invalid type: expected non-zero sized field");
                     underlying.ty.clone().split(n)
-                }
+                },
                 struct_ty => {
                     let original_repr = struct_ty.repr;
                     let original_size = struct_ty.size;
@@ -372,7 +362,8 @@ impl Type {
                             break;
                         }
 
-                        // We need to process more fields for this request (i.e. field_size < needed)
+                        // We need to process more fields for this request (i.e. field_size <
+                        // needed)
                         needed -= field_size;
                         split.size += field_size;
                         field.offset = current_offset;
@@ -390,17 +381,17 @@ impl Type {
                         1 => (split, remaining.fields.pop().map(|f| f.ty)),
                         _ => (split, Some(remaining.into())),
                     }
-                }
+                },
             },
             Type::List(_) => {
                 panic!("invalid type: list has no defined representation yet, so cannot be split")
-            }
+            },
             // These types either have no size, or are 1 byte in size, so must have
             // been handled above when checking if the size of the type is <= the
             // requested split size
             Self::Unknown | Self::Never | Self::I1 | Self::U8 | Self::I8 => {
                 unreachable!()
-            }
+            },
         }
     }
 

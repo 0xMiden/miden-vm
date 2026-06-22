@@ -45,7 +45,7 @@ impl FunctionType {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid CallConv tag: {invalid}"
                 )));
-            }
+            },
         };
 
         let arity = source.read_usize()?;
@@ -76,11 +76,7 @@ impl FunctionType {
             results.push(ty);
         }
 
-        Ok(Self {
-            abi,
-            params,
-            results,
-        })
+        Ok(Self { abi, params, results })
     }
 }
 
@@ -115,7 +111,7 @@ impl Serializable for Type {
                     AddressSpace::Element => target.write_u8(1),
                 }
                 ty.pointee().write_into(target);
-            }
+            },
             Type::Struct(ty) => {
                 target.write_u8(17);
                 if let Some(name) = ty.name() {
@@ -130,11 +126,11 @@ impl Serializable for Type {
                     TypeRepr::Align(align) => {
                         target.write_u8(1);
                         target.write_u16(align.get());
-                    }
+                    },
                     TypeRepr::Packed(align) => {
                         target.write_u8(2);
                         target.write_u16(align.get());
-                    }
+                    },
                     TypeRepr::Transparent => target.write_u8(3),
                     TypeRepr::BigEndian => target.write_u8(4),
                 }
@@ -149,20 +145,20 @@ impl Serializable for Type {
                     }
                     field.ty.write_into(target);
                 }
-            }
+            },
             Type::Array(ty) => {
                 target.write_u8(18);
                 target.write_usize(ty.len);
                 ty.ty.write_into(target);
-            }
+            },
             Type::List(ty) => {
                 target.write_u8(19);
                 ty.write_into(target);
-            }
+            },
             Type::Function(ty) => {
                 target.write_u8(20);
                 ty.write_into(target);
-            }
+            },
             Type::Enum(ty) => {
                 target.write_u8(21);
                 target.write_usize(ty.name().len());
@@ -192,7 +188,7 @@ impl Serializable for Type {
                         target.write_bool(false);
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -204,9 +200,9 @@ const MAX_TYPE_NESTING: usize = 128;
 impl Type {
     /// Provides [Type] deserialization support via the miden-serde-utils serializer.
     ///
-    /// This is a temporary implementation to allow type information to be serialized with libraries,
-    /// but in a future release we'll either rely on the `serde` serialization for these types, or
-    /// provide the serialization implementation in midenc-hir-type instead
+    /// This is a temporary implementation to allow type information to be serialized with
+    /// libraries, but in a future release we'll either rely on the `serde` serialization for
+    /// these types, or provide the serialization implementation in midenc-hir-type instead
     fn read_from_with_depth<R: ByteReader>(
         source: &mut R,
         depth: usize,
@@ -247,11 +243,11 @@ impl Type {
                         return Err(DeserializationError::InvalidValue(format!(
                             "invalid AddressSpace tag: {invalid}"
                         )));
-                    }
+                    },
                 };
                 let pointee = Type::read_from_with_depth(source, next_depth)?;
                 Type::Ptr(Arc::new(PointerType { addrspace, pointee }))
-            }
+            },
             17 => {
                 let name = if source.read_bool()? {
                     Some(Arc::<str>::from(String::read_from(source)?.into_boxed_str()))
@@ -267,7 +263,7 @@ impl Type {
                             )
                         })?;
                         TypeRepr::Align(align)
-                    }
+                    },
                     2 => {
                         let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
                             DeserializationError::InvalidValue(
@@ -276,14 +272,14 @@ impl Type {
                             )
                         })?;
                         TypeRepr::Packed(align)
-                    }
+                    },
                     3 => TypeRepr::Transparent,
                     4 => TypeRepr::BigEndian,
                     invalid => {
                         return Err(DeserializationError::InvalidValue(format!(
                             "invalid TypeRepr tag: {invalid}"
                         )));
-                    }
+                    },
                 };
                 let num_fields = source.read_u8()?;
                 let mut fields = SmallVec::<[NameAndType; 4]>::with_capacity(num_fields as usize);
@@ -297,16 +293,16 @@ impl Type {
                     fields.push(NameAndType { name, ty });
                 }
                 Type::Struct(Arc::new(StructType::from_parts(name, repr, fields)))
-            }
+            },
             18 => {
                 let arity = source.read_usize()?;
                 let ty = Type::read_from_with_depth(source, next_depth)?;
                 Type::Array(Arc::new(ArrayType { ty, len: arity }))
-            }
+            },
             19 => {
                 let ty = Type::read_from_with_depth(source, next_depth)?;
                 Type::List(Arc::new(ty))
-            }
+            },
             20 => Type::Function(Arc::new(FunctionType::read_from_with_depth(source, next_depth)?)),
             21 => {
                 let name = Arc::<str>::from(String::read_from(source)?.into_boxed_str());
@@ -347,12 +343,12 @@ impl Type {
                 let enum_ty = EnumType::new(name, discriminant, variants)
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
                 Type::Enum(Arc::new(enum_ty))
-            }
+            },
             invalid => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid Type tag: {invalid}"
                 )));
-            }
+            },
         };
         Ok(ty)
     }

@@ -48,7 +48,7 @@ impl ArrayType {
                 let element_size = self.ty.size_in_bits();
                 let padded_element_size = element_size.align_up(min_align);
                 element_size + (padded_element_size * (n - 1))
-            }
+            },
         }
     }
 }

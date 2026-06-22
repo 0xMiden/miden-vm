@@ -196,7 +196,7 @@ impl Type {
             Self::I128 | Self::U128 => Self::I128,
             Self::Felt => {
                 panic!("invalid conversion to signed integer type: felt has no signed equivalent")
-            }
+            },
             ty => panic!("invalid conversion to signed integer type: {ty} is not an integer"),
         }
     }
