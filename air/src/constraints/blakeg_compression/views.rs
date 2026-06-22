@@ -49,6 +49,9 @@ const BD_A_BASE_COL: usize = 64;
 const BD_D_BASE_COL: usize = 68;
 const BD_K2_BASE_COL: usize = 72;
 
+pub(super) const FIRST_B_HIN_PAIR2_BASE_COL: usize = BYTE_SLOT_WIDTH * 16;
+pub(super) const FIRST_B_HIN_PAIR3_BASE_COL: usize = BYTE_SLOT_WIDTH * 17;
+
 #[inline]
 fn byte_slot_base(g: usize, j: usize) -> usize {
     debug_assert!(g < NUM_G);
@@ -91,9 +94,8 @@ pub struct ACRow<'a, AB: LiftedAirBuilder<F = Felt>> {
 }
 
 impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
-    /// Wrap a row slice as an A/C view. The caller is responsible for ensuring
-    /// the slice actually corresponds to an A or C row; the view itself does
-    /// not gate by row type.
+    /// Wrap a row slice as an A/C view. The caller is responsible for using an
+    /// A or C row; the view itself does not gate by row type.
     pub fn new(cols: &'a [AB::Var]) -> Self {
         Self { cols, _phantom: PhantomData }
     }
@@ -308,6 +310,21 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
         )
     }
 
+    /// Routed HIN pair index on the first B row.
+    pub fn first_b_hin_pair_index(&self, pair_idx: usize) -> AB::Expr {
+        self.col(first_b_hin_pair_base(pair_idx))
+    }
+
+    /// Even word in a routed HIN pair on the first B row.
+    pub fn first_b_hin_even_word(&self, pair_idx: usize) -> AB::Expr {
+        self.col(first_b_hin_pair_base(pair_idx) + 1)
+    }
+
+    /// Odd word in a routed HIN pair on the first B row.
+    pub fn first_b_hin_odd_word(&self, pair_idx: usize) -> AB::Expr {
+        self.col(first_b_hin_pair_base(pair_idx) + 2)
+    }
+
     /// `b_new` after the B/D rotation selected by the lookup bus.
     ///
     /// The row view only sums byte contributions. The lookup bus fixes whether
@@ -317,14 +334,24 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
     }
 }
 
+#[inline]
+fn first_b_hin_pair_base(pair_idx: usize) -> usize {
+    match pair_idx {
+        2 => FIRST_B_HIN_PAIR2_BASE_COL,
+        3 => FIRST_B_HIN_PAIR3_BASE_COL,
+        _ => panic!("first-B HIN pair index must be 2 or 3"),
+    }
+}
+
 // ===================================================================
 // Footer row view (F0..F3)
 // ===================================================================
 
 /// View of a footer row F_t (`t` in `0..4`).
 ///
-/// Footer rows compute output bytes from the `v_lo`, `v_hi`, and AND-witness
-/// fields; they are not stored as a separate byte block.
+/// Footer rows use the fixed byte-slot bank. Output bytes are computed from the
+/// `v_lo`, `v_hi`, and AND-witness fields; they are not stored as a separate
+/// byte block.
 pub struct FooterRow<'a, AB: LiftedAirBuilder<F = Felt>> {
     cols: &'a [AB::Var],
     _phantom: PhantomData<AB>,

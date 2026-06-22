@@ -695,7 +695,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
     fn constraint_degree(&self) -> ConstraintDegrees {
         match self {
             Self::Core(_) | Self::Chiplets(_) => ConstraintDegrees { base: 9, ext: 9 },
-            Self::BlakeGCompression(_) => ConstraintDegrees { base: 3, ext: 4 },
+            Self::BlakeGCompression(_) => ConstraintDegrees { base: 3, ext: 3 },
             Self::And8Lookup(_) => ConstraintDegrees { base: 0, ext: 2 },
         }
     }

@@ -33,8 +33,10 @@ use miden_air::trace::{
         FOOTER_OUT_MASKED_TOP_BIT_COL, FOOTER_OUT_ODD_TOP_BYTE_COL, FOOTER_OUT_TOP_MASK_COL,
         FOOTER_ROW_INDEX_COL, FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL,
         IFACE_D_BASE_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
-        MSG_M1_R_CARRY_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS, footer_future_w_col,
-        iface_h_word_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
+        MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS,
+        ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT, footer_future_w_col, iface_h_word_col,
+        iface_m0_route_col, iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col,
+        msg_m1_range_col, msg_word_col,
     },
 };
 use miden_core::{
@@ -83,6 +85,8 @@ const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
 const FOOTER_BYTE_SLOT_COUNT: usize = 18;
 const RAW_OUT_LEN: usize = 8;
+const FIRST_B_HIN_PAIR2_SLOT: usize = 16;
+const FIRST_B_HIN_PAIR3_SLOT: usize = 17;
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
 const AC_A_BASE_COL: usize = 60;
 const AC_B_BASE_COL: usize = 64;
@@ -108,6 +112,23 @@ fn ac_msg_slot_base(g: usize) -> usize {
 fn footer_slot_base(slot: usize) -> usize {
     debug_assert!(slot < FOOTER_BYTE_SLOT_COUNT);
     BYTE_SLOT_WIDTH * slot
+}
+
+fn write_first_b_hin_pairs(
+    rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
+    row: usize,
+    h: &[u32; 8],
+) {
+    let mut w = RowWriter::new(rows, row);
+    let pair2 = footer_slot_base(FIRST_B_HIN_PAIR2_SLOT);
+    w.set_col(pair2, 2);
+    w.set_col(pair2 + 1, h[4] as u64);
+    w.set_col(pair2 + 2, h[5] as u64);
+
+    let pair3 = footer_slot_base(FIRST_B_HIN_PAIR3_SLOT);
+    w.set_col(pair3, 3);
+    w.set_col(pair3 + 1, h[6] as u64);
+    w.set_col(pair3 + 2, h[7] as u64);
 }
 
 // ---- Byte helpers ----
@@ -420,7 +441,7 @@ fn generate_interface_rows(
         return;
     }
 
-    // Row I: HIN-pair fields, R[0..7], C[0..3], D[0..3], multiplicity.
+    // Row I: HIN-pair slots, R[0..7], C[0..3], D[0..3], multiplicity.
     for pair_idx in 0..4 {
         rows[row_i][3 * pair_idx] = Felt::new_unchecked(pair_idx as u64);
     }
@@ -460,8 +481,9 @@ fn generate_interface_rows(
 
 // ---- Message rows ----
 //
-// M0 binds m[0..7] and computes R[0..3] into M1. M1 binds m[8..15] and computes
-// R[4..7] directly into the interface row.
+// M0 and M1 use the fixed slot bank. They do not store all R values locally:
+// M0 computes R[0..3], carries them through M1, and M1 computes R[4..7]
+// directly into the I row.
 
 fn generate_message_rows(
     rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
@@ -473,7 +495,8 @@ fn generate_message_rows(
 ) {
     let row_m0 = start_row + MSG_ROW0;
     let row_m1 = start_row + MSG_ROW1;
-    if start_row + IFACE_INPUT_ROW >= rows.len() {
+    let row_i = start_row + IFACE_INPUT_ROW;
+    if row_i >= rows.len() {
         return;
     }
 
@@ -537,6 +560,15 @@ fn generate_message_rows(
 
     for k in 0..4 {
         rows[row_m1][MSG_M1_R_CARRY_BASE_COL + k] = input_state[k];
+    }
+
+    for i in 0..ROUTED_M0_RANGE_COUNT {
+        let m0_value = rows[row_m0][msg_m0_range_col(12 + i)];
+        rows[row_m1][MSG_M0_ROUTE_CARRY_BASE_COL + i] = m0_value;
+        rows[row_i][iface_m0_route_col(i)] = m0_value;
+    }
+    for i in 0..ROUTED_M1_RANGE_COUNT {
+        rows[row_i][iface_m1_route_col(i)] = rows[row_m1][msg_m1_range_col(8 + i)];
     }
 
     // C, D propagation: forwarded from F3 through M0 -> M1 -> I.
@@ -640,6 +672,9 @@ pub fn generate_compression_block(
         let m_x: [u32; 4] = core::array::from_fn(|g| m[m_x_idx[g]]);
         generate_row_ac(rows, base, &mut v, &G_IDX_COL, &m_x_idx, &m_x, 16, and8_counts);
         generate_row_bd(rows, base + 1, &mut v, &G_IDX_COL, 12, and8_counts);
+        if round == 0 {
+            write_first_b_hin_pairs(rows, base + 1, h);
+        }
 
         let m_y_idx: [usize; 4] = core::array::from_fn(|g| s[2 * g + 1]);
         let m_y: [u32; 4] = core::array::from_fn(|g| m[m_y_idx[g]]);

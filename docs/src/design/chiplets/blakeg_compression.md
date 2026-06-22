@@ -102,8 +102,8 @@ The AIR proves the packed/unpacked boundary explicitly:
 - message rows unpack `R` into `m`;
 - row `I` carries both packed `C` and unpacked `h`, and constrains
   `C[t] = h[2t] + 2^32 * h[2t + 1]`;
-- row `0` and the footer rows use the same `h` words, linked to row `I` by
-  input-chaining lookups.
+- row `0`, the first `B` row, and the footer rows use the same `h` words,
+  linked to row `I` by input-chaining lookups.
 
 With `m` and `h` fixed, the working state starts as:
 
@@ -190,7 +190,7 @@ The tables below use two shorthand forms:
 - `slot16(x, y, z)` means 16 consecutive 3-column slots in columns `0..47`.
 - `msg4(i, w)` means four message slots in columns `48..59`. Each slot uses
   `(message_index, message_word)`. The third cell follows the byte-slot stride
-  used by A/C rows; it is unused and could be recovered by a denser row layout.
+  used by A/C rows; reclaiming it requires a denser row layout.
 
 ### Round-row column bands
 
@@ -222,14 +222,19 @@ Rows `A` and `C` span all 80 physical columns, but only 76 cells carry live
 values. The four unused cells are the third cells of the stride-3 `msg4` slots
 described above. Rows `B` and `D` are sparser: they use the byte slots and the
 packed `a`, `d`, and `k2` tail fields, but do not need message slots or `k3`
-bits. This is a layout cost of keeping the four G-step row families separate; a
-fused or reordered row layout could improve occupancy, but would need a
-separate constraint and lookup-pressure analysis.
+bits. This is a layout cost of keeping the four G-step row families separate.
+Improving occupancy here requires a separate constraint and lookup-pressure
+analysis for a fused or reordered row layout.
 
 Row `0` is an `A_col` row with the same physical layout as every other `A` row,
 but its `a[0..3]` cells in columns `60..63` hold `h[0..3]`, and its `b[0..3]`
-cells in columns `64..67` hold `h[4..7]`. The row emits four first-row
-input-chaining lookup messages from those eight words.
+cells in columns `64..67` hold `h[4..7]`. Row `0` emits first-row
+input-chaining messages for pairs `0` and `1`.
+
+Pairs `2` and `3` are routed through spare byte-slot fields on the first `B`
+row. A local equality ties those routed fields to the first `B` row's
+byte-decomposed `b` words, so the routed pairs inherit the same byte range
+checks as the words used by the round core.
 
 ### Non-round column bands
 
@@ -310,10 +315,10 @@ families that need them:
 | `O` | none | `8..11` | VM-visible output forwarding; `C` is no longer needed. |
 
 The forwarding constraints enforce the path
-`F3 -> M0 -> M1 -> I` for both `C` and `D`, and `I -> O` for `D`. A denser
-layout could keep these values in the same physical columns across more row
-families, but it would have to repack the message-row canonicality fields,
-future-`W` cells, and interface payload without increasing lookup pressure.
+`F3 -> M0 -> M1 -> I` for both `C` and `D`, and `I -> O` for `D`. Keeping these
+values in the same physical columns across more row families would require a
+different placement for the message-row canonicality fields, future-`W` cells,
+and interface payload without increasing lookup pressure.
 
 ## Constraints by Row Family
 
@@ -342,8 +347,9 @@ Row `I` contributes the external lookup messages:
 - it contributes `+2` to each input-chaining pair
   `BlakeGInputPairMsg { pair_index, h_even, h_odd }`.
 
-Row `0` and the matching footer row each contribute `-1` to the same
-input-chaining pair.
+Row `0` contributes `-1` for pairs `0` and `1`. The first `B` row contributes
+`-1` for pairs `2` and `3`. The matching footer row contributes the other `-1`
+for each pair.
 
 Row `I` also forwards `[R, D]` and `multiplicity` to row `O`. This is local
 trace routing; row `O` does not contribute lookup messages.
@@ -459,8 +465,10 @@ column -> diagonal: a[g], b[(g+3)%4], c[(g+2)%4], d[(g+1)%4]
 diagonal -> column: a[g], b[(g+1)%4], c[(g+2)%4], d[(g+3)%4]
 ```
 
-Row `0` additionally contributes `-1` to each input-chaining pair and pins
-`v[8..15]` to the BlakeG IV constants. Row `55` forwards the final working
+Row `0` contributes `-1` to input-chaining pairs `0` and `1` and pins
+`v[8..15]` to the BlakeG IV constants. The first `B` row contributes `-1` to
+input-chaining pairs `2` and `3` through routed fields that are constrained
+equal to its byte-decomposed `b` words. Row `55` forwards the final working
 state `W[0..15]` into the footer.
 
 ### Footer Rows `F0..F3`
@@ -530,13 +538,16 @@ them to `M1`, and `M1` forwards them to row `I`. Non-AEAD rows force `clk = 0`.
 Row `O` carries the forwarded `[R, D]` state and multiplicity from row `I`, but
 it has no lookup messages. It gives the current last-row-idle lookup accumulator
 a final row with no active BlakeG lookups, and it keeps each compression block
-on a 64-row period. A wrapped lookup accumulator could use this row differently.
+on a 64-row period. Reusing this row for lookup work would require a wrapped
+lookup accumulator.
 
 ## Lookup Pressure by Row
 
-The layout described here uses 24 BlakeG lookup columns. Columns `0..15` carry
-byte-pair or range facts. Columns `16..23` carry word-level facts,
-input-chaining facts, the interface link, and AEAD-XOF output pairs.
+The production layout uses 12 BlakeG lookup columns: ten batch-2 columns for
+twenty narrow slots, plus two annex columns. The narrow slots carry the
+byte-pair, range, word, and input-chaining messages selected by each row family.
+The annex columns carry the remaining first-row, message-tail, AEAD-XOF, and
+interface-link messages.
 
 The table below counts active logical lookup contributions per row. It counts a
 single message with multiplicity `-7` as one lookup contribution, because it
@@ -544,21 +555,23 @@ occupies one lookup fraction.
 
 | Row(s) | Active lookup contributions |
 | ------ | --------------------------- |
-| `0` | 16 `And8Msg` for `d & a_new`, 4 `BlakeGWordMsg`, and 4 first-row `BlakeGInputPairMsg`: 24 total. |
+| `0` | 16 `And8Msg` for `d & a_new`, 4 `BlakeGWordMsg`, and 2 first-row `BlakeGInputPairMsg`: 22 total. |
+| First `B` row | 16 `rotr12` byte-pair messages and 2 routed first-row `BlakeGInputPairMsg`: 18 total. |
 | `A` rows except row `0` | 16 `And8Msg` for `d & a_new` and 4 `BlakeGWordMsg`: 20 total. |
 | `C` rows | 16 `And8Msg` for `d & a_new` and 4 `BlakeGWordMsg`: 20 total. |
-| `B` rows | 16 byte-pair rotation messages in the `rotr12` domains: 16 total. |
+| Other `B` rows | 16 byte-pair rotation messages in the `rotr12` domains: 16 total. |
 | `D` rows | 16 byte-pair rotation messages in the `rotr7` domains: 16 total. |
 | `F0..F3` in compression mode | 16 ordinary `And8Msg`, 1 top-bit `And8Msg`, and 1 `BlakeGInputPairMsg`: 18 total. |
 | `F0..F3` in AEAD-XOF mode | The compression-mode 18 plus low and high `AeadBlakeGOutputPairMsg`: 20 total. |
-| `M0` | 16 `RangeMsg` for the 16-bit limbs and 8 `BlakeGWordMsg`: 24 total. |
-| `M1` | 16 `RangeMsg` for the 16-bit limbs and 8 `BlakeGWordMsg`: 24 total. |
-| `I` | 4 `BlakeGInputPairMsg` with multiplicity `+2`, plus either one `HasherCompressionLinkMsg` or one `AeadBlakeGInputMsg`: 5 total. |
+| `M0` | 12 local `RangeMsg` for 16-bit limbs and 8 `BlakeGWordMsg`: 20 total. |
+| `M1` | 8 local `RangeMsg` for 16-bit limbs and 8 `BlakeGWordMsg`: 16 total. |
+| `I` | 4 `BlakeGInputPairMsg` with multiplicity `+2`, 12 routed message-limb `RangeMsg`, plus either one `HasherCompressionLinkMsg` or one `AeadBlakeGInputMsg`: 18 total. |
 | `O` | No lookup contributions. |
 
-Per 64-row block, this gives 1,137 active lookup contributions in compression
-mode and 1,145 in AEAD-XOF mode. The peak row pressure is 24, reached by row
-`0`, `M0`, and `M1`.
+Per 64-row block, this gives 1,138 active lookup contributions in compression
+mode. AEAD-XOF mode adds eight output-pair contributions, for 1,146 total. The
+peak row pressure is 22 on row `0`; after subtracting each row's annex
+contributions, every row fits the twenty narrow slots.
 
 ## Main-trace Utilization
 
@@ -582,10 +595,8 @@ the AIR move lookup work away from high-pressure rows, add helper values that
 lower a concrete degree bottleneck, or route values to a lower-pressure row
 without losing the binding, range, or canonicality constraints.
 
-Deferred layout questions:
+Remaining layout questions:
 
-- Restore the optimized lookup batching first; that is the direct path back to
-  the 12-auxiliary-column target.
 - Investigate whether `B/D` row slack can absorb message-word, range, or
   canonicality work currently concentrated on `M0/M1`.
 - Revisit row `O` only if BlakeG moves from last-row-idle lookup accumulation
@@ -611,8 +622,8 @@ Several values appear on more than one row. These copies have three roles:
 
 This forwarding is trace-level routing, not part of BlakeG itself.
 
-The following simplifications are intentionally deferred until the optimized
-12-auxiliary-column layout is restored and its pressure ledger is available:
+The following simplifications are intentionally deferred to separate layout
+commits, because each one can change routing or lookup-pressure assumptions:
 
 - decide whether row `O` can be reused under wrapped lookup accumulation;
 - reconsider whether compression-link and AEAD input messages can move off row
@@ -650,9 +661,9 @@ comes from the AIR transition constraints and periodic selectors.
 | Message | Payload | Participants |
 | ------- | ------- | -------- |
 | `And8Msg` | `[a, b, result]` plus byte-pair domain | G-core, footer, byte-pair table |
-| `RangeMsg` | `[value]` | Message rows, byte-pair table |
+| `RangeMsg` | `[value]` | Message rows, interface row, byte-pair table |
 | `BlakeGWordMsg` | `[word_index, word]` | Message rows, G-core |
-| `BlakeGInputPairMsg` | `[pair_index, h_even, h_odd]` | Interface row, row `0`, footer |
+| `BlakeGInputPairMsg` | `[pair_index, h_even, h_odd]` | Interface row, row `0`, first `B` row, footer |
 | `HasherCompressionLinkMsg` | `[block(8), cv_in(4), cv_out(4)]` | Interface row, hasher controller |
 | `AeadBlakeGInputMsg` | `[clk, state(12)]` | Interface row, Core AEAD request |
 | `AeadBlakeGOutputPairMsg` | `[clk, first_lane_idx, value0, value1]` | Footer, AEAD stream rows |
@@ -713,11 +724,14 @@ The lookup design relies on these obligations:
   or tied to a locally constrained value before it affects another relation.
 - Message domains are fixed by `BusId`.
 - `BlakeGWordMsg` includes both the schedule index and the word.
-- `BlakeGInputPairMsg` balances exactly as `+2 - 1 - 1` across row `I`, row `0`,
-  and footer rows.
+- `BlakeGInputPairMsg` balances exactly as `+2 - 1 - 1`: row `I` contributes
+  `+2`, row `0` contributes `-1` for pairs `0/1`, the first `B` row
+  contributes `-1` for pairs `2/3`, and footer rows contribute the other `-1`.
 - The footer side of `BlakeGInputPairMsg` is byte-bound by the footer AND8
-  lookups and canonicality gadget, so the row-`0` and row-`I` copies of `h`
-  inherit the same range and packing constraints.
+  lookups and canonicality gadget. The first `B` routed pairs are constrained
+  equal to byte-decomposed `B.b` words. Together these bindings make the row
+  `0`, first-`B`, row-`I`, and footer copies of `h` carry the same range and
+  packing constraints.
 - `HasherCompressionLinkMsg` includes `block`, `cv_in`, and `cv_out`; the
   controller address is handled by the hasher-controller relation.
 - AEAD-XOF output messages include both clock and lane index.
@@ -733,7 +747,7 @@ signed multiplicities, or row gates.
 ## Baseline Lookup Layout
 
 The baseline layout allows at most one active BlakeG lookup fraction per
-auxiliary column on each row. It uses 24 BlakeG lookup columns:
+auxiliary column on each row. It uses 24 logical BlakeG lookup columns:
 
 - columns `0..15`: byte-pair and range lookups;
 - columns `16..23`: word-level lookups, input-chaining lookups,
@@ -743,6 +757,121 @@ This layout exposes the module interfaces without batch packing or routing
 values through unrelated rows. Some singleton columns still contain disjoint
 row-gated relations; the baseline avoids batching, not all column sharing. It is
 an audit baseline, not the final column-minimized layout.
+
+## Production Lookup Layout
+
+The production AIR packs the same logical messages into:
+
+```text
+[2; 10] + [1; 2]
+```
+
+That is, ten auxiliary columns each batch two selected narrow slots, and two
+annex columns carry singleton groups. The batch columns do not change message
+payloads or signs; they only combine compatible fractions whose row selectors
+and degree bounds fit the lookup backend.
+
+The annex columns handle the cases that do not fit the narrow-slot packing:
+first-row input-chaining pairs, compact message-word tails, AEAD-XOF output
+pairs, and the compression/AEAD input interface link.
+
+The routed layout is part of the production shape:
+
+- first-row input-chaining pairs `0/1` are emitted from row `0`;
+- first-row input-chaining pairs `2/3` are emitted from the first `B` row and
+  constrained equal to byte-decomposed `B.b` words;
+- `M0` range-checks 12 limbs locally and routes 4 limb checks through `M1` to
+  row `I`;
+- `M1` range-checks 8 limbs locally and routes 8 limb checks to row `I`;
+- row `I` carries the 12 routed `RangeMsg` contributions and the external
+  compression or AEAD input message.
+
+Those routes reduce peak narrow-slot pressure without changing the LogUp
+payloads. Each route has a matching local equality constraint before the routed
+value is used by another lookup relation.
+
+The shape is not `[2; 12]` because the two annex columns cannot accept a second
+simultaneously active lookup fraction under the degree-3 BlakeG budget. This is
+different from sharing one column across disjoint row gates, which the annex
+columns already do.
+
+For one lookup column, the lookup builder composes the row's rational sum as:
+
+```text
+V / U
+```
+
+and the AIR checks, on transition rows:
+
+```text
+U * aux - V = 0
+```
+
+If the column has declared degree `Deg { v, u }`, the transition degree is:
+
+```text
+max(v, u + 1)
+```
+
+The ten narrow columns are selected batch-2 columns. Each selected slot has a
+linear encoded denominator and a linear multiplicity, so batching two slots gives:
+
+```text
+slot0 = m0 / D0,   deg(m0) = 1, deg(D0) = 1
+slot1 = m1 / D1,   deg(m1) = 1, deg(D1) = 1
+
+slot0 + slot1 = (m0 * D1 + m1 * D0) / (D0 * D1)
+```
+
+Thus:
+
+```text
+Deg { v: 2, u: 2 }
+transition degree = max(2, 2 + 1) = 3
+```
+
+That fits the BlakeG degree-3 budget.
+
+The annex columns are different. Each one has active branches with denominator
+degree two:
+
+```text
+annex0: Deg { v: 3, u: 2 }
+annex1: Deg { v: 2, u: 2 }
+```
+
+Their transition degrees are:
+
+```text
+annex0: max(3, 2 + 1) = 3
+annex1: max(2, 2 + 1) = 3
+```
+
+Those branches are already at the denominator side of the degree-3 budget. A
+second simultaneously active non-constant denominator of degree at least one
+would need a real batch, which cross-multiplies:
+
+```text
+(V0 / U0) + (V1 / U1)
+    = (V0 * U1 + V1 * U0) / (U0 * U1)
+```
+
+For either annex column, this gives:
+
+```text
+u >= 2 + 1 = 3
+transition degree >= 3 + 1 = 4
+```
+
+For `annex0`, the numerator side also exceeds the budget on the
+compression-link branch because that branch already gives `v = 3`, so
+`v >= 3 + 1 = 4`. For `annex1`, the denominator side alone is enough to force
+degree 4.
+
+That violates the degree-3 BlakeG AIR. A declared second slot with no real lookup
+would be only a misleading capacity annotation, not a smaller or faster AIR. The
+honest shape is therefore ten real batch-2 columns plus two singleton annex
+columns.
 
 ## Optimization Ladder
 
