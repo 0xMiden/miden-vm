@@ -58,7 +58,7 @@ jobs:
           cargo codspeed build --measurement-mode walltime --profile optimized -p miden-crypto-smt-codspeed-bench --bench smt_codspeed
 
       - name: Run benchmarks
-        uses: CodSpeedHQ/action@9d332c4d90b43981c3e55ae8e38e68709996240f # v4.17.0
+        uses: CodSpeedHQ/action@c145068895e045cc725ee76fcd2307624b65c3af # v4.17.5
         with:
           mode: walltime
           run: cargo codspeed run --measurement-mode walltime -p miden-crypto-smt-codspeed-bench --bench smt_codspeed

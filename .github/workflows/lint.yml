@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: typos
       - run: make typos-check
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: taplo-cli
       - run: make toml-check
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: cargo-workspace-lints
       - run: |
@@ -119,7 +119,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: cargo-shear
       - name: Check Cargo manifests for unused dependencies
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # pin@v6.0.3
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: cargo-deny
       - run: make cargo-deny
@@ -166,7 +166,7 @@ jobs:
           version: "17"
       - name: Rustup
         run: rustup update --no-self-update
-      - uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # pin@v2.81.8
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # pin@v2.81.11
         with:
           tool: cargo-hack
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # pin@v2.9.1
