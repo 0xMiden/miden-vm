@@ -357,10 +357,6 @@ impl And8LookupAir {
         BusId::COUNT
     }
 
-    fn lookup_accumulator_mode(self) -> crate::lookup::LookupAccumulatorMode {
-        crate::lookup::LookupAccumulatorMode::WrappedCentered
-    }
-
     fn lookup_eval<LB: And8LookupBuilder>(self, builder: &mut LB) {
         let main = builder.main();
         let local: &And8LookupCols<_> = main.current_slice().borrow();
@@ -438,10 +434,10 @@ impl MidenAirId {
 
     pub const fn lookup_accumulator_mode(self) -> crate::lookup::LookupAccumulatorMode {
         match self {
-            Self::Core | Self::Chiplets | Self::BlakeGCompression => {
-                crate::lookup::LookupAccumulatorMode::LastRowIdle
+            Self::Core | Self::Chiplets => crate::lookup::LookupAccumulatorMode::LastRowIdle,
+            Self::BlakeGCompression | Self::And8Lookup => {
+                crate::lookup::LookupAccumulatorMode::WrappedCentered
             },
-            Self::And8Lookup => crate::lookup::LookupAccumulatorMode::WrappedCentered,
         }
     }
 }
@@ -737,10 +733,10 @@ where
 
     fn accumulator_mode(&self) -> crate::lookup::LookupAccumulatorMode {
         match self {
-            Self::Core(_) | Self::Chiplets(_) | Self::BlakeGCompression(_) => {
-                crate::lookup::LookupAccumulatorMode::LastRowIdle
-            },
-            Self::And8Lookup(a) => a.lookup_accumulator_mode(),
+            Self::Core(_) => MidenAirId::Core.lookup_accumulator_mode(),
+            Self::Chiplets(_) => MidenAirId::Chiplets.lookup_accumulator_mode(),
+            Self::BlakeGCompression(_) => MidenAirId::BlakeGCompression.lookup_accumulator_mode(),
+            Self::And8Lookup(_) => MidenAirId::And8Lookup.lookup_accumulator_mode(),
         }
     }
 
@@ -1061,8 +1057,6 @@ mod tests {
         let centered = [QuadFelt::from(Felt::from_u32(3))];
 
         let base_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &zero];
-        let shifted_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &centered];
-
         let base = air
             .eval_external(
                 &challenges,
@@ -1072,20 +1066,26 @@ mod tests {
                 &log_heights,
             )
             .expect("base boundary reduction");
-        let shifted = air
-            .eval_external(
-                &challenges,
-                &public_values,
-                &kernel_digests,
-                &shifted_aux_values,
-                &log_heights,
-            )
-            .expect("shifted boundary reduction");
 
-        let trace_len = Felt::new(1u64 << LOG_AND8_LOOKUP_TRACE_HEIGHT)
-            .expect("trace length must be canonical");
-        let expected_delta = centered[0] * QuadFelt::from(trace_len);
-        assert_eq!(shifted[0] - base[0], expected_delta);
+        for air_id in [MidenAirId::BlakeGCompression, MidenAirId::And8Lookup] {
+            let mut shifted_aux_values = base_aux_values;
+            shifted_aux_values[air_id.instance_index()] = &centered;
+
+            let shifted = air
+                .eval_external(
+                    &challenges,
+                    &public_values,
+                    &kernel_digests,
+                    &shifted_aux_values,
+                    &log_heights,
+                )
+                .expect("shifted boundary reduction");
+
+            let trace_len = Felt::new(1u64 << log_heights[air_id.instance_index()])
+                .expect("trace length must be canonical");
+            let expected_delta = centered[0] * QuadFelt::from(trace_len);
+            assert_eq!(shifted[0] - base[0], expected_delta, "wrong boundary scale for {air_id:?}");
+        }
     }
 
     #[test]
@@ -1111,6 +1111,12 @@ mod tests {
                 aux_terms: vec![
                     crate::ace::AuxBoundaryTerm { column: 0, scale: None },
                     crate::ace::AuxBoundaryTerm {
+                        column: MidenAirId::BlakeGCompression.instance_index(),
+                        scale: Some(InputKey::TraceLenAir(
+                            MidenAirId::BlakeGCompression.instance_index(),
+                        )),
+                    },
+                    crate::ace::AuxBoundaryTerm {
                         column: MidenAirId::And8Lookup.instance_index(),
                         scale: Some(InputKey::TraceLenAir(MidenAirId::And8Lookup.instance_index())),
                     },
@@ -1134,12 +1140,18 @@ mod tests {
 
         let centered = QuadFelt::from(Felt::from_u32(3));
         let core_boundary = layout.index(InputKey::AuxBusBoundary(0)).expect("core boundary slot");
+        let blakeg_boundary =
+            layout.index(InputKey::AuxBusBoundary(2)).expect("BlakeG boundary slot");
         let and8_boundary = layout.index(InputKey::AuxBusBoundary(3)).expect("AND8 boundary slot");
 
         let base = circuit.eval(&inputs).expect("ACE base eval");
         let mut core_shifted = inputs.clone();
         core_shifted[core_boundary] += centered;
         let core_delta = circuit.eval(&core_shifted).expect("ACE core-shift eval") - base;
+
+        let mut blakeg_shifted = inputs.clone();
+        blakeg_shifted[blakeg_boundary] += centered;
+        let blakeg_delta = circuit.eval(&blakeg_shifted).expect("ACE BlakeG-shift eval") - base;
 
         let mut and8_shifted = inputs;
         and8_shifted[and8_boundary] += centered;
@@ -1156,6 +1168,8 @@ mod tests {
         let base_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] = [&zero, &zero, &zero, &zero];
         let core_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
             [&native_centered, &zero, &zero, &zero];
+        let blakeg_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
+            [&zero, &zero, &native_centered, &zero];
         let and8_aux_values: [&[QuadFelt]; MIDEN_AIR_COUNT] =
             [&zero, &zero, &zero, &native_centered];
 
@@ -1178,6 +1192,16 @@ mod tests {
             )
             .expect("native core-shift boundary")[0]
             - native_base[0];
+        let native_blakeg_delta = air
+            .eval_external(
+                &challenges,
+                &public_values,
+                &kernel_digests,
+                &blakeg_aux_values,
+                &log_heights,
+            )
+            .expect("native BlakeG-shift boundary")[0]
+            - native_base[0];
         let native_and8_delta = air
             .eval_external(
                 &challenges,
@@ -1189,6 +1213,7 @@ mod tests {
             .expect("native AND8-shift boundary")[0]
             - native_base[0];
 
+        assert_eq!(blakeg_delta * native_core_delta, core_delta * native_blakeg_delta);
         assert_eq!(and8_delta * native_core_delta, core_delta * native_and8_delta);
     }
 }

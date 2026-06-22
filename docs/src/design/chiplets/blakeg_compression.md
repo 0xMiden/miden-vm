@@ -172,7 +172,8 @@ The internal submodules are:
 
 Row `I` is the external interface. It carries packed `R`, packed `C`, packed
 `D`, and unpacked `h`, and it emits the compression or AEAD input lookup
-message. Row `O` is a lookup-idle row used by the last-row-idle accumulator.
+message. Row `O` carries the forwarded output state but has no lookup messages
+in this routing.
 
 The next section is a physical layout reference. It explains where values live
 in the 80 columns. The later "Constraints by Row Family" section explains what
@@ -180,9 +181,9 @@ each row family proves.
 
 ## Physical Layout Reference
 
-The 80 main-trace columns are overlaid by row family. The same physical column
-can mean different things on different row types; the row selector fixes the
-meaning. The tables in this section are layout references, not the primary
+The 80 main-trace columns are overlaid by row family. A physical column can
+have different semantic roles on different row types; the row selector fixes
+the role. The tables in this section are layout references, not the primary
 soundness argument.
 
 The tables below use two shorthand forms:
@@ -256,8 +257,9 @@ They do this as three small state machines:
   one packed `D[t]`.
 - `M0/M1` bind the packed rate block `R[0..7]` to the 16 message words
   `m[0..15]` used by the round rows.
-- `I/O` present the external boundary: row `I` emits the LogUp messages, and
-  row `O` is an inactive row for last-row-idle lookup accumulation.
+- `I/O` present the external boundary: row `I` emits the external LogUp
+  messages for this layout, and row `O` carries the forwarded output state
+  without emitting lookups.
 
 The footer rows need special handling because only `F0` is adjacent to the last
 G row. Row `55` transitions into `F0`, so `F0` can receive the final working
@@ -536,10 +538,10 @@ them to `M1`, and `M1` forwards them to row `I`. Non-AEAD rows force `clk = 0`.
 ### Output/Idle Row `O`
 
 Row `O` carries the forwarded `[R, D]` state and multiplicity from row `I`, but
-it has no lookup messages. It gives the current last-row-idle lookup accumulator
-a final row with no active BlakeG lookups, and it keeps each compression block
-on a 64-row period. Reusing this row for lookup work would require a wrapped
-lookup accumulator.
+it has no lookup messages. BlakeG uses wrapped lookup accumulation, so the row
+is not required for accumulator closure; it remains available for a separate
+routing change. In this layout it keeps each compression block on a 64-row
+period and forwards the VM-visible output state.
 
 ## Lookup Pressure by Row
 
@@ -576,7 +578,7 @@ contributions, every row fits the twenty narrow slots.
 ## Main-trace Utilization
 
 The 64-row by 80-column block has 5,120 cells. Counting semantic payload cells,
-the current layout uses about 4,242 cells, or 82.85%. Counting explicit helper
+this layout uses about 4,242 cells, or 82.85%. Counting explicit helper
 and zero-filled layout cells raises the accounting to about 85.20%, but the
 semantic number is the useful design metric.
 
@@ -595,16 +597,26 @@ the AIR move lookup work away from high-pressure rows, add helper values that
 lower a concrete degree bottleneck, or route values to a lower-pressure row
 without losing the binding, range, or canonicality constraints.
 
-Remaining layout questions:
+Deferred layout work:
 
-- Investigate whether `B/D` row slack can absorb message-word, range, or
-  canonicality work currently concentrated on `M0/M1`.
-- Revisit row `O` only if BlakeG moves from last-row-idle lookup accumulation
-  to wrapped lookup accumulation; otherwise it must stay lookup-idle.
-- Consider moving `A/C` carry bits into the unused message-slot fields only if
-  footer/message/interface tail rows no longer keep the width at 80.
-- Add degree-reduction helper columns only when a degree report shows that the
-  helper unlocks a specific lookup batch or auxiliary-column reduction.
+- `B/D` rows have spare cells, but their lookup pressure is not the
+  bottleneck. Moving M-row range or canonicality work there would lower M-row
+  pressure without reducing the 12-column lookup shape.
+- BlakeG uses wrapped lookup accumulation, so row `O` no longer has to stay
+  lookup-idle for accumulator closure. It is still idle in this routing;
+  reusing it is a separate layout change because moving messages onto `O`
+  changes lookup pressure and the recursive relation digest.
+- The unused third field in each `A/C` message slot is zero padding in the
+  selected-slot encoding. Reusing it requires changing the encoded
+  `BlakeGWordMsg` denominator for those slots. Moving `k3` bits there alone
+  does not reduce the 80-column width while M-row `D` slots and `mode, clk`
+  still occupy the tail columns.
+- Degree-reduction helper columns are still relevant for LogUp selectors and
+  multiplicities. The useful target is not the BlakeG main constraint degree,
+  which is already 3; it is reducing an annex column's declared `(v, u)` degree
+  enough to permit another real lookup fraction without making the transition
+  degree exceed 3. Add such helpers only when they unlock a concrete lookup
+  batch or column reduction.
 
 ## Forwarding and Duplicated Values
 
@@ -625,10 +637,11 @@ This forwarding is trace-level routing, not part of BlakeG itself.
 The following simplifications are intentionally deferred to separate layout
 commits, because each one can change routing or lookup-pressure assumptions:
 
-- decide whether row `O` can be reused under wrapped lookup accumulation;
+- decide which lookup messages, if any, should move onto row `O`;
 - reconsider whether compression-link and AEAD input messages can move off row
   `I`;
-- revisit the `C`/`D` forwarding path through `M0` and `M1`;
+- revisit the `C`/`D` forwarding path through `M0` and `M1` only if the
+  message-row or interface layout changes;
 - prune value routing that exists only for lookup-pressure management;
 - delete unused columns or helpers only after the relation digest, recursive
   verifier artifacts, and lookup oracle tests agree with the new layout.
