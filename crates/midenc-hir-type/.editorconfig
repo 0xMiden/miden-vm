@@ -1,0 +1,17 @@
+# Documentation available at editorconfig.org
+
+root=true
+
+[*]
+ident_style = space
+ident_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.yml]
+ident_size = 2
+
+[*.toml]
+indent_size = 4

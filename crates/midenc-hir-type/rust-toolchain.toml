@@ -1,0 +1,8 @@
+[toolchain]
+# REMINDER: After updating the channel, update:
+# - docs/src/usage/cargo-miden.md
+# - docs/src/usage/midenc.md
+channel = "1.93"
+components = ["rustfmt", "rust-src", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
