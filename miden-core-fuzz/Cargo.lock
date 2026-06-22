@@ -1073,7 +1073,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.24.0"
+version = "0.8.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
