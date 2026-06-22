@@ -68,8 +68,8 @@ struct BenchmarkResult {
     repo_root: String,
     git_ref: String,
     git_sha: String,
-    bench_wall_ms: Option<f64>,
-    trace_wall_ms: Option<f64>,
+    bench_build_and_run_wall_ms: Option<f64>,
+    span_collection_build_and_run_wall_ms: Option<f64>,
     rayon_num_threads: Option<usize>,
     bench_axes: Vec<String>,
     sample_size: Option<usize>,
@@ -114,8 +114,8 @@ struct Comparison {
     current_primary_ms: f64,
     program_delta_ms: f64,
     program_delta_pct: f64,
-    baseline_bench_wall_ms: Option<f64>,
-    current_bench_wall_ms: Option<f64>,
+    baseline_bench_build_and_run_wall_ms: Option<f64>,
+    current_bench_build_and_run_wall_ms: Option<f64>,
     rows: Vec<ComparisonRow>,
     top_slowdowns: Vec<ComparisonRow>,
     missing_in_current: Vec<String>,
@@ -238,11 +238,11 @@ fn cmd_run(
     if let Some(warm_up_time_secs) = warm_up_time_secs {
         bench_command.args(["--warm-up-time", &warm_up_time_secs.to_string()]);
     }
-    let bench_wall_ms =
+    let bench_build_and_run_wall_ms =
         run_logged_command(&mut bench_command, repo_root, &envs, &output_dir.join("bench.log"))?;
 
     let spans_path = output_dir.join("spans.json");
-    let (trace_wall_ms, spans) = if should_collect_proof_spans(bench_axes) {
+    let (span_collection_build_and_run_wall_ms, spans) = if should_collect_proof_spans(bench_axes) {
         let mut spans_command = Command::new("cargo");
         spans_command
             .args([
@@ -260,14 +260,14 @@ fn cmd_run(
             .arg(repo_root)
             .arg("--output")
             .arg(&spans_path);
-        let trace_wall_ms = run_logged_command(
+        let span_collection_build_and_run_wall_ms = run_logged_command(
             &mut spans_command,
             repo_root,
             &envs,
             &output_dir.join("spans.log"),
         )?;
         let spans: Vec<SpanRecord> = serde_json::from_str(&fs::read_to_string(&spans_path)?)?;
-        (Some(trace_wall_ms), spans)
+        (Some(span_collection_build_and_run_wall_ms), spans)
     } else {
         let spans = Vec::new();
         write_json(&spans_path, &spans)?;
@@ -277,8 +277,8 @@ fn cmd_run(
     let result = collect_result(
         repo_root,
         git_ref,
-        Some(bench_wall_ms),
-        trace_wall_ms,
+        Some(bench_build_and_run_wall_ms),
+        span_collection_build_and_run_wall_ms,
         Some(rayon_num_threads),
         bench_axes,
         sample_size,
@@ -294,8 +294,8 @@ fn cmd_run(
 fn collect_result(
     repo_root: &Path,
     git_ref: &str,
-    bench_wall_ms: Option<f64>,
-    trace_wall_ms: Option<f64>,
+    bench_build_and_run_wall_ms: Option<f64>,
+    span_collection_build_and_run_wall_ms: Option<f64>,
     rayon_num_threads: Option<usize>,
     bench_axes: &str,
     sample_size: Option<usize>,
@@ -322,8 +322,8 @@ fn collect_result(
         repo_root: repo_root.display().to_string(),
         git_ref: git_ref.to_string(),
         git_sha: current_sha(repo_root)?,
-        bench_wall_ms,
-        trace_wall_ms,
+        bench_build_and_run_wall_ms,
+        span_collection_build_and_run_wall_ms,
         rayon_num_threads,
         bench_axes: split_csv(bench_axes),
         sample_size,
@@ -505,8 +505,8 @@ fn compare_results(
         current_primary_ms: current_primary,
         program_delta_ms,
         program_delta_pct,
-        baseline_bench_wall_ms: baseline.bench_wall_ms,
-        current_bench_wall_ms: current.bench_wall_ms,
+        baseline_bench_build_and_run_wall_ms: baseline.bench_build_and_run_wall_ms,
+        current_bench_build_and_run_wall_ms: current.bench_build_and_run_wall_ms,
         rows,
         top_slowdowns,
         missing_in_current,
@@ -828,8 +828,8 @@ mod tests {
             repo_root: ".".to_string(),
             git_ref: git_ref.to_string(),
             git_sha: format!("{git_ref}-sha"),
-            bench_wall_ms: None,
-            trace_wall_ms: None,
+            bench_build_and_run_wall_ms: None,
+            span_collection_build_and_run_wall_ms: None,
             rayon_num_threads: None,
             bench_axes: vec![name.to_string()],
             sample_size: None,
