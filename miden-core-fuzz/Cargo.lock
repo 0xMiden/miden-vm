@@ -1073,9 +1073,7 @@ dependencies = [
 
 [[package]]
 name = "midenc-hir-type"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff8e411205251d07ec902559d80f097e66fedb644e0c35dc4cad431c10b99a4d"
+version = "0.24.0"
 dependencies = [
  "miden-formatting",
  "miden-serde-utils",
