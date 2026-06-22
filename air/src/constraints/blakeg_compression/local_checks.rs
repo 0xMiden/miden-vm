@@ -1,9 +1,8 @@
 //! Per-row local constraints: carry checks, message binding, mask_bit Boolean,
 //! footer accumulator zero-init, and IV initialization.
 //!
-//! These are the "no transition needed, same row" constraints. Splitting them
-//! out makes the row-by-row sanity checks easy to audit independently of the
-//! more involved row-to-row transition logic.
+//! These are the same-row constraints. Keeping them separate from transition
+//! constraints gives each row-local binding a direct test surface.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
@@ -99,32 +98,6 @@ where
     }
 }
 
-/// Bind routed HIN pairs 2 and 3 to the byte-decomposed first-B `b` lanes.
-///
-/// Pair 0 and pair 1 are emitted directly from row-0 `A.a`. Pair 2 and pair 3
-/// are routed through spare fields on the first B row, so they need this local
-/// equality to inherit the byte range checks already applied to `B.b`.
-pub fn enforce_first_b_hin_matches_b_words<AB>(
-    builder: &mut AB,
-    bd_local: &BDRow<AB>,
-    sel: &Selectors<AB>,
-) where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let is_first_b = sel.is_first_b();
-    let two = AB::Expr::from(Felt::new_unchecked(2));
-    let three = AB::Expr::from(Felt::new_unchecked(3));
-    let builder = &mut builder.when(is_first_b);
-
-    builder.assert_zero(bd_local.first_b_hin_pair_index(2) - two);
-    builder.assert_zero(bd_local.first_b_hin_even_word(2) - bd_local.b_word(0));
-    builder.assert_zero(bd_local.first_b_hin_odd_word(2) - bd_local.b_word(1));
-
-    builder.assert_zero(bd_local.first_b_hin_pair_index(3) - three);
-    builder.assert_zero(bd_local.first_b_hin_even_word(3) - bd_local.b_word(2));
-    builder.assert_zero(bd_local.first_b_hin_odd_word(3) - bd_local.b_word(3));
-}
-
 /// Footer `mask_bit` Boolean check.
 ///
 /// `mask_bit in {0, 1}` on every footer row. The Boolean form is enforced here; the AND8 lookup
@@ -150,9 +123,9 @@ pub fn enforce_footer_mask_bit_boolean<AB>(
 /// `v[0..8]` is the chaining value `h[0..8]` and is bound by the LogUp HIN
 /// bus (in `blakeg_air.rs`); but `v[8..16]` is *not* exposed on any bus, so
 /// without this constraint an adversarial trace could replace those eight u32
-/// slots with arbitrary values and produce a valid-looking compression that
-/// is not actually BlakeG. Gating by `is_first_comp` (1 only on row 0) makes
-/// this a pure local constraint of degree 2.
+/// slots and satisfy the compression constraints for a non-BlakeG initial
+/// state. Gating by `is_first_comp` (1 only on row 0) makes this a pure local
+/// constraint of degree 2.
 pub fn enforce_iv_init<AB>(builder: &mut AB, ac_local: &ACRow<AB>, sel: &Selectors<AB>)
 where
     AB: LiftedAirBuilder<F = Felt>,

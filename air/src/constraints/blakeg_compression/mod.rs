@@ -1,7 +1,7 @@
 //! BlakeG 64x80 chiplet AIR constraints.
 //!
 //! The chiplet trace is laid out as a 64-row x 80-column block. See
-//! `notes/blakeg-arithmetization-tutorial.md` for the full arithmetization:
+//! `docs/src/design/chiplets/blakeg_compression.md` for the arithmetization overview:
 //!
 //! - Rows 0..56: 7 rounds of BlakeG x 8 G-rows per round, four row types
 //!   `A` / `B` / `C` / `D` cycling through the column and diagonal halves.
@@ -113,29 +113,20 @@ pub const AC_K3_BIT0_BASE_COL: usize = 72;
 /// First A/C column for the high bit of the ternary `k3` carry.
 pub const AC_K3_BIT1_BASE_COL: usize = 76;
 
-/// Number of M0 message-limb range values pre-bound in the interface row.
-pub const ROUTED_M0_RANGE_COUNT: usize = 4;
-
-/// Number of M1 message-limb range values pre-bound in the interface row.
-pub const ROUTED_M1_RANGE_COUNT: usize = 8;
-
 /// First local message-row range slot.
 pub const MSG_LOCAL_RANGE_SLOT: usize = 6;
 
-/// Number of local M0 range checks.
-pub const MSG_M0_LOCAL_RANGE_COUNT: usize = 12;
+/// Number of M0 range limbs stored in the contiguous slot block.
+pub const MSG_M0_CONTIGUOUS_RANGE_COUNT: usize = 12;
 
-/// Number of local M1 range checks.
-pub const MSG_M1_LOCAL_RANGE_COUNT: usize = 8;
+/// Number of M1 range limbs stored in the contiguous slot block.
+pub const MSG_M1_CONTIGUOUS_RANGE_COUNT: usize = 8;
 
-/// First M0 message-row limb range routed out to I.
-pub const MSG_M0_ROUTED_RANGE_BASE_COL: usize = 54;
+/// First M0 tail range-limb column.
+pub const MSG_M0_TAIL_RANGE_BASE_COL: usize = 54;
 
-/// First M1 message-row limb range routed out to I.
-pub const MSG_M1_ROUTED_RANGE_BASE_COL: usize = 42;
-
-/// First M1 carry column for range values routed from M0 to I.
-pub const MSG_M0_ROUTE_CARRY_BASE_COL: usize = 50;
+/// First M1 tail range-limb column.
+pub const MSG_M1_TAIL_RANGE_BASE_COL: usize = 42;
 
 /// First M1 row column carrying R[0..3] computed on M0.
 pub const MSG_M1_R_CARRY_BASE_COL: usize = 54;
@@ -191,10 +182,10 @@ pub const fn footer_future_w_col(idx: usize) -> usize {
 
 /// Physical column for local M0 range limb `idx`.
 pub const fn msg_m0_range_col(idx: usize) -> usize {
-    if idx < MSG_M0_LOCAL_RANGE_COUNT {
+    if idx < MSG_M0_CONTIGUOUS_RANGE_COUNT {
         3 * (MSG_LOCAL_RANGE_SLOT + idx)
     } else if idx < 16 {
-        MSG_M0_ROUTED_RANGE_BASE_COL + (idx - MSG_M0_LOCAL_RANGE_COUNT)
+        MSG_M0_TAIL_RANGE_BASE_COL + (idx - MSG_M0_CONTIGUOUS_RANGE_COUNT)
     } else {
         panic!("M0 range limb index must be in 0..16")
     }
@@ -202,10 +193,10 @@ pub const fn msg_m0_range_col(idx: usize) -> usize {
 
 /// Physical column for local M1 range limb `idx`.
 pub const fn msg_m1_range_col(idx: usize) -> usize {
-    if idx < MSG_M1_LOCAL_RANGE_COUNT {
+    if idx < MSG_M1_CONTIGUOUS_RANGE_COUNT {
         3 * (MSG_LOCAL_RANGE_SLOT + idx)
     } else if idx < 16 {
-        MSG_M1_ROUTED_RANGE_BASE_COL + (idx - MSG_M1_LOCAL_RANGE_COUNT)
+        MSG_M1_TAIL_RANGE_BASE_COL + (idx - MSG_M1_CONTIGUOUS_RANGE_COUNT)
     } else {
         panic!("M1 range limb index must be in 0..16")
     }
@@ -219,24 +210,6 @@ pub const fn msg_canon_inv_col(idx: usize) -> usize {
         MSG_CANON_INV_HI_BASE_COL + (idx - 2)
     } else {
         panic!("canonicality inverse index must be in 0..4")
-    }
-}
-
-/// Physical column for I-row routed M0 range limb `idx`.
-pub const fn iface_m0_route_col(idx: usize) -> usize {
-    if idx < ROUTED_M0_RANGE_COUNT {
-        3 * (4 + idx)
-    } else {
-        panic!("M0 routed range index must be in 0..ROUTED_M0_RANGE_COUNT")
-    }
-}
-
-/// Physical column for I-row routed M1 range limb `idx`.
-pub const fn iface_m1_route_col(idx: usize) -> usize {
-    if idx < ROUTED_M1_RANGE_COUNT {
-        3 * (8 + idx)
-    } else {
-        panic!("M1 routed range index must be in 0..ROUTED_M1_RANGE_COUNT")
     }
 }
 
@@ -306,7 +279,6 @@ pub fn enforce_blakeg_constraints<AB>(
     local_checks::enforce_ac_a_new_bytes_match_word(builder, &ac_local, &sel);
     local_checks::enforce_ac_message_schedule(builder, &ac_local, &sel);
     local_checks::enforce_bd_k2_binary(builder, &bd_local, &sel);
-    local_checks::enforce_first_b_hin_matches_b_words(builder, &bd_local, &sel);
     local_checks::enforce_iv_init(builder, &ac_local, &sel);
 
     // 2. Within-round transitions.
@@ -335,7 +307,7 @@ pub fn enforce_blakeg_constraints<AB>(
     footer::enforce_f3_to_m0(builder, local, next, &sel);
 
     // 6. Message rows M0 / M1: limb reconstruction, rate binding,
-    //    canonicality gadget, M0 -> M1 forwarding (R[0..3], C, D),
+    //    canonicality gadget, M0 -> M1 forwarding (C, D),
     //    M1 -> I forwarding (R, C, D).
     interface::enforce_msg_row_limb_reconstruction(builder, local, &sel);
     interface::enforce_msg_rate_binding(builder, local, next, &sel);
@@ -375,10 +347,7 @@ mod degree3_shape_tests {
     use miden_crypto::stark::matrix::RowMajorMatrix;
 
     use super::{NUM_BLAKEG_COMPRESSION_COLS, periodic, selectors::Selectors};
-    use super::{
-        local_checks,
-        views::{ACRow, BDRow, FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL},
-    };
+    use super::{local_checks, views::ACRow};
     use crate::Felt;
 
     type Sym = SymbolicAirBuilder<Felt, QuadFelt>;
@@ -505,26 +474,11 @@ mod degree3_shape_tests {
         values
     }
 
-    fn first_b_periodic_values() -> Vec<Felt> {
-        let mut values = vec![Felt::ZERO; periodic::NUM_BLAKEG_PERIODIC_COLUMNS];
-        values[periodic::P_IS_B] = Felt::ONE;
-        values[periodic::P_IS_FIRST_B] = Felt::ONE;
-        values
-    }
-
     fn eval_ac_a_new_byte_binding(local: &[Felt; NUM_BLAKEG_COMPRESSION_COLS]) -> Vec<Felt> {
         let mut builder = ConstraintEvalBuilder::new(local, ac_periodic_values());
         let sel = Selectors::<ConstraintEvalBuilder>::new(builder.periodic_values(), 0);
         let ac = ACRow::<ConstraintEvalBuilder>::new(local);
         local_checks::enforce_ac_a_new_bytes_match_word(&mut builder, &ac, &sel);
-        builder.evaluations
-    }
-
-    fn eval_first_b_hin_binding(local: &[Felt; NUM_BLAKEG_COMPRESSION_COLS]) -> Vec<Felt> {
-        let mut builder = ConstraintEvalBuilder::new(local, first_b_periodic_values());
-        let sel = Selectors::<ConstraintEvalBuilder>::new(builder.periodic_values(), 0);
-        let bd = BDRow::<ConstraintEvalBuilder>::new(local);
-        local_checks::enforce_first_b_hin_matches_b_words(&mut builder, &bd, &sel);
         builder.evaluations
     }
 
@@ -572,31 +526,6 @@ mod degree3_shape_tests {
         assert!(
             eval_ac_message_schedule(&local, 7).iter().any(|value| *value != Felt::ZERO),
             "wrong message index for the A/C row must be rejected",
-        );
-    }
-
-    #[test]
-    fn first_b_hin_pairs_are_bound_to_b_words() {
-        let mut local = [Felt::ZERO; NUM_BLAKEG_COMPRESSION_COLS];
-        local[FIRST_B_HIN_PAIR2_BASE_COL] = Felt::new_unchecked(2);
-        local[FIRST_B_HIN_PAIR3_BASE_COL] = Felt::new_unchecked(3);
-
-        assert!(
-            eval_first_b_hin_binding(&local).iter().all(|value| *value == Felt::ZERO),
-            "zero first-B row with matching HIN fields should satisfy the binding",
-        );
-
-        local[FIRST_B_HIN_PAIR2_BASE_COL + 1] = Felt::ONE;
-        assert!(
-            eval_first_b_hin_binding(&local).iter().any(|value| *value != Felt::ZERO),
-            "changing routed HIN pair 2 without changing B.b must be rejected",
-        );
-
-        local[FIRST_B_HIN_PAIR2_BASE_COL + 1] = Felt::ZERO;
-        local[FIRST_B_HIN_PAIR3_BASE_COL] = Felt::new_unchecked(4);
-        assert!(
-            eval_first_b_hin_binding(&local).iter().any(|value| *value != Felt::ZERO),
-            "wrong routed HIN pair index must be rejected",
         );
     }
 

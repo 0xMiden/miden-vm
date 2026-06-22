@@ -2,21 +2,20 @@
 //!
 //! The interface block sits at rows 60..63:
 //!
-//! - Row 60: M0 (message row, m[0..7]). Carries message words and limb
-//!   ranges in the fixed slot bank, plus canonicality witnesses, C/D
-//!   accumulators, and AEAD-XOF labels.
-//! - Row 61: M1 (message row, m[8..15]). Same slot-bank shape, carries
-//!   routed M0 limbs and R[0..3] computed on M0.
-//! - Row 62: I (input interface). Carries HIN-pair slots, routed M-row
-//!   ranges, R[0..7], C[0..3], D[0..3], multiplicity, and AEAD-XOF labels.
+//! - Row 60: M0 (message row, m[0..7]). Carries message words, limb ranges,
+//!   canonicality witnesses, C/D accumulators, and AEAD-XOF labels.
+//! - Row 61: M1 (message row, m[8..15]). Carries message words, limb ranges,
+//!   canonicality witnesses, C/D accumulators, and R[0..3] computed on M0.
+//! - Row 62: I (input interface). Carries HIN-pair fields, R[0..7], C[0..3],
+//!   D[0..3], multiplicity, and AEAD-XOF labels.
 //! - Row 63: O (output interface, last compression-block row). The VM-visible output state
 //!   `block[8] || cv'[4]`, with multiplicity at col 12. No bus interactions.
 //!
 //! This module enforces:
 //! - The packing identity `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]`.
 //! - I -> O forwarding of `R`, `D`, and `multiplicity`.
-//! - M0 -> M1 forwarding of routed limbs, C/D, and AEAD-XOF labels.
-//! - M1 -> I forwarding of routed limbs, R[0..3], C/D, and AEAD-XOF labels.
+//! - M0 -> M1 forwarding of C/D and AEAD-XOF labels.
+//! - M1 -> I forwarding of R[0..3], C/D, and AEAD-XOF labels.
 //! - 16-bit limb reconstruction of `m[k]` on M0 and M1.
 //! - Canonicality of the Goldilocks-u64 (lo, hi) decomposition via an
 //!   inverse-or-zero witness and zero flag.
@@ -29,9 +28,8 @@ use super::selectors::Selectors;
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, IFACE_C_BASE_COL, IFACE_D_BASE_COL,
     IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
-    MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL, ROUTED_M0_RANGE_COUNT,
-    ROUTED_M1_RANGE_COUNT, iface_h_word_col, iface_m0_route_col, iface_m1_route_col,
-    msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
+    MSG_M1_R_CARRY_BASE_COL, iface_h_word_col, msg_canon_inv_col, msg_m0_range_col,
+    msg_m1_range_col, msg_word_col,
 };
 
 /// `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]` for `t in 0..4`.
@@ -89,7 +87,7 @@ pub fn enforce_iface_in_to_out<AB>(
     builder.assert_zero(i_mult - o_mult);
 }
 
-/// M0 -> M1: forward routed limbs, `C[0..3]`, `D[0..3]`, and AEAD-XOF labels.
+/// M0 -> M1: forward `C[0..3]`, `D[0..3]`, and AEAD-XOF labels.
 ///
 /// R[0..3] is computed directly into M1 by `enforce_msg_rate_binding`.
 /// C and D propagate as same-col copies through the M-row chain.
@@ -118,15 +116,9 @@ pub fn enforce_m0_to_m1<AB>(
         let m1_value: AB::Expr = next[col].clone().into();
         builder.assert_zero(m0_value - m1_value);
     }
-    for i in 0..ROUTED_M0_RANGE_COUNT {
-        // Route selected M0 range checks through M1; the interface row consumes them.
-        let routed: AB::Expr = local[msg_m0_range_col(12 + i)].clone().into();
-        let carry: AB::Expr = next[MSG_M0_ROUTE_CARRY_BASE_COL + i].clone().into();
-        builder.assert_zero(routed - carry);
-    }
 }
 
-/// M1 -> I: forward `R[0..3]`, routed limbs, C/D, and AEAD-XOF labels.
+/// M1 -> I: forward `R[0..3]`, C/D, and AEAD-XOF labels.
 ///
 /// R[4..7] is computed directly into I by `enforce_msg_rate_binding`.
 pub fn enforce_m1_to_iface_in<AB>(
@@ -161,18 +153,6 @@ pub fn enforce_m1_to_iface_in<AB>(
         let m1_value: AB::Expr = local[col].clone().into();
         let i_value: AB::Expr = next[col].clone().into();
         builder.assert_zero(m1_value - i_value);
-    }
-    for i in 0..ROUTED_M0_RANGE_COUNT {
-        // Carry routed M0/M1 range checks into the interface row.
-        let m0_routed: AB::Expr = local[MSG_M0_ROUTE_CARRY_BASE_COL + i].clone().into();
-        let i_m0_routed: AB::Expr = next[iface_m0_route_col(i)].clone().into();
-        builder.assert_zero(m0_routed - i_m0_routed);
-    }
-
-    for i in 0..ROUTED_M1_RANGE_COUNT {
-        let m1_routed: AB::Expr = local[msg_m1_range_col(8 + i)].clone().into();
-        let i_m1_routed: AB::Expr = next[iface_m1_route_col(i)].clone().into();
-        builder.assert_zero(m1_routed - i_m1_routed);
     }
 }
 

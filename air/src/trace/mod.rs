@@ -82,10 +82,8 @@ pub mod blakeg_compression {
         FOOTER_ROW_INDEX_COL, FOOTER_SPARE_COL, FOOTER_TOP_BIT_MASK, IFACE_C_BASE_COL,
         IFACE_D_BASE_COL, IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL,
         MSG_CANON_INV_HI_BASE_COL, MSG_CANON_INV_LO_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
-        MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M0_ROUTED_RANGE_BASE_COL, MSG_M1_R_CARRY_BASE_COL,
-        MSG_M1_ROUTED_RANGE_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS, ROUTED_M0_RANGE_COUNT,
-        ROUTED_M1_RANGE_COUNT, footer_future_w_col, iface_h_word_col, iface_m0_route_col,
-        iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
+        MSG_M1_R_CARRY_BASE_COL, NUM_BLAKEG_COMPRESSION_COLS, footer_future_w_col,
+        iface_h_word_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
     };
 }
 

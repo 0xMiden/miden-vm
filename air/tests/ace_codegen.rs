@@ -214,7 +214,10 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
         .sum::<usize>();
     let expected_aux_width = AIRS
         .iter()
-        .map(|spec| LiftedAir::<Felt, QuadFelt>::num_aux_values(&spec.air).next_multiple_of(8))
+        .map(|spec| {
+            let coord_width = LiftedAir::<Felt, QuadFelt>::aux_width(&spec.air) * EXT_DEGREE;
+            coord_width.next_multiple_of(8) / EXT_DEGREE
+        })
         .sum::<usize>();
     assert_eq!(
         layout.counts.width, expected_main_width,

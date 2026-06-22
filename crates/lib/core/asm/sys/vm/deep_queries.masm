@@ -245,7 +245,7 @@ proc process_aux_segment_execution_trace
     swapw padw
     #=> [ZERO, LEAF, CV, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
-    # Load the aligned aux leaf: 8 + 8 + 24 + 24 = 64 base felts.
+    # Load the aligned aux leaf: 8 + 8 + 48 + 24 = 88 coordinate felts.
     exec.load_aux_segment_execution_trace
     #=> [CV, ZERO, DIGEST, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
@@ -262,7 +262,7 @@ end
 #! Inputs:  [ZERO, LEAF, CV, ptr]
 #! Outputs: [CV, ZERO, DIGEST, ptr]
 proc load_aux_segment_execution_trace
-    repeat.8
+    repeat.11
         adv_pipe
         horner_eval_base
         exec.eidos::compress

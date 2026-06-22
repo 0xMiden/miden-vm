@@ -57,7 +57,7 @@ chiplet section begins.
 
 ## Compute AIR
 
-`BlakeGCompressionAir` owns the BlakeG arithmetic constraints. Its trace is a
+`BlakeGCompressionAir` contains the BlakeG arithmetic constraints. Its trace is a
 64-row block per compression request, followed by padding blocks as needed. The
 controller/compression link is a LogUp message:
 
@@ -67,6 +67,9 @@ controller/compression link is a LogUp message:
 
 This compression-link relation is the soundness bridge between the compact controller
 rows and the standalone compression trace.
+
+The lookup-facing BlakeG constraints are described in
+[BlakeG Compression AIR](./blakeg_compression.md).
 
 ## Supported operations
 

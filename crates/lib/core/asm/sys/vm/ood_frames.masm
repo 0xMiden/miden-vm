@@ -11,10 +11,10 @@ pub proc process_row_ood_evaluations
     # Per-row OOD layout uses LMCS alignment 8:
     #   preprocessed: ceil(11/8)*8      = 16 EF evals
     #   main:         56 + 24 + 80 + 16 = 176 EF evals
-    #   aux:          per-AIR aligned   = 64 EF evals
+    #   aux:          2 * (4 + 4 + 24 + 12) = 88 coordinate-polynomial evals
     #   quotient:     8 chunks * 2      = 16 EF evals
-    # The advice stream supplies 544 base felts, read as 68 `adv_pipe` blocks.
-    repeat.68
+    # The advice stream supplies 592 base felts, read as 74 `adv_pipe` blocks.
+    repeat.74
         adv_pipe
         horner_eval_ext
         exec.random_coin::eidos_absorb_block

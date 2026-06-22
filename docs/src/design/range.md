@@ -111,7 +111,7 @@ Requests are emitted by:
 
 - The Stack during some [`u32` operations](./stack/u32_ops.md#range-checks).
 - The [Memory chiplet](./chiplets/memory.md), for address and clock-delta decompositions.
-- The BlakeG compression AIR, for range checks routed out of its message schedule.
+- The BlakeG compression AIR, for message-word limb range checks.
 
 The byte-pair lookup side contributes the LogUp term:
 

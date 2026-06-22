@@ -72,11 +72,6 @@ impl<AB: LiftedAirBuilder<F = Felt>> Selectors<AB> {
         self.read(periodic::P_IS_FIRST_COMP)
     }
 
-    /// 1 on row 1 only (the first B row of an invocation).
-    pub fn is_first_b(&self) -> AB::Expr {
-        self.read(periodic::P_IS_FIRST_B)
-    }
-
     /// 1 on rows 56..59 (any footer row).
     pub fn is_footer(&self) -> AB::Expr {
         self.read(periodic::P_IS_FOOTER)

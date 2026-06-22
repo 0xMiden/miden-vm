@@ -42,7 +42,7 @@ pub const MSG_START: usize = FOOTER_START + FOOTER_ROWS; // 60
 pub const IFACE_START: usize = MSG_START + 2; // 62
 
 /// Number of BlakeG periodic columns.
-pub const NUM_BLAKEG_PERIODIC_COLUMNS: usize = 21;
+pub const NUM_BLAKEG_PERIODIC_COLUMNS: usize = 20;
 
 const SIGMA: [[usize; 16]; 7] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -111,11 +111,6 @@ pub const P_SIGMA_MSG_1: usize = 17;
 pub const P_SIGMA_MSG_2: usize = 18;
 /// Expected BlakeG SIGMA message index for A/C lane 3.
 pub const P_SIGMA_MSG_3: usize = 19;
-
-// ---- First B-row selector (20) ----
-
-/// 1 only on the first B row (row 1) of each block.
-pub const P_IS_FIRST_B: usize = 20;
 
 /// Returns the periodic column values for BlakeG 64x80 constraints.
 pub fn get_blakeg_periodic_column_values() -> Vec<Vec<Felt>> {
@@ -206,11 +201,6 @@ pub fn get_blakeg_periodic_column_values() -> Vec<Vec<Felt>> {
         }
         columns.push(sigma_msg);
     }
-
-    // P_IS_FIRST_B: 1 only on row 1.
-    let mut is_first_b = vec![Felt::ZERO; BLOCK_PERIOD];
-    is_first_b[1] = Felt::ONE;
-    columns.push(is_first_b);
 
     debug_assert_eq!(columns.len(), NUM_BLAKEG_PERIODIC_COLUMNS);
     columns
