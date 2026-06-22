@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
 };
 
 // DEBUG VARIABLE INFO
@@ -299,8 +302,7 @@ fn read_bounded_string<R: ByteReader>(
     source: &mut R,
     label: &str,
 ) -> Result<Arc<str>, DeserializationError> {
-    let len = source.read_usize()?;
-    validate_len(source, label, len)?;
+    let len = read_bounded_len(source, label, 1)?;
     let bytes = source.read_slice(len)?;
     let value = core::str::from_utf8(bytes)
         .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
@@ -311,29 +313,8 @@ fn read_bounded_bytes<R: ByteReader>(
     source: &mut R,
     label: &str,
 ) -> Result<Vec<u8>, DeserializationError> {
-    let len = source.read_usize()?;
-    validate_len(source, label, len)?;
+    let len = read_bounded_len(source, label, 1)?;
     source.read_slice(len).map(<[u8]>::to_vec)
-}
-
-fn validate_len<R: ByteReader>(
-    source: &R,
-    label: &str,
-    len: usize,
-) -> Result<(), DeserializationError> {
-    let max_len = source.max_alloc(1);
-    if len > max_len {
-        return Err(DeserializationError::InvalidValue(format!(
-            "{label} count {len} exceeds budget {max_len}"
-        )));
-    }
-
-    source.check_eor(len).map_err(|err| match err {
-        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(format!(
-            "{label} count {len} exceeds remaining input"
-        )),
-        err => err,
-    })
 }
 
 #[cfg(test)]

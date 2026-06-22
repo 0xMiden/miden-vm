@@ -35,6 +35,44 @@ pub mod serde {
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
     };
+
+    /// Reads and validates a serialized length before it is used for allocation.
+    pub fn read_bounded_len<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+        min_element_size: usize,
+    ) -> Result<usize, DeserializationError> {
+        let len = source.read_usize()?;
+        validate_bounded_len(source, label, len, min_element_size)?;
+        Ok(len)
+    }
+
+    /// Validates that a serialized length fits both the reader budget and remaining input.
+    pub fn validate_bounded_len<R: ByteReader>(
+        source: &R,
+        label: &str,
+        len: usize,
+        min_element_size: usize,
+    ) -> Result<(), DeserializationError> {
+        let max_len = source.max_alloc(min_element_size);
+        if len > max_len {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "{label} count {len} exceeds budget {max_len}"
+            )));
+        }
+
+        let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} count {len} overflows minimum serialized size {min_element_size}"
+            ))
+        })?;
+        source.check_eor(min_bytes).map_err(|err| match err {
+            DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(
+                alloc::format!("{label} count {len} exceeds remaining input"),
+            ),
+            err => err,
+        })
+    }
 }
 
 pub mod crypto {

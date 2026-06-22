@@ -5,7 +5,10 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use miden_core::{
     Word,
     mast::MastNodeId,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
 };
 use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
@@ -832,8 +835,7 @@ impl Deserializable for DebugFunctionInfo {
 // ================================================================================================
 
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
-    let len = source.read_usize()?;
-    validate_len(source, "debug string bytes", len, 1)?;
+    let len = read_bounded_len(source, "debug string bytes", 1)?;
     let bytes = source.read_slice(len)?;
     let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
@@ -859,42 +861,6 @@ fn read_debug_type_indices<R: ByteReader>(
 ) -> Result<Vec<DebugTypeIdx>, DeserializationError> {
     let len = read_bounded_len(source, label, DebugTypeIdx::min_serialized_size())?;
     source.read_many_iter(len)?.collect::<Result<_, _>>()
-}
-
-fn read_bounded_len<R: ByteReader>(
-    source: &mut R,
-    label: &str,
-    min_element_size: usize,
-) -> Result<usize, DeserializationError> {
-    let len = source.read_usize()?;
-    validate_len(source, label, len, min_element_size)?;
-    Ok(len)
-}
-
-fn validate_len<R: ByteReader>(
-    source: &R,
-    label: &str,
-    len: usize,
-    min_element_size: usize,
-) -> Result<(), DeserializationError> {
-    let max_len = source.max_alloc(min_element_size);
-    if len > max_len {
-        return Err(DeserializationError::InvalidValue(alloc::format!(
-            "{label} count {len} exceeds budget {max_len}"
-        )));
-    }
-
-    let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
-        DeserializationError::InvalidValue(alloc::format!(
-            "{label} count {len} overflows minimum serialized size {min_element_size}"
-        ))
-    })?;
-    source.check_eor(min_bytes).map_err(|err| match err {
-        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(alloc::format!(
-            "{label} count {len} exceeds remaining input"
-        )),
-        err => err,
-    })
 }
 
 #[cfg(test)]
