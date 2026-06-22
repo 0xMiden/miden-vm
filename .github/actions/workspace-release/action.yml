@@ -10,6 +10,14 @@ inputs:
     description: "If true, ensure the triggering SHA matches main's HEAD"
     required: false
     default: "false"
+  packages:
+    description: "Comma, space, or newline separated packages to release. Empty uses packages_file."
+    required: false
+    default: ""
+  packages_file:
+    description: "Package list file used when packages is empty."
+    required: false
+    default: "release-packages.txt"
 
 runs:
   using: "composite"
@@ -86,18 +94,27 @@ runs:
         rm -rf ~/.cargo/registry/src
 
     # Dry-run vs real publish
-    - name: Dry-run workspace publish
+    - name: Dry-run selected crate publish
       if: ${{ inputs.mode == 'dry-run' }}
       shell: bash
+      env:
+        RELEASE_PACKAGES: ${{ inputs.packages }}
+        RELEASE_PACKAGES_FILE: ${{ inputs.packages_file }}
       run: |
-        echo "Running cargo publish --workspace --dry-run"
-        cargo publish --workspace --dry-run
+        scripts/release-selected.sh \
+          --mode dry-run \
+          --packages "$RELEASE_PACKAGES" \
+          --packages-file "$RELEASE_PACKAGES_FILE"
 
-    - name: Publish workspace crates
+    - name: Publish selected crates
       if: ${{ inputs.mode == 'publish' }}
       shell: bash
       env:
         CARGO_REGISTRY_TOKEN: ${{ env.CARGO_REGISTRY_TOKEN }}
+        RELEASE_PACKAGES: ${{ inputs.packages }}
+        RELEASE_PACKAGES_FILE: ${{ inputs.packages_file }}
       run: |
-        echo "Publishing workspace crates to crates.io"
-        cargo publish --workspace
+        scripts/release-selected.sh \
+          --mode publish \
+          --packages "$RELEASE_PACKAGES" \
+          --packages-file "$RELEASE_PACKAGES_FILE"
