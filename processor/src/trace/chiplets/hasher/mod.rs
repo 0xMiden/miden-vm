@@ -113,7 +113,7 @@ impl Hasher {
     ///
     /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
     /// align the following chiplet section. `compression_len` is the standalone BlakeG AIR length,
-    /// including the final zero-multiplicity cycle required by the LogUp accumulator.
+    /// before power-of-two trace padding.
     pub(super) fn region_lengths(&self) -> (usize, usize) {
         debug_assert!(!self.finalized, "region_lengths must be called before finalization");
         let controller_len = self.trace.trace_len().next_multiple_of(CONTROLLER_TRACE_ALIGNMENT);
@@ -123,15 +123,13 @@ impl Hasher {
 
     /// Returns the unpadded BlakeG-compression AIR trace length.
     ///
-    /// The extra dummy cycle is required by the generic LogUp accumulator: the last
-    /// trace row must not emit bus interactions. Real BlakeG blocks emit their
-    /// compression-link receives on the input interface row, so the trace always ends
-    /// with a zero-multiplicity block.
+    /// Wrapped lookup accumulation lets real compression blocks occupy the full logical trace.
+    /// Power-of-two padding may still add zero-multiplicity dummy blocks later.
     pub(super) fn blakeg_compression_trace_len(&self) -> usize {
         if self.finalized {
             0
         } else {
-            (self.compression_request_map.len() + 1) * HASH_CYCLE_LEN
+            self.compression_request_map.len() * HASH_CYCLE_LEN
         }
     }
 
@@ -310,8 +308,7 @@ impl Hasher {
     /// Finalizes and fills the controller and BlakeG-compression traces.
     ///
     /// Finalization pads the controller region and materializes one 64-row BlakeG block
-    /// per unique input state. Remaining BlakeG rows are valid zero-multiplicity dummy
-    /// blocks.
+    /// per unique input state. Trace-height padding may append zero-multiplicity dummy blocks.
     pub(super) fn fill_trace(
         mut self,
         trace: &mut ChipletTraceFragment,
@@ -504,7 +501,7 @@ fn fill_blakeg_compression_trace(
     let (rows, _) = trace.as_chunks_mut::<W>();
     debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "BlakeG height must align to blocks");
     debug_assert!(
-        (compression_requests.len() + 1) * HASH_CYCLE_LEN <= rows.len(),
+        compression_requests.len() * HASH_CYCLE_LEN <= rows.len(),
         "BlakeG trace buffer is too short for compression requests",
     );
 

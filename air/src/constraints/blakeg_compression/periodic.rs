@@ -5,11 +5,10 @@
 //!   Rows 56-59: footer (F0, F1, F2, F3)
 //!   Row 60:     message row M0 (m[0..7])
 //!   Row 61:     message row M1 (m[8..15])
-//!   Row 62:     input interface (I)
-//!   Row 63:     output interface (O)
+//!   Row 62:     interface (I)
+//!   Row 63:     idle row
 //!
-//! Row 63 (O) has no bus interactions, which lets the lookup AIR evaluate
-//! fraction columns without a transition selector.
+//! Row 63 has no constrained payload in the current layout.
 //!
 //! Computation row types (merged, 4 per half-round):
 //!   A (row%4==0): add3(x) + xor_rot16   (rows 0,4,8,...,52)
@@ -38,7 +37,7 @@ pub const FOOTER_START: usize = COMPUTATION_ROWS; // 56
 /// Start of message rows (M0 = MSG_START, M1 = MSG_START + 1).
 pub const MSG_START: usize = FOOTER_START + FOOTER_ROWS; // 60
 
-/// Start of interface rows (I = IFACE_START, O = IFACE_START + 1).
+/// Start of the interface row. The following row is idle in the current layout.
 pub const IFACE_START: usize = MSG_START + 2; // 62
 
 /// Number of BlakeG periodic columns.
@@ -79,7 +78,7 @@ pub const P_IS_F1: usize = 7;
 pub const P_IS_F2: usize = 8;
 /// 1 on F3 (row 59).
 pub const P_IS_F3: usize = 9;
-/// 1 on input interface row (row 62).
+/// 1 on the interface row (row 62).
 pub const P_IS_IFACE_IN: usize = 10;
 /// 1 on M0 (row 60). Carries m[0..7] and binds R[0..3] = pack(m[0..7]).
 pub const P_IS_MSG_ROW0: usize = 11;

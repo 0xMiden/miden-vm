@@ -95,7 +95,7 @@ impl<AB: LiftedAirBuilder<F = Felt>> Selectors<AB> {
         self.read(id)
     }
 
-    /// 1 on row 62 (input interface I).
+    /// 1 on row 62 (interface I).
     pub fn is_iface_in(&self) -> AB::Expr {
         self.read(periodic::P_IS_IFACE_IN)
     }

@@ -7,8 +7,8 @@
 //!   Rows 0-55:  computation (7 rounds x 8 rows/round, merged A/B/C/D row types)
 //!   Rows 56-59: footer (F0, F1, F2, F3; each handles one word-pair feed-forward)
 //!   Rows 60-61: message rows (M0, M1)
-//!   Row 62:     input interface (I)
-//!   Row 63:     output interface (O)
+//!   Row 62:     interface (I)
+//!   Row 63:     idle row
 //!
 //! Row types:
 //!   A (row%4==0): add3(x) + xor_rot16
@@ -73,11 +73,8 @@ pub const MSG_ROW0: usize = 60;
 /// Row offset for M1 (message row, m[8..15]).
 pub const MSG_ROW1: usize = 61;
 
-/// Row offset for input interface.
+/// Row offset for the interface row.
 pub const IFACE_INPUT_ROW: usize = 62;
-
-/// Row offset for output interface (last trace row, no bus interactions).
-pub const IFACE_OUTPUT_ROW: usize = 63;
 
 // ---- Computation-row layout helpers ----
 
@@ -436,8 +433,7 @@ fn generate_interface_rows(
     multiplicity: u64,
 ) {
     let row_i = start_row + IFACE_INPUT_ROW;
-    let row_o = start_row + IFACE_OUTPUT_ROW;
-    if row_o >= rows.len() {
+    if row_i >= rows.len() {
         return;
     }
 
@@ -459,22 +455,6 @@ fn generate_interface_rows(
         CompressionOutput::AeadXof { clk } => {
             rows[row_i][AEAD_XOF_MODE_COL] = Felt::ONE;
             rows[row_i][AEAD_XOF_CLK_COL] = clk;
-        },
-    }
-
-    // Row O: block[0..8], D[0..3], multiplicity.
-    for k in 0..8 {
-        rows[row_o][k] = input_state[k];
-    }
-    for k in 0..4 {
-        rows[row_o][8 + k] = Felt::new_unchecked(d_accum[k]);
-    }
-    rows[row_o][12] = Felt::new_unchecked(multiplicity);
-    match output_mode {
-        CompressionOutput::Packed => {},
-        CompressionOutput::AeadXof { clk } => {
-            rows[row_o][AEAD_XOF_MODE_COL] = Felt::ONE;
-            rows[row_o][AEAD_XOF_CLK_COL] = clk;
         },
     }
 }
@@ -755,7 +735,7 @@ pub fn generate_compression_block(
     // because the C/D accumulators flow F3 -> M0 -> M1 -> I.
     generate_message_rows(rows, start_row, input_state, &c_accum, &d_accum, output_mode);
 
-    // Interface rows (I row 62, O row 63)
+    // Interface row (I row 62). Row 63 stays idle.
     generate_interface_rows(
         rows,
         start_row,

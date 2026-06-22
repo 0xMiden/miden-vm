@@ -15,7 +15,7 @@
 //! row or constrained to zero (see `local_checks::enforce_footer_accumulator_zero_init`).
 //!
 //! Row F3 is the last footer row; its `C[0..4]` and `D[0..4]` are forwarded
-//! into M0, then through M1 into the input interface row I.
+//! into M0, then through M1 into interface row I.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};

@@ -9,9 +9,9 @@
 //!   accumulators.
 //! - Row 60: `M0`, the first message row (`m[0..7]`).
 //! - Row 61: `M1`, the second message row (`m[8..15]`).
-//! - Row 62: `I`, the input interface row. It exposes the packed input state,
+//! - Row 62: `I`, the interface row. It exposes the packed input state,
 //!   packed digest, output mode, and multiplicity to the buses.
-//! - Row 63: `O`, the output/idle row.
+//! - Row 63: `O`, an idle row with no constrained payload.
 //!
 //! This module is split by *section of the trace*, with one submodule per
 //! responsibility:
@@ -26,7 +26,7 @@
 //! - [`footer`]: F0..F3 W continuity, accumulator continuity, byte
 //!   decomposition, accumulator definitions, F3 -> M0 forwarding.
 //! - [`interface`]: M0/M1 limb reconstruction and rate binding, M -> I forwarding,
-//!   I.C/I.H consistency, output-mode selection, and I -> O forwarding.
+//!   I.C/I.H consistency, and output-mode selection.
 //!
 //! [`enforce_blakeg_constraints`] is the public entry point. It builds the
 //! row views once and dispatches to each submodule. The order is intentionally
@@ -343,10 +343,9 @@ pub fn enforce_blakeg_constraints<AB>(
     interface::enforce_m0_to_m1(builder, local, next, &sel);
     interface::enforce_m1_to_iface_in(builder, local, next, &sel);
 
-    // 7. Interface rows: I C/H consistency, output-mode binding, I -> O forwarding.
+    // 7. Interface row: I C/H consistency and output-mode binding.
     interface::enforce_iface_in_c_h_consistency(builder, local, &sel);
-    interface::enforce_aead_mode_and_label_constraints(builder, local, next, &sel);
-    interface::enforce_iface_in_to_out(builder, local, next, &sel);
+    interface::enforce_aead_mode_and_label_constraints(builder, local, &sel);
 
     // 8. Footer tail constraints.
     local_checks::enforce_footer_tail_constraints(builder, local, &sel);

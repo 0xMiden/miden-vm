@@ -7,14 +7,12 @@
 //!   accumulators, and AEAD-XOF labels.
 //! - Row 61: M1 (message row, m[8..15]). Same slot-bank shape, carries
 //!   routed M0 limbs and R[0..3] computed on M0.
-//! - Row 62: I (input interface). Carries HIN-pair slots, routed M-row
+//! - Row 62: I (interface). Carries HIN-pair slots, routed M-row
 //!   ranges, R[0..7], C[0..3], D[0..3], multiplicity, and AEAD-XOF labels.
-//! - Row 63: O (output/idle row). Carries the VM-visible output state
-//!   `block[8] || cv'[4]`, with multiplicity at col 12. No bus interactions.
+//! - Row 63: O (idle row). No bus interactions and no constrained payload.
 //!
 //! This module enforces:
 //! - The packing identity `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]`.
-//! - I -> O forwarding of `R`, `D`, and `multiplicity`.
 //! - M0 -> M1 forwarding of routed limbs, C/D, and AEAD-XOF labels.
 //! - M1 -> I forwarding of routed limbs, R[0..3], C/D, and AEAD-XOF labels.
 //! - 16-bit limb reconstruction of `m[k]` on M0 and M1.
@@ -27,11 +25,11 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::selectors::Selectors;
 use super::{
-    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, IFACE_C_BASE_COL, IFACE_D_BASE_COL,
-    IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL,
-    MSG_M0_ROUTE_CARRY_BASE_COL, MSG_M1_R_CARRY_BASE_COL, ROUTED_M0_RANGE_COUNT,
-    ROUTED_M1_RANGE_COUNT, iface_h_word_col, iface_m0_route_col, iface_m1_route_col,
-    msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col, msg_word_col,
+    AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, IFACE_C_BASE_COL, IFACE_D_BASE_COL, IFACE_R_BASE_COL,
+    MSG_C_BASE_COL, MSG_CANON_Z_BASE_COL, MSG_D_BASE_COL, MSG_M0_ROUTE_CARRY_BASE_COL,
+    MSG_M1_R_CARRY_BASE_COL, ROUTED_M0_RANGE_COUNT, ROUTED_M1_RANGE_COUNT, iface_h_word_col,
+    iface_m0_route_col, iface_m1_route_col, msg_canon_inv_col, msg_m0_range_col, msg_m1_range_col,
+    msg_word_col,
 };
 
 /// `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]` for `t in 0..4`.
@@ -56,37 +54,6 @@ pub fn enforce_iface_in_c_h_consistency<AB>(
             .when(is_iface_in.clone())
             .assert_zero(c_t - h_even - h_odd * two_pow_32.clone());
     }
-}
-
-/// I -> O: forward the VM-visible output state `[R, D]` and the multiplicity.
-///
-/// `R` is the 8-felt block. `D` is the new 4-felt chaining value.
-pub fn enforce_iface_in_to_out<AB>(
-    builder: &mut AB,
-    local: &[AB::Var],
-    next: &[AB::Var],
-    sel: &Selectors<AB>,
-) where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    let is_iface_in = sel.is_iface_in();
-    let builder = &mut builder.when(is_iface_in);
-    // I.R[k] -> O[0..8].
-    for k in 0..8 {
-        let i_r: AB::Expr = local[IFACE_R_BASE_COL + k].clone().into();
-        let o_r: AB::Expr = next[k].clone().into();
-        builder.assert_zero(i_r - o_r);
-    }
-    // I.D[t] -> O[8..11].
-    for t in 0..4 {
-        let i_d: AB::Expr = local[IFACE_D_BASE_COL + t].clone().into();
-        let o_d: AB::Expr = next[8 + t].clone().into();
-        builder.assert_zero(i_d - o_d);
-    }
-    // I.multiplicity -> O.multiplicity (col 12).
-    let i_mult: AB::Expr = local[IFACE_MULTIPLICITY_COL].clone().into();
-    let o_mult: AB::Expr = next[12].clone().into();
-    builder.assert_zero(i_mult - o_mult);
 }
 
 /// M0 -> M1: forward routed limbs, `C[0..3]`, `D[0..3]`, and AEAD-XOF labels.
@@ -180,7 +147,6 @@ pub fn enforce_m1_to_iface_in<AB>(
 pub fn enforce_aead_mode_and_label_constraints<AB>(
     builder: &mut AB,
     local: &[AB::Var],
-    next: &[AB::Var],
     sel: &Selectors<AB>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
@@ -191,12 +157,6 @@ pub fn enforce_aead_mode_and_label_constraints<AB>(
     let inactive = AB::Expr::ONE - mode.clone();
     builder.assert_zero(mode.clone() * inactive.clone());
     builder.assert_zero(inactive * Into::<AB::Expr>::into(local[AEAD_XOF_CLK_COL].clone()));
-
-    for col in [AEAD_XOF_MODE_COL, AEAD_XOF_CLK_COL] {
-        builder.assert_zero(
-            Into::<AB::Expr>::into(local[col].clone()) - Into::<AB::Expr>::into(next[col].clone()),
-        );
-    }
 }
 
 /// 16-bit limb reconstruction on the message rows.

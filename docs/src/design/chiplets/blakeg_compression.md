@@ -141,7 +141,7 @@ One compression block has 64 rows:
 | `60` | Message row `M0` | Message words `m[0..7]`, range limbs, `R[0..3]` packing. |
 | `61` | Message row `M1` | Message words `m[8..15]`, range limbs, `R[4..7]` packing. |
 | `62` | Interface row `I` | External `R`, `C`, `D`, unpacked `h`, mode, multiplicity. |
-| `63` | Output/idle row `O` | Forwarded `[R, D]` and multiplicity; no lookup messages. |
+| `63` | Idle row `O` | No constrained payload or lookup messages. |
 
 The physical order is not the algorithmic order. Message rows are stored after
 the round rows even though their `m[i]` values are used during the rounds.
@@ -172,8 +172,8 @@ The internal submodules are:
 
 Row `I` is the external interface. It carries packed `R`, packed `C`, packed
 `D`, and unpacked `h`, and it emits the compression or AEAD input lookup
-message. Row `O` carries the forwarded output state but has no lookup messages
-in this routing.
+message. Row `O` is idle in this routing; it remains part of the fixed 64-row
+period but carries no constrained payload.
 
 The next section is a physical layout reference. It explains where values live
 in the 80 columns. The later "Constraints by Row Family" section explains what
@@ -257,9 +257,8 @@ They do this as three small state machines:
   one packed `D[t]`.
 - `M0/M1` bind the packed rate block `R[0..7]` to the 16 message words
   `m[0..15]` used by the round rows.
-- `I/O` present the external boundary: row `I` emits the external LogUp
-  messages for this layout, and row `O` carries the forwarded output state
-  without emitting lookups.
+- `I` presents the external boundary and emits the external LogUp messages for
+  this layout. Row `O` is the idle tail row of the 64-row period.
 
 The footer rows need special handling because only `F0` is adjacent to the last
 G row. Row `55` transitions into `F0`, so `F0` can receive the final working
@@ -303,7 +302,7 @@ Column-table terms:
 | `M0` | `m[0..5]` slots and range limbs | range limbs | range limbs, canonicality witnesses | `m[6]`, `m[7]`, canonicality witnesses | canonicality flags | `C[0..3]` | `D[0..3]` | `mode`, `clk` |
 | `M1` | `m[8..13]` slots and range limbs | tail range limbs | carried `R[0..3]`, canonicality witnesses | `m[14]`, `m[15]`, canonicality witnesses | canonicality flags | `C[0..3]` | `D[0..3]` | `mode`, `clk` |
 | `I` | `h` pair slots in `0..11` | `R[0..5]` | `R[6..7]`, `C[0..1]` | `C[2..3]`, `D[0..1]` | `D[2..3]`, multiplicity | empty | empty | `mode`, `clk` |
-| `O` | `[R[0..7], D[0..3], multiplicity]` in `0..12` | empty | empty | empty | empty | empty | empty | `mode`, `clk` |
+| `O` | empty | empty | empty | empty | empty | empty | empty | empty |
 
 `C` and `D` are logical values, not fixed physical columns across every row
 family. They are fixed inside the footer block, then forwarded through the row
@@ -314,13 +313,12 @@ families that need them:
 | `F0..F3` | `66..69` | `70..73` | Accumulators filled one C/D slot at a time. On `F_t`, `C[t]` and `D[t]` are written, earlier slots are copied forward, and later slots are zero until written. |
 | `M0/M1` | `70..73` | `74..77` | Forwarding slots. The message rows keep the completed footer accumulators while they bind `R` to `m[0..15]`. |
 | `I` | `56..59` | `60..63` | External boundary slots used by the compression or AEAD input lookup message. |
-| `O` | none | `8..11` | VM-visible output forwarding; `C` is no longer needed. |
 
 The forwarding constraints enforce the path
-`F3 -> M0 -> M1 -> I` for both `C` and `D`, and `I -> O` for `D`. Keeping these
-values in the same physical columns across more row families would require a
-different placement for the message-row canonicality fields, future-`W` cells,
-and interface payload without increasing lookup pressure.
+`F3 -> M0 -> M1 -> I` for both `C` and `D`. Keeping these values in the same
+physical columns across more row families would require a different placement
+for the message-row canonicality fields, future-`W` cells, and interface
+payload without increasing lookup pressure.
 
 ## Constraints by Row Family
 
@@ -353,8 +351,8 @@ Row `0` contributes `-1` for pairs `0` and `1`. The first `B` row contributes
 `-1` for pairs `2` and `3`. The matching footer row contributes the other `-1`
 for each pair.
 
-Row `I` also forwards `[R, D]` and `multiplicity` to row `O`. This is local
-trace routing; row `O` does not contribute lookup messages.
+Row `I` is the only external boundary row in the compression period. Row `O`
+has no output payload and does not contribute lookup messages.
 
 ### Message Rows `M0` and `M1`
 
@@ -535,13 +533,12 @@ AEAD-XOF labels follow the same route. The footer rows constrain `(mode, clk)`
 to be constant across `F0..F3`; `F3` forwards the labels to `M0`, `M0` forwards
 them to `M1`, and `M1` forwards them to row `I`. Non-AEAD rows force `clk = 0`.
 
-### Output/Idle Row `O`
+### Idle Row `O`
 
-Row `O` carries the forwarded `[R, D]` state and multiplicity from row `I`, but
-it has no lookup messages. BlakeG uses wrapped lookup accumulation, so the row
-is not required for accumulator closure; it remains available for a separate
-routing change. In this layout it keeps each compression block on a 64-row
-period and forwards the VM-visible output state.
+Row `O` has no constrained payload and no lookup messages. It remains in the fixed
+64-row period, but wrapped lookup accumulation means BlakeG no longer needs a
+terminal lookup-idle row for accumulator closure. Reusing this row for payload
+or lookup work is a separate layout change.
 
 ## Lookup Pressure by Row
 
@@ -578,8 +575,8 @@ contributions, every row fits the twenty narrow slots.
 ## Main-trace Utilization
 
 The 64-row by 80-column block has 5,120 cells. Counting semantic payload cells,
-this layout uses about 4,242 cells, or 82.85%. Counting explicit helper
-and zero-filled layout cells raises the accounting to about 85.20%, but the
+this layout uses about 4,227 cells, or 82.56%. Counting explicit helper
+and zero-filled layout cells raises the accounting to about 84.90%, but the
 semantic number is the useful design metric.
 
 Most slack is concentrated in a few places:
@@ -587,7 +584,7 @@ Most slack is concentrated in a few places:
 | Source | Slack |
 | ------ | ----: |
 | `B/D` rows | 560 cells |
-| `I/O` rows | 114 cells |
+| `I/O` rows | 129 cells |
 | unused third field in `A/C` message slots | 112 cells |
 | `M0/M1` rows | 60 cells |
 | footer rows | 32 cells |
