@@ -1090,15 +1090,13 @@ mod tests {
     #[test]
     fn test_debug_source_map_locationless_asm_op_min_size() {
         let source_node = DebugSourceNodeId::from(0);
+        let asm_op = |op_idx| {
+            DebugSourceAsmOp::new(source_node, op_idx, None, "test::ctx".into(), "add".into(), 1)
+        };
         let section = DebugSourceMapSection::from_parts(
-            alloc::vec![DebugSourceAsmOp::new(
-                source_node,
-                2,
-                None,
-                "test::ctx".into(),
-                "add".into(),
-                1,
-            )],
+            // Three location-less rows exceed the trailing empty debug_vars/inline_calls
+            // length prefixes, so an overestimated row size rejects this section.
+            alloc::vec![asm_op(2), asm_op(3), asm_op(4)],
             alloc::vec![],
         );
 
