@@ -1,7 +1,7 @@
+use core::assert_matches;
 use std::path::Path;
 
 use miden_assembly_syntax::debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt};
-use miden_core::assert_matches;
 
 use crate::{ast::MidenProject, *};
 

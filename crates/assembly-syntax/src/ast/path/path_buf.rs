@@ -451,8 +451,7 @@ impl fmt::Display for PathBuf {
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
-
-    use miden_core::assert_matches;
+    use core::assert_matches;
 
     use super::{PathBuf, PathError};
     use crate::{Path, PathComponent, ast::IdentError};

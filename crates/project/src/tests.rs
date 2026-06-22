@@ -1,3 +1,4 @@
+use core::assert_matches;
 use std::{boxed::Box, fs, path::Path, sync::Arc};
 
 use miden_assembly_syntax::{
@@ -5,7 +6,6 @@ use miden_assembly_syntax::{
     debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt},
     diagnostics::Report,
 };
-use miden_core::assert_matches;
 use tempfile::TempDir;
 
 use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace};

@@ -68,7 +68,7 @@ pub mod log_precompile {
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;
 
 // Chiplets trace
-// 5 selectors + 15 shared chiplet data columns + s_perm + chip_clk = 22.
+// s_00 + s_01 + chip_clk + 4 selectors + 15 shared chiplet data columns = 22.
 // `chip_clk` is the chiplet-trace row counter (value `row_index + 1`); it sources the
 // hasher responder address on the chiplet side.
 pub const CHIPLETS_WIDTH: usize = 22;

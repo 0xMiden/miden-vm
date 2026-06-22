@@ -3,7 +3,7 @@
 ## v0.24.0 (TBD)
 
 #### Changes
-
+- Bumped MSRV from 1.90 to 1.96 and replaced local `assert_matches!` macro with `core::assert_matches` ([#3267](https://github.com/0xMiden/miden-vm/pull/3267)).
 - [BREAKING] Unified `OnceLockCompat` behavior across `std` and `no_std` ([#3188](https://github.com/0xMiden/miden-vm/pull/3188)).
 - Added an event-based `miden::core::debug` module providing `print_*` procedures for print-style debugging of the operand stack, memory, advice stack, and advice map ([#3169](https://github.com/0xMiden/miden-vm/issues/3169)).
 - [BREAKING] Removed `debug.*` decorators in favor of `miden::core::debug` procedures, and bumped the MAST wire format to `0.0.4` ([#3201](https://github.com/0xMiden/miden-vm/pull/3201)).
@@ -36,6 +36,7 @@
 - [BREAKING] Targets specified in `miden-project.toml` must now always provide a `path` key, though it may refer to files with extensions other than `.masm`, such as the case in Rust projects ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - [BREAKING] `ProjectAssembler::assemble_with_sources` has been removed - projects require assembly from the filesystem going forward ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - [BREAKING] `miden-vm bundle` now treats the `--kernel` option as a flag; when set, it expects the file path given to `bundle` to be the path to the root module of the kernel, and the support library for the kernel is derived from explicit submodule declarations in that module.
+- Reordered the chiplets trace columns and renamed the chiplet selectors to `s_00`/`s_01` ([#3266](https://github.com/0xMiden/miden-vm/pull/3266)).
 - [BREAKING] Moved debug info ownership out of `MastForest` and into package debug sections, adding source-node debug metadata that preserves distinct source occurrences after MAST node deduplication ([#3221](https://github.com/0xMiden/miden-vm/pull/3221)).
 - Cleaned up processor error handling for diagnostics, malformed MAST loading, and binary-value checks ([#3230](https://github.com/0xMiden/miden-vm/pull/3230)).
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
