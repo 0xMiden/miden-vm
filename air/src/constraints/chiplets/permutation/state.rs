@@ -159,7 +159,7 @@ pub fn enforce_permutation_steps<AB>(
         // 1 witness constraint
         builder.assert_zero(witness_check);
         // 12 next-state constraints
-        builder.assert_eq_arrays(h_next.clone(), expected);
+        builder.assert_eq_arrays(h_next, expected);
     }
 }
 
