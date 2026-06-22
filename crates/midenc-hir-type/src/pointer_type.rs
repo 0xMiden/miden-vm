@@ -15,10 +15,7 @@ pub struct PointerType {
 impl PointerType {
     /// Create a new byte-addressable pointer type to `pointee`
     pub fn new(pointee: Type) -> Self {
-        Self {
-            addrspace: AddressSpace::Byte,
-            pointee,
-        }
+        Self { addrspace: AddressSpace::Byte, pointee }
     }
 
     /// Create a new pointer type to `pointee` in `addrspace`

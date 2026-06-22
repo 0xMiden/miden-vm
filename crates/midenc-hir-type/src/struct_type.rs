@@ -137,10 +137,7 @@ impl From<Type> for NameAndType {
 
 impl From<(Arc<str>, Type)> for NameAndType {
     fn from((name, ty): (Arc<str>, Type)) -> Self {
-        Self {
-            name: Some(name),
-            ty,
-        }
+        Self { name: Some(name), ty }
     }
 }
 
@@ -199,13 +196,7 @@ impl StructType {
                         .try_into()
                         .expect("invalid type: size is larger than 2^32 bytes");
                     if field_size == 0 {
-                        fields.push(StructField {
-                            name,
-                            index,
-                            align: 1,
-                            offset,
-                            ty,
-                        });
+                        fields.push(StructField { name, index, align: 1, offset, ty });
                     } else {
                         let align = ty.min_alignment().try_into().expect(
                             "invalid struct field alignment: expected power of two between 1 and \
@@ -216,18 +207,12 @@ impl StructType {
                             "invalid transparent representation for struct: repr(transparent) is \
                              only valid for structs with a single non-zero sized field"
                         );
-                        fields.push(StructField {
-                            name,
-                            index,
-                            align,
-                            offset,
-                            ty,
-                        });
+                        fields.push(StructField { name, index, align, offset, ty });
                         offset += field_size;
                     }
                 }
                 offset
-            }
+            },
             repr => {
                 let mut offset = 0u32;
                 let default_align: u16 =
@@ -239,7 +224,7 @@ impl StructType {
                     TypeRepr::Packed(align) => core::cmp::min(align.get(), default_align),
                     TypeRepr::Transparent | TypeRepr::Default | TypeRepr::BigEndian => {
                         default_align
-                    }
+                    },
                 };
 
                 for (index, NameAndType { name, ty }) in tys.into_iter().enumerate() {
@@ -257,25 +242,14 @@ impl StructType {
                         _ => default_align,
                     };
                     offset += offset.align_offset(align as u32);
-                    fields.push(StructField {
-                        name,
-                        index,
-                        align,
-                        offset,
-                        ty,
-                    });
+                    fields.push(StructField { name, index, align, offset, ty });
                     offset += field_size;
                 }
                 offset.align_up(align as u32)
-            }
+            },
         };
 
-        Self {
-            name,
-            repr,
-            size,
-            fields,
-        }
+        Self { name, repr, size, fields }
     }
 
     /// Get the name of this struct, if provided.

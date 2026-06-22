@@ -66,13 +66,12 @@ pub enum CallConv {
     /// * If the function arguments require more than 16 elements of the operand stack to represent,
     ///   then arguments will be spilled to the caller's stack frame, such that no more than 15
     ///   elements are required. The caller must then obtain the value of the stack pointer on
-    ///   entry, and offset it to access spilled arguments as desired. The arguments are spilled
-    ///   in reverse order, i.e. the last argument in the argument list has the greatest offset,
-    ///   while the first argument of the argument list to be spilled starts at `sp` (the value
-    ///   of the stack pointer on entry).
+    ///   entry, and offset it to access spilled arguments as desired. The arguments are spilled in
+    ///   reverse order, i.e. the last argument in the argument list has the greatest offset, while
+    ///   the first argument of the argument list to be spilled starts at `sp` (the value of the
+    ///   stack pointer on entry).
     ///
     /// NOTE: This convention may be non-optimal if not being used for cross-language interop.
-    ///
     #[default]
     C,
     /// This convention is used to represent function signatures in WebAssembly.
@@ -89,8 +88,8 @@ pub enum CallConv {
     ///
     /// * It is always executed in the caller's context
     /// * May only be the target of a `exec` or `dynexec` instruction
-    /// * Only supports IR types which correspond to a valid WebAssembly type. Notably this does
-    ///   not include aggregates (except via reference types).
+    /// * Only supports IR types which correspond to a valid WebAssembly type. Notably this does not
+    ///   include aggregates (except via reference types).
     /// * Floating-point types are not allowed, except `f32` which is used to represent field
     ///   elements in the WebAssembly type system.
     /// * Callees must preserve the state of the operand stack following the function arguments
@@ -128,17 +127,17 @@ pub enum CallConv {
     ///   pad the unused portions of the operand stack where applicable.
     /// * If the function arguments require more than 16 elements of the operand stack to represent,
     ///   then arguments will be spilled to the advice provider, as a block of memory (in words)
-    ///   sufficiently large to hold all of the spilled arguments. The block will be hashed and
-    ///   the digest used as the key in the advice map under which the block will be stored. The
-    ///   digest will then be passed by-value to the callee as the first argument. This requires
-    ///   a word (4 elements) of operand stack to be unused, so when spilling arguments, the first
-    ///   12 elements are preserved, while the rest are spilled. The callee is expected to, as part
-    ///   of its prologue, immediately fetch the spilled arguments from the advice map using the
-    ///   provided digest on top of the operand stack, and write them into the current stack frame.
-    ///   The spilled arguments can then be accessed by computing the offset from the stack pointer
-    ///   to the desired argument. Note that, like the spill strategy for `C`, the spilled
-    ///   arguments will be written into memory in reverse order (the closer to the front of the
-    ///   argument list, the smaller the offset).
+    ///   sufficiently large to hold all of the spilled arguments. The block will be hashed and the
+    ///   digest used as the key in the advice map under which the block will be stored. The digest
+    ///   will then be passed by-value to the callee as the first argument. This requires a word (4
+    ///   elements) of operand stack to be unused, so when spilling arguments, the first 12 elements
+    ///   are preserved, while the rest are spilled. The callee is expected to, as part of its
+    ///   prologue, immediately fetch the spilled arguments from the advice map using the provided
+    ///   digest on top of the operand stack, and write them into the current stack frame. The
+    ///   spilled arguments can then be accessed by computing the offset from the stack pointer to
+    ///   the desired argument. Note that, like the spill strategy for `C`, the spilled arguments
+    ///   will be written into memory in reverse order (the closer to the front of the argument
+    ///   list, the smaller the offset).
     ComponentModel,
 }
 

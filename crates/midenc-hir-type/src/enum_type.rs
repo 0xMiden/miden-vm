@@ -184,11 +184,11 @@ impl EnumType {
                             > largest_variant.aligned_size_in_bytes() =>
                     {
                         *largest_variant = value_ty.clone();
-                    }
+                    },
                     Some(_) => (),
                     None => {
                         largest_variant = Some(value_ty.clone());
-                    }
+                    },
                 }
             }
         }
@@ -200,12 +200,12 @@ impl EnumType {
                 let size = struct_ty.size();
                 let align = struct_ty.min_alignment();
                 (size, align)
-            }
+            },
             None => {
                 let size = discriminant.size_in_bytes();
                 let align = discriminant.min_alignment();
                 (size, align)
-            }
+            },
         };
 
         Ok(Self {
@@ -369,7 +369,7 @@ impl PrettyPrint for Variant {
             None => display(self.name.clone()),
             Some(ty) => {
                 display(self.name.clone()) + const_text("(") + ty.render() + const_text(")")
-            }
+            },
         };
 
         if let Some(tag) = self.discriminant_value {
@@ -410,7 +410,7 @@ impl<'a> Iterator for Discriminator<'a> {
                 Ok(next) => {
                     self.last_discriminant = Some(next);
                     next
-                }
+                },
                 Err(err) => return Some(Err(err)),
             }
         };
