@@ -5,11 +5,15 @@
 use alloc::{sync::Arc, vec::Vec};
 use std::println;
 
+use super::{FLAG_HASHLESS, FLAG_SPARSE, MAGIC, VERSION};
 use crate::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     events::EventId,
-    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
+    mast::{
+        BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest,
+        MastForestContributor, SparseMastForestBuilder, SplitNodeBuilder, VisitKind,
+    },
     operations::Operation,
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs, StackOutputs},
@@ -123,6 +127,89 @@ fn generate_fuzz_seeds() {
             "hashless.bin",
             &bytes,
         );
+    }
+
+    // Sparse MAST seeds.
+    {
+        let sparse_targets = &["sparse_mast_forest_deserialize", "sparse_mast_forest_validate"];
+
+        let mut forest = MastForest::new();
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(block_id);
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(block_id, VisitKind::FullVisit);
+        write_mast_seed(sparse_targets, "sparse_basic_block.bin", &builder.finalize().to_bytes());
+
+        let mut forest = MastForest::new();
+        let true_branch = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let false_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let root = SplitNodeBuilder::new([true_branch, false_branch])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(root);
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(true_branch, VisitKind::FullVisit);
+        builder.record_visit(false_branch, VisitKind::DigestOnly);
+        builder.record_visit(root, VisitKind::FullVisit);
+        write_mast_seed(
+            sparse_targets,
+            "sparse_split_digest_only_child.bin",
+            &builder.finalize().to_bytes(),
+        );
+
+        let mut forest = MastForest::new();
+        let left = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let right = BasicBlockNodeBuilder::new(vec![Operation::Mul])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let root = JoinNodeBuilder::new([left, right]).add_to_forest(&mut forest).unwrap();
+        forest.make_root(root);
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(left, VisitKind::DigestOnly);
+        builder.record_visit(right, VisitKind::DigestOnly);
+        builder.record_visit(root, VisitKind::FullVisit);
+        write_mast_seed(
+            sparse_targets,
+            "sparse_join_digest_only_children.bin",
+            &builder.finalize().to_bytes(),
+        );
+
+        let mut forest = MastForest::new();
+        let external_digest = Word::new([
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+        ]);
+        let external =
+            ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
+        forest.make_root(external);
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(external, VisitKind::FullVisit);
+        write_mast_seed(
+            sparse_targets,
+            "sparse_external_full_node.bin",
+            &builder.finalize().to_bytes(),
+        );
+
+        let mut invalid_sparse_header = Vec::new();
+        invalid_sparse_header.write_bytes(MAGIC);
+        invalid_sparse_header.write_u8(FLAG_HASHLESS | FLAG_SPARSE);
+        invalid_sparse_header.write_bytes(&VERSION);
+        invalid_sparse_header.write_usize(usize::MAX);
+        write_mast_seed(sparse_targets, "invalid_sparse_header.bin", &invalid_sparse_header);
     }
 
     // Seed 5: Empty header (just magic + flags + version + minimal counts)

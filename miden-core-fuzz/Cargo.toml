@@ -39,6 +39,9 @@ features = ["std", "serde", "resolver"]
 path = "../crates/project"
 features = ["std", "serde"]
 
+[dependencies.miden-prover]
+path = "../prover"
+
 [dependencies.toml]
 version = "1.0"
 features = ["parse", "display", "serde"]
@@ -54,6 +57,27 @@ bench = false
 [[bin]]
 name = "mast_forest_validate"
 path = "fuzz_targets/mast_forest_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sparse_mast_forest_deserialize"
+path = "fuzz_targets/sparse_mast_forest_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sparse_mast_forest_validate"
+path = "fuzz_targets/sparse_mast_forest_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trace_proving_inputs_deserialize"
+path = "fuzz_targets/trace_proving_inputs_deserialize.rs"
 test = false
 doc = false
 bench = false

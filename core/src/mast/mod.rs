@@ -50,6 +50,9 @@ use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "serde")]
+use crate::serde::SliceReader;
+
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use node::arbitrary;
@@ -61,19 +64,17 @@ pub use node::{
     OpBatch, SplitNode, SplitNodeBuilder,
 };
 
-#[cfg(feature = "serde")]
-use crate::serde::{Deserializable, Serializable, SliceReader};
 use crate::{
     Felt, Word,
     advice::AdviceMap,
-    serde::{ByteWriter, DeserializationError},
+    serde::{ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{Idx, IndexVec, hash_string_to_word},
 };
 
 mod serialization;
 pub use serialization::{
     AdviceMapView, AdviceValueView, MastForestReadMode, MastForestReadView, MastForestView,
-    MastForestWireView, MastNodeEntry, MastNodeInfo,
+    MastForestWireView, MastNodeEntry, MastNodeInfo, SparseMastForestReadOptions,
 };
 
 mod untrusted;
@@ -904,6 +905,24 @@ impl Idx for MastNodeId {}
 impl From<MastNodeId> for u32 {
     fn from(value: MastNodeId) -> Self {
         value.0
+    }
+}
+
+impl Serializable for MastNodeId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        Serializable::write_into(&self.0, target);
+    }
+}
+
+impl Deserializable for MastNodeId {
+    fn read_from<R: crate::serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        Ok(Self(<u32 as Deserializable>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        <u32 as Deserializable>::min_serialized_size()
     }
 }
 

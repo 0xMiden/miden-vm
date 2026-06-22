@@ -1,4 +1,7 @@
-use miden_core::proof::HashFunction;
+use miden_core::{
+    proof::HashFunction,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // PROVING OPTIONS
 // ================================================================================================
@@ -42,5 +45,17 @@ impl ProvingOptions {
 impl Default for ProvingOptions {
     fn default() -> Self {
         Self::new(HashFunction::Blake3_256)
+    }
+}
+
+impl Serializable for ProvingOptions {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.hash_fn.write_into(target);
+    }
+}
+
+impl Deserializable for ProvingOptions {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::new(HashFunction::read_from(source)?))
     }
 }

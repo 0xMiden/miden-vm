@@ -3,7 +3,11 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use miden_air::trace::chiplets::hasher::{
     CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
 };
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE,
+    operations::Operation,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 use super::{
     block_stack::{BlockInfo, BlockStack, ExecutionContextInfo},
@@ -77,6 +81,136 @@ pub struct TraceGenerationContext {
     /// The maximum number of field elements allowed on the operand stack in an active execution
     /// context.
     pub max_stack_depth: usize,
+}
+
+impl Serializable for TraceGenerationContext {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.mast_forest_store.len());
+        for forest in &self.mast_forest_store {
+            forest.write_into(target);
+        }
+        self.core_trace_contexts.write_into(target);
+        self.range_checker_replay.write_into(target);
+        self.memory_writes.write_into(target);
+        self.bitwise_replay.write_into(target);
+        self.hasher_for_chiplet.write_into(target);
+        self.kernel_replay.write_into(target);
+        self.ace_replay.write_into(target);
+        self.fragment_size.write_into(target);
+        self.max_stack_depth.write_into(target);
+    }
+}
+
+impl Deserializable for TraceGenerationContext {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let store_len = source.read_usize()?;
+        let max_store_len = source.max_alloc(SparseMastForest::min_serialized_size());
+        if store_len > max_store_len {
+            return Err(DeserializationError::InvalidValue(format!(
+                "MAST forest store length {store_len} exceeds reader allocation bound {max_store_len}"
+            )));
+        }
+
+        let mut mast_forest_store = Vec::with_capacity(store_len);
+        for _ in 0..store_len {
+            mast_forest_store.push(Arc::new(SparseMastForest::read_from(source)?));
+        }
+
+        let context = Self {
+            mast_forest_store,
+            core_trace_contexts: Vec::<CoreTraceFragmentContext>::read_from(source)?,
+            range_checker_replay: RangeCheckerReplay::read_from(source)?,
+            memory_writes: MemoryWritesReplay::read_from(source)?,
+            bitwise_replay: BitwiseReplay::read_from(source)?,
+            hasher_for_chiplet: HasherRequestReplay::read_from(source)?,
+            kernel_replay: KernelReplay::read_from(source)?,
+            ace_replay: AceReplay::read_from(source)?,
+            fragment_size: usize::read_from(source)?,
+            max_stack_depth: usize::read_from(source)?,
+        };
+        validate_trace_generation_context_invariants(&context)?;
+        validate_trace_generation_context_forest_ids(&context)?;
+        Ok(context)
+    }
+}
+
+fn validate_trace_generation_context_invariants(
+    context: &TraceGenerationContext,
+) -> Result<(), DeserializationError> {
+    if context.fragment_size == 0 {
+        return Err(DeserializationError::InvalidValue(
+            "trace generation fragment_size must be non-zero".into(),
+        ));
+    }
+    if context.max_stack_depth < MIN_STACK_DEPTH {
+        return Err(DeserializationError::InvalidValue(format!(
+            "trace generation max_stack_depth {} is below minimum {MIN_STACK_DEPTH}",
+            context.max_stack_depth
+        )));
+    }
+    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
+        let stack_depth = fragment.state.stack.stack_depth();
+        if stack_depth > context.max_stack_depth {
+            return Err(DeserializationError::InvalidValue(format!(
+                "fragment {fragment_index}: stack depth {stack_depth} exceeds max_stack_depth {}",
+                context.max_stack_depth
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_trace_generation_context_forest_ids(
+    context: &TraceGenerationContext,
+) -> Result<(), DeserializationError> {
+    let store_len = context.mast_forest_store.len();
+    for (fragment_index, fragment) in context.core_trace_contexts.iter().enumerate() {
+        validate_mast_forest_id(
+            fragment.initial_mast_forest_id,
+            store_len,
+            "core trace fragment initial_mast_forest_id",
+        )?;
+        for forest_id in fragment.continuation.iter_enter_forest_ids() {
+            validate_mast_forest_id(
+                forest_id,
+                store_len,
+                "core trace fragment continuation EnterForest",
+            )
+            .map_err(|err| {
+                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+            })?;
+        }
+        for forest_id in fragment.replay.mast_forest_resolution.iter_forest_ids() {
+            validate_mast_forest_id(
+                forest_id,
+                store_len,
+                "core trace fragment MastForestResolutionReplay",
+            )
+            .map_err(|err| {
+                DeserializationError::InvalidValue(format!("fragment {fragment_index}: {err}"))
+            })?;
+        }
+    }
+
+    for forest_id in context.hasher_for_chiplet.iter_hash_basic_block_forest_ids() {
+        validate_mast_forest_id(forest_id, store_len, "hasher HashBasicBlock replay")?;
+    }
+
+    Ok(())
+}
+
+fn validate_mast_forest_id(
+    forest_id: MastForestId,
+    store_len: usize,
+    label: &str,
+) -> Result<(), DeserializationError> {
+    if forest_id.to_usize() >= store_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} id {} is out of range for mast_forest_store length {store_len}",
+            u32::from(forest_id)
+        )));
+    }
+    Ok(())
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -1078,5 +1212,50 @@ impl HasherChipletShim {
 impl Default for HasherChipletShim {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::*;
+
+    fn empty_trace_generation_context(
+        fragment_size: usize,
+        max_stack_depth: usize,
+    ) -> TraceGenerationContext {
+        TraceGenerationContext {
+            mast_forest_store: Vec::new(),
+            core_trace_contexts: Vec::new(),
+            range_checker_replay: RangeCheckerReplay::default(),
+            memory_writes: MemoryWritesReplay::default(),
+            bitwise_replay: BitwiseReplay::default(),
+            hasher_for_chiplet: HasherRequestReplay::default(),
+            kernel_replay: KernelReplay::default(),
+            ace_replay: AceReplay::default(),
+            fragment_size,
+            max_stack_depth,
+        }
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_zero_fragment_size() {
+        let context = empty_trace_generation_context(0, MIN_STACK_DEPTH);
+
+        let err = TraceGenerationContext::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid fragment size error");
+        };
+        assert!(message.contains("fragment_size must be non-zero"));
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_max_stack_depth_below_minimum() {
+        let context = empty_trace_generation_context(1, MIN_STACK_DEPTH - 1);
+
+        let err = TraceGenerationContext::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid max stack depth error");
+        };
+        assert!(message.contains("max_stack_depth"));
     }
 }

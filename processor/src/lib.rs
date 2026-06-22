@@ -353,6 +353,24 @@ impl From<ContextId> for Felt {
     }
 }
 
+impl serde::Serializable for ContextId {
+    fn write_into<W: serde::ByteWriter>(&self, target: &mut W) {
+        serde::Serializable::write_into(&self.0, target);
+    }
+}
+
+impl serde::Deserializable for ContextId {
+    fn read_from<R: serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, serde::DeserializationError> {
+        Ok(Self(<u32 as serde::Deserializable>::read_from(source)?))
+    }
+
+    fn min_serialized_size() -> usize {
+        <u32 as serde::Deserializable>::min_serialized_size()
+    }
+}
+
 impl Display for ContextId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

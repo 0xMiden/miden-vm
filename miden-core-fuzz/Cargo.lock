@@ -179,6 +179,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -707,6 +732,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
+name = "miden-ace-codegen"
+version = "0.24.0"
+dependencies = [
+ "miden-core",
+ "miden-crypto",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-air"
+version = "0.24.0"
+dependencies = [
+ "miden-ace-codegen",
+ "miden-core",
+ "miden-crypto",
+ "miden-utils-indexing",
+ "proptest",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "miden-assembly"
 version = "0.25.0"
 dependencies = [
@@ -777,6 +824,7 @@ dependencies = [
  "miden-mast-package",
  "miden-package-registry",
  "miden-project",
+ "miden-prover",
  "serde_json",
  "toml",
 ]
@@ -977,6 +1025,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-processor"
+version = "0.24.0"
+dependencies = [
+ "itertools",
+ "miden-air",
+ "miden-core",
+ "miden-debug-types",
+ "miden-mast-package",
+ "miden-utils-diagnostics",
+ "miden-utils-indexing",
+ "paste",
+ "rayon",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "miden-project"
 version = "0.25.0"
 dependencies = [
@@ -989,6 +1054,20 @@ dependencies = [
  "serde-untagged",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "miden-prover"
+version = "0.24.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "miden-crypto",
+ "miden-processor",
+ "serde",
+ "serde-wincode",
+ "tracing",
+ "wincode",
 ]
 
 [[package]]
@@ -1417,6 +1496,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1618,6 +1703,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1766,6 +1871,17 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
+]
+
+[[package]]
+name = "serde-wincode"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a62dfa6ae65cb073dfe001fb076eaf827fd4267fcba7eb3be2fee4f1e69ccb5"
+dependencies = [
+ "serde",
+ "thiserror",
+ "wincode",
 ]
 
 [[package]]
@@ -2252,6 +2368,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "wincode"
+version = "0.4.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "657690780ce23e6f66576a782ffd88eb353512381817029cc1d7a99154bb6d1f"
+dependencies = [
+ "pastey",
+ "proc-macro2",
+ "quote",
+ "thiserror",
 ]
 
 [[package]]

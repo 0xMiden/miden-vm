@@ -223,6 +223,11 @@ mod fast_parallel {
     use miden_core::{
         Felt, Word,
         events::{EventId, EventName},
+        mast::{
+            BasicBlockNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest,
+            MastForestContributor, MastNodeExt,
+        },
+        operations::Operation,
         precompile::{
             PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
             PrecompileVerifier, PrecompileVerifierRegistry,
@@ -231,13 +236,15 @@ mod fast_parallel {
     };
     use miden_core_lib::CoreLibrary;
     use miden_processor::{
-        DefaultHost, ExecutionOptions, FastProcessor, ProcessorState, StackInputs, StackOutputs,
+        DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, ProcessorState, StackInputs,
+        StackOutputs,
         advice::{AdviceInputs, AdviceMutation},
         event::{EventError, EventHandler},
         trace::build_trace,
     };
     use miden_prover::{
         ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync, prove_stark,
+        serde::{Deserializable, Serializable},
     };
     use miden_verifier::{verify, verify_with_precompiles};
     use miden_vm::{Program, TraceBuildInputs};
@@ -265,6 +272,38 @@ mod fast_parallel {
 
     fn default_source_manager_host() -> DefaultHost {
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()))
+    }
+
+    fn create_simple_library() -> HostLibrary {
+        let mut mast_forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        mast_forest.make_root(swap_block);
+        HostLibrary::from(Arc::new(mast_forest))
+    }
+
+    fn external_lib_proc_digest() -> Word {
+        let mut forest = MastForest::new();
+        let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.get_node_by_id(swap_block).unwrap().digest()
+    }
+
+    fn external_program() -> Program {
+        let mut program = MastForest::new();
+        let basic_block = BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop])
+            .add_to_forest(&mut program)
+            .unwrap();
+        let external_node = ExternalNodeBuilder::new(external_lib_proc_digest())
+            .add_to_forest(&mut program)
+            .unwrap();
+        let root = JoinNodeBuilder::new([basic_block, external_node])
+            .add_to_forest(&mut program)
+            .unwrap();
+        program.make_root(root);
+        Program::new(Arc::new(program), root)
     }
 
     /// Test that proves and verifies using the fast processor + parallel trace generation path.
@@ -350,6 +389,67 @@ mod fast_parallel {
             ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
         ))
         .expect("prove_from_trace_sync failed");
+
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
+    }
+
+    #[test]
+    fn test_trace_proving_inputs_round_trip_proves_external_library_program() {
+        std::thread::Builder::new()
+            .name("trace-proving-inputs-round-trip".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(trace_proving_inputs_round_trip_proves_external_library_program)
+            .expect("failed to spawn round-trip test thread")
+            .join()
+            .expect("round-trip test thread panicked");
+    }
+
+    fn trace_proving_inputs_round_trip_proves_external_library_program() {
+        let program = external_program();
+        let stack_inputs = StackInputs::default();
+        let advice_inputs = AdviceInputs::default();
+        let mut host = default_source_manager_host();
+        host.load_library(create_simple_library())
+            .expect("failed to load test library into host");
+        let trace_inputs =
+            execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
+
+        let trace_inputs_bytes = trace_inputs.to_bytes();
+        let restored_trace_inputs = TraceBuildInputs::read_from_bytes(&trace_inputs_bytes)
+            .expect("trace inputs round trip");
+        assert!(
+            restored_trace_inputs.trace_generation_context().mast_forest_store.len() > 1,
+            "expected dynamic library execution to serialize multiple MAST forests"
+        );
+        let _trace = build_trace(restored_trace_inputs).expect("restored trace inputs build trace");
+
+        let trace_inputs = TraceBuildInputs::read_from_bytes(&trace_inputs_bytes)
+            .expect("trace inputs round trip");
+        let proving_inputs = TraceProvingInputs::new(
+            trace_inputs,
+            ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
+        );
+        let proving_inputs_bytes = proving_inputs.to_bytes();
+        let proving_inputs_budget =
+            proving_inputs_bytes.len().checked_mul(4).expect("test input budget overflow");
+        let mut proving_inputs_with_trailing_byte = proving_inputs_bytes.clone();
+        proving_inputs_with_trailing_byte.push(0);
+        assert!(
+            TraceProvingInputs::read_from_bytes_with_budget(
+                &proving_inputs_with_trailing_byte,
+                proving_inputs_bytes.len(),
+            )
+            .is_err(),
+            "TraceProvingInputs should reject trailing bytes even when the budget matches the valid prefix"
+        );
+        let restored_proving_inputs = TraceProvingInputs::read_from_bytes_with_budget(
+            &proving_inputs_bytes,
+            proving_inputs_budget,
+        )
+        .expect("trace proving inputs round trip");
+
+        let (stack_outputs, proof) =
+            prove_from_trace_sync(restored_proving_inputs).expect("prove_from_trace_sync failed");
 
         verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
     }

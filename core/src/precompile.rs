@@ -366,6 +366,18 @@ impl PrecompileTranscript {
     }
 }
 
+impl Serializable for PrecompileTranscript {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.state.write_into(target);
+    }
+}
+
+impl Deserializable for PrecompileTranscript {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::from_state(Word::read_from(source)?))
+    }
+}
+
 // PRECOMPILE ERROR
 // ================================================================================================
 
