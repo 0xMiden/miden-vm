@@ -311,7 +311,7 @@ fn register_debug_type(
                     .add_string(field_name.unwrap_or_else(|| format!("{i}").into()));
                 fields.push(DebugFieldInfo { name_idx, type_idx, offset: field.offset });
             }
-            let struct_name = declared_name.clone().or_else(|| struct_ty.name());
+            let struct_name = declared_name.or_else(|| struct_ty.name());
             let name_idx = debug_types_section
                 .add_string(struct_name.clone().unwrap_or_else(|| "<anon>".into()));
             let size = u32::try_from(struct_ty.size()).map_err(|_| {
