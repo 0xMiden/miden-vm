@@ -306,6 +306,11 @@ impl StackInterface for FastProcessor {
 
         self.stack_bot_idx = self.stack_top_idx - MIN_STACK_DEPTH;
 
+        // Charge the suspended overflow against the aggregate operand-stack budget. The elements
+        // are merely moved from the active stack into the saved overflow, so the aggregate depth is
+        // unchanged here; tracking it lets `ensure_stack_capacity_for_push` cap the total across
+        // all nested contexts rather than only the active one.
+        self.saved_overflow_len += overflow_stack.len();
         self.stack_overflow_save_stack.push(overflow_stack);
     }
 
@@ -326,6 +331,10 @@ impl StackInterface for FastProcessor {
             MIN_STACK_DEPTH.saturating_add(target_overflow_len) <= self.options.max_stack_depth(),
             "suspended caller stacks are checked against the operand stack depth limit before being saved"
         );
+
+        // Release this segment from the aggregate operand-stack budget; the elements are about to
+        // be moved back into the active context below.
+        self.saved_overflow_len -= target_overflow_len;
 
         // Check if there's enough room to restore the overflow stack in the current stack buffer.
         // If not, move the stack within the buffer so that after restoring the overflow stack, the

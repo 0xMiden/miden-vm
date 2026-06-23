@@ -22,7 +22,7 @@ These are the formatter decisions that are currently hard-coded:
 | Maximum line width | `80` columns |
 | Structured body indentation | `4` spaces |
 | Consecutive blank lines preserved | at most `1` |
-| Import alias arrow spacing | `path->alias` |
+| Import alias spacing | `path as alias` |
 | Compact error-operand instruction spacing | `assert.err=...` |
 | Compact bracket-suffix instruction spacing | `push.CONST[0..2]` |
 
@@ -40,7 +40,7 @@ Current normalization rules include:
   exactly `4` spaces per nesting level
 - runs of blank lines are collapsed to at most one blank line between sibling items/operations
 - ordinary token spacing is normalized by syntax, for example:
-  - `pub   use   miden::core::mem  ->  memory` becomes `pub use miden::core::mem->memory`
+  - `use   miden::core::mem  as  memory` becomes `use miden::core::mem as memory`
   - `pub const X=event("foo")` becomes `pub const X = event("foo")`
 - line comments are trimmed at the end of the line, and then re-emitted at the formatter-chosen
   indentation level
@@ -63,14 +63,14 @@ exceed that width, or when the construct already contains comments that require 
 
 - `use` declarations stay on one line if they fit
 - import paths stay on one line and are not broken at `::` separators
-- long aliases may wrap to an indented continuation line
-- import aliases always use `->alias` with no spaces around `->`
+- long module aliases or item-import `from` clauses may wrap to an indented continuation line
+- module import aliases use `as`, and item imports use braced lists with optional per-item `as`
 
 Example:
 
 ```masm
-pub use ::miden::core::collections::sorted_array::lowerbound_key_value
-    ->lowerbound_key_value
+pub use {lowerbound_key_value as lowerbound_key_value_long_alias}
+    from ::miden::core::collections::sorted_array
 ```
 
 ### Constants and Advice Maps
@@ -165,7 +165,7 @@ with that construct.
 Examples:
 
 ```masm
-use ::miden::utils::panic # import
+use {panic} from ::miden::utils # import
 pub proc long_name(arg: ptr<u8, addrspace(byte)>) # proc
 if.true # condition
 ```
@@ -268,12 +268,12 @@ The following options are things we might add config for in the future:
 | --- | --- | --- |
 | `max_blank_lines` | `1` | Maximum number of blank lines preserved between sibling constructs |
 | `preserve_single_line_instruction_groups` | `true` | Keep same-line instruction groups when they fit |
-| `wrap_long_import_aliases` | `true` | Wrap long import aliases without breaking the import path |
+| `wrap_long_import_aliases` | `true` | Wrap long import aliases or item-import `from` clauses without breaking the import path |
 | `wrap_long_values` | `true` | Wrap long `const` and `adv_map` value expressions |
 | `wrap_long_signatures` | `true` | Wrap long procedure signatures |
 | `comment_anchor_mode` | `"line_based"` | Anchor comments based on same-line vs immediate-following-line placement |
 | `header_comment_mode` | `"same_line_only"` | Only inline comments that appear on the same line as a structured header |
-| `import_alias_spacing` | `"compact_arrow"` | Render import aliases as `path->alias` |
+| `import_alias_spacing` | `"as"` | Render import aliases as `path as alias` or `item as alias` |
 | `compact_instruction_err_spacing` | `"compact"` | Render error operands as `.err=...` |
 | `compact_instruction_slice_spacing` | `"compact"` | Render selector/range suffixes as `op[range]` |
 

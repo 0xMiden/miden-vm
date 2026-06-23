@@ -67,9 +67,13 @@ impl AirBuilder for ConstraintEvalBuilder {
         Felt::ZERO
     }
 
-    fn is_transition_window(&self, size: usize) -> Self::Expr {
-        assert_eq!(size, 2, "stack_arith only uses 2-row transition constraints");
+    fn is_transition(&self) -> Self::Expr {
         Felt::ONE
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        assert_eq!(size, 2, "stack arithmetic tests use two-row transition windows");
+        self.is_transition()
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -78,6 +82,14 @@ impl AirBuilder for ConstraintEvalBuilder {
 
     fn public_values(&self) -> &[Self::PublicVar] {
         &[]
+    }
+}
+
+impl PeriodicAirBuilder for ConstraintEvalBuilder {
+    type PeriodicVar = Felt;
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
     }
 }
 
@@ -109,14 +121,6 @@ impl PermutationAirBuilder for ConstraintEvalBuilder {
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
         &self.permutation_values
-    }
-}
-
-impl PeriodicAirBuilder for ConstraintEvalBuilder {
-    type PeriodicVar = Felt;
-
-    fn periodic_values(&self) -> &[Self::PeriodicVar] {
-        &self.periodic_values
     }
 }
 

@@ -5,13 +5,7 @@ use miden_package_registry::{PackageId, PackageRegistry, Version};
 use miden_package_registry_local::LocalPackageRegistry;
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "miden-registry",
-    version,
-    about,
-    rename_all = "kebab-case",
-    arg_required_else_help(true)
-)]
+#[command(version, about, rename_all = "kebab-case", arg_required_else_help(true))]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -49,6 +43,13 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let mut registry = LocalPackageRegistry::load_from_env()?;
 
+    run(cli, &mut registry)
+}
+
+fn run(
+    cli: Cli,
+    registry: &mut LocalPackageRegistry,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
     match cli.command {
         Command::Publish { package } => {
             let published = registry.publish(package)?;
@@ -73,7 +74,18 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         },
         Command::Show { package, version, quiet, json } => {
             let package_id = PackageId::from(package);
-            let version = version.map(|version| version.parse::<Version>()).transpose()?;
+            let version = match version {
+                Some(version) => match version.parse::<Version>() {
+                    Ok(version) => Some(version),
+                    Err(err) => {
+                        if quiet {
+                            return Ok(ExitCode::from(2));
+                        }
+                        return Err(Box::new(err));
+                    },
+                },
+                None => None,
+            };
             if let Some(summary) = registry.show(&package_id, version.as_ref()) {
                 if json {
                     let mut stdout = std::io::stdout();
@@ -117,4 +129,53 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_test_registry() -> (tempfile::TempDir, LocalPackageRegistry) {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let registry = LocalPackageRegistry::load(
+            tempdir.path().join("etc").join("registry").join("index.toml"),
+            tempdir.path().join("lib"),
+        )
+        .unwrap();
+
+        (tempdir, registry)
+    }
+
+    #[test]
+    fn show_quiet_invalid_version_returns_error_code_without_registry_lookup() {
+        let (_tempdir, mut registry) = empty_test_registry();
+        let cli = Cli::parse_from([
+            "miden-registry",
+            "show",
+            "some-package",
+            "--version",
+            "not-a-version",
+            "--quiet",
+        ]);
+
+        let exit_code = run(cli, &mut registry).expect("quiet parse errors should not escape");
+
+        assert_eq!(exit_code, ExitCode::from(2));
+    }
+
+    #[test]
+    fn show_invalid_version_without_quiet_returns_parse_error() {
+        let (_tempdir, mut registry) = empty_test_registry();
+        let cli = Cli::parse_from([
+            "miden-registry",
+            "show",
+            "some-package",
+            "--version",
+            "not-a-version",
+        ]);
+
+        let err = run(cli, &mut registry).expect_err("non-quiet parse errors should escape");
+
+        assert!(err.to_string().contains("invalid semantic version"), "{err}");
+    }
 }

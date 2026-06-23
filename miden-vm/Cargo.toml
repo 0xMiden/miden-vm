@@ -92,6 +92,7 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true

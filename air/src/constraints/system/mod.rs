@@ -180,9 +180,13 @@ mod tests {
             Felt::ZERO
         }
 
-        fn is_transition_window(&self, size: usize) -> Self::Expr {
-            assert_eq!(size, 2, "system constraints only use 2-row transition constraints");
+        fn is_transition(&self) -> Self::Expr {
             Felt::ONE
+        }
+
+        fn is_transition_window(&self, size: usize) -> Self::Expr {
+            assert_eq!(size, 2, "system tests use two-row transition windows");
+            self.is_transition()
         }
 
         fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
@@ -191,6 +195,14 @@ mod tests {
 
         fn public_values(&self) -> &[Self::PublicVar] {
             &[]
+        }
+    }
+
+    impl PeriodicAirBuilder for ConstraintEvalBuilder {
+        type PeriodicVar = Felt;
+
+        fn periodic_values(&self) -> &[Self::PeriodicVar] {
+            &self.periodic_values
         }
     }
 
@@ -222,14 +234,6 @@ mod tests {
 
         fn permutation_values(&self) -> &[Self::PermutationVar] {
             &self.permutation_values
-        }
-    }
-
-    impl PeriodicAirBuilder for ConstraintEvalBuilder {
-        type PeriodicVar = Felt;
-
-        fn periodic_values(&self) -> &[Self::PeriodicVar] {
-            &self.periodic_values
         }
     }
 

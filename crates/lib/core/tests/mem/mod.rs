@@ -25,7 +25,7 @@ fn test_memcopy_words_fails_on_overlap() {
     ";
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_memcopy_elements_fails_on_overlap() {
     ";
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }
 
 #[test]

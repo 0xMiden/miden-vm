@@ -8,67 +8,41 @@ entrypoint=0
 num_procedures=1
 num_nodes=1
 forest_commitment=Word([3630602870060514113, 5050619743084583595, 3463914896761820171, 1508570266937747574])
-serialized_program_len=292
-serialized_forest_len=287
+serialized_program_len=117
+serialized_forest_len=112
 roots=[0]
 procedure_digests=[Word([4342166135994949017, 2094262227220471274, 3638650055443582261, 5796292743647083666])]
 node_digests=[Word([4342166135994949017, 2094262227220471274, 3638650055443582261, 5796292743647083666])]
-debug_counts=asm_ops:4 debug_vars:0 procedure_names:0
-asm_ops=["::$exec::$main:push.1:2:loc=true", "::$exec::$main:push.2:1:loc=true", "::$exec::$main:add:1:loc=true", "::$exec::$main:emit.2786995720836218532:3:loc=true"]
-debug_vars=[]
-node[0]=asm:[(4, 0), (6, 1), (7, 2), (8, 3)] debug:[]
 === nested_control_flow ===
 program_hash=Word([1635631736616508626, 7976522995001250029, 7611219931845578461, 1062025275391321683])
 entrypoint=6
 num_procedures=1
 num_nodes=7
 forest_commitment=Word([849929022552317214, 7427500503658320881, 2774716538908629281, 8455461885536911745])
-serialized_program_len=681
-serialized_forest_len=676
+serialized_program_len=394
+serialized_forest_len=389
 roots=[6]
 procedure_digests=[Word([1635631736616508626, 7976522995001250029, 7611219931845578461, 1062025275391321683])]
 node_digests=[Word([3709846097249837907, 3687687910892602360, 2347863464329765900, 5847375796569540460]), Word([1157166304109973644, 660450707788813354, 5841391230910664373, 8037084447917296400]), Word([3917642103669044294, 1256917413018478811, 2723211249734177761, 7544549658768400965]), Word([2123092357292031793, 4019208144123511714, 5932350296896399797, 6512606112131086804]), Word([252762879258792265, 507466002686573248, 8465968327637638013, 8928597546718340320]), Word([6418966682397379538, 3705532757406318785, 5430543709481962386, 4871162173256439981]), Word([1635631736616508626, 7976522995001250029, 7611219931845578461, 1062025275391321683])]
-debug_counts=asm_ops:8 debug_vars:0 procedure_names:0
-asm_ops=["::$exec::$main:push.1:2:loc=true", "::$exec::$main:push.2:1:loc=true", "::$exec::$main:push.3:1:loc=true", "::$exec::$main:push.1:2:loc=true", "::$exec::$main:add:1:loc=true", "::$exec::$main:if.true:0:loc=true", "::$exec::$main:begin:0:loc=true", "::$exec::$main:begin:0:loc=true"]
-debug_vars=[]
-node[0]=asm:[(4, 0)] debug:[]
-node[1]=asm:[(0, 1)] debug:[]
-node[2]=asm:[(0, 2)] debug:[]
-node[3]=asm:[(0, 3), (2, 4), (3, 3), (5, 4), (6, 3), (8, 4)] debug:[]
-node[4]=asm:[(0, 5)] debug:[]
-node[5]=asm:[(0, 6)] debug:[]
-node[6]=asm:[(0, 7)] debug:[]
 === procedure_calls_and_repeated_subtrees ===
 program_hash=Word([7748460684097462619, 873079055815085414, 3740307134852709629, 6522058108487841281])
 entrypoint=2
 num_procedures=3
 num_nodes=3
 forest_commitment=Word([2074376403169272627, 3402960231634946025, 8097559058844746962, 2523371372180792924])
-serialized_program_len=515
-serialized_forest_len=510
+serialized_program_len=263
+serialized_forest_len=258
 roots=[0, 1, 2]
 procedure_digests=[Word([5955199831066580220, 6699777506829489709, 6621357357215156367, 1360749507433601729]), Word([5141973560591791905, 2104168351443563332, 6594270431102044106, 1200540235716515838]), Word([7748460684097462619, 873079055815085414, 3740307134852709629, 6522058108487841281])]
 node_digests=[Word([5955199831066580220, 6699777506829489709, 6621357357215156367, 1360749507433601729]), Word([5141973560591791905, 2104168351443563332, 6594270431102044106, 1200540235716515838]), Word([7748460684097462619, 873079055815085414, 3740307134852709629, 6522058108487841281])]
-debug_counts=asm_ops:5 debug_vars:0 procedure_names:0
-asm_ops=["::$exec::repeated_b:push.9:1:loc=true", "::$exec::repeated_b:push.3:1:loc=true", "::$exec::repeated_b:add:1:loc=true", "::$exec::decorated:push.0:1:loc=true", "::$exec::decorated:drop:1:loc=true"]
-debug_vars=[]
-node[0]=asm:[(0, 0), (1, 1), (2, 2)] debug:[]
-node[1]=asm:[(0, 3), (1, 4)] debug:[]
-node[2]=asm:[(4, 0), (5, 1), (6, 2), (7, 0), (9, 1), (10, 2), (11, 3), (12, 4)] debug:[]
 === static_imports ===
 program_hash=Word([4711211185774630562, 908982954560373323, 8771513030226615948, 5176891099336789510])
 entrypoint=2
 num_procedures=3
 num_nodes=3
 forest_commitment=Word([6966243469927407185, 914709142177238141, 5972546056275288770, 4755403105702261068])
-serialized_program_len=500
-serialized_forest_len=495
+serialized_program_len=222
+serialized_forest_len=217
 roots=[0, 1, 2]
 procedure_digests=[Word([5141973560591791905, 2104168351443563332, 6594270431102044106, 1200540235716515838]), Word([9171173652270577584, 6742455075019110453, 7565338020746892769, 8957462170255620448]), Word([4711211185774630562, 908982954560373323, 8771513030226615948, 5176891099336789510])]
 node_digests=[Word([5141973560591791905, 2104168351443563332, 6594270431102044106, 1200540235716515838]), Word([9171173652270577584, 6742455075019110453, 7565338020746892769, 8957462170255620448]), Word([4711211185774630562, 908982954560373323, 8771513030226615948, 5176891099336789510])]
-debug_counts=asm_ops:5 debug_vars:0 procedure_names:0
-asm_ops=["::acceptance::helpers::inspect:push.0:1:loc=true", "::acceptance::helpers::inspect:drop:1:loc=true", "::acceptance::helpers::inc:push.1:2:loc=true", "::acceptance::helpers::inc:add:1:loc=true", "::$exec::$main:push.41:1:loc=true"]
-debug_vars=[]
-node[0]=asm:[(0, 0), (1, 1)] debug:[]
-node[1]=asm:[(0, 2), (2, 3)] debug:[]
-node[2]=asm:[(4, 4), (5, 2), (7, 3), (8, 0), (9, 1)] debug:[]

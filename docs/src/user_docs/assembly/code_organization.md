@@ -146,51 +146,93 @@ A program cannot contain any exported procedures.
 
 When a program is executed, the execution starts at the first instruction following the `begin` instruction.
 
-#### Importing modules
-To reference items in another module, you may either use imports (introduced using the `use` keyword at the top-level scope of a module), or by using the fully-qualified path of the item. This gives you three different ways to reference items, depending on what is most appropriate in a given context. Let's look at all three from the perspective of a concrete example, we want to invoke a public procedure `baz`, which is defined in the namespace `foo::bar`:
-
-1. We can simply use the absolute/fully-qualified path to invoke the procedure, i.e. `exec.::foo::bar::baz`. Absolute paths must be prefixed with `::` to indicate that they are fully-qualified, otherwise the assembler will attempt to resolve them relative to the imports in scope.
-2. We can import the `bar` namespace into scope with `use foo::bar`, which allows us to invoke the procedure using a relative path, i.e. `exec.bar::baz`. This approach only requires you to specify the fully-qualified path once to bring a namespace into scope, which reduces visual noise, while retaining a visual cue as to where a symbol reference is defined.
-3. We can import the `baz` item directly into scope with `use foo::bar::baz`, allowing us to treat it like a locally-defined item, e.g. `exec.baz`
-
-All three are demonstrated below:
+#### Declaring submodules
+Modules may declare submodules, and so on, to better organize functionality for re-use and maintainability. Modules must explicitly declare each submodule that
+is an immediate child of their namespace, using `mod` or `pub mod`:
 
 ```
+pub mod api
+mod internal
+
+pub proc call_api
+    exec.api::foo
+end
+```
+
+The declaration in the above example tells the assembler that `api` and `internal` are child modules of the current module. Submodules are available by name inside the declaring module's scope as if they had been imported, as demonstrated by `exec.api::foo`.
+
+The visibility on the submodule declaration controls who may resolve paths through that submodule. A private `mod internal` child is visible from the module that declared it and from that module's descendants. Code outside that internal scope must go through public submodule edges, declared with `pub mod`. This module visibility is separate from item visibility: a submodule, regardless of its own visibility, always exposes only the procedures, constants, and types that are themselves public or re-exported.
+
+If a linked module is a child of another module, the parent must declare it. Missing declarations and declarations without a corresponding child module are reported as assembly errors.
+
+#### Importing modules
+To reference items in another module, you may use imports (introduced with `use` at the top-level scope of a module), declared submodule paths, or fully-qualified paths. Let's look at all three from the perspective of a concrete example: we want to invoke a public procedure `baz`, which is defined in the module `foo::bar`:
+
+1. We can use the absolute/fully-qualified path to invoke the procedure, i.e. `exec.::foo::bar::baz`. Absolute code paths must be prefixed with `::`.
+2. We can import the `bar` module into scope with `use foo::bar`, which allows us to invoke the procedure using an import-qualified path, i.e. `exec.bar::baz`. Import declarations are resolved from the global module tree, so `foo::bar` does not need a leading `::`.
+3. We can refer to a descendant module of the current module by using submodule-relative paths, indicated by the `self::` prefix, e.g. `use self::child::helpers`, where `child` is a submodule of the current module.
+4. We can import the `baz` item directly into scope with `use {baz} from foo::bar`, allowing us to treat it like a locally-defined item, e.g. `exec.baz`.
+
+All four are demonstrated below:
+
+```
+pub mod child
+
 use foo::bar
-use foo::bar::baz
+use {baz} from foo::bar
+use self::child::helpers
 
 begin
   exec.::foo::bar::baz # no import, fully-qualified path
   exec.bar::baz # uses the first import, partially-qualified path
   exec.baz # uses the second import, unqualified path
+  exec.helpers::foo # uses the third import, self-qualified path
 end
 ```
 
-Let's say we have a local symbol that conflicts with the symbol we're trying to import, we can work around this by renaming the imported symbol to avoid the conflict, as shown below:
+In the case of the `self`-qualified path in the example above, `helpers` must have be declared by `child`. Because the current module is reaching through `child` into a deeper descendant, `child` must declare `helpers` with `pub mod helpers`. A direct child declared in the current module is already in scope and should be referenced directly, as in `exec.child::foo`, rather than imported.
+
+Let's say we have a local symbol that conflicts with the module or item we're trying to import. We can work around this by renaming the import to avoid the conflict, as shown below:
 
 ```
-use foo::bar->bar2
+use foo::bar as bar2
 ```
 
 This would bring `bar` into scope as `bar2` instead:
 
 ```
-use foo::bar->bar2
+use foo::bar as bar2
 
 begin
     exec.bar2::baz
 end
 ```
 
+Items can also be renamed:
+
+```
+use {baz as baz2} from foo::bar
+
+begin
+    exec.baz2
+end
+```
+
+Imports are resolved independently. An import may not refer to another import declared in the same module:
+
+```
+use foo::bar
+use bar::baz # invalid: this tries to resolve global module `bar::baz`
+```
+
+Code paths that are not absolute must start with a local item, an import alias, or a declared submodule in the current module. The assembler does not fall back to the global module tree for unresolved relative-looking paths.
+
 If the assembler cannot resolve external symbol references to a known module or item, assembly will fail. You can register modules with the assembler when instantiating it, either in source form, or precompiled form. See the [miden-assembly docs](https://crates.io/crates/miden-assembly) for details. The assembler will use this information to resolve references to imported items during assembly.
 
 #### Re-exporting items
-Items imported into a module, can also be simultaneously re-exported from that module, using the name bound to the symbol when it was imported. For example:
+Items can be imported and simultaneously re-exported from a module with `pub use`. For example:
 ```
-use miden::core::math::u64
-
-pub use u64::add
-pub use u64::mul->mul64
+pub use {add, mul as mul64} from miden::core::math::u64
 
 pub proc foo
     <instructions>
@@ -199,35 +241,24 @@ end
 
 In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `miden::core::math::u64` module.
 
-Similar to procedure invocation, you can bypass the explicit import by specifying an absolute path, like so:
+`pub use` follows the same path rules as `use`: it resolves from the global module tree unless the path starts with `self::`, and it does not resolve through other imports in the current module. Modules cannot be re-exported with `pub use`; use `pub mod` in the parent module to expose a submodule as part of a public module tree.
+
+A leading `::` may be used to make the global root explicit:
 
 ```
-pub use ::miden::core::math::u64::mul->mul64
+pub use {mul as mul64} from ::miden::core::math::u64
 ```
 
-Additionally, you may re-export a procedure using its MAST root, so long as you specify a name for it, as shown below:
+In all of the forms described above, other modules which reference the re-exported procedure will have those references resolved to the original procedure during assembly.
 
-```
-pub use 0x0000..0000->mul64
-```
+Documentation comments do not attach to imports or re-exports. API documentation should be written on the original item declaration.
 
-Note that when an explicit MAST root is used, either directly, or via an alias like the example above - the assembler assumes that the MAST corresponding to that root will be available at runtime, and so it is up to you to either provide that code to the VM when executing the program, or statically link the code into the assembled program ahead of time using the assembler.
-
-In all of the forms described above, the actual implementation of the re-exported procedure is defined externally. Other modules which reference the re-exported procedure, will have those references resolved to the original procedure during assembly.
-
-You may attach documentation to re-exported items, e.g.:
-
-```
-#! Multiply two u64 integers
-pub use ::miden::core::math::u64::mul
-```
-
-However you cannot attach attributes to re-exported items, i.e. the following is
+You also cannot attach attributes to re-exported items, i.e. the following is
 not supported:
 
 ```
 @foo
-pub use ::miden::core::math::u64::mul
+pub use {mul} from ::miden::core::math::u64
 ```
 
 ### Constants
@@ -246,11 +277,11 @@ The division operators in constant expressions have different semantics:
 
 Use `//` when the intended result is an integer quotient.
 
-**NOTE:** Constants used as immediate operands, e.g. `push.CONSTANT` do not currently support qualified paths. For example, `push.foo::BAR` is not allowed. Instead, you must import the constant first, i.e. `use foo::BAR`, and then reference it as a local definition, i.e. `push.BAR`. We may lift this limitation in the future.
+**NOTE:** Constants used as immediate operands, e.g. `push.CONSTANT` do not currently support qualified paths. For example, `push.foo::BAR` is not allowed. Instead, you must import the constant first, i.e. `use {BAR} from foo`, and then reference it as a local definition, i.e. `push.BAR`. We may lift this limitation in the future.
 
 ```
 use miden::core::math::u64
-use mylib::CONSTANT_1 # constants can be imported like other items
+use {CONSTANT_1} from mylib # constants can be imported like other items
 
 # Constants can be exported like other items
 pub const CONSTANT_2 = 200+(CONSTANT_1-50)
@@ -352,7 +383,7 @@ pub type Id = u64
 
 In `b.masm`:
 ```
-use a::Id
+use {Id} from a
 
 type Account = struct { id: Id }
 

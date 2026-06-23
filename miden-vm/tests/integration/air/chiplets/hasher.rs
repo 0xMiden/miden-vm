@@ -175,7 +175,7 @@ fn mtree_merge_then_get() {
     "
     );
 
-    build_test!(&source, &stack_inputs, &[], store).check_constraints();
+    build_test!(source, &stack_inputs, &[], store).check_constraints();
 }
 
 /// Helper function that builds a test stack and Merkle tree for testing mtree updates.

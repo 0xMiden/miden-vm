@@ -1,30 +1,9 @@
-use miden::core::stark::verifier
+pub mod constants
+pub mod deep_queries
+pub mod ood_frames
+pub mod public_inputs
+pub mod random_coin
+pub mod utils
+pub mod verifier
 
-#! Verifies a STARK proof.
-#!
-#! The purpose of the following verifier is to serve as a generic core around which a specific
-#! verifier can be built. It expects the following parameters on the stack from the caller:
-#!
-#! 1. `[D0, D1, D2, D3, D4]` which are respectively the digests for dynamic execution of procedures
-#!   D0. `observe_aux_trace`
-#!   D1. `process_public_inputs`
-#!   D2. `process_row_ood_evaluations`
-#!   D3. `execute_constraint_evaluation_check`
-#!   D4. `compute_deep_composition_polynomial_queries`
-#!
-#! Precondition: security parameters, relation metadata, and any callback-owned instance state
-#! must already be stored in memory. The instance-specific wrapper owns validation and setup of
-#! that state.
-#!
-#! The following simplifying assumptions are currently made and hardcoded:
-#!
-#! - The blowup factor is set to 8.
-#! - The maximal allowed degree of the remainder polynomial is 127.
-#! - To boost soundness, the protocol is run on a quadratic extension field and this means that
-#!   the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
-#!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
-#!   values for computing random linear combinations are also in this extension field.
-#!
-#! Inputs:  [D0, D1, D2, D3, D4]
-#! Outputs: []
-pub use verifier::verify
+pub use {verify} from self::verifier

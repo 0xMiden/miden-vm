@@ -74,6 +74,24 @@ impl<'a> LoweringContext<'a> {
         self.lower_ident_text(span, raw)
     }
 
+    /// Lowers an identifier-like or quoted-string token into an AST identifier.
+    ///
+    /// This is used for declarations whose textual name may need quoting in source syntax, such as
+    /// `extern package "<package-id>"`.
+    pub(super) fn lower_ident_or_string_token(
+        &mut self,
+        token: &SyntaxToken,
+    ) -> Result<ast::Ident, ParsingError> {
+        let span = self.parse.span_for_token(token);
+        let raw = match token.kind() {
+            SyntaxKind::QuotedIdent | SyntaxKind::QuotedString if token.text().len() >= 2 => {
+                &token.text()[1..token.text().len() - 1]
+            },
+            _ => token.text(),
+        };
+        self.lower_ident_text(span, raw)
+    }
+
     /// Lowers a procedure-name token using the token's original spelling.
     ///
     /// Procedure names have slightly different validation semantics than plain identifiers, and

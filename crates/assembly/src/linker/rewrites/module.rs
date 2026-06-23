@@ -10,8 +10,7 @@ use miden_core::Felt;
 use crate::{
     ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
     ast::{
-        self, Alias, AliasTarget, InvocationTarget, Invoke, InvokeKind, Procedure,
-        SymbolResolution,
+        self, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
         constants::ConstEnvironment,
         visit::{self, VisitMut},
     },
@@ -105,7 +104,6 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
                 return Ok(Some(CachedConstantValue::Hit(cached)));
             },
             SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => (),
-            SymbolItem::Alias { .. } => unreachable!(),
         }
 
         Err(self.invalid_constant_ref(span))
@@ -146,20 +144,8 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
             Ok(SymbolResolution::Module { id, path }) => {
                 log::debug!(target: "linker", "    | target resolved to module {id}: '{path}'");
             },
-            Ok(SymbolResolution::Local(item)) => {
-                log::debug!(target: "linker", "    | target is already resolved locally to {item}");
-            },
-            Ok(SymbolResolution::External(path)) => {
-                log::debug!(target: "linker", "    | target is externally defined at {path}");
-                match target {
-                    InvocationTarget::MastRoot(_) => unreachable!(),
-                    InvocationTarget::Path(old_path) => {
-                        *old_path = path.with_span(old_path.span());
-                    },
-                    target @ InvocationTarget::Symbol(_) => {
-                        *target = InvocationTarget::Path(path.with_span(target.span()));
-                    },
-                }
+            Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => {
+                unreachable!("link-time namespace resolution should produce exact ids")
             },
         }
 
@@ -187,37 +173,6 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
         target: &mut InvocationTarget,
     ) -> ControlFlow<LinkerError> {
         self.rewrite_target(InvokeKind::Exec, target)
-    }
-    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<LinkerError> {
-        match alias.target() {
-            AliasTarget::MastRoot(_) => return ControlFlow::Continue(()),
-            AliasTarget::Path(_) => (),
-        }
-        log::debug!(target: "linker", "    * rewriting alias target {}", alias.target());
-        let span = alias.target().span();
-        let context = SymbolResolutionContext { span, module: self.module_id, kind: None };
-        match self.resolver.resolve_alias_target(&context, &*alias) {
-            Err(err) => {
-                log::error!(target: "linker", "    | failed to resolve target {}", alias.target());
-                return ControlFlow::Break(err);
-            },
-            Ok(SymbolResolution::Module { id, path }) => {
-                log::debug!(target: "linker", "    | target resolved to module '{path}' (id {id})");
-                *alias.target_mut() = AliasTarget::Path(path.with_span(span));
-            },
-            Ok(SymbolResolution::Exact { gid, path }) => {
-                log::debug!(target: "linker", "    | target resolved to item '{path}' (id {gid})");
-                *alias.target_mut() = AliasTarget::Path(path.with_span(span));
-            },
-            Ok(SymbolResolution::MastRoot(digest)) => {
-                log::warn!(target: "linker", "    | target resolved to mast root {digest}");
-            },
-            Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => unreachable!(),
-        }
-        ControlFlow::Continue(())
-    }
-    fn visit_mut_alias_target(&mut self, _target: &mut AliasTarget) -> ControlFlow<LinkerError> {
-        unreachable!("expected all alias targets to be reached via an alias")
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
         let mut visitor = ConstEvalVisitor::new(self);
@@ -288,16 +243,8 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             module: self.module_id,
             kind: None,
         };
-        let gid = match self.resolver.resolve_local(&context, &name)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
-            SymbolResolution::External(path) => {
-                return self.get_by_path(path.as_deref());
-            },
-            SymbolResolution::Module { .. } | SymbolResolution::MastRoot(_) => {
-                return Err(self.invalid_constant_ref(name.span()));
-            },
-        };
+        let path = ast::Path::new(name.inner());
+        let gid = self.resolver.resolve_constant_path(&context, Span::new(name.span(), path))?;
 
         self.get_constant_by_gid(gid, name.span())
     }
@@ -311,14 +258,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             module: self.module_id,
             kind: None,
         };
-        let gid = match self.resolver.resolve_path(&context, path)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(self.invalid_constant_ref(path.span()));
-            },
-            SymbolResolution::External(_) => unreachable!(),
-        };
+        let gid = self.resolver.resolve_constant_path(&context, path)?;
 
         self.get_constant_by_gid(gid, path.span())
     }

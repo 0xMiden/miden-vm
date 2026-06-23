@@ -18,6 +18,30 @@
 //!
 //! #### Custom Sections
 //! - `sections` (a vector of zero or more [`crate::Section`])
+//!
+//! #### Reader trust policy
+//!
+//! Package deserialization has two independently important trust decisions:
+//!
+//! - whether the embedded [`MastForest`] must be recomputed and validated;
+//! - whether package-owned debug sections may be exposed to callers.
+//!
+//! [`Package::read_from`] and [`Package::read_from_bytes`] are the normal untrusted readers. They
+//! validate the embedded MAST forest and discard package-owned debug sections before returning the
+//! package. Use them for bytes received across a trust boundary.
+//!
+//! [`Package::read_from_trusted`] and [`Package::read_from_bytes_trusted`] are for local
+//! files/cache entries controlled by the same trusted build or execution system. They validate the
+//! embedded MAST forest, but preserve package-owned debug sections so [`Package::debug_info`] can
+//! decode them.
+//!
+//! [`Package::read_from_unchecked`] and [`Package::read_from_bytes_unchecked`] are also trusted
+//! same-domain readers, but skip MAST validation. Use them only for bytes that were already
+//! validated before being persisted by the same trusted system.
+//!
+//! Embedded kernel package bytes are stored in the opaque `kernel` custom section. Untrusted
+//! package reads may carry those bytes, but decoding the embedded kernel through the package API
+//! uses the untrusted reader and therefore strips any nested package-owned debug sections.
 
 use alloc::{
     format,
@@ -26,7 +50,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::ast::{AttributeSet, PathBuf};
+use miden_assembly_syntax::ast::{self, AttributeSet, PathBuf};
 use miden_core::{
     Word,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
@@ -36,9 +60,13 @@ use miden_core::{
     },
 };
 
-use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
+use super::{
+    ConstantExport, PackageId, PackageModule, PackageSubmodule, ProcedureExport, TargetType,
+    TypeExport,
+};
 use crate::{
     Dependency, ManifestValidationError, Package, PackageExport, PackageManifest, Section,
+    debug_info::DebugSourceNodeId,
 };
 
 // CONSTANTS
@@ -50,7 +78,7 @@ const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [5, 0, 0];
+const VERSION: [u8; 3] = [6, 0, 0];
 
 /// Byte-read budget multiplier for package deserialization from a byte slice.
 ///
@@ -93,29 +121,59 @@ impl Package {
         }
     }
 
-    /// Reads a package from `source` without validating the embedded MAST forest.
+    /// Reads a trusted package from `source` without validating the embedded MAST forest.
     ///
-    /// This is only correct when serialization and deserialization happen within the same trust
-    /// domain. A typical use case is reloading bytes that were already validated before being
-    /// persisted to local storage controlled by the same trusted system.
+    /// # Trust boundary
     ///
-    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
-    /// received over the network or from another party. Authenticating the outer byte stream does
-    /// not prove that embedded MAST node digests are semantically valid.
+    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
+    /// bytes that were already validated before being persisted by the same trusted system.
+    ///
+    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
+    /// other package that crosses a trust boundary. Use [`Package::read_from`] for those
+    /// inputs.
     pub fn read_from_unchecked<R: ByteReader>(
         source: &mut R,
     ) -> Result<Self, DeserializationError> {
         let header = Self::read_header_from(source)?;
         let mast_forest = Self::read_mast_forest(source, false)?;
-        Self::read_from_with_header_and_mast(source, header, mast_forest)
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
     }
 
-    /// Reads a package from `bytes` without validating the embedded MAST forest.
+    /// Reads trusted package bytes without validating the embedded MAST forest.
     ///
-    /// See [`Package::read_from_unchecked`].
+    /// # Trust boundary
+    ///
+    /// This skips embedded MAST validation and trusts serialized node digests. Use it only for
+    /// bytes that were already validated before being persisted by the same trusted system.
+    ///
+    /// Do not use this for user-controlled packages, network input, registry artifacts, or any
+    /// other package that crosses a trust boundary. Use [`Package::read_from_bytes`] for those
+    /// inputs.
     pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
         let mut source = SliceReader::new(bytes);
         Self::read_from_unchecked(&mut source)
+    }
+
+    /// Reads a trusted local package while validating the embedded MAST forest.
+    ///
+    /// This keeps the same structural validation as [`Package::read_from`], but allows
+    /// package-owned debug sections to be decoded as trusted metadata. Use this only for local
+    /// files or cache artifacts controlled by this process or build system. Do not use this for
+    /// inbound artifacts from an untrusted channel; use [`Package::read_from`] instead so debug
+    /// sections are discarded before the package is exposed to callers.
+    pub fn read_from_trusted<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let header = Self::read_header_from(source)?;
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_header_and_mast(source, header, mast_forest, true)
+    }
+
+    /// Reads trusted local package bytes while validating the embedded MAST forest.
+    ///
+    /// See [`Package::read_from_trusted`].
+    pub fn read_from_bytes_trusted(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let budget = bytes.len().saturating_mul(PACKAGE_BYTE_READ_BUDGET_MULTIPLIER);
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from_trusted(&mut reader)
     }
 
     fn read_mast_forest<R: ByteReader>(
@@ -195,6 +253,7 @@ impl Package {
         source: &mut R,
         header: PackageHeader,
         mast: Arc<MastForest>,
+        debug_sections_trusted: bool,
     ) -> Result<Self, DeserializationError> {
         let PackageHeader { name, version, description, kind } = header;
 
@@ -202,7 +261,13 @@ impl Package {
         let manifest = PackageManifest::read_from_safe(source, &mast)?;
 
         // Read custom sections
-        let sections = Vec::<Section>::read_from(source)?;
+        let mut sections = Vec::<Section>::read_from(source)?;
+        if !debug_sections_trusted && sections.iter().any(|section| section.id.is_debug()) {
+            log::warn!(
+                "Package read ignored debug sections from an untrusted artifact; use Package::read_from_trusted for local cache/debug reads"
+            );
+            sections.retain(|section| !section.id.is_debug());
+        }
 
         let mut package = Self {
             name,
@@ -213,6 +278,7 @@ impl Package {
             mast,
             manifest,
             sections,
+            debug_sections_trusted,
         };
 
         package
@@ -230,7 +296,7 @@ impl Deserializable for Package {
         // Read MAST artifact
         let mast = Self::read_mast_forest(source, true)?;
 
-        Self::read_from_with_header_and_mast(source, header, mast)
+        Self::read_from_with_header_and_mast(source, header, mast, false)
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
@@ -271,9 +337,28 @@ impl serde::Serialize for PackageManifest {
             }
         }
 
-        let mut serializer = serializer.serialize_struct("PackageManifest", 2)?;
+        struct PackageModules<'a>(&'a BTreeMap<Arc<Path>, PackageModule>);
+
+        impl serde::Serialize for PackageModules<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeSeq;
+
+                let mut serializer = serializer.serialize_seq(Some(self.0.len()))?;
+                for value in self.0.values() {
+                    serializer.serialize_element(value)?;
+                }
+                serializer.end()
+            }
+        }
+
+        let mut serializer = serializer.serialize_struct("PackageManifest", 4)?;
         serializer.serialize_field("exports", &PackageExports(&self.exports))?;
+        serializer.serialize_field("modules", &PackageModules(&self.modules))?;
         serializer.serialize_field("dependencies", &self.dependencies)?;
+        serializer.serialize_field("entrypoint", &self.entrypoint)?;
         serializer.end()
     }
 }
@@ -288,7 +373,9 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
             Exports,
+            Modules,
             Dependencies,
+            Entrypoint,
         }
 
         struct PackageManifestVisitor;
@@ -307,11 +394,25 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let exports = seq
                     .next_element::<Vec<PackageExport>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let modules = seq
+                    .next_element::<Vec<PackageModule>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
                 let dependencies = seq
                     .next_element::<Vec<Dependency>>()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
+                let entrypoint = seq
+                    .next_element::<Option<PathBuf>>()
+                    .map(|p| p.map(|p| p.map(Arc::<ast::Path>::from)))?;
                 PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .and_then(|manifest| {
+                        if let Some(Some(entrypoint)) = entrypoint {
+                            manifest.with_entrypoint(entrypoint)
+                        } else {
+                            Ok(manifest)
+                        }
+                    })
                     .map_err(serde::de::Error::custom)
             }
 
@@ -320,7 +421,9 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 A: serde::de::MapAccess<'de>,
             {
                 let mut exports = None;
+                let mut modules = None;
                 let mut dependencies = None;
+                let mut entrypoint = None;
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::Exports => {
@@ -329,26 +432,50 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                             }
                             exports = Some(map.next_value::<Vec<PackageExport>>()?);
                         },
+                        Field::Modules => {
+                            if modules.is_some() {
+                                return Err(serde::de::Error::duplicate_field("modules"));
+                            }
+                            modules = Some(map.next_value::<Vec<PackageModule>>()?);
+                        },
                         Field::Dependencies => {
                             if dependencies.is_some() {
                                 return Err(serde::de::Error::duplicate_field("dependencies"));
                             }
                             dependencies = Some(map.next_value::<Vec<Dependency>>()?);
                         },
+                        Field::Entrypoint => {
+                            if entrypoint.is_some() {
+                                return Err(serde::de::Error::duplicate_field("entrypoint"));
+                            }
+                            entrypoint = Some(
+                                map.next_value::<Option<PathBuf>>()
+                                    .map(|p| p.map(Arc::<ast::Path>::from))?,
+                            );
+                        },
                     }
                 }
                 let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
+                let modules = modules.ok_or_else(|| serde::de::Error::missing_field("modules"))?;
                 let dependencies =
                     dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
                 PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_modules(modules))
                     .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .and_then(|manifest| {
+                        if let Some(Some(entrypoint)) = entrypoint {
+                            manifest.with_entrypoint(entrypoint)
+                        } else {
+                            Ok(manifest)
+                        }
+                    })
                     .map_err(serde::de::Error::custom)
             }
         }
 
         deserializer.deserialize_struct(
             "PackageManifest",
-            &["exports", "dependencies"],
+            &["exports", "modules", "dependencies", "entrypoint"],
             PackageManifestVisitor,
         )
     }
@@ -362,10 +489,24 @@ impl Serializable for PackageManifest {
             export.write_into(target);
         }
 
+        // Write module surfaces
+        target.write_usize(self.num_modules());
+        for module in self.modules() {
+            module.write_into(target);
+        }
+
         // Write dependencies
         target.write_usize(self.num_dependencies());
         for dep in self.dependencies() {
             dep.write_into(target);
+        }
+
+        // Write entrypoint
+        if let Some(entrypoint) = self.entrypoint.as_ref() {
+            target.write_bool(true);
+            entrypoint.write_into(target);
+        } else {
+            target.write_bool(false);
         }
     }
 }
@@ -388,11 +529,36 @@ impl PackageManifest {
             exports.push(PackageExport::read_from_safe(source, mast)?);
         }
 
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let max_modules = source.max_alloc(PackageModule::min_serialized_size());
+        if modules_len > max_modules {
+            return Err(DeserializationError::InvalidValue(format!(
+                "requested {modules_len} elements but reader can provide at most {max_modules}"
+            )));
+        }
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
         PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
             .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
     }
 }
@@ -403,12 +569,65 @@ impl Deserializable for PackageManifest {
         let exports_len = source.read_usize()?;
         let exports = source.read_many_iter(exports_len)?.collect::<Result<Vec<_>, _>>()?;
 
+        // Read module surfaces
+        let modules_len = source.read_usize()?;
+        let modules = source.read_many_iter(modules_len)?.collect::<Result<Vec<_>, _>>()?;
+
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
+        // Read entrypoint
+        let entrypoint = if source.read_bool()? {
+            Some(PathBuf::read_from(source).map(Arc::<ast::Path>::from)?)
+        } else {
+            None
+        };
+
         PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_modules(modules))
             .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .and_then(|manifest| {
+                if let Some(entrypoint) = entrypoint {
+                    manifest.with_entrypoint(entrypoint)
+                } else {
+                    Ok(manifest)
+                }
+            })
             .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
+    }
+}
+
+// PACKAGE MODULE SURFACE SERIALIZATION/DESERIALIZATION
+// ================================================================================================
+
+impl Serializable for PackageModule {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.path.write_into(target);
+        target.write_usize(self.submodules.len());
+        for submodule in self.submodules.iter() {
+            submodule.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for PackageModule {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let submodules = Vec::<PackageSubmodule>::read_from(source)?;
+        Ok(Self { path, submodules })
+    }
+}
+
+impl Serializable for PackageSubmodule {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.name.write_into(target);
+    }
+}
+
+impl Deserializable for PackageSubmodule {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let name = ast::Ident::read_from(source)?;
+        Ok(Self { name })
     }
 }
 
@@ -464,6 +683,12 @@ impl Serializable for ProcedureExport {
         } else {
             target.write_bool(false);
         }
+        if let Some(source_node) = self.source_node {
+            target.write_bool(true);
+            source_node.write_into(target);
+        } else {
+            target.write_bool(false);
+        }
         self.digest.write_into(target);
         match self.signature.as_ref() {
             Some(sig) => {
@@ -496,6 +721,11 @@ impl ProcedureExport {
         } else {
             None
         };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceNodeId::read_from(source)?)
+        } else {
+            None
+        };
         let digest = Word::read_from(source)?;
         // Ensure that the digest associated with `node` matches the provided digest
         if let Some(node) = node
@@ -514,6 +744,7 @@ impl ProcedureExport {
         Ok(Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -530,6 +761,11 @@ impl Deserializable for ProcedureExport {
         } else {
             None
         };
+        let source_node = if source.read_bool()? {
+            Some(DebugSourceNodeId::read_from(source)?)
+        } else {
+            None
+        };
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
             Some(FunctionType::read_from(source)?)
@@ -540,6 +776,7 @@ impl Deserializable for ProcedureExport {
         Ok(Self {
             path,
             node,
+            source_node,
             digest,
             signature,
             attributes,
@@ -557,7 +794,7 @@ impl Serializable for ConstantExport {
 impl Deserializable for ConstantExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
-        let value = miden_assembly_syntax::ast::ConstantValue::read_from(source)?;
+        let value = ast::ConstantValue::read_from(source)?;
         Ok(Self { path, value })
     }
 }
@@ -580,23 +817,33 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "std")]
+    use alloc::format;
     use alloc::{
         string::{String, ToString},
         sync::Arc,
         vec,
         vec::Vec,
     };
+    use core::assert_matches;
     use std::collections::BTreeMap;
+    #[cfg(feature = "std")]
+    use std::fs;
 
-    use miden_assembly_syntax::ast::{Path as AstPath, PathBuf};
+    use miden_assembly_syntax::ast::{Ident, Path as AstPath, PathBuf, ProcedureName};
     use miden_core::{
-        Felt, Word, assert_matches,
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+        Felt, Word,
+        advice::AdviceMap,
+        mast::{
+            BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
+            MastNodeId,
+        },
         operations::Operation,
         serde::{
             BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
             SliceReader,
         },
+        utils::IndexVec,
     };
 
     use super::{
@@ -604,8 +851,12 @@ mod tests {
         VERSION,
     };
     use crate::{
-        Dependency, ManifestValidationError, PackageExport, PackageId, ProcedureExport, SectionId,
-        TargetType,
+        Dependency, ManifestValidationError, PackageExport, PackageId, PackageModule,
+        PackageSubmodule, ProcedureExport, SectionId, TargetType,
+        debug_info::{
+            DebugSourceAsmOp, DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode,
+            DebugSourceNodeId,
+        },
     };
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -644,6 +895,50 @@ mod tests {
             None,
         )
         .expect("test package should be valid")
+    }
+
+    fn build_package_with_debug_info() -> Package {
+        let mut nodes = IndexVec::<MastNodeId, MastNode>::new();
+        let node = BasicBlockNodeBuilder::new(vec![Operation::Add])
+            .build()
+            .expect("failed to build basic block");
+        let digest = node.digest();
+        let node_id = nodes.push(node.into()).expect("failed to add basic block");
+        let source_node = DebugSourceNodeId::from(0);
+
+        let mast = Arc::new(
+            MastForest::from_raw_parts(nodes, vec![node_id], AdviceMap::default())
+                .expect("forest should be valid"),
+        );
+        let path = absolute_path("test::proc");
+        let exports = vec![PackageExport::Procedure(
+            ProcedureExport::new(path, Some(node_id), digest, None)
+                .with_source_node(Some(source_node)),
+        )];
+        let mut package = Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Library,
+            mast,
+            exports,
+            None,
+        )
+        .expect("test package should be valid");
+        let source_graph = DebugSourceGraphSection::from_parts(
+            vec![DebugSourceNode::new(node_id, Vec::new(), 0, 1)],
+            vec![source_node],
+        );
+        let source_map = DebugSourceMapSection::from_parts(
+            vec![DebugSourceAsmOp::new(source_node, 0, None, "trusted".into(), "add".into(), 1)],
+            Vec::new(),
+        );
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()));
+        package
+            .sections
+            .push(Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()));
+        package
     }
 
     fn build_dependency() -> Dependency {
@@ -686,12 +981,139 @@ mod tests {
             .run(&any::<Package>(), move |package| {
                 let bytes = package.to_bytes();
                 let deserialized = Package::read_from_bytes(&bytes).unwrap();
-                prop_assert_eq!(package, deserialized);
+                let mut expected = package;
+                expected.sections.retain(|section| !section.id.is_debug());
+                prop_assert_eq!(expected.to_bytes(), deserialized.to_bytes());
                 Ok(())
             })
             .unwrap_or_else(|err| {
                 panic!("{err}");
             });
+    }
+
+    #[test]
+    fn executable_package_entrypoint_roundtrips() {
+        let (forest, node_id) = build_forest();
+        let entrypoint =
+            Arc::from(AstPath::exec_path().join(ProcedureName::MAIN_PROC_NAME).into_boxed_path());
+        let export = ProcedureExport::new(
+            Arc::clone(&entrypoint),
+            Some(node_id),
+            forest[node_id].digest(),
+            None,
+        );
+        let package = Package::create(
+            PackageId::from("test_pkg"),
+            crate::Version::new(0, 0, 0),
+            TargetType::Executable,
+            Arc::new(forest),
+            [PackageExport::Procedure(export)],
+            None,
+        )
+        .expect("executable package should be valid");
+
+        let deserialized = Package::read_from_bytes(&package.to_bytes())
+            .expect("executable package should deserialize without duplicate entrypoint errors");
+
+        assert_eq!(deserialized.manifest.entrypoint(), Some(entrypoint));
+    }
+
+    #[test]
+    fn package_checked_deserialization_discards_untrusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes(&bytes).unwrap();
+
+        assert!(
+            !deserialized.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted package reads should discard debug sections"
+        );
+        assert!(deserialized.debug_info().unwrap().is_none());
+        let debug_source_map_id = SectionId::DEBUG_SOURCE_MAP.as_str().as_bytes();
+        assert!(
+            !deserialized
+                .to_bytes()
+                .windows(debug_source_map_id.len())
+                .any(|window| window == debug_source_map_id),
+            "discarded debug sections should not be reserialized"
+        );
+    }
+
+    #[test]
+    fn package_trusted_deserialization_preserves_trusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes_trusted(&bytes).unwrap();
+
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
+        assert!(deserialized.debug_info().unwrap().is_some());
+    }
+
+    #[test]
+    fn package_unchecked_deserialization_preserves_trusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let bytes = package.to_bytes();
+
+        let deserialized = Package::read_from_bytes_unchecked(&bytes).unwrap();
+
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
+        assert!(deserialized.debug_info().unwrap().is_some());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_discards_untrusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "debug-sections"
+        ));
+        package.write_to_file(&path).unwrap();
+
+        let deserialized = Package::deserialize_from_file(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(
+            !deserialized.sections.iter().any(|section| section.id.is_debug()),
+            "untrusted package file reads should discard debug sections"
+        );
+        assert!(deserialized.debug_info().unwrap().is_none());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_trusted_preserves_trusted_debug_sections() {
+        let package = build_package_with_debug_info();
+        let path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "trusted-debug-sections"
+        ));
+        package.write_to_file(&path).unwrap();
+
+        let deserialized = Package::deserialize_from_file_trusted(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+
+        assert!(
+            deserialized
+                .sections
+                .iter()
+                .any(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        );
+        assert!(deserialized.debug_info().unwrap().is_some());
     }
 
     #[test]
@@ -776,6 +1198,7 @@ mod tests {
     fn package_manifest_rejects_over_budget_dependencies() {
         let mut bytes = Vec::new();
         bytes.write_usize(0);
+        bytes.write_usize(0);
         bytes.write_usize(2);
 
         let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 2);
@@ -856,6 +1279,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         // Manually serialize the tampered package: forest + one export referencing a non-root node.
@@ -899,10 +1323,40 @@ mod tests {
     }
 
     #[test]
+    fn package_manifest_roundtrips_module_surfaces() {
+        let export = PackageExport::Procedure(ProcedureExport::new(
+            absolute_path("test::api::foo"),
+            None,
+            Word::default(),
+            None,
+        ));
+        let module = PackageModule::new(
+            absolute_path("test"),
+            [PackageSubmodule::new(Ident::new("api").unwrap())],
+        );
+        let child = PackageModule::new(absolute_path("test::api"), []);
+
+        let manifest = PackageManifest::new([export])
+            .and_then(|manifest| manifest.with_modules([module, child]))
+            .expect("manifest should be valid");
+        let bytes = manifest.to_bytes();
+        let decoded = PackageManifest::read_from_bytes(&bytes).expect("manifest should roundtrip");
+
+        let root = decoded
+            .get_module(absolute_path("test").as_ref())
+            .expect("root module surface should be present");
+        assert_eq!(root.submodules().len(), 1);
+        assert_eq!(root.submodules()[0].name.as_str(), "api");
+        assert!(decoded.get_module(absolute_path("test::api").as_ref()).is_some());
+    }
+
+    #[test]
     fn package_manifest_add_dependency_rejects_duplicate_dependencies() {
         let mut manifest = PackageManifest {
             exports: Default::default(),
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
         let dependency = build_dependency();
 
@@ -926,6 +1380,8 @@ mod tests {
         export.write_into(&mut bytes);
         export.write_into(&mut bytes);
         bytes.write_usize(0);
+        bytes.write_usize(0);
+        bytes.write_bool(false);
 
         let mut reader = SliceReader::new(&bytes);
         let err = PackageManifest::read_from(&mut reader)
@@ -939,9 +1395,11 @@ mod tests {
 
         let mut bytes = Vec::new();
         bytes.write_usize(0);
+        bytes.write_usize(0);
         bytes.write_usize(2);
         dependency.write_into(&mut bytes);
         dependency.write_into(&mut bytes);
+        bytes.write_bool(false);
 
         let mut reader = SliceReader::new(&bytes);
         let err = PackageManifest::read_from(&mut reader)
@@ -959,7 +1417,9 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();
@@ -989,7 +1449,9 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();
@@ -1017,7 +1479,9 @@ mod tests {
 
         let manifest = PackageManifest {
             exports,
+            modules: Default::default(),
             dependencies: Default::default(),
+            entrypoint: None,
         };
 
         let bytes = manifest.to_bytes();
@@ -1062,6 +1526,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _) =
@@ -1108,6 +1573,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _spoofed_digest) =
@@ -1151,6 +1617,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _) =
@@ -1158,6 +1625,63 @@ mod tests {
         let err = Package::read_from_bytes(&bytes).expect_err(
             "expected kernel package deserialization to reject inconsistent node digests",
         );
+        assert!(
+            err.to_string().contains("invalid untrusted MAST forest"),
+            "expected untrusted-MAST validation failure, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("hash mismatch for node"),
+            "expected digest mismatch failure, got: {err}"
+        );
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn package_deserialize_from_file_rejects_spoofed_kernel_mast_node_digests() {
+        // Build mast for:
+        //
+        // pub proc k1
+        //     push.1
+        // end
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::from_u32(1))])
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        let digest = forest[node_id].digest();
+
+        let path = absolute_path("$kernel::k1");
+        let exports = vec![PackageExport::Procedure(ProcedureExport::new(
+            Arc::clone(&path),
+            Some(node_id),
+            digest,
+            None,
+        ))];
+
+        let package = Package {
+            name: PackageId::from("kernel"),
+            version: crate::Version::new(0, 0, 0),
+            digest,
+            description: None,
+            kind: TargetType::Kernel,
+            mast: Arc::new(forest),
+            manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
+            sections: Default::default(),
+            debug_sections_trusted: true,
+        };
+
+        let (bytes, _) =
+            build_package_bytes_with_spoofed_first_node_digest(&package, "spoofed-kernel-digest");
+        let file_path = std::env::temp_dir().join(format!(
+            "miden-package-deserialize-{}-{}.masp",
+            std::process::id(),
+            "spoofed-kernel-digest"
+        ));
+        fs::write(&file_path, bytes).expect("failed to write tampered package file");
+
+        let err = Package::deserialize_from_file(&file_path)
+            .expect_err("expected file deserialization to reject inconsistent node digests");
+        fs::remove_file(&file_path).unwrap();
+
         assert!(
             err.to_string().contains("invalid untrusted MAST forest"),
             "expected untrusted-MAST validation failure, got: {err}"
@@ -1198,6 +1722,7 @@ mod tests {
             mast: Arc::new(forest),
             manifest: PackageManifest::new(exports).expect("test manifest should be valid"),
             sections: Default::default(),
+            debug_sections_trusted: true,
         };
 
         let (bytes, _spoofed_digest) =
@@ -1268,13 +1793,13 @@ mod tests {
     ) -> (Vec<u8>, Word) {
         use miden_core::serde::Serializable;
 
-        // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
+        // Serialize the MastForest normally so the byte layout is stable.
         let forest = lib.mast_forest().as_ref();
         let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
         let mut output_bytes = Vec::new();
         lib.write_header_into(&mut output_bytes);
         let forest_offset = output_bytes.len();
-        forest.write_stripped(&mut output_bytes);
+        forest.write_into(&mut output_bytes);
 
         let (node_hashes_start, node_count) =
             locate_first_node_hash(&output_bytes[forest_offset..]);

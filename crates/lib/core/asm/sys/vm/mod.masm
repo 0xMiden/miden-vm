@@ -1,8 +1,9 @@
-use miden::core::sys::vm::aux_trace
-use miden::core::sys::vm::deep_queries
-use miden::core::sys::vm::constraints_eval
-use miden::core::sys::vm::ood_frames
-use miden::core::sys::vm::public_inputs
+pub mod aux_trace
+pub mod constraints_eval
+pub mod constraints_eval_inputs
+pub mod deep_queries
+pub mod ood_frames
+pub mod public_inputs
 
 use miden::core::stark::verifier
 use miden::core::stark::constants
@@ -17,10 +18,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # Root of the accepted ACE circuit registry. This value is absorbed into the
 # Fiat-Shamir transcript and authenticates the ACE circuit selected by ORDER_TAG.
-const RELATION_DIGEST_0 = 2339418497189609251
-const RELATION_DIGEST_1 = 6484464626112559367
-const RELATION_DIGEST_2 = 5742065140229736793
-const RELATION_DIGEST_3 = 2259541909710029702
+const RELATION_DIGEST_0 = 13112305287433647
+const RELATION_DIGEST_1 = 6130174278750720151
+const RELATION_DIGEST_2 = 6020224436064991083
+const RELATION_DIGEST_3 = 2045719929495289722
 
 # Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
 # This is trusted verifier setup, not proof data or advice.

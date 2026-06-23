@@ -120,6 +120,9 @@ NEXTEST_PROFILE ?= default
 CARGO_PROFILE   ?= test-dev
 CRATE           ?=
 FEATURES        ?=
+# Some VM-style tests overflow the default nextest thread stack when the processor is built
+# without optimization in the test-dev profile.
+TEST_RUST_MIN_STACK ?= 16777216
 # Filter expression/selector passed through to nextest, e.g.:
 #   -E 'not test(#*proptest)'   or   'my::module::test_name'
 EXPR            ?=
@@ -127,7 +130,7 @@ EXPR            ?=
 EXTRA           ?=
 
 define _CARGO_NEXTEST
-	$(BACKTRACE) cargo nextest run \
+	$(BACKTRACE) RUST_MIN_STACK=$(TEST_RUST_MIN_STACK) cargo nextest run \
 		--profile $(NEXTEST_PROFILE) \
 		--cargo-profile $(CARGO_PROFILE) \
 		$(if $(FEATURES),--features $(FEATURES),) \

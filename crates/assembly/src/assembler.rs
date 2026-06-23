@@ -2,11 +2,17 @@ pub(super) mod debuginfo;
 mod error;
 mod product;
 
-use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
+};
 
 use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
+    MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -23,8 +29,9 @@ use miden_core::{
     serde::Serializable,
 };
 use miden_mast_package::{
-    ConstantExport, Package, PackageExport, PackageId, ProcedureExport, Section, SectionId,
-    TypeExport,
+    ConstantExport, Package, PackageDebugInfoError, PackageExport, PackageId, PackageModule,
+    PackageSubmodule, ProcedureExport, Section, SectionId, TypeExport,
+    debug_info::DebugSourceNodeId,
 };
 use miden_project::{Linkage, TargetType};
 
@@ -34,8 +41,11 @@ use crate::{
     ast::Path,
     basic_block_builder::BasicBlockBuilder,
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
-    mast_forest_builder::{MastForestBuilder, MastNodeRef},
+    linker::{Import, LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
+    mast_forest_builder::{
+        MastForestBuilder, MastNodeRef, SourceDebugGraph, SourceNodeId, SourceNodeRef,
+        StaticLibrary,
+    },
 };
 
 /// Maximum allowed nesting of control-flow blocks during compilation.
@@ -54,6 +64,7 @@ enum PendingPackageExport {
 #[derive(Debug)]
 struct PendingProcedureExport {
     node_ref: MastNodeRef,
+    source_ref: Option<SourceNodeRef>,
     digest: Word,
     path: Arc<Path>,
     signature: Option<FunctionType>,
@@ -64,9 +75,10 @@ impl PendingPackageExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
     ) -> Result<PackageExport, Report> {
         match self {
-            Self::Procedure(export) => export.into_package_export(node_id_by_ref),
+            Self::Procedure(export) => export.into_package_export(node_id_by_ref, source_id_by_ref),
             Self::Constant(export) => Ok(PackageExport::Constant(export)),
             Self::Type(export) => Ok(PackageExport::Type(export)),
         }
@@ -77,14 +89,20 @@ impl PendingProcedureExport {
     fn into_package_export(
         self,
         node_id_by_ref: &BTreeMap<MastNodeRef, MastNodeId>,
+        source_id_by_ref: &BTreeMap<SourceNodeRef, SourceNodeId>,
     ) -> Result<PackageExport, Report> {
         let node = node_id_by_ref.get(&self.node_ref).copied().ok_or_else(|| {
             Report::msg(format!("procedure export ref {} was not finalized", self.node_ref))
         })?;
+        let source_node = self
+            .source_ref
+            .and_then(|source_ref| source_id_by_ref.get(&source_ref).copied())
+            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         Ok(PackageExport::Procedure(ProcedureExport {
             digest: self.digest,
             path: self.path,
             node: Some(node),
+            source_node,
             signature: self.signature,
             attributes: self.attributes,
         }))
@@ -218,41 +236,6 @@ impl Assembler {
         self.trim_paths = yes;
         self
     }
-
-    pub(crate) fn invalid_invoke_target_report(
-        &self,
-        kind: InvokeKind,
-        callee: &InvocationTarget,
-        caller: GlobalItemIndex,
-    ) -> Report {
-        let span = callee.span();
-        let source_file = self.source_manager.get(span.source_id()).ok();
-        let context = SymbolResolutionContext {
-            span,
-            module: caller.module,
-            kind: Some(kind),
-        };
-
-        let path = match self.linker.resolve_invoke_target(&context, callee) {
-            Ok(
-                SymbolResolution::Exact { path, .. }
-                | SymbolResolution::Module { path, .. }
-                | SymbolResolution::External(path),
-            ) => Some(path.into_inner()),
-            Ok(SymbolResolution::Local(_) | SymbolResolution::MastRoot(_)) => None,
-            Err(err) => return Report::new(err),
-        }
-        .or_else(|| match callee {
-            InvocationTarget::Symbol(symbol) => Some(Path::from_ident(symbol).into_owned().into()),
-            InvocationTarget::Path(path) => Some(path.clone().into_inner()),
-            InvocationTarget::MastRoot(_) => None,
-        });
-
-        match path {
-            Some(path) => Report::new(LinkerError::InvalidInvokeTarget { span, source_file, path }),
-            None => Report::msg("invalid procedure reference: target is not a procedure"),
-        }
-    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -276,15 +259,7 @@ impl Assembler {
     ) -> Result<&mut Self, Report> {
         let modules = modules
             .into_iter()
-            .map(|module| {
-                module.parse_with_options(
-                    self.source_manager.clone(),
-                    ParseOptions {
-                        warnings_as_errors: self.warnings_as_errors,
-                        ..ParseOptions::for_library()
-                    },
-                )
-            })
+            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
         self.linker.link_modules(modules)?;
@@ -292,20 +267,18 @@ impl Assembler {
         Ok(self)
     }
 
-    /// Compiles and statically links all Miden Assembly modules in the provided directory, using
-    /// the provided [Path] as the root namespace for the compiled modules.
+    /// Compiles and statically links all Miden Assembly modules reachable from the provided root
+    /// module. The namespace of the resulting modules will be derived from an explicit namespace
+    /// declaration in the root module, or from `namespace` if provided - if both are present, they
+    /// must agree.
     ///
-    /// When compiling each module, its Miden Assembly path is derived by appending path components
-    /// corresponding to the relative path of the module in `dir`, to `namespace`. If a source file
-    /// named `mod.masm` is found, the resulting module will derive its path using the path
-    /// components of the parent directory, rather than the file name.
+    /// The module structure is determined by `mod` declarations reachable from the root module,
+    /// i.e. if the root module contains the line `mod foo`, then a submodule `foo` in the namespace
+    /// of the root module will be located and parsed.
     ///
-    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
-    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
-    /// allows defining multiple projects relative to a common root namespace without conflict.
-    ///
-    /// This function recursively parses the entire directory structure under `dir`, ignoring
-    /// any files which do not have the `.masm` extension.
+    /// If provided `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as
+    /// is `std::math::u64` - there is no requirement that the namespace be a single identifier.
+    /// This allows defining multiple projects relative to a common root namespace without conflict.
     ///
     /// For example, let's say I call this function like so:
     ///
@@ -313,32 +286,51 @@ impl Assembler {
     /// use miden_assembly::{Assembler, Path};
     ///
     /// let mut assembler = Assembler::default();
-    /// assembler.compile_and_statically_link_from_dir("~/masm/core", "miden::core::foo");
+    /// assembler.compile_and_statically_link_from_root("~/masm/core/lib.masm", None);
     /// ```
     ///
-    /// Here's how we would handle various files under this path:
+    /// And `lib.masm` contains:
     ///
-    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
-    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
-    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
-    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
-    /// - ~/masm/core/math/README.md      -> Ignored
+    /// ```text,ignore
+    /// namespace miden::core
+    ///
+    /// pub mod sys;
+    /// pub mod math;
+    /// ```
+    ///
+    /// Then either of the following directory layouts would be parsed successfully, with the
+    /// namespacing shown:
+    ///
+    /// Layout 1: Submodules are defined at the same level as the parent, named after their module
+    /// name:
+    ///
+    /// - ~/masm/core/lib.masm        -> Parsed as "miden::core"
+    /// - ~/masm/core/sys.masm        -> Parsed as "miden::core::sys"
+    /// - ~/masm/core/math.masm       -> Parsed as "miden::core::math"
+    /// - ~/masm/core/math/README.md  -> Ignored
+    ///
+    /// Layout 2: Submodules are defined in sub-directories named after their module name:
+    ///
+    /// - ~/masm/core/lib.masm        -> Parsed as "miden::core"
+    /// - ~/masm/core/sys/mod.masm    -> Parsed as "miden::core::sys"
+    /// - ~/masm/core/math/mod.masm   -> Parsed as "miden::core::math"
+    /// - ~/masm/core/math/README.md  -> Ignored
     #[cfg(feature = "std")]
-    pub fn compile_and_statically_link_from_dir(
+    pub fn compile_and_statically_link_from_root(
         &mut self,
-        dir: impl AsRef<std::path::Path>,
-        namespace: impl AsRef<Path>,
+        root: impl AsRef<std::path::Path>,
+        namespace: Option<&Path>,
     ) -> Result<(), Report> {
         use miden_assembly_syntax::parser;
 
-        let namespace = namespace.as_ref();
-        let modules = parser::read_modules_from_dir(
-            dir,
-            namespace,
+        let (root, modules) = parser::read_modules_from_root(
+            root,
+            namespace.map(Into::into),
+            None,
             self.source_manager.clone(),
             self.warnings_as_errors,
         )?;
-        self.linker.link_modules(modules)?;
+        self.linker.link_modules(core::iter::once(root).chain(modules))?;
         Ok(())
     }
 
@@ -404,7 +396,7 @@ impl Assembler {
 // ------------------------------------------------------------------------------------------------
 /// Compilation/Assembly
 impl Assembler {
-    /// Assembles a set of modules into a library [`Package`].
+    /// Assembles a root module, and its supporting submodules into a library [`Package`].
     ///
     /// # Errors
     ///
@@ -412,75 +404,46 @@ impl Assembler {
     pub fn assemble_library(
         self,
         name: impl Into<PackageId>,
-        modules: impl IntoIterator<Item = impl Parse>,
+        root: impl Parse,
+        support: impl IntoIterator<Item = impl Parse>,
     ) -> Result<Box<Package>, Report> {
-        let modules = modules
+        let root = root.parse(self.warnings_as_errors, self.source_manager.clone())?;
+        let support = support
             .into_iter()
-            .map(|module| {
-                module.parse_with_options(
-                    self.source_manager.clone(),
-                    ParseOptions {
-                        warnings_as_errors: self.warnings_as_errors,
-                        ..ParseOptions::for_library()
-                    },
-                )
-            })
+            .map(|module| module.parse(self.warnings_as_errors, self.source_manager.clone()))
             .collect::<Result<Vec<_>, Report>>()?;
 
-        self.assemble_library_modules(name.into(), modules, TargetType::Library)?
+        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
             .into_artifact()
     }
 
-    /// Assemble a library [`Package`] from a standard Miden Assembly project layout, using the
-    /// provided [Path] as the root under which the project is rooted.
+    /// Assemble a library [`Package`] from the set of modules reachable from `root`.
     ///
-    /// The standard layout assumes that the given filesystem path corresponds to the root of
-    /// `namespace`. Modules will be parsed with their path made relative to `namespace` according
-    /// to their location in the directory structure with respect to `path`. See below for an
-    /// example of what this looks like in practice.
-    ///
-    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
-    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
-    /// allows defining multiple projects relative to a common root namespace without conflict.
-    ///
-    /// NOTE: You must ensure there is no conflict in namespace between projects, e.g. two projects
-    /// both assembled with `namespace` set to `std::math` would conflict with each other in a way
-    /// that would prevent them from being used at the same time.
-    ///
-    /// This function recursively parses the entire directory structure under `path`, ignoring
-    /// any files which do not have the `.masm` extension.
-    ///
-    /// For example, let's say I call this function like so:
-    ///
-    /// ```rust
-    /// use miden_assembly::{Assembler, Path};
-    ///
-    /// Assembler::default().assemble_library_from_dir("~/masm/core", "miden::core::foo");
-    /// ```
-    ///
-    /// Here's how we would handle various files under this path:
-    ///
-    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
-    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
-    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
-    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
-    /// - ~/masm/core/math/README.md      -> Ignored
+    /// See [Assembler::compile_and_statically_link_from_root] for details on how modules are
+    /// discovered and linked from `root`.
     #[cfg(feature = "std")]
-    pub fn assemble_library_from_dir(
+    pub fn assemble_library_from_root(
         self,
-        dir: impl AsRef<std::path::Path>,
-        namespace: impl AsRef<Path>,
+        root: impl AsRef<std::path::Path>,
+        namespace: Option<&Path>,
     ) -> Result<Box<Package>, Report> {
         use miden_assembly_syntax::parser;
 
-        let dir = dir.as_ref();
-        let namespace = namespace.as_ref();
-        let name = namespace.as_str().replace("::", "-");
+        let root = root.as_ref().to_path_buf();
+        let namespace = namespace.map(Into::into);
+        let (root, support) = parser::read_modules_from_root(
+            &root,
+            namespace,
+            Some(ModuleKind::Library),
+            self.source_manager.clone(),
+            self.warnings_as_errors,
+        )?;
 
-        let source_manager = self.source_manager.clone();
-        let modules =
-            parser::read_modules_from_dir(dir, namespace, source_manager, self.warnings_as_errors)?;
-        self.assemble_library(name, modules)
+        // Derive the package name from the namespace of the root module
+        let name = root.path().as_str().replace("::", "-");
+
+        self.assemble_library_modules(name.into(), root, support, TargetType::Library)?
+            .into_artifact()
     }
 
     /// Assembles the provided module into a kernel package.
@@ -491,18 +454,11 @@ impl Assembler {
     pub fn assemble_kernel(
         self,
         name: impl Into<PackageId>,
-        module: impl Parse,
+        root: Box<ast::Module>,
+        support: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<Box<Package>, Report> {
-        let module = module.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                path: Some(Path::kernel_path().into()),
-                warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::for_kernel()
-            },
-        )?;
-
-        self.assemble_kernel_module(name.into(), module)?.into_artifact()
+        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
+            .into_artifact()
     }
 
     /// Assemble a kernel [`Package`] from a standard Miden Assembly kernel project layout.
@@ -519,19 +475,23 @@ impl Assembler {
     /// Note: this is a temporary structure which will likely change once
     /// <https://github.com/0xMiden/miden-vm/issues/1436> is implemented.
     #[cfg(feature = "std")]
-    pub fn assemble_kernel_from_dir(
-        mut self,
+    pub fn assemble_kernel_from_root(
+        self,
         name: impl Into<PackageId>,
         sys_module_path: impl AsRef<std::path::Path>,
-        lib_dir: Option<impl AsRef<std::path::Path>>,
     ) -> Result<Box<Package>, Report> {
-        // if library directory is provided, add modules from this directory to the assembler
-        if let Some(lib_dir) = lib_dir {
-            self.compile_and_statically_link_from_dir(lib_dir, Path::kernel_path())?;
-        }
+        let sys_module_path = sys_module_path.as_ref();
+        let namespace = Some(Path::KERNEL.into());
+        let (root, support) = miden_assembly_syntax::parser::read_modules_from_root(
+            sys_module_path,
+            namespace,
+            Some(ModuleKind::Kernel),
+            self.source_manager.clone(),
+            self.warnings_as_errors,
+        )?;
 
-        let name = name.into();
-        self.assemble_kernel(name, sys_module_path.as_ref())
+        self.assemble_library_modules(name.into(), root, support, TargetType::Kernel)?
+            .into_artifact()
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
@@ -541,27 +501,28 @@ impl Assembler {
         module_indices: &[ModuleIndex],
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.linkage, Linkage::Static) {
-                Some(lib.mast().as_ref())
-            } else {
-                None
-            }
-        });
-        let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        let staticlibs = self.static_libraries_for_builder()?;
+        let mut mast_forest_builder = MastForestBuilder::new_with_static_libraries(staticlibs)?;
         let exports = {
             let mut exports = BTreeMap::new();
 
             for module_idx in module_indices.iter().copied() {
-                let module = &self.linker[module_idx];
+                let (module_kind, module_path, num_symbols, imports) = {
+                    let module = &self.linker[module_idx];
 
-                if let Some(advice_map) = module.advice_map() {
-                    mast_forest_builder.merge_advice_map(advice_map)?;
-                }
+                    if let Some(advice_map) = module.advice_map() {
+                        mast_forest_builder.merge_advice_map(advice_map)?;
+                    }
 
-                let module_kind = module.kind();
-                let module_path = module.path().clone();
-                for index in 0..module.symbols().len() {
+                    (
+                        module.kind(),
+                        module.path().clone(),
+                        module.symbols().len(),
+                        module.imports().cloned().collect::<Vec<_>>(),
+                    )
+                };
+
+                for index in 0..num_symbols {
                     let index = ItemIndex::new(index);
                     let gid = module_idx + index;
 
@@ -587,20 +548,81 @@ impl Assembler {
                         return Err(Report::new(AssemblerError::DuplicateExportPath { path }));
                     }
                 }
+
+                for import in imports.iter() {
+                    if !import.visibility().is_public() {
+                        continue;
+                    }
+
+                    let path: Arc<Path> = module_path
+                        .join(import.local_name())
+                        .canonicalize()
+                        .into_diagnostic()?
+                        .into_boxed_path()
+                        .into();
+                    let export = self.export_import(
+                        module_idx,
+                        module_kind,
+                        path.clone(),
+                        import,
+                        &mut mast_forest_builder,
+                    )?;
+                    if exports.insert(path.clone(), export).is_some() {
+                        return Err(Report::new(AssemblerError::DuplicateExportPath { path }));
+                    }
+                }
             }
 
             exports
         };
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, source_id_by_ref) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let exports = exports
             .into_iter()
             .map(|(path, export)| {
-                export.into_package_export(&node_id_by_ref).map(|export| (path, export))
+                export
+                    .into_package_export(&node_id_by_ref, &source_id_by_ref)
+                    .map(|export| (path, export))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-        self.finish_library_product(name, mast_forest, exports, kind)
+        let modules = self.package_modules(module_indices);
+        self.finish_library_product(name, mast_forest, source_graph, exports, modules, kind)
+    }
+
+    fn package_modules(&self, module_indices: &[ModuleIndex]) -> Vec<PackageModule> {
+        let mut visited = BTreeSet::new();
+        let mut stack = module_indices.to_vec();
+        let mut modules = BTreeMap::new();
+
+        while let Some(module_idx) = stack.pop() {
+            if !visited.insert(module_idx) {
+                continue;
+            }
+
+            let module = &self.linker[module_idx];
+            let mut submodules = Vec::new();
+            for decl in module.submodules() {
+                if !decl.visibility.is_public() {
+                    continue;
+                }
+
+                submodules.push(PackageSubmodule::new(decl.name.clone()));
+
+                let child_path = module.path().join(&decl.name);
+                if let Some(child_idx) = self.linker.find_module_index(child_path.as_path()) {
+                    stack.push(child_idx);
+                }
+            }
+
+            modules.insert(
+                module.path().clone(),
+                PackageModule::new(module.path().clone(), submodules),
+            );
+        }
+
+        modules.into_values().collect()
     }
 
     /// The purpose of this function is, for any given symbol in the set of modules being compiled
@@ -622,7 +644,6 @@ impl Assembler {
             SymbolItem::Procedure(_) => "procedure",
             SymbolItem::Constant(_) => "constant",
             SymbolItem::Type(_) => "type",
-            SymbolItem::Alias { .. } => "alias",
         });
         let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
@@ -642,6 +663,7 @@ impl Assembler {
                             item.digest,
                             item.source_library_commitment(),
                             item.source_root_id(),
+                            item.source_debug_root_id().map(DebugSourceNodeId::from),
                             mast_forest_builder,
                         )?;
                         ResolvedProcedure { node, signature: item.signature.clone() }
@@ -667,6 +689,7 @@ impl Assembler {
                     digest,
                     path: symbol_path,
                     node_ref: node,
+                    source_ref: mast_forest_builder.latest_source_ref_for_node_ref(node),
                     signature: signature.map(|sig| (*sig).clone()),
                     attributes,
                 })
@@ -687,11 +710,13 @@ impl Assembler {
                     .expect("compilation succeeded but root not found in cache");
                 let digest = proc.mast_root();
                 let signature = self.linker.resolve_signature(gid)?;
-                let attributes = self.linker.resolve_attributes(gid)?;
+                let attributes = self.linker.resolve_attributes(gid);
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,
                     node_ref: proc.body_node_ref(),
+                    source_ref: mast_forest_builder
+                        .latest_source_ref_for_node_ref(proc.body_node_ref()),
                     signature: signature.map(Arc::unwrap_or_clone),
                     attributes,
                 })
@@ -706,55 +731,40 @@ impl Assembler {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
                 PendingPackageExport::Type(TypeExport { path: symbol_path, ty })
             },
-
-            SymbolItem::Alias { alias, resolved } => {
-                if let Some(resolved) = resolved.get() {
-                    return self.export_symbol(
-                        resolved,
-                        module_kind,
-                        symbol_path,
-                        mast_forest_builder,
-                    );
-                }
-
-                let Some(ResolvedProcedure { node, signature }) = self.resolve_target(
-                    InvokeKind::ProcRef,
-                    &alias.target().into(),
-                    gid,
-                    mast_forest_builder,
-                )?
-                else {
-                    return Err(self.unresolved_alias_report("export", &symbol_path, alias));
-                };
-
-                let digest = mast_forest_builder
-                    .mast_root_for_ref(node)
-                    .expect("resolved alias export node must exist");
-                let pctx = ProcedureContext::new(
-                    gid,
-                    /* is_program_entrypoint= */ false,
-                    symbol_path.clone(),
-                    Visibility::Public,
-                    signature.clone(),
-                    module_kind.is_kernel(),
-                    self.source_manager.clone(),
-                );
-                let procedure = pctx.into_procedure(digest, node);
-                let body_node_ref = procedure.body_node_ref();
-                self.linker.register_procedure_root(gid, digest);
-                mast_forest_builder.insert_procedure(gid, procedure)?;
-
-                return Ok(PendingPackageExport::Procedure(PendingProcedureExport {
-                    digest,
-                    path: symbol_path,
-                    node_ref: body_node_ref,
-                    signature: signature.map(Arc::unwrap_or_clone),
-                    attributes: Default::default(),
-                }));
-            },
         };
 
         Ok(export)
+    }
+
+    fn export_import(
+        &mut self,
+        module: ModuleIndex,
+        module_kind: ModuleKind,
+        symbol_path: Arc<Path>,
+        import: &Import,
+        mast_forest_builder: &mut MastForestBuilder,
+    ) -> Result<PendingPackageExport, Report> {
+        if let Some(resolved) = import.resolved() {
+            return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
+        }
+
+        let target = import.target_path();
+        let context = SymbolResolutionContext {
+            span: target.span(),
+            module,
+            kind: Some(InvokeKind::ProcRef),
+        };
+        match self.linker.resolve_path(&context, target.inner())? {
+            SymbolResolution::Exact { gid, .. } => {
+                self.export_symbol(gid, module_kind, symbol_path, mast_forest_builder)
+            },
+            SymbolResolution::Module { .. }
+            | SymbolResolution::MastRoot(_)
+            | SymbolResolution::Local(_)
+            | SymbolResolution::External(_) => {
+                Err(self.unresolved_import_report("export", &symbol_path, import))
+            },
+        }
     }
 
     /// Compiles the provided module into an executable package.
@@ -770,14 +780,12 @@ impl Assembler {
         name: impl Into<PackageId>,
         source: impl Parse,
     ) -> Result<Box<Package>, Report> {
-        let options = ParseOptions {
-            kind: ModuleKind::Executable,
-            warnings_as_errors: self.warnings_as_errors,
-            path: Some(Path::exec_path().into()),
-        };
-
-        let program = source.parse_with_options(self.source_manager.clone(), options)?;
-        assert!(program.is_executable());
+        let program = source.parse(self.warnings_as_errors, self.source_manager.clone())?;
+        if !program.is_executable() {
+            return Err(Report::msg(
+                "unable to assemble program: source is not an executable module",
+            ));
+        }
 
         self.assemble_executable_modules(name.into(), program, [])?.into_artifact()
     }
@@ -785,20 +793,15 @@ impl Assembler {
     pub(crate) fn assemble_library_modules(
         mut self,
         name: PackageId,
-        modules: impl IntoIterator<Item = Box<ast::Module>>,
+        root: Box<ast::Module>,
+        support: impl IntoIterator<Item = Box<ast::Module>>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let module_indices = self.linker.link(modules)?;
+        let module_indices = match kind {
+            TargetType::Kernel => self.linker.link_kernel(root, support)?,
+            _ => self.linker.link([root], support)?,
+        };
         self.assemble_library_product(name, &module_indices, kind)
-    }
-
-    pub(crate) fn assemble_kernel_module(
-        mut self,
-        name: PackageId,
-        module: Box<ast::Module>,
-    ) -> Result<AssemblyProduct, Report> {
-        let module_indices = self.linker.link_kernel(module)?;
-        self.assemble_library_product(name, &module_indices, TargetType::Kernel)
     }
 
     pub(crate) fn assemble_executable_modules(
@@ -807,10 +810,9 @@ impl Assembler {
         program: Box<ast::Module>,
         support_modules: impl IntoIterator<Item = Box<ast::Module>>,
     ) -> Result<AssemblyProduct, Report> {
-        self.linker.link_modules(support_modules)?;
-
         // Recompute graph with executable module, and start compiling
-        let module_index = self.linker.link([program])?[0];
+        let namespace = Arc::<Path>::from(program.path());
+        let module_index = self.linker.link([program], support_modules)?[0];
 
         // Find the executable entrypoint Note: it is safe to use `unwrap_ast()` here, since this is
         // the module we just added, which is in AST representation.
@@ -821,14 +823,8 @@ impl Assembler {
             .ok_or(SemanticAnalysisError::MissingEntrypoint)?;
 
         // Compile the linked module graph rooted at the entrypoint
-        let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.linkage, Linkage::Static) {
-                Some(lib.mast().as_ref())
-            } else {
-                None
-            }
-        });
-        let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        let staticlibs = self.static_libraries_for_builder()?;
+        let mut mast_forest_builder = MastForestBuilder::new_with_static_libraries(staticlibs)?;
 
         if let Some(advice_map) = self.linker[module_index].advice_map() {
             mast_forest_builder.merge_advice_map(advice_map)?;
@@ -840,31 +836,40 @@ impl Assembler {
             .expect("compilation succeeded but root not found in cache")
             .body_node_ref();
 
-        let (mast_forest, node_id_by_ref) = mast_forest_builder.build()?.into_parts();
+        let (mast_forest, node_id_by_ref, source_graph, _) =
+            mast_forest_builder.build()?.into_parts_with_source_graph();
         let entry_node_id = *node_id_by_ref.get(&entry_node_ref).ok_or_else(|| {
             Report::msg(format!("entrypoint ref {entry_node_ref} was not finalized"))
         })?;
 
-        self.finish_program_product(name, mast_forest, entry_node_id, self.linker.kernel_package())
+        self.finish_program_product(
+            name,
+            namespace,
+            mast_forest,
+            source_graph,
+            entry_node_id,
+            self.linker.kernel_package(),
+        )
     }
 
     fn finish_library_product(
         &self,
         name: PackageId,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         exports: BTreeMap<Arc<Path>, PackageExport>,
+        modules: Vec<PackageModule>,
         kind: TargetType,
     ) -> Result<AssemblyProduct, Report> {
-        let mast_forest = self.apply_debug_options(mast_forest);
-
         let mast = Arc::new(mast_forest);
         let package = Box::new(
-            Package::create(
+            Package::create_with_modules(
                 name,
                 miden_mast_package::Version::new(0, 0, 0),
                 kind,
                 mast,
                 exports.into_values(),
+                modules,
                 None,
             )
             .map_err(Report::msg)?,
@@ -879,33 +884,57 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, None, debug_info))
+        let source_graph =
+            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+
+        Ok(AssemblyProduct::new(package, None, debug_info, source_graph))
+    }
+
+    fn static_libraries_for_builder(&self) -> Result<Vec<StaticLibrary<'_>>, Report> {
+        self.linker
+            .libraries()
+            .filter(|lib| matches!(lib.linkage, Linkage::Static))
+            .map(|lib| {
+                let debug_info = match lib.package.debug_info() {
+                    Ok(debug_info) => debug_info,
+                    Err(PackageDebugInfoError::UntrustedSections) => None,
+                    Err(err) => {
+                        return Err(Report::msg(format!(
+                            "failed to decode debug info for statically linked package '{}': {err}",
+                            lib.package.name
+                        )));
+                    },
+                };
+                Ok(StaticLibrary::new(lib.mast().as_ref(), debug_info))
+            })
+            .collect()
     }
 
     fn finish_program_product(
         &self,
         name: PackageId,
+        namespace: Arc<Path>,
         mast_forest: miden_core::mast::MastForest,
+        source_graph: SourceDebugGraph,
         entrypoint: MastNodeId,
         kernel: Option<Arc<Package>>,
     ) -> Result<AssemblyProduct, Report> {
-        let mast_forest = self.apply_debug_options(mast_forest);
-
         let mast = Arc::new(mast_forest);
-        let entry: Arc<Path> = Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entry: Arc<Path> = namespace.join(ast::ProcedureName::MAIN_PROC_NAME).into();
         let entry_digest = mast[entrypoint].digest();
+        let entry_source_node = source_graph
+            .unique_root_for_exec_node(entrypoint)
+            .map(|source_id| DebugSourceNodeId::from(u32::from(source_id)));
         let package = Box::new(
             Package::create(
                 name,
                 miden_mast_package::Version::new(0, 0, 0),
                 TargetType::Executable,
                 mast,
-                vec![PackageExport::Procedure(ProcedureExport::new(
-                    entry,
-                    Some(entrypoint),
-                    entry_digest,
-                    None,
-                ))],
+                vec![PackageExport::Procedure(
+                    ProcedureExport::new(entry, Some(entrypoint), entry_digest, None)
+                        .with_source_node(entry_source_node),
+                )],
                 None,
             )
             .map_err(Report::msg)?,
@@ -920,28 +949,24 @@ impl Assembler {
             debug_info
         });
 
-        Ok(AssemblyProduct::new(package, kernel, debug_info))
+        let source_graph =
+            self.emit_debug_info.then(|| self.apply_source_debug_options(source_graph));
+
+        Ok(AssemblyProduct::new(package, kernel, debug_info, source_graph))
     }
 
-    fn apply_debug_options(
-        &self,
-        mast_forest: miden_core::mast::MastForest,
-    ) -> miden_core::mast::MastForest {
-        if !self.emit_debug_info {
-            return mast_forest.without_debug_info();
-        }
-
+    fn apply_source_debug_options(&self, source_graph: SourceDebugGraph) -> SourceDebugGraph {
         if self.trim_paths {
             #[cfg(feature = "std")]
             if let Some(trimmer) = self.source_path_trimmer() {
-                return mast_forest.with_rewritten_source_locations(
+                return source_graph.with_rewritten_source_locations(
                     |location| trimmer.trim_location(location),
                     |location| trimmer.trim_file_line_col(location),
                 );
             }
         }
 
-        mast_forest
+        source_graph
     }
 
     #[cfg(feature = "std")]
@@ -976,12 +1001,7 @@ impl Assembler {
                 LinkerError::Cycle { nodes: nodes.into() }
             })?
             .into_iter()
-            .filter(|&gid| {
-                matches!(
-                    self.linker[gid].item(),
-                    SymbolItem::Procedure(_) | SymbolItem::Alias { .. }
-                )
-            })
+            .filter(|&gid| matches!(self.linker[gid].item(), SymbolItem::Procedure(_)))
             .collect();
 
         assert!(!worklist.is_empty());
@@ -1047,67 +1067,6 @@ impl Assembler {
                     self.linker.register_procedure_root(procedure_gid, procedure.mast_root());
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
-                SymbolItem::Alias { alias, resolved } => {
-                    let path: Arc<Path> = module_path.join(alias.name().as_str()).into();
-                    let procedure_gid = match resolved.get() {
-                        Some(procedure_gid) => {
-                            match self.linker[procedure_gid].item() {
-                                SymbolItem::Procedure(_)
-                                | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {},
-                                SymbolItem::Constant(_)
-                                | SymbolItem::Type(_)
-                                | SymbolItem::Compiled(_) => {
-                                    continue;
-                                },
-                                // A resolved alias will always refer to a non-alias item, this is
-                                // because when aliases are resolved, they are resolved
-                                // recursively. Had the alias chain been cyclical, we would have
-                                // raised an error already.
-                                SymbolItem::Alias { .. } => unreachable!(),
-                            }
-                            procedure_gid
-                        },
-                        None => procedure_gid,
-                    };
-                    // A program entrypoint is never an alias
-                    let is_program_entrypoint = false;
-                    let mut pctx = ProcedureContext::new(
-                        procedure_gid,
-                        is_program_entrypoint,
-                        path,
-                        Visibility::Public,
-                        None,
-                        module_kind.is_kernel(),
-                        self.source_manager.clone(),
-                    )
-                    .with_span(alias.span());
-
-                    // We must resolve aliases at this point to their real definition, in order to
-                    // know whether we need to emit a MAST node for a foreign procedure item. If
-                    // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_ref, signature }) = self
-                        .resolve_target(
-                            InvokeKind::ProcRef,
-                            &alias.target().into(),
-                            procedure_gid,
-                            mast_forest_builder,
-                        )?
-                    else {
-                        continue;
-                    };
-
-                    pctx.set_signature(signature);
-
-                    let proc_mast_root = mast_forest_builder
-                        .mast_root_for_ref(proc_node_ref)
-                        .expect("resolved alias node must exist");
-
-                    let procedure = pctx.into_procedure(proc_mast_root, proc_node_ref);
-
-                    // Make the MAST root available to all dependents
-                    self.linker.register_procedure_root(procedure_gid, proc_mast_root);
-                    mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
-                },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
                 },
@@ -1117,26 +1076,21 @@ impl Assembler {
         Ok(())
     }
 
-    fn unresolved_alias_report(
+    fn unresolved_import_report(
         &self,
         action: &'static str,
         symbol_path: &Path,
-        alias: &ast::Alias,
+        import: &Import,
     ) -> Report {
-        let span = alias.target().span();
-        let reason = match alias.target() {
-            ast::AliasTarget::MastRoot(_) => {
-                "this digest target does not resolve to a known procedure"
-            },
-            ast::AliasTarget::Path(_) => "this alias target does not resolve to a concrete item",
-        };
+        let target = import.target_path();
+        let span = target.span();
 
         RelatedLabel::error(format!(
-            "unable to {action} alias '{symbol_path}' targeting '{}'",
-            alias.target()
+            "unable to {action} import '{symbol_path}' targeting '{}'",
+            target.inner()
         ))
-        .with_labeled_span(span, reason)
-        .with_help("aliases must resolve to a concrete item before they can be used")
+        .with_labeled_span(span, "this import target does not resolve to a concrete item")
+        .with_help("imports must resolve to a concrete item before they can be used")
         .with_source_file(self.source_manager.get(span.source_id()).ok())
         .into()
     }
@@ -1415,20 +1369,18 @@ impl Assembler {
 
     /// Resolves the specified target to the corresponding procedure root [`MastNodeRef`].
     ///
-    /// If the resolved target is a non-procedure item, this returns `Ok(None)`.
-    ///
     /// If no [`MastNodeRef`] exists for that procedure root, we wrap the root in an
     /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeRef`].
     pub(super) fn resolve_target(
         &self,
         kind: InvokeKind,
         target: &InvocationTarget,
-        caller_id: GlobalItemIndex,
+        caller_module: ModuleIndex,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<Option<ResolvedProcedure>, Report> {
+    ) -> Result<ResolvedProcedure, Report> {
         let caller = SymbolResolutionContext {
             span: target.span(),
-            module: caller_id.module,
+            module: caller_module,
             kind: Some(kind),
         };
         let resolved = self.linker.resolve_invoke_target(&caller, target)?;
@@ -1440,16 +1392,17 @@ impl Assembler {
                     mast_root.into_inner(),
                     None,
                     None,
+                    None,
                     mast_forest_builder,
                 )?;
-                Ok(Some(ResolvedProcedure { node, signature: None }))
+                Ok(ResolvedProcedure { node, signature: None })
             },
             SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => Ok(Some(ResolvedProcedure {
+                    Some(proc) => Ok(ResolvedProcedure {
                         node: proc.body_node_ref(),
                         signature: proc.signature(),
-                    })),
+                    }),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
                     None => match self.linker[gid].item() {
@@ -1460,18 +1413,16 @@ impl Assembler {
                                 p.digest,
                                 p.source_library_commitment(),
                                 p.source_root_id(),
+                                p.source_debug_root_id().map(DebugSourceNodeId::from),
                                 mast_forest_builder,
                             )?;
-                            Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
+                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
                         },
                         SymbolItem::Procedure(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
                         ),
-                        SymbolItem::Alias { .. } => {
-                            unreachable!("unexpected reference to ast alias item from {gid:?}")
-                        },
                         SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
-                            Ok(None)
+                            unreachable!("invoke resolver should reject non-procedure targets")
                         },
                     },
                 }
@@ -1493,6 +1444,7 @@ impl Assembler {
         mast_root: Word,
         source_library_commitment: Option<Word>,
         source_root_id: Option<MastNodeId>,
+        source_debug_root_id: Option<DebugSourceNodeId>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeRef, Report> {
         // Get the procedure from the assembler
@@ -1540,6 +1492,7 @@ impl Assembler {
             mast_root,
             source_library_commitment,
             source_root_id,
+            source_debug_root_id,
         )
     }
 }

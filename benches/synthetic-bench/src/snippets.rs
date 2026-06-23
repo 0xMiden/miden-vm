@@ -105,7 +105,7 @@ pub fn render(snippet: &Snippet, iters: u64) -> String {
     out
 }
 
-/// Wrap a snippet fragment into a complete `begin ... end` program.
+/// Wrap a snippet fragment into a complete executable program.
 pub fn wrap_program(body: &str) -> String {
     format!("begin\n{body}end\n")
 }

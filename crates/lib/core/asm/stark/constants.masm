@@ -170,10 +170,9 @@ const RELATION_DIGEST_PTR = 3223322784
 ### Trusted setup commitment for the preprocessed trace group.
 const PREPROCESSED_TRACE_COM_PTR = 3223322788
 
-### Scratch buffer used while absorbing VM statement public inputs.
-###
-### It holds the 4-felt statement descriptor, 40 fixed public-input felts, and up to
-### MAX_AUX_INPUTS kernel digest felts during `sys::vm::public_inputs::process_public_inputs`.
+### Scratch buffer for the VM public-input transcript stream.
+### It holds the statement descriptor, fixed public inputs, and up to MAX_AUX_INPUTS kernel
+### digest felts before block absorption.
 const ABSORB_SCRATCH_PTR = 3223324000
 
 ## ACE related

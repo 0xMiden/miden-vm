@@ -1,15 +1,10 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    string::String,
-    sync::Arc,
-};
+use alloc::{string::String, sync::Arc};
+use core::assert_matches;
 
-use miden_core::assert_matches;
 use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
 use super::*;
-use crate::ast::{Form, Immediate, Instruction, Op};
+use crate::ast::{Form, Immediate, Instruction, Op, Visibility};
 
 fn test_source_file(source: &str) -> Arc<SourceFile> {
     Arc::new(SourceFile::new(
@@ -20,7 +15,9 @@ fn test_source_file(source: &str) -> Arc<SourceFile> {
     ))
 }
 
-fn repo_root() -> PathBuf {
+#[cfg(feature = "std")]
+fn repo_root() -> std::path::PathBuf {
+    use std::path::Path;
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -28,7 +25,8 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn checked_in_masm_corpus() -> Vec<PathBuf> {
+#[cfg(feature = "std")]
+fn checked_in_masm_corpus() -> Vec<std::path::PathBuf> {
     let root = repo_root();
     let mut files = Vec::new();
     for relative in [
@@ -42,7 +40,10 @@ fn checked_in_masm_corpus() -> Vec<PathBuf> {
     files
 }
 
-fn collect_masm_files(dir: &Path, files: &mut Vec<PathBuf>) {
+#[cfg(feature = "std")]
+fn collect_masm_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    use std::fs;
+
     let entries = fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()));
     for entry in entries {
@@ -58,7 +59,10 @@ fn collect_masm_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn load_source_file(path: &Path) -> Arc<SourceFile> {
+#[cfg(feature = "std")]
+fn load_source_file(path: &std::path::Path) -> Arc<SourceFile> {
+    use std::fs;
+
     let source = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     Arc::new(SourceFile::new(
@@ -77,26 +81,87 @@ fn assert_parses(source: Arc<SourceFile>) {
     parse_forms(source).expect("parser should succeed");
 }
 
+#[cfg(feature = "std")]
+fn temp_parser_dir(test_name: &str) -> std::path::PathBuf {
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let path = env::temp_dir().join(format!("miden-parser-{test_name}-{id}"));
+    fs::create_dir_all(&path)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", path.display()));
+    path
+}
+
 #[test]
 fn overlong_path_component_is_rejected_without_panic() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use crate::{
-        debuginfo::DefaultSourceManager,
-        parse::{Parse, ParseOptions},
-    };
+    use crate::debuginfo::DefaultSourceManager;
 
     let big_component = "a".repeat(u16::MAX as usize);
     let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
 
     let source_manager = Arc::new(DefaultSourceManager::default());
     let parsed = catch_unwind(AssertUnwindSafe(|| {
-        source.parse_with_options(source_manager, ParseOptions::default())
+        ModuleParser::new(None).parse_str(None, source, source_manager)
     }));
 
     assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
     let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
     crate::assert_diagnostic!(err, "invalid item path: too long (max 65535 bytes)");
+}
+
+#[test]
+#[cfg(feature = "std")]
+fn read_modules_from_root_walks_valid_submodule_tree() {
+    use std::fs;
+
+    use crate::debuginfo::DefaultSourceManager;
+
+    let dir = temp_parser_dir("walks-valid-submodule-tree");
+    let root_path = dir.join("root.masm");
+    let child_path = dir.join("child.masm");
+
+    fs::write(
+        &root_path,
+        "\
+namespace parser::root
+
+pub mod child
+
+pub proc entry
+    nop
+end
+",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {error}", root_path.display()));
+    fs::write(
+        &child_path,
+        "\
+namespace parser::root::child
+
+pub proc helper
+    nop
+end
+",
+    )
+    .unwrap_or_else(|error| panic!("failed to write {}: {error}", child_path.display()));
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let (root, support) = read_modules_from_root(&root_path, None, None, source_manager, false)
+        .expect("valid root module with one declared submodule should parse without panicking");
+
+    assert_eq!(root.path(), Path::new("::parser::root"));
+    assert_eq!(support.len(), 1);
+    assert_eq!(support[0].path(), Path::new("::parser::root::child"));
+
+    fs::remove_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("failed to remove {}: {error}", dir.display()));
 }
 
 #[test]
@@ -122,6 +187,11 @@ fn parse_top_level_form_sequences() {
 #! Module docs line 1
 #! Module docs line 2
 
+namespace test::root
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod api
+
 #! Import docs
 use std::math::u64
 
@@ -142,6 +212,43 @@ end
     );
 
     assert_parses(source);
+}
+
+#[test]
+fn parse_forms_lowers_module_surface_declarations() {
+    let source = test_source_file(
+        "\
+namespace app::accounts
+extern package \"miden/base@0.1.0\"
+mod internal
+pub mod api
+",
+    );
+
+    let forms = parse_forms(source).expect("parser should succeed");
+    assert_eq!(forms.len(), 4);
+
+    let Form::Namespace(namespace) = &forms[0] else {
+        panic!("expected namespace, got {:?}", forms[0]);
+    };
+    assert_eq!(namespace.inner().as_ref().to_string(), "app::accounts");
+
+    let Form::ExternPackage(package) = &forms[1] else {
+        panic!("expected extern package, got {:?}", forms[1]);
+    };
+    assert_eq!(package.as_str(), "miden/base@0.1.0");
+
+    let Form::Submodule(submodule) = &forms[2] else {
+        panic!("expected private submodule, got {:?}", forms[2]);
+    };
+    assert_eq!(submodule.visibility, Visibility::Private);
+    assert_eq!(submodule.name.as_str(), "internal");
+
+    let Form::Submodule(submodule) = &forms[3] else {
+        panic!("expected public submodule, got {:?}", forms[3]);
+    };
+    assert_eq!(submodule.visibility, Visibility::Public);
+    assert_eq!(submodule.name.as_str(), "api");
 }
 
 #[test]
@@ -177,50 +284,114 @@ end
 }
 
 #[test]
-fn parse_path_import_forms() {
+fn parse_import_module_decl_single_segment() {
+    let source = test_source_file("use foo\n");
+
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Module(import))] = forms.as_slice() else {
+        panic!("expected one module import, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Private);
+    assert_eq!(import.module_path().inner().to_string(), "foo");
+    assert_eq!(import.local_name().as_str(), "foo");
+}
+
+#[test]
+fn parse_import_module_decl_alias() {
     let source = test_source_file(
         "\
 use std::math::u64
-pub use ::std::math::u64->math_u64
-use foo::\"miden::base/account@0.1.0\"->account
+use foo::\"miden::base/account@0.1.0\" as account
 ",
     );
 
-    assert_parses(source);
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [
+        Form::Import(ast::ImportDecl::Module(first)),
+        Form::Import(ast::ImportDecl::Module(second)),
+    ] = forms.as_slice()
+    else {
+        panic!("expected two module imports, got {forms:?}");
+    };
+    assert_eq!(first.module_path().inner().to_string(), "std::math::u64");
+    assert_eq!(first.local_name().as_str(), "u64");
+    assert_eq!(second.module_path().inner().to_string(), "foo::\"miden::base/account@0.1.0\"");
+    assert_eq!(second.local_name().as_str(), "account");
 }
 
 #[test]
-fn parse_digest_import_forms() {
+fn parse_import_item_group_decl() {
     let source = test_source_file(
         "\
-use 0x0000000000000000000000000000000000000000000000000000000000000000->entry
-pub use 0x0000000000000000000000000000000000000000000000000000000000000000->public_entry
+use {foo, bar as baz} from some::module
 ",
     );
 
-    assert_parses(source);
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Items(import))] = forms.as_slice() else {
+        panic!("expected one item import group, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Private);
+    assert_eq!(import.module_path().inner().to_string(), "some::module");
+    let specs = import.specs();
+    assert_eq!(specs.len(), 2);
+    assert_eq!(specs[0].source_name().as_str(), "foo");
+    assert_eq!(specs[0].local_name().as_str(), "foo");
+    assert_eq!(specs[1].source_name().as_str(), "bar");
+    assert_eq!(specs[1].local_name().as_str(), "baz");
 }
 
 #[test]
-fn parser_reports_unnamed_digest_imports() {
+fn parse_import_public_item_reexport_decl() {
     let source = test_source_file(
         "\
-use 0x0000000000000000000000000000000000000000000000000000000000000000
+pub use {alpha} from core
 ",
     );
 
-    let err = parse_forms(source).expect_err("expected unnamed reexport error");
-
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("re-exporting a procedure identified by digest requires giving it a name"));
+    let forms = parse_forms(source).expect("parser should succeed");
+    let [Form::Import(ast::ImportDecl::Items(import))] = forms.as_slice() else {
+        panic!("expected one item import group, got {forms:?}");
+    };
+    assert_eq!(import.visibility(), Visibility::Public);
+    assert_eq!(import.module_path().inner().to_string(), "core");
+    assert_eq!(import.specs()[0].source_name().as_str(), "alpha");
 }
 
 #[test]
-fn parser_reports_invalid_digest_imports() {
+fn parse_import_rejects_pub_module_import() {
+    let source = test_source_file("pub use some::module\n");
+
+    let err = parse_forms(source).expect_err("expected public module import error");
+
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("`pub use` is only supported for braced item imports"));
+}
+
+#[test]
+fn parse_import_rejects_source_digest_import_but_allows_direct_digest_target() {
     let source = test_source_file("use 0x1234->entry\n");
 
-    let err = parse_forms(source).expect_err("expected invalid digest error");
+    let err = parse_forms(source).expect_err("expected digest import error");
 
-    assert_matches!(render_diagnostic(&err), diag if diag.contains("invalid MAST root literal"));
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("digest imports are not supported"));
+
+    let source = test_source_file(
+        "\
+begin
+    exec.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+",
+    );
+    parse_forms(source).expect("direct digest invocation targets should still lower");
+}
+
+#[test]
+fn parse_import_old_arrow_syntax_rejected() {
+    let source = test_source_file("use foo->bar\n");
+
+    let err = parse_forms(source).expect_err("expected old arrow syntax error");
+
+    assert_matches!(render_diagnostic(&err), diag if diag.contains("import aliases use `as`; `->` is no longer supported"));
 }
 
 #[test]
@@ -590,6 +761,7 @@ end
 }
 
 #[test]
+#[cfg(feature = "std")]
 fn parser_accepts_checked_in_masm_corpus() {
     let files = checked_in_masm_corpus();
     assert!(
@@ -606,12 +778,16 @@ fn parser_accepts_checked_in_masm_corpus() {
 }
 
 #[test]
-fn parser_reports_unqualified_imports() {
+fn parse_import_accepts_unqualified_module_imports() {
     let source = test_source_file("use foo\n");
 
-    let err = parse_forms(source).expect_err("parser should reject unqualified imports");
+    let forms = parse_forms(source).expect("parser should accept single-segment module imports");
 
-    assert_matches!(render_diagnostic(err), diag if diag.contains("expected a fully-qualified module path"));
+    let [Form::Import(ast::ImportDecl::Module(import))] = forms.as_slice() else {
+        panic!("expected one module import, got {forms:?}");
+    };
+    assert_eq!(import.module_path().inner().to_string(), "foo");
+    assert_eq!(import.local_name().as_str(), "foo");
 }
 
 #[test]

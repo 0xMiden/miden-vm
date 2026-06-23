@@ -2,7 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{ExecutionError, Word, operation::OperationError};
+use miden_processor::{
+    ExecutionError, Word,
+    operation::{BinaryValueErrorContext, OperationError},
+};
 use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
@@ -69,7 +72,10 @@ fn faulty_condition_from_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue {
+                context: BinaryValueErrorContext::Loop,
+                value: _,
+            },
             ..
         }
     );
@@ -123,7 +129,7 @@ fn faulty_condition_from_tail_controlled_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::NotBinaryValueLoop { value: _ },
+            err: OperationError::NotBinaryValue { value: _, .. },
             ..
         }
     );
@@ -456,11 +462,8 @@ fn simple_dyn_exec() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
-        .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+    let context = miden_assembly::testing::TestContext::new();
+    let program = context.assemble(program_source).unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -514,6 +517,8 @@ fn dynexec_with_procref() {
         .with_module(
             "external::module",
             "\
+            namespace external::module
+
             pub proc func
                 u32wrapping_add.1
             end
@@ -553,11 +558,8 @@ fn simple_dyncall() {
         end";
 
     // Compute the hash of foo by assembling the program
-    let source_manager = Arc::new(DefaultSourceManager::default());
-    let program = Assembler::new(source_manager)
-        .assemble_program("program", program_source)
-        .unwrap()
-        .unwrap_program();
+    let context = miden_assembly::testing::TestContext::new();
+    let program = context.assemble(program_source).unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
@@ -615,7 +617,7 @@ fn dyncall_with_syscall_and_caller() {
     let test = build_debug_test!(program_source).with_kernel(kernel_source);
 
     // Compile to get the hash of `bar`
-    let (program, _kernel) = test.compile().unwrap();
+    let (program, _kernel, _debug_info) = test.compile().unwrap();
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     // bar is the first procedure root in the forest (index 0)
     let bar_digest = procedure_digests[0];
@@ -643,8 +645,9 @@ fn dyncall_with_syscall_and_caller() {
 #[test]
 fn procref() -> Result<(), Report> {
     let module_source = "
-    use miden::core::math::u64
-    pub use u64::overflowing_add
+    namespace test::foo
+
+    pub use {overflowing_add} from miden::core::math::u64
 
     @locals(4)
     pub proc foo
@@ -656,12 +659,13 @@ fn procref() -> Result<(), Report> {
     let mast_roots: Vec<Word> = {
         let source_manager = Arc::new(DefaultSourceManager::default());
         let module_path = PathBuf::new("test::foo").unwrap();
-        let mut parser = Module::parser(ModuleKind::Library);
-        let module = parser.parse_str(module_path, module_source, source_manager.clone())?;
+        let mut parser = Module::parser(Some(ModuleKind::Library));
+        let module =
+            parser.parse_str(Some(module_path.as_path()), module_source, source_manager.clone())?;
         let library = Assembler::new(source_manager)
             .with_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
             .unwrap()
-            .assemble_library("test", [module])
+            .assemble_library("test", module, None::<Box<Module>>)
             .unwrap();
 
         let module_info = library.module_infos().next().unwrap();

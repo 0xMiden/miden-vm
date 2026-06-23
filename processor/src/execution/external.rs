@@ -1,8 +1,11 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+
 use crate::{
-    BaseHost, BreakReason,
-    continuation_stack::ContinuationStack,
+    BreakReason,
+    continuation_stack::{Continuation, ContinuationStack},
     execution::InternalBreakReason,
     mast::{ExecutableMastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
@@ -17,6 +20,7 @@ use crate::{
 #[inline(always)]
 pub(super) fn execute_external_node<T, F>(
     external_node_id: MastNodeId,
+    source_node_id: Option<DebugSourceNodeId>,
     current_forest: &mut F,
     tracer: &mut T,
 ) -> ControlFlow<InternalBreakReason<F>>
@@ -42,6 +46,7 @@ where
     ControlFlow::Break(InternalBreakReason::LoadMastForestFromExternal {
         external_node_id,
         procedure_hash: external_node.digest(),
+        source_node_id,
     })
 }
 
@@ -50,10 +55,12 @@ where
 pub fn finish_load_mast_forest_from_external<F, T>(
     resolved_node_id_new_forest: MastNodeId,
     new_mast_forest: F,
+    new_package_debug_info: Option<Arc<PackageDebugInfo>>,
+    new_source_node_id: Option<DebugSourceNodeId>,
     external_node_id_old_forest: MastNodeId,
     current_forest: &mut F,
+    current_package_debug_info: &mut Option<Arc<PackageDebugInfo>>,
     continuation_stack: &mut ContinuationStack<F>,
-    host: &mut impl BaseHost,
     tracer: &mut T,
 ) -> ControlFlow<BreakReason<F>>
 where
@@ -74,26 +81,96 @@ where
     // node, we are about to enter into an infinite loop - so, return an error
     if resolved_node_new_forest.is_external() {
         return ControlFlow::Break(BreakReason::Err(
-            OperationError::CircularExternalNode(external_node_old_forest.digest()).with_context(
-                old_forest,
-                external_node_id_old_forest,
-                host,
-            ),
+            OperationError::CircularExternalNode(external_node_old_forest.digest()).with_context(),
         ));
     }
 
     tracer.record_mast_forest_resolution(resolved_node_id_new_forest, &new_mast_forest);
 
+    let old_package_debug_info = current_package_debug_info.clone();
+
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(old_forest.clone());
+    continuation_stack
+        .push_enter_forest_with_package_debug_info(old_forest.clone(), old_package_debug_info);
 
     // Push the root node of the external MAST forest onto the continuation stack.
-    continuation_stack.push_start_node(resolved_node_id_new_forest);
+    continuation_stack.push_with_source_node_id(
+        Continuation::StartNode(resolved_node_id_new_forest),
+        new_source_node_id,
+    );
 
     // Update the current forest to the new MAST forest.
     *current_forest = new_mast_forest;
+    *current_package_debug_info = new_package_debug_info;
 
     // Note that executing an External node does not end the clock cycle, so we do not finalize the
     // clock cycle here.
     ControlFlow::Continue(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+    use core::{assert_matches, ops::ControlFlow};
+
+    use miden_core::{
+        Felt,
+        mast::{BasicBlockNodeBuilder, ExternalNodeBuilder, MastForest, MastForestContributor},
+        operations::Operation,
+        program::Program,
+    };
+    use miden_mast_package::debug_info::DebugSourceNodeId;
+
+    use super::*;
+    use crate::{Continuation, fast::NoopTracer};
+
+    #[test]
+    fn loaded_external_forest_starts_without_source_sidecar() {
+        let mut current_forest = MastForest::new();
+        let mut loaded_forest = MastForest::new();
+        let target_id = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::from_u32(7))])
+            .add_to_forest(&mut loaded_forest)
+            .unwrap();
+        loaded_forest.make_root(target_id);
+        let external_id = ExternalNodeBuilder::new(loaded_forest[target_id].digest())
+            .add_to_forest(&mut current_forest)
+            .unwrap();
+        current_forest.make_root(external_id);
+
+        let caller_source_node_id = DebugSourceNodeId::from(0);
+        let mut current_forest = Arc::new(current_forest);
+        let program = Program::new(current_forest.clone(), external_id);
+        let new_mast_forest = Arc::new(loaded_forest);
+        let mut continuation_stack =
+            ContinuationStack::new_with_source_node_id(&program, caller_source_node_id);
+        let mut tracer = NoopTracer;
+        let mut package_debug_info = None;
+
+        let result = finish_load_mast_forest_from_external(
+            target_id,
+            new_mast_forest,
+            None,
+            None,
+            external_id,
+            &mut current_forest,
+            &mut package_debug_info,
+            &mut continuation_stack,
+            &mut tracer,
+        );
+
+        assert_matches!(result, ControlFlow::Continue(()));
+        assert_matches!(
+            continuation_stack.pop_continuation_with_source_node_id(),
+            Some((Continuation::StartNode(node_id), None)) if node_id == target_id
+        );
+        assert_matches!(
+            continuation_stack.pop_continuation_with_source_node_id(),
+            Some((Continuation::EnterForest { .. }, None))
+        );
+        assert_matches!(
+            continuation_stack.pop_continuation_with_source_node_id(),
+            Some((Continuation::StartNode(node_id), Some(source_node_id)))
+                if node_id == external_id && source_node_id == caller_source_node_id
+        );
+    }
 }

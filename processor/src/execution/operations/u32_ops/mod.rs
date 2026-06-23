@@ -4,7 +4,6 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
-    mast::ExecutableMastForest,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -301,15 +300,11 @@ where
 /// the high values are equal to 0; if they are, puts the original elements back onto the
 /// stack; if they are not, returns an error.
 #[inline(always)]
-pub(super) fn op_u32assert2<P: Processor, T: Tracer, F>(
+pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-    program: &F,
-) -> Result<OperationHelperRegisters, OperationError>
-where
-    F: ExecutableMastForest + ?Sized,
-{
+) -> Result<OperationHelperRegisters, OperationError> {
     let first = processor.stack().get(0);
     let second = processor.stack().get(1);
 
@@ -329,8 +324,11 @@ where
             // A custom error code was provided: surface it as a U32AssertionFailed so
             // callers get both the error context *and* the offending values for
             // richer diagnostics (addresses bobbinth's review suggestion).
-            let err_msg = program.resolve_error_message(err_code);
-            return Err(OperationError::U32AssertionFailed { err_code, err_msg, invalid_values });
+            return Err(OperationError::U32AssertionFailed {
+                err_code,
+                err_msg: None,
+                invalid_values,
+            });
         }
 
         // No custom error code: report the specific out-of-range values so

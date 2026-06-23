@@ -1,5 +1,6 @@
-use alloc::sync::Arc;
+use alloc::{boxed::Box, sync::Arc};
 
+use miden_assembly_syntax::ast;
 use miden_core::{
     mast::{MastForest, MastForestRootMap, MastNodeExt},
     utils::Idx,
@@ -17,15 +18,19 @@ fn merge_programs(
     program_b: &str,
 ) -> Result<(MastForest, MastForest, MastForest, MastForestRootMap), Report> {
     let context = TestContext::new();
-    let module = context.parse_module_with_path("lib::mod", program_a)?;
+    let module = context.parse_module(program_a)?;
 
     let lib_a = Assembler::new(context.source_manager())
-        .assemble_library("lib-a", [module])
+        .assemble_library("lib-a", module, None::<Box<ast::Module>>)
         .map(Arc::from)?;
 
     let mut assembler = Assembler::new(context.source_manager());
     assembler.link_package(Arc::clone(&lib_a), Linkage::Dynamic)?;
-    let lib_b = assembler.assemble_library("lib-b", [program_b])?.mast_forest().as_ref().clone();
+    let lib_b = assembler
+        .assemble_library("lib-b", program_b, None::<Box<ast::Module>>)?
+        .mast_forest()
+        .as_ref()
+        .clone();
     let lib_a = lib_a.mast_forest().as_ref().clone();
 
     let (merged, root_maps) = MastForest::merge([&lib_a, &lib_b]).into_diagnostic()?;
@@ -38,6 +43,8 @@ fn merge_programs(
 #[test]
 fn mast_forest_merge_assembler() {
     let lib_a = r#"
+  namespace lib::mod
+
   pub proc foo
       push.19
   end
@@ -48,6 +55,8 @@ fn mast_forest_merge_assembler() {
 "#;
 
     let lib_b = r#"
+  namespace lib_b
+
   use lib::mod
 
   pub proc qux_duplicate

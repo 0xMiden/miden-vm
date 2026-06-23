@@ -331,9 +331,9 @@ Instructions for communicating with the host through events.
 
 ## Debugging Operations
 
-Procedures for inspecting VM state during execution. These are ordinary `core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs. Remove these calls from production programs.
+Procedures for inspecting VM state during execution. These are ordinary `miden::core::debug` procedure calls that emit events, so adding them changes the program being executed. Procedures with stack inputs also change VM state by consuming those inputs. Remove these calls from production programs.
 
-### `core::debug`
+### `miden::core::debug`
 
 - **Procedures:**
   - `print_stack`: Prints the entire operand stack. Inputs: `[...]`. Outputs: `[...]`. Cycles: 3.

@@ -1,3 +1,5 @@
+use core::assert_matches;
+
 use super::*;
 use crate::{ExecutionError, MemoryError, fast::Memory};
 
@@ -18,7 +20,10 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
+        assert_eq!(
+            err.to_string(),
+            "word access at memory address 43 in context 0 is unaligned: word accesses require addresses that are multiples of 4"
+        );
     }
 
     // mstorew
@@ -34,7 +39,10 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
+        assert_eq!(
+            err.to_string(),
+            "word access at memory address 43 in context 0 is unaligned: word accesses require addresses that are multiples of 4"
+        );
     }
 }
 

@@ -48,7 +48,9 @@ STARK configurations are defined in the `miden-air` crate and shared between the
 
 Different hash functions offer different tradeoffs:
 - **BLAKE3/Keccak**: Fast proving but not efficient for recursion
-- **RPO256/Poseidon2/RPX256**: Slower proving but efficient for recursive verification in Miden VM
+- **RPO256/Poseidon2/RPX256**: Algebraic hash options with recursion-friendly verification
+- **Eidos**: VM-native hash option, built on BlakeG compression and intended for recursive
+  verification in Miden VM
 
 ## Crate features
 Miden prover can be compiled with the following features:

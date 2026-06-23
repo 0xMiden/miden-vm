@@ -1,17 +1,17 @@
 //! EdDSA (Ed25519) signature verification precompile for the Miden VM.
 //!
 //! This precompile mirrors the flow of the existing ECDSA integration but targets Ed25519.
-//! Execution emits an event with pointers to packed bytes (public key, pre-computed challenge
-//! digest `k_digest`, and signature); the host verifies the signature with `miden-crypto`
-//! primitives, returns the result via the advice stack, and logs the calldata for deferred
-//! verification. During proof verification, the stored calldata is re-verified and committed
-//! with the same hashing scheme used at execution time.
+//! Execution emits an event with pointers to packed bytes (public key, message, and signature);
+//! the host verifies the signature with `miden-crypto` primitives, returns the result via the
+//! advice stack, and logs the calldata for deferred verification. During proof verification, the
+//! stored calldata is re-verified and committed with the same hashing scheme used at execution
+//! time.
 
 use alloc::{vec, vec::Vec};
-use core::convert::TryInto;
+use core::convert::{TryFrom, TryInto};
 
 use miden_core::{
-    Felt,
+    Felt, Word,
     chiplets::hasher::Hasher as VmHasher,
     events::EventName,
     field::PrimeCharacteristicRing,
@@ -39,20 +39,20 @@ pub const EDDSA25519_VERIFY_EVENT_NAME: EventName =
     EventName::new("miden::core::dsa::eddsa_ed25519::verify");
 
 const PUBLIC_KEY_LEN_BYTES: usize = 32;
-const K_DIGEST_LEN_BYTES: usize = 64;
+const MESSAGE_LEN_BYTES: usize = 32;
 const SIGNATURE_LEN_BYTES: usize = 64;
 
 const PRECOMPILE_REQUEST_LEN: usize =
-    PUBLIC_KEY_LEN_BYTES + K_DIGEST_LEN_BYTES + SIGNATURE_LEN_BYTES;
+    PUBLIC_KEY_LEN_BYTES + MESSAGE_LEN_BYTES + SIGNATURE_LEN_BYTES;
 
 /// EdDSA (Ed25519) signature verification precompile handler.
 pub struct EddsaPrecompile;
 
 impl EventHandler for EddsaPrecompile {
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        // Stack: [event_id, pk_ptr, k_digest_ptr, sig_ptr, ...]
+        // Stack: [event_id, pk_ptr, msg_ptr, sig_ptr, ...]
         let pk_ptr = process.get_stack_item(1).as_canonical_u64();
-        let k_digest_ptr = process.get_stack_item(2).as_canonical_u64();
+        let msg_ptr = process.get_stack_item(2).as_canonical_u64();
         let sig_ptr = process.get_stack_item(3).as_canonical_u64();
 
         let pk = {
@@ -63,11 +63,11 @@ impl EventHandler for EddsaPrecompile {
                 .map_err(|source| EddsaError::DeserializeError { data_type, source })?
         };
 
-        let k_digest = {
-            let data_type = DataType::KDigest;
-            let bytes = read_memory_packed_u32(process, k_digest_ptr, K_DIGEST_LEN_BYTES)
+        let message = {
+            let data_type = DataType::Message;
+            let bytes = read_memory_packed_u32(process, msg_ptr, MESSAGE_LEN_BYTES)
                 .map_err(|source| EddsaError::ReadError { data_type, source })?;
-            bytes.try_into().expect("k-digest length must be exactly 64 bytes")
+            bytes.try_into().expect("message length must be exactly 32 bytes")
         };
 
         let signature = {
@@ -78,7 +78,7 @@ impl EventHandler for EddsaPrecompile {
                 .map_err(|source| EddsaError::DeserializeError { data_type, source })?
         };
 
-        let request = EddsaRequest::new(pk, k_digest, signature);
+        let request = EddsaRequest::new(pk, message, signature);
         let result = request.result();
 
         Ok(vec![
@@ -101,22 +101,22 @@ impl PrecompileVerifier for EddsaPrecompile {
 /// EdDSA verification request containing all data needed to re-run signature verification.
 pub struct EddsaRequest {
     pk: PublicKey,
-    /// Pre-computed challenge hash k = SHA-512(R || A || message), 64 bytes.
-    k_digest: [u8; K_DIGEST_LEN_BYTES],
+    /// Message bytes verified by the Ed25519 precompile.
+    message: [u8; MESSAGE_LEN_BYTES],
     sig: Signature,
 }
 
 impl EddsaRequest {
-    pub fn new(pk: PublicKey, k_digest: [u8; K_DIGEST_LEN_BYTES], sig: Signature) -> Self {
-        Self { pk, k_digest, sig }
+    pub fn new(pk: PublicKey, message: [u8; MESSAGE_LEN_BYTES], sig: Signature) -> Self {
+        Self { pk, message, sig }
     }
 
     pub fn pk(&self) -> &PublicKey {
         &self.pk
     }
 
-    pub fn k_digest(&self) -> &[u8; K_DIGEST_LEN_BYTES] {
-        &self.k_digest
+    pub fn message(&self) -> &[u8; MESSAGE_LEN_BYTES] {
+        &self.message
     }
 
     pub fn sig(&self) -> &Signature {
@@ -130,7 +130,10 @@ impl EddsaRequest {
     }
 
     pub fn result(&self) -> bool {
-        self.pk.verify_with_unchecked_k(self.k_digest, &self.sig).is_ok()
+        match Word::try_from(self.message) {
+            Ok(message) => self.pk.verify(message, &self.sig),
+            Err(_) => false,
+        }
     }
 
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
@@ -141,8 +144,8 @@ impl EddsaRequest {
             let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
             VmHasher::hash_elements(&felts)
         };
-        let k_digest_comm = {
-            let felts = bytes_to_packed_u32_elements(&self.k_digest);
+        let message_comm = {
+            let felts = bytes_to_packed_u32_elements(&self.message);
             VmHasher::hash_elements(&felts)
         };
         let sig_comm = {
@@ -150,7 +153,7 @@ impl EddsaRequest {
             VmHasher::hash_elements(&felts)
         };
 
-        let commitment = VmHasher::merge(&[VmHasher::merge(&[pk_comm, k_digest_comm]), sig_comm]);
+        let commitment = VmHasher::merge(&[VmHasher::merge(&[pk_comm, message_comm]), sig_comm]);
 
         PrecompileCommitment::new(tag, commitment)
     }
@@ -159,7 +162,7 @@ impl EddsaRequest {
 impl Serializable for EddsaRequest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.pk.write_into(target);
-        target.write_bytes(&self.k_digest);
+        target.write_bytes(&self.message);
         self.sig.write_into(target);
     }
 }
@@ -167,9 +170,9 @@ impl Serializable for EddsaRequest {
 impl Deserializable for EddsaRequest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let pk = PublicKey::read_from(source)?;
-        let k_digest = source.read_array()?;
+        let message = source.read_array()?;
         let sig = Signature::read_from(source)?;
-        Ok(Self { pk, k_digest, sig })
+        Ok(Self { pk, message, sig })
     }
 }
 
@@ -185,7 +188,7 @@ impl From<EddsaRequest> for PrecompileRequest {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DataType {
     PublicKey,
-    KDigest,
+    Message,
     Signature,
 }
 
@@ -193,7 +196,7 @@ impl core::fmt::Display for DataType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             DataType::PublicKey => write!(f, "public key"),
-            DataType::KDigest => write!(f, "k-digest"),
+            DataType::Message => write!(f, "message"),
             DataType::Signature => write!(f, "signature"),
         }
     }

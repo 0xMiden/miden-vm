@@ -7,7 +7,7 @@ use super::{
 use crate::{
     chiplets::hasher,
     mast::{
-        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
+        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
         node::hash_op_batches,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
@@ -130,7 +130,6 @@ impl<'a> ResolvedSerializedForest<'a> {
     pub(super) fn materialize(
         &self,
         advice_map: AdviceMap,
-        debug_info: DebugInfo,
     ) -> Result<MastForest, DeserializationError> {
         let basic_block_data_decoder = BasicBlockDataDecoder::new(basic_block_data(
             self.bytes,
@@ -164,7 +163,6 @@ impl<'a> ResolvedSerializedForest<'a> {
             nodes: mast_forest.nodes,
             roots,
             advice_map,
-            debug_info,
         })
         .map_err(|e| {
             DeserializationError::InvalidValue(format!(

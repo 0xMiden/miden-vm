@@ -4,7 +4,10 @@ use miden_air::{
     MidenMultiAir, NUM_PUBLIC_VALUES, NUM_VAR_LEN_PUBLIC_INPUT_GROUPS, ProofOrder, PublicInputs,
     Statement, config,
 };
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::{
+    Assembler, DefaultSourceManager, Path,
+    ast::{Module, ModuleKind},
+};
 use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::AdviceStackBuilder,
@@ -234,8 +237,11 @@ pub fn generate_recursive_verifier_data(
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
+                let mut parser = Module::parser(Some(ModuleKind::Kernel));
+                let kernel =
+                    parser.parse_str(Some(Path::KERNEL), kernel, source_manager.clone()).unwrap();
                 let kernel_lib = Assembler::new(source_manager.clone())
-                    .assemble_kernel("kernel", kernel)
+                    .assemble_kernel("kernel", kernel, None)
                     .map(Arc::<Package>::from)
                     .unwrap();
                 let assembler = Assembler::with_kernel(source_manager, kernel_lib.clone()).unwrap();

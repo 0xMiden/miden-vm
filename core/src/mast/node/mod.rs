@@ -38,9 +38,6 @@ pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
 use crate::mast::{MastForest, MastNodeId};
 
-#[cfg(debug_assertions)]
-use crate::mast::ExecutableMastForest;
-
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
@@ -64,12 +61,6 @@ pub trait MastNodeExt {
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
-
-    /// Verifies that this node is internally consistent with the forest in debug builds.
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
-    where
-        F: ExecutableMastForest + ?Sized;
 
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;

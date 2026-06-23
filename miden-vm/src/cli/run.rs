@@ -184,7 +184,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     }
 
     // load program from file and compile
-    let (program, source_manager) =
+    let (program, package_debug_info, entrypoint_source_node, source_manager) =
         get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
@@ -196,9 +196,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
     for lib in libraries.libraries {
-        host.load_library(lib.mast_forest())
-            .into_diagnostic()
-            .wrap_err("Failed to load library")?;
+        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();
@@ -213,9 +211,22 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let trace_inputs = processor
-        .execute_trace_inputs_sync(&program, &mut host)
-        .wrap_err("Failed to execute program")?;
+    let trace_inputs = match (package_debug_info.as_ref(), entrypoint_source_node) {
+        (Some(debug_info), Some(entrypoint_source_node_id)) => processor
+            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+                &program,
+                debug_info,
+                entrypoint_source_node_id,
+                &mut host,
+            )
+            .wrap_err("Failed to execute program")?,
+        (Some(debug_info), None) => processor
+            .execute_trace_inputs_with_package_debug_info_sync(&program, debug_info, &mut host)
+            .wrap_err("Failed to execute program")?,
+        (None, _) => processor
+            .execute_trace_inputs_sync(&program, &mut host)
+            .wrap_err("Failed to execute program")?,
+    };
     let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))

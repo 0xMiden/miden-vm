@@ -110,6 +110,7 @@ impl From<&CoreLibrary> for HostLibrary {
     fn from(core_lib: &CoreLibrary) -> Self {
         Self {
             mast_forest: core_lib.mast_forest().clone(),
+            package_debug_info: Ok(None),
             handlers: core_lib.handlers(),
         }
     }

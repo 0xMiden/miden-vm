@@ -6,9 +6,11 @@ use miden_core::chiplets::blakeg;
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     BaseHost, ContextId, ExecutionError, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
-    errors::{CryptoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner, OperationError},
+    errors::{
+        CryptoError, MapExecErrWithOpIdx, MerklePathVerificationFailedInner, OperationError,
+        PackageSourceDebugContext,
+    },
     field::{BasedVectorSpace, QuadFelt},
-    mast::{ExecutableMastForest, MastNodeId},
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -83,15 +85,11 @@ pub(super) fn op_bcompress<P: Processor, T: Tracer>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mpverify<P: Processor, T: Tracer, F>(
+pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
-    program: &F,
     tracer: &mut T,
-) -> Result<OperationHelperRegisters, CryptoError>
-where
-    F: ExecutableMastForest + ?Sized,
-{
+) -> Result<OperationHelperRegisters, CryptoError> {
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -107,14 +105,13 @@ where
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
-        let err_msg = program.resolve_error_message(err_code);
         OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: node,
                 index,
                 root,
                 err_code,
-                err_msg,
+                err_msg: None,
             }),
         }
     })?;
@@ -499,22 +496,30 @@ impl From<OperationError> for AeadStreamError {
 }
 
 impl<T> MapExecErrWithOpIdx<T> for Result<T, AeadStreamError> {
-    fn map_exec_err_with_op_idx<F>(
+    fn map_exec_err_with_op_idx(self) -> Result<T, ExecutionError> {
+        match self {
+            Ok(result) => Ok(result),
+            Err(AeadStreamError::Memory(err)) => {
+                Result::<T, MemoryError>::Err(err).map_exec_err_with_op_idx()
+            },
+            Err(AeadStreamError::Operation(err)) => {
+                Result::<T, OperationError>::Err(err).map_exec_err_with_op_idx()
+            },
+        }
+    }
+
+    fn map_exec_err_with_package_source_op_idx(
         self,
-        mast_forest: &F,
-        node_id: MastNodeId,
+        context: Option<PackageSourceDebugContext<'_>>,
         host: &impl BaseHost,
         op_idx: usize,
-    ) -> Result<T, ExecutionError>
-    where
-        F: ExecutableMastForest,
-    {
+    ) -> Result<T, ExecutionError> {
         match self {
             Ok(result) => Ok(result),
             Err(AeadStreamError::Memory(err)) => Result::<T, MemoryError>::Err(err)
-                .map_exec_err_with_op_idx(mast_forest, node_id, host, op_idx),
+                .map_exec_err_with_package_source_op_idx(context, host, op_idx),
             Err(AeadStreamError::Operation(err)) => Result::<T, OperationError>::Err(err)
-                .map_exec_err_with_op_idx(mast_forest, node_id, host, op_idx),
+                .map_exec_err_with_package_source_op_idx(context, host, op_idx),
         }
     }
 }

@@ -333,7 +333,7 @@ impl ExecutionTrace {
         )
         .expect("prover statement construction failed");
 
-        let config = config::poseidon2_config(config::pcs_params());
+        let config = config::eidos_config(config::pcs_params());
         debug::check_constraints(&prover_statement, config.challenger());
     }
 

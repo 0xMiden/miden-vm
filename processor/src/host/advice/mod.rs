@@ -1,9 +1,13 @@
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{
+    collections::{BTreeSet, VecDeque},
+    vec::Vec,
+};
 
 use miden_core::{
     Felt, WORD_SIZE, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    chiplets::hasher::Hasher as VmHasher,
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
 #[cfg(test)]
@@ -18,7 +22,54 @@ use crate::{ExecutionOptions, host::AdviceMutation, processor::AdviceProviderInt
 // ================================================================================================
 
 /// Maximum number of elements allowed on the advice stack. Set to 2^17.
-const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+pub const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+
+trait MerkleStoreBudget {
+    fn contains_internal_node(&self, root: Word) -> bool;
+
+    fn new_internal_node_count<I>(&self, roots: I) -> usize
+    where
+        I: IntoIterator<Item = Word>;
+
+    fn new_path_node_count(
+        &self,
+        index: u64,
+        node: Word,
+        path: &MerklePath,
+    ) -> Result<usize, MerkleError>;
+}
+
+impl MerkleStoreBudget for MerkleStore {
+    fn contains_internal_node(&self, root: Word) -> bool {
+        self.get_node(root, NodeIndex::root()).is_ok()
+    }
+
+    fn new_internal_node_count<I>(&self, roots: I) -> usize
+    where
+        I: IntoIterator<Item = Word>,
+    {
+        let mut seen_roots = BTreeSet::new();
+        let mut count = 0;
+
+        for root in roots {
+            if seen_roots.insert(root) && !self.contains_internal_node(root) {
+                count += 1;
+            }
+        }
+
+        count
+    }
+
+    fn new_path_node_count(
+        &self,
+        index: u64,
+        node: Word,
+        path: &MerklePath,
+    ) -> Result<usize, MerkleError> {
+        path.authenticated_nodes(index, node)
+            .map(|nodes| self.new_internal_node_count(nodes.map(|node| node.value)))
+    }
+}
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -57,7 +108,12 @@ pub struct AdviceProvider {
     max_map_value_size: usize,
     max_map_elements: usize,
     store: MerkleStore,
+    merkle_store_node_count: usize,
+    max_merkle_store_nodes: usize,
     pc_requests: Vec<PrecompileRequest>,
+    pc_request_calldata_bytes: usize,
+    max_pc_requests: usize,
+    max_pc_request_calldata_bytes: usize,
 }
 
 impl Default for AdviceProvider {
@@ -74,20 +130,27 @@ impl AdviceProvider {
         let AdviceInputs { stack, map, store } = inputs;
         let mut provider = Self::empty(options);
         provider.extend_stack(stack)?;
-        provider.extend_merkle_store(store.inner_nodes());
+        provider.extend_merkle_store(store.inner_nodes())?;
         provider.extend_map(&map)?;
         Ok(provider)
     }
 
     fn empty(options: &ExecutionOptions) -> Self {
+        let store = MerkleStore::default();
+        let merkle_store_node_count = store.num_internal_nodes();
         Self {
             stack: VecDeque::new(),
             map: AdviceMap::default(),
             map_element_count: 0,
             max_map_value_size: options.max_adv_map_value_size(),
             max_map_elements: options.max_adv_map_elements(),
-            store: MerkleStore::default(),
+            store,
+            merkle_store_node_count,
+            max_merkle_store_nodes: options.max_merkle_store_nodes(),
             pc_requests: Vec::new(),
+            pc_request_calldata_bytes: 0,
+            max_pc_requests: options.max_precompile_requests(),
+            max_pc_request_calldata_bytes: options.max_precompile_request_calldata_bytes(),
         }
     }
 
@@ -106,10 +169,34 @@ impl AdviceProvider {
                 max: options.max_adv_map_elements(),
             });
         }
+        if self.merkle_store_node_count > options.max_merkle_store_nodes() {
+            return Err(AdviceError::MerkleStoreNodeBudgetExceeded {
+                current: 0,
+                added: self.merkle_store_node_count,
+                max: options.max_merkle_store_nodes(),
+            });
+        }
+        if self.pc_requests.len() > options.max_precompile_requests() {
+            return Err(AdviceError::PrecompileRequestCountExceeded {
+                current: 0,
+                added: self.pc_requests.len(),
+                max: options.max_precompile_requests(),
+            });
+        }
+        if self.pc_request_calldata_bytes > options.max_precompile_request_calldata_bytes() {
+            return Err(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: 0,
+                added: self.pc_request_calldata_bytes,
+                max: options.max_precompile_request_calldata_bytes(),
+            });
+        }
 
         self.map_element_count = map_element_count;
         self.max_map_value_size = options.max_adv_map_value_size();
         self.max_map_elements = options.max_adv_map_elements();
+        self.max_merkle_store_nodes = options.max_merkle_store_nodes();
+        self.max_pc_requests = options.max_precompile_requests();
+        self.max_pc_request_calldata_bytes = options.max_precompile_request_calldata_bytes();
         Ok(())
     }
 
@@ -136,10 +223,10 @@ impl AdviceProvider {
                 self.extend_map(&other)?;
             },
             AdviceMutation::ExtendMerkleStore { infos } => {
-                self.extend_merkle_store(infos);
+                self.extend_merkle_store(infos)?;
             },
             AdviceMutation::ExtendPrecompileRequests { data } => {
-                self.extend_precompile_requests(data);
+                self.extend_precompile_requests(data)?;
             },
         }
         Ok(())
@@ -410,6 +497,29 @@ impl AdviceProvider {
         Ok(())
     }
 
+    fn check_merkle_store_node_budget(&self, node_count: usize) -> Result<(), AdviceError> {
+        if node_count > self.max_merkle_store_nodes {
+            return Err(AdviceError::MerkleStoreNodeBudgetExceeded {
+                current: self.merkle_store_node_count,
+                added: node_count.saturating_sub(self.merkle_store_node_count),
+                max: self.max_merkle_store_nodes,
+            });
+        }
+        Ok(())
+    }
+
+    fn check_merkle_store_node_addition(&self, added: usize) -> Result<(), AdviceError> {
+        let Some(node_count) = self.merkle_store_node_count.checked_add(added) else {
+            return Err(AdviceError::MerkleStoreNodeBudgetExceeded {
+                current: self.merkle_store_node_count,
+                added,
+                max: self.max_merkle_store_nodes,
+            });
+        };
+
+        self.check_merkle_store_node_budget(node_count)
+    }
+
     /// Inserts the provided value into the advice map under the specified key.
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
@@ -552,9 +662,6 @@ impl AdviceProvider {
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;
     /// returns the Merkle path from the updated node to the new root, together with the new root.
     ///
-    /// The tree is cloned prior to the update. Thus, the advice provider retains the original and
-    /// the updated tree.
-    ///
     /// # Errors
     /// Returns an error if:
     /// - A Merkle tree for the specified root cannot be found in this advice provider.
@@ -571,10 +678,28 @@ impl AdviceProvider {
     ) -> Result<(MerklePath, Word), AdviceError> {
         let node_index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
-        self.store
-            .set_node(root, node_index, value)
-            .map(|root| (root.path, root.root))
-            .map_err(AdviceError::MerkleStoreUpdateFailed)
+        let proof = self
+            .store
+            .get_path(root, node_index)
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        let path = proof.path;
+
+        if proof.value == value {
+            return Ok((path, root));
+        }
+
+        let added = self
+            .store
+            .new_path_node_count(node_index.position(), value, &path)
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        self.check_merkle_store_node_addition(added)?;
+
+        let new_root = self
+            .store
+            .add_merkle_path(node_index.position(), value, path.clone())
+            .map_err(AdviceError::MerkleStoreUpdateFailed)?;
+        self.merkle_store_node_count += added;
+        Ok((path, new_root))
     }
 
     /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -586,7 +711,13 @@ impl AdviceProvider {
     /// It is not checked whether a Merkle tree for either of the specified roots can be found in
     /// this advice provider.
     pub fn merge_roots(&mut self, lhs: Word, rhs: Word) -> Result<Word, AdviceError> {
-        self.store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)
+        let root = VmHasher::merge(&[lhs, rhs]);
+        let added = self.store.new_internal_node_count([root]);
+        self.check_merkle_store_node_addition(added)?;
+
+        let root = self.store.merge_roots(lhs, rhs).map_err(AdviceError::MerkleStoreMergeFailed)?;
+        self.merkle_store_node_count += added;
+        Ok(root)
     }
 
     /// Returns true if the Merkle root exists for the advice provider Merkle store.
@@ -595,11 +726,17 @@ impl AdviceProvider {
     }
 
     /// Extends the [MerkleStore] with the given nodes.
-    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    pub fn extend_merkle_store<I>(&mut self, iter: I) -> Result<(), AdviceError>
     where
         I: IntoIterator<Item = InnerNodeInfo>,
     {
-        self.store.extend(iter);
+        let nodes = iter.into_iter().collect::<Vec<_>>();
+        let added = self.store.new_internal_node_count(nodes.iter().map(|node| node.value));
+        self.check_merkle_store_node_addition(added)?;
+
+        self.store.extend(nodes);
+        self.merkle_store_node_count += added;
+        Ok(())
     }
 
     // PRECOMPILE REQUESTS
@@ -614,11 +751,55 @@ impl AdviceProvider {
     }
 
     /// Extends the precompile requests with the given entries.
-    pub fn extend_precompile_requests<I>(&mut self, iter: I)
+    pub fn extend_precompile_requests<I>(&mut self, iter: I) -> Result<(), AdviceError>
     where
         I: IntoIterator<Item = PrecompileRequest>,
     {
-        self.pc_requests.extend(iter);
+        let requests = Vec::from_iter(iter);
+        let added_calldata_bytes = requests
+            .iter()
+            .try_fold(0usize, |acc, request| acc.checked_add(request.calldata().len()));
+        let added_calldata_bytes =
+            added_calldata_bytes.ok_or(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: usize::MAX,
+                max: self.max_pc_request_calldata_bytes,
+            })?;
+
+        let request_count = self.pc_requests.len().checked_add(requests.len()).ok_or(
+            AdviceError::PrecompileRequestCountExceeded {
+                current: self.pc_requests.len(),
+                added: requests.len(),
+                max: self.max_pc_requests,
+            },
+        )?;
+        if request_count > self.max_pc_requests {
+            return Err(AdviceError::PrecompileRequestCountExceeded {
+                current: self.pc_requests.len(),
+                added: requests.len(),
+                max: self.max_pc_requests,
+            });
+        }
+
+        let calldata_bytes = self
+            .pc_request_calldata_bytes
+            .checked_add(added_calldata_bytes)
+            .ok_or(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: added_calldata_bytes,
+                max: self.max_pc_request_calldata_bytes,
+            })?;
+        if calldata_bytes > self.max_pc_request_calldata_bytes {
+            return Err(AdviceError::PrecompileRequestCalldataBudgetExceeded {
+                current: self.pc_request_calldata_bytes,
+                added: added_calldata_bytes,
+                max: self.max_pc_request_calldata_bytes,
+            });
+        }
+
+        self.pc_request_calldata_bytes = calldata_bytes;
+        self.pc_requests.extend(requests);
+        Ok(())
     }
 
     /// Moves all accumulated precompile requests out of this provider, leaving it empty.
@@ -626,6 +807,7 @@ impl AdviceProvider {
     /// Intended for proof packaging, where requests are serialized into the proof and no longer
     /// needed in the provider after consumption.
     pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
+        self.pc_request_calldata_bytes = 0;
         core::mem::take(&mut self.pc_requests)
     }
 
@@ -635,7 +817,7 @@ impl AdviceProvider {
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
         self.extend_stack(inputs.stack.iter().cloned())?;
-        self.extend_merkle_store(inputs.store.inner_nodes());
+        self.extend_merkle_store(inputs.store.inner_nodes())?;
         self.extend_map(&inputs.map)
     }
 
@@ -692,7 +874,7 @@ impl AdviceProviderInterface for AdviceProvider {
 mod tests {
     use alloc::{collections::BTreeMap, vec, vec::Vec};
 
-    use miden_core::WORD_SIZE;
+    use miden_core::{WORD_SIZE, events::EventId, precompile::PrecompileRequest};
 
     use super::AdviceProvider;
     use crate::{
@@ -816,6 +998,209 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn precompile_requests_extend_respects_count_budget_atomically() {
+        let options = ExecutionOptions::default().with_max_precompile_requests(2);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 1)]).unwrap();
+
+        let err = provider
+            .extend_precompile_requests([precompile_request(1, 1), precompile_request(2, 1)])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::PrecompileRequestCountExceeded { current: 1, added: 2, max: 2 }
+        ));
+
+        assert_eq!(provider.precompile_requests().len(), 1);
+        assert_eq!(provider.precompile_requests()[0], precompile_request(0, 1));
+    }
+
+    #[test]
+    fn precompile_requests_extend_respects_calldata_budget_atomically() {
+        let options = ExecutionOptions::default().with_max_precompile_request_calldata_bytes(3);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 2)]).unwrap();
+
+        let err = provider.extend_precompile_requests([precompile_request(1, 2)]).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::PrecompileRequestCalldataBudgetExceeded { current: 2, added: 2, max: 3 }
+        ));
+
+        assert_eq!(provider.precompile_requests().len(), 1);
+        assert_eq!(provider.precompile_requests()[0], precompile_request(0, 2));
+    }
+
+    #[test]
+    fn take_precompile_requests_resets_calldata_budget() {
+        let options = ExecutionOptions::default().with_max_precompile_request_calldata_bytes(2);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        provider.extend_precompile_requests([precompile_request(0, 2)]).unwrap();
+
+        assert_eq!(provider.take_precompile_requests(), vec![precompile_request(0, 2)]);
+
+        provider.extend_precompile_requests([precompile_request(1, 2)]).unwrap();
+        assert_eq!(provider.precompile_requests(), &[precompile_request(1, 2)]);
+    }
+
+    #[test]
+    fn initial_merkle_store_respects_node_budget() {
+        let tree = merkle_tree_from_leaves(0..4);
+        let store = merkle_store_from_tree(&tree);
+        let options =
+            ExecutionOptions::default().with_max_merkle_store_nodes(store.num_internal_nodes() - 1);
+        let inputs = AdviceInputs::default().with_merkle_store(store);
+
+        let err = AdviceProvider::new(inputs, &options).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::MerkleStoreNodeBudgetExceeded {
+                current: _,
+                added: _,
+                max
+            } if max == options.max_merkle_store_nodes()
+        ));
+    }
+
+    #[test]
+    fn merkle_store_extend_respects_node_budget_atomically() {
+        let base_node_count = MerkleStore::default().num_internal_nodes();
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(base_node_count + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let tree = merkle_tree_from_leaves(0..4);
+
+        let err = provider.extend_merkle_store(tree.inner_nodes()).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::MerkleStoreNodeBudgetExceeded {
+                current,
+                added: _,
+                max
+            } if current == base_node_count && max == base_node_count + 1
+        ));
+
+        assert_eq!(provider.merkle_store_node_count, base_node_count);
+        assert!(!provider.has_merkle_root(tree.root()));
+    }
+
+    #[test]
+    fn merkle_store_extend_allows_exact_node_budget() {
+        let base_node_count = MerkleStore::default().num_internal_nodes();
+        let tree = merkle_tree_from_leaves(0..2);
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(base_node_count + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        provider.extend_merkle_store(tree.inner_nodes()).unwrap();
+
+        assert_eq!(provider.merkle_store_node_count, base_node_count + 1);
+        assert!(provider.has_merkle_root(tree.root()));
+    }
+
+    #[test]
+    fn merkle_store_extend_counts_only_new_unique_nodes() {
+        let base_node_count = MerkleStore::default().num_internal_nodes();
+        let tree = merkle_tree_from_leaves(0..2);
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(base_node_count + 1);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+        let nodes = tree.inner_nodes().collect::<Vec<_>>();
+
+        provider
+            .extend_merkle_store(nodes.iter().cloned().chain(nodes.iter().cloned()))
+            .unwrap();
+        provider.extend_merkle_store(nodes).unwrap();
+
+        assert_eq!(provider.merkle_store_node_count, base_node_count + 1);
+        assert!(provider.has_merkle_root(tree.root()));
+    }
+
+    #[test]
+    fn merkle_store_merge_respects_node_budget_atomically() {
+        let base_node_count = MerkleStore::default().num_internal_nodes();
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(base_node_count);
+        let mut provider = AdviceProvider::new(AdviceInputs::default(), &options).unwrap();
+
+        let err = provider.merge_roots(make_leaf(0), make_leaf(4)).unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::MerkleStoreNodeBudgetExceeded {
+                current,
+                added: 1,
+                max
+            } if current == base_node_count && max == base_node_count
+        ));
+
+        assert_eq!(provider.merkle_store_node_count, base_node_count);
+    }
+
+    #[test]
+    fn merkle_store_merge_counts_existing_parent_once() {
+        let lhs = make_leaf(0);
+        let rhs = make_leaf(4);
+        let mut store = MerkleStore::default();
+        let root = store.merge_roots(lhs, rhs).unwrap();
+        let node_count = store.num_internal_nodes();
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(node_count);
+        let mut provider =
+            AdviceProvider::new(AdviceInputs::default().with_merkle_store(store), &options)
+                .unwrap();
+
+        assert_eq!(provider.merge_roots(lhs, rhs).unwrap(), root);
+        assert_eq!(provider.merkle_store_node_count, node_count);
+    }
+
+    #[test]
+    fn merkle_store_update_respects_node_budget_atomically() {
+        let tree = merkle_tree_from_leaves(0..4);
+        let store = merkle_store_from_tree(&tree);
+        let node_count = store.num_internal_nodes();
+        let options = ExecutionOptions::default().with_max_merkle_store_nodes(node_count);
+        let inputs = AdviceInputs::default().with_merkle_store(store);
+        let mut provider = AdviceProvider::new(inputs, &options).unwrap();
+
+        let err = provider
+            .update_merkle_node(tree.root(), Felt::new_unchecked(2), Felt::ZERO, make_leaf(100))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AdviceError::MerkleStoreNodeBudgetExceeded {
+                current,
+                added: _,
+                max
+            } if current == node_count && max == node_count
+        ));
+
+        assert_eq!(provider.merkle_store_node_count, node_count);
+        assert_eq!(
+            provider.get_tree_node(tree.root(), Felt::new_unchecked(2), Felt::ZERO).unwrap(),
+            make_leaf(0)
+        );
+    }
+
+    #[test]
+    fn merkle_store_update_allows_exact_node_budget() {
+        let tree = merkle_tree_from_leaves(0..4);
+        let store = merkle_store_from_tree(&tree);
+        let mut staged = store.clone();
+        staged
+            .set_node(
+                tree.root(),
+                miden_core::crypto::merkle::NodeIndex::new(2, 0).unwrap(),
+                make_leaf(100),
+            )
+            .unwrap();
+        let options =
+            ExecutionOptions::default().with_max_merkle_store_nodes(staged.num_internal_nodes());
+        let inputs = AdviceInputs::default().with_merkle_store(store);
+        let mut provider = AdviceProvider::new(inputs, &options).unwrap();
+
+        provider
+            .update_merkle_node(tree.root(), Felt::new_unchecked(2), Felt::ZERO, make_leaf(100))
+            .unwrap();
+
+        assert_eq!(provider.merkle_store_node_count, staged.num_internal_nodes());
+    }
+
     fn advice_map_from_entries(keys: impl Iterator<Item = u64>, value_len: usize) -> AdviceMap {
         keys.map(|key| {
             let values = (0..value_len)
@@ -825,5 +1210,20 @@ mod tests {
         })
         .collect::<BTreeMap<_, _>>()
         .into()
+    }
+
+    fn precompile_request(seed: u64, calldata_len: usize) -> PrecompileRequest {
+        let calldata = (0..calldata_len).map(|offset| seed as u8 + offset as u8).collect();
+        PrecompileRequest::new(EventId::from_u64(seed), calldata)
+    }
+
+    fn merkle_tree_from_leaves(keys: impl Iterator<Item = u64>) -> MerkleTree {
+        MerkleTree::new(keys.map(make_leaf).collect::<Vec<_>>()).unwrap()
+    }
+
+    fn merkle_store_from_tree(tree: &MerkleTree) -> MerkleStore {
+        let mut store = MerkleStore::default();
+        store.extend(tree.inner_nodes());
+        store
     }
 }

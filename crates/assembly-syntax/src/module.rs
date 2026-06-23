@@ -6,7 +6,7 @@ use midenc_hir_type::FunctionType;
 
 use crate::{
     Path, Word,
-    ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName},
+    ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName, SubmoduleDecl},
 };
 
 // MODULE INFO
@@ -19,6 +19,7 @@ pub struct ModuleInfo {
     /// disambiguated by version.
     version: Option<crate::Version>,
     items: Vec<ItemInfo>,
+    submodules: Vec<SubmoduleDecl>,
 }
 
 impl ModuleInfo {
@@ -31,7 +32,12 @@ impl ModuleInfo {
     /// The semantic version is optional, as currently the assembler allows assembling artifacts
     /// without providing one.
     pub fn new(path: Arc<Path>, version: Option<crate::Version>) -> Self {
-        Self { version, path, items: Vec::new() }
+        Self {
+            version,
+            path,
+            items: Vec::new(),
+            submodules: Vec::new(),
+        }
     }
 
     /// Specify the version of this module
@@ -47,7 +53,7 @@ impl ModuleInfo {
         signature: Option<Arc<FunctionType>>,
         attributes: AttributeSet,
     ) {
-        self.add_procedure_with_provenance(name, digest, signature, attributes, None, None);
+        self.add_procedure_with_provenance(name, digest, signature, attributes, None, None, None);
     }
 
     /// Adds a procedure to the module with optional source provenance.
@@ -58,6 +64,7 @@ impl ModuleInfo {
         signature: Option<Arc<FunctionType>>,
         attributes: AttributeSet,
         source_root_id: Option<MastNodeId>,
+        source_debug_root_id: Option<u32>,
         source_library_commitment: Option<Word>,
     ) {
         self.items.push(ItemInfo::Procedure(ProcedureInfo {
@@ -66,6 +73,7 @@ impl ModuleInfo {
             signature,
             attributes,
             source_root_id,
+            source_debug_root_id,
             source_library_commitment,
         }));
     }
@@ -78,6 +86,11 @@ impl ModuleInfo {
     /// Adds a type declaration to the module.
     pub fn add_type(&mut self, name: Ident, ty: ast::types::Type) {
         self.items.push(ItemInfo::Type(TypeInfo { name, ty }));
+    }
+
+    /// Adds a submodule declaration to the module surface.
+    pub fn add_submodule(&mut self, submodule: SubmoduleDecl) {
+        self.submodules.push(submodule);
     }
 
     /// Returns the module's library path.
@@ -123,6 +136,11 @@ impl ModuleInfo {
     /// module.
     pub fn items(&self) -> impl ExactSizeIterator<Item = (ItemIndex, &ItemInfo)> {
         self.items.iter().enumerate().map(|(idx, item)| (ItemIndex::new(idx), item))
+    }
+
+    /// Returns the declared submodules in this module surface.
+    pub fn submodules(&self) -> &[SubmoduleDecl] {
+        &self.submodules
     }
 
     /// Returns an iterator over the procedure infos in the module with their corresponding
@@ -213,6 +231,8 @@ pub struct ProcedureInfo {
     pub source_root_id: Option<MastNodeId>,
     /// The commitment of the source library forest that `source_root_id` belongs to, if known.
     pub source_library_commitment: Option<Word>,
+    /// The exact source/debug occurrence root in package-owned debug info, if known.
+    pub source_debug_root_id: Option<u32>,
 }
 
 impl ProcedureInfo {
@@ -222,6 +242,10 @@ impl ProcedureInfo {
 
     pub fn source_library_commitment(&self) -> Option<Word> {
         self.source_library_commitment
+    }
+
+    pub fn source_debug_root_id(&self) -> Option<u32> {
+        self.source_debug_root_id
     }
 }
 

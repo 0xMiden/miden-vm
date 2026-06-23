@@ -35,7 +35,7 @@ authors = ["Miden contributors"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
-rust-version = "1.90"
+rust-version = "1.96"
 version = "0.24.0"
 
 [profile.optimized]
@@ -49,6 +49,12 @@ opt-level = 1
 debug = true
 debug-assertions = true
 overflow-checks = true
+
+# The fast processor's generated test code is large enough that optimizing it dominates CI build
+# time. Keeping this crate unoptimized gives most of the build-time win without slowing the rest
+# of the test suite enough to matter in practice.
+[profile.test-dev.package.miden-processor]
+opt-level = 0
 
 [workspace.dependencies]
 # Workspace crates
@@ -103,6 +109,7 @@ thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 trybuild        = { version = "1.0" }
+windows-sys     = { version = "0.61.2" }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }

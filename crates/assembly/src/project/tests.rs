@@ -1,13 +1,19 @@
-use std::{path::Path, process::Command, string::String};
+use std::{path::Path, process::Command, string::String, sync::Arc};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
+    operations::{DebugVarInfo, DebugVarLocation, Operation},
     serde::{Deserializable, Serializable, SliceReader},
     utils::hash_string_to_word,
 };
 use miden_mast_package::{
-    Section, SectionId,
-    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
+    PackageExport, PackageModule, ProcedureExport, Section, SectionId,
+    debug_info::{
+        DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCE_MAP_VERSION, DebugFunctionsSection, DebugSourceAsmOp,
+        DebugSourceGraphSection, DebugSourceMapSection, DebugSourceNode, DebugSourceNodeId,
+        DebugSourceVar, DebugSourcesSection, DebugTypesSection,
+    },
 };
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
@@ -49,12 +55,32 @@ end
     assert_eq!(dev.version.to_string(), "1.2.3");
     assert_eq!(dev.description.as_deref(), Some("sample library"));
     assert_eq!(dev.kind, TargetType::Library);
-    assert!(dev.mast_forest().debug_info().num_asm_ops() > 0);
+    assert!(
+        dev.debug_info()
+            .expect("dev package debug info should decode")
+            .expect("dev package should contain debug info")
+            .source_map()
+            .is_some_and(|source_map| !source_map.asm_ops().is_empty())
+    );
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH));
+    assert!(dev.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
 
     let release = context
         .assemble_library_package(&manifest_path, Some("release"))
         .expect("failed to assemble under release profile");
-    assert_eq!(release.mast_forest().debug_info().num_asm_ops(), 0);
+    assert!(
+        release
+            .debug_info()
+            .expect("release package debug info should decode")
+            .is_none()
+    );
+    assert!(
+        !release
+            .sections
+            .iter()
+            .any(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+    );
+    assert!(!release.sections.iter().any(|section| section.id == SectionId::DEBUG_SOURCE_MAP));
 }
 
 #[test]
@@ -68,7 +94,7 @@ name = "app"
 version = "1.0.0"
 
 [lib]
-path = "lib.masm"
+path = "library/root.masm"
 
 [[bin]]
 name = "primary"
@@ -77,6 +103,13 @@ path = "main.masm"
 [[bin]]
 name = "alternate"
 path = "main2.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("library/root.masm"),
+        r#"pub proc helper
+    push.0
+end
 "#,
     );
     write_file(
@@ -95,8 +128,8 @@ end
     );
     write_file(
         &tempdir.path().join("main.masm"),
-        r#"use $exec::lib
-use $exec::shared
+        r#"pub mod lib
+pub mod shared
 
 begin
     exec.lib::helper
@@ -123,53 +156,6 @@ end
 }
 
 #[test]
-fn omitted_path_targets_require_explicit_sources() {
-    let tempdir = TempDir::new().unwrap();
-    let manifest_path = tempdir.path().join("miden-project.toml");
-    write_file(
-        &manifest_path,
-        r#"[package]
-name = "generated"
-version = "1.0.0"
-
-[lib]
-"#,
-    );
-
-    let mut context = TestContext::new();
-    let error = context
-        .assemble_library_package(&manifest_path, None)
-        .expect_err("assembly without sources should fail");
-    assert!(error.to_string().contains("assemble_with_sources"));
-
-    let root = Module::parse(
-        "generated::temp",
-        ModuleKind::Library,
-        source_file!(
-            context,
-            r#"pub proc helper
-    push.1
-end
-"#
-        ),
-        context.source_manager(),
-    )
-    .unwrap();
-
-    let mut project_assembler = context.project_assembler_for_path(&manifest_path).unwrap();
-    let package = project_assembler
-        .assemble_with_sources(
-            ProjectTargetSelector::Library,
-            "dev",
-            ProjectSourceInputs { root, support: Default::default() },
-        )
-        .expect("assembly with sources should succeed");
-    assert_eq!(&package.name, "generated");
-    assert_eq!(package.kind, TargetType::Library);
-    assert!(PackageBuildProvenance::from_package(&package).unwrap().is_none());
-}
-
-#[test]
 fn builds_kernel_package_and_supports_kernel_conversion() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = tempdir.path().join("miden-project.toml");
@@ -185,9 +171,17 @@ path = "kernel.masm"
 "#,
     );
     write_file(
-        &tempdir.path().join("kernel.masm"),
+        &tempdir.path().join("support.masm"),
         r#"pub proc foo
     caller
+end
+"#,
+    );
+    write_file(
+        &tempdir.path().join("kernel.masm"),
+        r#"pub mod support
+pub proc foo
+    exec.support::foo
 end
 "#,
     );
@@ -246,6 +240,16 @@ end
         .iter()
         .find(|section| section.id == SectionId::DEBUG_TYPES)
         .expect("package should contain DEBUG_TYPES");
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
 
     let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
     let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
@@ -256,13 +260,393 @@ end
     let mut functions_reader = SliceReader::new(debug_functions.data.as_ref());
     let debug_functions = DebugFunctionsSection::read_from(&mut functions_reader)
         .expect("DEBUG_FUNCTIONS should deserialize");
-    assert_eq!(debug_functions.version, 1);
+    assert_eq!(debug_functions.version, DEBUG_FUNCTIONS_VERSION);
     assert_eq!(debug_functions.functions.len(), 1);
 
     let mut types_reader = SliceReader::new(debug_types.data.as_ref());
     let debug_types =
         DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
     assert_eq!(debug_types.version, 1);
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    assert_eq!(debug_source_graph.version(), 1);
+    assert!(!debug_source_graph.nodes().is_empty());
+    assert!(!debug_source_graph.roots().is_empty());
+
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+    assert_eq!(debug_source_map.version(), DEBUG_SOURCE_MAP_VERSION);
+    assert!(!debug_source_map.asm_ops().is_empty());
+}
+
+#[test]
+fn source_debug_sections_distinguish_same_execution_metadata_occurrences() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "source-rows"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc alias_a
+    push.1
+    drop
+end
+
+pub proc alias_b
+    push.1
+    drop
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("debug build should succeed");
+
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+
+    let mut source_nodes_by_exec = BTreeMap::new();
+    for row in debug_source_map.asm_ops() {
+        let source_node = row.source_node.as_u32() as usize;
+        let exec_node = debug_source_graph.nodes()[source_node].exec_node;
+        source_nodes_by_exec
+            .entry(exec_node)
+            .or_insert_with(std::collections::BTreeSet::<DebugSourceNodeId>::new)
+            .insert(row.source_node);
+    }
+
+    assert!(
+        source_nodes_by_exec.values().any(|source_nodes| source_nodes.len() >= 2),
+        "source-keyed asm-op rows should preserve multiple metadata occurrences for one execution node",
+    );
+}
+
+#[test]
+fn source_debug_sections_preserve_compiler_merged_block_ranges() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "source-ranges"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc entry
+    mul
+    repeat.5
+        add
+    end
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("debug build should succeed");
+
+    let debug_source_graph = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_GRAPH)
+        .expect("package should contain DEBUG_SOURCE_GRAPH");
+    let debug_source_map = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCE_MAP)
+        .expect("package should contain DEBUG_SOURCE_MAP");
+
+    let mut source_graph_reader = SliceReader::new(debug_source_graph.data.as_ref());
+    let debug_source_graph = DebugSourceGraphSection::read_from(&mut source_graph_reader)
+        .expect("DEBUG_SOURCE_GRAPH should deserialize");
+    let mut source_map_reader = SliceReader::new(debug_source_map.data.as_ref());
+    let debug_source_map = DebugSourceMapSection::read_from(&mut source_map_reader)
+        .expect("DEBUG_SOURCE_MAP should deserialize");
+
+    let exec_with_split_ranges = debug_source_graph
+        .nodes()
+        .iter()
+        .enumerate()
+        .fold(BTreeMap::new(), |mut ranges_by_exec, (source_idx, source_node)| {
+            let has_asm_op = debug_source_map
+                .asm_ops()
+                .iter()
+                .any(|row| row.source_node.as_u32() as usize == source_idx);
+            if has_asm_op {
+                ranges_by_exec
+                    .entry(source_node.exec_node)
+                    .or_insert_with(Vec::new)
+                    .push((source_node.op_start, source_node.op_end));
+            }
+            ranges_by_exec
+        })
+        .into_values()
+        .any(|mut ranges| {
+            ranges.sort_unstable();
+            ranges.contains(&(0, 1)) && ranges.contains(&(1, 2))
+        });
+
+    assert!(
+        exec_with_split_ranges,
+        "compiler-merged basic blocks should keep source nodes with distinct operation ranges",
+    );
+}
+
+fn debug_bearing_static_package(
+    name: &str,
+    export: &str,
+    context: &str,
+    var_name: &str,
+    marker_export: Option<(&str, Operation)>,
+) -> MastPackage {
+    let mut forest = MastForest::new();
+    let root = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .expect("test package block should build");
+    forest.make_root(root);
+    let digest = forest[root].digest();
+
+    let mut exports = Vec::new();
+    let mut module_paths = Vec::new();
+    let export_path =
+        miden_assembly_syntax::ast::PathBuf::new(export).expect("test export path should parse");
+    let export_path = export_path.as_path().to_absolute().unwrap().into_owned();
+    let export_path = Arc::from(export_path.into_boxed_path());
+    push_export_module_path(&mut module_paths, &export_path);
+    let source_root = DebugSourceNodeId::from(0);
+    let export = ProcedureExport::new(export_path, Some(root), digest, None)
+        .with_source_node(Some(source_root));
+    exports.push(PackageExport::Procedure(export));
+
+    if let Some((marker_export, marker_op)) = marker_export {
+        let marker_root = BasicBlockNodeBuilder::new(vec![marker_op])
+            .add_to_forest(&mut forest)
+            .expect("test package marker block should build");
+        forest.make_root(marker_root);
+        let marker_digest = forest[marker_root].digest();
+        let marker_path = miden_assembly_syntax::ast::PathBuf::new(marker_export)
+            .expect("test marker export path should parse");
+        let marker_path = marker_path.as_path().to_absolute().unwrap().into_owned();
+        let marker_path = Arc::from(marker_path.into_boxed_path());
+        push_export_module_path(&mut module_paths, &marker_path);
+        exports.push(PackageExport::Procedure(ProcedureExport::new(
+            marker_path,
+            Some(marker_root),
+            marker_digest,
+            None,
+        )));
+    }
+
+    let source_graph = DebugSourceGraphSection::from_parts(
+        vec![DebugSourceNode::new(root, vec![], 0, 1)],
+        vec![source_root],
+    );
+    let source_map = DebugSourceMapSection::from_parts(
+        vec![DebugSourceAsmOp::new(
+            source_root,
+            0,
+            None,
+            context.to_string(),
+            "add".to_string(),
+            1,
+        )],
+        vec![DebugSourceVar::new(
+            source_root,
+            0,
+            DebugVarInfo::new(var_name, DebugVarLocation::Stack(0)),
+        )],
+    );
+
+    let modules = module_paths.into_iter().map(|path| PackageModule::new(path, []));
+    let mut package = MastPackage::create_with_modules(
+        PackageId::from(name),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        Arc::new(forest),
+        exports,
+        modules,
+        [],
+    )
+    .expect("test package should be valid");
+    package.sections = vec![
+        Section::new(SectionId::DEBUG_SOURCE_GRAPH, source_graph.to_bytes()),
+        Section::new(SectionId::DEBUG_SOURCE_MAP, source_map.to_bytes()),
+    ];
+    package
+}
+
+fn push_export_module_path(
+    module_paths: &mut Vec<Arc<miden_assembly_syntax::ast::Path>>,
+    export_path: &Arc<miden_assembly_syntax::ast::Path>,
+) {
+    let module_path = export_path.parent().expect("export path should have a module path");
+    let module_path: Arc<miden_assembly_syntax::ast::Path> =
+        Arc::from(module_path.to_path_buf().into_boxed_path());
+    if !module_paths.iter().any(|path| path.as_ref() == module_path.as_ref()) {
+        module_paths.push(module_path);
+    }
+}
+
+#[test]
+fn static_linking_preserves_debug_rows_for_deduped_execution_nodes() {
+    let tempdir = TempDir::new().unwrap();
+
+    let depa = debug_bearing_static_package(
+        "depa",
+        "deps::depa::leaf",
+        "depa_ctx",
+        "depa_var",
+        Some(("deps::depa::marker", Operation::Mul)),
+    );
+    let depa_path = tempdir.path().join("depa.masp");
+    depa.write_to_file(&depa_path).unwrap();
+
+    let depb = debug_bearing_static_package(
+        "depb",
+        "deps::depb::leaf",
+        "depb_ctx",
+        "depb_var",
+        Some(("deps::depb::marker", Operation::Incr)),
+    );
+    let depb_path = tempdir.path().join("depb.masp");
+    depb.write_to_file(&depb_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+depa = { path = "../depa.masp", linkage = "static" }
+depb = { path = "../depb.masp", linkage = "static" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::deps::depa::leaf
+    exec.::deps::depb::leaf
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&root_manifest, Some("dev"))
+        .expect("root package with static debug deps should build");
+    let debug_info = package
+        .debug_info()
+        .expect("package debug sections should decode")
+        .expect("root package should contain debug info");
+    let source_for_context = |context_name: &str| {
+        debug_info
+            .source_map()
+            .expect("root package should contain source map")
+            .asm_ops()
+            .iter()
+            .find(|row| row.context_name == context_name)
+            .map(|row| row.source_node)
+            .unwrap_or_else(|| panic!("missing asm-op row for {context_name}"))
+    };
+    let depa_source = source_for_context("depa_ctx");
+    let depb_source = source_for_context("depb_ctx");
+    assert_ne!(depa_source, depb_source, "static package source occurrences must stay distinct",);
+
+    let depa_exec = debug_info.source_node(depa_source).unwrap().exec_node;
+    let depb_exec = debug_info.source_node(depb_source).unwrap().exec_node;
+    assert_eq!(
+        depa_exec, depb_exec,
+        "identical static dependency bodies should dedup to one execution node",
+    );
+
+    let contexts_for_deduped_exec = [depa_source, depb_source]
+        .into_iter()
+        .filter(|&source_node| debug_info.source_node(source_node).unwrap().exec_node == depa_exec)
+        .map(|source_node| {
+            debug_info
+                .first_asm_op_for_source_node(source_node)
+                .unwrap()
+                .context_name
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+    assert!(contexts_for_deduped_exec.contains(&"depa_ctx"));
+    assert!(contexts_for_deduped_exec.contains(&"depb_ctx"));
+
+    let vars_at_source_start = |source_node_id| {
+        let op_start = debug_info.source_node(source_node_id).unwrap().op_start;
+        debug_info
+            .debug_vars_for_operation(source_node_id, op_start)
+            .map(|row| row.var.name())
+            .collect::<Vec<_>>()
+    };
+    let depa_vars = vars_at_source_start(depa_source);
+    let depb_vars = vars_at_source_start(depb_source);
+    assert_eq!(depa_vars, vec!["depa_var"]);
+    assert_eq!(depb_vars, vec!["depb_var"]);
+
+    let round_tripped = MastPackage::read_from_bytes_trusted(&package.to_bytes())
+        .expect("root package should deserialize as trusted");
+    let round_tripped_debug_info = round_tripped
+        .debug_info()
+        .expect("round-tripped debug sections should decode")
+        .expect("round-tripped package should contain debug info");
+    assert_eq!(
+        round_tripped_debug_info
+            .first_asm_op_for_source_node(depa_source)
+            .unwrap()
+            .context_name,
+        "depa_ctx",
+    );
+    assert_eq!(
+        {
+            let op_start = round_tripped_debug_info.source_node(depb_source).unwrap().op_start;
+            round_tripped_debug_info.debug_vars_for_operation(depb_source, op_start)
+        }
+        .map(|row| row.var.name())
+        .collect::<Vec<_>>(),
+        vec!["depb_var"],
+    );
 }
 
 #[test]
@@ -300,11 +684,14 @@ end
     let tempdir_prefix = tempdir.path().display().to_string();
 
     let asm_op_path = package
-        .mast_forest()
         .debug_info()
+        .expect("package debug info should decode")
+        .expect("package should contain debug info")
+        .source_map()
+        .expect("package should contain source map")
         .asm_ops()
         .iter()
-        .find_map(|asm_op| asm_op.location().map(|location| location.uri.path().to_string()))
+        .find_map(|asm_op| asm_op.location.as_ref().map(|location| location.uri.path().to_string()))
         .expect("assembled package should contain asm-op locations");
     assert!(
         !asm_op_path.contains(tempdir_prefix.as_str()),
@@ -563,22 +950,21 @@ fn preassembled_dependency_bypasses_registry_semver_collision() {
     let tempdir = TempDir::new().unwrap();
     let mut context = TestContext::new();
 
-    let registered_module = Module::parse(
-        "deps::predep",
-        ModuleKind::Library,
-        source_file!(
+    let registered_module = context
+        .parse_module(source_file!(
             context,
-            r#"pub proc leaf
+            r#"namespace deps::predep
+
+pub proc leaf
     push.1
     drop
 end
 "#
-        ),
-        context.source_manager(),
-    )
-    .unwrap();
-    let registered =
-        context.assemble_library("predep", Some("1.0.0"), [registered_module]).unwrap();
+        ))
+        .unwrap();
+    let registered = context
+        .assemble_library("predep", Some("1.0.0"), registered_module, None::<Box<Module>>)
+        .unwrap();
     let registered_digest = registered.digest();
     context.registry_mut().add_package(registered.into());
 
@@ -1882,7 +2268,7 @@ description = "metadata-only update"
 ticket = "ignored"
 
 [lib]
-path = "src/lib.masm"
+path = "lib.masm"
 
 [[bin]]
 name = "unused"
@@ -1987,72 +2373,6 @@ end
         .assemble_library_package(&root_manifest, None)
         .expect_err("new git revision should require a semver bump");
     assert!(error.to_string().contains("bump the semantic version"));
-}
-
-#[test]
-fn omitted_path_dependency_requires_canonical_registry_entry() {
-    let tempdir = TempDir::new().unwrap();
-    let dep_dir = tempdir.path().join("dep");
-    write_file(
-        &dep_dir.join("miden-project.toml"),
-        r#"[package]
-name = "dep"
-version = "1.0.0"
-
-[lib]
-"#,
-    );
-
-    let root_dir = tempdir.path().join("root");
-    let root_manifest = root_dir.join("miden-project.toml");
-    write_file(
-        &root_manifest,
-        r#"[package]
-name = "root"
-version = "1.0.0"
-
-[lib]
-path = "lib.masm"
-
-[dependencies]
-dep = { path = "../dep" }
-"#,
-    );
-    write_file(
-        &root_dir.join("lib.masm"),
-        r#"pub proc entry
-    exec.::dep::foo
-end
-"#,
-    );
-
-    let mut context = TestContext::new();
-    let missing = context
-        .assemble_library_package(&root_manifest, None)
-        .expect_err("omitted-path dependency should require a canonical registry entry");
-    assert!(missing.to_string().contains("was not found in the package registry"));
-
-    let dep = Arc::<MastPackage>::from(context.assemble_library_package_with_export(
-        "dep",
-        "1.0.0",
-        "dep::foo",
-        [],
-    ));
-    let dep_digest = dep.digest();
-    context.registry_mut().add_package(dep);
-    context.registry().clear_loaded_packages();
-
-    let package = context
-        .assemble_library_package(&root_manifest, None)
-        .expect("canonical registry entry should satisfy omitted-path dependency");
-    assert_eq!(
-        package
-            .manifest
-            .dependencies()
-            .map(|dep| format!("{}@{}#{}", dep.name, dep.version, dep.digest))
-            .collect::<Vec<_>>(),
-        vec![format!("dep@1.0.0#{dep_digest}")]
-    );
 }
 
 #[test]
@@ -2832,7 +3152,7 @@ path = "kernel.masm"
 
 [[bin]]
 name = "main"
-path = "main.masm"
+path = "bin/main.masm"
 "#,
     );
     write_file(
@@ -2843,7 +3163,7 @@ end
 "#,
     );
     write_file(
-        &root.join("main.masm"),
+        &root.join("bin/main.masm"),
         r#"begin
     syscall.foo
 end

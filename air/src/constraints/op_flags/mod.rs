@@ -971,10 +971,8 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of HORNEREXT operation.
         hornerext => opcodes::HORNEREXT,
         /// Operation Flag of MSTREAM operation.
-        #[expect(dead_code)]
         mstream => opcodes::MSTREAM,
         /// Operation Flag of PIPE operation.
-        #[expect(dead_code)]
         pipe => opcodes::PIPE,
     );
 
@@ -1114,5 +1112,7 @@ pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
     bit_array
 }
 
+#[cfg(test)]
+mod stack_route_tests;
 #[cfg(test)]
 mod tests;

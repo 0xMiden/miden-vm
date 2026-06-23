@@ -596,6 +596,35 @@ mod tests {
         LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder)
     }
 
+    fn valid_opcodes() -> impl Iterator<Item = usize> {
+        let degree7 = 0..=63;
+        let degree6 = (64..=79).step_by(2);
+        let degree5 = 80..=95;
+        let degree4 = (96..=127).step_by(4);
+        degree7.chain(degree6).chain(degree5).chain(degree4)
+    }
+
+    #[test]
+    fn boolean_row_matches_polynomial_for_all_valid_opcodes() {
+        for opcode in valid_opcodes() {
+            let row = generate_test_row(opcode);
+            let row_next = generate_test_row(0);
+            let polynomial =
+                LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+            let boolean =
+                LookupOpFlags::from_boolean_row(&row.decoder, &row.stack, &row_next.decoder);
+
+            assert_flags_match(&alloc::format!("opcode {opcode}"), &boolean, &polynomial);
+        }
+
+        let mut row = generate_test_row(opcodes::END.into());
+        row.decoder.hasher_state[5] = ONE;
+        let row_next = generate_test_row(0);
+        let polynomial = LookupOpFlags::from_main_cols(&row.decoder, &row.stack, &row_next.decoder);
+        let boolean = LookupOpFlags::from_boolean_row(&row.decoder, &row.stack, &row_next.decoder);
+        assert_flags_match("loop end", &boolean, &polynomial);
+    }
+
     #[test]
     fn boolean_row_matches_polynomial_for_chiplet_request_ops() {
         type FlagAccessor = fn(&LookupOpFlags<Felt>) -> Felt;
