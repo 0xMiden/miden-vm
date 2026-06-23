@@ -332,83 +332,91 @@ end
 #!
 #! Panics if:
 #! - any adjacent key pair is not strictly increasing.
-@locals(10)
+@locals(17)
 proc find_unique_multi_leaf_key
     loc_storew_le.0 dropw
     # => [start_ptr, end_ptr, ...]
 
-    dup loc_store.4
+    # locals:
+    # 0..3: K
+    # 4: end_ptr
+    # 5: current_ptr
+    # 6: result_ptr
+    # 7: is_key_found
+    # 8: is_position_found
+    # 12..15: previous key
+    # 16: has_previous_key
+
+    dup.1 loc_store.4
     # => [start_ptr, end_ptr, ...]
 
-    dup.1 loc_store.5
+    dup loc_store.5
     # => [start_ptr, end_ptr, ...]
 
-    dup loc_store.6
+    dup.1 loc_store.6
     # => [start_ptr, end_ptr, ...]
 
-    dup.1 loc_store.7
-    # => [start_ptr, end_ptr, ...]
-
+    push.0 loc_store.7
     push.0 loc_store.8
-    push.0 loc_store.9
+    push.0 loc_store.16
     # => [start_ptr, end_ptr, ...]
 
-    loc_load.6 loc_load.5 u32lt
+    loc_load.5 loc_load.4 u32lt
     while.true
-        loc_load.6 loc_load.4 neq
-        if.true
-            loc_load.6 sub.8 padw movup.4 mem_loadw_le
-            # => [PREV_KEY, start_ptr, end_ptr, ...]
+        loc_load.5 padw movup.4 mem_loadw_le
+        # => [LEAF_KEY, start_ptr, end_ptr, ...]
 
-            loc_load.6 padw movup.4 mem_loadw_le
-            # => [NEXT_KEY, PREV_KEY, start_ptr, end_ptr, ...]
+        # validate that keys stay strictly sorted.
+        loc_load.16
+        if.true
+            dupw padw loc_loadw_le.12 swapw
+            # => [LEAF_KEY, PREVIOUS_KEY, LEAF_KEY, start_ptr, end_ptr, ...]
 
             exec.word::lt
             assert.err="invalid multi-leaf preimage: keys must be unique and sorted"
-            # => [start_ptr, end_ptr, ...]
+            # => [LEAF_KEY, start_ptr, end_ptr, ...]
         end
 
-        loc_load.6 padw movup.4 mem_loadw_le
-        # => [LEAF_KEY, start_ptr, end_ptr, ...]
-
-        padw loc_loadw_le.0
-        # => [K, LEAF_KEY, start_ptr, end_ptr, ...]
-
-        exec.word::eq
-        # => [is_key_found, start_ptr, end_ptr, ...]
-
+        # compare against K until we find the matching key or insertion point.
+        loc_load.8 not
         if.true
-            loc_load.6 loc_store.7
-            push.1 loc_store.8
-        end
-        # => [start_ptr, end_ptr, ...]
+            dupw padw loc_loadw_le.0
+            # => [K, LEAF_KEY, LEAF_KEY, start_ptr, end_ptr, ...]
 
-        loc_load.8 loc_load.9 or not
-        if.true
-            padw loc_loadw_le.0
-            # => [K, start_ptr, end_ptr, ...]
-
-            loc_load.6 padw movup.4 mem_loadw_le
-            # => [LEAF_KEY, K, start_ptr, end_ptr, ...]
-
-            exec.word::lt
-            # => [K < LEAF_KEY, start_ptr, end_ptr, ...]
+            exec.word::eq
+            # => [is_key_found, LEAF_KEY, start_ptr, end_ptr, ...]
 
             if.true
-                loc_load.6 loc_store.7
-                push.1 loc_store.9
+                loc_load.5 loc_store.6
+                push.1 loc_store.7
+                push.1 loc_store.8
+            else
+                dupw padw loc_loadw_le.0 swapw
+                # => [LEAF_KEY, K, LEAF_KEY, start_ptr, end_ptr, ...]
+
+                exec.word::lt
+                # => [K < LEAF_KEY, LEAF_KEY, start_ptr, end_ptr, ...]
+
+                if.true
+                    loc_load.5 loc_store.6
+                    push.1 loc_store.8
+                end
             end
         end
+        # => [LEAF_KEY, start_ptr, end_ptr, ...]
+
+        loc_storew_le.12 dropw
+        push.1 loc_store.16
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.6 add.8
-        loc_store.6
+        loc_load.5 add.8
+        loc_store.5
         # => [start_ptr, end_ptr, ...]
 
-        loc_load.6 loc_load.5 u32lt
+        loc_load.5 loc_load.4 u32lt
     end
 
-    loc_load.7 loc_load.8
+    loc_load.6 loc_load.7
     # => [is_key_found, key_ptr, start_ptr, end_ptr, ...]
 end
 
@@ -749,9 +757,6 @@ proc set_multi_leaf
     # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
 
     push.LEAF_DOMAIN exec.mem::pipe_double_words_preimage_to_memory_with_domain
-    # => [end_ptr; NV, K, V, leaf_size, R]
-
-    locaddr.0 drop
     # => [end_ptr; NV, K, V, leaf_size, R]
 
     movdn.12
