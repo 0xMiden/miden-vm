@@ -36,10 +36,13 @@ const LEAF_DOMAIN = 0x13af
 #! Fails if the tree with the specified root does not exits in the VM's advice provider.
 #!
 #! Cycles
-#!   Leaf empty: 66 cycles
-#!   Leaf single: 115 cycles
-#!   Leaf multiple, non-empty value: 189 + 6 * pair_count
-#!   Leaf multiple, empty value: 186 + 6 * pair_count
+#!   Leaf empty: 67 cycles
+#!   Leaf single: 162 cycles
+#!   Leaf multiple, found at first key: 255 + 253 * pair_count
+#!   Leaf multiple, found at last key: 67 + 441 * pair_count
+#!   Leaf multiple, missing before first key: 400 + 253 * pair_count
+#!   Leaf multiple, missing after last key: 193 + 441 * pair_count
+#!   Leaf multiple, middle keys or insertion points: between the first-key and last-key costs
 pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
@@ -261,8 +264,11 @@ end
 #!   Operand stack: [V, R]
 #!
 #! Cycles:
-#!  Non-empty: 125 + 6 * pair_count
-#!  Empty: 122 + 6 * pair_count
+#!  Found at first key: 191 + 253 * pair_count
+#!  Found at last key: 3 + 441 * pair_count
+#!  Missing before first key: 336 + 253 * pair_count
+#!  Missing after last key: 129 + 441 * pair_count
+#!  Middle keys or insertion points: between the first-key and last-key costs.
 @locals(8192)
 proc get_multi_leaf_value
     # First, we'll pipe all the pairs in the leaf from the advice stack.
@@ -288,6 +294,7 @@ proc get_multi_leaf_value
     # => [ptr_end, K, R]
 
     locaddr.0
+    # drop ptr_end, then arrange [K, start_ptr, end_ptr].
     drop movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
@@ -344,6 +351,7 @@ proc find_unique_multi_leaf_key
     # 6: result_ptr
     # 7: is_key_found
     # 8: is_position_found
+    # 9..11: unused so previous key is word-aligned
     # 12..15: previous key
     # 16: has_previous_key
 

@@ -145,6 +145,36 @@ fn test_smt_get_rejects_authenticated_duplicate_keys() {
 }
 
 #[test]
+fn test_smt_get_rejects_authenticated_unsorted_unique_keys() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::get
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let low_key = word(601, 602, 603, 0x4343);
+    let high_key = word(701, 702, 703, 0x4343);
+    let low_value = word(31, 32, 33, 34);
+    let high_value = word(41, 42, 43, 44);
+    let unsorted_entries = [(high_key, high_value), (low_key, low_value)];
+
+    let (root, store, advice_map) = build_custom_smt_root(&unsorted_entries);
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &low_key);
+
+    let test = build_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    crate::expect_assert_error_code_from_msg!(
+        test,
+        "invalid multi-leaf preimage: keys must be unique and sorted"
+    );
+}
+
+#[test]
 fn test_smt_set_rejects_authenticated_duplicate_keys() {
     const SOURCE: &str = "
         use miden::core::collections::smt
