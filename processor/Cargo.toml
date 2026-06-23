@@ -19,6 +19,7 @@ bench = false
 doctest = false
 
 [features]
+arbitrary = ["dep:proptest", "miden-core/arbitrary"]
 concurrent = ["std", "miden-air/concurrent"]
 default = ["std"]
 std = [
@@ -45,12 +46,14 @@ miden-utils-indexing.workspace = true
 # External dependencies
 itertools.workspace = true
 paste.workspace = true
+proptest = { workspace = true, optional = true }
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
+miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { workspace = true, features = ["std"] }

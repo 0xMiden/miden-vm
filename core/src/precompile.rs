@@ -334,6 +334,10 @@ pub trait PrecompileVerifier: Send + Sync {
 /// statement into the rolling state via the 2-to-1 hash
 /// `state' = Poseidon2::merge(state, STMNT)`. The state is exposed directly as the transcript
 /// digest — no finalization step is required.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
     /// The rolling transcript digest.
@@ -375,6 +379,20 @@ impl Serializable for PrecompileTranscript {
 impl Deserializable for PrecompileTranscript {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self::from_state(Word::read_from(source)?))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::prelude::Arbitrary for PrecompileTranscript {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        prop::array::uniform4(any::<u32>().prop_map(Felt::from_u32))
+            .prop_map(Word::new)
+            .prop_map(Self::from_state)
+            .boxed()
     }
 }
 

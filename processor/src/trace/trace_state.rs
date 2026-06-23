@@ -43,7 +43,11 @@ use crate::{
 /// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
 ///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
 ///    [`miden_core::mast::DynNode`]).
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
@@ -59,7 +63,11 @@ pub struct CoreTraceFragmentContext {
 
 /// Subset of the processor state used to build the core trace (system, decoder and stack sets of
 /// columns).
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CoreTraceState {
     pub system: SystemState,
     pub decoder: DecoderState,
@@ -73,6 +81,10 @@ pub struct CoreTraceState {
 ///
 /// This struct captures the complete state of the system at a specific clock cycle, allowing for
 /// reconstruction of the system trace during concurrent execution.
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemState {
     /// Current clock cycle (row index in the trace)
@@ -109,7 +121,11 @@ impl SystemState {
 // ================================================================================================
 
 /// The subset of the decoder state required to build the trace.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DecoderState {
     /// The value of the decoder's `addr` column.
     pub current_addr: Felt,
@@ -158,7 +174,11 @@ impl DecoderState {
 /// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns. The helper
 /// columns (stack_depth, overflow_addr, and overflow_helper) are computed from the stack_depth and
 /// last_overflow_addr fields.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15). These represent the top elements of the stack that are
     /// directly accessible.
@@ -284,7 +304,11 @@ impl StackState {
 /// components needed to produce those values, such as the memory chiplet, advice provider, etc. It
 /// also packages up all the necessary data for trace generators to generate trace fragments, which
 /// can be done on separate machines in parallel, for example.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub execution_context: ExecutionContextReplay,
@@ -299,7 +323,11 @@ pub struct ExecutionReplay {
 // EXECUTION CONTEXT REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ExecutionContextReplay {
     /// Extra data needed to recover the state on an END operation specifically for
     /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
@@ -326,7 +354,11 @@ impl ExecutionContextReplay {
 // ================================================================================================
 
 /// Replay data for the block stack.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockStackReplay {
     /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
     node_start_parent_addr: VecDeque<Felt>,
@@ -431,7 +463,11 @@ impl NodeFlags {
 /// We record `ended_node_addr` in order to be able to properly populate the trace row for the
 /// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
 /// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
@@ -445,7 +481,11 @@ pub struct NodeEndData {
 
 /// Data required to recover the state of an execution context when restoring it during an END
 /// operation.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
@@ -464,7 +504,11 @@ pub struct ExecutionContextSystemInfo {
 /// [`crate::TraceGenerationContext`] that owns this replay. This avoids holding a strong
 /// `Arc<MastForest>` reference per resolution, allowing the trace generation context to deduplicate
 /// forests across fragments.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MastForestResolutionReplay {
     mast_forest_resolutions: VecDeque<(MastNodeId, MastForestId)>,
 }
@@ -503,7 +547,11 @@ impl MastForestResolutionReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryReadsReplay {
     elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_read: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -568,7 +616,11 @@ impl MemoryReadsReplay {
 ///
 /// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
 /// (as reads are), but only to be able to fully build the memory chiplet trace.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct MemoryWritesReplay {
     elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
     words_written: VecDeque<(Word, Felt, ContextId, RowIndex)>,
@@ -654,7 +706,11 @@ impl MemoryInterface for MemoryReadsReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -745,14 +801,22 @@ impl AdviceProviderInterface for AdviceReplay {
 // ================================================================================================
 
 /// Enum representing the different bitwise operations that can be recorded.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BitwiseOp {
     U32And,
     U32Xor,
 }
 
 /// Replay data for bitwise operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BitwiseReplay {
     u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
 }
@@ -786,7 +850,11 @@ impl IntoIterator for BitwiseReplay {
 // ================================================================================================
 
 /// Replay data for kernel operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
 }
@@ -815,7 +883,11 @@ impl IntoIterator for KernelReplay {
 // ================================================================================================
 
 /// Replay data for ACE operations.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AceReplay {
     circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
 }
@@ -847,7 +919,11 @@ impl IntoIterator for AceReplay {
 /// Replay data for range checking operations.
 ///
 /// This currently only records
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct RangeCheckerReplay {
     range_checks_u32_ops: VecDeque<[u16; 4]>,
 }
@@ -875,7 +951,11 @@ impl IntoIterator for RangeCheckerReplay {
 // BLOCK ADDRESS REPLAY
 // ================================================================================================
 
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BlockAddressReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     block_addresses: VecDeque<Felt>,
@@ -905,7 +985,11 @@ impl BlockAddressReplay {
 ///
 /// The hasher responses are recorded during fast processor execution and then replayed during core
 /// trace generation.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherResponseReplay {
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
@@ -1012,7 +1096,11 @@ impl HasherInterface for HasherResponseReplay {
 
 /// Enum representing the different hasher operations that can be recorded, along with their
 /// operands.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
@@ -1028,7 +1116,11 @@ pub enum HasherOp {
 ///
 /// The hasher requests are recorded during fast processor execution and then replayed during hasher
 /// chiplet trace generation.
-#[derive(Debug, Default)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
 }
@@ -1113,7 +1205,11 @@ impl IntoIterator for HasherRequestReplay {
 /// the clock cycle of the last overflow update) and provides replay methods that return the
 /// pre-recorded values. This works naturally since the fast processor has exactly the same
 /// access patterns as the main trace generators.
-#[derive(Debug)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
@@ -1772,6 +1868,417 @@ impl Deserializable for ExecutionReplay {
             block_address: BlockAddressReplay::read_from(source)?,
             mast_forest_resolution: MastForestResolutionReplay::read_from(source)?,
         })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use alloc::collections::VecDeque;
+
+    use miden_air::trace::chiplets::hasher::STATE_WIDTH;
+    use proptest::{collection, prelude::*};
+
+    use super::*;
+
+    const MAX_REPLAY_ITEMS: usize = 8;
+
+    fn arb_felt() -> impl Strategy<Value = Felt> {
+        any::<u32>().prop_map(Felt::from_u32)
+    }
+
+    fn arb_word() -> impl Strategy<Value = Word> {
+        any::<[u32; 4]>().prop_map(|values| values.map(Felt::from_u32).into())
+    }
+
+    fn arb_row_index() -> impl Strategy<Value = RowIndex> {
+        any::<u32>().prop_map(RowIndex::from)
+    }
+
+    fn arb_merkle_path() -> impl Strategy<Value = MerklePath> {
+        collection::vec(arb_word(), 0..=MAX_REPLAY_ITEMS).prop_map(MerklePath::new)
+    }
+
+    fn arb_vec_deque<T, S>(strategy: S) -> impl Strategy<Value = VecDeque<T>>
+    where
+        T: core::fmt::Debug + 'static,
+        S: Strategy<Value = T> + 'static,
+    {
+        collection::vec(strategy, 0..=MAX_REPLAY_ITEMS).prop_map(VecDeque::from)
+    }
+
+    fn arb_felt_array<const N: usize>() -> impl Strategy<Value = [Felt; N]> {
+        any::<[u32; N]>().prop_map(|values| values.map(Felt::from_u32))
+    }
+
+    fn arb_word_pair() -> impl Strategy<Value = [Word; 2]> {
+        (arb_word(), arb_word()).prop_map(|(first, second)| [first, second])
+    }
+
+    impl Arbitrary for SystemState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_row_index(), any::<ContextId>(), arb_word(), arb_word())
+                .prop_map(|(clk, ctx, fn_hash, pc_transcript_state)| Self {
+                    clk,
+                    ctx,
+                    fn_hash,
+                    pc_transcript_state,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for DecoderState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_felt(), arb_felt())
+                .prop_map(|(current_addr, parent_addr)| Self { current_addr, parent_addr })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for StackState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_felt_array::<MIN_STACK_DEPTH>(),
+                MIN_STACK_DEPTH..=MIN_STACK_DEPTH + 64,
+                arb_felt(),
+            )
+                .prop_map(|(stack_top, stack_depth, last_overflow_addr)| Self {
+                    stack_top,
+                    stack_depth,
+                    last_overflow_addr,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceState {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<SystemState>(), any::<DecoderState>(), any::<StackState>())
+                .prop_map(|(system, decoder, stack)| Self { system, decoder, stack })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CoreTraceFragmentContext {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                any::<CoreTraceState>(),
+                any::<ExecutionReplay>(),
+                any::<ContinuationStack<MastForestId>>(),
+                any::<MastForestId>(),
+            )
+                .prop_map(|(state, replay, continuation, initial_mast_forest_id)| Self {
+                    state,
+                    replay,
+                    continuation,
+                    initial_mast_forest_id,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for NodeEndData {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_felt(), arb_felt(), arb_felt())
+                .prop_map(|(ended_node_addr, prev_addr, prev_parent_addr)| Self {
+                    ended_node_addr,
+                    prev_addr,
+                    prev_parent_addr,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextSystemInfo {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (any::<ContextId>(), arb_word())
+                .prop_map(|(parent_ctx, parent_fn_hash)| Self { parent_ctx, parent_fn_hash })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionContextReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque(any::<ExecutionContextSystemInfo>())
+                .prop_map(|execution_contexts| Self { execution_contexts })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockStackReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_vec_deque(arb_felt()), arb_vec_deque(any::<NodeEndData>()))
+                .prop_map(|(node_start_parent_addr, node_end)| Self {
+                    node_start_parent_addr,
+                    node_end,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MastForestResolutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque((any::<MastNodeId>(), any::<MastForestId>()))
+                .prop_map(|mast_forest_resolutions| Self { mast_forest_resolutions })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryReadsReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_vec_deque((arb_felt(), arb_felt(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((arb_word(), arb_felt(), any::<ContextId>(), arb_row_index())),
+            )
+                .prop_map(|(elements_read, words_read)| Self { elements_read, words_read })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for MemoryWritesReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_vec_deque((arb_felt(), arb_felt(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((arb_word(), arb_felt(), any::<ContextId>(), arb_row_index())),
+            )
+                .prop_map(|(elements_written, words_written)| Self {
+                    elements_written,
+                    words_written,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for AdviceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_vec_deque(arb_felt()),
+                arb_vec_deque(arb_word()),
+                arb_vec_deque(arb_word_pair()),
+            )
+                .prop_map(|(stack_pops, stack_word_pops, stack_dword_pops)| Self {
+                    stack_pops,
+                    stack_word_pops,
+                    stack_dword_pops,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![Just(Self::U32And), Just(Self::U32Xor)].boxed()
+        }
+    }
+
+    impl Arbitrary for BitwiseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque((any::<BitwiseOp>(), arb_felt(), arb_felt()))
+                .prop_map(|u32op_with_operands| Self { u32op_with_operands })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for KernelReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque(arb_word())
+                .prop_map(|kernel_proc_accesses| Self { kernel_proc_accesses })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for RangeCheckerReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque(any::<[u16; 4]>())
+                .prop_map(|range_checks_u32_ops| Self { range_checks_u32_ops })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for BlockAddressReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque(arb_felt())
+                .prop_map(|block_addresses| Self { block_addresses })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherResponseReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_vec_deque((arb_felt(), arb_felt_array::<STATE_WIDTH>())),
+                arb_vec_deque((arb_felt(), arb_word())),
+                arb_vec_deque((arb_felt(), arb_word(), arb_word())),
+            )
+                .prop_map(
+                    |(
+                        permutation_operations,
+                        build_merkle_root_operations,
+                        mrupdate_operations,
+                    )| {
+                        Self {
+                            permutation_operations,
+                            build_merkle_root_operations,
+                            mrupdate_operations,
+                        }
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherOp {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                arb_felt_array::<STATE_WIDTH>().prop_map(Self::Permute),
+                (arb_word(), arb_word(), arb_felt(), arb_word()).prop_map(Self::HashControlBlock),
+                (any::<MastForestId>(), any::<MastNodeId>(), arb_word())
+                    .prop_map(Self::HashBasicBlock),
+                (arb_word(), arb_merkle_path(), arb_felt()).prop_map(Self::BuildMerkleRoot),
+                (arb_word(), arb_word(), arb_merkle_path(), arb_felt())
+                    .prop_map(Self::UpdateMerkleRoot),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for HasherRequestReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque(any::<HasherOp>())
+                .prop_map(|hasher_ops| Self { hasher_ops })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for StackOverflowReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_vec_deque((arb_felt(), arb_felt())),
+                arb_vec_deque((MIN_STACK_DEPTH..=MIN_STACK_DEPTH + 64, arb_felt())),
+            )
+                .prop_map(|(overflow_values, restore_context_info)| Self {
+                    overflow_values,
+                    restore_context_info,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for ExecutionReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                any::<BlockStackReplay>(),
+                any::<ExecutionContextReplay>(),
+                any::<StackOverflowReplay>(),
+                any::<MemoryReadsReplay>(),
+                any::<AdviceReplay>(),
+                any::<HasherResponseReplay>(),
+                any::<BlockAddressReplay>(),
+                any::<MastForestResolutionReplay>(),
+            )
+                .prop_map(
+                    |(
+                        block_stack,
+                        execution_context,
+                        stack_overflow,
+                        memory_reads,
+                        advice,
+                        hasher,
+                        block_address,
+                        mast_forest_resolution,
+                    )| Self {
+                        block_stack,
+                        execution_context,
+                        stack_overflow,
+                        memory_reads,
+                        advice,
+                        hasher,
+                        block_address,
+                        mast_forest_resolution,
+                    },
+                )
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for AceReplay {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            arb_vec_deque((arb_row_index(), any::<CircuitEvaluation>()))
+                .prop_map(|circuit_evaluations| Self { circuit_evaluations })
+                .boxed()
+        }
     }
 }
 

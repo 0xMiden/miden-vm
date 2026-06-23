@@ -40,6 +40,17 @@ impl crate::serde::Deserializable for MastForestId {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl proptest::prelude::Arbitrary for MastForestId {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u32>().prop_map(Self::from).boxed()
+    }
+}
+
 // SPARSE MAST FOREST
 // ================================================================================================
 
@@ -303,6 +314,22 @@ impl ExecutableMastForest for SparseMastForest {
     #[inline(always)]
     fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
+    }
+}
+
+#[cfg(all(feature = "arbitrary", test))]
+mod serde_tests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::serde::{Deserializable, Serializable};
+
+    proptest! {
+        #[test]
+        fn mast_forest_id_binary_serde_roundtrip(id in any::<MastForestId>()) {
+            let bytes = id.to_bytes();
+            prop_assert_eq!(id, MastForestId::read_from_bytes(&bytes).unwrap());
+        }
     }
 }
 

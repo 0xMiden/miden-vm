@@ -22,7 +22,15 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 /// [`Continuation::EnterForest`] variant. For live execution this is `Arc<MastForest>`; for the
 /// snapshotted continuation stack inside a trace fragment it is a `usize` index into the
 /// `mast_forest_store` of the trace generation context.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(
+        binary_serde(true),
+        serde_test(false),
+        types(MastForestId)
+    )
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Continuation<F> {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
@@ -119,7 +127,15 @@ impl<F> Continuation<F> {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(
+        binary_serde(true),
+        serde_test(false),
+        types(MastForestId)
+    )
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationStack<F> {
     stack: Vec<Continuation<F>>,
     source_node_ids: Option<Vec<Option<DebugSourceNodeId>>>,
@@ -458,6 +474,71 @@ impl Deserializable for ContinuationStack<MastForestId> {
             )));
         }
         Ok(Self { stack, source_node_ids })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::{collection, prelude::*};
+
+    use super::*;
+    use crate::mast::MastForestId;
+
+    const MAX_CONTINUATIONS: usize = 16;
+
+    fn arb_source_node_id() -> impl Strategy<Value = DebugSourceNodeId> {
+        any::<u32>().prop_map(DebugSourceNodeId::from)
+    }
+
+    impl Arbitrary for Continuation<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![
+                any::<MastNodeId>().prop_map(Self::StartNode),
+                any::<MastNodeId>().prop_map(Self::FinishJoin),
+                any::<MastNodeId>().prop_map(Self::FinishSplit),
+                any::<MastNodeId>().prop_map(Self::FinishLoop),
+                any::<MastNodeId>().prop_map(Self::FinishCall),
+                any::<MastNodeId>().prop_map(Self::FinishDyn),
+                (any::<MastNodeId>(), 0usize..=8, 0usize..=8).prop_map(
+                    |(node_id, batch_index, op_idx_in_batch)| Self::ResumeBasicBlock {
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    },
+                ),
+                (any::<MastNodeId>(), 0usize..=8)
+                    .prop_map(|(node_id, batch_index)| Self::Respan { node_id, batch_index }),
+                any::<MastNodeId>().prop_map(Self::FinishBasicBlock),
+                any::<MastForestId>()
+                    .prop_map(|forest| Self::EnterForest { forest, package_debug_info: None }),
+            ]
+            .boxed()
+        }
+    }
+
+    impl Arbitrary for ContinuationStack<MastForestId> {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            collection::vec(any::<Continuation<MastForestId>>(), 0..=MAX_CONTINUATIONS)
+                .prop_flat_map(|stack| {
+                    let len = stack.len();
+                    (
+                        Just(stack),
+                        prop_oneof![
+                            Just(None),
+                            collection::vec(proptest::option::of(arb_source_node_id()), len..=len,)
+                                .prop_map(Some),
+                        ],
+                    )
+                })
+                .prop_map(|(stack, source_node_ids)| Self { stack, source_node_ids })
+                .boxed()
+        }
     }
 }
 

@@ -26,7 +26,10 @@ mod host;
 mod processor;
 mod tracer;
 
-use miden_core::mast::ExecutableMastForest;
+use miden_core::{
+    mast::ExecutableMastForest,
+    serde::{Deserializable, Serializable},
+};
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
@@ -308,6 +311,10 @@ pub trait Stopper {
 // ================================================================================================
 
 /// Represents the ID of an execution context
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ContextId(u32);
 
@@ -353,21 +360,32 @@ impl From<ContextId> for Felt {
     }
 }
 
-impl serde::Serializable for ContextId {
+impl Serializable for ContextId {
     fn write_into<W: serde::ByteWriter>(&self, target: &mut W) {
-        serde::Serializable::write_into(&self.0, target);
+        Serializable::write_into(&self.0, target);
     }
 }
 
-impl serde::Deserializable for ContextId {
+impl Deserializable for ContextId {
     fn read_from<R: serde::ByteReader>(
         source: &mut R,
     ) -> Result<Self, serde::DeserializationError> {
-        Ok(Self(<u32 as serde::Deserializable>::read_from(source)?))
+        Ok(Self(<u32 as Deserializable>::read_from(source)?))
     }
 
     fn min_serialized_size() -> usize {
-        <u32 as serde::Deserializable>::min_serialized_size()
+        <u32 as Deserializable>::min_serialized_size()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::prelude::Arbitrary for ContextId {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u32>().prop_map(Self).boxed()
     }
 }
 

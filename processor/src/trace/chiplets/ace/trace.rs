@@ -19,7 +19,11 @@ use crate::{ContextId, errors::AceError};
 
 /// One row of the ACE chiplet trace in `READ` mode: two memory-loaded wires per row, plus the
 /// pointer of the word that was loaded.
-#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReadNode {
     ptr: Felt,
     id_0: Felt,
@@ -31,7 +35,11 @@ struct ReadNode {
 /// One row of the ACE chiplet trace in `EVAL` mode: a single arithmetic gate `(id_0, v_0)` with
 /// two inputs `(id_1, v_1)` (left) and `(id_2, v_2)` (right), the instruction pointer that
 /// produced it, and the gate's `eval_op` selector.
-#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EvalNode {
     ptr: Felt,
     eval_op: Felt,
@@ -47,7 +55,11 @@ struct EvalNode {
 /// The output value is checked to be equal to 0.
 ///
 /// The set of nodes is used to fill the ACE chiplet trace.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
@@ -244,7 +256,11 @@ fn quad_to_expr(v: QuadFelt) -> QuadFeltExpr<Felt> {
 /// gate, to "receive" the values of the input wires from the bus and to "send" the value of
 /// the value of the output wire back with multiplicity equal to the fan-out of the respective gate.
 /// Note that the messages include extra data in order to avoid collisions.
-#[derive(Debug, Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true), serde_test(false))
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WireBus {
     // Circuit ID as Felt of the next wire to be inserted
     id_next: Felt,
@@ -492,6 +508,120 @@ impl CircuitEvaluation {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::{collection, prelude::*};
+
+    use super::*;
+
+    const MAX_TEST_NODES: usize = 8;
+
+    fn arb_felt() -> impl Strategy<Value = Felt> {
+        any::<u32>().prop_map(Felt::from_u32)
+    }
+
+    fn arb_quad_felt() -> impl Strategy<Value = QuadFelt> {
+        (arb_felt(), arb_felt()).prop_map(|(c0, c1)| QuadFelt::new([c0, c1]))
+    }
+
+    impl Arbitrary for ReadNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (arb_felt(), arb_felt(), arb_quad_felt(), arb_felt(), arb_quad_felt())
+                .prop_map(|(ptr, id_0, v_0, id_1, v_1)| Self { ptr, id_0, v_0, id_1, v_1 })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for EvalNode {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (
+                arb_felt(),
+                arb_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+                arb_felt(),
+                arb_quad_felt(),
+            )
+                .prop_map(|(ptr, eval_op, id_0, v_0, id_1, v_1, id_2, v_2)| Self {
+                    ptr,
+                    eval_op,
+                    id_0,
+                    v_0,
+                    id_1,
+                    v_1,
+                    id_2,
+                    v_2,
+                })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for WireBus {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (1usize..=MAX_TEST_NODES)
+                .prop_flat_map(|wire_count| {
+                    (
+                        arb_felt(),
+                        collection::vec((arb_quad_felt(), any::<u32>()), wire_count),
+                        Just(wire_count as u32),
+                    )
+                })
+                .prop_map(|(id_next, wires, num_wires)| Self { id_next, wires, num_wires })
+                .boxed()
+        }
+    }
+
+    impl Arbitrary for CircuitEvaluation {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            (0usize..=3, 1usize..=MAX_TEST_NODES)
+                .prop_filter(
+                    "ACE test circuit must fit the wire limit",
+                    |(read_count, eval_count)| {
+                        read_count.saturating_mul(2).saturating_add(*eval_count)
+                            <= MAX_NUM_ACE_WIRES as usize
+                    },
+                )
+                .prop_flat_map(|(read_count, eval_count)| {
+                    let wire_count = read_count * 2 + eval_count;
+                    (
+                        any::<ContextId>(),
+                        any::<u32>().prop_map(RowIndex::from),
+                        collection::vec(any::<ReadNode>(), read_count),
+                        collection::vec(any::<EvalNode>(), eval_count),
+                        collection::vec((arb_quad_felt(), any::<u32>()), wire_count),
+                        Just(wire_count as u32),
+                    )
+                })
+                .prop_map(|(ctx, clk, read_nodes, eval_nodes, wires, num_wires)| Self {
+                    ctx,
+                    clk,
+                    wire_bus: WireBus {
+                        id_next: Felt::from_u32(num_wires),
+                        wires,
+                        num_wires,
+                    },
+                    read_nodes,
+                    eval_nodes,
+                })
+                .boxed()
+        }
     }
 }
 

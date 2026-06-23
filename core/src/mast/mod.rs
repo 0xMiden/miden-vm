@@ -839,7 +839,10 @@ impl<T: ExecutableMastForest + ?Sized> ExecutableMastForest for Arc<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(binary_serde(true))
+)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
