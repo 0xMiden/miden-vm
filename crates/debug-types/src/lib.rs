@@ -13,7 +13,7 @@ mod span;
 
 #[cfg(feature = "arbitrary")]
 use alloc::vec;
-use alloc::{string::String, sync::Arc};
+use alloc::{format, string::String, sync::Arc};
 
 use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -262,8 +262,37 @@ impl Serializable for Uri {
 
 impl Deserializable for Uri {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        String::read_from(source).map(Self::from)
+        read_bounded_string(source).map(Self::from)
     }
+}
+
+fn read_bounded_string<R: ByteReader>(source: &mut R) -> Result<String, DeserializationError> {
+    let len = source.read_usize()?;
+    validate_len(source, "uri bytes", len)?;
+    let bytes = source.read_slice(len)?;
+    core::str::from_utf8(bytes)
+        .map(String::from)
+        .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))
+}
+
+fn validate_len<R: ByteReader>(
+    source: &R,
+    label: &str,
+    len: usize,
+) -> Result<(), DeserializationError> {
+    let max_len = source.max_alloc(1);
+    if len > max_len {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds budget {max_len}"
+        )));
+    }
+
+    source.check_eor(len).map_err(|err| match err {
+        DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(format!(
+            "{label} count {len} exceeds remaining input"
+        )),
+        err => err,
+    })
 }
 
 impl core::str::FromStr for Uri {
@@ -308,7 +337,21 @@ impl Arbitrary for Uri {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::utils::{Deserializable, DeserializationError, SliceReader};
+
     use super::*;
+
+    #[test]
+    fn uri_rejects_oversized_length_prefix() {
+        let bytes = [0x08, 0x2a, 0xfe, 0xfe, 0x01];
+        let mut reader = SliceReader::new(&bytes);
+        let err = Uri::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("uri bytes count"));
+        assert!(message.contains("exceeds remaining input"));
+    }
 
     #[test]
     fn uri_scheme_extraction() {

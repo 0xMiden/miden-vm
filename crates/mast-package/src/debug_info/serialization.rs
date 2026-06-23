@@ -5,7 +5,10 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 use miden_core::{
     Word,
     mast::MastNodeId,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
 };
 use miden_debug_types::{ByteIndex, ColumnNumber, LineNumber, Location, Uri};
 
@@ -52,19 +55,13 @@ impl Deserializable for DebugTypesSection {
         // Manual bounds check required: read_string is a local helper, not Deserializable,
         // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
         // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = source.read_usize()?;
-        let max_strings = source.max_alloc(1);
-        if strings_len > max_strings {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_types strings count {strings_len} exceeds budget {max_strings}"
-            )));
-        }
+        let strings_len = read_bounded_len(source, "debug_types strings", 1)?;
         let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
 
-        let types_len = source.read_usize()?;
+        let types_len = read_bounded_len(source, "debug_types types", 1)?;
         let types = source.read_many_iter(types_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, types })
@@ -104,19 +101,13 @@ impl Deserializable for DebugSourcesSection {
         // Manual bounds check required: read_string is a local helper, not Deserializable,
         // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
         // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = source.read_usize()?;
-        let max_strings = source.max_alloc(1);
-        if strings_len > max_strings {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_sources strings count {strings_len} exceeds budget {max_strings}"
-            )));
-        }
+        let strings_len = read_bounded_len(source, "debug_sources strings", 1)?;
         let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
 
-        let files_len = source.read_usize()?;
+        let files_len = read_bounded_len(source, "debug_sources files", 1)?;
         let files = source.read_many_iter(files_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, files })
@@ -156,19 +147,13 @@ impl Deserializable for DebugFunctionsSection {
         // Manual bounds check required: read_string is a local helper, not Deserializable,
         // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
         // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
-        let strings_len = source.read_usize()?;
-        let max_strings = source.max_alloc(1);
-        if strings_len > max_strings {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_functions strings count {strings_len} exceeds budget {max_strings}"
-            )));
-        }
+        let strings_len = read_bounded_len(source, "debug_functions strings", 1)?;
         let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
 
-        let functions_len = source.read_usize()?;
+        let functions_len = read_bounded_len(source, "debug_functions functions", 1)?;
         let functions = source.read_many_iter(functions_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, functions })
@@ -191,7 +176,7 @@ impl Deserializable for DebugSourceNode {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self {
             exec_node: MastNodeId::new_unchecked(source.read_u32()?),
-            children: Vec::<DebugSourceNodeId>::read_from(source)?,
+            children: read_debug_source_node_ids(source, "debug_source_node children")?,
             op_start: source.read_u32()?,
             op_end: source.read_u32()?,
         })
@@ -219,8 +204,9 @@ impl Deserializable for DebugSourceGraphSection {
             )));
         }
 
-        let nodes = Vec::<DebugSourceNode>::read_from(source)?;
-        let roots = Vec::<DebugSourceNodeId>::read_from(source)?;
+        let nodes_len = read_bounded_len(source, "debug_source_graph nodes", 1)?;
+        let nodes = source.read_many_iter(nodes_len)?.collect::<Result<_, _>>()?;
+        let roots = read_debug_source_node_ids(source, "debug_source_graph roots")?;
         Ok(Self::from_parts(nodes, roots))
     }
 }
@@ -353,44 +339,36 @@ impl Deserializable for DebugSourceMapSection {
             )));
         }
 
-        let locations_len = source.read_usize()?;
-        let max_locations = source.max_alloc(MIN_REQUIRED_LOCATION_SERIALIZED_SIZE);
-        if locations_len > max_locations {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_source_map locations count {locations_len} exceeds budget {max_locations}"
-            )));
-        }
+        let locations_len = read_bounded_len(
+            source,
+            "debug_source_map locations",
+            MIN_REQUIRED_LOCATION_SERIALIZED_SIZE,
+        )?;
         let mut locations = Vec::with_capacity(locations_len);
         for _ in 0..locations_len {
             locations.push(read_required_location(source)?);
         }
 
-        let strings_len = source.read_usize()?;
-        let max_strings = source.max_alloc(1);
-        if strings_len > max_strings {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_source_map strings count {strings_len} exceeds budget {max_strings}"
-            )));
-        }
+        let strings_len = read_bounded_len(source, "debug_source_map strings", 1)?;
         let mut strings = Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
-            strings.push(String::read_from(source)?);
+            strings.push(read_owned_string(source)?);
         }
 
-        let asm_ops_len = source.read_usize()?;
-        let max_asm_ops = source.max_alloc(min_source_map_asm_op_row_serialized_size());
-        if asm_ops_len > max_asm_ops {
-            return Err(DeserializationError::InvalidValue(alloc::format!(
-                "debug_source_map asm op count {asm_ops_len} exceeds budget {max_asm_ops}"
-            )));
-        }
+        let asm_ops_len = read_bounded_len(
+            source,
+            "debug_source_map asm ops",
+            min_source_map_asm_op_row_serialized_size(),
+        )?;
         let mut asm_ops = Vec::with_capacity(asm_ops_len);
         for _ in 0..asm_ops_len {
             asm_ops.push(read_source_asm_op(source, &locations, &strings)?);
         }
 
-        let debug_vars = Vec::<DebugSourceVar>::read_from(source)?;
-        let inline_calls = Vec::<DebugSourceInlineCall>::read_from(source)?;
+        let debug_vars_len = read_bounded_len(source, "debug_source_map debug vars", 1)?;
+        let debug_vars = source.read_many_iter(debug_vars_len)?.collect::<Result<_, _>>()?;
+        let inline_calls_len = read_bounded_len(source, "debug_source_map inline calls", 1)?;
+        let inline_calls = source.read_many_iter(inline_calls_len)?.collect::<Result<_, _>>()?;
         Ok(Self::from_parts_with_inline_calls(asm_ops, debug_vars, inline_calls))
     }
 }
@@ -450,6 +428,7 @@ fn read_source_asm_op<R: ByteReader>(
 }
 
 fn min_source_map_asm_op_row_serialized_size() -> usize {
+    // The location index is conditional and is omitted for location-less rows.
     DebugSourceNodeId::min_serialized_size() + 4 + 1 + 4 + 4 + 1
 }
 
@@ -513,7 +492,8 @@ impl Deserializable for DebugErrorMessagesSection {
             )));
         }
 
-        let messages = Vec::<DebugErrorMessage>::read_from(source)?;
+        let messages_len = read_bounded_len(source, "debug_error_messages messages", 1)?;
+        let messages = source.read_many_iter(messages_len)?.collect::<Result<_, _>>()?;
         Ok(Self::from_parts(messages))
     }
 }
@@ -652,7 +632,7 @@ impl Deserializable for DebugTypeInfo {
             TYPE_TAG_STRUCT => {
                 let name_idx = source.read_u32()?;
                 let size = source.read_u32()?;
-                let fields_len = source.read_usize()?;
+                let fields_len = read_bounded_len(source, "debug struct fields", 1)?;
                 let fields = source.read_many_iter(fields_len)?.collect::<Result<_, _>>()?;
                 Ok(Self::Struct { name_idx, size, fields })
             },
@@ -663,14 +643,15 @@ impl Deserializable for DebugTypeInfo {
                 } else {
                     None
                 };
-                let param_type_indices = Vec::<DebugTypeIdx>::read_from(source)?;
+                let param_type_indices =
+                    read_debug_type_indices(source, "debug function parameters")?;
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
             TYPE_TAG_ENUM => {
                 let name_idx = source.read_u32()?;
                 let size = source.read_u32()?;
                 let discriminant_type_idx = DebugTypeIdx::from(source.read_u32()?);
-                let variants_len = source.read_usize()?;
+                let variants_len = read_bounded_len(source, "debug enum variants", 1)?;
                 let variants = source.read_many_iter(variants_len)?.collect::<Result<_, _>>()?;
                 Ok(Self::Enum {
                     name_idx,
@@ -855,12 +836,32 @@ impl Deserializable for DebugFunctionInfo {
 // ================================================================================================
 
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
-    let len = source.read_usize()?;
+    let len = read_bounded_len(source, "debug string bytes", 1)?;
     let bytes = source.read_slice(len)?;
     let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
     })?;
     Ok(Arc::from(s))
+}
+
+fn read_owned_string<R: ByteReader>(source: &mut R) -> Result<String, DeserializationError> {
+    read_string(source).map(|value| String::from(value.as_ref()))
+}
+
+fn read_debug_source_node_ids<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<Vec<DebugSourceNodeId>, DeserializationError> {
+    let len = read_bounded_len(source, label, DebugSourceNodeId::min_serialized_size())?;
+    source.read_many_iter(len)?.collect::<Result<_, _>>()
+}
+
+fn read_debug_type_indices<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<Vec<DebugTypeIdx>, DeserializationError> {
+    let len = read_bounded_len(source, label, DebugTypeIdx::min_serialized_size())?;
+    source.read_many_iter(len)?.collect::<Result<_, _>>()
 }
 
 #[cfg(test)]
@@ -1087,6 +1088,24 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_source_map_locationless_asm_op_min_size() {
+        let source_node = DebugSourceNodeId::from(0);
+        let asm_op = |op_idx| {
+            DebugSourceAsmOp::new(source_node, op_idx, None, "test::ctx".into(), "add".into(), 1)
+        };
+        let section = DebugSourceMapSection::from_parts(
+            // Three location-less rows exceed the trailing empty debug_vars/inline_calls
+            // length prefixes, so an overestimated row size rejects this section.
+            alloc::vec![asm_op(2), asm_op(3), asm_op(4)],
+            alloc::vec![],
+        );
+
+        let bytes = section.to_bytes();
+        let deserialized = DebugSourceMapSection::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized.asm_ops(), section.asm_ops());
+    }
+
+    #[test]
     fn test_debug_source_map_locations_are_deduplicated() {
         let source_node = DebugSourceNodeId::from(0);
         let location =
@@ -1286,6 +1305,18 @@ mod tests {
 
         let mut reader = FixedBudgetReader::new(&functions_ok, 1);
         assert_eq!(DebugFunctionsSection::read_from(&mut reader).unwrap().strings.len(), 1);
+    }
+
+    #[test]
+    fn test_debug_functions_rejects_oversized_string_table_count() {
+        let bytes = [0x02, 0x08, 0x2a, 0xfe, 0xfe, 0x01];
+        let mut reader = miden_core::serde::SliceReader::new(&bytes);
+        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("debug_functions strings count"));
+        assert!(message.contains("exceeds remaining input"));
     }
 
     #[test]
