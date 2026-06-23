@@ -12,7 +12,7 @@ use alloc::{
 
 use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
+    ExportedTypeUse, MAX_REPEAT_COUNT, Parse, SemanticAnalysisError,
     ast::{
         self, AttributeSet, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind,
         SymbolResolution, Visibility, types::FunctionType,
@@ -56,25 +56,6 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
-
-#[derive(Clone, Copy)]
-enum ExportedTypeUse {
-    ProcedureSignature,
-    TypeDeclaration,
-}
-
-impl ExportedTypeUse {
-    fn private_type_error(self, span: SourceSpan, defined: SourceSpan) -> SemanticAnalysisError {
-        match self {
-            Self::ProcedureSignature => {
-                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
-            },
-            Self::TypeDeclaration => {
-                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
-            },
-        }
-    }
-}
 
 #[derive(Debug)]
 enum PendingPackageExport {

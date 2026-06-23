@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
-    errors::{LimitKind, SemanticAnalysisError, SyntaxError},
+    errors::{ExportedTypeUse, LimitKind, SemanticAnalysisError, SyntaxError},
     passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
@@ -334,25 +334,6 @@ fn verify_exported_signature_type_visibility(module: &Module, analyzer: &mut Ana
             &mut visiting_types,
             ExportedTypeUse::TypeDeclaration,
         );
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ExportedTypeUse {
-    ProcedureSignature,
-    TypeDeclaration,
-}
-
-impl ExportedTypeUse {
-    fn private_type_error(self, span: SourceSpan, defined: SourceSpan) -> SemanticAnalysisError {
-        match self {
-            Self::ProcedureSignature => {
-                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
-            },
-            Self::TypeDeclaration => {
-                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
-            },
-        }
     }
 }
 

@@ -48,6 +48,30 @@ pub struct SyntaxWarning {
     pub errors: Vec<SemanticAnalysisError>,
 }
 
+/// Identifies the exported surface where a private type was found.
+#[derive(Clone, Copy)]
+pub enum ExportedTypeUse {
+    ProcedureSignature,
+    TypeDeclaration,
+}
+
+impl ExportedTypeUse {
+    pub fn private_type_error(
+        self,
+        span: SourceSpan,
+        defined: SourceSpan,
+    ) -> SemanticAnalysisError {
+        match self {
+            Self::ProcedureSignature => {
+                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
+            },
+            Self::TypeDeclaration => {
+                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
+            },
+        }
+    }
+}
+
 /// Represents an error that occurs during semantic analysis
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum SemanticAnalysisError {
