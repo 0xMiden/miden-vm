@@ -1893,20 +1893,14 @@ mod arbitrary {
 
     const MAX_REPLAY_ITEMS: usize = 8;
 
-    fn arb_felt() -> impl Strategy<Value = Felt> {
-        any::<u32>().prop_map(Felt::from_u32)
-    }
-
-    fn arb_word() -> impl Strategy<Value = Word> {
-        any::<[u32; 4]>().prop_map(|values| values.map(Felt::from_u32).into())
-    }
-
     fn arb_row_index() -> impl Strategy<Value = RowIndex> {
         any::<u32>().prop_map(RowIndex::from)
     }
 
+    // TODO: use any::<MerklePath>() once miden-crypto exposes its impl outside test code:
+    // https://github.com/0xMiden/crypto/issues/1072
     fn arb_merkle_path() -> impl Strategy<Value = MerklePath> {
-        collection::vec(arb_word(), 0..=MAX_REPLAY_ITEMS).prop_map(MerklePath::new)
+        collection::vec(any::<Word>(), 0..=MAX_REPLAY_ITEMS).prop_map(MerklePath::new)
     }
 
     fn arb_vec_deque<T, S>(strategy: S) -> impl Strategy<Value = VecDeque<T>>
@@ -1917,20 +1911,12 @@ mod arbitrary {
         collection::vec(strategy, 0..=MAX_REPLAY_ITEMS).prop_map(VecDeque::from)
     }
 
-    fn arb_felt_array<const N: usize>() -> impl Strategy<Value = [Felt; N]> {
-        any::<[u32; N]>().prop_map(|values| values.map(Felt::from_u32))
-    }
-
-    fn arb_word_pair() -> impl Strategy<Value = [Word; 2]> {
-        (arb_word(), arb_word()).prop_map(|(first, second)| [first, second])
-    }
-
     impl Arbitrary for SystemState {
         type Parameters = ();
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (arb_row_index(), any::<ContextId>(), arb_word(), arb_word())
+            (arb_row_index(), any::<ContextId>(), any::<Word>(), any::<Word>())
                 .prop_map(|(clk, ctx, fn_hash, pc_transcript_state)| Self {
                     clk,
                     ctx,
@@ -1946,7 +1932,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (arb_felt(), arb_felt())
+            (any::<Felt>(), any::<Felt>())
                 .prop_map(|(current_addr, parent_addr)| Self { current_addr, parent_addr })
                 .boxed()
         }
@@ -1958,9 +1944,9 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_felt_array::<MIN_STACK_DEPTH>(),
+                any::<[Felt; MIN_STACK_DEPTH]>(),
                 MIN_STACK_DEPTH..=MIN_STACK_DEPTH + 64,
-                arb_felt(),
+                any::<Felt>(),
             )
                 .prop_map(|(stack_top, stack_depth, last_overflow_addr)| Self {
                     stack_top,
@@ -2008,7 +1994,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (arb_felt(), arb_felt(), arb_felt())
+            (any::<Felt>(), any::<Felt>(), any::<Felt>())
                 .prop_map(|(ended_node_addr, prev_addr, prev_parent_addr)| Self {
                     ended_node_addr,
                     prev_addr,
@@ -2023,7 +2009,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (any::<ContextId>(), arb_word())
+            (any::<ContextId>(), any::<Word>())
                 .prop_map(|(parent_ctx, parent_fn_hash)| Self { parent_ctx, parent_fn_hash })
                 .boxed()
         }
@@ -2045,7 +2031,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            (arb_vec_deque(arb_felt()), arb_vec_deque(any::<NodeEndData>()))
+            (arb_vec_deque(any::<Felt>()), arb_vec_deque(any::<NodeEndData>()))
                 .prop_map(|(node_start_parent_addr, node_end)| Self {
                     node_start_parent_addr,
                     node_end,
@@ -2071,8 +2057,8 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_vec_deque((arb_felt(), arb_felt(), any::<ContextId>(), arb_row_index())),
-                arb_vec_deque((arb_word(), arb_felt(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((any::<Felt>(), any::<Felt>(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((any::<Word>(), any::<Felt>(), any::<ContextId>(), arb_row_index())),
             )
                 .prop_map(|(elements_read, words_read)| Self { elements_read, words_read })
                 .boxed()
@@ -2085,8 +2071,8 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_vec_deque((arb_felt(), arb_felt(), any::<ContextId>(), arb_row_index())),
-                arb_vec_deque((arb_word(), arb_felt(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((any::<Felt>(), any::<Felt>(), any::<ContextId>(), arb_row_index())),
+                arb_vec_deque((any::<Word>(), any::<Felt>(), any::<ContextId>(), arb_row_index())),
             )
                 .prop_map(|(elements_written, words_written)| Self {
                     elements_written,
@@ -2102,9 +2088,9 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_vec_deque(arb_felt()),
-                arb_vec_deque(arb_word()),
-                arb_vec_deque(arb_word_pair()),
+                arb_vec_deque(any::<Felt>()),
+                arb_vec_deque(any::<Word>()),
+                arb_vec_deque(any::<[Word; 2]>()),
             )
                 .prop_map(|(stack_pops, stack_word_pops, stack_dword_pops)| Self {
                     stack_pops,
@@ -2129,7 +2115,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            arb_vec_deque((any::<BitwiseOp>(), arb_felt(), arb_felt()))
+            arb_vec_deque((any::<BitwiseOp>(), any::<Felt>(), any::<Felt>()))
                 .prop_map(|u32op_with_operands| Self { u32op_with_operands })
                 .boxed()
         }
@@ -2140,7 +2126,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            arb_vec_deque(arb_word())
+            arb_vec_deque(any::<Word>())
                 .prop_map(|kernel_proc_accesses| Self { kernel_proc_accesses })
                 .boxed()
         }
@@ -2162,7 +2148,7 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            arb_vec_deque(arb_felt())
+            arb_vec_deque(any::<Felt>())
                 .prop_map(|block_addresses| Self { block_addresses })
                 .boxed()
         }
@@ -2174,9 +2160,9 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_vec_deque((arb_felt(), arb_felt_array::<STATE_WIDTH>())),
-                arb_vec_deque((arb_felt(), arb_word())),
-                arb_vec_deque((arb_felt(), arb_word(), arb_word())),
+                arb_vec_deque((any::<Felt>(), any::<[Felt; STATE_WIDTH]>())),
+                arb_vec_deque((any::<Felt>(), any::<Word>())),
+                arb_vec_deque((any::<Felt>(), any::<Word>(), any::<Word>())),
             )
                 .prop_map(
                     |(
@@ -2201,12 +2187,13 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             prop_oneof![
-                arb_felt_array::<STATE_WIDTH>().prop_map(Self::Permute),
-                (arb_word(), arb_word(), arb_felt(), arb_word()).prop_map(Self::HashControlBlock),
-                (any::<MastForestId>(), any::<MastNodeId>(), arb_word())
+                any::<[Felt; STATE_WIDTH]>().prop_map(Self::Permute),
+                (any::<Word>(), any::<Word>(), any::<Felt>(), any::<Word>())
+                    .prop_map(Self::HashControlBlock),
+                (any::<MastForestId>(), any::<MastNodeId>(), any::<Word>())
                     .prop_map(Self::HashBasicBlock),
-                (arb_word(), arb_merkle_path(), arb_felt()).prop_map(Self::BuildMerkleRoot),
-                (arb_word(), arb_word(), arb_merkle_path(), arb_felt())
+                (any::<Word>(), arb_merkle_path(), any::<Felt>()).prop_map(Self::BuildMerkleRoot),
+                (any::<Word>(), any::<Word>(), arb_merkle_path(), any::<Felt>())
                     .prop_map(Self::UpdateMerkleRoot),
             ]
             .boxed()
@@ -2230,8 +2217,8 @@ mod arbitrary {
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
             (
-                arb_vec_deque((arb_felt(), arb_felt())),
-                arb_vec_deque((MIN_STACK_DEPTH..=MIN_STACK_DEPTH + 64, arb_felt())),
+                arb_vec_deque((any::<Felt>(), any::<Felt>())),
+                arb_vec_deque((MIN_STACK_DEPTH..=MIN_STACK_DEPTH + 64, any::<Felt>())),
             )
                 .prop_map(|(overflow_values, restore_context_info)| Self {
                     overflow_values,
