@@ -56,6 +56,7 @@
 - [BREAKING] Removed the stripped `MastForest` serialization mode. Normal forest bytes now describe execution data only ([#3268](https://github.com/0xMiden/miden-vm/pull/3268)).
 - [BREAKING] Bump Plonky3 related dependencies to fix NEON arithmetic bug ([#3272](https://github.com/0xMiden/miden-vm/pull/3272)).
 - [BREAKING] Bump Plonky3 and miden-crypto related dependencies ([#3275](https://github.com/0xMiden/miden-vm/pull/3275)).
+- Added trusted binary serialization for `TraceProvingInputs` and sparse MAST replay data so pre-executed trace inputs can be sent to a trusted prover ([#3284](https://github.com/0xMiden/miden-vm/pull/3284)).
 
 #### Fixes
 
