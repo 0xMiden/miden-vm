@@ -415,13 +415,22 @@ mod fast_parallel {
             execute_parallel_trace_inputs(&program, stack_inputs, advice_inputs, &mut host);
 
         let trace_inputs_bytes = trace_inputs.to_bytes();
+        let original_trace = build_trace(trace_inputs).expect("original trace inputs build trace");
         let restored_trace_inputs = TraceBuildInputs::read_from_bytes(&trace_inputs_bytes)
             .expect("trace inputs round trip");
         assert!(
             restored_trace_inputs.trace_generation_context().mast_forest_store.len() > 1,
             "expected dynamic library execution to serialize multiple MAST forests"
         );
-        let _trace = build_trace(restored_trace_inputs).expect("restored trace inputs build trace");
+        let restored_trace =
+            build_trace(restored_trace_inputs).expect("restored trace inputs build trace");
+        assert_eq!(restored_trace.stack_outputs(), original_trace.stack_outputs());
+        assert_eq!(restored_trace.program_info(), original_trace.program_info());
+        assert_eq!(restored_trace.trace_len_summary(), original_trace.trace_len_summary());
+        assert_eq!(
+            restored_trace.public_inputs().to_air_inputs(),
+            original_trace.public_inputs().to_air_inputs()
+        );
 
         let trace_inputs = TraceBuildInputs::read_from_bytes(&trace_inputs_bytes)
             .expect("trace inputs round trip");

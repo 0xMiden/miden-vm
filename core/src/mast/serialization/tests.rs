@@ -725,6 +725,37 @@ fn sparse_mast_round_trip_preserves_sparse_replay_ids() {
     assert_eq!(restored.get_digest_by_id(root), Some(source[root].digest()));
 }
 
+#[test]
+fn sparse_mast_round_trip_preserves_external_full_node() {
+    let mut forest = MastForest::new();
+    let unvisited = BasicBlockNodeBuilder::new(vec![Operation::Add])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_digest = Word::new([
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
+        Felt::new_unchecked(19),
+        Felt::new_unchecked(20),
+    ]);
+    let external = ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
+    forest.make_root(external);
+
+    let forest = Arc::new(forest);
+    let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+    builder.record_visit(external, VisitKind::FullVisit);
+    let sparse = builder.finalize();
+
+    let restored = SparseMastForest::read_from_bytes(&sparse.to_bytes()).unwrap();
+
+    assert_eq!(restored.num_nodes(), forest.num_nodes() as usize);
+    assert_eq!(restored.procedure_roots(), &[external]);
+    assert_eq!(restored.commitment(), forest.commitment());
+    assert_eq!(restored.get_node_by_id(external).unwrap().digest(), external_digest);
+    assert_eq!(restored.get_digest_by_id(external), Some(external_digest));
+    assert!(restored.get_node_by_id(unvisited).is_none());
+    assert_eq!(restored.get_digest_by_id(unvisited), None);
+}
+
 fn write_sparse_test_payload(
     source_node_count: usize,
     roots: &[MastNodeId],
