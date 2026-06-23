@@ -1514,6 +1514,10 @@ impl Deserializable for ExecutionContextSystemInfo {
             parent_fn_hash: Word::read_from(source)?,
         })
     }
+
+    fn min_serialized_size() -> usize {
+        ContextId::min_serialized_size() + Word::min_serialized_size()
+    }
 }
 
 impl Serializable for ExecutionContextReplay {
@@ -1812,6 +1816,13 @@ impl Deserializable for HasherOp {
                 "invalid hasher replay op tag {tag}"
             ))),
         }
+    }
+
+    fn min_serialized_size() -> usize {
+        u8::min_serialized_size()
+            + (MastForestId::min_serialized_size()
+                + MastNodeId::min_serialized_size()
+                + Word::min_serialized_size())
     }
 }
 
