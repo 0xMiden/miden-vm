@@ -294,7 +294,7 @@ proc get_multi_leaf_value
     # => [ptr_end, K, R]
 
     locaddr.0
-    # drop ptr_end, then arrange [K, start_ptr, end_ptr].
+    # arrange [K, start_ptr, end_ptr].
     drop movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
