@@ -290,7 +290,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation,
         processor: &ReplayProcessor,
     ) -> Option<bool> {
-        if let Continuation::FinishLoop { .. } = &continuation {
+        if let Continuation::FinishLoop { was_entered, .. } = &continuation {
+            if !was_entered {
+                return Some(false);
+            }
+
             let condition = processor.stack.get(0);
             return Some(condition == ONE);
         }
