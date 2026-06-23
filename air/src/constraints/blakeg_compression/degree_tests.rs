@@ -8,11 +8,10 @@ use miden_crypto::stark::air::{
 };
 use miden_crypto::stark::matrix::RowMajorMatrix;
 
+use super::layout::{FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL};
+use super::local_checks;
+use super::views::{ACRow, BDRow};
 use super::{NUM_BLAKEG_COMPRESSION_COLS, periodic, selectors::Selectors};
-use super::{
-    local_checks,
-    views::{ACRow, BDRow, FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL},
-};
 use crate::Felt;
 
 type Sym = SymbolicAirBuilder<Felt, QuadFelt>;

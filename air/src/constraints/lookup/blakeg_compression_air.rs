@@ -8,8 +8,9 @@ use super::messages::{
 };
 use crate::{
     constraints::blakeg_compression::{
-        AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, BlakeGCompressionCols, IFACE_C_BASE_COL,
-        IFACE_D_BASE_COL, IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, periodic::*,
+        AC_A_BASE_COL, AC_B_BASE_COL, AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, BYTE_SLOT_WIDTH,
+        BYTES_PER_WORD, BlakeGCompressionCols, IFACE_C_BASE_COL, IFACE_D_BASE_COL,
+        IFACE_MULTIPLICITY_COL, IFACE_R_BASE_COL, periodic::*,
     },
     lookup::{Deg, LookupBuilder, LookupColumn, LookupGroup, LookupMessage},
 };
@@ -24,9 +25,6 @@ pub(crate) trait BlakeGCompressionLookupBuilder: LookupBuilder<F = Felt> {}
 pub(crate) const BLAKEG_COMPRESSION_COLUMN_SHAPE: [usize; 12] =
     [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1];
 
-const BYTE_SLOT_WIDTH: usize = 3;
-const AC_A_BASE_COL: usize = 60;
-const AC_B_BASE_COL: usize = 64;
 const NARROW_BATCH_COLUMNS: usize = 10;
 const LAST_NARROW_BATCH_COLUMN: usize = NARROW_BATCH_COLUMNS - 1;
 const NARROW_SLOT_PAIR_OFFSET: usize = NARROW_BATCH_COLUMNS;
@@ -48,8 +46,6 @@ const FOOTER_OUTPUT_ODD_SLOT_BASE: usize = 12;
 const COMPACT_PAIR_BASE_COL: usize = AC_A_BASE_COL;
 const COMPACT_M0_PAIR_INDEX_BASE: usize = 6;
 const COMPACT_M1_PAIR_INDEX_BASE: usize = 14;
-const WORD_BYTE_COUNT: usize = 4;
-
 const ACTIVITY_COMMON_BYTE: usize = 0;
 const ACTIVITY_M0_BYTE: usize = 1;
 const ACTIVITY_M0_ROUTE_OR_FIRST_B_HIN: usize = 2;
@@ -444,8 +440,8 @@ fn add_byte_slot_buses<LB, G>(
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     add_bus(encoded, group, BusId::And8Lookup, selectors.byte_lookup_rows.clone());
-    add_bus(encoded, group, blakeg_rot12_bus(slot % WORD_BYTE_COUNT), selectors.is_b.clone());
-    add_bus(encoded, group, blakeg_rot7_bus(slot % WORD_BYTE_COUNT), selectors.is_d.clone());
+    add_bus(encoded, group, blakeg_rot12_bus(slot % BYTES_PER_WORD), selectors.is_b.clone());
+    add_bus(encoded, group, blakeg_rot7_bus(slot % BYTES_PER_WORD), selectors.is_d.clone());
 }
 
 fn selected_slot_encoding<LB, G>(
@@ -500,7 +496,7 @@ where
         _ => unreachable_narrow_slot(slot),
     }
 
-    // Inactive slots use a fixed RangeCheck dummy denominator. This keeps every
+    // Inactive slots use a fixed RangeCheck fallback denominator. This keeps every
     // batch denominator nonzero without selecting trace payloads by row type.
     let active = selected_slot_activity::<LB>(slot, selectors);
     add_bus(&mut encoded, group, BusId::RangeCheck, LB::Expr::ONE - active);

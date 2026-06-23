@@ -18,8 +18,9 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
+use super::layout::NUM_G;
 use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow, NUM_G};
+use super::views::{ACRow, BDRow, FooterRow};
 
 /// D -> next-A remap for both half-round boundaries.
 pub fn enforce_d_to_next_a<AB>(

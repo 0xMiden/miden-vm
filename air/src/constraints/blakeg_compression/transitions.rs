@@ -12,8 +12,9 @@
 use miden_core::Felt;
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
+use super::layout::NUM_G;
 use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, NUM_G};
+use super::views::{ACRow, BDRow};
 
 /// Helper: `2^32` as an `AB::Expr`.
 #[inline]

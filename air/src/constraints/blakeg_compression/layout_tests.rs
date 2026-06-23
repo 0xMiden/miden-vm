@@ -1,3 +1,4 @@
+use super::layout::{FOOTER_FUTURE_W_COLS, MSG_M0_LOCAL_RANGE_COUNT, MSG_M1_LOCAL_RANGE_COUNT};
 use super::*;
 
 fn mark_once(used: &mut [bool; NUM_BLAKEG_COMPRESSION_COLS], col: usize) {

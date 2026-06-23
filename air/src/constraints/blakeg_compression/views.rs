@@ -10,54 +10,30 @@
 //! `AB::Expr` constructed from a single `.clone().into()` of the underlying
 //! variable.
 //!
-//! Constants for slot offsets and small packing helpers live below. Computed
-//! expressions, such as `xor1[j] = d[j] + a_new[j] - 2*and1[j]`, are exposed
-//! as methods so they are written exactly once and reused across constraints.
+//! Physical column positions live in `layout.rs`. Computed expressions, such
+//! as `xor1[j] = d[j] + a_new[j] - 2*and1[j]`, are exposed as methods so they
+//! are written once and reused across constraints.
 
 use core::marker::PhantomData;
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{
-    FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL, FOOTER_OUT_MASKED_TOP_BIT_COL,
-    FOOTER_OUT_ODD_TOP_BYTE_COL,
+use super::layout::{
+    AC_A_BASE_COL, AC_B_BASE_COL, AC_C_BASE_COL, AC_K3_BIT0_BASE_COL, AC_K3_BIT1_BASE_COL,
+    AC_MSG_SLOT_BASE_COL, BD_A_BASE_COL, BD_D_BASE_COL, BD_K2_BASE_COL, BYTE_SLOT_WIDTH,
+    BYTES_PER_WORD, FIRST_B_HIN_PAIR2_BASE_COL, FIRST_B_HIN_PAIR3_BASE_COL, FOOTER_C_BASE_COL,
+    FOOTER_D_BASE_COL, FOOTER_H_CANON_INV_COL, FOOTER_H_CANON_Z_COL, FOOTER_H_EVEN_WORD_COL,
+    FOOTER_H_ODD_WORD_COL, FOOTER_OUT_MASKED_TOP_BIT_COL, FOOTER_OUT_ODD_TOP_BYTE_COL,
+    FOOTER_ROW_INDEX_COL, NUM_G, byte_slot_base, footer_future_w_col,
 };
 
 // ===================================================================
-// Layout constants
+// Footer constants
 // ===================================================================
-
-/// Number of parallel G functions per row.
-pub const NUM_G: usize = 4;
-
-/// Bytes per BlakeG word.
-pub const BYTES_PER_WORD: usize = 4;
-
-const BYTE_SLOT_WIDTH: usize = 3;
-const BYTE_SLOTS_PER_ROW: usize = 16;
 
 // Multiplicative inverse of 128 in the base field.
 const FOOTER_TOP_BIT_MASK_INV: Felt = Felt::new_unchecked(18302628881372282881);
-
-const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
-const AC_A_BASE_COL: usize = 60;
-const AC_B_BASE_COL: usize = 64;
-const AC_C_BASE_COL: usize = 68;
-
-const BD_A_BASE_COL: usize = 64;
-const BD_D_BASE_COL: usize = 68;
-const BD_K2_BASE_COL: usize = 72;
-
-pub(super) const FIRST_B_HIN_PAIR2_BASE_COL: usize = BYTE_SLOT_WIDTH * 16;
-pub(super) const FIRST_B_HIN_PAIR3_BASE_COL: usize = BYTE_SLOT_WIDTH * 17;
-
-#[inline]
-fn byte_slot_base(g: usize, j: usize) -> usize {
-    debug_assert!(g < NUM_G);
-    debug_assert!(j < BYTES_PER_WORD);
-    BYTE_SLOT_WIDTH * (g * BYTES_PER_WORD + j)
-}
 
 // ===================================================================
 // Small packing helpers
@@ -143,13 +119,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
     /// Low bit of the ternary carry decomposition `k3 = bit0 + 2*bit1`.
     pub fn k3_bit0(&self, g: usize) -> AB::Expr {
         debug_assert!(g < NUM_G);
-        self.col(super::AC_K3_BIT0_BASE_COL + g)
+        self.col(AC_K3_BIT0_BASE_COL + g)
     }
 
     /// High bit of the ternary carry decomposition `k3 = bit0 + 2*bit1`.
     pub fn k3_bit1(&self, g: usize) -> AB::Expr {
         debug_assert!(g < NUM_G);
-        self.col(super::AC_K3_BIT1_BASE_COL + g)
+        self.col(AC_K3_BIT1_BASE_COL + g)
     }
 
     /// `j`-th byte of `d` (LE).
@@ -368,34 +344,34 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     /// Input-chaining-value accumulator slot `C[t]` for `t = 0..3`.
     pub fn c(&self, t: usize) -> AB::Expr {
         debug_assert!(t < 4);
-        self.col(super::FOOTER_C_BASE_COL + t)
+        self.col(FOOTER_C_BASE_COL + t)
     }
 
     /// Output-digest accumulator slot `D[t]` for `t = 0..3`.
     pub fn d(&self, t: usize) -> AB::Expr {
         debug_assert!(t < 4);
-        self.col(super::FOOTER_D_BASE_COL + t)
+        self.col(FOOTER_D_BASE_COL + t)
     }
 
     /// Queued future W word. On F_t this stores words needed by later footer rows.
     pub fn future_w(&self, idx: usize) -> AB::Expr {
         debug_assert!(idx < 12);
-        self.col(super::footer_future_w_col(idx))
+        self.col(footer_future_w_col(idx))
     }
 
     /// Footer-row index field used by the HIN-pair slot.
     pub fn row_index(&self) -> AB::Expr {
-        self.col(super::FOOTER_ROW_INDEX_COL)
+        self.col(FOOTER_ROW_INDEX_COL)
     }
 
     /// Stored even H word, bound to the row's `H_even` bytes.
     pub fn stored_h_even_word(&self) -> AB::Expr {
-        self.col(super::FOOTER_H_EVEN_WORD_COL)
+        self.col(FOOTER_H_EVEN_WORD_COL)
     }
 
     /// Stored odd H word, bound to the row's `H_odd` bytes.
     pub fn stored_h_odd_word(&self) -> AB::Expr {
-        self.col(super::FOOTER_H_ODD_WORD_COL)
+        self.col(FOOTER_H_ODD_WORD_COL)
     }
 
     /// `j`-th byte of `H_even` (= `h[2t]`) used by the row's XOR derivation.

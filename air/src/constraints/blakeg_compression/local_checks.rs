@@ -7,8 +7,9 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
+use super::layout::NUM_G;
 use super::selectors::Selectors;
-use super::views::{ACRow, BDRow, FooterRow, NUM_G};
+use super::views::{ACRow, BDRow, FooterRow};
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL, FOOTER_SPARE_COL,
 };

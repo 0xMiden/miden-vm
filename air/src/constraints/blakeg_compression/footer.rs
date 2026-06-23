@@ -21,8 +21,9 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
+use super::layout::BYTES_PER_WORD;
 use super::selectors::Selectors;
-use super::views::{BYTES_PER_WORD, FooterRow};
+use super::views::FooterRow;
 use super::{
     AEAD_XOF_CLK_COL, AEAD_XOF_MODE_COL, FOOTER_C_BASE_COL, FOOTER_D_BASE_COL,
     FOOTER_H_CANON_SPARE_COL, FOOTER_OUT_TOP_MASK_COL, FOOTER_TOP_BIT_MASK, MSG_C_BASE_COL,

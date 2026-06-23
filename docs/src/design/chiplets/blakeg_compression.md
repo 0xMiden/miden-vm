@@ -899,6 +899,8 @@ plus two one-fraction annex columns.
 - `air/src/constraints/lookup/messages.rs`: message payloads and `BusId`
   encodings.
 - `air/src/constraints/lookup/and8_lookup_air.rs`: byte-pair table side.
+- `air/src/constraints/blakeg_compression/layout.rs`: physical column layout
+  constants and column-index helpers.
 - `air/src/constraints/blakeg_compression/`: local BlakeG row constraints.
 - `processor/src/trace/chiplets/hasher/blakeg_trace.rs`: compression trace
   generation.
