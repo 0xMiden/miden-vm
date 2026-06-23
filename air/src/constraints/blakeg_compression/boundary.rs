@@ -36,13 +36,13 @@ pub fn enforce_d_to_next_a<AB>(
 
     for g in 0..NUM_G {
         let builder = &mut builder.when(gate.clone());
-        let b_rot7 = d_local.b_new_from_contributions(g);
-        let c_new = d_local.c_new_word(g);
+        let b_rot7 = d_local.rotated_b_xor_c_new_word(g);
+        let c_new = d_local.packed_c_new_bytes(g);
 
         let next_b = is_col.clone() * a_next.b((g + 3) % NUM_G)
             + is_diag.clone() * a_next.b((g + 1) % NUM_G);
-        let next_d = is_col.clone() * a_next.d_word((g + 1) % NUM_G)
-            + is_diag.clone() * a_next.d_word((g + 3) % NUM_G);
+        let next_d = is_col.clone() * a_next.packed_d_bytes((g + 1) % NUM_G)
+            + is_diag.clone() * a_next.packed_d_bytes((g + 3) % NUM_G);
 
         // a[g] -> a[g]
         builder.assert_zero(d_local.a(g) - a_next.a(g));
@@ -69,8 +69,8 @@ pub fn enforce_last_d_to_f0<AB>(
 {
     let gate = sel.gate_last_d();
     let f0 = FooterRow::<AB>::new(f0_next);
-    let b_words: [AB::Expr; NUM_G] = core::array::from_fn(|g| d_local.b_new_from_contributions(g));
-    let c_words: [AB::Expr; NUM_G] = core::array::from_fn(|g| d_local.c_new_word(g));
+    let b_words: [AB::Expr; NUM_G] = core::array::from_fn(|g| d_local.rotated_b_xor_c_new_word(g));
+    let c_words: [AB::Expr; NUM_G] = core::array::from_fn(|g| d_local.packed_c_new_bytes(g));
 
     // The final D row is diagonal. Undo the diagonal lane placement so F0 sees
     // the canonical W[0..15] order.
@@ -80,15 +80,15 @@ pub fn enforce_last_d_to_f0<AB>(
             4..=7 => b_words[(idx - 1) % NUM_G].clone(),
             8..=11 => c_words[(idx - 6) % NUM_G].clone(),
             12..=15 => d_local.d((idx - 11) % NUM_G),
-            _ => unreachable!("BlakeG W index must be in 0..16"),
+            _ => unreachable!("BlakeG W index must be in 0..=15"),
         }
     };
 
     let builder = &mut builder.when(gate);
-    builder.assert_zero(f0.vlo_even_word() - final_w(0));
-    builder.assert_zero(f0.vlo_odd_word() - final_w(1));
-    builder.assert_zero(f0.vhi_even_word() - final_w(8));
-    builder.assert_zero(f0.vhi_odd_word() - final_w(9));
+    builder.assert_zero(f0.packed_vlo_even_bytes() - final_w(0));
+    builder.assert_zero(f0.packed_vlo_odd_bytes() - final_w(1));
+    builder.assert_zero(f0.packed_vhi_even_bytes() - final_w(8));
+    builder.assert_zero(f0.packed_vhi_odd_bytes() - final_w(9));
 
     // F0 consumes W0,W1,W8,W9 locally; the queue carries the remaining words
     // in the order consumed by F1, F2, and F3.

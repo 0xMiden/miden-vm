@@ -37,7 +37,7 @@ pub const BYTES_PER_WORD: usize = 4;
 const BYTE_SLOT_WIDTH: usize = 3;
 const BYTE_SLOTS_PER_ROW: usize = 16;
 
-// Inverse of the footer top-bit mask, 128.
+// Multiplicative inverse of 128 in the base field.
 const FOOTER_TOP_BIT_MASK_INV: Felt = Felt::new_unchecked(18302628881372282881);
 
 const AC_MSG_SLOT_BASE_COL: usize = BYTE_SLOT_WIDTH * BYTE_SLOTS_PER_ROW;
@@ -86,8 +86,8 @@ pub(super) fn pack4_bytes<AB: LiftedAirBuilder<F = Felt>>(
 /// View of a row whose locals are `add3 + xor + rot` (A or C row).
 ///
 /// A rows use rotation-by-16; C rows use rotation-by-8. The slot layout is
-/// identical between A and C; the rotation choice drives only which method
-/// the consumer calls (`d_new_rot16` vs `d_new_rot8`).
+/// identical between A and C; the rotation choice drives only which computed
+/// expression the consumer calls.
 pub struct ACRow<'a, AB: LiftedAirBuilder<F = Felt>> {
     cols: &'a [AB::Var],
     _phantom: PhantomData<AB>,
@@ -170,15 +170,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
 
     // --- computed expressions --------------------------------------------
 
-    /// `a_new_word = a + b + msg - 2^32 * k3`.
-    /// The expected output of A's add3 step (modulo 2^32, with `k3` carrying
-    /// the spillover).
-    pub fn a_new_word(&self, g: usize) -> AB::Expr {
+    /// Result of the add3 step: `a + b + msg - 2^32 * k3`.
+    pub fn add3_result_word(&self, g: usize) -> AB::Expr {
         self.a(g) + self.b(g) + self.msg(g) - felt::<AB>(1u64 << 32) * self.k3(g)
     }
 
-    /// `pack(a_new_byte[0..4])` (LE).
-    pub fn a_new_byte_word(&self, g: usize) -> AB::Expr {
+    /// Little-endian packing of the four `a_new_byte` values.
+    pub fn packed_a_new_bytes(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
             self.a_new_byte(g, 0),
             self.a_new_byte(g, 1),
@@ -187,8 +185,8 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
         )
     }
 
-    /// `d_word = pack(d_byte[0..4])` (LE).
-    pub fn d_word(&self, g: usize) -> AB::Expr {
+    /// Little-endian packing of the four `d_byte` values.
+    pub fn packed_d_bytes(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
             self.d_byte(g, 0),
             self.d_byte(g, 1),
@@ -201,30 +199,30 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> ACRow<'a, AB> {
     /// `xor1[j] = d[j] + a_new[j] - 2 * and1[j]`.
     ///
     /// The AND8 lookup binds `and1[j] = d_byte[j] & a_new_byte[j]`.
-    pub fn xor1_byte(&self, g: usize, j: usize) -> AB::Expr {
+    pub fn d_xor_a_new_byte(&self, g: usize, j: usize) -> AB::Expr {
         debug_assert!(j < BYTES_PER_WORD);
         self.d_byte(g, j) + self.a_new_byte(g, j) - self.and1(g, j) - self.and1(g, j)
     }
 
     /// `d_new` after rot16 (used on A rows): packed bytes
     /// `(xor1[2], xor1[3], xor1[0], xor1[1])`.
-    pub fn d_new_rot16(&self, g: usize) -> AB::Expr {
+    pub fn rot16_d_xor_a_new_word(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
-            self.xor1_byte(g, 2),
-            self.xor1_byte(g, 3),
-            self.xor1_byte(g, 0),
-            self.xor1_byte(g, 1),
+            self.d_xor_a_new_byte(g, 2),
+            self.d_xor_a_new_byte(g, 3),
+            self.d_xor_a_new_byte(g, 0),
+            self.d_xor_a_new_byte(g, 1),
         )
     }
 
     /// `d_new` after rot8 (used on C rows): packed bytes
     /// `(xor1[1], xor1[2], xor1[3], xor1[0])`.
-    pub fn d_new_rot8(&self, g: usize) -> AB::Expr {
+    pub fn rot8_d_xor_a_new_word(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
-            self.xor1_byte(g, 1),
-            self.xor1_byte(g, 2),
-            self.xor1_byte(g, 3),
-            self.xor1_byte(g, 0),
+            self.d_xor_a_new_byte(g, 1),
+            self.d_xor_a_new_byte(g, 2),
+            self.d_xor_a_new_byte(g, 3),
+            self.d_xor_a_new_byte(g, 0),
         )
     }
 }
@@ -290,8 +288,8 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
 
     // --- computed expressions --------------------------------------------
 
-    /// `b_word = pack(b_byte[0..4])`.
-    pub fn b_word(&self, g: usize) -> AB::Expr {
+    /// Little-endian packing of the four `b_byte` values.
+    pub fn packed_b_bytes(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
             self.b_byte(g, 0),
             self.b_byte(g, 1),
@@ -300,8 +298,8 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
         )
     }
 
-    /// `c_new_word = pack(c_new_byte[0..4])`.
-    pub fn c_new_word(&self, g: usize) -> AB::Expr {
+    /// Little-endian packing of the four `c_new_byte` values.
+    pub fn packed_c_new_bytes(&self, g: usize) -> AB::Expr {
         pack4_bytes::<AB>(
             self.c_new_byte(g, 0),
             self.c_new_byte(g, 1),
@@ -329,7 +327,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> BDRow<'a, AB> {
     ///
     /// The row view only sums byte contributions. The lookup bus fixes whether
     /// those contributions are rot12 (B rows) or rot7 (D rows).
-    pub fn b_new_from_contributions(&self, g: usize) -> AB::Expr {
+    pub fn rotated_b_xor_c_new_word(&self, g: usize) -> AB::Expr {
         (0..BYTES_PER_WORD).fold(AB::Expr::ZERO, |acc, j| acc + self.rot_contribution(g, j))
     }
 }
@@ -347,7 +345,7 @@ fn first_b_hin_pair_base(pair_idx: usize) -> usize {
 // Footer row view (F0..F3)
 // ===================================================================
 
-/// View of a footer row F_t (`t` in `0..4`).
+/// View of a footer row `F_t` for `t = 0..3`.
 ///
 /// Footer rows use the fixed byte-slot bank. Output bytes are computed from the
 /// `v_lo`, `v_hi`, and AND-witness fields; they are not stored as a separate
@@ -367,13 +365,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         Into::<AB::Expr>::into(self.cols[idx].clone())
     }
 
-    /// Input-chaining-value accumulator slot `C[t]` (`t in 0..4`).
+    /// Input-chaining-value accumulator slot `C[t]` for `t = 0..3`.
     pub fn c(&self, t: usize) -> AB::Expr {
         debug_assert!(t < 4);
         self.col(super::FOOTER_C_BASE_COL + t)
     }
 
-    /// Output-digest accumulator slot `D[t]` (`t in 0..4`).
+    /// Output-digest accumulator slot `D[t]` for `t = 0..3`.
     pub fn d(&self, t: usize) -> AB::Expr {
         debug_assert!(t < 4);
         self.col(super::FOOTER_D_BASE_COL + t)
@@ -391,12 +389,12 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// Stored even H word, bound to the row's `H_even` bytes.
-    pub fn h_even_word_field(&self) -> AB::Expr {
+    pub fn stored_h_even_word(&self) -> AB::Expr {
         self.col(super::FOOTER_H_EVEN_WORD_COL)
     }
 
     /// Stored odd H word, bound to the row's `H_odd` bytes.
-    pub fn h_odd_word_field(&self) -> AB::Expr {
+    pub fn stored_h_odd_word(&self) -> AB::Expr {
         self.col(super::FOOTER_H_ODD_WORD_COL)
     }
 
@@ -448,13 +446,13 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
         self.col(3 * (12 + j) + 1)
     }
 
-    /// `j`-th byte of `Out_even` (= `h'[2t]`), computed from the output slot.
+    /// `j`-th byte of `Out_even` (= `y[2t]`), computed from the output slot.
     pub fn out_even_byte(&self, j: usize) -> AB::Expr {
         debug_assert!(j < BYTES_PER_WORD);
         self.vlo_even_byte(j) + self.vhi_even_output_byte(j) - felt::<AB>(2) * self.a1_even(j)
     }
 
-    /// `j`-th byte of `Out_odd` (= `h'[2t+1]`), computed from the output slot.
+    /// `j`-th byte of `Out_odd` (= `y[2t + 1]`), computed from the output slot.
     pub fn out_odd_byte(&self, j: usize) -> AB::Expr {
         debug_assert!(j < BYTES_PER_WORD);
         self.vlo_odd_byte(j) + self.vhi_odd_output_byte(j) - felt::<AB>(2) * self.a1_odd(j)
@@ -495,15 +493,15 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// Top bit of `Out_odd[3]`. Constrained Boolean and bound to the actual
-    /// top bit by the footer mask lookup.
-    pub fn mask_bit(&self) -> AB::Expr {
+    /// top bit by the footer top-bit lookup.
+    pub fn out_odd_top_bit_flag(&self) -> AB::Expr {
         self.masked_top_bit() * AB::Expr::from(FOOTER_TOP_BIT_MASK_INV)
     }
 
     // --- computed expressions --------------------------------------------
 
     /// `Vlo_even` packed into a u32 word.
-    pub fn vlo_even_word(&self) -> AB::Expr {
+    pub fn packed_vlo_even_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.vlo_even_byte(0),
             self.vlo_even_byte(1),
@@ -513,7 +511,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `Vlo_odd` packed into a u32 word.
-    pub fn vlo_odd_word(&self) -> AB::Expr {
+    pub fn packed_vlo_odd_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.vlo_odd_byte(0),
             self.vlo_odd_byte(1),
@@ -523,7 +521,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `Vhi_even` packed into a u32 word.
-    pub fn vhi_even_word(&self) -> AB::Expr {
+    pub fn packed_vhi_even_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.vhi_even_byte(0),
             self.vhi_even_byte(1),
@@ -533,7 +531,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `Vhi_odd` packed into a u32 word.
-    pub fn vhi_odd_word(&self) -> AB::Expr {
+    pub fn packed_vhi_odd_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.vhi_odd_byte(0),
             self.vhi_odd_byte(1),
@@ -543,7 +541,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `H_even` packed into a u32 word (raw, no top-bit mask).
-    pub fn h_even_word(&self) -> AB::Expr {
+    pub fn packed_h_even_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.h_even_byte(0),
             self.h_even_byte(1),
@@ -553,7 +551,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `H_odd` packed into a u32 word (raw, no top-bit mask).
-    pub fn h_odd_word(&self) -> AB::Expr {
+    pub fn packed_h_odd_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.h_odd_byte(0),
             self.h_odd_byte(1),
@@ -563,7 +561,7 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `Out_even` packed into a u32 word.
-    pub fn out_even_word(&self) -> AB::Expr {
+    pub fn packed_out_even_bytes(&self) -> AB::Expr {
         pack4_bytes::<AB>(
             self.out_even_byte(0),
             self.out_even_byte(1),
@@ -573,8 +571,8 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
     }
 
     /// `Out_odd` packed into a u32 word, with the top bit stripped into the
-    /// `mask_bit` witness.
-    pub fn out_odd_masked_word(&self) -> AB::Expr {
+    /// `out_odd_top_bit_flag` witness.
+    pub fn packed_masked_out_odd_bytes(&self) -> AB::Expr {
         let masked_msb = self.out_odd_byte(3) - self.masked_top_bit();
         pack4_bytes::<AB>(
             self.out_odd_byte(0),
@@ -586,14 +584,14 @@ impl<'a, AB: LiftedAirBuilder<F = Felt>> FooterRow<'a, AB> {
 
     /// Felt-level packing of `H_even || H_odd` for the row's `C[t]` definition.
     /// `C[t] = H_even_word + 2^32 * H_odd_word`.
-    pub fn c_value_from_h(&self) -> AB::Expr {
-        self.h_even_word_field() + self.h_odd_word_field() * felt::<AB>(1u64 << 32)
+    pub fn packed_c_from_stored_h_words(&self) -> AB::Expr {
+        self.stored_h_even_word() + self.stored_h_odd_word() * felt::<AB>(1u64 << 32)
     }
 
     /// Felt-level packing of `Out_even || Out_odd_masked` for `D[t]`.
     /// `D[t] = Out_even_word + 2^32 * Out_odd_masked_word`.
-    pub fn d_value_from_out(&self) -> AB::Expr {
-        self.out_even_word() + self.out_odd_masked_word() * felt::<AB>(1u64 << 32)
+    pub fn packed_d_from_output_bytes(&self) -> AB::Expr {
+        self.packed_out_even_bytes() + self.packed_masked_out_odd_bytes() * felt::<AB>(1u64 << 32)
     }
 }
 

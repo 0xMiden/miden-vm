@@ -82,9 +82,9 @@ impl<AB: LiftedAirBuilder<F = Felt>> Selectors<AB> {
         self.read(periodic::P_IS_FOOTER)
     }
 
-    /// 1 on `F_t` only (`t` in `0..4`).
+    /// 1 on `F_t` only, for `t = 0..3`.
     pub fn is_f(&self, t: usize) -> AB::Expr {
-        debug_assert!(t < 4, "footer index must be in 0..4");
+        debug_assert!(t < 4, "footer index must be in 0..=3");
         let id = match t {
             0 => periodic::P_IS_F0,
             1 => periodic::P_IS_F1,
@@ -118,7 +118,7 @@ impl<AB: LiftedAirBuilder<F = Felt>> Selectors<AB> {
 
     /// Expected BlakeG message-word index for lane `g` on A/C rows.
     pub fn sigma_msg_index(&self, g: usize) -> AB::Expr {
-        debug_assert!(g < 4, "G lane index must be in 0..4");
+        debug_assert!(g < 4, "G lane index must be in 0..=3");
         let idx = match g {
             0 => periodic::P_SIGMA_MSG_0,
             1 => periodic::P_SIGMA_MSG_1,

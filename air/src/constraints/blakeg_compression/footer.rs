@@ -9,12 +9,13 @@
 //! - progressive C/D accumulators;
 //! - HIN-pair fields and AEAD-XOF labels.
 //!
-//! On `F_t`, the per-row witnesses correspond to lane `t`. `C[t]` and `D[t]`
-//! are *defined* on `F_t` (from the H bytes and Out bytes respectively). The
-//! other slots of `C` / `D` are either copied forward from the previous footer
-//! row or constrained to zero (see `local_checks::enforce_footer_accumulator_zero_init`).
+//! On `F_t`, the per-row witnesses correspond to output lanes `2t` and
+//! `2t + 1`. `C[t]` and `D[t]` are *defined* on `F_t` from the H bytes and
+//! output bytes respectively. The other slots of `C` / `D` are either copied
+//! forward from the previous footer row or constrained to zero (see
+//! `local_checks::enforce_footer_accumulator_zero_init`).
 //!
-//! Row F3 is the last footer row; its `C[0..4]` and `D[0..4]` are forwarded
+//! Row F3 is the last footer row; its `C[0..3]` and `D[0..3]` are forwarded
 //! into M0, then through M1 into interface row I.
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
@@ -46,10 +47,10 @@ pub fn enforce_footer_w_continuity<AB>(
     let next_footer = FooterRow::<AB>::new(next);
     let gates = [sel.is_f(0), sel.is_f(1), sel.is_f(2)];
     let next_current = [
-        next_footer.vlo_even_word(),
-        next_footer.vlo_odd_word(),
-        next_footer.vhi_even_word(),
-        next_footer.vhi_odd_word(),
+        next_footer.packed_vlo_even_bytes(),
+        next_footer.packed_vlo_odd_bytes(),
+        next_footer.packed_vhi_even_bytes(),
+        next_footer.packed_vhi_odd_bytes(),
     ];
 
     for (footer_row, gate) in gates.iter().enumerate() {
@@ -58,7 +59,7 @@ pub fn enforce_footer_w_continuity<AB>(
             builder.assert_zero(word.clone() - local_footer.future_w(idx));
         }
 
-        let remaining = 8usize.saturating_sub(4 * footer_row);
+        let remaining = 8 - 4 * footer_row;
         for idx in 0..remaining {
             builder.assert_zero(next_footer.future_w(idx) - local_footer.future_w(4 + idx));
         }
@@ -145,8 +146,8 @@ pub fn enforce_footer_vlo_vhi_decomposition<AB>(
             Into::<AB::Expr>::into(local[FOOTER_OUT_TOP_MASK_COL].clone()) - top_bit_mask,
         );
         builder.assert_zero(Into::<AB::Expr>::into(local[FOOTER_H_CANON_SPARE_COL].clone()));
-        builder.assert_zero(footer_local.h_even_word_field() - footer_local.h_even_word());
-        builder.assert_zero(footer_local.h_odd_word_field() - footer_local.h_odd_word());
+        builder.assert_zero(footer_local.stored_h_even_word() - footer_local.packed_h_even_bytes());
+        builder.assert_zero(footer_local.stored_h_odd_word() - footer_local.packed_h_odd_bytes());
     }
 
     for t in 0..4 {
@@ -168,7 +169,7 @@ pub fn enforce_footer_c_definition<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let c_val = footer_local.c_value_from_h();
+    let c_val = footer_local.packed_c_from_stored_h_words();
     builder.when(sel.is_f(0)).assert_zero(footer_local.c(0) - c_val.clone());
     builder.when(sel.is_f(1)).assert_zero(footer_local.c(1) - c_val.clone());
     builder.when(sel.is_f(2)).assert_zero(footer_local.c(2) - c_val.clone());
@@ -188,7 +189,7 @@ pub fn enforce_footer_c_canonicality<AB>(
     AB: LiftedAirBuilder<F = Felt>,
 {
     let max_u32 = AB::Expr::from(Felt::new_unchecked((1u64 << 32) - 1));
-    let h = footer_local.h_odd_word_field() - max_u32;
+    let h = footer_local.stored_h_odd_word() - max_u32;
     let inv = footer_local.h_canon_inv();
     let z = footer_local.h_canon_z();
     let gate = sel.is_footer();
@@ -196,13 +197,14 @@ pub fn enforce_footer_c_canonicality<AB>(
     let builder = &mut builder.when(gate);
     builder.assert_zero(h.clone() * inv + z.clone() - AB::Expr::ONE);
     builder.assert_zero(z.clone() * h);
-    builder.assert_zero(z * footer_local.h_even_word_field());
+    builder.assert_zero(z * footer_local.stored_h_even_word());
 }
 
 /// `D[t] = pack(Out_even) + 2^32 * pack(Out_odd_masked)` on row `F_t`.
 ///
-/// `Out_odd_masked[3] = Out_odd[3] - mask_bit * 128`, so the top bit of `Out_odd[3]` is captured
-/// by the Boolean witness `mask_bit`. The AND-with-128 lookup binds `mask_bit` to that top bit.
+/// `Out_odd_masked[3] = Out_odd[3] - out_odd_top_bit_flag * 128`, so the top bit of
+/// `Out_odd[3]` is captured by a Boolean witness. The AND-with-128 lookup binds that witness
+/// to the actual top bit.
 pub fn enforce_footer_d_definition<AB>(
     builder: &mut AB,
     footer_local: &FooterRow<AB>,
@@ -210,7 +212,7 @@ pub fn enforce_footer_d_definition<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let d_val = footer_local.d_value_from_out();
+    let d_val = footer_local.packed_d_from_output_bytes();
     builder.when(sel.is_f(0)).assert_zero(footer_local.d(0) - d_val.clone());
     builder.when(sel.is_f(1)).assert_zero(footer_local.d(1) - d_val.clone());
     builder.when(sel.is_f(2)).assert_zero(footer_local.d(2) - d_val.clone());
@@ -219,7 +221,7 @@ pub fn enforce_footer_d_definition<AB>(
 
 /// F3 -> M0: forward the final accumulators into the first message row.
 ///
-/// On row F3, `C[0..4]` and `D[0..4]` are fully filled. The next row is M0,
+/// On row F3, `C[0..3]` and `D[0..3]` are fully filled. The next row is M0,
 /// which holds C/D in its forwarding slots at cols 70..73 and 74..77. From
 /// M0 the accumulators continue through M1 to I via `interface::enforce_m0_to_m1`
 /// and `interface::enforce_m1_to_iface_in`.

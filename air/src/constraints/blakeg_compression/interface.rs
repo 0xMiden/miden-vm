@@ -32,11 +32,11 @@ use super::{
     msg_word_col,
 };
 
-/// `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]` for `t in 0..4`.
+/// `I.C[t] = I.H[2t] + 2^32 * I.H[2t+1]` for `t = 0..3`.
 ///
-/// `I.C` is the packed (felt-level) chaining value seen by the LogUp HIN
-/// bus; `I.H` is the unpacked u32-level form used by F0..F3's per-row XOR
-/// witnesses (via the F3 -> I forwarding).
+/// `I.C` is the packed chaining value used by the external compression or
+/// AEAD input relation. `I.H` is the unpacked u32-level form used by the
+/// input-chaining relation and by F0..F3's per-row XOR witnesses.
 pub fn enforce_iface_in_c_h_consistency<AB>(
     builder: &mut AB,
     local: &[AB::Var],
@@ -143,7 +143,7 @@ pub fn enforce_m1_to_iface_in<AB>(
     }
 }
 
-/// Output mode is packed or AEAD-XOF, with a clock label only for AEAD rows.
+/// Compression mode is packed or AEAD-XOF, with a clock label only for AEAD rows.
 pub fn enforce_aead_mode_and_label_constraints<AB>(
     builder: &mut AB,
     local: &[AB::Var],
@@ -161,9 +161,9 @@ pub fn enforce_aead_mode_and_label_constraints<AB>(
 
 /// 16-bit limb reconstruction on the message rows.
 ///
-/// On M0 and M1, `m[k] = L[2k] + 2^16 * L[2k+1]` for `k in 0..8`.
-/// The 16-bit limbs are themselves range-checked via the shared VM range-bus,
-/// which enforces that each `m[*]` is a 32-bit word.
+/// On M0 and M1, `m[k] = L[2k] + 2^16 * L[2k+1]` for `k = 0..7`.
+/// The 16-bit limbs are range-checked through the shared byte-pair table,
+/// which makes each `m[*]` a 32-bit word.
 pub fn enforce_msg_row_limb_reconstruction<AB>(
     builder: &mut AB,
     local: &[AB::Var],

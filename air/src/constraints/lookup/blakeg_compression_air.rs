@@ -218,7 +218,7 @@ where
     if coeff >= 0 {
         value * E::from_u32(coeff as u32)
     } else {
-        E::ZERO - value * E::from_u32((-coeff) as u32)
+        -(value * E::from_u32((-coeff) as u32))
     }
 }
 
@@ -784,4 +784,151 @@ fn emit_annex1<LB, G>(
         || aead_blakeg_input_msg::<LB>(local),
         AEAD_XOF_INPUT,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec::Vec;
+
+    use super::*;
+
+    fn f(value: u32) -> Felt {
+        Felt::new_unchecked(value as u64)
+    }
+
+    fn neg(value: u32) -> Felt {
+        -f(value)
+    }
+
+    #[derive(Default)]
+    struct SelectorBits {
+        is_first: bool,
+        is_first_b: bool,
+        is_ac_nonfirst: bool,
+        is_b: bool,
+        is_d: bool,
+        is_footer: bool,
+        is_msg_row0: bool,
+        is_msg_row1: bool,
+        is_iface_in: bool,
+    }
+
+    fn selectors(bits: SelectorBits) -> SlotSelectors<Felt> {
+        let bit = |value: bool| if value { Felt::ONE } else { Felt::ZERO };
+        SlotSelectors::new(
+            bit(bits.is_first),
+            bit(bits.is_first_b),
+            bit(bits.is_ac_nonfirst),
+            bit(bits.is_b),
+            bit(bits.is_d),
+            bit(bits.is_footer),
+            bit(bits.is_msg_row0),
+            bit(bits.is_msg_row1),
+            bit(bits.is_iface_in),
+        )
+    }
+
+    fn slot_activity(slot: usize, selectors: &SlotSelectors<Felt>) -> Felt {
+        selectors.activity[slot_activity_group(slot).expect("valid narrow slot")]
+    }
+
+    fn slot_multiplicity(slot: usize, selectors: &SlotSelectors<Felt>) -> Felt {
+        selectors.multiplicity[slot_multiplicity_group(slot).expect("valid narrow slot")]
+    }
+
+    fn active_slots(selectors: &SlotSelectors<Felt>) -> Vec<usize> {
+        (0..NARROW_SLOT_COUNT)
+            .filter(|&slot| slot_activity(slot, selectors) != Felt::ZERO)
+            .collect()
+    }
+
+    fn nonzero_multiplicities(selectors: &SlotSelectors<Felt>) -> Vec<(usize, Felt)> {
+        (0..NARROW_SLOT_COUNT)
+            .filter_map(|slot| {
+                let multiplicity = slot_multiplicity(slot, selectors);
+                (multiplicity != Felt::ZERO).then_some((slot, multiplicity))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn lookup_column_shape_is_ten_batch2_plus_two_annex_columns() {
+        assert_eq!(BLAKEG_COMPRESSION_COLUMN_SHAPE, [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1]);
+        assert_eq!(NARROW_BATCH_COLUMNS, 10);
+        assert_eq!(NARROW_SLOT_COUNT, 20);
+        assert_eq!(NARROW_SLOT_PAIR_OFFSET, 10);
+        assert_eq!(ANNEX0_COLUMN, 10);
+        assert_eq!(ANNEX1_COLUMN, 11);
+
+        for low_slot in 0..NARROW_BATCH_COLUMNS {
+            assert!(low_slot + NARROW_SLOT_PAIR_OFFSET < NARROW_SLOT_COUNT);
+        }
+    }
+
+    #[test]
+    fn selected_slot_ledger_matches_row_pressure() {
+        let first_a = selectors(SelectorBits { is_first: true, ..Default::default() });
+        assert_eq!(active_slots(&first_a), (0..20).collect::<Vec<_>>());
+        assert_eq!(
+            nonzero_multiplicities(&first_a),
+            (0..16)
+                .map(|slot| (slot, neg(1)))
+                .chain((16..20).map(|slot| (slot, Felt::ONE)))
+                .collect::<Vec<_>>()
+        );
+
+        let first_b = selectors(SelectorBits {
+            is_first_b: true,
+            is_b: true,
+            ..Default::default()
+        });
+        assert_eq!(active_slots(&first_b), (0..18).collect::<Vec<_>>());
+        assert_eq!(
+            nonzero_multiplicities(&first_b),
+            (0..18).map(|slot| (slot, neg(1))).collect::<Vec<_>>()
+        );
+
+        let footer = selectors(SelectorBits { is_footer: true, ..Default::default() });
+        assert_eq!(
+            active_slots(&footer),
+            (0..16).chain([FOOTER_OUT_MASK_SLOT, AC_FOOTER_HIN_SLOT]).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            nonzero_multiplicities(&footer),
+            (0..16)
+                .chain([FOOTER_OUT_MASK_SLOT, AC_FOOTER_HIN_SLOT])
+                .map(|slot| (slot, neg(1)))
+                .collect::<Vec<_>>()
+        );
+
+        let msg0 = selectors(SelectorBits { is_msg_row0: true, ..Default::default() });
+        assert_eq!(active_slots(&msg0), (0..18).collect::<Vec<_>>());
+        assert_eq!(
+            nonzero_multiplicities(&msg0),
+            (0..6)
+                .map(|slot| (slot, neg(7)))
+                .chain((6..18).map(|slot| (slot, neg(1))))
+                .collect::<Vec<_>>()
+        );
+
+        let msg1 = selectors(SelectorBits { is_msg_row1: true, ..Default::default() });
+        assert_eq!(active_slots(&msg1), (0..14).collect::<Vec<_>>());
+        assert_eq!(
+            nonzero_multiplicities(&msg1),
+            (0..6)
+                .map(|slot| (slot, neg(7)))
+                .chain((6..14).map(|slot| (slot, neg(1))))
+                .collect::<Vec<_>>()
+        );
+
+        let iface = selectors(SelectorBits { is_iface_in: true, ..Default::default() });
+        assert_eq!(active_slots(&iface), (0..16).collect::<Vec<_>>());
+        assert_eq!(
+            nonzero_multiplicities(&iface),
+            (0..4)
+                .map(|slot| (slot, f(2)))
+                .chain((4..16).map(|slot| (slot, neg(1))))
+                .collect::<Vec<_>>()
+        );
+    }
 }
