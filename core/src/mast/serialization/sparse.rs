@@ -26,7 +26,10 @@ fn sparse_mast_forest_min_serialized_size() -> usize {
         + usize::min_serialized_size()
 }
 
-/// Serializes a [`SparseMastForest`] in sparse replay form.
+/// Serializes a [`SparseMastForest`] in trusted sparse replay form.
+///
+/// This format carries the digest for each full node and accepts those digests on read. It is
+/// suitable for trusted remote proving inputs, not as an untrusted hashless validation path.
 pub(super) fn write_sparse_into<W: ByteWriter>(forest: &SparseMastForest, target: &mut W) {
     let mut basic_block_data_builder = BasicBlockDataBuilder::new();
     let mut full_ids = Vec::with_capacity(forest.nodes().len());

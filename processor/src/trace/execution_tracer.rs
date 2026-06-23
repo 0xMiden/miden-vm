@@ -1218,6 +1218,7 @@ impl Default for HasherChipletShim {
 #[cfg(test)]
 mod serialization_tests {
     use super::*;
+    use crate::mast::{BasicBlockNodeBuilder, MastForestContributor};
 
     fn empty_trace_generation_context(
         fragment_size: usize,
@@ -1235,6 +1236,64 @@ mod serialization_tests {
             fragment_size,
             max_stack_depth,
         }
+    }
+
+    fn one_node_sparse_forest() -> Arc<SparseMastForest> {
+        let mut forest = MastForest::new();
+        let root = BasicBlockNodeBuilder::new(vec![Operation::Noop])
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(root);
+
+        let forest = Arc::new(forest);
+        let mut builder = SparseMastForestBuilder::new(Arc::clone(&forest));
+        builder.record_visit(root, VisitKind::FullVisit);
+        Arc::new(builder.finalize())
+    }
+
+    fn core_trace_state() -> CoreTraceState {
+        CoreTraceState {
+            system: SystemState {
+                clk: RowIndex::from(0u32),
+                ctx: ContextId::root(),
+                fn_hash: Word::default(),
+                pc_transcript_state: Word::default(),
+            },
+            decoder: DecoderState { current_addr: ZERO, parent_addr: ZERO },
+            stack: StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO),
+        }
+    }
+
+    fn valid_trace_generation_context() -> TraceGenerationContext {
+        TraceGenerationContext {
+            mast_forest_store: vec![one_node_sparse_forest()],
+            core_trace_contexts: vec![CoreTraceFragmentContext {
+                state: core_trace_state(),
+                replay: ExecutionReplay::default(),
+                continuation: ContinuationStack::default(),
+                initial_mast_forest_id: MastForestId::from(0u32),
+            }],
+            range_checker_replay: RangeCheckerReplay::default(),
+            memory_writes: MemoryWritesReplay::default(),
+            bitwise_replay: BitwiseReplay::default(),
+            hasher_for_chiplet: HasherRequestReplay::default(),
+            kernel_replay: KernelReplay::default(),
+            ace_replay: AceReplay::default(),
+            fragment_size: 1,
+            max_stack_depth: MIN_STACK_DEPTH,
+        }
+    }
+
+    fn assert_context_read_rejects_bad_forest_id(
+        context: TraceGenerationContext,
+        expected_label: &str,
+    ) {
+        let err = TraceGenerationContext::read_from_bytes(&context.to_bytes()).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected invalid forest id error");
+        };
+        assert!(message.contains(expected_label), "{message}");
+        assert!(message.contains("out of range for mast_forest_store length 1"), "{message}");
     }
 
     #[test]
@@ -1257,5 +1316,55 @@ mod serialization_tests {
             panic!("expected invalid max stack depth error");
         };
         assert!(message.contains("max_stack_depth"));
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_initial_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0].initial_mast_forest_id = MastForestId::from(1u32);
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment initial_mast_forest_id",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_continuation_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0]
+            .continuation
+            .push_enter_forest(MastForestId::from(1u32));
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment continuation EnterForest",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_resolution_replay_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.core_trace_contexts[0]
+            .replay
+            .mast_forest_resolution
+            .record_resolution(MastNodeId::from(0), MastForestId::from(1u32));
+
+        assert_context_read_rejects_bad_forest_id(
+            context,
+            "core trace fragment MastForestResolutionReplay",
+        );
+    }
+
+    #[test]
+    fn trace_generation_context_read_rejects_bad_hasher_replay_forest_id() {
+        let mut context = valid_trace_generation_context();
+        context.hasher_for_chiplet.record_hash_basic_block(
+            MastForestId::from(1u32),
+            MastNodeId::from(0),
+            Word::default(),
+        );
+
+        assert_context_read_rejects_bad_forest_id(context, "hasher HashBasicBlock replay");
     }
 }

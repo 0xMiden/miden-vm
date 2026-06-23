@@ -81,8 +81,9 @@
 //! - [`MastForestWireView::new`]: trusted wire-backed cache access; rejects hashless and legacy
 //!   debug-bearing payloads, and rejects sparse payloads.
 //! - [`crate::mast::SparseMastForest::read_from_bytes`] /
-//!   [`crate::mast::SparseMastForest::read_from_bytes_with_options`]: sparse replay payloads for
-//!   serialized trace-generation inputs.
+//!   [`crate::mast::SparseMastForest::read_from_bytes_with_options`]: trusted sparse replay
+//!   payloads for serialized trace-generation inputs. Sparse payloads currently carry full-node
+//!   digests and do not recompute them on read.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_options`]: untrusted parsing plus
 //!   later validation before use.

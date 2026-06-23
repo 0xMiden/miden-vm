@@ -1028,6 +1028,110 @@ fn sparse_serialized_parts_reject_duplicate_full_ids() {
     );
 }
 
+#[test]
+fn sparse_serialized_parts_reject_duplicate_digest_only_ids() {
+    let (_source, sparse, _true_branch, false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let digest = sparse.get_digest_by_id(false_branch).unwrap();
+    digests.push((false_branch, digest));
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("duplicate sparse digest-only id")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_full_digest_overlap() {
+    let (_source, sparse, true_branch, _false_branch, _root) = sparse_split_fixture();
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    digests.push((true_branch, sparse.get_digest_by_id(true_branch).unwrap()));
+
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+    );
+
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("overlaps a digest-only entry")
+    );
+}
+
+#[test]
+fn sparse_serialized_parts_reject_out_of_range_full_digest_and_root_ids() {
+    let (_source, sparse, true_branch, false_branch, _root) = sparse_split_fixture();
+    let out_of_range = MastNodeId::from(sparse.num_nodes() as u32);
+
+    let mut nodes: Vec<_> = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    nodes.push((out_of_range, sparse.get_node_by_id(true_branch).unwrap().clone()));
+    let digests: Vec<_> =
+        sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests.clone(),
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("full node id")
+            && msg.contains("out of range")
+    );
+
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let mut out_of_range_digests = digests;
+    out_of_range_digests.push((out_of_range, sparse.get_digest_by_id(false_branch).unwrap()));
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        out_of_range_digests,
+        sparse.num_nodes(),
+        sparse.procedure_roots().to_vec(),
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("digest-only node id")
+            && msg.contains("out of range")
+    );
+
+    let nodes = sparse.nodes().iter().map(|(&id, node)| (id, node.clone())).collect();
+    let digests = sparse.digest_entries().iter().map(|(&id, &digest)| (id, digest)).collect();
+    let result = SparseMastForest::from_serialized_parts(
+        nodes,
+        digests,
+        sparse.num_nodes(),
+        vec![out_of_range],
+        sparse.advice_map().clone(),
+        sparse.commitment(),
+    );
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("procedure root id")
+            && msg.contains("out of range")
+    );
+}
+
 /// Test that a forest with a node whose child ids are larger than its own id serializes and
 /// deserializes successfully.
 #[test]
