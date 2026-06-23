@@ -825,6 +825,7 @@ mod tests {
         vec,
         vec::Vec,
     };
+    use core::assert_matches;
     use std::collections::BTreeMap;
     #[cfg(feature = "std")]
     use std::fs;
@@ -833,7 +834,6 @@ mod tests {
     use miden_core::{
         Felt, Word,
         advice::AdviceMap,
-        assert_matches,
         mast::{
             BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNode, MastNodeExt,
             MastNodeId,
@@ -1793,13 +1793,13 @@ mod tests {
     ) -> (Vec<u8>, Word) {
         use miden_core::serde::Serializable;
 
-        // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
+        // Serialize the MastForest normally so the byte layout is stable.
         let forest = lib.mast_forest().as_ref();
         let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
         let mut output_bytes = Vec::new();
         lib.write_header_into(&mut output_bytes);
         let forest_offset = output_bytes.len();
-        forest.write_stripped(&mut output_bytes);
+        forest.write_into(&mut output_bytes);
 
         let (node_hashes_start, node_count) =
             locate_first_node_hash(&output_bytes[forest_offset..]);

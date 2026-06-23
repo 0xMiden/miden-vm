@@ -433,6 +433,8 @@ proc absorb_reduced_inputs_window_into_fs
 
     repeat.2
         mem_stream
+        # Bind the absorbed length (8) into the capacity before each absorb permutation.
+        movup.8 add.8 movdn.8
         exec.poseidon2::permute
     end
     # => [R1', R2', C', base+16, ...]
@@ -466,6 +468,8 @@ proc load_public_inputs
     # 4 iterations × 8 = 32 = NUM_FIXED_LEN_PUBLIC_INPUTS.
     repeat.4
         exec.public_inputs::load_base_store_extension_double_word
+        # Bind the absorbed length (8) into the capacity before each absorb permutation.
+        movup.8 add.8 movdn.8
         exec.poseidon2::permute
     end
     # => [R1', R2', C', pi_ptr + 64, ...]

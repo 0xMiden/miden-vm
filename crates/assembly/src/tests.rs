@@ -4,7 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt::Write, str::FromStr};
+use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{
@@ -13,7 +13,7 @@ use miden_assembly_syntax::{
     diagnostics::WrapErr,
 };
 use miden_core::{
-    Felt, Word, assert_matches,
+    Felt, Word,
     events::EventId,
     field::PrimeField64,
     mast::{MastNode, MastNodeExt},
@@ -4555,29 +4555,28 @@ fn issue_3035_compact_after_clear_debug_info_does_not_grow_mast() -> TestResult 
         "test input must create at least one padded basic block"
     );
 
-    let stripped_size = forest.to_bytes().len();
-    let stripped_without_debug_info_size = {
+    let original_size = forest.to_bytes().len();
+    let explicit_size = {
         let mut bytes = Vec::new();
-        forest.write_stripped(&mut bytes);
+        forest.write_into(&mut bytes);
         bytes.len()
     };
-    let stripped_nodes = forest.nodes().len();
+    let original_nodes = forest.nodes().len();
     let (compacted, _) = forest.compact();
     let compacted_size = compacted.to_bytes().len();
-    let compacted_without_debug_info_size = {
+    let compacted_explicit_size = {
         let mut bytes = Vec::new();
-        compacted.write_stripped(&mut bytes);
+        compacted.write_into(&mut bytes);
         bytes.len()
     };
     let compacted_nodes = compacted.nodes().len();
 
     assert!(
-        compacted_size <= stripped_size,
-        "MastForest::compact increased serialized size after stripping debug info: \
-         stripped={stripped_size}, compacted={compacted_size}, \
-         stripped_without_debug_info={stripped_without_debug_info_size}, \
-         compacted_without_debug_info={compacted_without_debug_info_size}, \
-         stripped_nodes={stripped_nodes}, compacted_nodes={compacted_nodes}"
+        compacted_size <= original_size,
+        "MastForest::compact increased serialized execution size: \
+         original={original_size}, compacted={compacted_size}, \
+         explicit={explicit_size}, compacted_explicit={compacted_explicit_size}, \
+         original_nodes={original_nodes}, compacted_nodes={compacted_nodes}"
     );
 
     Ok(())

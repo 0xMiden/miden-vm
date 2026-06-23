@@ -50,11 +50,27 @@ impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
 // TRACE FRAGMENT
 // ================================================================================================
 
+/// Physical column of the `s_00` permutation selector within the chiplets trace.
+pub const S_00_COL: usize = 0;
+
+/// Physical column of the `s_01` controller selector within the chiplets trace.
+pub const S_01_COL: usize = 1;
+
+/// Physical column of the `chip_clk` counter within the chiplets trace.
+pub const CHIP_CLK_COL: usize = 2;
+
+/// Physical column where the chiplet data band begins.
+pub const DATA_COL_START: usize = 3;
+
 /// A writable, row-major view over one chiplet's region of the chiplets trace.
 ///
 /// A chiplet occupies a contiguous band of rows and a contiguous band of columns
 /// `[col_start, col_start + num_cols)`. [`Self::copy_rows_from`] also writes the per-row
-/// `prefix_one_cols` selectors and (when there's room) the trailing `chip_clk` column.
+/// `prefix_one_cols` selectors and the `chip_clk` column at [`CHIP_CLK_COL`].
+///
+/// When `scatter_last` is set, the final source column of each row is written to that physical
+/// column instead of the contiguous band; the hasher uses this to place its `s_00` selector at
+/// [`S_00_COL`] while its remaining columns stay contiguous.
 pub struct ChipletTraceFragment<'a> {
     /// Contiguous `num_rows * stride` row-major slice (this chiplet's rows).
     band: &'a mut [Felt],
@@ -64,8 +80,14 @@ pub struct ChipletTraceFragment<'a> {
     num_cols: usize,
     /// Global row offset of `band[0]` in the chiplets trace; used to compute `chip_clk`.
     row_offset: usize,
-    /// Columns `< col_start` to set to ONE on every row in this band.
+    /// Columns to set to ONE on every row in this band.
     prefix_one_cols: &'static [usize],
+    /// Physical column for `chip_clk`; written every row when `write_clk` is set.
+    clk_col: usize,
+    /// When set, write `chip_clk` at `clk_col`.
+    write_clk: bool,
+    /// When set, route the last source column of each row to this physical column.
+    scatter_last: Option<usize>,
 }
 
 impl<'a> ChipletTraceFragment<'a> {
@@ -76,11 +98,25 @@ impl<'a> ChipletTraceFragment<'a> {
         col_start: usize,
         num_cols: usize,
     ) -> Self {
-        Self::with_overheads(band, stride, col_start, num_cols, 0, &[])
+        debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
+        debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
+        let num_rows = band.len() / stride;
+        Self {
+            band,
+            stride,
+            col_start,
+            num_rows,
+            num_cols,
+            row_offset: 0,
+            prefix_one_cols: &[],
+            clk_col: CHIP_CLK_COL,
+            write_clk: false,
+            scatter_last: None,
+        }
     }
 
     /// Adds the chiplets-trace overheads: per-row ONEs at `prefix_one_cols` and `chip_clk` at
-    /// column `stride - 1` (when there's room), using `row_offset` as `band[0]`'s global row.
+    /// [`CHIP_CLK_COL`], using `row_offset` as `band[0]`'s global row.
     pub fn with_overheads(
         band: &'a mut [Felt],
         stride: usize,
@@ -91,10 +127,6 @@ impl<'a> ChipletTraceFragment<'a> {
     ) -> Self {
         debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
         debug_assert!(col_start + num_cols <= stride, "column band overruns the row stride");
-        debug_assert!(
-            prefix_one_cols.iter().all(|&c| c < col_start),
-            "prefix_one_cols must lie before col_start",
-        );
         let num_rows = band.len() / stride;
         Self {
             band,
@@ -104,6 +136,37 @@ impl<'a> ChipletTraceFragment<'a> {
             num_cols,
             row_offset,
             prefix_one_cols,
+            clk_col: CHIP_CLK_COL,
+            write_clk: true,
+            scatter_last: None,
+        }
+    }
+
+    /// Like [`Self::with_overheads`], but routes the last source column of each row to the
+    /// `scatter_last` physical column instead of the contiguous band.
+    pub fn with_scattered_last(
+        band: &'a mut [Felt],
+        stride: usize,
+        col_start: usize,
+        num_cols: usize,
+        row_offset: usize,
+        scatter_last: usize,
+    ) -> Self {
+        debug_assert_eq!(band.len() % stride, 0, "band length must be a multiple of stride");
+        debug_assert!(num_cols >= 1, "scattered fragment needs at least one column");
+        debug_assert!(col_start + num_cols - 1 <= stride, "column band overruns the row stride",);
+        let num_rows = band.len() / stride;
+        Self {
+            band,
+            stride,
+            col_start,
+            num_rows,
+            num_cols,
+            row_offset,
+            prefix_one_cols: &[],
+            clk_col: CHIP_CLK_COL,
+            write_clk: true,
+            scatter_last: Some(scatter_last),
         }
     }
 
@@ -120,11 +183,15 @@ impl<'a> ChipletTraceFragment<'a> {
         self.num_rows
     }
 
-    /// Mutable access to columns `[0..col_start)` of `row`, for chiplets whose prefix
-    /// selectors vary per row (e.g. the hasher's `s_ctrl`).
-    pub fn prefix_mut(&mut self, row: usize) -> &mut [Felt] {
-        let row_start = row * self.stride;
-        &mut self.band[row_start..row_start + self.col_start]
+    /// Sets the `s_01` controller selector to [`ONE`] on `row`.
+    ///
+    /// No-op when this fragment has no prefix space (`col_start < DATA_COL_START`), i.e. the band
+    /// starts inside the prefix columns.
+    pub fn set_s_01(&mut self, row: usize) {
+        if self.col_start < DATA_COL_START {
+            return;
+        }
+        self.band[row * self.stride + S_01_COL] = ONE;
     }
 
     // DATA MUTATORS
@@ -138,7 +205,7 @@ impl<'a> ChipletTraceFragment<'a> {
     }
 
     /// Copies `src.len() / num_cols` rows starting at `row_offset` into this fragment's band,
-    /// fusing the per-row prefix-selector ONEs and trailing `chip_clk` when configured.
+    /// fusing the per-row prefix-selector ONEs and the `chip_clk` column when configured.
     pub fn copy_rows_into(&mut self, row_offset: usize, src: &[Felt]) {
         debug_assert_eq!(src.len() % self.num_cols, 0, "source buffer size not row-aligned");
         let chunk_rows = src.len() / self.num_cols;
@@ -146,8 +213,12 @@ impl<'a> ChipletTraceFragment<'a> {
             row_offset + chunk_rows <= self.num_rows,
             "chunk overruns fragment row range",
         );
-        let write_chip_clk = self.stride > self.col_start + self.num_cols;
-        let clk_col = self.stride - 1;
+        // The number of leading source columns written contiguously; the scattered last column
+        // (when present) is routed separately.
+        let contiguous_cols = match self.scatter_last {
+            Some(_) => self.num_cols - 1,
+            None => self.num_cols,
+        };
         for r in 0..chunk_rows {
             let dst_row = row_offset + r;
             let row_start = dst_row * self.stride;
@@ -155,10 +226,14 @@ impl<'a> ChipletTraceFragment<'a> {
             for &col in self.prefix_one_cols {
                 row[col] = ONE;
             }
-            row[self.col_start..self.col_start + self.num_cols]
-                .copy_from_slice(&src[r * self.num_cols..(r + 1) * self.num_cols]);
-            if write_chip_clk {
-                row[clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
+            let src_row = &src[r * self.num_cols..(r + 1) * self.num_cols];
+            row[self.col_start..self.col_start + contiguous_cols]
+                .copy_from_slice(&src_row[..contiguous_cols]);
+            if let Some(scatter_col) = self.scatter_last {
+                row[scatter_col] = src_row[self.num_cols - 1];
+            }
+            if self.write_clk {
+                row[self.clk_col] = Felt::from_u32((self.row_offset + dst_row + 1) as u32);
             }
         }
     }

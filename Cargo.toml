@@ -35,7 +35,7 @@ authors = ["Miden contributors"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
-rust-version = "1.90"
+rust-version = "1.96"
 version = "0.24.0"
 
 [profile.optimized]
@@ -80,9 +80,9 @@ miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-
 miden-verifier          = { path = "./verifier", version = "0.24", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.26", default-features = false }
+miden-crypto     = { version = "0.27", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type  = { version = "0.7.0", default-features = false }
+midenc-hir-type  = { version = "0.8", default-features = false }
 
 # Serialization
 serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }

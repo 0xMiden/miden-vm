@@ -16,8 +16,7 @@
 //! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_options`] with
 //! [`UntrustedMastForestReadOptions`] to tune the wire byte budget. This limits allocations driven
 //! directly by wire counts while reading the payload. A separate validation helper budget is
-//! derived from it for later allocations needed to materialize and check stripped or hashless
-//! payloads.
+//! derived from it for later allocations needed to materialize and check hashless payloads.
 //!
 //! ```ignore
 //! use miden_core::mast::{UntrustedMastForest, UntrustedMastForestReadOptions};
@@ -568,45 +567,15 @@ impl MastForest {
     // SERIALIZATION
     // --------------------------------------------------------------------------------------------
 
-    /// Serializes this MastForest without debug information.
-    ///
-    /// `MastForest` is an execution artifact, so current writers always omit legacy debug payloads.
-    /// The resulting bytes can be deserialized with the standard [`Deserializable`] impl.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use miden_core::{mast::MastForest, serde::Serializable};
-    ///
-    /// let forest = MastForest::new();
-    ///
-    /// // Full serialization (with debug info)
-    /// let full_bytes = forest.to_bytes();
-    ///
-    /// // Stripped serialization (without debug info)
-    /// let mut stripped_bytes = Vec::new();
-    /// forest.write_stripped(&mut stripped_bytes);
-    ///
-    /// // Both can be deserialized the same way
-    /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
-    /// ```
-    pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
-        serialization::write_stripped_into(self, target);
-    }
-
     /// Serializes this MastForest with the HASHLESS flag set.
     ///
-    /// Hashless implies stripped: debug info is omitted, and digests must be recomputed during
-    /// validation. Trusted deserialization rejects this flag.
+    /// Hashless forest bytes omit rebuildable internal node hashes. External node digests stay on
+    /// the wire because they cannot be rebuilt from local structure. Trusted deserialization
+    /// rejects this flag.
     ///
     /// Use this when producing data for untrusted validation.
     pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
         serialization::write_hashless_into(self, target);
-    }
-
-    /// Returns the exact size of stripped serialization in bytes.
-    pub fn stripped_size_hint(&self) -> usize {
-        serialization::stripped_size_hint(self)
     }
 }
 

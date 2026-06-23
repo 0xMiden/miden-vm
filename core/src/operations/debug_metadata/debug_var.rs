@@ -1,4 +1,4 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{format, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
 use miden_debug_types::FileLineCol;
@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        read_bounded_len,
+    },
 };
 
 // DEBUG VARIABLE INFO
@@ -245,7 +248,7 @@ impl Deserializable for DebugVarLocation {
                 Ok(Self::Local(i16::from_le_bytes(bytes)))
             },
             4 => {
-                let bytes = Vec::<u8>::read_from(source)?;
+                let bytes = read_bounded_bytes(source, "debug variable expression bytes")?;
                 Ok(Self::Expression(bytes))
             },
             5 => {
@@ -273,7 +276,7 @@ impl Serializable for DebugVarInfo {
 
 impl Deserializable for DebugVarInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name: Arc<str> = String::read_from(source)?.into();
+        let name = read_bounded_string(source, "debug variable name bytes")?;
         let value_location = DebugVarLocation::read_from(source)?;
         let type_id = Option::<u32>::read_from(source)?;
         let arg_index = Option::<u32>::read_from(source)?
@@ -295,6 +298,25 @@ impl Deserializable for DebugVarInfo {
     }
 }
 
+fn read_bounded_string<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<Arc<str>, DeserializationError> {
+    let len = read_bounded_len(source, label, 1)?;
+    let bytes = source.read_slice(len)?;
+    let value = core::str::from_utf8(bytes)
+        .map_err(|err| DeserializationError::InvalidValue(format!("{err}")))?;
+    Ok(Arc::from(value))
+}
+
+fn read_bounded_bytes<R: ByteReader>(
+    source: &mut R,
+    label: &str,
+) -> Result<Vec<u8>, DeserializationError> {
+    let len = read_bounded_len(source, label, 1)?;
+    source.read_slice(len).map(<[u8]>::to_vec)
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::ToString;
@@ -308,6 +330,30 @@ mod tests {
     fn debug_var_info_display_simple() {
         let var = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
         assert_eq!(var.to_string(), "var.x = stack[0]");
+    }
+
+    #[test]
+    fn debug_var_info_rejects_oversized_name_length() {
+        let bytes = [0x08, 0x2a, 0xfe, 0xfe, 0x01];
+        let mut reader = SliceReader::new(&bytes);
+        let err = DebugVarInfo::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("debug variable name bytes count"));
+        assert!(message.contains("exceeds remaining input"));
+    }
+
+    #[test]
+    fn debug_var_location_rejects_oversized_expression_length() {
+        let bytes = [4, 0x08, 0x2a, 0xfe, 0xfe, 0x01];
+        let mut reader = SliceReader::new(&bytes);
+        let err = DebugVarLocation::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("debug variable expression bytes count"));
+        assert!(message.contains("exceeds remaining input"));
     }
 
     #[test]

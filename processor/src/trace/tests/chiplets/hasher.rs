@@ -649,7 +649,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let main = trace.main_trace();
 
     // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_ctrl column) AND the hasher internal
+    // `chiplet_active.controller = 1` (s_01 column) AND the hasher internal
     // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
     // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
