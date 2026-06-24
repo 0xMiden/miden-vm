@@ -800,6 +800,31 @@ fn parser_reports_invalid_struct_repr_from_direct_type_lowering() {
 }
 
 #[test]
+fn parser_rejects_non_power_of_two_struct_packed_alignment() {
+    let source = test_source_file("type Foo = struct @packed(3) { x: u32 }\n");
+
+    let err = parse_forms(source).expect_err("parser should reject invalid packed alignment");
+
+    assert_matches!(render_diagnostic(err), diag if diag.contains("power-of-two"));
+}
+
+#[test]
+fn parser_rejects_non_power_of_two_struct_align_alignment() {
+    let source = test_source_file("type Foo = struct @align(3) { x: u32 }\n");
+
+    let err = parse_forms(source).expect_err("parser should reject invalid struct alignment");
+
+    assert_matches!(render_diagnostic(err), diag if diag.contains("power-of-two"));
+}
+
+#[test]
+fn parser_accepts_power_of_two_struct_packed_alignment() {
+    let source = test_source_file("type Foo = struct @packed(4) { x: u32 }\n");
+
+    assert_parses(source);
+}
+
+#[test]
 fn parser_reports_attribute_key_value_conflicts() {
     let source = test_source_file(
         "\
