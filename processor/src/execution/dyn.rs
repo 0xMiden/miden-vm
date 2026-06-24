@@ -21,7 +21,7 @@ use crate::{
 // ================================================================================================
 
 /// Executes a Dyn node from the start.
-#[inline(always)]
+#[inline]
 pub(super) fn start_dyn_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     current_node_id: MastNodeId,
