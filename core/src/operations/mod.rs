@@ -544,13 +544,13 @@ pub enum Operation {
     /// This operation:
     /// - Folds 4 query values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1)
     /// - Computes new value of the domain generator power: poe' = poe^4
-    /// - Increments layer pointer (cptr) by 2
+    /// - Increments layer pointer (cptr) by 8
     /// - Checks that the previous folding was done correctly
     /// - Shifts the stack to move an item from the overflow table to stack position 15
     ///
     /// Stack transition:
-    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
-    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0,
+    /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, coset, poe, pe1, pe0, a1, a0, cptr, ...]
+    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+8, poe^4, f_pos, ne1, ne0,
     /// eptr, ...] where eptr is moved from the stack overflow table and is the address of the
     /// final FRI layer.
     FriE2F4 = opcodes::FRIE2F4,
