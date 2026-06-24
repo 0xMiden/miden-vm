@@ -20,7 +20,7 @@ use crate::{
 /// inspected at the end of each iteration (REPEAT/END). Source-level guarding (`while.true`) is
 /// implemented by the assembler wrapping the LOOP in a SPLIT that selects the loop on a true
 /// condition and skips it on false.
-#[inline(always)]
+#[inline]
 pub(super) fn start_loop_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     loop_node: &LoopNode,
@@ -112,7 +112,7 @@ where
 ///
 /// Reads the boolean condition the body left on top of the stack. If `ONE`, fires REPEAT and
 /// re-enters the body; if `ZERO`, fires END and exits the loop. Any other value is an error.
-#[inline(always)]
+#[inline]
 pub(super) fn finish_loop_node<P, H, S, T, F>(
     state: &mut ExecutionState<'_, P, H, S, T, F>,
     current_node_id: MastNodeId,
