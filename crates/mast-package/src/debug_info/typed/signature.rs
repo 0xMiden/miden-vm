@@ -35,6 +35,9 @@ pub(super) fn format_type(types: &DebugTypesSection, idx: DebugTypeIdx, depth: u
         DebugTypeInfo::Function { return_type_idx, param_type_indices } => {
             format_function(types, *return_type_idx, param_type_indices, depth)
         },
+        DebugTypeInfo::Enum { name_idx, .. } => {
+            wit_type_name(type_name_raw(types, *name_idx)).to_string()
+        },
         DebugTypeInfo::Unknown => "?".into(),
     }
 }

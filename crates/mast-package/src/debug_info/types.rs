@@ -1627,6 +1627,37 @@ pub enum DebugPrimitiveType {
 }
 
 impl DebugPrimitiveType {
+    /// Returns the size of this primitive type in bytes.
+    pub const fn size_in_bytes(self) -> u32 {
+        match self {
+            Self::Void => 0,
+            Self::Bool | Self::I8 | Self::U8 => 1,
+            Self::I16 | Self::U16 => 2,
+            Self::I32 | Self::U32 | Self::F32 => 4,
+            Self::I64 | Self::U64 | Self::F64 | Self::Felt => 8,
+            Self::I128 | Self::U128 => 16,
+            Self::Word | Self::U256 => 32,
+        }
+    }
+
+    /// Returns the size of this primitive type in Miden stack elements (felts).
+    pub const fn size_in_felts(self) -> u32 {
+        match self {
+            Self::Void => 0,
+            Self::Bool
+            | Self::I8
+            | Self::U8
+            | Self::I16
+            | Self::U16
+            | Self::I32
+            | Self::U32
+            | Self::F32
+            | Self::Felt => 1,
+            Self::I64 | Self::U64 | Self::F64 => 2,
+            Self::I128 | Self::U128 | Self::Word | Self::U256 => 4,
+        }
+    }
+
     /// Converts a discriminant byte to a primitive type.
     pub fn from_discriminant(discriminant: u8) -> Option<Self> {
         match discriminant {
@@ -2143,6 +2174,26 @@ mod tests {
             Err(DebugSourceGraphLookupError::AmbiguousRoot { exec_node: root_exec }),
         );
         assert_eq!(package_debug.child_source_node(root, 1).unwrap().unwrap().0, child_b);
+    }
+
+    #[test]
+    fn test_primitive_type_sizes() {
+        assert_eq!(DebugPrimitiveType::Void.size_in_bytes(), 0);
+        assert_eq!(DebugPrimitiveType::I32.size_in_bytes(), 4);
+        assert_eq!(DebugPrimitiveType::F32.size_in_bytes(), 4);
+        assert_eq!(DebugPrimitiveType::I64.size_in_bytes(), 8);
+        assert_eq!(DebugPrimitiveType::F64.size_in_bytes(), 8);
+        assert_eq!(DebugPrimitiveType::Felt.size_in_bytes(), 8);
+        assert_eq!(DebugPrimitiveType::Word.size_in_bytes(), 32);
+        assert_eq!(DebugPrimitiveType::U256.size_in_bytes(), 32);
+
+        assert_eq!(DebugPrimitiveType::Void.size_in_felts(), 0);
+        assert_eq!(DebugPrimitiveType::I32.size_in_felts(), 1);
+        assert_eq!(DebugPrimitiveType::F32.size_in_felts(), 1);
+        assert_eq!(DebugPrimitiveType::I64.size_in_felts(), 2);
+        assert_eq!(DebugPrimitiveType::F64.size_in_felts(), 2);
+        assert_eq!(DebugPrimitiveType::Word.size_in_felts(), 4);
+        assert_eq!(DebugPrimitiveType::U256.size_in_felts(), 4);
     }
 
     #[test]

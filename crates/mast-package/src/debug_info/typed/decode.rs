@@ -12,6 +12,7 @@ use super::{
     super::{DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo},
     Felt, MAX_TYPE_DEPTH, TypedView, WitScalarCodec,
     lookup::{field_name, is_anonymous, type_name_raw, wit_type_name},
+    max_for_bits,
     sizing::count_units,
 };
 
@@ -19,16 +20,7 @@ use super::{
 /// to render the result. `None` when the count isn't known statically (dynamic arrays, `Unknown`),
 /// the type graph is cyclic/deeper than [`MAX_TYPE_DEPTH`], or a count computation overflows.
 pub(super) fn stack_felt_count(view: &TypedView<'_>, idx: DebugTypeIdx) -> Option<usize> {
-    count_units(view, idx, primitive_felt_count, |c| c.felt_count())
-}
-
-/// Stack felts a primitive leaf occupies.
-fn primitive_felt_count(p: DebugPrimitiveType) -> usize {
-    match p {
-        DebugPrimitiveType::Word => 4,
-        DebugPrimitiveType::Void => 0,
-        _ => 1,
-    }
+    count_units(view, idx, |p| p.size_in_felts() as usize, |c| c.felt_count())
 }
 
 /// Returns `(body, leftover)`. The body for primitives omits the outer type tag.
@@ -97,6 +89,7 @@ fn decode_value_at<'a>(
         DebugTypeInfo::Array { count: None, .. }
         | DebugTypeInfo::Pointer { .. }
         | DebugTypeInfo::Function { .. }
+        | DebugTypeInfo::Enum { .. }
         | DebugTypeInfo::Unknown => None,
     }
 }
@@ -138,25 +131,68 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
             let v = head.as_canonical_u64();
             Some((if v == 0 { "false".into() } else { "true".into() }, rest))
         },
+        // Signed ints: read the limbs, then read the low `bits` bits as two's complement.
         DebugPrimitiveType::I8
         | DebugPrimitiveType::I16
         | DebugPrimitiveType::I32
         | DebugPrimitiveType::I64
-        | DebugPrimitiveType::U8
+        | DebugPrimitiveType::I128 => {
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            Some((render_signed(value, p.size_in_bytes() * 8), rest))
+        },
+        // Unsigned ints: read the limbs and print the packed value.
+        DebugPrimitiveType::U8
         | DebugPrimitiveType::U16
         | DebugPrimitiveType::U32
-        | DebugPrimitiveType::U64 => {
-            let (head, rest) = felts.split_first()?;
-            Some((head.as_canonical_u64().to_string(), rest))
+        | DebugPrimitiveType::U64
+        | DebugPrimitiveType::U128 => {
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            Some((render_unsigned(value, p.size_in_bytes() * 8), rest))
         },
-        DebugPrimitiveType::I128
-        | DebugPrimitiveType::U128
-        | DebugPrimitiveType::F32
-        | DebugPrimitiveType::F64 => {
-            let (head, rest) = felts.split_first()?;
-            Some((format!("{} (as {p:?})", head.as_canonical_u64()), rest))
+        DebugPrimitiveType::F32 => {
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            Some((f32::from_bits(value as u32).to_string(), rest))
         },
+        DebugPrimitiveType::F64 => {
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            Some((f64::from_bits(value as u64).to_string(), rest))
+        },
+        // 256-bit values exceed the `u128` limb path; no typed decoding is defined for them yet.
+        DebugPrimitiveType::U256 => None,
     }
+}
+
+/// Reads `n` 32-bit limbs (low first) from the front of `felts` and packs them into a `u128`
+/// (`n` is at most 4, so 128 bits fit). This is the inverse of the encoder's `limbs_to_felts`.
+/// Returns the value and the leftover felts, or `None` if there are too few felts or a felt is
+/// bigger than 32 bits (not a valid limb).
+fn read_limbs(felts: &[Felt], n: usize) -> Option<(u128, &[Felt])> {
+    if felts.len() < n {
+        return None;
+    }
+    let (chunk, rest) = felts.split_at(n);
+    let mut value: u128 = 0;
+    for (i, f) in chunk.iter().enumerate() {
+        let limb = f.as_canonical_u64();
+        if limb > u32::MAX as u64 {
+            return None;
+        }
+        value |= (limb as u128) << (32 * i);
+    }
+    Some((value, rest))
+}
+
+/// Prints the low `bits` bits of `value` as an unsigned decimal.
+fn render_unsigned(value: u128, bits: u32) -> String {
+    (value & max_for_bits(bits)).to_string()
+}
+
+/// Prints the low `bits` bits of `value` as a signed decimal (two's complement). We move the sign
+/// bit to the top, then shift back down to copy the sign. This also drops higher bits and works up
+/// to 128 bits (shift of 0).
+fn render_signed(value: u128, bits: u32) -> String {
+    let shift = 128 - bits;
+    (((value << shift) as i128) >> shift).to_string()
 }
 
 /// `name(body)` for named structs; `{body}` for anonymous or unnamed ones.

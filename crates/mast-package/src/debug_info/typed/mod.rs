@@ -30,7 +30,6 @@ use self::{
 };
 use super::{
     DebugFunctionInfo, DebugFunctionsSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
-    DebugVariableInfo,
 };
 use crate::Package;
 
@@ -47,6 +46,12 @@ mod sizing;
 /// The [`DebugTypesSection`] comes from a package and is not checked for cycles, so a cyclic
 /// (`A -> B -> A`) or very deep type could otherwise recurse until the stack overflows.
 pub(super) const MAX_TYPE_DEPTH: usize = 64;
+
+/// The biggest unsigned value that fits in `bits` bits. Also used as a mask for the low `bits`
+/// bits. Both encode and decode use it.
+pub(super) fn max_for_bits(bits: u32) -> u128 {
+    if bits >= 128 { u128::MAX } else { (1u128 << bits) - 1 }
+}
 
 pub use self::{
     codec::{WitScalarCodec, WordCodec},
@@ -94,7 +99,7 @@ impl TypedProcInfo {
         let func = find_debug_fn(&funcs, procedure_name)?;
         let name = func_display_name(func, &funcs, procedure_name);
         let (return_type_idx, fallback_param_types) = extract_signature_types(func, &types);
-        let params = build_params(func, &funcs, &fallback_param_types);
+        let params = build_params(&fallback_param_types);
         Some(Self {
             types,
             name,
@@ -247,56 +252,18 @@ fn extract_signature_types(
     }
 }
 
-/// Builds the parameter list. When the function-type signature is available its positional indices
-/// are authoritative for arity and parameter types; names are overlaid from the debug variables
-/// (`arg_index > 0`, 1-based) where present, falling back to `arg1`, `arg2`, .... Only when there
-/// is no function-type signature do the argument variables themselves stand in as the parameters.
-fn build_params(
-    func: &DebugFunctionInfo,
-    funcs: &DebugFunctionsSection,
-    fallback_indices: &[DebugTypeIdx],
-) -> Vec<TypedParam> {
-    // Display name of an argument variable: its string-table name, or `arg<n>` as a fallback.
-    let var_name = |v: &DebugVariableInfo| {
-        funcs
-            .strings
-            .get(v.name_idx as usize)
-            .map_or_else(|| format!("arg{}", v.arg_index), |s| s.as_ref().to_string())
-    };
-
-    // Name of the argument at 0-based `position`, from the matching debug variable if any.
-    // `DebugVariableInfo` entries are not necessarily in `arg_index` order, hence the search.
-    let name_for = |position: usize| -> Option<String> {
-        func.variables
-            .iter()
-            .find(|v| v.arg_index as usize == position + 1)
-            .map(&var_name)
-    };
-
-    if !fallback_indices.is_empty() {
-        // The function-type signature fixes how many parameters there are and their types; never
-        // drop or reorder them based on a partial/unordered variable list.
-        return fallback_indices
-            .iter()
-            .enumerate()
-            .map(|(i, t)| TypedParam {
-                name: name_for(i).unwrap_or_else(|| format!("arg{}", i + 1)),
-                type_idx: *t,
-            })
-            .collect();
-    }
-
-    // No function-type signature: fall back to the typed argument variables themselves.
-    let mut named: Vec<(u32, String, DebugTypeIdx)> = func
-        .variables
+/// Builds the parameter list from the function-type signature: one [`TypedParam`] per positional
+/// index, named `arg1`, `arg2`, .... Returns an empty list when the debug entry has no `Function`
+/// type, which (since argument variables are no longer attached to functions) is the only source of
+/// parameter info.
+fn build_params(fallback_indices: &[DebugTypeIdx]) -> Vec<TypedParam> {
+    fallback_indices
         .iter()
-        .filter(|v| v.is_parameter())
-        .map(|v| (v.arg_index, var_name(v), v.type_idx))
-        .collect();
-    named.sort_by_key(|(i, ..)| *i);
-    named
-        .into_iter()
-        .map(|(_, name, type_idx)| TypedParam { name, type_idx })
+        .enumerate()
+        .map(|(i, t)| TypedParam {
+            name: format!("arg{}", i + 1),
+            type_idx: *t,
+        })
         .collect()
 }
 
@@ -483,14 +450,127 @@ mod tests {
             vec![TypedParam { name: "n".to_string(), type_idx: u64_idx }],
         );
 
-        let encoded = encode_all(&proc, &["1234567890123"]);
-        assert_eq!(encoded, vec![felt(1_234_567_890_123)]);
-
-        assert_eq!(
-            proc.decode_result(&[felt(1_234_567_890_123)]).as_deref(),
-            Some("u64(1234567890123)")
-        );
+        // A `u64` occupies two 32-bit limbs, least-significant first (the stdlib layout).
+        let v: u64 = 1_234_567_890_123;
+        let lo = felt(v & 0xffff_ffff);
+        let hi = felt(v >> 32);
+        assert_eq!(encode_all(&proc, &["1234567890123"]), vec![lo, hi]);
+        assert_eq!(proc.decode_result(&[lo, hi]).as_deref(), Some("u64(1234567890123)"));
+        assert_eq!(proc.output_felt_count(), Some(2));
         assert_eq!(proc.to_string(), "take-u64(n: U64) -> U64");
+    }
+
+    /// Helper: a single-primitive `take-x` proc whose param and return type are `p`.
+    fn prim_proc(p: DebugPrimitiveType, name: &str) -> TypedProcInfo {
+        let mut types = DebugTypesSection::new();
+        let idx = types.add_type(DebugTypeInfo::Primitive(p));
+        make_proc(
+            types,
+            name,
+            Some(idx),
+            vec![TypedParam { name: "x".to_string(), type_idx: idx }],
+        )
+    }
+
+    #[test]
+    fn i32_signed_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::I32, "take-i32");
+        // -1 is stored as the 32-bit two's-complement limb 0xFFFFFFFF.
+        let neg_one = felt(0xffff_ffff);
+        assert_eq!(encode_all(&proc, &["-1"]), vec![neg_one]);
+        assert_eq!(proc.decode_result(&[neg_one]).as_deref(), Some("i32(-1)"));
+        // Positive values round-trip unchanged.
+        assert_eq!(encode_all(&proc, &["42"]), vec![felt(42)]);
+        assert_eq!(proc.decode_result(&[felt(42)]).as_deref(), Some("i32(42)"));
+    }
+
+    #[test]
+    fn i64_signed_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::I64, "take-i64");
+        // -2 across two limbs: low = 0xFFFFFFFE, high = 0xFFFFFFFF.
+        let encoded = encode_all(&proc, &["-2"]);
+        assert_eq!(encoded, vec![felt(0xffff_fffe), felt(0xffff_ffff)]);
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("i64(-2)"));
+    }
+
+    #[test]
+    fn u128_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::U128, "take-u128");
+        let v: u128 = (1u128 << 96) + (2u128 << 64) + (3u128 << 32) + 4;
+        let encoded = encode_all(&proc, &[&v.to_string()]);
+        assert_eq!(encoded, vec![felt(4), felt(3), felt(2), felt(1)]);
+        assert_eq!(proc.output_felt_count(), Some(4));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some(&*format!("u128({v})")));
+    }
+
+    #[test]
+    fn i128_signed_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::I128, "take-i128");
+        let encoded = encode_all(&proc, &["-1"]);
+        // -1 is all-ones across four 32-bit limbs.
+        assert_eq!(encoded, vec![felt(0xffff_ffff); 4]);
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("i128(-1)"));
+    }
+
+    #[test]
+    fn f32_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::F32, "take-f32");
+        let bits = 1.5f32.to_bits();
+        let encoded = encode_all(&proc, &["1.5"]);
+        // A 32-bit float fits in a single limb (one felt), not two.
+        assert_eq!(encoded, vec![felt(bits as u64)]);
+        assert_eq!(proc.output_felt_count(), Some(1));
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("f32(1.5)"));
+    }
+
+    #[test]
+    fn f64_roundtrip() {
+        let proc = prim_proc(DebugPrimitiveType::F64, "take-f64");
+        let bits = 1.5f64.to_bits();
+        let encoded = encode_all(&proc, &["1.5"]);
+        assert_eq!(encoded, vec![felt(bits & 0xffff_ffff), felt(bits >> 32)]);
+        assert_eq!(proc.decode_result(&encoded).as_deref(), Some("f64(1.5)"));
+    }
+
+    #[test]
+    fn out_of_range_values_are_rejected() {
+        // A u32 token larger than u32::MAX must be rejected, not silently truncated into a felt.
+        let u32_proc = prim_proc(DebugPrimitiveType::U32, "take-u32");
+        let mut over = ["4294967296".to_string()].into_iter();
+        assert!(matches!(
+            u32_proc.encode_arg(&mut over, u32_proc.param_type_indices()[0]),
+            Err(TypedDebugInfoError::IntOutOfRange { .. })
+        ));
+
+        // An i8 below its signed minimum is rejected too.
+        let i8_proc = prim_proc(DebugPrimitiveType::I8, "take-i8");
+        let mut under = ["-129".to_string()].into_iter();
+        assert!(matches!(
+            i8_proc.encode_arg(&mut under, i8_proc.param_type_indices()[0]),
+            Err(TypedDebugInfoError::IntOutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn two_args_encode_in_sequence() {
+        // `(a: f32, b: u32)`: `b` must sit right after `a`'s single felt. When f32 wrongly took two
+        // felts, `b` was pushed one slot down, so this guards that regression across two args.
+        let mut types = DebugTypesSection::new();
+        let f32_idx = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::F32));
+        let u32_idx = types.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+        let proc = make_proc(
+            types,
+            "take-two",
+            None,
+            vec![
+                TypedParam { name: "a".to_string(), type_idx: f32_idx },
+                TypedParam { name: "b".to_string(), type_idx: u32_idx },
+            ],
+        );
+
+        // a -> the f32 bits (one felt), then b -> 7 (one felt).
+        let bits = 1.5f32.to_bits();
+        assert_eq!(encode_all(&proc, &["1.5", "7"]), vec![felt(bits as u64), felt(7)]);
     }
 
     #[test]
