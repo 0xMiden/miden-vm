@@ -2,6 +2,8 @@ use alloc::string::String;
 
 use thiserror::Error;
 
+use super::super::DebugPrimitiveType;
+
 /// Errors from resolving, encoding, or decoding values against a [`Package`](crate::Package)'s
 /// debug sections.
 #[derive(Debug, Error)]
@@ -22,11 +24,20 @@ pub enum TypedDebugInfoError {
     #[error("invalid u64 '{0}'")]
     InvalidU64(String),
 
+    #[error("invalid integer '{0}'")]
+    InvalidInt(String),
+
+    #[error("invalid float '{0}'")]
+    InvalidFloat(String),
+
     #[error("invalid hex '{0}'")]
     InvalidHex(String),
 
     #[error("value '{0}' is out of range for a field element")]
     FeltOutOfRange(String),
+
+    #[error("value '{token}' is out of range for {ty:?}")]
+    IntOutOfRange { token: String, ty: DebugPrimitiveType },
 
     #[error("not enough arguments")]
     NotEnoughArgs,

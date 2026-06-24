@@ -62,8 +62,9 @@ fn count_units_at(
             }
             Some(total)
         },
-        DebugTypeInfo::Pointer { .. } | DebugTypeInfo::Function { .. } | DebugTypeInfo::Unknown => {
-            None
-        },
+        DebugTypeInfo::Pointer { .. }
+        | DebugTypeInfo::Function { .. }
+        | DebugTypeInfo::Enum { .. }
+        | DebugTypeInfo::Unknown => None,
     }
 }
