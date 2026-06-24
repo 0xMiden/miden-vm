@@ -8,7 +8,7 @@ use crate::{
     Felt,
     chiplets::hasher,
     mast::{
-        CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
+        CallNode, DynNode, JoinNode, LoopNode, MastForestParts, SplitNode,
         serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
@@ -61,7 +61,7 @@ impl ForestDigests {
             build_digest_slot_by_node(bytes, layout, remaining_allocation_budget.as_deref_mut())?;
         // If the internal-hash section is absent, rebuild all non-external digests once and cache
         // them for later lookups.
-        let hash_table = if layout.node_hash_offset.is_none() {
+        let hash_table = if layout.node_hash_offset().is_none() {
             Some(recompute_hash_table(bytes, layout, remaining_allocation_budget)?)
         } else {
             None
@@ -86,7 +86,7 @@ impl ForestDigests {
         })? as usize;
 
         if matches!(entry, MastNodeEntry::External) {
-            return read_digest_entry(bytes, layout.external_digest_offset, digest_slot);
+            return read_digest_entry(bytes, layout.external_digest_offset(), digest_slot);
         }
 
         if let Some(hash_table) = &self.hash_table {
@@ -99,7 +99,7 @@ impl ForestDigests {
             });
         }
 
-        let node_hash_offset = layout.node_hash_offset.ok_or_else(|| {
+        let node_hash_offset = layout.node_hash_offset().ok_or_else(|| {
             DeserializationError::InvalidValue(
                 "hash-backed digest lookup requested but node hash section is absent".to_string(),
             )
@@ -130,15 +130,13 @@ impl<'a> ResolvedSerializedForest<'a> {
     pub(super) fn materialize(
         &self,
         advice_map: AdviceMap,
-        debug_info: DebugInfo,
     ) -> Result<MastForest, DeserializationError> {
         let basic_block_data_decoder = BasicBlockDataDecoder::new(basic_block_data(
             self.bytes,
-            self.layout.basic_block_offset,
-            self.layout.basic_block_len,
+            self.layout.basic_block_offset(),
+            self.layout.basic_block_len(),
         )?);
         let mut mast_forest = MastForest::new();
-        mast_forest.debug_info = debug_info;
 
         for index in 0..self.node_count() {
             let entry = self.node_entry_at(index)?;
@@ -156,12 +154,21 @@ impl<'a> ResolvedSerializedForest<'a> {
             })?;
         }
 
+        let mut roots = Vec::with_capacity(self.procedure_root_count());
         for index in 0..self.procedure_root_count() {
-            mast_forest.make_root(self.procedure_root_at(index)?);
+            roots.push(self.procedure_root_at(index)?);
         }
 
-        mast_forest.advice_map = advice_map;
-        Ok(mast_forest)
+        MastForest::from_trusted_deserialization_parts(MastForestParts {
+            nodes: mast_forest.nodes,
+            roots,
+            advice_map,
+        })
+        .map_err(|e| {
+            DeserializationError::InvalidValue(format!(
+                "failed to construct trusted deserialized MAST forest: {e}",
+            ))
+        })
     }
 
     pub(super) fn node_count(&self) -> usize {
@@ -287,8 +294,8 @@ fn recompute_hash_table(
 ) -> Result<Vec<crate::Word>, DeserializationError> {
     let basic_block_data_decoder = BasicBlockDataDecoder::new(basic_block_data(
         bytes,
-        layout.basic_block_offset,
-        layout.basic_block_len,
+        layout.basic_block_offset(),
+        layout.basic_block_len(),
     )?);
 
     let mut digests = Vec::new();
@@ -340,7 +347,7 @@ fn recompute_hash_table(
             MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
             MastNodeEntry::External => {
                 let digest =
-                    read_digest_entry(bytes, layout.external_digest_offset, external_slot)?;
+                    read_digest_entry(bytes, layout.external_digest_offset(), external_slot)?;
                 external_slot = external_slot.checked_add(1).ok_or_else(|| {
                     DeserializationError::InvalidValue("external digest slot overflow".to_string())
                 })?;

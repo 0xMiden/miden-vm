@@ -42,7 +42,6 @@ use crate::{
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
@@ -112,7 +111,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
     // HOUT output: hs0=hs1=hs2=0 (always responds on digest). Degree 4 (no is_boundary).
     let f_hout: LB::Expr = controller_flag.clone() * not_hs0.clone() * not_hs1.clone() * not_hs2;
 
-    // SOUT output with is_boundary=1 only (HPERM return).
+    // SOUT output with is_boundary=1 only (HPERM / LOGPRECOMPILE return).
     let f_sout: LB::Expr = controller_flag * not_hs0 * not_hs1 * hs2 * is_boundary;
 
     // --- Non-hasher flags ---
@@ -125,9 +124,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
-    // All hasher response variants encode their row at `clk + 1` (so they cancel against
-    // the matching request at `clk`).
-    let clk_plus_one: LB::Expr = local.system.clk.into() + LB::Expr::ONE;
+    // All hasher response variants encode their row at the chiplet-trace row counter
+    // (`chip_clk`) so they cancel against the matching request.
+    let clk_plus_one: LB::Expr = local.chip_clk.into();
 
     // Local helpers: convert the copied Var arrays into Expr arrays.
     let full_state = || -> [LB::Expr; 12] { state.map(Into::into) };
@@ -217,7 +216,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg { v: 4, u: 5 },
                     );
 
-                    // SOUT: full 12-lane state (HPERM return), node_index = 0.
+                    // SOUT: full 12-lane state (HPERM / LOGPRECOMPILE return), node_index = 0.
                     g.add(
                         "sout",
                         f_sout,

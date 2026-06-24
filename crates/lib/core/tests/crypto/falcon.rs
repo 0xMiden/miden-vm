@@ -1,21 +1,24 @@
 use std::{sync::Arc, vec};
 
 use miden_air::Felt;
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, Linkage};
 use miden_core::{
     ZERO,
     events::EventName,
     field::PrimeField64,
+    mast::error_code_from_msg,
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program, StackInputs,
+    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program,
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
 };
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::proptest;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
@@ -23,10 +26,10 @@ use miden_utils_testing::{
         falcon512_poseidon2::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
-    proptest::proptest,
     rand::random_word,
+    stack_inputs_from_ints,
 };
-use rand::{Rng, SeedableRng, rng};
+use rand::{Rng, RngExt, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 
@@ -163,6 +166,7 @@ fn test_falcon512_diff_mod_m() {
     test2.expect_stack(&[simplified_answer as u64]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
@@ -356,6 +360,8 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     const M_INV: u64 = 15010777177727684609;
 
     // Malicious event handler that always returns remainder = 0.
+    // Signature matches the event-handler callback contract.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -388,16 +394,17 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // falcon_div handler from CoreLibrary.
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_msg, .. },
+            err: OperationError::FailedAssertion { err_code, err_msg },
             ..
-        } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
+        } if err_code == error_code_from_msg("comparison failed: quotient overflow")
+            && err_msg.is_none()
     );
 }
 
@@ -412,6 +419,7 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     const FORGED_R: u64 = 5_664;
 
     // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let q_hi = Felt::new_unchecked(FORGED_Q >> 32);
         let q_lo = Felt::new_unchecked(FORGED_Q & 0xffff_ffff);
@@ -435,15 +443,16 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 
     let core_lib = CoreLibrary::default();
     let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
-        .with_library(core_lib.library().clone())
+        .with_library(core_lib.package())
         .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            err: OperationError::FailedAssertion { err_msg, .. },
+            err: OperationError::FailedAssertion { err_code, err_msg },
             ..
-        } if err_msg.as_deref() == Some("comparison failed: addition overflow")
+        } if err_code == error_code_from_msg("comparison failed: addition overflow")
+            && err_msg.is_none()
     );
 }
 
@@ -452,6 +461,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
+    #[allow(clippy::unnecessary_wraps)]
     fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let a_hi = process.get_stack_item(1).as_canonical_u64();
         let a_lo = process.get_stack_item(2).as_canonical_u64();
@@ -479,7 +489,7 @@ fn test_mod_12289_rejects_non_u32_remainder_advice() {
 
     let core_lib = CoreLibrary::default();
     let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
+    test.libraries.push(core_lib.package());
     test.add_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
@@ -498,12 +508,13 @@ fn falcon_prove_verify() {
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
-        .with_dynamic_library(CoreLibrary::default())
+        .with_package(CoreLibrary::default().package(), Linkage::Dynamic)
         .expect("failed to load core library")
-        .assemble_program(source)
-        .expect("failed to compile test source");
+        .assemble_program("program", source)
+        .expect("failed to compile test source")
+        .unwrap_program();
 
-    let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
+    let stack_inputs = stack_inputs_from_ints(op_stack);
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&CoreLibrary::default()).expect("failed to load mast forest");
@@ -519,7 +530,6 @@ fn falcon_prove_verify() {
     trace.check_constraints();
 }
 
-#[allow(clippy::type_complexity)]
 fn generate_test(
     sk: SecretKey,
     message: Word,

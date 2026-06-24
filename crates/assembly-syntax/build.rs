@@ -1,10 +1,6 @@
-extern crate lalrpop;
-
 use rustc_version::{Channel, version_meta};
 
 fn main() {
-    lalrpop::process_root().unwrap();
-
     // In cases where we want to compile with support for the standard library Error type (which
     // is used by all of our diagnostics, etc.), but we are compiling without the `std` feature,
     // we require use of the `error_in_core` feature, which is currently unstable, and thus requires

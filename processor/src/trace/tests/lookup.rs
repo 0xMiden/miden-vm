@@ -21,13 +21,13 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
+    BaseAir, LiftedAir, MidenAir,
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
     lookup::{Challenges, accumulate, build_lookup_fractions, debug::collect_column_oracle_folds},
 };
 use miden_core::{
     field::{Field, QuadFelt},
-    utils::Matrix,
+    utils::{Matrix, RowMajorMatrix},
 };
 
 use super::{Felt, build_trace_from_ops, rand_array};
@@ -46,95 +46,107 @@ fn tiny_span() -> Vec<Operation> {
     ]
 }
 
-/// Cross-check: the fused `accumulate` prover path must agree with the constraint-path
-/// `(V_col, U_col)` oracle bit-exactly on every `(row, col)` delta.
-///
-/// - **Prover path**: collect `(m_i, d_i)` fractions via `ProverLookupBuilder` on each row, then
-///   `accumulate` runs batched Montgomery inversion + per-column partial sums to produce
-///   `aux[col][r+1] - aux[col][r] = Σ m_i · d_i^{-1}`.
-/// - **Constraint path**: `ColumnOracleBuilder` evaluates `ProcessorAir` row-by-row using the same
-///   `(V_g, U_g)` algebra the constraint system uses, folded per column via cross-multiplication,
-///   producing `expected_delta = V_col · U_col^{-1}`.
-///
-/// A divergence means either the prover path or the oracle has a bug — fix the root cause.
-#[test]
-fn build_lookup_fractions_matches_constraint_path_oracle() {
-    let trace = build_trace_from_ops(tiny_span(), &[]);
-
-    let main_trace = trace.main_trace().to_row_major();
-    let public_vals = trace.to_public_values();
-    let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
-
-    // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
-    // implement Randomizable, so we draw base-field elements and pair them).
-    let raw = rand_array::<Felt, 4>();
-    let alpha = QuadFelt::new([raw[0], raw[1]]);
-    let beta = QuadFelt::new([raw[2], raw[3]]);
-    let air = ProcessorAir;
-    let challenges =
-        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
-
-    // --- Prover path: collect fractions and run the fused accumulator. ---
-    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &challenges);
-
-    // Shape / non-degenerate smoke checks — if these trip, the oracle check below is moot.
-    let num_rows = trace.main_trace().num_rows();
-    assert_eq!(fractions.num_rows(), num_rows);
-    assert_eq!(fractions.num_columns(), LOGUP_AUX_TRACE_WIDTH);
-    assert_eq!(fractions.counts().len(), num_rows * LOGUP_AUX_TRACE_WIDTH);
-    assert!(
-        !fractions.fractions().is_empty(),
-        "no fractions collected — trace is degenerate or emitters are broken",
-    );
-
-    // `accumulate` returns a row-major matrix with `num_rows + 1` rows and `num_cols`
-    // columns. Col 0 is the running-sum accumulator; cols 1+ hold per-row fraction values.
-    let aux = accumulate(&fractions);
-    let aux_width = aux.width();
+/// Asserts the `accumulate` output matches the oracle folds bit-exactly on every
+/// `(row, col)` delta. Data-only so it's free of AIR generics.
+fn assert_prover_matches_oracle(
+    label: &str,
+    aux: &RowMajorMatrix<QuadFelt>,
+    oracle_folds: &[Vec<(QuadFelt, QuadFelt)>],
+    aux_width: usize,
+) {
+    let num_rows = oracle_folds.len();
+    assert_eq!(aux.width(), aux_width, "{label}: aux width mismatch");
+    assert_eq!(aux.height(), num_rows + 1, "{label}: aux height mismatch");
     let aux_values = &aux.values;
-    assert_eq!(aux_width, LOGUP_AUX_TRACE_WIDTH);
-    assert_eq!(aux.height(), num_rows + 1);
 
-    // --- Constraint path: walk the trace through the oracle to collect per-row folded
-    //     `(V_col, U_col)` pairs. ---
-    let oracle_folds =
-        collect_column_oracle_folds(&air, &main_trace, &periodic, &public_vals, &challenges);
-    assert_eq!(oracle_folds.len(), num_rows);
-
-    // --- Per-(row, col) value check. ---
     // Col 0 (accumulator): aux[r+1][0] - aux[r][0] == Σ_col per_row_value[col].
     // Cols 1+ (fraction): aux[r][col] == V/U per-row value.
     for (r, row_folds) in oracle_folds.iter().enumerate() {
-        assert_eq!(row_folds.len(), LOGUP_AUX_TRACE_WIDTH);
+        assert_eq!(row_folds.len(), aux_width, "{label} row {r}: fold width mismatch");
         let per_row_values: Vec<QuadFelt> = row_folds
             .iter()
             .enumerate()
             .map(|(col, &(v_col, u_col))| {
                 let u_inv = u_col.try_inverse().unwrap_or_else(|| {
                     panic!(
-                        "row {r} col {col}: oracle U_col is zero — bus has a zero-denominator \
-                         product, indicating a bug in the emitter or message encoding",
+                        "{label} row {r} col {col}: oracle U_col is zero — bus has a \
+                         zero-denominator product, indicating a bug in the emitter or \
+                         message encoding",
                     )
                 });
                 v_col * u_inv
             })
             .collect();
 
-        // Accumulator (col 0): delta == sum of all columns' per-row values.
         let expected_delta: QuadFelt = per_row_values.iter().copied().sum();
         let actual_delta = aux_values[(r + 1) * aux_width] - aux_values[r * aux_width];
         assert_eq!(
             actual_delta, expected_delta,
-            "row {r} col 0 (accumulator): prover vs constraint path mismatch",
+            "{label} row {r} col 0 (accumulator): prover vs constraint path mismatch",
         );
 
-        // Fraction columns (cols 1+): aux[r][col] == per-row V/U.
-        for col in 1..LOGUP_AUX_TRACE_WIDTH {
+        for col in 1..aux_width {
             let actual_value = aux_values[r * aux_width + col];
             assert_eq!(
                 actual_value, per_row_values[col],
-                "row {r} col {col} (fraction): prover vs constraint path mismatch",
+                "{label} row {r} col {col} (fraction): prover vs constraint path mismatch",
             );
         }
     }
+}
+
+#[test]
+fn build_lookup_fractions_matches_constraint_path_oracle() {
+    let trace = build_trace_from_ops(tiny_span(), &[]);
+
+    let (core_matrix, chip_matrix) = trace.main_trace().to_core_chiplets_matrices();
+    let public_vals = trace.to_public_values();
+    // Core has no periodic columns; the hasher/bitwise periodics belong to Chiplets.
+    let chip_periodic = MidenAir::CHIPLETS.periodic_columns();
+
+    // QuadFelt challenges for LogUp, built from 4 random Felts (QuadFelt itself doesn't
+    // implement Randomizable, so we draw base-field elements and pair them).
+    let raw = rand_array::<Felt, 4>();
+    let alpha = QuadFelt::new([raw[0], raw[1]]);
+    let beta = QuadFelt::new([raw[2], raw[3]]);
+    let challenges =
+        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
+
+    // --- Core ---
+    let core_fractions = build_lookup_fractions(&MidenAir::CORE, &core_matrix, &[], &challenges);
+    assert!(
+        !core_fractions.fractions().is_empty(),
+        "no Core fractions collected — trace is degenerate or emitters are broken",
+    );
+    let core_aux = accumulate(&core_fractions);
+    let core_folds =
+        collect_column_oracle_folds(&MidenAir::CORE, &core_matrix, &[], &public_vals, &challenges);
+    assert_prover_matches_oracle(
+        "Core",
+        &core_aux,
+        &core_folds,
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CORE),
+    );
+
+    // --- Chiplets ---
+    let chip_fractions =
+        build_lookup_fractions(&MidenAir::CHIPLETS, &chip_matrix, &chip_periodic, &challenges);
+    assert!(
+        !chip_fractions.fractions().is_empty(),
+        "no Chiplets fractions collected — trace is degenerate or emitters are broken",
+    );
+    let chip_aux = accumulate(&chip_fractions);
+    let chip_folds = collect_column_oracle_folds(
+        &MidenAir::CHIPLETS,
+        &chip_matrix,
+        &chip_periodic,
+        &public_vals,
+        &challenges,
+    );
+    assert_prover_matches_oracle(
+        "Chiplets",
+        &chip_aux,
+        &chip_folds,
+        LiftedAir::<Felt, QuadFelt>::aux_width(&MidenAir::CHIPLETS),
+    );
 }

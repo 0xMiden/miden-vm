@@ -201,7 +201,7 @@ This group contains operations which require constraints with degree up to $3$. 
 | `LOGPRECOMPILE` |     $94$     |   `101_1110`    | [Crypto ops](./crypto_ops.md#log_precompile) |     $5$     |
 | `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
 
-Note that the `SPLIT` and `LOOP` operations are grouped together under the common prefix `101010`, and thus can have a common flag of degree $4$ (using $e_0$ for degree reduction). This is important because both of these operations shift the stack to the left.
+Note that the `SPLIT` and `LOOP` operations share the common prefix `101010` and can be detected together with a flag of degree $4$ (using $e_0$ for degree reduction). Only `SPLIT` shifts the stack to the left, however: `LOOP` is do-while and reads no stack input — see [LOOP block decoding](../decoder/index.md#loop-block-decoding).
 
 
 Also, we need to make sure that `extra` register $e_0$, which is used to reduce the flag degree by $2$, is set to $1$ when $b_6 = 1$, $b_5 = 0$, and $b_4 = 1$:
@@ -261,21 +261,16 @@ $$
 f_{add3\_madd} = b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_3 \cdot b_2 \text{ | degree} = 5
 $$
 
-A flag which is set to $1$ when $f_{split} = 1$ or $f_{loop} = 1$:
+Using the above variable, we compute the left-shift flag as follows:
 
 $$
-f_{split\_loop} = e_0 \cdot (1 - b_3) \cdot b_2 \cdot (1 - b_1) \text{ | degree} = 4
-$$
-
-Using the above variables, we compute left-shift flag as follows:
-
-$$
-f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split\_loop} + f_{repeat} + f_{end} \cdot h_5 \text{ | degree} = 5
+f_{shl} = (1 - b_6) \cdot b_5 \cdot (1 - b_4) + f_{add3\_madd} + f_{split} + f_{repeat} + f_{end} \cdot h_5 \text{ | degree} = 5
 $$
 
 In the above:
 * $(1 - b_6) \cdot b_5 \cdot (1 - b_4)$ evaluates to $1$ for all [left stack shift](#left-stack-shift-operations) operations described previously. This works because all these operations have a common prefix `010`.
-* $h_5$ is the helper register in the decoder which is set to $1$ when we are exiting a `LOOP` block, and to $0$ otherwise.
+* $f_{split}$ is the SPLIT op flag. 
+* $h_5$ is the helper register in the decoder which is set to $1$ when we are exiting a `LOOP` block, and to $0$ otherwise. Because the loop body is always entered, $h_5$ coincides with "the ending node is a *loop*".
 
 Thus, similarly to the right-shift flag, we compute the value of the left-shift flag based on the prefix of the operation group which contains most left shift operations, and add in flag values for other operations which shift the stack to the left but are not a part of this group.
 

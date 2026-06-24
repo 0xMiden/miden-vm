@@ -1,3 +1,5 @@
+pub mod vm
+
 # ===== SYSTEM PROCEDURES ==========================================================================
 
 #! Removes elements deep in the stack until the depth of the stack is exactly 16. The elements
@@ -35,15 +37,23 @@ pub proc drop_stack_top()
     dropw dropw dropw dropw
 end
 
-#! Logs a precompile commitment and removes the helper words produced by `log_precompile`.
+#! Folds a precompile commitment into the rolling transcript via `log_precompile` and removes
+#! the helper words produced by the instruction.
+#!
+#! Computes the per-call statement word `STMNT = Poseidon2::merge(COMM, TAG)` from the supplied
+#! commitment halves, seats it at stack[4..8] (the HPERM rate1 lanes), and lets the underlying
+#! `log_precompile` opcode fold it into the transcript state. Pads stack[0..4] and stack[8..12]
+#! with zero words so the opcode's writes there don't clobber data deeper in the stack.
 #!
 #! Input: `[COMM, TAG, ...]`
-#! Output: Stack without the three helper words `[R0, R1, CAP_NEXT]`.
-#! Cycles: 1 (plus cost of the underlying `log_precompile` instruction).
+#! Output: Stack with `COMM` and `TAG` consumed and the three helper words produced by
+#!         `log_precompile` dropped.
 pub proc log_precompile_request
-    padw movdnw.2
-    # => [COMM, TAG, PAD, ...]
+    hmerge
+    # => [STMNT, ...]
+    padw padw movdnw.2
+    # => [_, STMNT, _, ...]
     log_precompile
-    # => [R0, R1, CAP_NEXT, ...]
+    # => [STATE_NEW, OUT_RATE1, OUT_CAP, ...]
     dropw dropw dropw
 end

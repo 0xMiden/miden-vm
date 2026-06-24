@@ -3,10 +3,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-mod decorators;
-pub use decorators::{
-    AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, DecoratorList,
-};
+mod debug_metadata;
+pub use debug_metadata::{AssemblyOp, DebugVarInfo, DebugVarLocation};
 
 use crate::{
     Felt,

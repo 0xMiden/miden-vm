@@ -14,12 +14,12 @@ pub use miden_core::{
 };
 pub use miden_debug_types as debuginfo;
 pub use miden_utils_diagnostics::{self as diagnostics, Report};
-pub use semver;
+pub use semver::{self, Error as VersionError, Version};
 
 #[cfg(feature = "arbitrary")]
 pub mod arbitrary;
 pub mod ast;
-pub mod library;
+pub mod module;
 mod parse;
 pub mod parser;
 pub mod sema;
@@ -28,12 +28,11 @@ pub mod testing;
 #[doc(hidden)]
 pub use self::{
     ast::{Path, PathBuf, PathComponent, PathError},
-    library::{KernelLibrary, Library, LibraryError, Version, VersionError},
     parser::{ModuleParser, ParsingError},
 };
 pub use self::{
-    parse::{Parse, ParseOptions},
-    sema::SemanticAnalysisError,
+    parse::Parse,
+    sema::{ExportedTypeUse, SemanticAnalysisError},
 };
 
 /// Maximum allowed iteration count for `repeat.<count>` blocks.

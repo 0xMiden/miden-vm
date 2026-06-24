@@ -28,14 +28,14 @@ mod tests;
 
 // Re-exported for downstream crates
 pub use miden_assembly_syntax::{
-    KernelLibrary, Library, ModuleParser, Parse, ParseOptions, Path, PathBuf, ast,
+    ModuleParser, Path, PathBuf, ast,
     ast::{GlobalItemIndex, ModuleIndex},
     debuginfo::{
         self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
     },
     diagnostics,
     diagnostics::{Report, report},
-    library,
+    module,
 };
 /// Syntax components for the Miden Assembly AST
 /// Merkelized abstract syntax tree (MAST) components defining Miden VM programs.
@@ -43,11 +43,15 @@ pub use miden_core::{mast, serde, utils};
 pub use miden_mast_package as package;
 
 #[doc(hidden)]
-pub use self::linker::{LinkLibraryKind, LinkerError};
+pub use self::linker::LinkerError;
 #[cfg(feature = "std")]
-pub use self::project::{ProjectAssembler, ProjectSourceInputs, ProjectTargetSelector};
+pub use self::project::{
+    MasmSourceProvider, ProjectAssembler, ProjectSourceInputs, ProjectSourceProvenanceInputs,
+    ProjectSourceProvider, ProjectTargetSelector, SourceFileProvenance, TargetAssemblyContext,
+};
 pub use self::{
     assembler::Assembler,
+    linker::Linkage,
     procedure::{Procedure, ProcedureContext},
 };
 

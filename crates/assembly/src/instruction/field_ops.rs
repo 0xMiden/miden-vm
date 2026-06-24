@@ -371,6 +371,12 @@ pub fn lt(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
+/// Same as `lt`, but pushes `imm` on the operand stack first
+pub fn lt_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
+    span_builder.push_op(Push(imm));
+    lt(span_builder)
+}
+
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "less
 /// than or equal" comparison. The stack is expected to be arranged as [b, a, ...] (from the top).
 /// A value of 1 is pushed onto the stack if a <= b. Otherwise, 0 is pushed.
@@ -393,6 +399,12 @@ pub fn lte(span_builder: &mut BasicBlockBuilder) {
     // combine low-bit and high-bit results
     // 2 cycles
     set_result(span_builder);
+}
+
+/// Same as `lte`, but pushes `imm` on the operand stack first
+pub fn lte_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
+    span_builder.push_op(Push(imm));
+    lte(span_builder)
 }
 
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "greater
@@ -419,6 +431,12 @@ pub fn gt(span_builder: &mut BasicBlockBuilder) {
     set_result(span_builder);
 }
 
+/// Same as `gt`, but pushes `imm` on the operand stack first
+pub fn gt_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
+    span_builder.push_op(Push(imm));
+    gt(span_builder)
+}
+
 /// Appends a sequence of operations to pop the top 2 elements off the stack and do a "greater
 /// than or equal" comparison. The stack is expected to be arranged as [b, a, ...] (from the top).
 /// A value of 1 is pushed onto the stack if a >= b. Otherwise, 0 is pushed.
@@ -441,6 +459,12 @@ pub fn gte(span_builder: &mut BasicBlockBuilder) {
     // combine low-bit and high-bit results
     // 2 cycles
     set_result(span_builder);
+}
+
+/// Same as `gte`, but pushes `imm` on the operand stack first
+pub fn gte_imm(span_builder: &mut BasicBlockBuilder, imm: Felt) {
+    span_builder.push_op(Push(imm));
+    gte(span_builder)
 }
 
 /// Checks if the top element in the stack is an odd number or not.

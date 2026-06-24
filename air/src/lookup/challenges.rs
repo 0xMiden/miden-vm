@@ -8,7 +8,7 @@
 //!
 //! - **AIR constraints** (symbolic expressions): `Challenges<AB::ExprEF>`
 //! - **Processor aux trace builders** (concrete field elements): `Challenges<E>`
-//! - **Verifier** (`reduced_aux_values`): `Challenges<EF>`
+//! - **Verifier** (`eval_external`): `Challenges<EF>`
 //!
 //! See [`super::message`] for the standard coefficient index layout.
 
@@ -53,6 +53,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     /// [`LookupAir`]: crate::lookup::LookupAir
     pub fn new(alpha: EF, beta: EF, max_message_width: usize, num_bus_ids: usize) -> Self {
         assert!(max_message_width > 0, "max_message_width must be non-zero");
+        assert!(num_bus_ids > 0, "num_bus_ids must be non-zero");
 
         let mut beta_powers: Vec<EF> = Vec::with_capacity(max_message_width);
         beta_powers.push(EF::ONE);

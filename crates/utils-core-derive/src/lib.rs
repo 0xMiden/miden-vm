@@ -107,15 +107,12 @@ pub fn derive_mast_node_ext(input: TokenStream) -> TokenStream {
 fn get_mast_node_ext_methods() -> Vec<&'static str> {
     vec![
         "digest",
-        "before_enter",
-        "after_exit",
         "to_display",
         "to_pretty_print",
         "has_children",
         "append_children_to",
         "for_each_child",
         "domain",
-        "verify_node_in_forest",
         "to_builder",
     ]
 }
@@ -133,20 +130,6 @@ fn generate_method_impl_for_trait_method(
             fn digest(&self) -> miden_crypto::Word {
                 match self {
                     #(#enum_name::#variant_names(field) => field.digest()),*
-                }
-            }
-        },
-        "before_enter" => quote! {
-            fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.before_enter(forest)),*
-                }
-            }
-        },
-        "after_exit" => quote! {
-            fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
                 }
             }
         },
@@ -189,14 +172,6 @@ fn generate_method_impl_for_trait_method(
             fn domain(&self) -> miden_crypto::Felt {
                 match self {
                     #(#enum_name::#variant_names(field) => field.domain()),*
-                }
-            }
-        },
-        "verify_node_in_forest" => quote! {
-            #[cfg(debug_assertions)]
-            fn verify_node_in_forest(&self, forest: &crate::mast::MastForest) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.verify_node_in_forest(forest)),*
                 }
             }
         },
@@ -265,7 +240,7 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     // Parse the data to ensure it's an enum
     let enum_data = match &input.data {
         Data::Enum(data) => data,
-        _ => panic!("EnumThispatch can only be derived for enums"),
+        _ => panic!("MastForestContributor can only be derived for enums"),
     };
 
     // Extract variant information
@@ -306,8 +281,8 @@ fn generate_mast_forest_contributor_impl(
             fn fingerprint_for_node(
                 &self,
                 forest: &crate::mast::MastForest,
-                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeFingerprint>,
-            ) -> Result<crate::mast::MastNodeFingerprint, crate::mast::MastForestError> {
+                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::Word>,
+            ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
                     #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
                 }
@@ -316,30 +291,6 @@ fn generate_mast_forest_contributor_impl(
             fn remap_children(self, remapping: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>) -> Self {
                 match self {
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.remap_children(remapping))),*
-                }
-            }
-
-            fn with_before_enter(self, decorators: impl Into<alloc::vec::Vec<crate::mast::DecoratorId>>) -> Self {
-                match self {
-                    #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_before_enter(decorators))),*
-                }
-            }
-
-            fn with_after_exit(self, decorators: impl Into<alloc::vec::Vec<crate::mast::DecoratorId>>) -> Self {
-                match self {
-                    #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_after_exit(decorators))),*
-                }
-            }
-
-            fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.append_before_enter(decorators)),*
-                }
-            }
-
-            fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.append_after_exit(decorators)),*
                 }
             }
 

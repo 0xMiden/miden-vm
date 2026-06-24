@@ -19,9 +19,9 @@ use miden_crypto::{
         GenericStarkConfig,
         challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
         dft::Radix2DitParallel,
-        fri::PcsParams,
         hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
         lmcs::config::LmcsConfig,
+        pcs::PcsParams,
         symmetric::{
             CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
             TruncatedPermutation,
@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new_unchecked(2564365500194292689),
-    Felt::new_unchecked(7963649451118915546),
-    Felt::new_unchecked(13003513905888733288),
-    Felt::new_unchecked(3704785727996306162),
+    Felt::new_unchecked(17246763836728246237),
+    Felt::new_unchecked(9838047215024765106),
+    Felt::new_unchecked(15366705014579132635),
+    Felt::new_unchecked(14157638374955997968),
 ];
 
 /// Observes PCS protocol parameters into the challenger.
@@ -107,40 +107,6 @@ pub fn observe_protocol_params(challenger: &mut impl CanObserve<Felt>) {
     challenger.observe(Felt::new_unchecked(LOG_FINAL_DEGREE as u64));
     challenger.observe(Felt::new_unchecked(1_u64 << LOG_FOLDING_ARITY));
     challenger.observe(Felt::ZERO);
-}
-
-/// Absorbs variable-length public inputs into the challenger.
-///
-/// Each VLPI group is a flat slice of fixed-width messages. `message_widths[i]` gives the
-/// width of each message in group `i`. Every message is zero-padded to the next multiple
-/// of `SPONGE_RATE` and reversed before observation, matching the layout the MASM recursive
-/// verifier's `mem_stream` + `horner_eval_base` expects.
-pub fn observe_var_len_public_inputs<C: CanObserve<Felt>>(
-    challenger: &mut C,
-    var_len_public_inputs: &[&[Felt]],
-    message_widths: &[usize],
-) {
-    assert_eq!(
-        var_len_public_inputs.len(),
-        message_widths.len(),
-        "must provide one message width per VLPI group"
-    );
-    for (group, &msg_width) in var_len_public_inputs.iter().zip(message_widths) {
-        assert!(msg_width > 0, "VLPI message width must be positive");
-        let padded_width = msg_width.next_multiple_of(SPONGE_RATE);
-        for message in group.chunks(msg_width) {
-            assert_eq!(
-                message.len(),
-                msg_width,
-                "VLPI group has trailing elements that don't form a complete message"
-            );
-            let mut padded = vec![Felt::ZERO; padded_width];
-            for (i, &elem) in message.iter().enumerate() {
-                padded[padded_width - 1 - i] = elem;
-            }
-            challenger.observe_slice(&padded);
-        }
-    }
 }
 
 // ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
@@ -296,7 +262,7 @@ mod tests {
     use miden_ace_codegen::{AceConfig, LayoutKind};
     use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
-    use crate::{ProcessorAir, ace};
+    use crate::ace;
 
     const PROTOCOL_ID: u64 = 0;
     const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
@@ -312,11 +278,9 @@ mod tests {
             num_quotient_chunks: 8,
             num_vlpi_groups: 1,
             layout: LayoutKind::Masm,
+            is_multi_air: true,
         };
-        let air = ProcessorAir;
-        let boundary_config = ace::logup_boundary_config();
-        let circuit =
-            ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &boundary_config).unwrap();
+        let circuit = ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
         let encoded = circuit.to_ace().unwrap();
         let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
 

@@ -1,11 +1,13 @@
+use core::assert_matches;
+#[cfg(feature = "arbitrary")]
 use core::cmp;
 
-use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::{ExecutionError, operation::OperationError};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value, stack,
+    Felt, PrimeField64, U32_BOUND, expect_exec_error_matches, rand::rand_value, stack,
 };
 
 #[test]
@@ -313,6 +315,58 @@ fn widening_mul_edge_cases() {
         let input_stack = stack![b0, b1, a0, a1, 777];
         let test = build_test!(source, &input_stack);
         test.expect_stack(&[c0, c1, c2, c3, 777]);
+    }
+}
+
+#[test]
+fn overflowing_mul() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::overflowing_mul
+        end";
+
+    let cases: &[(u64, u64)] = &[
+        (0, 0),
+        (1, 1),
+        (1, u64::MAX),
+        (u64::MAX, 1),
+        (u32::MAX as u64, u32::MAX as u64), // largest no-overflow product
+        (1u64 << 32, 1u64 << 32),           // smallest overflowing product
+        (u64::MAX, u64::MAX),
+        (rand_value(), rand_value()),
+    ];
+
+    for &(a, b) in cases {
+        let (c, overflow) = a.overflowing_mul(b);
+        let (a1, a0) = split_u64(a);
+        let (b1, b0) = split_u64(b);
+        let (c1, c0) = split_u64(c);
+
+        let input_stack = stack![a0, a1, b0, b1];
+        let test = build_test!(source, &input_stack);
+        test.expect_stack(&[overflow as u64, c0, c1]);
+    }
+}
+
+#[test]
+fn checked_not() {
+    let cases: &[u64] = &[0, 1, u64::MAX, u32::MAX as u64, 1u64 << 32, rand_value()];
+
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::not
+        end";
+
+    for &a in cases {
+        let c = !a;
+        let (a1, a0) = split_u64(a);
+        let (c1, c0) = split_u64(c);
+
+        let input_stack = stack![a0, a1];
+        let test = build_test!(source, &input_stack);
+        test.expect_stack(&[c0, c1]);
     }
 }
 
@@ -1358,6 +1412,7 @@ fn u32clz_nonzero_boundary_regression() {
     build_test!(source, &stack![1], &[32]).expect_stack(&[31]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn u32clz_matches_rust_leading_zeros(n in any::<u32>()) {
@@ -1447,6 +1502,7 @@ fn cto() {
 // RANDOMIZED TESTS
 // ================================================================================================
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn unchecked_lt_proptest(a in any::<u64>(), b in any::<u64>()) {
@@ -1716,6 +1772,7 @@ proptest! {
 /// Strategy that mixes boundary u64 values with uniformly random ones. Each variant has equal
 /// probability of being sampled; the boundary cases stress 32-bit limb edges where carry handling
 /// is most likely to fail.
+#[cfg(feature = "arbitrary")]
 fn boundary_biased_u64() -> impl Strategy<Value = u64> {
     prop_oneof![
         Just(0u64),
@@ -1734,6 +1791,7 @@ fn boundary_biased_u64() -> impl Strategy<Value = u64> {
 
 /// Strategy for shift amounts in [0, 64) biased toward the values that exercise control-flow
 /// boundaries in shr/rotl/rotr (32-bit limb edge, the no-op case, and the maximum).
+#[cfg(feature = "arbitrary")]
 fn boundary_biased_shift() -> impl Strategy<Value = u32> {
     prop_oneof![
         Just(0u32),

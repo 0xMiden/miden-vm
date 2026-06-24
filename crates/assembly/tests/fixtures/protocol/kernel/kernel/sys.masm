@@ -1,1 +1,1 @@
-pub use ::miden::utils::panic
+pub use {panic} from ::miden::utils

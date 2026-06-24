@@ -16,7 +16,8 @@ OperationError {
         ),
     },
     source_file: None,
-    err: NotBinaryValueLoop {
+    err: NotBinaryValue {
+        context: Loop,
         value: 100,
     },
 }

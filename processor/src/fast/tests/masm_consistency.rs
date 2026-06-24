@@ -1,5 +1,6 @@
 use alloc::string::String;
 
+use miden_assembly::package::Package;
 use rstest::fixture;
 
 use super::*;
@@ -237,17 +238,24 @@ fn test_masm_consistency(
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
+                let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
+                let kernel_lib = Assembler::new(source_manager.clone())
+                    .assemble_kernel("kernel", kernel, None)
+                    .map(Arc::<Package>::from)
                     .unwrap();
+                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                    .unwrap()
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
+                let program = Assembler::new(source_manager)
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
@@ -316,17 +324,24 @@ fn test_masm_errors_consistency(
 
         match kernel_source {
             Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
+                let kernel = parse_kernel_source(source_manager.clone(), kernel_source);
+                let kernel_lib = Assembler::new(source_manager.clone())
+                    .assemble_kernel("kernel", kernel, None)
+                    .map(Arc::<Package>::from)
                     .unwrap();
+                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                    .unwrap()
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
 
                 (program, Some(kernel_lib))
             },
             None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
+                let program = Assembler::new(source_manager)
+                    .assemble_program("program", program_source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
@@ -351,58 +366,54 @@ fn test_masm_errors_consistency(
     insta::assert_debug_snapshot!(testname, fast_err);
 }
 
-/// Tests that `log_precompile` correctly computes the Poseidon2 permutation and updates the stack.
+/// Tests that `log_precompile` correctly folds a precomputed statement word into the rolling
+/// transcript via Poseidon2.
 ///
-/// This test verifies:
-/// 1. The Poseidon2 permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
-/// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
-/// 3. The capacity is properly initialized to [0,0,0,0] for the first call
+/// Verifies:
+/// 1. Poseidon2 input layout `[STATE_PREV, STMNT, ZERO]` (rate0, rate1, capacity).
+/// 2. Output identity-mapped to the stack: rate0_out → `stack[0..4]` (= `STATE_NEW`), rate1_out →
+///    `stack[4..8]`, cap_out → `stack[8..12]`.
+/// 3. Transcript state initialised to `[0, 0, 0, 0]` for the first call.
 #[test]
 fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Poseidon2;
 
-    // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
-    // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
-    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new_unchecked);
-    let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new_unchecked).into();
-    let tag: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
-    let cap_prev = Word::empty();
+    // The opcode reads STMNT from stack[4..8]; stack[0..4] and stack[8..12] are ignored.
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(Felt::new_unchecked);
+    let stmnt: Word = [5, 6, 7, 8].map(Felt::new_unchecked).into();
+    let state_prev = Word::empty();
 
-    // Compute expected output using Poseidon2 permutation
-    // Input state: [COMM, TAG, CAP_PREV], with CAP_PREV = [0,0,0,0]
+    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAP = ZERO].
     let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(comm_calldata.as_slice());
-    hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(cap_prev.as_slice());
+    hasher_state[0..4].copy_from_slice(state_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(stmnt.as_slice());
 
-    // Apply Poseidon2 permutation
     Poseidon2::apply_permutation(&mut hasher_state);
 
-    // The implementation writes output to stack as:
-    // stack[0..4] = R0 elements, stack[4..8] = R1 elements, stack[8..12] = CAP_NEXT elements
-    // Each written as: stack[i] = word[i]
-    let expected_r0: Word = hasher_state[0..4].try_into().unwrap();
-    let expected_r1: Word = hasher_state[4..8].try_into().unwrap();
-    let expected_cap: Word = hasher_state[8..12].try_into().unwrap();
+    let expected_state_new: Word = hasher_state[0..4].try_into().unwrap();
+    let expected_out_rate1: Word = hasher_state[4..8].try_into().unwrap();
+    let expected_out_cap: Word = hasher_state[8..12].try_into().unwrap();
 
-    // Execute the program
     let program_source = "begin log_precompile end";
     let program = {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        Assembler::new(source_manager).assemble_program(program_source).unwrap()
+        Assembler::new(source_manager)
+            .assemble_program("program", program_source)
+            .unwrap()
+            .unwrap_program()
     };
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    let actual_r0 = execution_output.stack.get_word(0).unwrap();
-    let actual_r1 = execution_output.stack.get_word(4).unwrap();
-    let actual_cap = execution_output.stack.get_word(8).unwrap();
+    let actual_state_new = execution_output.stack.get_word(0).unwrap();
+    let actual_out_rate1 = execution_output.stack.get_word(4).unwrap();
+    let actual_out_cap = execution_output.stack.get_word(8).unwrap();
 
-    assert_eq!(expected_r0, actual_r0, "R0 mismatch");
-    assert_eq!(expected_r1, actual_r1, "R1 mismatch");
-    assert_eq!(expected_cap, actual_cap, "CAP_NEXT mismatch");
+    assert_eq!(expected_state_new, actual_state_new, "STATE_NEW mismatch");
+    assert_eq!(expected_out_rate1, actual_out_rate1, "OUT_RATE1 mismatch");
+    assert_eq!(expected_out_cap, actual_out_cap, "OUT_CAP mismatch");
 }
 
 // Workaround to make insta and rstest work together.

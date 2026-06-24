@@ -1,3 +1,6 @@
+pub mod io
+pub mod sys
+
 const SYSCALL_TABLE_ADDR = 0
 const NUM_SYSCALLS = 3
 

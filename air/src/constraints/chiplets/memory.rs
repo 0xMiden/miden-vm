@@ -32,8 +32,12 @@ use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{
-    MainCols, MidenAirBuilder,
-    constraints::{chiplets::columns::MemoryCols, constants::TWO_POW_16, utils::BoolNot},
+    ChipletCols, MidenAirBuilder,
+    constraints::{
+        chiplets::columns::MemoryCols,
+        constants::{F_4, TWO_POW_16},
+        utils::BoolNot,
+    },
 };
 
 // ENTRY POINTS
@@ -48,8 +52,8 @@ use crate::{
 /// precedence over clock change.
 pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -67,6 +71,11 @@ pub fn enforce_memory_constraints<AB>(
         builder.assert_bool(cols.is_word);
         builder.assert_bool(cols.idx0);
         builder.assert_bool(cols.idx1);
+
+        let word_addr_lo = local.memory_word_addr_lo();
+        let word_addr_hi = local.memory_word_addr_hi();
+        let word_addr = (word_addr_hi * TWO_POW_16 + word_addr_lo) * F_4;
+        builder.assert_eq(cols.word_addr, word_addr);
 
         // For word access, idx bits must be zero (only element accesses use idx0/idx1).
         {
@@ -235,4 +244,193 @@ where
     // not_written[i] = is_read + is_write * is_element * !selected[i]
     let is_element_write = is_write * is_element;
     selected.map(|s_i| is_read + is_element_write.clone() * s_i.not())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+    use core::borrow::BorrowMut;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+    };
+    use miden_crypto::stark::{
+        air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
+        matrix::RowMajorMatrix,
+    };
+
+    use super::enforce_memory_constraints;
+    use crate::{
+        ChipletCols, MemoryCols,
+        constraints::chiplets::selectors::ChipletFlags,
+        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH},
+    };
+
+    struct ConstraintEvalBuilder {
+        main: RowMajorMatrix<Felt>,
+        aux: RowMajorMatrix<QuadFelt>,
+        randomness: Vec<QuadFelt>,
+        permutation_values: Vec<QuadFelt>,
+        periodic_values: Vec<Felt>,
+        preprocessed: RowWindow<'static, Felt>,
+        evaluations: Vec<QuadFelt>,
+    }
+
+    impl ConstraintEvalBuilder {
+        fn new() -> Self {
+            Self {
+                main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
+                aux: RowMajorMatrix::new(
+                    vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2],
+                    AUX_TRACE_WIDTH,
+                ),
+                randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
+                permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
+                periodic_values: Vec::new(),
+                preprocessed: RowWindow::from_two_rows(&[], &[]),
+                evaluations: Vec::new(),
+            }
+        }
+    }
+
+    impl AirBuilder for ConstraintEvalBuilder {
+        type F = Felt;
+        type Expr = Felt;
+        type Var = Felt;
+        type PreprocessedWindow = RowWindow<'static, Felt>;
+        type MainWindow = RowMajorMatrix<Felt>;
+        type PublicVar = Felt;
+        type PeriodicVar = Felt;
+
+        fn main(&self) -> Self::MainWindow {
+            self.main.clone()
+        }
+
+        fn preprocessed(&self) -> &Self::PreprocessedWindow {
+            &self.preprocessed
+        }
+
+        fn is_first_row(&self) -> Self::Expr {
+            Felt::ZERO
+        }
+
+        fn is_last_row(&self) -> Self::Expr {
+            Felt::ZERO
+        }
+
+        fn is_transition(&self) -> Self::Expr {
+            Felt::ONE
+        }
+
+        fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
+            self.evaluations.push(QuadFelt::from(x.into()));
+        }
+
+        fn public_values(&self) -> &[Self::PublicVar] {
+            &[]
+        }
+
+        fn periodic_values(&self) -> &[Self::PeriodicVar] {
+            &self.periodic_values
+        }
+    }
+
+    impl ExtensionBuilder for ConstraintEvalBuilder {
+        type EF = QuadFelt;
+        type ExprEF = QuadFelt;
+        type VarEF = QuadFelt;
+
+        fn assert_zero_ext<I>(&mut self, x: I)
+        where
+            I: Into<Self::ExprEF>,
+        {
+            self.evaluations.push(x.into());
+        }
+    }
+
+    impl PermutationAirBuilder for ConstraintEvalBuilder {
+        type MP = RowMajorMatrix<QuadFelt>;
+        type RandomVar = QuadFelt;
+        type PermutationVar = QuadFelt;
+
+        fn permutation(&self) -> Self::MP {
+            self.aux.clone()
+        }
+
+        fn permutation_randomness(&self) -> &[Self::RandomVar] {
+            &self.randomness
+        }
+
+        fn permutation_values(&self) -> &[Self::PermutationVar] {
+            &self.permutation_values
+        }
+    }
+
+    fn memory_flags() -> ChipletFlags<Felt> {
+        ChipletFlags {
+            is_active: Felt::ONE,
+            is_transition: Felt::ZERO,
+            is_last: Felt::ZERO,
+            next_is_first: Felt::ZERO,
+        }
+    }
+
+    fn memory_row() -> ChipletCols<Felt> {
+        ChipletCols {
+            s_00: Felt::ZERO,
+            s_01: Felt::ZERO,
+            chip_clk: Felt::ONE,
+            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 3],
+        }
+    }
+
+    fn memory_cols(row: &mut ChipletCols<Felt>) -> &mut MemoryCols<Felt> {
+        row.chiplets[2..17].borrow_mut()
+    }
+
+    fn set_word_addr_limbs(row: &mut ChipletCols<Felt>, lo: u64, hi: u64) {
+        row.chiplets[17] = Felt::new_unchecked(lo);
+        row.chiplets[18] = Felt::new_unchecked(hi);
+    }
+
+    fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {
+        let next = memory_row();
+        let mut builder = ConstraintEvalBuilder::new();
+        enforce_memory_constraints(&mut builder, row, &next, &memory_flags());
+        builder.evaluations
+    }
+
+    fn assert_constraints_accept(row: &ChipletCols<Felt>) {
+        let evaluations = eval_memory_constraints(row);
+        assert!(
+            evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+            "expected all memory constraints to evaluate to zero; got {evaluations:?}",
+        );
+    }
+
+    fn assert_constraints_reject(row: &ChipletCols<Felt>) {
+        let evaluations = eval_memory_constraints(row);
+        assert!(
+            evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+            "expected at least one nonzero memory constraint evaluation",
+        );
+    }
+
+    #[test]
+    fn memory_constraints_bind_word_addr_to_range_checked_limbs() {
+        let mut valid = memory_row();
+        {
+            let cols = memory_cols(&mut valid);
+            cols.is_read = Felt::ONE;
+            cols.is_word = Felt::ONE;
+            cols.word_addr = Felt::new_unchecked(4 * (7 + (3 << 16)));
+        }
+        set_word_addr_limbs(&mut valid, 7, 3);
+        assert_constraints_accept(&valid);
+
+        let mut invalid = valid.clone();
+        set_word_addr_limbs(&mut invalid, 0, 0);
+        assert_constraints_reject(&invalid);
+    }
 }

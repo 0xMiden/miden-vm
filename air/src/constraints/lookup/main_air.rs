@@ -32,7 +32,8 @@ use super::{
     },
 };
 use crate::{
-    Felt, MainCols,
+    CoreCols, Felt,
+    constraints::columns::NUM_CORE_COLS,
     lookup::{LookupAir, LookupBuilder},
 };
 
@@ -55,13 +56,13 @@ use crate::{
 pub(crate) trait MainLookupBuilder: LookupBuilder<F = Felt> {
     /// Build the shared [`LookupOpFlags`] instance for one `eval` call.
     ///
-    /// Default body calls [`LookupOpFlags::from_main_cols`], the polynomial path. Adapters
-    /// override this when a cheaper construction path is available (e.g. the prover path,
-    /// where decoder bits are concrete 0/1).
+    /// Default body calls [`LookupOpFlags::from_main_cols`], the polynomial path, against
+    /// the multi-AIR `CoreCols` view. Adapters override this when a cheaper construction
+    /// path is available (e.g. the prover path, where decoder bits are concrete 0/1).
     fn build_op_flags(
         &self,
-        local: &MainCols<Self::Var>,
-        next: &MainCols<Self::Var>,
+        local: &CoreCols<Self::Var>,
+        next: &CoreCols<Self::Var>,
     ) -> LookupOpFlags<Self::Expr> {
         LookupOpFlags::from_main_cols(&local.decoder, &local.stack, &next.decoder)
     }
@@ -80,10 +81,10 @@ pub(crate) struct MainBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
 {
-    /// Typed view of the current row.
-    pub local: &'a MainCols<LB::Var>,
-    /// Typed view of the next row.
-    pub next: &'a MainCols<LB::Var>,
+    /// Typed view of the current row (Core half of the trace).
+    pub local: &'a CoreCols<LB::Var>,
+    /// Typed view of the next row (Core half of the trace).
+    pub next: &'a CoreCols<LB::Var>,
     /// Operation flags computed from `(local.decoder, local.stack, next.decoder)` via the
     /// builder-provided hook.
     pub op_flags: LookupOpFlags<LB::Expr>,
@@ -98,7 +99,7 @@ where
     /// Delegates the `LookupOpFlags` construction to the builder's
     /// [`MainLookupBuilder::build_op_flags`] hook so the constraint-path and prover-path
     /// adapters can diverge on construction cost without the emitters noticing.
-    pub fn new(builder: &LB, local: &'a MainCols<LB::Var>, next: &'a MainCols<LB::Var>) -> Self {
+    pub fn new(builder: &LB, local: &'a CoreCols<LB::Var>, next: &'a CoreCols<LB::Var>) -> Self {
         let op_flags = builder.build_op_flags(local, next);
         Self { local, next, op_flags }
     }
@@ -138,10 +139,9 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // Must match `ProcessorAir::max_message_width` since this sub-AIR shares the
-        // aggregator's bus-prefix table. The widest main-trace payload is
-        // `HasherMsg::State` (linear_hash_init / return_state) at 15 slots, but the
-        // aggregator's `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM transcript alignment.
+        // The widest main-trace payload is `HasherMsg::State` (linear_hash_init /
+        // return_state) at 15 slots, but `MIDEN_MAX_MESSAGE_WIDTH = 16` is kept for MASM
+        // transcript alignment.
         super::messages::MIDEN_MAX_MESSAGE_WIDTH
     }
 
@@ -154,9 +154,16 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
+        // Hold the `MainWindow` as an owned value so its borrow on the underlying builder is
+        // released by the time we grab the `&mut builder` for the per-column emitters.
+        //
+        // Borrow the leading `NUM_CORE_COLS` of the row as a `CoreCols` — the Core half of
+        // the trace.
         let main = builder.main();
-        let local: &MainCols<_> = main.current_slice().borrow();
-        let next: &MainCols<_> = main.next_slice().borrow();
+        let local_slice = main.current_slice();
+        let next_slice = main.next_slice();
+        let local: &CoreCols<_> = local_slice[..NUM_CORE_COLS].borrow();
+        let next: &CoreCols<_> = next_slice[..NUM_CORE_COLS].borrow();
 
         let ctx = MainBusContext::new(&*builder, local, next);
 

@@ -9,7 +9,7 @@
 //! memory slots, missing absorptions) that would silently break soundness.
 
 use miden_ace_codegen::{AceConfig, InputKey, InputLayout, LayoutKind};
-use miden_air::{ProcessorAir, ace::build_batched_ace_circuit};
+use miden_air::ace::build_multi_air_ace_circuit;
 use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
@@ -20,7 +20,10 @@ use miden_processor::{ContextId, ExecutionOutput};
 // MASM CONSTANTS (must match crates/lib/core/asm/stark/constants.masm)
 // ================================================================================================
 
-const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322667;
+// Must match the constants in `crates/lib/core/asm/stark/constants.masm`. Updated
+// for the multi-AIR layout (see `CHIPLETS_TRACE_LENGTH_LOG_PTR` insertion shifting
+// the post-heights pointers forward).
+const PUBLIC_INPUTS_ADDRESS_PTR: u32 = 3223322671;
 const AUX_RAND_ELEM_PTR: u32 = 3225419776;
 
 // EXTRACTION
@@ -100,11 +103,10 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        is_multi_air: true,
     };
 
-    let batch_config = miden_air::ace::logup_boundary_config();
-    let circuit = build_batched_ace_circuit::<_, QuadFelt>(&ProcessorAir, config, &batch_config)
-        .expect("ace circuit");
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ace circuit");
     let layout = circuit.layout();
 
     let inputs = extract_ace_inputs(output, layout);

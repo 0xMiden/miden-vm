@@ -4,10 +4,9 @@ use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
     BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
-    ProcessorState, StackInputs, Word,
+    LoadedMastForest, ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName},
-    mast::MastForest,
 };
 
 struct YieldingAsyncHost {
@@ -33,7 +32,7 @@ impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
         async { None }
     }
 
@@ -52,6 +51,7 @@ impl Host for YieldingAsyncHost {
 fn simple_program() -> miden_processor::Program {
     Assembler::default()
         .assemble_program(
+            "program",
             r#"
             begin
                 push.2
@@ -60,6 +60,7 @@ fn simple_program() -> miden_processor::Program {
             "#,
         )
         .expect("program should compile")
+        .unwrap_program()
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -124,8 +125,9 @@ async fn execute_async_supports_async_only_host_events() {
     let event_name = EventName::new("test::async::emit");
     let event_id = event_name.to_event_id().as_u64();
     let program = Assembler::default()
-        .assemble_program(format!("begin push.{event_id} emit drop end"))
-        .expect("program should compile");
+        .assemble_program("program", format!("begin push.{event_id} emit drop end"))
+        .expect("program should compile")
+        .unwrap_program();
 
     let mut host = YieldingAsyncHost::new();
     let output = FastProcessor::new(StackInputs::default())

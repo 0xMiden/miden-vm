@@ -6,52 +6,6 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-// ASSERT MATCHES MACRO
-// ================================================================================================
-
-/// This is an implementation of `std::assert_matches::assert_matches`
-/// so it can be removed when that feature stabilizes upstream
-#[macro_export]
-macro_rules! assert_matches {
-    ($left:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
-        match $left {
-            $( $pattern )|+ $( if $guard )? => {}
-            ref left_val => {
-                panic!(r#"
-assertion failed: `(left matches right)`
-    left: `{:?}`,
-    right: `{}`"#, left_val, stringify!($($pattern)|+ $(if $guard)?));
-            }
-        }
-    };
-
-    ($left:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )?, $msg:literal $(,)?) => {
-        match $left {
-            $( $pattern )|+ $( if $guard )? => {}
-            ref left_val => {
-                panic!(concat!(r#"
-assertion failed: `(left matches right)`
-    left: `{:?}`,
-    right: `{}`
-"#, $msg), left_val, stringify!($($pattern)|+ $(if $guard)?));
-            }
-        }
-    };
-
-    ($left:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )?, $msg:literal, $($arg:tt)+) => {
-        match $left {
-            $( $pattern )|+ $( if $guard )? => {}
-            ref left_val => {
-                panic!(concat!(r#"
-assertion failed: `(left matches right)`
-    left: `{:?}`,
-    right: `{}`
-"#, $msg), left_val, stringify!($($pattern)|+ $(if $guard)?), $($arg)+);
-            }
-        }
-    }
-}
-
 // EXPORTS
 // ================================================================================================
 
@@ -81,6 +35,44 @@ pub mod serde {
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
     };
+
+    /// Reads and validates a serialized length before it is used for allocation.
+    pub fn read_bounded_len<R: ByteReader>(
+        source: &mut R,
+        label: &str,
+        min_element_size: usize,
+    ) -> Result<usize, DeserializationError> {
+        let len = source.read_usize()?;
+        validate_bounded_len(source, label, len, min_element_size)?;
+        Ok(len)
+    }
+
+    /// Validates that a serialized length fits both the reader budget and remaining input.
+    pub fn validate_bounded_len<R: ByteReader>(
+        source: &R,
+        label: &str,
+        len: usize,
+        min_element_size: usize,
+    ) -> Result<(), DeserializationError> {
+        let max_len = source.max_alloc(min_element_size);
+        if len > max_len {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "{label} count {len} exceeds budget {max_len}"
+            )));
+        }
+
+        let min_bytes = len.checked_mul(min_element_size).ok_or_else(|| {
+            DeserializationError::InvalidValue(alloc::format!(
+                "{label} count {len} overflows minimum serialized size {min_element_size}"
+            ))
+        })?;
+        source.check_eor(min_bytes).map_err(|err| match err {
+            DeserializationError::UnexpectedEOF => DeserializationError::InvalidValue(
+                alloc::format!("{label} count {len} exceeds remaining input"),
+            ),
+            err => err,
+        })
+    }
 }
 
 pub mod crypto {
@@ -116,21 +108,6 @@ pub mod crypto {
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};
-
-    /// Pretty-print a list of [PrettyPrint] values as comma-separated items.
-    pub fn pretty_print_csv<'a, T>(items: impl IntoIterator<Item = &'a T>) -> Document
-    where
-        T: PrettyPrint + 'a,
-    {
-        let mut doc = Document::Empty;
-        for (i, item) in items.into_iter().enumerate() {
-            if i > 0 {
-                doc += const_text(", ");
-            }
-            doc += item.render();
-        }
-        doc
-    }
 }
 
 // CONSTANTS

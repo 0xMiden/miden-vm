@@ -7,15 +7,14 @@ use miden_air::trace::chiplets::hasher::{
 use miden_core::chiplets::hasher::apply_permutation;
 
 use super::{
-    Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
-    ZERO,
+    ChipletTraceFragment, Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch,
+    Word as Digest, ZERO,
 };
 
 mod trace;
 use trace::HasherTrace;
 
 #[cfg(test)]
-#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // HASH PROCESSOR
@@ -65,7 +64,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 #[derive(Debug, Default)]
 pub struct Hasher {
     trace: HasherTrace,
-    /// Maps block digest -> (start_row, end_row) for memoized controller traces.
+    /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps input state -> multiplicity for permutation deduplication.
     /// During finalize_trace(), one 16-row perm cycle is emitted per entry.
@@ -155,6 +154,7 @@ impl Hasher {
         }
 
         let addr = self.trace.next_row_addr();
+        let op_start = self.trace.next_op_index();
         let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
         // Single permutation: boundary on both input and output
         let permuted = self.append_controller_permutation(
@@ -169,7 +169,7 @@ impl Hasher {
             ZERO, // direction_bit: non-Merkle
         );
 
-        self.insert_to_memoized_trace_map(addr, expected_hash);
+        self.insert_to_memoized_trace_map(op_start, expected_hash);
         let result = get_digest(&permuted);
         (addr, result)
     }
@@ -188,6 +188,7 @@ impl Hasher {
         }
 
         let addr = self.trace.next_row_addr();
+        let op_start = self.trace.next_op_index();
         let init_state = init_state(op_batches[0].groups(), ZERO);
 
         let num_batches = op_batches.len();
@@ -205,7 +206,7 @@ impl Hasher {
                 ZERO,
                 ZERO,
             );
-            self.insert_to_memoized_trace_map(addr, expected_hash);
+            self.insert_to_memoized_trace_map(op_start, expected_hash);
             let result = get_digest(&permuted);
             return (addr, result);
         }
@@ -254,7 +255,7 @@ impl Hasher {
             ZERO,
         );
 
-        self.insert_to_memoized_trace_map(addr, expected_hash);
+        self.insert_to_memoized_trace_map(op_start, expected_hash);
         let result = get_digest(&permuted);
         (addr, result)
     }
@@ -309,7 +310,7 @@ impl Hasher {
     ///
     /// Finalization pads the controller region and appends one 16-row permutation cycle
     /// per unique input state. This is the only place where the perm segment is materialized.
-    pub(super) fn fill_trace(mut self, trace: &mut TraceFragment) {
+    pub(super) fn fill_trace(mut self, trace: &mut ChipletTraceFragment) {
         if !self.finalized {
             let estimated_len = self.estimate_trace_len();
             self.finalize_trace();
@@ -484,44 +485,36 @@ impl Hasher {
 
     /// Attempts to replay a memoized controller trace for the given expected hash.
     ///
-    /// If a memoized trace exists, copies it, re-registers permutation requests from copied
-    /// input rows, and returns `Some((addr, digest))`. Otherwise returns `None`.
+    /// If a memoized trace exists, re-pushes the source ops with the current `mrupdate_id`,
+    /// re-registers permutation requests from copied input rows, and returns `Some((addr,
+    /// digest))`. Otherwise returns `None`.
     fn replay_memoized_trace(&mut self, expected_hash: Digest) -> Option<(Felt, Digest)> {
-        let (start_row, end_row) = match self.get_memoized_trace(expected_hash) {
+        let (op_start, op_end) = match self.get_memoized_trace(expected_hash) {
             Some(&(s, e)) => (s, e),
             None => return None,
         };
 
         let addr = self.trace.next_row_addr();
-        let mut state = [ZERO; STATE_WIDTH];
-        let append_start = self.trace.trace_len();
-        self.trace.copy_trace(&mut state, start_row..end_row);
-        let append_end = self.trace.trace_len();
+        let (last_state, input_states) =
+            self.trace.replay_ops_range(op_start..op_end, self.mrupdate_id);
 
-        // Ensure mrupdate_id is consistent with the current counter for all copied rows.
-        self.trace
-            .overwrite_mrupdate_id_in_range(append_start..append_end, self.mrupdate_id);
-
-        // Re-register permutation requests from copied input rows
-        let input_states = self.trace.input_states_in_range(append_start..append_end);
         for input_state in input_states {
             self.record_perm_request(&input_state);
         }
 
-        let result = get_digest(&state);
+        let result = get_digest(&last_state);
         Some((addr, result))
     }
 
-    /// Returns the start and end rows of a memoized block trace, if it exists.
+    /// Returns the start and end op indices of a memoized block trace, if it exists.
     fn get_memoized_trace(&self, hash: Digest) -> Option<&(usize, usize)> {
         self.memoized_trace_map.get(&digest_to_key(hash))
     }
 
-    /// Records the start and end rows of a block's controller trace for memoization.
-    fn insert_to_memoized_trace_map(&mut self, addr: Felt, hash: Digest) {
-        let start_row = addr.as_canonical_u64() as usize - 1;
-        let end_row = self.trace.next_row_addr().as_canonical_u64() as usize - 1;
-        self.memoized_trace_map.insert(digest_to_key(hash), (start_row, end_row));
+    /// Records the op index range of a block's controller trace for memoization.
+    fn insert_to_memoized_trace_map(&mut self, op_start: usize, hash: Digest) {
+        let op_end = self.trace.next_op_index();
+        self.memoized_trace_map.insert(digest_to_key(hash), (op_start, op_end));
     }
 }
 

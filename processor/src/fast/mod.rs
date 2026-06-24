@@ -1,23 +1,17 @@
-#[cfg(test)]
-use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-#[cfg(test)]
-use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    mast::{MastForest, MastNodeExt, MastNodeId},
-    operations::Decorator,
+    mast::{ExecutableMastForest, MastForest},
     precompile::PrecompileTranscript,
     program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ProcessorState,
     advice::AdviceError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
@@ -25,7 +19,6 @@ use crate::{
 };
 
 mod basic_block;
-mod call_and_dyn;
 mod execution_api;
 mod external;
 mod memory;
@@ -96,8 +89,8 @@ const STACK_BUFFER_BASE_IDX: usize = INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH;
 ///       bottom is 15 elements away from the bottom boundary, then we can safely execute 10
 ///       operations that modify the stack depth with no bounds check.
 /// - When switching contexts (e.g., during a call or syscall), all elements past the first 16 are
-///   stored in an `ExecutionContextInfo` struct, and the stack is truncated to 16 elements. This
-///   will be restored when returning from the call or syscall.
+///   stored in `stack_overflow_save_stack`, and the stack is truncated to 16 elements. They will be
+///   restored when returning from the call or syscall.
 ///
 /// # Clock Cycle Management
 /// - The clock cycle (`clk`) is managed in the same way as in `Process`. That is, it is incremented
@@ -120,7 +113,7 @@ pub struct FastProcessor {
     ctx: ContextId,
 
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
-    /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
+    /// ZERO]` if we are in the first context (i.e. when `system_call_state_stack` is empty).
     caller_hash: Word,
 
     /// The advice provider to be used during execution.
@@ -129,22 +122,30 @@ pub struct FastProcessor {
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
-    /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
-    /// `dyncall`) to keep track of the information needed to return to the previous context upon
-    /// return. It is a stack since calls can be nested.
-    call_stack: Vec<ExecutionContextInfo>,
+    /// Stack of saved system state, used when starting a new execution context (from a `call`,
+    /// `syscall` or `dyncall`) to keep track of the previous `(ctx, caller_hash)` upon return.
+    /// Pushed in lockstep with `stack_overflow_save_stack`.
+    system_call_state_stack: Vec<SystemCallState>,
 
-    /// Options for execution, including but not limited to whether debug or tracing is enabled,
-    /// the size of core trace fragments during execution, etc.
+    /// Stack of saved operand-stack overflows, used when starting a new execution context to keep
+    /// the elements that lived past the top 16 of the previous context. Pushed in lockstep with
+    /// `system_call_state_stack`.
+    stack_overflow_save_stack: Vec<Vec<Felt>>,
+
+    /// Running total of the number of field elements currently held across all suspended overflow
+    /// segments in `stack_overflow_save_stack`. Maintained in lockstep with that stack so the
+    /// aggregate operand-stack depth (active context plus all suspended overflow) can be bounded
+    /// by `ExecutionOptions::max_stack_depth()` in O(1) without summing every saved segment on
+    /// each push. See [`Self::ensure_stack_capacity_for_push`].
+    saved_overflow_len: usize,
+
+    /// Options for execution, including cycle limits, stack limits, advice map limits, and the
+    /// size of core trace fragments during execution.
     options: ExecutionOptions,
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via
     /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
-
-    /// Tracks decorator retrieval calls for testing.
-    #[cfg(test)]
-    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
@@ -162,7 +163,7 @@ impl FastProcessor {
     /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
     #[inline(always)]
     fn execution_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
         processor: Self,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match flow {
@@ -182,7 +183,7 @@ impl FastProcessor {
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     fn stack_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
+        flow: ControlFlow<BreakReason<Arc<MastForest>>, StackOutputs>,
     ) -> Result<StackOutputs, ExecutionError> {
         match flow {
             ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
@@ -200,8 +201,7 @@ impl FastProcessor {
 
     /// Creates a new `FastProcessor` instance with the given stack inputs.
     ///
-    /// By default, advice inputs are empty and execution options use their defaults
-    /// (debugging and tracing disabled).
+    /// By default, advice inputs are empty and execution options use their defaults.
     ///
     /// # Example
     /// ```ignore
@@ -209,9 +209,7 @@ impl FastProcessor {
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
-    ///     .expect("advice inputs should fit advice map limits")
-    ///     .with_debugging(true)
-    ///     .with_tracing(true);
+    ///     .expect("advice inputs should fit advice map limits");
     /// ```
     ///
     /// When using non-default advice map limits, prefer [`Self::new_with_options`] so the advice
@@ -234,31 +232,14 @@ impl FastProcessor {
 
     /// Sets the execution options for the processor.
     ///
-    /// This will override any previously set debugging or tracing settings.
-    ///
     /// Existing advice inputs are revalidated against the new options before they are applied. To
     /// load advice inputs that require non-default advice map limits, call this before
     /// [`Self::with_advice`] or use [`Self::new_with_options`].
     pub fn with_options(mut self, options: ExecutionOptions) -> Result<Self, AdviceError> {
         self.advice.set_options(&options)?;
+        self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
-    }
-
-    /// Enables or disables debugging mode.
-    ///
-    /// When debugging is enabled, debug decorators will be executed during program execution.
-    pub fn with_debugging(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_debugging(enabled);
-        self
-    }
-
-    /// Enables or disables tracing mode.
-    ///
-    /// When tracing is enabled, trace decorators will be executed during program execution.
-    pub fn with_tracing(mut self, enabled: bool) -> Self {
-        self.options = self.options.with_tracing(enabled);
-        self
     }
 
     /// Constructor for creating a `FastProcessor` with all options specified at once.
@@ -291,12 +272,12 @@ impl FastProcessor {
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
             caller_hash: EMPTY_WORD,
-            memory: Memory::new(),
-            call_stack: Vec::new(),
+            memory: Memory::new(options.max_memory_elements()),
+            system_call_state_stack: Vec::new(),
+            stack_overflow_save_stack: Vec::new(),
+            saved_overflow_len: 0,
             options,
             pc_transcript: PrecompileTranscript::new(),
-            #[cfg(test)]
-            decorator_retrieval_count: Rc::new(Cell::new(0)),
         })
     }
 
@@ -313,32 +294,12 @@ impl FastProcessor {
             current_forest: program.mast_forest().clone(),
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
+            package_debug_info: None,
         })
     }
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
-
-    /// Returns whether the processor is executing in debug mode.
-    #[inline(always)]
-    pub fn in_debug_mode(&self) -> bool {
-        self.options.enable_debugging()
-    }
-
-    /// Returns true if decorators should be executed.
-    ///
-    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
-    /// enabled (for trace decorators).
-    #[inline(always)]
-    fn should_execute_decorators(&self) -> bool {
-        self.in_debug_mode() || self.options.enable_tracing()
-    }
-
-    #[cfg(test)]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {
-        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
-    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -519,91 +480,6 @@ impl FastProcessor {
         self.stack_write(idx2, a);
     }
 
-    // DECORATOR EXECUTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Executes the decorators that should be executed before entering a node.
-    fn execute_before_enter_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.before_enter(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the decorators that should be executed after exiting a node.
-    fn execute_after_exit_decorators(
-        &self,
-        node_id: MastNodeId,
-        current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
-        }
-
-        #[cfg(test)]
-        self.record_decorator_retrieval();
-
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
-
-        for &decorator_id in node.after_exit(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
-        }
-
-        ControlFlow::Continue(())
-    }
-
-    /// Executes the specified decorator
-    fn execute_decorator(
-        &self,
-        decorator: &Decorator,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        match decorator {
-            Decorator::Debug(options) => {
-                if self.in_debug_mode() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_debug(&processor_state, options) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::DebugHandlerError { err }.into(),
-                        ));
-                    }
-                }
-            },
-            Decorator::Trace(id) => {
-                if self.options.enable_tracing() {
-                    let processor_state = self.state();
-                    if let Err(err) = host.on_trace(&processor_state, *id) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
-                                .into(),
-                        ));
-                    }
-                }
-            },
-        };
-        ControlFlow::Continue(())
-    }
-
     /// Increments the stack top pointer by 1.
     ///
     /// The bottom of the stack is never affected by this operation.
@@ -621,9 +497,20 @@ impl FastProcessor {
     /// `SmallVec` would put a useful inline buffer inside `FastProcessor`, and preallocating the
     /// full limit would penalize ordinary programs. This policy is performance-sensitive and should
     /// be benchmarked against the fixed-buffer baseline.
+    ///
+    /// The depth that is checked is the *aggregate* operand-stack depth: the active context's depth
+    /// plus every element held in suspended overflow segments (`saved_overflow_len`). A `call`,
+    /// `dyncall`, or `syscall` context switch hides the caller's overflow in
+    /// `stack_overflow_save_stack` rather than freeing it, so checking only the active context
+    /// would let a program nest context switches to accumulate `O(call_depth *
+    /// max_stack_depth)` hidden operand-stack memory while every live frame stayed within the
+    /// limit. Because a context switch merely moves elements between the active stack and the
+    /// saved overflow (it never creates elements), the aggregate is conserved across switches
+    /// and only grows on a push, so enforcing the bound here is sufficient to cap total
+    /// operand-stack memory.
     #[inline(always)]
     fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
-        let depth = self.stack_size() + 1;
+        let depth = self.stack_size() + self.saved_overflow_len + 1;
         let max = self.options.max_stack_depth();
         if depth > max {
             return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
@@ -742,20 +629,17 @@ pub struct ExecutionOutput {
     pub final_precompile_transcript: PrecompileTranscript,
 }
 
-// EXECUTION CONTEXT INFO
+// SYSTEM CALL STATE
 // ===============================================================================================
 
-/// Information about the execution context.
+/// The system-state half of a saved execution context.
 ///
-/// This struct is used to keep track of the information needed to return to the previous context
-/// upon return from a `call`, `syscall` or `dyncall`.
+/// Used to keep track of the `(ctx, caller_hash)` pair that needs to be restored upon return from a
+/// `call`, `syscall` or `dyncall`.
 #[derive(Debug)]
-struct ExecutionContextInfo {
-    /// This stores all the elements on the stack at the call site, excluding the top 16 elements.
-    /// This corresponds to the overflow table in [crate::Process].
-    overflow_stack: Vec<Felt>,
-    ctx: ContextId,
-    fn_hash: Word,
+pub(super) struct SystemCallState {
+    pub ctx: ContextId,
+    pub caller_hash: Word,
 }
 
 // NOOP TRACER
@@ -766,13 +650,14 @@ pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     type Processor = FastProcessor;
+    type Forest = Arc<MastForest>;
 
     #[inline(always)]
     fn start_clock_cycle(
         &mut self,
         _processor: &FastProcessor,
-        _continuation: Continuation,
-        _continuation_stack: &ContinuationStack,
+        _continuation: Continuation<Arc<MastForest>>,
+        _continuation_stack: &ContinuationStack<Arc<MastForest>>,
         _current_forest: &Arc<MastForest>,
     ) {
         // do nothing

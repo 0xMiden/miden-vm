@@ -3,7 +3,6 @@
 //! This module defines the structure of the hasher chiplet's execution trace, including:
 //! - Trace selectors that determine which hash operation is being performed
 //! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
-//! - Column ranges and indices for accessing trace data
 //!
 //! The hasher chiplet supports several operations:
 //! - Linear hashing (absorbing arbitrary-length inputs)
@@ -15,7 +14,7 @@ use core::ops::Range;
 
 pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
-use super::{Felt, ONE, ZERO, create_range};
+use super::{Felt, ONE, ZERO};
 
 // TYPES ALIASES
 // ================================================================================================
@@ -38,35 +37,16 @@ pub type HasherState = [Felt; STATE_WIDTH];
 /// The sponge state is `[RATE0(4), RATE1(4), CAPACITY(4)]`.
 pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 
-/// The hasher state portion of the execution trace, located in columns 3..15.
-pub const STATE_COL_RANGE: Range<usize> = create_range(NUM_SELECTORS, STATE_WIDTH);
-
 /// Number of field elements in the capacity portion of the hasher's state.
 pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 
 /// The index in the hasher state where the domain is set when initializing the hasher.
 ///
 /// The domain is stored in the second element of the capacity word.
-/// With LE sponge state layout [RATE0, RATE1, CAP], this is at index 9 (= CAPACITY_RANGE.start +
-/// 1).
 pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
 /// Number of field elements in the rate portion of the hasher's state.
 pub const RATE_LEN: usize = 8;
-
-/// The rate portion of the hasher state in the execution trace, located in columns 3..11.
-/// With LE sponge state layout [RATE0, RATE1, CAP], rate comes first.
-pub const RATE_COL_RANGE: Range<usize> = Range {
-    start: STATE_COL_RANGE.start,
-    end: STATE_COL_RANGE.start + RATE_LEN,
-};
-
-/// The capacity portion of the hasher state in the execution trace, located in columns 11..15.
-/// With LE sponge state layout [RATE0, RATE1, CAP], capacity comes last.
-pub const CAPACITY_COL_RANGE: Range<usize> = Range {
-    start: RATE_COL_RANGE.end,
-    end: RATE_COL_RANGE.end + CAPACITY_LEN,
-};
 
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
@@ -96,27 +76,9 @@ pub const NUM_SELECTORS: usize = 3;
 pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
-/// Index of the node_index column. Holds the Merkle tree node index on controller rows.
-/// This column is reused to hold the permutation request multiplicity on perm segment rows.
-pub const NODE_INDEX_COL_IDX: usize = NUM_SELECTORS + STATE_WIDTH;
-
-/// Index of the mrupdate_id column (domain separator for sibling table across MRUPDATE ops).
-pub const MRUPDATE_ID_COL_IDX: usize = NODE_INDEX_COL_IDX + 1;
-
-/// Index of the is_boundary column (1 on boundary rows: first input or last output of each
-/// operation, 0 otherwise).
-pub const IS_BOUNDARY_COL_IDX: usize = MRUPDATE_ID_COL_IDX + 1;
-
-/// Index of the direction_bit column. On Merkle controller rows, holds the extracted direction
-/// bit from the node index. Zero on non-Merkle rows and perm segment rows.
-pub const DIRECTION_BIT_COL_IDX: usize = IS_BOUNDARY_COL_IDX + 1;
-
-/// Index of the s_perm column (0 = controller region, 1 = permutation segment).
-pub const S_PERM_COL_IDX: usize = DIRECTION_BIT_COL_IDX + 1;
-
 /// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_perm = 20.
-pub const TRACE_WIDTH: usize = S_PERM_COL_IDX + 1;
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_00 = 20.
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 5;
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;

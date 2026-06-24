@@ -22,10 +22,7 @@ use miden_air::{
     trace::{
         MainTrace,
         chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
-        log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
-        },
+        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
 use miden_core::{
@@ -35,14 +32,14 @@ use miden_core::{
     operations::{Operation, opcodes},
     program::Program,
 };
-use miden_utils_testing::stack;
+use miden_utils_testing::{stack, stack_inputs_from_ints};
 use rstest::rstest;
 
 use super::super::{
     build_trace_from_ops_with_inputs, build_trace_from_program,
     lookup_harness::{Expectations, InteractionLog},
 };
-use crate::{AdviceInputs, RowIndex, StackInputs, trace::utils::build_span_with_respan_ops};
+use crate::{AdviceInputs, RowIndex, trace::utils::build_span_with_respan_ops};
 
 // RESPONSE-SIDE DISPATCH
 // ================================================================================================
@@ -71,7 +68,7 @@ enum HasherResponseKind {
 fn hasher_response_rows(
     main: &MainTrace,
 ) -> impl Iterator<Item = (RowIndex, HasherResponseKind)> + '_ {
-    (0..main.num_rows()).filter_map(move |row| {
+    (0..main.chiplets_height()).filter_map(move |row| {
         let idx = RowIndex::from(row);
         if !is_hasher_controller_row(main, idx) {
             return None;
@@ -109,7 +106,7 @@ fn span_end_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
 
@@ -162,7 +159,7 @@ fn respan_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut respan_request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::RESPAN as u64 {
@@ -199,10 +196,10 @@ fn respan_hasher_bus() {
 fn merge_hasher_bus() {
     let program = {
         let mut mast_forest = MastForest::new();
-        let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Add])
             .add_to_forest(&mut mast_forest)
             .unwrap();
-        let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Mul])
             .add_to_forest(&mut mast_forest)
             .unwrap();
         let split_id = SplitNodeBuilder::new([t_branch, f_branch])
@@ -219,7 +216,7 @@ fn merge_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut split_request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::SPLIT as u64 {
@@ -265,7 +262,7 @@ fn hperm_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
     let mut hperm_helper0: Option<Felt> = None;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::HPERM as u64 {
@@ -328,7 +325,7 @@ fn logprecompile_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
     let mut logprecompile_addr: Option<Felt> = None;
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::LOGPRECOMPILE as u64 {
@@ -339,27 +336,19 @@ fn logprecompile_hasher_bus() {
         let log_addr = main.helper_register(HELPER_ADDR_IDX, idx);
         logprecompile_addr = Some(log_addr);
 
-        // Input: [COMM, TAG, CAP_PREV] — 8 stack lanes + 4 helper registers.
+        // Input: [STATE_PREV, STMNT, ZERO] — 4 helpers + 4 stack lanes + 4 ZEROs.
         let input_state: [Felt; 12] = core::array::from_fn(|i| {
             if i < 4 {
-                main.stack_element(STACK_COMM_RANGE.start + i, idx)
+                main.helper_register(HELPER_STATE_PREV_RANGE.start + i, idx)
             } else if i < 8 {
-                main.stack_element(STACK_TAG_RANGE.start + (i - 4), idx)
+                main.stack_element(STACK_STMNT_RANGE.start + (i - 4), idx)
             } else {
-                main.helper_register(HELPER_CAP_PREV_RANGE.start + (i - 8), idx)
+                ZERO
             }
         });
 
-        // Output (next row): [R0, R1, CAP_NEXT] — all 12 lanes from stack.
-        let output_state: [Felt; 12] = core::array::from_fn(|i| {
-            if i < 4 {
-                main.stack_element(STACK_R0_RANGE.start + i, next)
-            } else if i < 8 {
-                main.stack_element(STACK_R1_RANGE.start + (i - 4), next)
-            } else {
-                main.stack_element(STACK_CAP_NEXT_RANGE.start + (i - 8), next)
-            }
-        });
+        // Output (next row): [STATE_NEW, OUT_RATE1, OUT_CAP] identity-mapped to stack[0..12].
+        let output_state: [Felt; 12] = core::array::from_fn(|i| main.stack_element(i, next));
 
         exp.remove(row, &HasherMsg::linear_hash_init(log_addr, input_state));
         exp.remove(
@@ -413,7 +402,7 @@ fn mpverify_hasher_bus() {
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
-    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(runtime_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -428,7 +417,7 @@ fn mpverify_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::MPVERIFY as u64 {
@@ -495,7 +484,7 @@ fn mrupdate_hasher_bus() {
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
     runtime_stack.extend_from_slice(&word_to_ints(new_leaf_value));
-    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(runtime_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -507,7 +496,7 @@ fn mrupdate_hasher_bus() {
     let mut exp = Expectations::new(&log);
     let mut request_count = 0usize;
 
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op != opcodes::MRUPDATE as u64 {
@@ -580,9 +569,7 @@ fn mrupdate_hasher_bus() {
 
 fn single_block_program(ops: Vec<Operation>) -> Program {
     let mut mast_forest = MastForest::new();
-    let id = BasicBlockNodeBuilder::new(ops, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
+    let id = BasicBlockNodeBuilder::new(ops).add_to_forest(&mut mast_forest).unwrap();
     mast_forest.make_root(id);
     Program::new(mast_forest.into(), id)
 }
@@ -596,6 +583,9 @@ fn rate_from_hasher_state(main: &MainTrace, row: RowIndex) -> [Felt; 8] {
 }
 
 fn is_hasher_controller_row(main: &MainTrace, row: RowIndex) -> bool {
+    if usize::from(row) >= main.chiplets_height() {
+        return false;
+    }
     main.chiplet_selector_0(row) == ONE && main.chiplet_s_perm(row) == ZERO
 }
 
@@ -649,7 +639,7 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     init_stack.extend_from_slice(&[3, index]);
     init_stack.extend_from_slice(&word_to_ints(tree.root()));
     init_stack.extend_from_slice(&word_to_ints(new_node));
-    let stack_inputs = StackInputs::try_from_ints(init_stack).unwrap();
+    let stack_inputs = stack_inputs_from_ints(init_stack);
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -659,12 +649,12 @@ fn mrupdate_emits_sibling_add_and_remove_per_level(#[case] index: u64) {
     let main = trace.main_trace();
 
     // Collect MV / MU controller rows. A row is a sibling-table add/remove site when
-    // `chiplet_active.controller = 1` (s_ctrl column) AND the hasher internal
+    // `chiplet_active.controller = 1` (s_01 column) AND the hasher internal
     // `(s0, s1, s2)` sub-selectors pick out the MV-all (`s0·s1·(1-s2)`) or MU-all
     // (`s0·s1·s2`) pattern. See `air/src/constraints/lookup/buses/hash_kernel.rs`.
     let mut mv_rows: Vec<RowIndex> = Vec::new();
     let mut mu_rows: Vec<RowIndex> = Vec::new();
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if main.chiplet_selector_0(idx) != ONE || main.chiplet_s_perm(idx) != ZERO {
             continue;

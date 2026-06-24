@@ -19,7 +19,10 @@ use miden::core::stark::utils
 #!   D2. `process_row_ood_evaluations`
 #!   D3. `execute_constraint_evaluation_check`
 #!   D4. `compute_deep_composition_polynomial_queries`
-#! 2. Per-proof parameter: `log(trace_length)`
+#! 2. Per-proof parameters: `log(core_trace_length), log(chiplets_trace_length)` —
+#!    the two per-AIR log heights, in caller order (Core first, Chiplets second).
+#!    The verifier internally derives the max for lifted-domain math and uses each
+#!    AIR's own height for its lifted selectors and β-fold coefficient.
 #! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
 #!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
 #!
@@ -35,7 +38,7 @@ use miden::core::stark::utils
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, D4, log(trace_length), rd0, rd1, rd2, rd3]
+#! Inputs:  [D0, D1, D2, D3, D4, log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3]
 #! Outputs: []
 pub proc verify
 
@@ -45,14 +48,14 @@ pub proc verify
 
     # Store digests of dynamically executed procedures
     exec.utils::store_dynamically_executed_procedures
-    # => [log(trace_length), rd0, rd1, rd2, rd3]
+    # => [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]
 
-    # Validate inputs
+    # Validate inputs (each height independently)
     exec.utils::validate_inputs
-    # => [log(trace_length), rd0, rd1, rd2, rd3]
+    # => [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]
 
     # Initialize sponge with DSFS seeding and derive trace domain parameters.
-    # Consumes [log(tl), rd0, rd1, rd2, rd3]. Security params are read from memory.
+    # Consumes [log(core_tl), log(chiplets_tl), rd0, rd1, rd2, rd3]. Security params are read from memory.
     exec.random_coin::init_seed
     # => [...]
 
@@ -60,18 +63,16 @@ pub proc verify
     exec.public_inputs::process_public_inputs
     # => [...]
 
-    # Observe the AIR instance shape and discard the unused instance challenge.
-    exec.random_coin::observe_trace_height_and_discard_instance_challenge
+    # Observe the AIR instance shape (instance count + per-AIR log heights), continuing the
+    # buffered duplex begun while absorbing the public inputs.
+    exec.random_coin::observe_instance_shape
     # => [...]
 
-    # Load main trace commitment and re-seed with it.
-    #
-    # SAFETY: reseed_direct bypasses the duplex input buffer and requires input_len=0.
-    # The preceding trace-height observation helper guarantees this postcondition.
+    # Load the main trace commitment, observe it onto the buffered stream, and flush.
     padw adv_loadw
     exec.constants::main_trace_com_ptr mem_storew_le
     # => [main_trace_commitment, ...]
-    exec.random_coin::reseed_direct
+    exec.random_coin::reseed_main_after_shape
     # => [...]
 
 
@@ -119,8 +120,10 @@ pub proc verify
 
     exec.ood_frames::load_and_horner_eval_ood_frames
 
+    exec.utils::swap_air_regions_if_chip_first
+
     #==============================================================================================
-    #       VI) Draw gamma for reduced_aux_values batching and evaluate constraints
+    #       VI) Draw gamma for the LogUp boundary batching and evaluate constraints
     #==============================================================================================
 
     exec.utils::execute_constraint_evaluation_check

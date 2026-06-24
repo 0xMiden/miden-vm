@@ -294,8 +294,10 @@ impl ProjectFile {
         if self.lib.is_none() && self.bins.is_empty() {
             let project_name = &self.package.name;
             let span = project_name.span();
-            let namespace: Span<Arc<MasmPath>> =
-                Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
+            let namespace: Span<Arc<MasmPath>> = Span::new(
+                span,
+                MasmPath::new(project_name.inner()).to_absolute().map_err(Report::msg)?.into(),
+            );
             let name = project_name.clone();
             return Ok(Some(Span::new(
                 span,
@@ -303,7 +305,7 @@ impl ProjectFile {
                     ty: TargetType::Library,
                     name,
                     namespace,
-                    path: Some(Span::new(span, Uri::new("mod.masm"))),
+                    path: Span::new(span, Uri::new("mod.masm")),
                 },
             )));
         }
@@ -324,7 +326,9 @@ impl ProjectFile {
                     .namespace
                     .clone()
                     .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
-                ns.map(|ns| MasmPath::new(&ns).to_absolute().into())
+                let path = MasmPath::new(ns.inner());
+                let abs = path.to_absolute().map_err(Report::msg)?;
+                Span::new(ns.span(), abs.into())
             },
         };
         Ok(Some(Span::new(
@@ -424,9 +428,7 @@ impl Validate for ProjectFile {
                     .with_help("Library targets may only be of kind 'library', 'kernel', 'account-component', 'note-script', or 'tx-script'")
                     .with_source_file(Some(source.clone()))));
             }
-            if let Some(path) = lib.path.clone() {
-                target_paths.insert(path, None);
-            }
+            target_paths.insert(lib.path.clone(), None);
         }
 
         for target in self.bins.iter() {
@@ -434,42 +436,30 @@ impl Validate for ProjectFile {
 
             // 2a. Check for conflicting paths
             let span = target.span();
-            if target.path.is_none() {
-                invalid_config.push(RelatedError::wrap(
-                    RelatedLabel::error("missing binary target path")
-                        .with_labeled_span(
-                            span,
-                            "binary targets must specify the path to their entrypoint module",
-                        )
-                        .with_source_file(Some(source.clone())),
-                ));
-            }
-            if let Some(path) = target.path.clone() {
-                match target_paths.entry(path) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(None);
-                    },
-                    Entry::Occupied(mut entry) => {
-                        let path_span = target.path.as_ref().map(Span::span).unwrap_or(span);
-                        let conflict_label = Label::new(path_span, "conflict occurs here");
-                        let path = entry.key().clone();
-                        match entry.get_mut() {
-                            Some(error) => {
-                                error.conflicts.push(conflict_label);
-                            },
-                            opt => {
-                                let label = Label::new(
-                                    path.span(),
-                                    format!(
-                                        "the path for this target, `{path}`, conflicts with other targets"
-                                    ),
-                                );
-                                let conflicts = vec![conflict_label];
-                                *opt = Some(TargetConflictError { label, conflicts });
-                            },
-                        }
-                    },
-                }
+            match target_paths.entry(target.path.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(None);
+                },
+                Entry::Occupied(mut entry) => {
+                    let path_span = target.path.span();
+                    let conflict_label = Label::new(path_span, "conflict occurs here");
+                    let path = entry.key().clone();
+                    match entry.get_mut() {
+                        Some(error) => {
+                            error.conflicts.push(conflict_label);
+                        },
+                        opt => {
+                            let label = Label::new(
+                                path.span(),
+                                format!(
+                                    "the path for this target, `{path}`, conflicts with other targets"
+                                ),
+                            );
+                            let conflicts = vec![conflict_label];
+                            *opt = Some(TargetConflictError { label, conflicts });
+                        },
+                    }
+                },
             }
 
             // 2b. Check for name conflicts

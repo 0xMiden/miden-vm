@@ -1,16 +1,12 @@
 use alloc::boxed::Box;
 
-use miden_air::trace::{
-    chiplets::hasher::STATE_WIDTH,
-    log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
-};
+use miden_air::trace::chiplets::hasher::{Hasher, STATE_WIDTH};
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, QuadFelt},
-    mast::MastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -64,9 +60,10 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
     let (addr, output_state) = processor.hasher().permute(input_state)?;
 
     // Write result back to stack (state[0] at top).
-    let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect("r1 slice has length 4");
-    let cap: Word = output_state[STATE_CAP_RANGE].try_into().expect("cap slice has length 4");
+    let r0: Word = output_state[Hasher::RATE0_RANGE].try_into().expect("r0 slice has length 4");
+    let r1: Word = output_state[Hasher::RATE1_RANGE].try_into().expect("r1 slice has length 4");
+    let cap: Word =
+        output_state[Hasher::CAPACITY_RANGE].try_into().expect("cap slice has length 4");
     processor.stack_mut().set_word(0, &r0);
     processor.stack_mut().set_word(4, &r1);
     processor.stack_mut().set_word(8, &cap);
@@ -98,7 +95,6 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
 pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
-    program: &MastForest,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, CryptoError> {
     // read node value, depth, index and root value from the stack
@@ -116,14 +112,13 @@ pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
-        let err_msg = program.resolve_error_message(err_code);
         OperationError::MerklePathVerificationFailed {
             inner: Box::new(MerklePathVerificationFailedInner {
                 value: node,
                 index,
                 root,
                 err_code,
-                err_msg,
+                err_msg: None,
             }),
         }
     })?;
@@ -448,63 +443,46 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 // LOG PRECOMPILE OPERATION
 // ================================================================================================
 
-/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
-/// capacity.
+/// Folds a precomputed statement into the rolling precompile-transcript state.
 ///
 /// Stack transition:
-/// `[COMM, TAG, PAD, ...] -> [R0, R1, CAP_NEXT, ...]`
+/// `[_, STMNT, _, ...] -> [STATE_NEW, OUT_RATE1, OUT_CAP, ...]`
 ///
-/// Where:
-/// - The hasher computes: `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`
-/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
-///   registers.
-/// - Stack elements are in LSB-first order (structural order).
+/// - Hasher computes `merge(STATE_PREV, STMNT) = rate0(Poseidon2([STATE_PREV, STMNT, ZERO]))`;
+///   `STATE_NEW` is the rate0 half of the output.
+/// - `STATE_PREV` is the previous rolling state, threaded internally and exposed to constraints via
+///   helper registers.
+/// - `STMNT` lives at stack[4..8] (HPERM rate1 lanes) so the chiplet bus's β⁶..β⁹ products share
+///   with HPERM.
+/// - Output is identity-mapped to `stack_next[0..12]`, also matching HPERM's output layout.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    // Read COMM and TAG from the stack
-    let comm: Word = processor.stack().get_word(0);
-    let tag: Word = processor.stack().get_word(4);
+    let stmnt: Word = processor.stack().get_word(4);
+    let state_prev = processor.system().precompile_transcript_state();
 
-    // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_transcript_state();
-
-    // Build the full 12-element hasher state for Poseidon2 permutation
-    // State layout: [RATE0 = COMM, RATE1 = TAG, CAPACITY = CAP_PREV]
+    // Hasher input: [RATE0 = STATE_PREV, RATE1 = STMNT, CAPACITY = ZERO].
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(comm.as_slice());
-    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(tag.as_slice());
-    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+    hasher_state[Hasher::RATE0_RANGE].copy_from_slice(state_prev.as_slice());
+    hasher_state[Hasher::RATE1_RANGE].copy_from_slice(stmnt.as_slice());
 
-    // Perform the Poseidon2 permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
-    // Extract R0, R1 and CAP_NEXT from the output state
-    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
-        .try_into()
-        .expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
-        .try_into()
-        .expect("r1 slice has length 4");
-    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
-        .try_into()
-        .expect("cap_next slice has length 4");
+    let state_new: Word = output_state[Hasher::RATE0_RANGE].try_into().unwrap();
+    let out_rate1: Word = output_state[Hasher::RATE1_RANGE].try_into().unwrap();
+    let out_cap: Word = output_state[Hasher::CAPACITY_RANGE].try_into().unwrap();
 
-    // Update the processor's precompile sponge capacity
-    processor.set_precompile_transcript_state(cap_next);
+    processor.system_mut().set_precompile_transcript_state(state_new);
 
-    // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
-    processor.stack_mut().set_word(0, &r0);
-    processor.stack_mut().set_word(4, &r1);
-    processor.stack_mut().set_word(8, &cap_next);
+    processor.stack_mut().set_word(0, &state_new);
+    processor.stack_mut().set_word(4, &out_rate1);
+    processor.stack_mut().set_word(8, &out_cap);
 
-    // Record the hasher permutation for trace generation
     tracer.record_hasher_permute(hasher_state, output_state);
 
-    // Return helper registers containing the hasher address and CAP_PREV
-    Ok(OperationHelperRegisters::LogPrecompile { addr, cap_prev })
+    Ok(OperationHelperRegisters::LogPrecompile { addr, state_prev })
 }
 
 // STREAM CIPHER OPERATION

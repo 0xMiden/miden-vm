@@ -5,7 +5,7 @@
 //! chiplets bus; the **permutation** sub-chiplet executes the actual Poseidon2 cycles.
 //! A LogUp perm-link bus on the shared `v_wiring` column binds the two regions.
 //!
-//! The controller is active when `s_ctrl = chiplets[0] = 1`, which covers ALL controller
+//! The controller is active when `s_01 = 1`, which covers ALL controller
 //! rows (input, output, and padding).
 //!
 //! ## Sub-modules
@@ -42,7 +42,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    ChipletCols, MidenAirBuilder,
     constraints::{
         chiplets::{columns::ControllerCols, selectors::ChipletFlags},
         utils::BoolNot,
@@ -54,12 +54,12 @@ use crate::{
 
 /// Enforce all controller sub-chiplet constraints.
 ///
-/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The `s_ctrl`
-/// column (`chiplets[0]`) is never referenced directly by constraint code.
+/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The `s_01`
+/// column is never referenced directly by constraint code.
 pub fn enforce_controller_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     chiplet: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -79,10 +79,10 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- First-row boundary ---
     // The first row of the trace must be a controller input row: asserting
-    // `is_active * is_input = 1` forces both `s_ctrl = 1` and `s0 = 1` because
+    // `is_active * is_input = 1` forces both `s_01 = 1` and `s0 = 1` because
     // the only solution to a product of booleans equaling 1 is all factors = 1.
     // NOTE: this assumes the controller is the first chiplet section in the trace.
-    // The transition rules (s_ctrl → s_ctrl' + s_perm' = 1) and the trace layout
+    // The transition rules (s_01 → s_01' + s_00' = 1) and the trace layout
     // guarantee this, but a reordering of chiplet sections would require moving
     // this constraint.
     builder
@@ -124,7 +124,7 @@ pub fn enforce_controller_constraints<AB>(
     // --- Padding stability ---
     // A padding row may only be followed by another padding row (or the first
     // permutation row, which ends the controller section). Gating on
-    // `chiplet.is_transition` = `is_transition * s_ctrl * s_ctrl'` makes the
+    // `chiplet.is_transition` = `is_transition * s_01 * s_01'` makes the
     // constraint vanish on the last padding row when the next row is a permutation
     // row (where `cols_next.s0/s1/s2` hold S-box witnesses).
     //
@@ -145,16 +145,16 @@ pub fn enforce_controller_constraints<AB>(
     // =====================================================================
     // 2. OPERATION START
     //
-    // The first row of every operation is a controller input row (s_ctrl = 1,
+    // The first row of every operation is a controller input row (s_01 = 1,
     // s0 = 1). These constraints apply to ANY input row regardless of
     // operation kind.
     // =====================================================================
 
     // --- No input row at the ctrl→perm boundary ---
     // An input row cannot be the last controller row. Without this, the
-    // adjacency rule below (which relies on `s_ctrl'` so that `s0'/s1'` are
+    // adjacency rule below (which relies on `s_01'` so that `s0'/s1'` are
     // binary on the next row) would have a hole at the ctrl→perm transition.
-    // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly on that boundary.
+    // `chiplet.is_last = s_01 * (1 - s_01')` fires exactly on that boundary.
     builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
 
     // --- No non-final output at the ctrl→perm boundary ---
@@ -170,7 +170,7 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Input→output adjacency on ctrl→ctrl transitions ---
     // On a ctrl→ctrl transition from an input row, the next row must be an
-    // output row. `is_transition` carries the `s_ctrl'` factor, so on this
+    // output row. `is_transition` carries the `s_01'` factor, so on this
     // gate `cols_next.s0/s1` are boolean and `(1 - s0')(1 - s1') = 1` really
     // does force both to 0. Combined with the `is_last` guard above, every
     // ctrl_input is followed by a ctrl_output.
@@ -217,9 +217,7 @@ pub fn enforce_controller_constraints<AB>(
         let cap_next = cols_next.capacity();
 
         let builder = &mut builder.when(gate);
-        for i in 0..4 {
-            builder.assert_eq(cap_next[i], cap[i]);
-        }
+        builder.assert_eq_arrays(cap_next, cap);
     }
 
     // =====================================================================

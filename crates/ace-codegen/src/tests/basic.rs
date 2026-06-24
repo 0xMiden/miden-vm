@@ -1,9 +1,12 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
-    stark::air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-        symbolic::{AirLayout, SymbolicAirBuilder},
+    stark::{
+        air::{
+            AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+            symbolic::{AirLayout, SymbolicAirBuilder},
+        },
+        matrix::{Matrix, RowMajorMatrix},
     },
 };
 
@@ -27,13 +30,13 @@ impl BaseAir<F> for MockAir {
     fn num_public_values(&self) -> usize {
         1
     }
-}
 
-impl LiftedAir<F, EF> for MockAir {
     fn periodic_columns(&self) -> Vec<Vec<F>> {
         vec![vec![Felt::ONE]]
     }
+}
 
+impl LiftedAir<F, EF> for MockAir {
     fn num_randomness(&self) -> usize {
         2
     }
@@ -46,8 +49,14 @@ impl LiftedAir<F, EF> for MockAir {
         1
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
@@ -115,6 +124,7 @@ fn test_verifier_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -157,6 +167,7 @@ fn test_emitted_circuit_matches_dag_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -175,6 +186,7 @@ fn test_encoded_circuit_structure() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();

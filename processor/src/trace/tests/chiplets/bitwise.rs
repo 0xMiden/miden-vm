@@ -9,7 +9,7 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{logup::BitwiseMsg, trace::chiplets::BITWISE_SELECTOR_COL_IDX};
+use miden_air::logup::BitwiseMsg;
 use miden_core::{
     Felt,
     operations::{Operation, opcodes},
@@ -68,7 +68,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
 
     let mut and_rows: Vec<RowIndex> = Vec::new();
     let mut xor_rows: Vec<RowIndex> = Vec::new();
-    for row in 0..main.num_rows() {
+    for row in 0..main.core_height() {
         let idx = RowIndex::from(row);
         let op = main.get_op_code(idx).as_canonical_u64();
         if op == opcodes::U32AND as u64 {
@@ -108,7 +108,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     // chiplet segment starts at a multiple of `HASH_CYCLE_LEN = 16`, which is a multiple of 8,
     // so this alignment condition holds across the whole trace.
     let mut response_rows_seen = 0usize;
-    for row in 0..main.num_rows() {
+    for row in 0..main.chiplets_height() {
         let idx = RowIndex::from(row);
         if !main.is_bitwise_row(idx) {
             continue;
@@ -118,7 +118,7 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
         }
         response_rows_seen += 1;
 
-        let op = main.get(idx, BITWISE_SELECTOR_COL_IDX);
+        let op = main.chiplet_cols(idx).bitwise().op_flag;
         let a = main.chiplet_bitwise_a(idx);
         let b = main.chiplet_bitwise_b(idx);
         let z = main.chiplet_bitwise_z(idx);
@@ -132,4 +132,23 @@ fn bitwise_chiplet_bus_emits_per_request_row() {
     );
 
     log.assert_contains(&exp);
+}
+
+/// Regression test for huitseeker's
+/// <https://github.com/0xMiden/miden-vm/pull/3177#discussion_r3284561750>: in the split-trace
+/// model the bitwise classifier must return `false` past the chiplets-AIR height. The bitwise
+/// active pattern is all-zero selectors (`s_01=0, s_00=0, s1=0`), which used to alias
+/// rows past the chiplets height under the unified-projection semantics.
+#[test]
+fn rows_past_chiplets_height_are_not_classified_as_bitwise() {
+    let trace = build_trace_from_ops(vec![Operation::Noop; 128], &[]);
+    let main = trace.main_trace();
+
+    for row in main.chiplets_height()..main.num_rows() {
+        let idx = RowIndex::from(row);
+        assert!(
+            !main.is_bitwise_row(idx),
+            "row {row} (past chiplets height) classified as bitwise",
+        );
+    }
 }

@@ -1,14 +1,16 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
+
+use miden_mast_package::debug_info::DebugSourceNodeId;
 
 use crate::{
     BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::PackageSourceDebugContext,
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
     },
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{BasicBlockNode, ExecutableMastForest, MastNodeId},
     operation::Operation,
     processor::Processor,
     tracer::Tracer,
@@ -19,17 +21,18 @@ use crate::{
 
 /// Execute the given basic block node.
 #[inline(always)]
-pub(super) fn execute_basic_block_node_from_start<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn execute_basic_block_node_from_start<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<InternalBreakReason>
+    current_forest: &F,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -38,24 +41,22 @@ where
         current_forest,
     );
 
-    // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
-
     // Finalize the clock cycle corresponding to the SPAN operation.
+    let source_node_id = state.current_source_node_id();
     finalize_clock_cycle_with_continuation(
         state.processor,
         state.tracer,
         state.stopper,
         state.continuation_stack,
         || {
-            Some(Continuation::ResumeBasicBlock {
-                node_id,
-                batch_index: 0,
-                op_idx_in_batch: 0,
-            })
+            Some((
+                Continuation::ResumeBasicBlock {
+                    node_id,
+                    batch_index: 0,
+                    op_idx_in_batch: 0,
+                },
+                source_node_id,
+            ))
         },
         current_forest,
     )
@@ -65,7 +66,7 @@ where
     // starting from the RESPAN preceding the batch (and there is no such RESPAN before the first
     // batch).
     if !basic_block_node.op_batches().is_empty() {
-        execute_op_batch(state, basic_block_node, 0, 0, 0, current_forest)?;
+        execute_op_batch(state, basic_block_node, node_id, 0, 0, 0, current_forest)?;
     }
 
     // Execute the rest of the batches.
@@ -75,19 +76,20 @@ where
 /// Executes the give basic block node starting from the specified operation index within the
 /// specified batch.
 #[inline(always)]
-pub(super) fn execute_basic_block_node_from_op_idx<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn execute_basic_block_node_from_op_idx<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
     start_batch_index: usize,
     start_op_idx_in_batch: usize,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<InternalBreakReason>
+    current_forest: &F,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     let batch_offset_in_block = basic_block_node
         .op_batches()
@@ -100,6 +102,7 @@ where
     execute_op_batch(
         state,
         basic_block_node,
+        node_id,
         start_batch_index,
         start_op_idx_in_batch,
         batch_offset_in_block,
@@ -118,18 +121,19 @@ where
 
 /// Executes the give basic block node starting from the RESPAN preceding the specified batch.
 #[inline(always)]
-pub(super) fn execute_basic_block_node_from_batch<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+pub(super) fn execute_basic_block_node_from_batch<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
     start_batch_index: usize,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<InternalBreakReason>
+    current_forest: &F,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     let mut batch_offset_in_block = basic_block_node
         .op_batches()
@@ -157,17 +161,17 @@ where
             // what happens *after* the clock is incremented. For example, if we were to put a
             // `Continuation::Respan` here instead, and execution was stopped after this RESPAN,
             // then the next call to `Processor::execute_impl()` would re-execute the RESPAN.
+            let source_node_id = state.current_source_node_id();
             finalize_clock_cycle_with_continuation(
                 state.processor,
                 state.tracer,
                 state.stopper,
                 state.continuation_stack,
                 || {
-                    Some(Continuation::ResumeBasicBlock {
-                        node_id,
-                        batch_index,
-                        op_idx_in_batch: 0,
-                    })
+                    Some((
+                        Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch: 0 },
+                        source_node_id,
+                    ))
                 },
                 current_forest,
             )
@@ -178,6 +182,7 @@ where
         execute_op_batch(
             state,
             basic_block_node,
+            node_id,
             batch_index,
             0,
             batch_offset_in_block,
@@ -186,23 +191,22 @@ where
         batch_offset_in_block += op_batch.ops().len();
     }
 
-    finish_basic_block(state, basic_block_node, node_id, current_forest)
-        .map_break(InternalBreakReason::from)
+    finish_basic_block(state, node_id, current_forest).map_break(InternalBreakReason::from)
 }
 
 /// Execute the finish phase of a basic block node.
 #[inline(always)]
-pub(super) fn finish_basic_block<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
-    _basic_block_node: &BasicBlockNode,
+pub(super) fn finish_basic_block<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     node_id: MastNodeId,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     state.tracer.start_clock_cycle(
         state.processor,
@@ -217,13 +221,9 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecorators(node_id)),
+        || None,
         current_forest,
-    )?;
-
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    )
 }
 
 // HELPERS
@@ -232,26 +232,23 @@ where
 /// Executes a single operation batch within a basic block node, starting from the operation
 /// index `start_op_idx`.
 #[inline(always)]
-fn execute_op_batch<P, H, S, T>(
-    state: &mut ExecutionState<'_, P, H, S, T>,
+fn execute_op_batch<P, H, S, T, F>(
+    state: &mut ExecutionState<'_, P, H, S, T, F>,
     basic_block: &BasicBlockNode,
+    node_id: MastNodeId,
     batch_index: usize,
     start_op_idx: usize,
     batch_offset_in_block: usize,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<InternalBreakReason>
+    current_forest: &F,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
     H: BaseHost,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     let batch = &basic_block.op_batches()[batch_index];
-
-    // Get the node ID once since it doesn't change within the loop
-    let node_id = basic_block
-        .linked_id()
-        .expect("basic block node should be linked when executing operations");
 
     // Execute operations in the batch one by one
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
@@ -264,11 +261,6 @@ where
             current_forest,
         );
 
-        state
-            .processor
-            .execute_decorators_for_op(node_id, op_idx_in_block, current_forest, state.host)
-            .map_break(InternalBreakReason::from)?;
-
         // Execute the operation.
         let operation_helpers = match op {
             Operation::Emit => {
@@ -278,7 +270,6 @@ where
                 // execution loop. When done, the processor *must* call
                 // `finish_emit_op_execution()` below for execution to proceed properly.
                 return ControlFlow::Break(InternalBreakReason::Emit {
-                    basic_block_node_id: node_id,
                     op_idx: op_idx_in_block,
                     continuation: get_continuation_after_executing_operation(
                         basic_block,
@@ -286,18 +277,25 @@ where
                         batch_index,
                         op_idx_in_batch,
                     ),
+                    source_node_id: state.current_source_node_id(),
                 });
             },
             _ => {
                 // If the operation is not an Emit, we execute it normally.
+                let source_debug_info = state.source_debug_info.clone();
+                let package_source_context = source_debug_info.as_deref().map(|debug_info| {
+                    PackageSourceDebugContext::new_optional(
+                        debug_info,
+                        state.current_source_node_id(),
+                    )
+                });
                 match execute_op(
                     state.processor,
                     op,
                     op_idx_in_block,
-                    current_forest,
-                    node_id,
                     state.host,
                     state.tracer,
+                    package_source_context,
                 ) {
                     Ok(operation_helpers) => operation_helpers,
                     Err(err) => {
@@ -308,17 +306,21 @@ where
         };
 
         // Finalize the clock cycle corresponding to the operation.
+        let source_node_id = state.current_source_node_id();
         finalize_clock_cycle_with_continuation_and_op_helpers(
             state.processor,
             state.tracer,
             state.stopper,
             state.continuation_stack,
             || {
-                Some(get_continuation_after_executing_operation(
-                    basic_block,
-                    node_id,
-                    batch_index,
-                    op_idx_in_batch,
+                Some((
+                    get_continuation_after_executing_operation(
+                        basic_block,
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                    ),
+                    source_node_id,
                 ))
             },
             operation_helpers,
@@ -337,12 +339,12 @@ where
 /// That is, `op_idx_in_batch` is the index of the operation that was just executed within the batch
 /// `batch_index` of the basic block `basic_block_node`.
 #[inline(always)]
-fn get_continuation_after_executing_operation(
+fn get_continuation_after_executing_operation<F>(
     basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
     batch_index: usize,
     op_idx_in_batch: usize,
-) -> Continuation {
+) -> Continuation<F> {
     let last_op_idx_in_batch = basic_block_node.op_batches()[batch_index].ops().len() - 1;
     let last_batch_idx_in_block = basic_block_node.num_op_batches() - 1;
 
@@ -370,18 +372,20 @@ fn get_continuation_after_executing_operation(
 
 /// Function to be called after [`InternalBreakReason::Emit`] is handled. See the documentation of
 /// that enum variant for more details.
-pub fn finish_emit_op_execution<P, S, T>(
-    post_emit_continuation: Continuation,
+pub fn finish_emit_op_execution<P, S, T, F>(
+    post_emit_continuation: Continuation<F>,
+    source_node_id: Option<DebugSourceNodeId>,
     processor: &mut P,
-    continuation_stack: &mut ContinuationStack,
-    current_forest: &Arc<MastForest>,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &F,
     tracer: &mut T,
     stopper: &S,
-) -> ControlFlow<BreakReason>
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     // When we enter here, the `continuation_stack` top contains the continuation to execute *after*
     // the basic block that contained the `Emit` operation (i.e. after all operations are executed,
@@ -403,12 +407,12 @@ where
         continuation_stack,
         {
             let post_emit_continuation = post_emit_continuation.clone();
-            || Some(post_emit_continuation)
+            || Some((post_emit_continuation, source_node_id))
         },
         current_forest,
     )?;
 
-    continuation_stack.push_continuation(post_emit_continuation);
+    continuation_stack.push_with_source_node_id(post_emit_continuation, source_node_id);
 
     ControlFlow::Continue(())
 }

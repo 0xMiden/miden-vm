@@ -1,23 +1,9 @@
-use alloc::{collections::BTreeMap, vec::Vec};
-use core::mem::MaybeUninit;
+use alloc::collections::BTreeMap;
 
-use miden_air::trace::RANGE_CHECK_TRACE_WIDTH;
-
-use super::RowIndex;
-use crate::{
-    Felt, ZERO,
-    utils::{assume_init_vec, uninit_vector},
-};
+use crate::Felt;
 
 #[cfg(test)]
 mod tests;
-
-// TRACE
-// ================================================================================================
-
-pub struct RangeCheckTrace {
-    pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-}
 
 // RANGE CHECKER
 // ================================================================================================
@@ -50,10 +36,6 @@ pub struct RangeCheckTrace {
 pub struct RangeChecker {
     /// Tracks lookup count for each checked value.
     lookups: BTreeMap<u16, usize>,
-    /// Range check lookups performed by all user operations, grouped and sorted by clock cycle.
-    /// Each cycle is mapped to a vector of the range checks requested at that cycle, which can
-    /// come from the stack, memory, or both.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
 }
 
 impl RangeChecker {
@@ -66,7 +48,7 @@ impl RangeChecker {
         // range checker table are initialized. this simplifies trace table building later on.
         lookups.insert(0, 0);
         lookups.insert(u16::MAX, 0);
-        Self { lookups, cycle_lookups: BTreeMap::new() }
+        Self { lookups }
     }
 
     // TRACE MUTATORS
@@ -78,7 +60,7 @@ impl RangeChecker {
     }
 
     /// Adds range check lookups from the stack or memory to this [RangeChecker] instance.
-    pub fn add_range_checks(&mut self, clk: RowIndex, values: &[u16]) {
+    pub fn add_range_checks(&mut self, values: &[u16]) {
         // range checks requests only come from memory or from the stack, which always request 2 or
         // 4 lookups respectively.
         debug_assert!(values.len() == 2 || values.len() == 4);
@@ -87,69 +69,53 @@ impl RangeChecker {
             // add the specified value to the trace of this range checker's lookups.
             self.add_value(*value);
         }
-
-        // track the range check requests at each cycle
-        // TODO: optimize this to use a struct instead of vectors, e.g. (#2793):
-        // struct MemoryLookupValues {
-        //   num_lookups: u8,
-        //   lookup_values: [u16; 6],
-        // }
-        self.cycle_lookups
-            .entry(clk)
-            .and_modify(|entry| entry.extend_from_slice(values))
-            .or_insert_with(|| values.to_vec());
     }
 
     // EXECUTION TRACE GENERATION (INTERNAL)
     // --------------------------------------------------------------------------------------------
 
-    /// Converts this [RangeChecker] into an execution trace with 2 columns and the number of rows
-    /// specified by the `target_len` parameter.
+    /// Writes the range-checker `(m, v)` columns in-place into the row-major core buffer
+    /// `core_data` (physical row width `stride`), at column offsets `m_off` and `v_off`.
     ///
-    /// If the number of rows needed to represent execution trace of this range checker is smaller
-    /// than `target_len` parameter, the trace is padded with extra rows.
-    ///
-    /// # Panics
-    /// Panics if `target_len` is not a power of two or is smaller than the trace length needed
-    /// to represent all lookups in this range checker.
-    pub fn into_trace_with_table(self, trace_len: usize, target_len: usize) -> RangeCheckTrace {
-        assert!(target_len.is_power_of_two(), "target trace length is not a power of two");
+    /// The two range slots in `core_data` are assumed to be zero on entry, so the front
+    /// padding rows (`[0, num_padding_rows)`, all zero) are left untouched.
+    pub fn write_range_into_core(
+        self,
+        core_data: &mut [Felt],
+        stride: usize,
+        m_off: usize,
+        v_off: usize,
+        range_table_len: usize,
+        core_height: usize,
+    ) {
+        let num_padding_rows = core_height - range_table_len;
 
-        // determine the length of the trace required to support all the lookups in this range
-        // checker, and make sure this length is smaller than or equal to the target trace length.
-        assert!(trace_len <= target_len, "target trace length too small");
+        let end = {
+            let mut sink = |step: usize, m: u64, v: u64| {
+                core_data[step * stride + m_off] = Felt::new_unchecked(m);
+                core_data[step * stride + v_off] = Felt::new_unchecked(v);
+            };
+            self.emit_table_rows(&mut sink, num_padding_rows)
+        };
+        assert_eq!(end, core_height, "range checker table length mismatch vs core height");
+    }
 
-        // allocate memory for the trace
-        let mut trace = [uninit_vector(target_len), uninit_vector(target_len)];
-
-        // determine the number of padding rows needed to get to target trace length and pad the
-        // table with the required number of rows.
-        let num_padding_rows = target_len - trace_len;
-        trace[0][..num_padding_rows].fill(MaybeUninit::new(ZERO));
-        trace[1][..num_padding_rows].fill(MaybeUninit::new(ZERO));
-
-        // build the trace table
-        let mut i = num_padding_rows;
+    /// Emits the range-checker table rows (bridge rows + value rows + the trailing extra
+    /// `u16::MAX` row) through `sink`, starting at row `start_step`. `sink(step, m, v)` is
+    /// invoked once per row with monotonically increasing `step`.
+    fn emit_table_rows<F: FnMut(usize, u64, u64)>(&self, sink: &mut F, start_step: usize) -> usize {
+        let mut step = start_step;
         let mut prev_value = 0u16;
         for (&value, &num_lookups) in self.lookups.iter() {
-            write_rows(&mut trace, &mut i, num_lookups, value, prev_value);
+            write_rows(sink, &mut step, num_lookups, value, prev_value);
             prev_value = value;
         }
 
-        // pad the trace with an extra row of 0 lookups for u16::MAX so that when b_range is built
-        // there is space for the inclusion of u16::MAX range check lookups before the trace ends.
-        // (When there is data at the end of the main trace, auxiliary bus columns always need to be
-        // one row longer than the main trace, since values in the bus column are based on data from
-        // the "current" row of the main trace but placed into the "next" row of the bus column.)
-        write_trace_row(&mut trace, &mut i, 0, (u16::MAX).into());
-
-        assert_eq!(i, target_len, "range checker trace not fully initialized; trace_len mismatch");
-
-        // all elements are now initialized
-        let [t0, t1] = trace;
-        let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
-
-        RangeCheckTrace { trace }
+        // Pad the trace with an extra row of 0 lookups for u16::MAX so that when b_range is
+        // built there is space for the inclusion of u16::MAX range check lookups before the
+        // trace ends.
+        write_trace_row(sink, &mut step, 0, (u16::MAX).into());
+        step
     }
 
     // PUBLIC ACCESSORS
@@ -185,16 +151,6 @@ impl RangeChecker {
     pub fn trace_len(&self) -> usize {
         self.get_number_range_checker_rows()
     }
-
-    /// Converts this [RangeChecker] into an execution trace with 2 columns and the number of rows
-    /// specified by the `target_len` parameter.
-    ///
-    /// Wrapper for [`RangeChecker::into_trace_with_table`].
-    #[cfg(test)]
-    pub fn into_trace(self, target_len: usize) -> RangeCheckTrace {
-        let table_len = self.get_number_range_checker_rows();
-        self.into_trace_with_table(table_len, target_len)
-    }
 }
 
 impl Default for RangeChecker {
@@ -225,8 +181,8 @@ pub fn get_num_bridge_rows(delta: u16) -> usize {
 
 /// Adds a row for the values to be range checked. In case the difference between the current and
 /// next value is not a power of 3, this function will add additional bridge rows to the trace.
-fn write_rows(
-    trace: &mut [Vec<MaybeUninit<Felt>>],
+fn write_rows<F: FnMut(usize, u64, u64)>(
+    sink: &mut F,
     step: &mut usize,
     num_lookups: usize,
     value: u16,
@@ -239,22 +195,21 @@ fn write_rows(
         if gap > stride {
             gap -= stride;
             prev_val += stride;
-            write_trace_row(trace, step, 0, prev_val as u64);
+            write_trace_row(sink, step, 0, prev_val as u64);
         } else {
             stride /= 3;
         }
     }
-    write_trace_row(trace, step, num_lookups, value as u64);
+    write_trace_row(sink, step, num_lookups, value as u64);
 }
 
-/// Populates a single row at the specified step in the trace table.
-fn write_trace_row(
-    trace: &mut [Vec<MaybeUninit<Felt>>],
+/// Populates a single row at the specified step via `sink`.
+fn write_trace_row<F: FnMut(usize, u64, u64)>(
+    sink: &mut F,
     step: &mut usize,
     num_lookups: usize,
     value: u64,
 ) {
-    trace[0][*step].write(Felt::new_unchecked(num_lookups as u64));
-    trace[1][*step].write(Felt::new_unchecked(value));
+    sink(*step, num_lookups as u64, value);
     *step += 1;
 }

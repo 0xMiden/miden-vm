@@ -49,7 +49,7 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-arbitrary = ["std", "dep:proptest"]
+arbitrary = ["std", "dep:proptest", "miden-assembly/testing", "miden-utils-testing/arbitrary"]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
@@ -57,7 +57,6 @@ serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
-    "miden-debug-types/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -65,6 +64,7 @@ std = [
     "serde?/std",
     "serde_json?/std",
 ]
+testing = ["arbitrary"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde", "std"]
 
@@ -72,7 +72,6 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
-miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
@@ -91,15 +90,12 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
-bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
-miden-crypto.workspace = true
+miden-assembly = { workspace = true, features = ["testing"] }
 miden-processor = { workspace = true, features = ["testing"] }
-miden-lifted-stark.workspace = true
 miden-test-serde-macros.workspace = true
 miden-utils-testing.workspace = true
 predicates = { version = "3.1" }
-proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-walkdir = { version = "2.5" }
+walkdir.workspace = true

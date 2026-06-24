@@ -1,16 +1,11 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
-
-use super::ParseError;
 
 // LITERAL ERROR KIND
 // ================================================================================================
@@ -123,6 +118,13 @@ pub enum ParsingError {
         #[label("occurs here")]
         span: SourceSpan,
     },
+    #[error("invalid syntax: {message}")]
+    #[diagnostic()]
+    InvalidSyntax {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
+    },
     #[error("invalid syntax")]
     #[diagnostic(help("expected {}", expected.as_slice().join(", or ")))]
     UnrecognizedToken {
@@ -170,24 +172,6 @@ pub enum ParsingError {
     },
     #[error("invalid constant expression: division by zero")]
     DivisionByZero {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("constant expression nesting depth exceeded")]
-    #[diagnostic(help("constant expression folding exceeded the maximum depth of {max_depth}"))]
-    ConstExprDepthExceeded {
-        #[label]
-        span: SourceSpan,
-        max_depth: usize,
-    },
-    #[error("invalid constant expression: value is larger than expected range")]
-    ConstantOverflow {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("unexpected string in an arithmetic expression")]
-    #[diagnostic()]
-    StringInArithmeticExpression {
         #[label]
         span: SourceSpan,
     },
@@ -263,7 +247,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error(
-        "re-exporting a procedure identified by digest requires giving it a name, e.g. `pub use DIGEST->foo`"
+        "source-level digest re-exports are not supported; re-export a named item with `pub use {{item}} from module`"
     )]
     UnnamedReexportOfMastRoot {
         #[label]
@@ -324,7 +308,9 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error("invalid struct annotation")]
-    #[diagnostic(help("expected one of: '@packed', '@transparent', '@bigendian', or '@align(N)'"))]
+    #[diagnostic(help(
+        "expected one of: '@packed', '@packed(N)', '@transparent', '@bigendian', or '@align(N)'"
+    ))]
     InvalidStructAnnotation {
         #[label]
         span: SourceSpan,
@@ -358,6 +344,56 @@ pub enum ParsingError {
         span: SourceSpan,
         padding: u8,
     },
+    #[error(
+        "invalid submodule declaration '{name}': could not find module sources at '{directory}/{basename}.masm' or '{directory}/{basename}/mod.masm'"
+    )]
+    UndefinedSubmodule {
+        name: crate::ast::Ident,
+        basename: alloc::boxed::Box<str>,
+        directory: miden_debug_types::Uri,
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "invalid submodule declaration '{name}': submodules must not have the same name as their parent"
+    )]
+    #[diagnostic(help("occurred while parsing {parent_module_uri}"))]
+    SelfReferentialSubmodule {
+        name: crate::ast::Ident,
+        parent_module_uri: miden_debug_types::Uri,
+        #[label(
+            "module source resolution rules require this declaration to resolve to the current source file"
+        )]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "conflicting submodule paths detected: '{name}' can be parsed from either '{first}' and '{second}', but not both"
+    )]
+    AmbiguousSubmoduleLocation {
+        name: crate::ast::Ident,
+        first: miden_debug_types::Uri,
+        second: miden_debug_types::Uri,
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
+    #[error(
+        "invalid submodule declaration '{name}': module source '{module_uri}' is already reachable through another submodule declaration"
+    )]
+    #[diagnostic(help("each module source file can only be owned by one module in a module tree"))]
+    DuplicateSubmoduleSource {
+        name: crate::ast::Ident,
+        module_uri: miden_debug_types::Uri,
+        #[label("this declaration resolves to an already visited module source")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<miden_debug_types::SourceFile>>,
+    },
 }
 
 impl ParsingError {
@@ -378,6 +414,9 @@ impl PartialEq for ParsingError {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Failed, Self::Failed) => true,
+            (Self::InvalidSyntax { message: l, .. }, Self::InvalidSyntax { message: r, .. }) => {
+                l == r
+            },
             (Self::InvalidLiteral { kind: l, .. }, Self::InvalidLiteral { kind: r, .. }) => l == r,
             (Self::InvalidHexLiteral { kind: l, .. }, Self::InvalidHexLiteral { kind: r, .. }) => {
                 l == r
@@ -417,92 +456,4 @@ impl ParsingError {
             },
         }
     }
-
-    pub fn from_parse_error(source_id: SourceId, err: ParseError<'_>) -> Self {
-        use super::Token;
-
-        match err {
-            ParseError::InvalidToken { location: at } => {
-                Self::InvalidToken { span: SourceSpan::at(source_id, at) }
-            },
-            ParseError::UnrecognizedToken { token: (l, Token::Eof, r), expected } => {
-                Self::UnrecognizedEof {
-                    span: SourceSpan::new(source_id, l..r),
-                    expected: simplify_expected_tokens(expected),
-                }
-            },
-            ParseError::UnrecognizedToken { token: (l, tok, r), expected } => {
-                Self::UnrecognizedToken {
-                    span: SourceSpan::new(source_id, l..r),
-                    token: tok.to_string(),
-                    expected: simplify_expected_tokens(expected),
-                }
-            },
-            ParseError::ExtraToken { token: (l, tok, r) } => Self::ExtraToken {
-                span: SourceSpan::new(source_id, l..r),
-                token: tok.to_string(),
-            },
-            ParseError::UnrecognizedEof { location: at, expected } => Self::UnrecognizedEof {
-                span: SourceSpan::new(source_id, at..at),
-                expected: simplify_expected_tokens(expected),
-            },
-            ParseError::User { error } => error,
-        }
-    }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-// The parser generator will show every token that is expected in some scenarios, so to avoid
-// cluttering the diagnostic output with all of the instruction opcodes, we collapse them into a
-// single token.
-fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
-    use super::Token;
-    let mut has_instruction = false;
-    let mut has_ctrl = false;
-    let mut has_type = false;
-    expected
-        .into_iter()
-        .filter_map(|t| {
-            let tok = match t.as_str() {
-                "bare_ident" => return Some("identifier".to_string()),
-                "const_ident" => return Some("constant identifier".to_string()),
-                "quoted_ident" => return Some("quoted identifier".to_string()),
-                "doc_comment" => return Some("doc comment".to_string()),
-                "hex_value" => return Some("hex-encoded literal".to_string()),
-                "bin_value" => return Some("bin-encoded literal".to_string()),
-                "uint" => return Some("integer literal".to_string()),
-                "EOF" => return Some("end of file".to_string()),
-                other => other[1..].strip_suffix('"').and_then(Token::parse),
-            };
-            match tok {
-                Some(Token::If | Token::While | Token::Repeat) => {
-                    if !has_ctrl {
-                        has_ctrl = true;
-                        Some("control flow opcode (e.g. \"if.true\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                Some(tok) if tok.is_instruction() => {
-                    if !has_instruction {
-                        has_instruction = true;
-                        Some("primitive opcode (e.g. \"add\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                Some(tok) if tok.is_type_keyword() => {
-                    if !has_type {
-                        has_type = true;
-                        Some("type (e.g. \"felt\")".to_string())
-                    } else {
-                        None
-                    }
-                },
-                _ => Some(t),
-            }
-        })
-        .collect()
 }

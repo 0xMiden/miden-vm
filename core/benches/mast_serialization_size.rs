@@ -1,4 +1,4 @@
-//! Benchmark MastForest serialization and report byte sizes for full/stripped/hashless.
+//! Benchmark MastForest serialization and report byte sizes for normal and hashless modes.
 
 use std::hint::black_box;
 
@@ -20,15 +20,15 @@ fn sample_forest(params: MastForestParams, runner: &mut TestRunner) -> MastFores
 }
 
 fn serialize_sizes(forest: &MastForest) -> (usize, usize, usize) {
-    let full_bytes = forest.to_bytes();
+    let to_bytes = forest.to_bytes();
 
-    let mut stripped_bytes = Vec::new();
-    forest.write_stripped(&mut stripped_bytes);
+    let mut write_into_bytes = Vec::new();
+    forest.write_into(&mut write_into_bytes);
 
     let mut hashless_bytes = Vec::new();
     forest.write_hashless(&mut hashless_bytes);
 
-    (full_bytes.len(), stripped_bytes.len(), hashless_bytes.len())
+    (to_bytes.len(), write_into_bytes.len(), hashless_bytes.len())
 }
 
 fn bench_serialization_sizes(c: &mut Criterion) {
@@ -43,7 +43,6 @@ fn bench_serialization_sizes(c: &mut Criterion) {
 
     for &blocks_per_forest in sizes {
         let gen_params = MastForestParams {
-            decorators: 32,
             blocks: blocks_per_forest..=blocks_per_forest,
             max_joins: blocks_per_forest.min(8),
             max_splits: blocks_per_forest.min(8),
@@ -55,26 +54,28 @@ fn bench_serialization_sizes(c: &mut Criterion) {
         };
 
         let forest = sample_forest(gen_params, &mut runner);
-        let (full, stripped, hashless) = serialize_sizes(&forest);
-        eprintln!("blocks={blocks_per_forest} full={full} stripped={stripped} hashless={hashless}");
+        let (to_bytes, write_into, hashless) = serialize_sizes(&forest);
+        eprintln!(
+            "blocks={blocks_per_forest} to_bytes={to_bytes} write_into={write_into} hashless={hashless}"
+        );
 
-        group.throughput(Throughput::Bytes(full as u64));
+        group.throughput(Throughput::Bytes(to_bytes as u64));
         group.bench_with_input(
-            BenchmarkId::new("full", blocks_per_forest),
+            BenchmarkId::new("to_bytes", blocks_per_forest),
             &forest,
             |b, forest| {
                 b.iter(|| black_box(forest.to_bytes()));
             },
         );
 
-        group.throughput(Throughput::Bytes(stripped as u64));
+        group.throughput(Throughput::Bytes(write_into as u64));
         group.bench_with_input(
-            BenchmarkId::new("stripped", blocks_per_forest),
+            BenchmarkId::new("write_into", blocks_per_forest),
             &forest,
             |b, forest| {
                 b.iter(|| {
                     let mut bytes = Vec::new();
-                    forest.write_stripped(&mut bytes);
+                    forest.write_into(&mut bytes);
                     black_box(bytes);
                 });
             },

@@ -1,9 +1,5 @@
-/// Test case for issue #2456: DecoratorId out of bounds when calling procedures
-/// from statically linked libraries.
-///
-/// The issue occurs because decorators aren't remapped when copying nodes from
-/// statically linked libraries, causing decorator IDs from the source forest to
-/// be used in the target forest where they don't exist.
+/// Test case for issue #2456: statically linked library calls should preserve valid MAST
+/// structure when copying nodes between forests.
 use miden_assembly::Assembler;
 use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs};
 
@@ -11,9 +7,11 @@ use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::Advice
 fn test_issue_2456_statically_linked_library_call() {
     use std::sync::Arc;
 
-    use miden_assembly::{DefaultSourceManager, diagnostics::NamedSource};
+    use miden_assembly::DefaultSourceManager;
 
     let test_module_source = "
+        namespace test::module_1
+
         pub proc foo
             push.3.4
             add
@@ -21,14 +19,15 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    let source = NamedSource::new("test::module_1", test_module_source);
     let source_manager = Arc::new(DefaultSourceManager::default());
     let mut assembler = Assembler::new(source_manager);
 
-    let library = assembler.clone().assemble_library([source]).unwrap();
+    let library = assembler
+        .clone()
+        .assemble_library("library", test_module_source, None::<Box<miden_assembly::ast::Module>>)
+        .unwrap();
 
-    // This program calls a procedure from a statically linked library, which
-    // triggers the DecoratorId remapping issue.
+    // This program calls a procedure from a statically linked library.
     let source = "
         use test::module_1
 
@@ -39,10 +38,10 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
-    assembler.link_static_library(library).unwrap();
-    let program = assembler.assemble_program(source).unwrap();
+    assembler.link_package(library.into(), miden_assembly::Linkage::Static).unwrap();
+    let program = assembler.assemble_program("program", source).unwrap().unwrap_program();
 
-    // Execute the program - this should now succeed without DecoratorId out of bounds error
+    // Execute the program. This should succeed after static linking.
     let stack_inputs = StackInputs::default();
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();

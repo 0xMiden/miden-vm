@@ -3,11 +3,8 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::{
-    AirWitness, ProcessorAir, PublicInputs, debug,
-    trace::{
-        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
-        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    },
+    MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
+    trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
@@ -15,12 +12,12 @@ use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::QuadFelt,
-    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
-    utils::{Matrix, RowMajorMatrix},
+    precompile::{PrecompileRequest, PrecompileTranscript},
+    utils::RowMajorMatrix,
 };
 
 pub(crate) mod utils;
-use utils::TraceFragment;
+use utils::ChipletTraceFragment;
 
 pub mod chiplets;
 pub(crate) mod execution_tracer;
@@ -117,11 +114,6 @@ impl TraceBuildInputs {
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
         &self.trace_output.final_precompile_transcript
-    }
-
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -264,11 +256,6 @@ impl ExecutionTrace {
         self.final_precompile_transcript
     }
 
-    /// Returns the digest of the final precompile transcript observed during execution.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.final_precompile_transcript().finalize()
-    }
-
     /// Returns the owned execution outputs required for proof packaging.
     pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
         (self.stack_outputs, self.precompile_requests, self.final_precompile_transcript)
@@ -299,7 +286,7 @@ impl ExecutionTrace {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
+            *result = self.main_trace.helper_register(i, row);
         }
         result
     }
@@ -334,45 +321,41 @@ impl ExecutionTrace {
     /// Panics if any AIR constraint evaluates to nonzero.
     pub fn check_constraints(&self) {
         let public_inputs = self.public_inputs();
-        let trace_matrix = self.to_row_major_matrix();
+        let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        // Derive deterministic challenges by hashing public values with Poseidon2.
-        // The 4-element digest maps directly to 2 QuadFelt challenges.
-        let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
-        let challenges =
-            [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
+        let statement =
+            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
+                .expect("valid statement inputs");
+        let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
+            .expect("valid trace shapes");
 
-        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
-        debug::check_constraints(&ProcessorAir, witness, &ProcessorAir, &challenges);
+        // A deterministic challenger seeds the debug constraint check; this is a local
+        // constraint debugger, not a full proof transcript, so any fixed challenge set works.
+        let config = config::poseidon2_config(config::pcs_params());
+        debug::check_constraints(&prover_statement, config.challenger());
     }
 
-    /// Returns the main trace as a row-major matrix for proving.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let row_major = self.main_trace.to_row_major();
-        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
-        row_major
+    /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
+    /// multi-AIR proving path. Strips the Poseidon2 rate-alignment padding columns
+    /// before returning.
+    pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.to_core_chiplets_matrices()
+    }
+
+    /// Consuming variant for the proving hot path: moves the chiplets row-major buffer
+    /// instead of copying it. See [`MainTrace::into_core_chiplets_matrices`].
+    pub fn into_core_chiplets_matrices(self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
+        self.main_trace.into_core_chiplets_matrices()
     }
 
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the index of the last row in the trace.
+    /// Returns the index of the last row in the Core trace.
     fn last_step(&self) -> usize {
-        self.length() - 1
-    }
-
-    // TEST HELPERS
-    // --------------------------------------------------------------------------------------------
-    #[cfg(feature = "std")]
-    pub fn print(&self) {
-        let mut row = [ZERO; TRACE_WIDTH];
-        for i in 0..self.length() {
-            self.main_trace.read_row_into(i, &mut row);
-            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
-        }
+        self.main_trace.core_height() - 1
     }
 
     #[cfg(any(test, feature = "testing"))]

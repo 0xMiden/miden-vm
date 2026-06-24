@@ -1,8 +1,8 @@
-use std::{fs, path::PathBuf, time::Instant};
+use std::{fs, path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler,
+    Assembler, DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
@@ -107,7 +107,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
     let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
     // Load kernel from .masp package or compile from .masm source
-    let kernel_lib = match ext.as_str() {
+    let kernel_pkg = match ext.as_str() {
         "masp" => {
             // Load kernel from package file
             let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
@@ -117,14 +117,23 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
                 Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
                     format!("Failed to deserialize kernel package `{}`", kernel_path.display())
                 })?;
-
-            package.try_into_kernel_library()?
+            if !package.is_kernel() {
+                return Err(Report::msg(format!(
+                    "invalid kernel package, package is of type {}",
+                    package.kind,
+                )));
+            }
+            Arc::new(package)
         },
         "masm" => {
             // Compile kernel from assembly source
-            Assembler::default().assemble_kernel(kernel_path.clone()).wrap_err_with(|| {
-                format!("Failed to compile kernel from `{}`", kernel_path.display())
-            })?
+            let source_manager = Arc::new(DefaultSourceManager::default());
+            Assembler::new(source_manager)
+                .assemble_kernel_from_root("kernel", kernel_path)
+                .map(Arc::<Package>::from)
+                .wrap_err_with(|| {
+                    format!("Failed to compile kernel from `{}`", kernel_path.display())
+                })?
         },
         _ => {
             return Err(Report::msg(format!(
@@ -135,7 +144,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
     };
 
     // Extract kernel from kernel library
-    Ok(kernel_lib.kernel().clone())
+    kernel_pkg.to_kernel()
 }
 
 #[cfg(test)]

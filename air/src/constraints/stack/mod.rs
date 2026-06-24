@@ -10,7 +10,10 @@ pub mod ops;
 pub mod overflow;
 pub mod stack_arith;
 
-use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags};
+#[cfg(test)]
+mod test_utils;
+
+use crate::{CoreCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -18,8 +21,8 @@ use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 /// Enforces stack main-trace constraints for this group.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

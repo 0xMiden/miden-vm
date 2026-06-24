@@ -30,7 +30,7 @@ pub struct RunCmd {
     #[arg(short = 'i', long = "input", value_parser)]
     input_file: Option<PathBuf>,
 
-    /// Paths to .masl library files (only used for assembly files)
+    /// Paths to .masp library files (only used for assembly files)
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
 
@@ -45,14 +45,6 @@ pub struct RunCmd {
     /// Path to output file
     #[arg(short = 'o', long = "output", value_parser)]
     output_file: Option<PathBuf>,
-
-    /// Enable tracing to monitor execution of the VM
-    #[arg(short = 't', long = "trace")]
-    trace: bool,
-
-    /// Disable debug instructions (release mode)
-    #[arg(short = 'r', long = "release")]
-    release: bool,
 
     /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
@@ -114,7 +106,7 @@ impl RunCmd {
             trace.trace_len_summary().trace_len(),
             trace.trace_len_summary().padded_trace_len(),
             padding_percentage,
-            trace.trace_len_summary().main_trace_len(),
+            trace.trace_len_summary().core_trace_len(),
             trace.trace_len_summary().range_trace_len(),
             trace.trace_len_summary().chiplets_trace_len().trace_len(),
             trace.trace_len_summary().chiplets_trace_len().hash_chiplet_len(),
@@ -147,8 +139,6 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        params.trace,
-        !params.release,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
@@ -186,12 +176,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     }
 
     // load program from file and compile
-    let (program, source_manager) = get_masm_program(
-        &params.program_file,
-        &libraries,
-        !params.release,
-        params.kernel_file.as_deref(),
-    )?;
+    let (program, package_debug_info, entrypoint_source_node, source_manager) =
+        get_masm_program(&params.program_file, &libraries, params.kernel_file.as_deref())?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
@@ -202,9 +188,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .into_diagnostic()
         .wrap_err("Failed to load core library")?;
     for lib in libraries.libraries {
-        host.load_library(lib.mast_forest())
-            .into_diagnostic()
-            .wrap_err("Failed to load library")?;
+        host.load_library(lib).into_diagnostic().wrap_err("Failed to load library")?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();
@@ -213,17 +197,28 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         Some(params.max_cycles),
         params.expected_cycles,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-        params.trace,
-        !params.release,
     )
     .map_err(|err| Report::msg(format!("{err}")))?;
 
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, exec_options)
         .map_err(|err| Report::msg(format!("{err}")))?;
 
-    let trace_inputs = processor
-        .execute_trace_inputs_sync(&program, &mut host)
-        .wrap_err("Failed to execute program")?;
+    let trace_inputs = match (package_debug_info.as_ref(), entrypoint_source_node) {
+        (Some(debug_info), Some(entrypoint_source_node_id)) => processor
+            .execute_trace_inputs_with_package_debug_info_at_source_node_sync(
+                &program,
+                debug_info,
+                entrypoint_source_node_id,
+                &mut host,
+            )
+            .wrap_err("Failed to execute program")?,
+        (Some(debug_info), None) => processor
+            .execute_trace_inputs_with_package_debug_info_sync(&program, debug_info, &mut host)
+            .wrap_err("Failed to execute program")?,
+        (None, _) => processor
+            .execute_trace_inputs_sync(&program, &mut host)
+            .wrap_err("Failed to execute program")?,
+    };
     let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))

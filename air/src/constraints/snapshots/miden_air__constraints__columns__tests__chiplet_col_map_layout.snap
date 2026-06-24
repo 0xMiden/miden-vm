@@ -1,0 +1,30 @@
+---
+source: air/src/constraints/columns.rs
+expression: CHIPLET_COL_MAP
+---
+ChipletCols {
+    s_00: 0,
+    s_01: 1,
+    chip_clk: 2,
+    chiplets: [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+    ],
+}

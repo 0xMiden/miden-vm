@@ -1,7 +1,7 @@
 //! Permutation sub-chiplet constraints.
 //!
 //! The permutation sub-chiplet executes Poseidon2 permutations as 16-row cycles.
-//! It is active when `s_perm = 1` (the permutation segment selector).
+//! It is active when `s_00 = 1` (the permutation segment selector).
 //!
 //! ## Sub-modules
 //!
@@ -14,7 +14,7 @@
 //! | w0, w1, w2   | S-box witnesses (same physical columns as hasher selectors) |
 //! | h[0..12)     | Poseidon2 state (RATE0, RATE1, CAP) |
 //! | multiplicity | Request multiplicity (same physical column as node_index) |
-//! | s_perm       | Permutation segment selector (consumed by chiplet selectors) |
+//! | s_00         | Permutation segment selector (consumed by chiplet selectors) |
 
 pub mod state;
 
@@ -23,7 +23,7 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
+    ChipletCols, MidenAirBuilder,
     constraints::chiplets::{
         columns::{HasherPeriodicCols, PeriodicCols},
         selectors::ChipletFlags,
@@ -35,12 +35,12 @@ use crate::{
 
 /// Enforce all permutation sub-chiplet constraints.
 ///
-/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The `s_perm`
+/// Receives pre-computed [`ChipletFlags`] from `build_chiplet_selectors`. The `s_00`
 /// column is never referenced directly by constraint code.
 pub fn enforce_permutation_constraints<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &ChipletCols<AB::Var>,
+    next: &ChipletCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -65,8 +65,8 @@ pub fn enforce_permutation_constraints<AB>(
     .sum();
 
     // --- Poseidon2 permutation step constraints ---
-    // Gate by is_active (= s_perm, degree 1) alone. This is sound because
-    // the tri-state selector constraints confine s_perm to hasher rows.
+    // Gate by is_active (= s_00, degree 1) alone. This is sound because
+    // the tri-state selector constraints confine s_00 to hasher rows.
     // Keeping the gate at degree 1 is critical: the S-box has degree 7, and
     // with the periodic selector (degree 1), the total constraint degree is
     // 1 + 1 + 7 = 9, which matches the system's max degree.
@@ -99,8 +99,8 @@ pub fn enforce_permutation_constraints<AB>(
     // so the periodic column selectors assign the correct round type to each row.
     //
     // Entry alignment: the row before the first perm row (= last controller row)
-    // must be on cycle row 15. `flags.next_is_first` = `ctrl.is_last * s_perm'`,
-    // which equals `ctrl.is_last` because the transition rules force `s_perm' = 1`
+    // must be on cycle row 15. `flags.next_is_first` = `ctrl.is_last * s_00'`,
+    // which equals `ctrl.is_last` because the transition rules force `s_00' = 1`
     // when `ctrl.is_last` fires.
     // Degree: next_is_first(3) * not_cycle_end(1) = 4.
     builder.when(flags.next_is_first.clone()).assert_zero(not_cycle_end.clone());

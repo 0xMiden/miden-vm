@@ -1,24 +1,27 @@
-use std::array;
+use std::{array, sync::Arc};
 
 use miden_air::PublicInputs;
-use miden_assembly::Assembler;
+use miden_assembly::{Assembler, testing::source_file};
 use miden_core::{
     Felt, WORD_SIZE,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
+use miden_mast_package::Package;
 use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
-use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
-use rand::{Rng, RngCore, SeedableRng};
+use miden_utils_testing::{
+    AdviceInputs, ProvingOptions, prove_sync,
+    recursive_verifier::{VerifierData, generate_advice_inputs},
+    stack_inputs_from_ints,
+};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
-use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
 mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
-mod verifier_recursive;
 
 // RECURSIVE VERIFIER TESTS
 // ================================================================================================
@@ -26,14 +29,14 @@ mod verifier_recursive;
 #[test]
 fn stark_verifier_e2f4_small() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None);
     run_recursive_verifier(&data);
 }
 
 #[test]
 fn stark_verifier_e2f4_large() {
     let inputs = fib_stack_inputs();
-    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None).unwrap();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None);
     run_recursive_verifier(&data);
 }
 
@@ -44,8 +47,7 @@ fn stark_verifier_e2f4_with_kernel_even() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_EVEN_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -56,8 +58,7 @@ fn stark_verifier_e2f4_with_kernel_odd() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_ODD_NUM_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -68,8 +69,7 @@ fn stark_verifier_e2f4_with_kernel_single() {
         EXAMPLE_FIB_KERNEL_SMALL,
         inputs,
         Some(KERNEL_SINGLE_PROC),
-    )
-    .unwrap();
+    );
     run_recursive_verifier(&data);
 }
 
@@ -78,25 +78,32 @@ pub fn generate_recursive_verifier_data(
     source: &str,
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
-) -> Result<VerifierData, VerifierError> {
+) -> VerifierData {
     let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
                 let context = miden_assembly::testing::TestContext::new();
-                let kernel_lib =
-                    Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
+                let kernel = context.parse_kernel(source_file!(&context, kernel)).unwrap();
+                let kernel_lib = Assembler::new(context.source_manager())
+                    .assemble_kernel("kernel", kernel, None)
+                    .map(Arc::<Package>::from)
+                    .unwrap();
                 let assembler =
-                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone());
-                let program: Program = assembler.assemble_program(source).unwrap();
+                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone()).unwrap();
+                let program: Program =
+                    assembler.assemble_program("program", source).unwrap().unwrap_program();
                 (program, Some(kernel_lib))
             },
             None => {
-                let program: Program = Assembler::default().assemble_program(source).unwrap();
+                let program: Program = Assembler::default()
+                    .assemble_program("program", source)
+                    .unwrap()
+                    .unwrap_program();
                 (program, None)
             },
         }
     };
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
+    let stack_inputs = stack_inputs_from_ints(stack_inputs);
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();
     if let Some(ref kernel_lib) = kernel_lib {
@@ -125,8 +132,7 @@ pub fn generate_recursive_verifier_data(
         PrecompileTranscriptState::default(),
     );
     let (_, proof_bytes, _precompile_requests) = proof.into_parts();
-    let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
-    Ok(data)
+    generate_advice_inputs(&proof_bytes, pub_inputs).unwrap()
 }
 
 /// Run the recursive verifier MASM program with the given VerifierData.
@@ -194,13 +200,17 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(2)]
 #[case(3)]
 #[case(8)]
-#[case(1000)]
+// 255 = MAX_AUX_INPUTS / WORD_SIZE is the maximum the Rust `Statement` accepts.
+#[case(255)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
-    let log_trace_length = 10_u64;
+    // init_seed expects [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3,
+    // ...]
+    let log_core_trace_length = 10_u64;
+    let log_chiplets_trace_length = 10_u64;
     // Relation digest values are arbitrary here; the test only validates VLPI reduction.
     let rd = [1_u64, 2, 3, 4];
-    let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
+    let initial_stack =
+        vec![log_core_trace_length, log_chiplets_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -259,8 +269,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     use miden_processor::ContextId;
     let ctx = ContextId::root();
 
-    // Read reduced kernel value from var_len_ptr (in ACE READ section)
-    let var_len_addr_ptr = 3223322666_u32; // VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+    // Read reduced kernel value from var_len_ptr (in ACE READ section).
+    // Must match `VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR` in
+    // `crates/lib/core/asm/stark/constants.masm`.
+    let var_len_addr_ptr = 3223322670_u32;
     let var_len_ptr = output
         .memory
         .read_element(ctx, Felt::from_u32(var_len_addr_ptr))
@@ -278,6 +290,53 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         masm_1.as_canonical_u64(),
         coeffs[1].as_canonical_u64(),
         "kernel_reduced coord 1 mismatch (nk={num_kernel_proc_digests})"
+    );
+}
+
+/// The recursive verifier must reject statements the Rust `Statement::new` refuses:
+/// `aux_inputs.len() = WORD_SIZE * num_kernel_proc_digests` must not exceed
+/// `MultiAir::max_aux_inputs()`. 256 kernel digests (1024 felts > MAX_AUX_INPUTS = 1020) is one
+/// over the limit, so `process_public_inputs` must fail rather than absorb an out-of-range length.
+#[test]
+fn rejects_too_many_kernel_proc_digests() {
+    let initial_stack = vec![10_u64, 10, 1, 2, 3, 4];
+
+    let seed = [0_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let input_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
+    let output_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
+    let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
+    let mut fixed_length_public_inputs = input_operand_stack.to_vec();
+    fixed_length_public_inputs.extend_from_slice(&output_operand_stack);
+    fixed_length_public_inputs.extend_from_slice(&program_digest);
+    fixed_length_public_inputs.resize(fixed_length_public_inputs.len().next_multiple_of(8), 0);
+
+    let num_kernel_proc_digests = 256; // one over the maximum (255)
+    let kernel_procedures_digests =
+        generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
+    let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
+
+    let mut advice_stack = fixed_length_public_inputs;
+    advice_stack.push(num_kernel_proc_digests as u64);
+    advice_stack.extend_from_slice(&kernel_procedures_digests);
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
+
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::stark::constants
+        use miden::core::sys::vm::public_inputs
+
+        begin
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+        end
+        ";
+
+    let test = build_test!(source, &initial_stack, &advice_stack);
+    assert!(
+        test.execute_for_output().is_err(),
+        "verifier accepted {num_kernel_proc_digests} kernel digests, exceeding max_aux_inputs"
     );
 }
 

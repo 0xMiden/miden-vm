@@ -104,7 +104,7 @@ impl PathBuf {
         S: AsRef<str> + ?Sized,
     {
         let source = source.as_ref();
-        Path::new(source).to_absolute().into_owned()
+        Path::new(source).to_absolute().unwrap().into_owned()
     }
 
     /// Create a relative [Path] from a pre-validated string
@@ -451,8 +451,7 @@ impl fmt::Display for PathBuf {
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
-
-    use miden_core::assert_matches;
+    use core::assert_matches;
 
     use super::{PathBuf, PathError};
     use crate::{Path, PathComponent, ast::IdentError};

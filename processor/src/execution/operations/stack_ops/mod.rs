@@ -1,6 +1,6 @@
 use crate::{
     ExecutionError, Felt, ZERO,
-    operation::OperationError,
+    operation::{BinaryValueErrorContext, OperationError},
     processor::{Processor, StackInterface},
     tracer::OperationHelperRegisters,
 };
@@ -96,7 +96,10 @@ where
             processor.stack_mut().swap(0, 1);
         },
         _ => {
-            return Err(OperationError::NotBinaryValue { value: condition });
+            return Err(OperationError::NotBinaryValue {
+                context: BinaryValueErrorContext::Operation,
+                value: condition,
+            });
         },
     }
 
@@ -127,7 +130,10 @@ where
             processor.stack_mut().swap(3, 7);
         },
         _ => {
-            return Err(OperationError::NotBinaryValue { value: condition });
+            return Err(OperationError::NotBinaryValue {
+                context: BinaryValueErrorContext::Operation,
+                value: condition,
+            });
         },
     }
 

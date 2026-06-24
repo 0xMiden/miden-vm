@@ -6,13 +6,11 @@ use miden_core::{
     advice::AdviceMap,
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
-    mast::MastForest,
-    operations::DebugOptions,
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, ProcessorState, TraceError};
+use crate::ProcessorState;
 
 pub(super) mod advice;
 
@@ -21,10 +19,10 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{DebugHandler, EventError};
+use handlers::EventError;
 
 mod mast_forest_store;
-pub use mast_forest_store::{MastForestStore, MemMastForestStore};
+pub use mast_forest_store::{LoadedMastForest, MastForestStore, MemMastForestStore};
 
 // ADVICE MAP MUTATIONS
 // ================================================================================================
@@ -62,8 +60,7 @@ impl AdviceMutation {
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
-/// 2. handling VM events (which can mutate the process' advice provider), and
-/// 3. handling debug and trace events.
+/// 2. handling VM events (which can mutate the process' advice provider).
 pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -76,22 +73,6 @@ pub trait BaseHost {
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
-
-    /// Handles the debug request from the VM.
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
-    }
-
-    /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_trace(process, trace_id)
-    }
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///
@@ -106,7 +87,7 @@ pub trait BaseHost {
 pub trait SyncHost: BaseHost {
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -134,7 +115,8 @@ pub trait Host: BaseHost {
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+    fn get_mast_forest(&self, node_digest: &Word)
+    -> impl FutureMaybeSend<Option<LoadedMastForest>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -158,7 +140,10 @@ impl<T> Host for T
 where
     T: SyncHost,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<LoadedMastForest>> {
         let result = SyncHost::get_mast_forest(self, node_digest);
         async move { result }
     }

@@ -415,7 +415,7 @@ fn advice_insert_hqword() {
         hperm
         # => [RATE1'', RATE2'', CAP'', ...]
 
-        # Extract hash 
+        # Extract hash
         swapw.2 dropw dropw
         # => [KEY]
 
@@ -482,7 +482,10 @@ fn run_insert_mem_with_max_size(
         end"#,
     );
 
-    let program = Assembler::default().assemble_program(&source).unwrap();
+    let program = Assembler::default()
+        .assemble_program("program", &source)
+        .unwrap()
+        .unwrap_program();
     let mut host = super::TestHost::default();
     let options = ExecutionOptions::default().with_max_adv_map_value_size(max_adv_map_value_size);
 

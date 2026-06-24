@@ -1,0 +1,143 @@
+# PRINT-STYLE DEBUGGING
+# ================================================================================================
+
+#! Event-based print debugging for MASM.
+#!
+#! Each procedure emits a well-known event which the host handles by printing the requested piece
+#! of VM state (operand stack, memory, advice stack, or advice map). A range-based procedure may
+#! share an event with its full-state variant when the full-state behavior can be represented as
+#! an unbounded range (e.g. the advice stack); memory uses a dedicated full-state event because
+#! `print_mem` enumerates its (capped) range while `print_mem_all` lists only initialized cells.
+#! These are ordinary `emit` events and carry no MAST/decorator cost, and they print whenever
+#! invoked.
+
+# CONSTANTS
+# ================================================================================================
+
+const PRINT_STACK_EVENT = event("miden::core::debug::print_stack")
+const PRINT_MEM_EVENT = event("miden::core::debug::print_mem")
+const PRINT_MEM_ALL_EVENT = event("miden::core::debug::print_mem_all")
+const PRINT_ADV_STACK_EVENT = event("miden::core::debug::print_adv_stack")
+const PRINT_ADV_MAP_EVENT = event("miden::core::debug::print_adv_map")
+const PRINT_ADV_MAP_ITEM_EVENT = event("miden::core::debug::print_adv_map_item")
+const MAX_FELT_VALUE = 18446744069414584320
+
+# PROCEDURES
+# ================================================================================================
+
+#! Prints the entire operand stack.
+#!
+#! Inputs:  []
+#! Outputs: []
+#!
+#! Cycles: 3
+pub proc print_stack
+    emit.PRINT_STACK_EVENT
+end
+
+#! Prints the contents of memory in the range `[start, end)` of the current context, consuming the
+#! two range arguments.
+#!
+#! Inputs:  [start, end]
+#! Outputs: []
+#!
+#! Where:
+#! - start is the (inclusive) start address of the range to print.
+#! - end is the (exclusive) end address of the range to print.
+#!
+#! Every address in the range is printed, with uninitialized cells shown as `EMPTY`. The range may
+#! span at most 1024 addresses; a wider range aborts execution. Use `print_mem_all` to print the
+#! entire memory of the current context.
+#!
+#! Cycles: 5
+pub proc print_mem
+    emit.PRINT_MEM_EVENT
+    # => [start, end, ...]
+    drop drop
+end
+
+#! Prints the contents of the single memory cell at `addr` in the current context, consuming the
+#! address argument.
+#!
+#! Inputs:  [addr]
+#! Outputs: []
+#!
+#! Where:
+#! - addr is the address of the memory cell to print.
+#!
+#! An uninitialized cell is shown as `EMPTY`.
+#!
+#! Cycles: 6
+pub proc print_mem_addr
+    dup add.1 swap
+    # => [addr, addr+1, ...]
+    emit.PRINT_MEM_EVENT
+    drop drop
+end
+
+#! Prints the full memory of the current context.
+#!
+#! Inputs:  []
+#! Outputs: []
+#!
+#! Only initialized memory cells are listed.
+#!
+#! Cycles: 3
+pub proc print_mem_all
+    emit.PRINT_MEM_ALL_EVENT
+end
+
+#! Prints the advice stack in the range `[start, end)`, consuming the two range arguments.
+#!
+#! Inputs:  [start, end]
+#! Outputs: []
+#!
+#! Where:
+#! - start is the (inclusive) start index of the range to print.
+#! - end is the (exclusive) end index of the range to print.
+#!
+#! Cycles: 5
+pub proc print_adv_stack
+    emit.PRINT_ADV_STACK_EVENT
+    # => [start, end, ...]
+    drop drop
+end
+
+#! Prints the full advice stack.
+#!
+#! Inputs:  []
+#! Outputs: []
+#!
+#! Cycles: 7
+pub proc print_adv_stack_all
+    push.MAX_FELT_VALUE push.0
+    emit.PRINT_ADV_STACK_EVENT
+    # => [0, MAX_FELT_VALUE, ...]
+    drop drop
+end
+
+#! Prints the full advice map.
+#!
+#! Inputs:  []
+#! Outputs: []
+#!
+#! Cycles: 3
+pub proc print_adv_map_all
+    emit.PRINT_ADV_MAP_EVENT
+end
+
+#! Looks up the WORD key in the advice map and prints the associated list of field elements,
+#! consuming the key.
+#!
+#! Inputs:  [KEY]
+#! Outputs: []
+#!
+#! Where:
+#! - KEY is the word used as the advice map key.
+#!
+#! Cycles: 7
+pub proc print_adv_map_item
+    emit.PRINT_ADV_MAP_ITEM_EVENT
+    # => [KEY, ...]
+    dropw
+end

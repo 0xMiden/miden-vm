@@ -1,21 +1,42 @@
 use alloc::vec::Vec;
+use core::{assert_matches, ops::Range};
 
 use miden_air::trace::{
     RowIndex,
     chiplets::memory::{
-        FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
-        IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE,
+        TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
+use miden_core::{
+    ONE, WORD_SIZE, Word, ZERO,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
-    TraceFragment, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
+    EMPTY_WORD, Felt, Memory,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
+use crate::{
+    ContextId, MemoryAddress, MemoryError,
+    trace::{ChipletTraceFragment, range::RangeChecker},
+};
+
+// Chiplet-local column indices used by the memory trace tests.
+const IS_READ_COL_IDX: usize = 0;
+const IS_WORD_ACCESS_COL_IDX: usize = 1;
+const CTX_COL_IDX: usize = 2;
+const WORD_COL_IDX: usize = 3;
+const IDX0_COL_IDX: usize = 4;
+const IDX1_COL_IDX: usize = 5;
+const CLK_COL_IDX: usize = 6;
+const V_COL_RANGE: Range<usize> = 7..11;
+const D0_COL_IDX: usize = 11;
+const D1_COL_IDX: usize = 12;
+const D_INV_COL_IDX: usize = 13;
+const FLAG_SAME_CONTEXT_AND_WORD: usize = 14;
+const WORD_ADDR_LO_COL_IDX: usize = 15;
+const WORD_ADDR_HI_COL_IDX: usize = 16;
 
 #[test]
 fn mem_init() {
@@ -506,11 +527,14 @@ impl MemoryAccess {
 
 /// Builds a trace of the specified length and fills it with data from the provided Memory instance.
 fn build_trace(mem: Memory, num_rows: usize) -> Vec<Vec<Felt>> {
-    let mut trace = (0..MEMORY_TRACE_WIDTH).map(|_| vec![ZERO; num_rows]).collect::<Vec<_>>();
-    let mut fragment = TraceFragment::trace_to_fragment(&mut trace);
+    let mut band = Felt::zero_vec(MEMORY_TRACE_WIDTH * num_rows);
+    let mut fragment =
+        ChipletTraceFragment::row_major(&mut band, MEMORY_TRACE_WIDTH, 0, MEMORY_TRACE_WIDTH);
     mem.fill_trace(&mut fragment);
 
-    trace
+    (0..MEMORY_TRACE_WIDTH)
+        .map(|c| (0..num_rows).map(|r| band[r * MEMORY_TRACE_WIDTH + c]).collect())
+        .collect()
 }
 
 fn read_trace_row(trace: &[Vec<Felt>], step: usize) -> [Felt; MEMORY_TRACE_WIDTH] {

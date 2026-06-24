@@ -12,8 +12,8 @@
 //! The total encoded size is:
 //! `encoded_operations_len + size_of::<u32>() + (5 * num_batches)`.
 //!
-//! This matches [`basic_block_data_len`], which is used for size accounting in stripped and
-//! hashless serialization.
+//! This matches [`basic_block_data_len`], which is used for size accounting in normal and hashless
+//! serialization.
 
 use alloc::vec::Vec;
 
@@ -59,7 +59,7 @@ pub(super) fn basic_block_data_len(basic_block: &BasicBlockNode) -> usize {
 /// Mutators
 impl BasicBlockDataBuilder {
     /// Encodes a [`BasicBlockNode`]'s operations into the serialized [`crate::mast::MastForest`]
-    /// data field. Decorators are stored separately.
+    /// data field.
     ///
     /// Operations are written in padded form with batch metadata for exact reconstruction.
     pub fn encode_basic_block(&mut self, basic_block: &BasicBlockNode) -> NodeDataOffset {

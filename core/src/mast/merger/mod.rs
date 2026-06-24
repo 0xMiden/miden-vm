@@ -1,10 +1,10 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use crate::{
-    crypto::hash::Blake3Digest,
+    Word,
     mast::{
-        DecoratorId, MastForest, MastForestContributor, MastForestError, MastNode, MastNodeBuilder,
-        MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
+        MastForest, MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeId,
+        MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
     utils::{DenseIdMap, IndexVec},
 };
@@ -17,18 +17,12 @@ mod tests;
 /// This functionality is exposed via [`MastForest::merge`]. See its documentation for more details.
 pub(crate) struct MastForestMerger {
     mast_forest: MastForest,
-    // Internal indices needed for efficient duplicate checking and MastNodeFingerprint
-    // computation.
+    // Internal indices needed for efficient duplicate checking.
     //
     // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
     // `mast_forest` are also added to the indices.
-    node_id_by_hash: BTreeMap<MastNodeFingerprint, MastNodeId>,
-    hash_by_node_id: IndexVec<MastNodeId, MastNodeFingerprint>,
-    decorators_by_hash: BTreeMap<Blake3Digest<32>, DecoratorId>,
-    /// Mappings from old decorator and node ids to their new ids.
-    ///
-    /// Any decorator in `mast_forest` is present as the target of some mapping in this map.
-    decorator_id_mappings: Vec<DenseIdMap<DecoratorId, DecoratorId>>,
+    node_id_by_hash: BTreeMap<Word, MastNodeId>,
+    hash_by_node_id: IndexVec<MastNodeId, Word>,
     /// Mappings from previous `MastNodeId`s to their new ids.
     ///
     /// Any `MastNodeId` in `mast_forest` is present as the target of some mapping in this map.
@@ -55,16 +49,13 @@ impl MastForestMerger {
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let forests = forests.into_iter().collect::<Vec<_>>();
 
-        let decorator_id_mappings = Vec::with_capacity(forests.len());
         let node_id_mappings =
             forests.iter().map(|f| DenseIdMap::with_len(f.nodes().len())).collect();
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
             hash_by_node_id: IndexVec::new(),
-            decorators_by_hash: BTreeMap::new(),
             mast_forest: MastForest::new(),
-            decorator_id_mappings,
             node_id_mappings,
         };
 
@@ -82,12 +73,9 @@ impl MastForestMerger {
     /// It does this in three steps:
     ///
     /// 1. Merge all advice maps, checking for key collisions.
-    /// 2. Merge all decorators, which is a case of deduplication and creating a decorator id
-    ///    mapping which contains how existing [`DecoratorId`]s map to [`DecoratorId`]s in the
-    ///    merged forest.
-    /// 3. Merge all nodes of forests.
-    ///    - Similar to decorators, node indices might move during merging, so the merger keeps a
-    ///      node id mapping as it merges nodes.
+    /// 2. Merge all nodes of forests.
+    ///    - Node indices might move during merging, so the merger keeps a node id mapping as it
+    ///      merges nodes.
     ///    - This is a depth-first traversal over all forests to ensure all children are processed
     ///      before their parents. See the documentation of [`MultiMastForestNodeIter`] for details
     ///      on this traversal.
@@ -107,20 +95,13 @@ impl MastForestMerger {
     ///        `replacement` node. Now we can simply add a mapping from the external node to the
     ///        `replacement` node in our node id mapping which means all nodes that referenced the
     ///        external node will point to the `replacement` instead.
-    /// 4. Finally, we merge all roots of all forests. Here we map the existing root indices to
+    /// 3. Finally, we merge all roots of all forests. Here we map the existing root indices to
     ///    their potentially new indices in the merged forest and add them to the forest,
     ///    deduplicating in the process, too.
     fn merge_inner(&mut self, forests: Vec<&MastForest>) -> Result<(), MastForestError> {
         for other_forest in forests.iter() {
             self.merge_advice_map(other_forest)?;
         }
-        for other_forest in forests.iter() {
-            self.merge_decorators(other_forest)?;
-        }
-        for other_forest in forests.iter() {
-            self.merge_error_codes(other_forest)?;
-        }
-
         let iterator = MultiMastForestNodeIter::new(forests.clone());
         for item in iterator {
             match item {
@@ -155,35 +136,8 @@ impl MastForestMerger {
         }
 
         for (forest_idx, forest) in forests.iter().enumerate() {
-            self.merge_roots(forest_idx, forest)?;
+            self.merge_roots(forest_idx, forest);
         }
-
-        Ok(())
-    }
-
-    fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        let mut decorator_id_remapping =
-            DenseIdMap::with_len(other_forest.debug_info.num_decorators());
-
-        for (merging_id, merging_decorator) in
-            other_forest.debug_info.decorators().iter().enumerate()
-        {
-            let merging_decorator_hash = merging_decorator.fingerprint();
-            let new_decorator_id = if let Some(existing_decorator) =
-                self.decorators_by_hash.get(&merging_decorator_hash)
-            {
-                *existing_decorator
-            } else {
-                let new_decorator_id = self.mast_forest.add_decorator(merging_decorator.clone())?;
-                self.decorators_by_hash.insert(merging_decorator_hash, new_decorator_id);
-                new_decorator_id
-            };
-
-            decorator_id_remapping
-                .insert(DecoratorId::new_unchecked(merging_id as u32), new_decorator_id);
-        }
-
-        self.decorator_id_mappings.push(decorator_id_remapping);
 
         Ok(())
     }
@@ -195,13 +149,6 @@ impl MastForestMerger {
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
     }
 
-    fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        self.mast_forest.debug_info.extend_error_codes(
-            other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())),
-        );
-        Ok(())
-    }
-
     fn merge_node(
         &mut self,
         forest_idx: usize,
@@ -209,14 +156,10 @@ impl MastForestMerger {
         node: MastNode,
         original_forests: &[&MastForest],
     ) -> Result<(), MastForestError> {
-        // We need to remap the node prior to computing the MastNodeFingerprint.
+        // We need to remap the node prior to computing the node fingerprint since child IDs may
+        // have changed in the merged forest.
         //
-        // This is because the MastNodeFingerprint computation looks up its descendants and
-        // decorators in the internal index, and if we were to pass the original node to
-        // that computation, it would look up the incorrect descendants and decorators
-        // (since the descendant's indices may have changed).
-        //
-        // Remapping at this point is guaranteed to be "complete", meaning all ids of children
+        // Remapping at this point is guaranteed to be "complete", meaning all IDs of children
         // will be present in the node id mapping since the DFS iteration guarantees
         // that all children of this `node` have been processed before this node and
         // their indices have been added to the mappings.
@@ -225,7 +168,6 @@ impl MastForestMerger {
             node,
             original_forests[forest_idx],
             &self.node_id_mappings[forest_idx],
-            &self.decorator_id_mappings[forest_idx],
         )?;
 
         let node_fingerprint =
@@ -243,11 +185,6 @@ impl MastForestMerger {
                 let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
-                // We need to update the indices with the newly inserted nodes
-                // since the MastNodeFingerprint computation requires all descendants of a node
-                // to be in this index. Hence when we encounter a node in the merging forest
-                // which has descendants (Call, Loop, Split, ...), then their descendants need to be
-                // in the indices.
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
                 let returned_id = self
                     .hash_by_node_id
@@ -263,11 +200,7 @@ impl MastForestMerger {
         Ok(())
     }
 
-    fn merge_roots(
-        &mut self,
-        forest_idx: usize,
-        other_forest: &MastForest,
-    ) -> Result<(), MastForestError> {
+    fn merge_roots(&mut self, forest_idx: usize, other_forest: &MastForest) {
         for root_id in other_forest.roots.iter() {
             // Map the previous root to its possibly new id.
             let new_root = self.node_id_mappings[forest_idx]
@@ -276,10 +209,8 @@ impl MastForestMerger {
             // This takes O(n) where n is the number of roots in the merged forest every time to
             // check if the root already exists. As the number of roots is relatively low generally,
             // this should be okay.
-            self.mast_forest.make_root(new_root);
+            self.mast_forest.mark_root(new_root);
         }
-
-        Ok(())
     }
 
     // HELPERS
@@ -287,20 +218,19 @@ impl MastForestMerger {
 
     /// Returns the ID of the node in the merged forest that matches the given
     /// fingerprint, if any.
-    fn lookup_node_by_fingerprint(&self, fingerprint: &MastNodeFingerprint) -> Option<MastNodeId> {
+    fn lookup_node_by_fingerprint(&self, fingerprint: &Word) -> Option<MastNodeId> {
         self.node_id_by_hash.get(fingerprint).copied()
     }
 
-    /// Builds a new node with remapped children and decorators using the provided mappings.
+    /// Builds a new node with remapped children using the provided mappings.
     fn build_with_remapped_children(
         &self,
         merging_id: MastNodeId,
         src: MastNode,
         original_forest: &MastForest,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
-        dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
-        super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
+        super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap)
     }
 }
 
@@ -311,8 +241,9 @@ impl MastForestMerger {
 ///
 /// It maps the roots ([`MastNodeId`]s) of a forest to their new [`MastNodeId`] in the merged
 /// forest. See [`MastForest::merge`] for more details.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MastForestRootMap {
+    node_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
     root_maps: Vec<BTreeMap<MastNodeId, MastNodeId>>,
 }
 
@@ -321,9 +252,18 @@ impl MastForestRootMap {
         id_map: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
         forests: Vec<&MastForest>,
     ) -> Self {
+        let mut node_maps = vec![BTreeMap::new(); forests.len()];
         let mut root_maps = vec![BTreeMap::new(); forests.len()];
 
         for (forest_idx, forest) in forests.into_iter().enumerate() {
+            for (node_idx, _) in forest.nodes().iter().enumerate() {
+                let node_id = MastNodeId::new_unchecked(
+                    node_idx.try_into().expect("MastForest node index exceeds u32"),
+                );
+                if let Some(new_id) = id_map[forest_idx].get(node_id) {
+                    node_maps[forest_idx].insert(node_id, new_id);
+                }
+            }
             for root in forest.procedure_roots() {
                 let new_id = id_map[forest_idx]
                     .get(*root)
@@ -332,7 +272,15 @@ impl MastForestRootMap {
             }
         }
 
-        Self { root_maps }
+        Self { node_maps, root_maps }
+    }
+
+    /// Maps any node from the given input forest to its new location in the merged forest.
+    ///
+    /// This includes non-root nodes, which is required when remapping package-owned source/debug
+    /// graphs after [`MastForest::merge`].
+    pub fn map_node(&self, forest_index: usize, node: &MastNodeId) -> Option<MastNodeId> {
+        self.node_maps.get(forest_index).and_then(|map| map.get(node)).copied()
     }
 
     /// Maps the given root to its new location in the merged forest, if such a mapping exists.

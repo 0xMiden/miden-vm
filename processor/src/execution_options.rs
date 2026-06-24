@@ -13,8 +13,6 @@ pub struct ExecutionOptions {
     max_cycles: u32,
     expected_cycles: u32,
     core_trace_fragment_size: usize,
-    enable_tracing: bool,
-    enable_debugging: bool,
     /// Maximum number of field elements that can be inserted into the advice map in a single
     /// `adv.insert_mem` operation.
     max_adv_map_value_size: usize,
@@ -25,9 +23,24 @@ pub struct ExecutionOptions {
     /// Maximum number of continuations allowed on the continuation stack at any point during
     /// execution.
     max_num_continuations: usize,
-    /// Maximum number of field elements allowed on the operand stack in the active execution
-    /// context.
+    /// Maximum number of internal nodes allowed in the advice provider's Merkle store.
+    max_merkle_store_nodes: usize,
+    /// Maximum number of deferred precompile requests allowed during execution.
+    max_precompile_requests: usize,
+    /// Maximum total number of calldata bytes allowed across deferred precompile requests.
+    max_precompile_request_calldata_bytes: usize,
+    /// Maximum number of field elements allowed on the operand stack across the active execution
+    /// context and all suspended contexts.
+    ///
+    /// A `call`, `dyncall`, or `syscall` context switch hides the caller's operand-stack overflow
+    /// (everything below the top 16 elements) until the callee returns. This limit bounds the
+    /// aggregate of the active context's depth plus all such suspended overflow, so nesting
+    /// context switches cannot accumulate hidden operand-stack memory beyond the configured
+    /// budget.
     max_stack_depth: usize,
+    /// Maximum number of field elements allowed in the processor's memory at any point during
+    /// execution, rounded up to the nearest multiple of 4.
+    max_memory_elements: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -36,13 +49,16 @@ impl Default for ExecutionOptions {
             max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-            enable_tracing: false,
-            enable_debugging: false,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
+            max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
+            max_precompile_request_calldata_bytes:
+                Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         }
     }
 }
@@ -75,11 +91,34 @@ impl ExecutionOptions {
     /// Set to 2^16 (65536).
     pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
 
+    /// Default maximum number of internal nodes allowed in the advice provider's Merkle store.
+    ///
+    /// Set to 2^20 so the default allows large Merkle inputs and repeated updates while still
+    /// providing a finite host-memory backstop.
+    pub const DEFAULT_MAX_MERKLE_STORE_NODES: usize = 1 << 20;
+
+    /// Default maximum number of deferred precompile requests allowed during execution.
+    /// Set to 2^16 (65536).
+    pub const DEFAULT_MAX_PRECOMPILE_REQUESTS: usize = 1 << 16;
+
+    /// Default maximum total calldata bytes allowed across deferred precompile requests.
+    /// Set to 2^28 (256 MB).
+    pub const DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES: usize = 1 << 28;
+
     /// Default maximum number of field elements allowed on the operand stack.
     ///
     /// This preserves the effective stack depth ceiling imposed by the previous fixed
     /// `FastProcessor` stack buffer.
     pub const DEFAULT_MAX_STACK_DEPTH: usize = 6615;
+
+    /// Default maximum number of field elements allowed in the processor's memory.
+    ///
+    /// Memory is element-addressable, so this bounds the total number of elements live across all
+    /// contexts. Internally memory is stored at word granularity (4 elements per word), so the
+    /// effective limit is rounded up to a whole number of words. Set to 2^28, which lets programs
+    /// use a large amount of memory while still providing a finite host-memory backstop against
+    /// unbounded growth from writes to arbitrarily many unique addresses.
+    pub const DEFAULT_MAX_MEMORY_ELEMENTS: usize = 1 << 28;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -97,8 +136,6 @@ impl ExecutionOptions {
         max_cycles: Option<u32>,
         expected_cycles: u32,
         core_trace_fragment_size: usize,
-        enable_tracing: bool,
-        enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
         // Validate max cycles.
         let max_cycles = if let Some(max_cycles) = max_cycles {
@@ -138,13 +175,16 @@ impl ExecutionOptions {
             max_cycles,
             expected_cycles,
             core_trace_fragment_size,
-            enable_tracing,
-            enable_debugging,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_adv_map_elements: Self::DEFAULT_MAX_ADV_MAP_ELEMENTS,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
             max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
+            max_merkle_store_nodes: Self::DEFAULT_MAX_MERKLE_STORE_NODES,
+            max_precompile_requests: Self::DEFAULT_MAX_PRECOMPILE_REQUESTS,
+            max_precompile_request_calldata_bytes:
+                Self::DEFAULT_MAX_PRECOMPILE_REQUEST_CALLDATA_BYTES,
             max_stack_depth: Self::DEFAULT_MAX_STACK_DEPTH,
+            max_memory_elements: Self::DEFAULT_MAX_MEMORY_ELEMENTS,
         })
     }
 
@@ -160,24 +200,6 @@ impl ExecutionOptions {
         }
         self.core_trace_fragment_size = size;
         Ok(self)
-    }
-
-    /// Enables execution of the `trace` instructions.
-    pub fn with_tracing(mut self, enable_tracing: bool) -> Self {
-        self.enable_tracing = enable_tracing;
-        self
-    }
-
-    /// Enables execution of programs in debug mode when the `enable_debugging` flag is set to true;
-    /// otherwise, debug mode is disabled.
-    ///
-    /// In debug mode the VM does the following:
-    /// - Executes `debug` instructions (these are ignored in regular mode).
-    /// - Records additional info about program execution (e.g., keeps track of stack state at every
-    ///   cycle of the VM) which enables stepping through the program forward and backward.
-    pub fn with_debugging(mut self, enable_debugging: bool) -> Self {
-        self.enable_debugging = enable_debugging;
-        self
     }
 
     // PUBLIC ACCESSORS
@@ -201,18 +223,6 @@ impl ExecutionOptions {
     /// Returns the fragment size for core trace generation.
     pub fn core_trace_fragment_size(&self) -> usize {
         self.core_trace_fragment_size
-    }
-
-    /// Returns a flag indicating whether the VM should execute `trace` instructions.
-    #[inline]
-    pub fn enable_tracing(&self) -> bool {
-        self.enable_tracing
-    }
-
-    /// Returns a flag indicating whether the VM should execute a program in debug mode.
-    #[inline]
-    pub fn enable_debugging(&self) -> bool {
-        self.enable_debugging
     }
 
     /// Returns the maximum number of field elements allowed in a single live advice map value.
@@ -258,11 +268,38 @@ impl ExecutionOptions {
         self.max_num_continuations
     }
 
-    /// Returns the maximum number of field elements allowed on the operand stack in the active
-    /// execution context.
+    /// Returns the maximum number of internal nodes allowed in the advice provider's Merkle store.
+    #[inline]
+    pub fn max_merkle_store_nodes(&self) -> usize {
+        self.max_merkle_store_nodes
+    }
+
+    /// Returns the maximum number of deferred precompile requests allowed during execution.
+    #[inline]
+    pub fn max_precompile_requests(&self) -> usize {
+        self.max_precompile_requests
+    }
+
+    /// Returns the maximum total calldata bytes allowed across deferred precompile requests.
+    #[inline]
+    pub fn max_precompile_request_calldata_bytes(&self) -> usize {
+        self.max_precompile_request_calldata_bytes
+    }
+
+    /// Returns the maximum number of field elements allowed on the operand stack across the active
+    /// execution context and all suspended contexts.
     #[inline]
     pub fn max_stack_depth(&self) -> usize {
         self.max_stack_depth
+    }
+
+    /// Returns the configured maximum number of field elements allowed in the processor's memory.
+    ///
+    /// This is the raw value as set via [`Self::with_max_memory_elements`]; the effective cap is
+    /// rounded up to a whole number of words (a multiple of 4) when memory is initialized.
+    #[inline]
+    pub fn max_memory_elements(&self) -> usize {
+        self.max_memory_elements
     }
 
     /// Sets the maximum number of continuations allowed on the continuation stack.
@@ -271,8 +308,29 @@ impl ExecutionOptions {
         self
     }
 
-    /// Sets the maximum number of field elements allowed on the operand stack in the active
-    /// execution context.
+    /// Sets the maximum number of internal nodes allowed in the advice provider's Merkle store.
+    pub fn with_max_merkle_store_nodes(mut self, max_merkle_store_nodes: usize) -> Self {
+        self.max_merkle_store_nodes = max_merkle_store_nodes;
+        self
+    }
+
+    /// Sets the maximum number of deferred precompile requests allowed during execution.
+    pub fn with_max_precompile_requests(mut self, max_precompile_requests: usize) -> Self {
+        self.max_precompile_requests = max_precompile_requests;
+        self
+    }
+
+    /// Sets the maximum total calldata bytes allowed across deferred precompile requests.
+    pub fn with_max_precompile_request_calldata_bytes(
+        mut self,
+        max_precompile_request_calldata_bytes: usize,
+    ) -> Self {
+        self.max_precompile_request_calldata_bytes = max_precompile_request_calldata_bytes;
+        self
+    }
+
+    /// Sets the maximum number of field elements allowed on the operand stack across the active
+    /// execution context and all suspended contexts.
     pub fn with_max_stack_depth(
         mut self,
         max_stack_depth: usize,
@@ -285,6 +343,12 @@ impl ExecutionOptions {
         }
         self.max_stack_depth = max_stack_depth;
         Ok(self)
+    }
+
+    /// Sets the maximum number of field elements allowed in the processor's memory.
+    pub fn with_max_memory_elements(mut self, max_memory_elements: usize) -> Self {
+        self.max_memory_elements = max_memory_elements;
+        self
     }
 }
 
@@ -320,20 +384,20 @@ mod tests {
     #[test]
     fn valid_fragment_size() {
         // Valid power of two values should succeed
-        let opts = ExecutionOptions::new(None, 64, 1024, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().core_trace_fragment_size(), 1024);
 
-        let opts = ExecutionOptions::new(None, 64, 4096, false, false);
+        let opts = ExecutionOptions::new(None, 64, 4096);
         assert!(opts.is_ok());
 
-        let opts = ExecutionOptions::new(None, 64, 1, false, false);
+        let opts = ExecutionOptions::new(None, 64, 1);
         assert!(opts.is_ok());
     }
 
     #[test]
     fn zero_fragment_size_fails() {
-        let opts = ExecutionOptions::new(None, 64, 0, false, false);
+        let opts = ExecutionOptions::new(None, 64, 0);
         assert!(matches!(opts, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
     }
 
@@ -352,7 +416,7 @@ mod tests {
     #[test]
     fn expected_cycles_validated_after_rounding() {
         // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
-        let opts = ExecutionOptions::new(Some(100), 65, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 65, 1024);
         assert!(matches!(
             opts,
             Err(ExecutionOptionsError::ExpectedCyclesTooBig {
@@ -362,7 +426,7 @@ mod tests {
         ));
 
         // expected_cycles=64 rounds to 64; max_cycles=100 -> ok.
-        let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
+        let opts = ExecutionOptions::new(Some(100), 64, 1024);
         assert!(opts.is_ok());
         assert_eq!(opts.unwrap().expected_cycles(), 64);
     }

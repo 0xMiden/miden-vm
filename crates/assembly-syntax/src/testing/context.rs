@@ -9,7 +9,7 @@ use miden_utils_diagnostics::{
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
 use crate::{
-    Parse, ParseOptions, Path,
+    Path,
     ast::{Form, Module, ModuleKind},
 };
 
@@ -76,8 +76,7 @@ impl SyntaxTestContext {
     /// forms, and is largely intended for low-level testing of the parser.
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
-        crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        crate::parser::parse_forms(source)
     }
 
     /// Parse the given source file into an executable [Module].
@@ -85,29 +84,10 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_program(&self, source: impl Parse) -> Result<Box<Module>, Report> {
-        source.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                warnings_as_errors: self.warnings_as_errors,
-                ..Default::default()
-            },
-        )
-    }
-
-    /// Parse the given source file into a kernel [Module].
-    ///
-    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
-    /// valid.
-    #[track_caller]
-    pub fn parse_kernel(&self, source: impl Parse) -> Result<Box<Module>, Report> {
-        source.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::for_kernel()
-            },
-        )
+    pub fn parse_program(&self, source: &str) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(Some(ModuleKind::Executable));
+        parser.set_warnings_as_errors(self.warnings_as_errors);
+        parser.parse_str(Some(Path::EXEC), source, self.source_manager())
     }
 
     /// Parse the given source file into an anonymous library [Module].
@@ -115,29 +95,48 @@ impl SyntaxTestContext {
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
     #[track_caller]
-    pub fn parse_module(&self, source: impl Parse) -> Result<Box<Module>, Report> {
-        source.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::for_library()
-            },
-        )
+    pub fn parse_program_source_file(
+        &self,
+        source_file: Arc<SourceFile>,
+    ) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(Some(ModuleKind::Executable));
+        parser.set_warnings_as_errors(self.warnings_as_errors);
+        parser.parse(None, source_file, self.source_manager())
     }
 
-    /// Parse the given source file into a library [Module] with the given fully-qualified path.
+    /// Parse the given source file into a kernel [Module].
+    ///
+    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
+    /// valid.
     #[track_caller]
-    pub fn parse_module_with_path(
+    pub fn parse_kernel(&self, source: &str) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(Some(ModuleKind::Kernel));
+        parser.set_warnings_as_errors(self.warnings_as_errors);
+        parser.parse_str(None, source, self.source_manager())
+    }
+
+    /// Parse the given source file into an anonymous library [Module].
+    ///
+    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
+    /// valid.
+    #[track_caller]
+    pub fn parse_module(&self, source: &str) -> Result<Box<Module>, Report> {
+        let mut parser = Module::parser(None);
+        parser.set_warnings_as_errors(self.warnings_as_errors);
+        parser.parse_str(None, source, self.source_manager())
+    }
+
+    /// Parse the given source file into an anonymous library [Module].
+    ///
+    /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
+    /// valid.
+    #[track_caller]
+    pub fn parse_module_source_file(
         &self,
-        path: impl AsRef<Path>,
-        source: impl Parse,
+        source_file: Arc<SourceFile>,
     ) -> Result<Box<Module>, Report> {
-        source.parse_with_options(
-            self.source_manager.clone(),
-            ParseOptions {
-                warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::new(ModuleKind::Library, path)
-            },
-        )
+        let mut parser = Module::parser(None);
+        parser.set_warnings_as_errors(self.warnings_as_errors);
+        parser.parse(None, source_file, self.source_manager())
     }
 }

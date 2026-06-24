@@ -33,7 +33,7 @@ use miden_core::{
 
 use crate::constraints::{decoder::columns::DecoderCols, stack::columns::StackCols};
 #[cfg(test)]
-use crate::trace::decoder::{NUM_OP_BITS, OP_BITS_RANGE};
+use crate::trace::decoder::NUM_OP_BITS;
 
 // CONSTANTS
 // ================================================================================================
@@ -284,7 +284,6 @@ where
     /// operation flags whose stack impact matches that shift at depth `d`. These are
     /// built incrementally: each depth adds or removes operations relative to the
     /// previous depth.
-    #[allow(clippy::too_many_arguments)]
     fn compute_composite_flags<V>(
         bits: &OpBits<E>,
         deg7: &[E; NUM_DEGREE_7_OPS],
@@ -327,7 +326,7 @@ where
         // no_shift[d] = sum of op flags whose stack position d is unchanged.
         // Built incrementally via accumulate_depth_deltas.
 
-        let no_shift_depth0 = E::sum_array::<10>(&[
+        let no_shift_depth0 = E::sum_array::<13>(&[
             // +NOOP         — no-op
             op7(opcodes::NOOP),
             // +U32ASSERT2   — checks s0,s1 are u32, no change
@@ -338,6 +337,8 @@ where
             op5(opcodes::SPAN),
             // +JOIN         — control flow: begins join block
             op5(opcodes::JOIN),
+            // +LOOP         — control flow: do-while LOOP reads no stack input
+            op5(opcodes::LOOP),
             // +EMIT         — emits event, no stack change
             op7(opcodes::EMIT),
             // +RESPAN       — control flow: next batch in basic block
@@ -346,8 +347,12 @@ where
             op4(opcodes::HALT),
             // +CALL         — control flow: enters procedure
             op4(opcodes::CALL),
-            // +END*(1-loop) — no-shift only when NOT ending a loop body
+            // +SYSCALL      - control flow: enters kernel procedure.
+            op4(opcodes::SYSCALL),
+            // +END*(1-loop) — no-shift for non-Loop ENDs (Loop's END drops the trailing condition)
             op4(opcodes::END) * (E::ONE - is_loop_end),
+            // +EVALCIRCUIT  - asserts an ACE evaluation without changing the stack.
+            op5(opcodes::EVALCIRCUIT),
         ]);
 
         // +opcodes[0..8] –NOOP — unary ops that modify only s0 (EQZ, NEG, INV, INCR, NOT, MLOAD)
@@ -356,39 +361,49 @@ where
         // +U32ADD +U32SUB +U32MUL +U32DIV — consume s0,s1, produce 2 results
         let u32_arith_group = prefix_100.clone() * bits[3][0].clone();
 
-        let no_shift_depth4 = E::sum_array::<5>(&[
+        let no_shift_depth4 = E::sum_array::<6>(&[
             // +MOVUP3|MOVDN3  — permute s0..s3
             movup_or_movdn[1].clone(),
             // +ADVPOPW|EXPACC — overwrite s0..s3 in place
             advpopw_or_expacc,
             // +SWAPW2|SWAPW3  — swap s0..s3 with s8+ (leaves at depth 8)
-            swapw2_or_swapw3.clone(),
+            swapw2_or_swapw3,
             // +EXT2MUL        — ext field multiply on s0..s3
             op7(opcodes::EXT2MUL),
             // +MRUPDATE       — Merkle root update on s0..s3
             op4(opcodes::MRUPDATE),
+            // +CALLER         - overwrite s0..s3 with the caller hash.
+            op7(opcodes::CALLER),
         ]);
 
-        // SWAPW2/SWAPW3 depth lifecycle:
-        //   Op      Swaps               No-shift depths
-        //   SWAPW2  s[0..4] ↔ s[8..12]  0-7, 12-15
-        //   SWAPW3  s[0..4] ↔ s[12..16] 0-7, 8-11
-        //   Combined pair: enters at 4, leaves at 8, re-enters at 12 (minus SWAPW3)
+        // Prefix-summed deltas for SWAPW2/SWAPW3:
+        //   SWAPW2 is active at depths 4..7 and 12..15.
+        //   SWAPW3 is active at depths 4..11.
+        // The shared SWAPW2|SWAPW3 term starts at depth 4. Depth 8 removes only SWAPW2,
+        // and depth 12 adds SWAPW2 back while removing SWAPW3.
+
+        let stream_word_ops = op5(opcodes::MSTREAM) + op5(opcodes::PIPE);
 
         let no_shift_depth8
             // +MOVUP7|MOVDN7  — permute s0..s7
             = movup_or_movdn[5].clone()
             // +SWAPW          — swap s0..s3 with s4..s7, only affects depths 0-7
             + op7(opcodes::SWAPW)
-            // –SWAPW2|SWAPW3  — target range s8+ now affected at this depth
-            - swapw2_or_swapw3.clone();
+            // +MSTREAM/PIPE   - overwrite s0..s7 and increment s12; preserve s8..s11.
+            + stream_word_ops.clone()
+            // -SWAPW2         - s8..s11 are SWAPW2's target word, but unchanged for SWAPW3.
+            - op7(opcodes::SWAPW2);
 
         let no_shift_depth12
-            // +SWAPW2|SWAPW3 — pair re-enters (both leave depths 12+ untouched)
-            = swapw2_or_swapw3
+            // +SWAPW2         - s12..s15 are unchanged by SWAPW2.
+            = op7(opcodes::SWAPW2)
             // +HPERM         — Poseidon2 permutation on s0..s11
             + op5(opcodes::HPERM)
-            // –SWAPW3        — SWAPW3 swaps s0..s3 with s12..s15, so s12+ still changes
+            // +LOGPRECOMPILE — Poseidon2 output rewrites s0..s11; s12..s15 stay unchanged
+            + op5(opcodes::LOGPRECOMPILE)
+            // -MSTREAM/PIPE  - s12 is incremented by these ops.
+            - stream_word_ops.clone()
+            // -SWAPW3         - s12..s15 are SWAPW3's target word.
             - op7(opcodes::SWAPW3);
 
         let no_shift = accumulate_depth_deltas([
@@ -419,8 +434,8 @@ where
             E::ZERO,
             // d=12
             no_shift_depth12,
-            // d=13 (unchanged)
-            E::ZERO,
+            // +MSTREAM/PIPE   - preserve s13..s15 after skipping the incremented s12.
+            stream_word_ops,
             // d=14 (unchanged)
             E::ZERO,
             // d=15 (unchanged)
@@ -451,9 +466,9 @@ where
             deg7[47].clone(),
             // +SPLIT        — control flow: pops condition from s0
             op5(opcodes::SPLIT),
-            // +LOOP         — control flow: pops condition from s0
-            op5(opcodes::LOOP),
-            // +END*loop     — END when ending a loop: pops the loop flag
+            // +REPEAT       - control flow: pops condition before re-entering a loop body
+            op4(opcodes::REPEAT),
+            // +END*loop     — END when ending a loop: pops the trailing condition the body left
             end_loop_flag.clone(),
             // +DYN          — control flow: consumes s0..s3 (target hash)
             op5(opcodes::DYN),
@@ -583,7 +598,7 @@ where
         // decoder hasher state (h5) for overflow constraints, not the generic path.
         let prefix_010 = prefix_01 * bits[4][0].clone();
         let u32_add3_madd_group = prefix_100 * bits[3][1].clone() * bits[2][1].clone();
-        let left_shift_scalar = E::sum_array::<7>(&[
+        let left_shift_scalar = E::sum_array::<6>(&[
             // +prefix_010          — ASSERT, EQ, ADD, MUL, AND, OR, U32AND, U32XOR, DROP,
             //                        CSWAP, CSWAPW, MLOADW, MSTORE, MSTOREW, (op46), (op47)
             prefix_010,
@@ -591,11 +606,9 @@ where
             u32_add3_madd_group,
             // +SPLIT               — control flow: pops condition
             op5(opcodes::SPLIT),
-            // +LOOP                — control flow: pops condition
-            op5(opcodes::LOOP),
             // +REPEAT              — control flow: pops condition for next iteration
             op4(opcodes::REPEAT),
-            // +END*loop            — END when ending a loop: pops loop flag
+            // +END*loop            — END when ending a loop: pops the trailing condition
             end_loop_flag,
             // +DYN                 — control flow: consumes target hash
             op5(opcodes::DYN),
@@ -932,6 +945,7 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of SPLIT operation.
         split => opcodes::SPLIT,
         /// Operation Flag of LOOP operation.
+        #[expect(dead_code)]
         loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
         span => opcodes::SPAN,
@@ -955,10 +969,8 @@ impl<E: PrimeCharacteristicRing> OpFlags<E> {
         /// Operation Flag of HORNEREXT operation.
         hornerext => opcodes::HORNEREXT,
         /// Operation Flag of MSTREAM operation.
-        #[expect(dead_code)]
         mstream => opcodes::MSTREAM,
         /// Operation Flag of PIPE operation.
-        #[expect(dead_code)]
         pipe => opcodes::PIPE,
     );
 
@@ -1046,36 +1058,39 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 // TEST HELPERS
 // ================================================================================================
 
-/// Generates a test trace row with the op bits set for a given opcode.
+/// Generates a test Core trace row with the op bits set for a given opcode.
 ///
-/// This creates a minimal trace row where:
+/// This creates a minimal Core row where:
 /// - Op bits are set according to the opcode's binary representation
 /// - Op bits extra columns are computed for degree reduction
 /// - All other columns are zero
 #[cfg(test)]
-pub fn generate_test_row(opcode: usize) -> crate::MainCols<miden_core::Felt> {
+pub fn generate_test_row(opcode: usize) -> crate::constraints::columns::CoreCols<miden_core::Felt> {
+    use core::borrow::{Borrow, BorrowMut};
+
     use miden_core::{Felt, ZERO};
 
-    use crate::trace::{TRACE_WIDTH, decoder::OP_BITS_EXTRA_COLS_RANGE};
+    use crate::constraints::columns::{CoreCols, NUM_CORE_COLS};
 
     let op_bits = get_op_bits(opcode);
 
-    // Build a flat zeroed row, then set the decoder op bits via the col map.
-    let mut row = [ZERO; TRACE_WIDTH];
-    for (i, &bit) in op_bits.iter().enumerate() {
-        row[OP_BITS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET + i] = bit;
+    let mut row_data = [ZERO; NUM_CORE_COLS];
+    {
+        let row: &mut CoreCols<Felt> = row_data.as_mut_slice().borrow_mut();
+        for (i, &bit) in op_bits.iter().enumerate() {
+            row.decoder.op_bits[i] = bit;
+        }
+
+        // Compute and set op bits extra columns for degree reduction.
+        let bit_6 = op_bits[6];
+        let bit_5 = op_bits[5];
+        let bit_4 = op_bits[4];
+        row.decoder.extra[0] = bit_6 * (Felt::ONE - bit_5) * bit_4;
+        row.decoder.extra[1] = bit_6 * bit_5;
     }
 
-    // Compute and set op bits extra columns for degree reduction.
-    let bit_6 = op_bits[6];
-    let bit_5 = op_bits[5];
-    let bit_4 = op_bits[4];
-    row[OP_BITS_EXTRA_COLS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET] =
-        bit_6 * (Felt::ONE - bit_5) * bit_4;
-    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
-
-    // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
-    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainCols<Felt>>(row) }
+    let row: &CoreCols<Felt> = row_data.as_slice().borrow();
+    row.clone()
 }
 
 /// Returns a 7-bit array representation of an opcode.
@@ -1095,5 +1110,7 @@ pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
     bit_array
 }
 
+#[cfg(test)]
+mod stack_route_tests;
 #[cfg(test)]
 mod tests;

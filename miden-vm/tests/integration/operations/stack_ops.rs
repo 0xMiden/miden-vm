@@ -1,8 +1,12 @@
+#[cfg(feature = "testing")]
 use miden_assembly::testing::regex;
-use miden_utils_testing::{
-    MIN_STACK_DEPTH, WORD_SIZE, assert_assembler_diagnostic, assert_diagnostic_lines,
-    build_op_test, proptest::prelude::*,
-};
+use miden_utils_testing::build_op_test;
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::{MIN_STACK_DEPTH, WORD_SIZE};
+#[cfg(feature = "testing")]
+use miden_utils_testing::{assert_assembler_diagnostic, assert_diagnostic_lines};
 
 // STACK OPERATIONS TESTS
 // ================================================================================================
@@ -53,6 +57,7 @@ fn dupn() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn dupn_fail() {
     let asm_op = "dup.16";
 
@@ -89,6 +94,7 @@ fn dupwn() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn dupwn_fail() {
     let asm_op = "dupw.4";
 
@@ -125,6 +131,7 @@ fn swapn() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn swapn_fail() {
     let asm_op = "swap.16";
 
@@ -161,6 +168,7 @@ fn swapwn() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn swapwn_fail() {
     let asm_op = "swapw.4";
 
@@ -196,6 +204,7 @@ fn movup() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn movup_fail() {
     let asm_op = "movup.0";
     let test = build_op_test!(asm_op, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -246,6 +255,7 @@ fn movupw() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn movupw_fail() {
     let asm_op = "movupw.0";
     let test = build_op_test!(asm_op, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -296,6 +306,7 @@ fn movdn() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn movdn_fail() {
     let asm_op = "movdn.0";
     let test = build_op_test!(asm_op, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -346,6 +357,7 @@ fn movdnw() {
 }
 
 #[test]
+#[cfg(feature = "testing")]
 fn movdnw_fail() {
     let asm_op = "movdnw.0";
     let test = build_op_test!(asm_op, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -432,6 +444,7 @@ fn cdropw() {
     test.expect_stack(&[1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0]);
 }
 
+#[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
 

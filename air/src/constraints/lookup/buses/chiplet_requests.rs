@@ -18,10 +18,7 @@ use crate::{
     lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
-        log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
-        },
+        log_precompile::{HELPER_ADDR_IDX, HELPER_STATE_PREV_RANGE, STACK_STMNT_RANGE},
     },
 };
 
@@ -33,7 +30,6 @@ use crate::{
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
 /// Emit the chiplet requests bus.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
     main_ctx: &MainBusContext<LB>,
@@ -595,39 +591,27 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     );
 
                     // --- LOGPRECOMPILE ---
+                    //
+                    // Hasher input: `[STATE_PREV (helpers), STMNT (stack[4..8]), ZERO]`.
+                    // STMNT lives at stack[4..8] (rate1 lanes) so the bus's β⁶..β⁹ products
+                    // share with HPERM's rate1 reads. Output is identity-mapped onto
+                    // `stack_next[0..12]`, matching HPERM exactly.
                     g.batch(
                         "logprecompile",
                         op_flags.log_precompile(),
                         move |b| {
                             let log_addr: LB::Expr = log_addr.into();
-                            let logpre_in: [LB::Expr; 12] = [
-                                stk.get(STACK_COMM_RANGE.start).into(),
-                                stk.get(STACK_COMM_RANGE.start + 1).into(),
-                                stk.get(STACK_COMM_RANGE.start + 2).into(),
-                                stk.get(STACK_COMM_RANGE.start + 3).into(),
-                                stk.get(STACK_TAG_RANGE.start).into(),
-                                stk.get(STACK_TAG_RANGE.start + 1).into(),
-                                stk.get(STACK_TAG_RANGE.start + 2).into(),
-                                stk.get(STACK_TAG_RANGE.start + 3).into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 1].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 2].into(),
-                                user_helpers[HELPER_CAP_PREV_RANGE.start + 3].into(),
-                            ];
-                            let logpre_out: [LB::Expr; 12] = [
-                                stk_next.get(STACK_R0_RANGE.start).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 1).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 2).into(),
-                                stk_next.get(STACK_R0_RANGE.start + 3).into(),
-                                stk_next.get(STACK_R1_RANGE.start).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 1).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 2).into(),
-                                stk_next.get(STACK_R1_RANGE.start + 3).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 1).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 2).into(),
-                                stk_next.get(STACK_CAP_NEXT_RANGE.start + 3).into(),
-                            ];
+                            let logpre_in: [LB::Expr; 12] = array::from_fn(|i| {
+                                if i < 4 {
+                                    user_helpers[HELPER_STATE_PREV_RANGE.start + i].into()
+                                } else if i < 8 {
+                                    stk.get(STACK_STMNT_RANGE.start + (i - 4)).into()
+                                } else {
+                                    LB::Expr::ZERO
+                                }
+                            });
+                            let logpre_out: [LB::Expr; 12] =
+                                array::from_fn(|i| stk_next.get(i).into());
                             b.remove(
                                 "logprecompile_init",
                                 HasherMsg::linear_hash_init(log_addr.clone(), logpre_in),

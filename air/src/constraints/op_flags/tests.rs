@@ -36,7 +36,6 @@ fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
     acc
 }
 
-#[allow(clippy::iter_skip_zero)]
 fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt; 8]) {
     let mut deg7 = [ZERO; 64];
     let mut deg6 = [ZERO; 8];
@@ -46,7 +45,6 @@ fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt;
     for (opcode, slot) in deg7
         .iter_mut()
         .enumerate()
-        .skip(DEGREE_7_OPCODE_STARTS)
         .take(DEGREE_7_OPCODE_ENDS - DEGREE_7_OPCODE_STARTS + 1)
     {
         *slot = naive_flag(&bits, opcode as u8);
@@ -91,12 +89,14 @@ fn naive_composites(
     let prefix_011 = not_6 * bit_5 * bit_4;
     let add3_madd_prefix = bit_6 * not_5 * not_4 * bit_3 * bit_2;
 
-    let split_loop_flag = deg5[4] + deg5[5];
+    // Under do-while semantics, LOOP (deg5[5]) does not shift the stack — only SPLIT (deg5[4])
+    // contributes here.
+    let split_flag = deg5[4];
     let shift_left_on_end = deg4[4] * is_loop_end;
 
     let right_shift_flag = prefix_011 + deg5[11] + deg6[4];
     let left_shift_flag =
-        prefix_010 + add3_madd_prefix + split_loop_flag + deg5[8] + deg4[5] + shift_left_on_end;
+        prefix_010 + add3_madd_prefix + split_flag + deg5[8] + deg4[5] + shift_left_on_end;
 
     let control_flow = deg5[4] + deg5[5] + deg5[6] + deg5[7] // SPAN/JOIN/SPLIT/LOOP
         + deg4[4] + deg4[5] + deg4[6] + deg4[7] // END/REPEAT/RESPAN/HALT
@@ -347,8 +347,15 @@ fn degree_4_op_flags() {
 #[test]
 fn composite_no_shift_flags() {
     // Operations where all 16 positions remain unchanged
-    let no_shift_opcodes: [u8; 4] =
-        [opcodes::MPVERIFY, opcodes::SPAN, opcodes::HALT, opcodes::EMIT];
+    let no_shift_opcodes: [u8; 7] = [
+        opcodes::MPVERIFY,
+        opcodes::SPAN,
+        opcodes::HALT,
+        opcodes::EMIT,
+        opcodes::CALL,
+        opcodes::SYSCALL,
+        opcodes::EVALCIRCUIT,
+    ];
 
     for opcode in no_shift_opcodes {
         let op_flags = op_flags_for_opcode(opcode.into());
@@ -398,7 +405,7 @@ fn composite_swap_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests composite flags for HPERM (no shift from position 12 onwards).
+/// Tests HPERM flags (top three words are overwritten, the tail is preserved).
 #[test]
 fn composite_hperm_flags() {
     let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
@@ -414,21 +421,56 @@ fn composite_hperm_flags() {
     assert_eq!(op_flags.left_shift(), ZERO);
 }
 
-/// Tests left shift composite flags for LOOP operation.
+/// Tests composite flags for LOGPRECOMPILE (hasher output rewrites positions 0..12, no shift from
+/// position 12 onwards).
 #[test]
-fn composite_loop_left_shift() {
+fn composite_log_precompile_flags() {
+    let op_flags = op_flags_for_opcode(opcodes::LOGPRECOMPILE.into());
+
+    for i in 0..12 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ZERO,
+            "no_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+    }
+    for i in 12..16 {
+        assert_eq!(
+            op_flags.no_shift_at(i),
+            ONE,
+            "no_shift_at({i}) should be ONE for LOGPRECOMPILE"
+        );
+    }
+
+    for i in 0..16 {
+        assert_eq!(
+            op_flags.left_shift_at(i),
+            ZERO,
+            "left_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+        assert_eq!(
+            op_flags.right_shift_at(i),
+            ZERO,
+            "right_shift_at({i}) should be ZERO for LOGPRECOMPILE"
+        );
+    }
+
+    assert_eq!(op_flags.right_shift(), ZERO);
+    assert_eq!(op_flags.left_shift(), ZERO);
+}
+
+/// Tests composite shift flags for LOOP operation. Under do-while semantics LOOP reads no stack
+/// input, so it is classified as no-shift at every depth.
+#[test]
+fn composite_loop_no_shift() {
     let op_flags = op_flags_for_opcode(opcodes::LOOP.into());
 
-    assert_eq!(op_flags.left_shift_at(0), ZERO);
-    // LOOP shifts the stack left
-    for i in 1..16 {
-        assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({i}) should be ONE for LOOP");
-    }
     for i in 0..16 {
-        assert_eq!(op_flags.no_shift_at(i), ZERO);
+        assert_eq!(op_flags.left_shift_at(i), ZERO, "left_shift_at({i}) should be ZERO for LOOP");
+        assert_eq!(op_flags.no_shift_at(i), ONE, "no_shift_at({i}) should be ONE for LOOP");
     }
 
-    assert_eq!(op_flags.left_shift(), ONE);
+    assert_eq!(op_flags.left_shift(), ZERO);
     assert_eq!(op_flags.right_shift(), ZERO);
     assert_eq!(op_flags.control_flow(), ONE);
 }

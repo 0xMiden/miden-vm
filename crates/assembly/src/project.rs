@@ -4,32 +4,30 @@ use std::{
     path::{Path as FsPath, PathBuf},
 };
 
-use miden_assembly_syntax::{
-    ModuleParser,
-    ast::{ModuleKind, Path as MasmPath},
-    diagnostics::Report,
-};
-use miden_core::serde::{Deserializable, Serializable};
-use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
+use miden_assembly_syntax::{ast::ModuleKind, diagnostics::Report};
+use miden_mast_package::{Package as MastPackage, TargetType};
 use miden_package_registry::{PackageCache, PackageId, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
     ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
+use crate::{Assembler, ast::Module};
 
 mod build_provenance;
 mod dependency_graph;
-mod package_ext;
+mod providers;
 mod runtime_dependencies;
 mod target_selector;
 
-use build_provenance::PackageBuildProvenance;
-use dependency_graph::DependencyGraph;
-use package_ext::ProjectPackageExt;
-use runtime_dependencies::RuntimeDependencies;
-pub use target_selector::ProjectTargetSelector;
+use self::{
+    build_provenance::PackageBuildProvenance, dependency_graph::DependencyGraph,
+    runtime_dependencies::RuntimeDependencies,
+};
+pub use self::{
+    providers::{MasmSourceProvider, ProjectSourceProvider, TargetAssemblyContext},
+    target_selector::ProjectTargetSelector,
+};
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +45,20 @@ impl Assembler {
     where
         S: PackageCache + ?Sized,
     {
+        let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
+        self.for_project_at_path_with_providers(manifest_path, store, [masm_provider])
+    }
+
+    /// Get a [ProjectAssembler] configured for the project whose manifest is at `manifest_path`.
+    pub fn for_project_at_path_with_providers<'a, S>(
+        self,
+        manifest_path: impl AsRef<FsPath>,
+        store: &'a mut S,
+        providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
+    where
+        S: PackageCache + ?Sized,
+    {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
         let project = miden_project::Project::load(manifest_path, &source_manager)?;
@@ -57,6 +69,7 @@ impl Assembler {
         Ok(ProjectAssembler {
             assembler: self,
             project: package,
+            source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
             store,
         })
@@ -71,12 +84,27 @@ impl Assembler {
     where
         S: PackageCache + ?Sized,
     {
+        let masm_provider = Box::new(MasmSourceProvider) as Box<_>;
+        self.for_project_with_providers(project, store, [masm_provider])
+    }
+
+    /// Get a [ProjectAssembler] configured for `project`
+    pub fn for_project_with_providers<'a, S>(
+        self,
+        project: Arc<ProjectPackage>,
+        store: &'a mut S,
+        providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
+    where
+        S: PackageCache + ?Sized,
+    {
         let source_manager = self.source_manager();
         let dependency_graph =
             DependencyGraph::from_project(project.clone(), store, source_manager)?;
         Ok(ProjectAssembler {
             assembler: self,
             project,
+            source_provider: SourceProviderRegistry::new(providers),
             dependency_graph,
             store,
         })
@@ -91,10 +119,79 @@ pub struct ProjectSourceInputs {
     pub support: Vec<Box<Module>>,
 }
 
+pub struct ProjectSourceProvenanceInputs {
+    pub root: SourceFileProvenance,
+    pub support: Vec<SourceFileProvenance>,
+}
+
+pub struct SourceFileProvenance {
+    pub path: Box<std::path::Path>,
+    pub content: Box<str>,
+}
+
+impl SourceFileProvenance {
+    pub fn from_path(path: PathBuf) -> Result<Self, Report> {
+        let content = fs::read_to_string(&path).map_err(|err| {
+            Report::msg(format!("unable to read source file '{}': {err}", path.display()))
+        })?;
+        Ok(Self {
+            path: path.into_boxed_path(),
+            content: content.into_boxed_str(),
+        })
+    }
+}
+
+pub struct SourceProviderRegistry {
+    registered: BTreeMap<&'static str, Box<dyn ProjectSourceProvider>>,
+}
+
+impl Default for SourceProviderRegistry {
+    fn default() -> Self {
+        Self {
+            registered: BTreeMap::from_iter([(
+                "masm",
+                Box::new(MasmSourceProvider) as Box<dyn ProjectSourceProvider>,
+            )]),
+        }
+    }
+}
+
+impl SourceProviderRegistry {
+    pub fn new(providers: impl IntoIterator<Item = Box<dyn ProjectSourceProvider>>) -> Self {
+        let mut this = Self {
+            registered: providers.into_iter().map(|p| (p.file_type(), p)).collect(),
+        };
+
+        if !this.registered.contains_key("masm") {
+            this.registered.insert("masm", Box::new(MasmSourceProvider));
+        }
+
+        this
+    }
+
+    pub fn with_source_provider(
+        &mut self,
+        provider: impl ProjectSourceProvider + 'static,
+    ) -> &mut Self {
+        let file_type = provider.file_type();
+        let provider = Box::new(provider) as Box<dyn ProjectSourceProvider>;
+
+        self.registered.insert(file_type, provider);
+
+        self
+    }
+
+    #[inline]
+    pub fn get_provider(&self, file_type: &str) -> Option<&dyn ProjectSourceProvider> {
+        self.registered.get(file_type).map(AsRef::as_ref)
+    }
+}
+
 pub struct ProjectAssembler<'a, S: PackageCache + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: DependencyGraph,
+    source_provider: SourceProviderRegistry,
     store: &'a mut S,
 }
 
@@ -102,32 +199,22 @@ impl<'a, S> ProjectAssembler<'a, S>
 where
     S: PackageCache + ?Sized,
 {
+    pub fn with_source_provider(
+        &mut self,
+        provider: impl ProjectSourceProvider + 'static,
+    ) -> &mut Self {
+        self.source_provider.with_source_provider(provider);
+        self
+    }
+
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
     }
 
     pub fn assemble(
         &mut self,
-        target: ProjectTargetSelector<'_>,
-        profile: &str,
-    ) -> Result<Arc<MastPackage>, Report> {
-        self.assemble_impl(target, profile, None)
-    }
-
-    pub fn assemble_with_sources(
-        &mut self,
-        target: ProjectTargetSelector<'_>,
-        profile: &str,
-        sources: ProjectSourceInputs,
-    ) -> Result<Arc<MastPackage>, Report> {
-        self.assemble_impl(target, profile, Some(sources))
-    }
-
-    fn assemble_impl(
-        &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
-        sources: Option<ProjectSourceInputs>,
     ) -> Result<Arc<MastPackage>, Report> {
         let target = target_selector.select_target(self.project.as_ref())?;
 
@@ -145,7 +232,6 @@ where
                 &library_target,
                 profile_name,
                 None,
-                None,
                 &mut cache,
             )?)
         } else {
@@ -158,7 +244,6 @@ where
             &target,
             profile_name,
             required_lib,
-            sources,
             &mut cache,
         )
         .map(|resolved| resolved.package)
@@ -171,13 +256,10 @@ where
         target: &Target,
         profile_name: &str,
         required_lib: Option<ResolvedPackage>,
-        sources: Option<ProjectSourceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
     ) -> Result<ResolvedPackage, Report> {
         let cache_key = project.target_package_name(target);
-        if sources.is_none()
-            && let Some(package) = cache.get(&cache_key).cloned()
-        {
+        if let Some(package) = cache.get(&cache_key).cloned() {
             assert_eq!(package.package.kind, target.ty);
             return Ok(package);
         }
@@ -189,9 +271,15 @@ where
             .with_emit_debug_info(profile.should_emit_debug_info())
             .with_trim_paths(profile.should_trim_paths());
         let mut runtime_dependencies = RuntimeDependencies::default();
+        debug_assert!(
+            required_lib.is_none() || target.ty.is_executable(),
+            "expected required_lib only for executable targets"
+        );
         match required_lib {
             Some(required_lib) if required_lib.package.is_kernel() => {
-                assembler.link_package(required_lib.package.clone(), Linkage::Dynamic)?;
+                // We do not link the package here, as by definition a required library is only
+                // present for executable targets, and we always unconditionally link kernel
+                // dependencies just prior to assembling the package
                 runtime_dependencies.record_linked_kernel_dependency(required_lib.package)?;
             },
             Some(required_lib) => {
@@ -215,91 +303,67 @@ where
                 )));
             }
 
-            assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            if !dependency_package.package.is_kernel() {
+                assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
+            }
             runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
-        let has_provided_sources = sources.is_some();
-        let LoadedTargetSources { root, support } = match sources {
-            Some(sources) => self.normalize_provided_sources(target, sources)?,
-            None => self.load_target_sources(project.as_ref(), target)?,
-        };
+        let ProjectSourceInputs { root, support } =
+            self.load_target_sources(project.as_ref(), target, profile)?;
 
-        let product = match target.ty {
-            TargetType::Executable => assembler.assemble_executable_modules(root, support)?,
-            TargetType::Kernel => {
-                if !support.is_empty() {
-                    assembler.compile_and_statically_link_all(support)?;
-                }
-                assembler.assemble_kernel_module(root)?
-            },
-            _ if target.ty.is_library() => {
-                let mut modules = Vec::with_capacity(support.len() + 1);
-                modules.push(root);
-                modules.extend(support);
-                assembler.assemble_library_modules(modules, target.ty)?
-            },
-            _ => unreachable!("non-exhaustive target type"),
-        };
-
-        let manifest = product
-            .manifest()
-            .clone()
-            .with_dependencies(runtime_dependencies.deps.into_values())
-            .expect("assembled package manifest should have unique runtime dependencies");
-        let debug_info = product.debug_info().cloned();
-
-        // Emit custom sections
+        // Collect specific well-known custom sections produced by the project assembler
         let mut sections = Vec::new();
 
         // Section: build provenance
+        //
+        // This is produced before actual assembly, while we still have the sources on hand
         if let Some(provenance) = self.dependency_graph.build_source_provenance(
             &package_id,
             project.as_ref(),
             target,
             profile_name,
-            has_provided_sources,
+            &self.source_provider,
         )? {
             sections.push(provenance.to_section());
         }
 
-        // Section: embedded kernel package
-        if target.ty.is_executable()
-            && let Some(kernel_package) = runtime_dependencies.kernel.clone()
-        {
-            sections.push(linked_kernel_package_section(kernel_package.as_ref()));
+        if let Some(kernel_package) = runtime_dependencies.kernel.clone() {
+            if matches!(target.ty, TargetType::Kernel) {
+                return Err(Report::msg(format!(
+                    "kernel targets cannot depend on a kernel, dependency '{}' is a kernel",
+                    kernel_package.name
+                )));
+            }
+            assembler.link_package(kernel_package, Linkage::Dynamic)?;
         }
 
-        // Section: debug info
-        if let Some(DebugInfoSections {
-            debug_sources_section,
-            debug_functions_section,
-            debug_types_section,
-        }) = debug_info.as_ref()
-        {
-            sections.push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
-            sections
-                .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));
-            sections.push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
-        }
+        let mut product = match target.ty {
+            TargetType::Executable => {
+                assembler.assemble_executable_modules(package_id.clone(), root, support)?
+            },
+            _ if target.ty.is_library() => {
+                assembler.assemble_library_modules(package_id.clone(), root, support, target.ty)?
+            },
+            _ => unreachable!("non-exhaustive target type"),
+        };
 
-        let package = Arc::new(MastPackage {
-            name: project.target_package_name(target),
-            version: project.version().into_inner().clone(),
-            description: project.description().map(|description| description.to_string()),
-            kind: product.kind(),
-            mast: product.into_artifact(),
-            manifest,
-            sections,
-        });
+        product
+            .extend_dependencies(runtime_dependencies.deps.into_values())
+            .expect("assembled package manifest should have unique runtime dependencies");
+
+        let mut package = product.into_artifact()?;
+        package.name = project.target_package_name(target);
+        package.version = project.version().into_inner().clone();
+        package.description = project.description().map(|description| description.to_string());
+        package.sections.extend(sections);
+        let package = Arc::from(package);
 
         let resolved = ResolvedPackage {
-            package: Arc::clone(&package),
+            package,
             linked_kernel_package: runtime_dependencies.kernel,
         };
-        if !has_provided_sources {
-            cache.insert(package_id, resolved.clone());
-        }
+        cache.insert(package_id, resolved.clone());
 
         Ok(resolved)
     }
@@ -327,14 +391,14 @@ where
                 manifest_path,
                 origin,
                 library_path: Some(_),
-                workspace_root,
                 ..
             }) => {
-                let project = ProjectPackage::load_package(
-                    self.assembler.source_manager(),
+                let project = miden_project::Project::load_project_reference(
                     package_id,
                     manifest_path,
-                )?;
+                    &self.assembler.source_manager(),
+                )
+                .map(|project| project.package())?;
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -351,7 +415,6 @@ where
                     profile_name,
                     origin,
                     manifest_path,
-                    workspace_root.as_deref(),
                 )? {
                     RegisteredSourcePackage::Loaded(package) => (
                         ResolvedPackage {
@@ -367,7 +430,6 @@ where
                             project,
                             &target,
                             profile_name,
-                            None,
                             None,
                             cache,
                         )?;
@@ -430,7 +492,7 @@ where
                     *kind,
                     requirements,
                 )?;
-                let should_cache = self.should_cache_preassembled_package(package_id, selected)?;
+                let should_cache = self.should_cache_preassembled_package(package_id, selected);
                 (
                     ResolvedPackage {
                         linked_kernel_package: self
@@ -480,7 +542,7 @@ where
                 Err(load_error) => {
                     if let Some(kernel_package) = package
                         .try_embedded_kernel_package()
-                        .map(|kernel_package| kernel_package.map(Arc::new))?
+                        .map(|kernel_package| kernel_package.map(Arc::from))?
                     {
                         return Ok(Some(kernel_package));
                     }
@@ -491,7 +553,7 @@ where
 
         package
             .try_embedded_kernel_package()
-            .map(|kernel_package| kernel_package.map(Arc::new))
+            .map(|kernel_package| kernel_package.map(Arc::from))
     }
 
     fn load_canonical_package(
@@ -514,7 +576,6 @@ where
         profile_name: &str,
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
     ) -> Result<RegisteredSourcePackage, Report> {
         let Some(record) = self.store.get_by_semver(package_id, version) else {
             return Ok(RegisteredSourcePackage::Missing);
@@ -533,7 +594,7 @@ where
             profile_name,
             origin,
             manifest_path,
-            workspace_root,
+            &self.source_provider,
         )?;
 
         match PackageBuildProvenance::from_package(&package)? {
@@ -557,43 +618,37 @@ where
         &self,
         package_id: &PackageId,
         selected: &PackageVersion,
-    ) -> Result<bool, Report> {
+    ) -> bool {
         let Some(record) = self.store.get_by_semver(package_id, &selected.version) else {
-            return Ok(true);
+            return true;
         };
         if record.version() != selected {
-            return Ok(false);
+            return false;
         }
 
-        match self.store.load_package(package_id, selected) {
-            Ok(_) => Ok(false),
-            Err(_) => Ok(true),
-        }
+        self.store.load_package(package_id, selected).is_err()
     }
 
     fn cache_resolved_package(&mut self, package: &ResolvedPackage) -> Result<(), Report> {
         self.cache_package(package.package.clone())?;
         if let Some(kernel_package) = package.linked_kernel_package.clone()
-            && self.should_cache_linked_kernel_package(kernel_package.as_ref())?
+            && self.should_cache_linked_kernel_package(kernel_package.as_ref())
         {
             self.cache_package(kernel_package)?;
         }
         Ok(())
     }
 
-    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> Result<bool, Report> {
+    fn should_cache_linked_kernel_package(&self, package: &MastPackage) -> bool {
         let version = PackageVersion::new(package.version.clone(), package.digest());
         let Some(record) = self.store.get_by_semver(&package.name, &package.version) else {
-            return Ok(true);
+            return true;
         };
         if record.version() != &version {
-            return Ok(false);
+            return false;
         }
 
-        match self.store.load_package(&package.name, &version) {
-            Ok(_) => Ok(false),
-            Err(_) => Ok(true),
-        }
+        self.store.load_package(&package.name, &version).is_err()
     }
 
     fn cache_package(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
@@ -603,65 +658,56 @@ where
             .map_err(|error| Report::msg(error.to_string()))
     }
 
-    fn normalize_provided_sources(
-        &self,
-        target: &Target,
-        sources: ProjectSourceInputs,
-    ) -> Result<LoadedTargetSources, Report> {
-        let mut root = sources.root;
-        root.set_kind(target_root_module_kind(target.ty));
-        root.set_path(target.namespace.inner().as_ref());
-
-        let support = sources
-            .support
-            .into_iter()
-            .map(|mut module| {
-                module.set_kind(ModuleKind::Library);
-                Ok(module)
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
-
-        Ok(LoadedTargetSources { root, support })
-    }
-
     fn load_target_sources(
         &self,
         project: &ProjectPackage,
         target: &Target,
-    ) -> Result<LoadedTargetSources, Report> {
-        let source_paths = project.resolve_target_source_paths(target)?;
-        let root = self.parse_module_file(
-            &source_paths.root,
-            target_root_module_kind(target.ty),
-            target.namespace.inner().as_ref(),
+        profile: &Profile,
+    ) -> Result<ProjectSourceInputs, Report> {
+        let manifest_path = project.expect_manifest_path()?;
+        let mut context = TargetAssemblyContext::new(
+            project,
+            manifest_path,
+            target,
+            profile,
+            self.dependency_graph.as_ref(),
+            self.assembler.source_manager(),
         )?;
-        let support = source_paths
-            .support
-            .iter()
-            .map(|path| {
-                let relative = path.strip_prefix(&source_paths.root_dir).map_err(|error| {
-                    Report::msg(format!(
-                        "failed to derive module path for '{}': {error}",
-                        path.display()
-                    ))
-                })?;
-                let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
-                self.parse_module_file(path, ModuleKind::Library, module_path.as_ref())
-            })
-            .collect::<Result<Vec<_>, Report>>()?;
+        context.with_warnings_as_errors(self.assembler.warnings_as_errors());
 
-        Ok(LoadedTargetSources { root, support })
-    }
+        let extension = context.resolved_target_root.extension().ok_or_else(|| {
+            Report::msg(format!(
+                "invalid target 'path' {}: path must have an extension",
+                context.resolved_target_root.display()
+            ))
+        })?;
+        let extension = extension.to_string_lossy();
 
-    fn parse_module_file(
-        &self,
-        path: &FsPath,
-        kind: ModuleKind,
-        module_path: &MasmPath,
-    ) -> Result<Box<Module>, Report> {
-        let mut parser = ModuleParser::new(kind);
-        parser.set_warnings_as_errors(self.assembler.warnings_as_errors());
-        parser.parse_file(module_path, path, self.assembler.source_manager())
+        let provider = self.source_provider.get_provider(extension.as_ref()).ok_or_else(|| Report::msg(format!("unsupported target file type '{extension}': no provider has been registered for that file type")))?;
+        let inputs = provider.provide_sources(&context)?;
+        match target.ty {
+            TargetType::Executable if !inputs.root.kind().is_executable() => {
+                Err(Report::msg(format!(
+                    "requested target type is executable, but root module provided to assembler for '{}' is {}",
+                    project.name(),
+                    inputs.root.kind()
+                )))
+            },
+            TargetType::Kernel if !inputs.root.kind().is_kernel() => Err(Report::msg(format!(
+                "requested target type is kernel, but root module provided to assembler for '{}' is {}",
+                project.name(),
+                inputs.root.kind()
+            ))),
+            _ if inputs.root.path() != target.namespace.inner().as_ref() => {
+                Err(Report::msg(format!(
+                    "requested target namespace is '{}', but root module provided to assembler for '{}' is '{}'",
+                    &target.namespace,
+                    project.name(),
+                    inputs.root.path()
+                )))
+            },
+            _ => Ok(inputs),
+        }
     }
 }
 
@@ -677,19 +723,6 @@ enum RegisteredSourcePackage {
     Missing,
     Loaded(Arc<MastPackage>),
     IndexedButUnreadable(PackageVersion),
-}
-
-struct LoadedTargetSources {
-    root: Box<Module>,
-    #[allow(clippy::vec_box)]
-    support: Vec<Box<Module>>,
-}
-
-#[derive(Debug)]
-struct TargetSourcePaths {
-    root: PathBuf,
-    root_dir: PathBuf,
-    support: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,45 +750,6 @@ impl PackageBuildSettings {
 
 // HELPER FUNCTIONS
 // ================================================================================================
-
-fn target_root_module_kind(ty: TargetType) -> ModuleKind {
-    match ty {
-        TargetType::Executable => ModuleKind::Executable,
-        TargetType::Kernel => ModuleKind::Kernel,
-        _ => ModuleKind::Library,
-    }
-}
-
-fn linked_kernel_package_section(package: &MastPackage) -> Section {
-    Section::new(SectionId::KERNEL, package.to_bytes())
-}
-
-fn module_path_from_relative(
-    namespace: &MasmPath,
-    relative: &FsPath,
-) -> Result<Arc<MasmPath>, Report> {
-    let mut module_path = namespace.to_path_buf();
-    let stem = relative.with_extension("");
-    let mut components = stem
-        .iter()
-        .map(|component| {
-            component.to_str().ok_or_else(|| {
-                Report::msg(format!("module path '{}' contains invalid UTF-8", relative.display()))
-            })
-        })
-        .collect::<Result<Vec<_>, Report>>()?;
-
-    if components.last().is_some_and(|component| *component == Module::ROOT) {
-        components.pop();
-    }
-
-    for component in components {
-        MasmPath::validate(component).map_err(|error| Report::msg(error.to_string()))?;
-        module_path.push(component);
-    }
-
-    Ok(module_path.into())
-}
 
 fn load_selected_preassembled_package(
     path: &FsPath,
@@ -811,7 +805,7 @@ fn load_selected_preassembled_package(
 fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
     let bytes = fs::read(path)
         .map_err(|error| Report::msg(format!("failed to read '{}': {error}", path.display())))?;
-    let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+    let package = MastPackage::read_from_bytes_trusted(&bytes).map_err(|error| {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))

@@ -3,7 +3,7 @@
 
 /// Creates a `Vec<u64>` for stack inputs where the first element will be on top of the stack.
 ///
-/// This macro handles the reversal required by `StackInputs::try_from_ints`, which reverses
+/// This macro handles the reversal required by `StackInputs`, which reverses
 /// its input internally. With this macro, you can specify stack inputs in intuitive order.
 ///
 /// # Example
@@ -127,7 +127,7 @@ macro_rules! build_debug_test {
 /// Returns a Test struct in the specified debug or non-debug mode using the provided source string
 /// and any specified stack and advice inputs.
 ///
-/// Parameters start with a boolean flag, `in_debug_mode`, specifying whether the test is built in
+/// Parameters start with a boolean flag, `in_tracing_mode`, specifying whether the test is built in
 /// debug or non-debug mode. After that, they match the parameters of `build_test` and
 ///`build_debug_test` macros.
 ///
@@ -135,23 +135,20 @@ macro_rules! build_debug_test {
 /// Instead, the build_test and build_debug_test wrappers should be used.
 #[macro_export]
 macro_rules! build_test_by_mode {
-    ($in_debug_mode:expr, $source:expr) => {{
+    ($in_tracing_mode:expr, $source:expr) => {{
         let name = format!("test{}", line!());
-        $crate::Test::new(&name, $source, $in_debug_mode)
+        let source = $source;
+        $crate::Test::new(&name, &source, $in_tracing_mode)
     }};
-    ($in_debug_mode:expr, $source:expr, $stack_inputs:expr) => {{
+    ($in_tracing_mode:expr, $source:expr, $stack_inputs:expr) => {{
         use $crate::SourceManager;
 
         let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
-        let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
+        let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let advice_inputs = $crate::AdviceInputs::default();
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
         $crate::Test {
             source_manager,
@@ -159,17 +156,17 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
-    ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
+    ($in_tracing_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
         use $crate::SourceManager;
 
         let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
-        let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
+        let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let stack_values: ::alloc::vec::Vec<u64> = $advice_stack.to_vec();
         let store = $crate::crypto::MerkleStore::new();
         let advice_inputs = $crate::AdviceInputs::default()
@@ -178,11 +175,7 @@ macro_rules! build_test_by_mode {
             .with_merkle_store(store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
         $crate::Test {
             source_manager,
@@ -190,14 +183,14 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
-        $in_debug_mode:expr,
+        $in_tracing_mode:expr,
         $source:expr,
         $stack_inputs:expr,
         $advice_stack:expr,
@@ -206,7 +199,7 @@ macro_rules! build_test_by_mode {
         use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
-        let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
+        let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let stack_values: Vec<u64> = $advice_stack.to_vec();
         let advice_inputs = $crate::AdviceInputs::default()
             .with_stack_values(stack_values)
@@ -214,11 +207,7 @@ macro_rules! build_test_by_mode {
             .with_merkle_store($advice_merkle_store);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
         $crate::Test {
             source_manager,
@@ -226,14 +215,14 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
-        $in_debug_mode:expr,
+        $in_tracing_mode:expr,
         $source:expr,
         $stack_inputs:expr,
         $advice_stack:expr,
@@ -243,7 +232,7 @@ macro_rules! build_test_by_mode {
         use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
-        let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
+        let stack_inputs = $crate::stack_inputs_from_ints(stack_inputs);
         let stack_values: Vec<u64> = $advice_stack.to_vec();
         let advice_inputs = $crate::AdviceInputs::default()
             .with_stack_values(stack_values)
@@ -252,11 +241,7 @@ macro_rules! build_test_by_mode {
             .with_map($advice_map);
         let name = format!("test{}", line!());
         let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
-        let source = source_manager.load(
-            $crate::SourceLanguage::Masm,
-            name.into(),
-            ::alloc::string::String::from($source),
-        );
+        let source = source_manager.load($crate::SourceLanguage::Masm, name.into(), $source.into());
 
         $crate::Test {
             source_manager,
@@ -264,7 +249,7 @@ macro_rules! build_test_by_mode {
             kernel_source: None,
             stack_inputs,
             advice_inputs,
-            in_debug_mode: $in_debug_mode,
+            in_tracing_mode: $in_tracing_mode,
             libraries: ::alloc::vec::Vec::default(),
             handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),

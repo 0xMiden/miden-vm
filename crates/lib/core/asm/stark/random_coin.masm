@@ -6,8 +6,16 @@
 #!
 #! Sampling uses an output_len counter that tracks how many rate elements remain. Each
 #! permutation sets output_len=8; each sample_felt decrements it by 1 and reads
-#! rate[output_len - 1]. Absorption (reseed_direct, reseed_with_felt, etc.) writes directly
-#! to rate memory and permutes, bypassing any input buffer.
+#! rate[output_len - 1].
+#!
+#! Two absorption paths are provided:
+#!   - `observe_felt`/`flush_buffer`: a faithful buffered duplex matching p3's `DuplexChallenger`
+#!     (append to `rate[input_len]`, permute only once the rate fills, flush a partial buffer
+#!     lazily). Used for the public inputs, instance shape, and main-trace commitment, whose
+#!     element stream is not rate-aligned.
+#!   - `reseed_direct`/`reseed_with_felt`/etc.: rate-aligned absorptions that write directly to
+#!     rate memory and permute immediately. Valid only when the input buffer is empty (the stream
+#!     is known to start and end on a rate boundary).
 
 use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
@@ -89,6 +97,19 @@ pub proc store_random_coin_state
     exec.set_capacity
 end
 
+#! Add the absorbed-length tag to the first capacity element (sponge state element 8).
+#!
+#! Mirrors p3's `DuplexChallenger::duplexing`, which makes every absorb prefix-free by
+#! binding the number of absorbed elements into the capacity before permuting. Squeeze-only
+#! permutations (empty input buffer) carry no tag.
+#!
+#! Input:  [n, ...]
+#! Output: [...]
+pub proc add_absorb_length_tag
+    exec.constants::c_ptr mem_load add
+    exec.constants::c_ptr mem_store
+end
+
 #! Sample a single base field element from the transcript.
 #!
 #! SAFETY: Requires output_len > 0. All call sites in the recursive verifier guarantee this
@@ -136,6 +157,82 @@ pub proc sample_bits
     drop
 end
 
+#! Absorb a single base field element into the transcript via the buffered duplex.
+#!
+#! Mirrors p3's `DuplexChallenger::observe`: invalidates any buffered rate output
+#! (`output_len = 0`), appends the element at `rate[input_len]`, and permutes only once the buffer
+#! fills (`input_len == 8`). A partial buffer is duplexed lazily by `flush_buffer`, which callers
+#! must run before sampling; until then `sample_felt`'s `output_len > 0` assertion fails loudly
+#! rather than returning a stale rate element.
+#!
+#! Input:  [felt, ...]
+#! Output: [...]
+pub proc observe_felt
+    # Invalidate any buffered rate output (p3's `output_buffer.clear()`): a partial buffer left here
+    # leaves output_len = 0, so an unflushed `sample_felt` trips its assertion instead of reading a
+    # stale rate. The full-buffer branch below restores output_len = 8 after permuting.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+    # Load input_len once and derive the write address rate[input_len] (rate elements 0..7 are
+    # addressed as r1_ptr + index), keeping input_len on the stack for the increment below.
+    exec.constants::random_coin_input_len_ptr mem_load
+    # => [input_len, felt, ...]
+    dup exec.constants::r1_ptr add
+    # => [rate_addr, input_len, felt, ...]
+    movup.2 swap mem_store
+    # => [input_len, ...]
+
+    # input_len += 1; permute and reset the buffer once the rate is full.
+    add.1
+    dup eq.8
+    if.true
+        drop
+        push.8 exec.add_absorb_length_tag
+        exec.load_random_coin_state
+        exec.poseidon2::permute
+        exec.store_random_coin_state
+        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.8 exec.constants::random_coin_output_len_ptr mem_store
+    else
+        exec.constants::random_coin_input_len_ptr mem_store
+    end
+end
+
+#! Flush a partial input buffer, matching the `DuplexChallenger` duplexing performed at sample time.
+#!
+#! When the input buffer is non-empty, permute the sponge: the buffered prefix already occupies
+#! `rate[0..input_len]`; `rate[input_len..8]` is zeroed and the absorbed length is bound into
+#! the capacity, exactly as p3's prefix-free absorb does before permuting. Exposes a fresh
+#! output (output_len=8) and empties the buffer. No-op when the buffer is already empty.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc flush_buffer
+    exec.constants::random_coin_input_len_ptr mem_load
+    dup push.0 neq
+    if.true
+        # Zero the rate slots the buffered inputs did not overwrite: rate[input_len..8].
+        dup
+        dup push.8 neq
+        while.true
+            push.0 dup.1 exec.constants::r1_ptr add mem_store
+            add.1
+            dup push.8 neq
+        end
+        drop
+        # => [input_len, ...]
+
+        exec.add_absorb_length_tag
+        exec.load_random_coin_state
+        exec.poseidon2::permute
+        exec.store_random_coin_state
+        push.0 exec.constants::random_coin_input_len_ptr mem_store
+        push.8 exec.constants::random_coin_output_len_ptr mem_store
+    else
+        drop
+    end
+end
+
 #! Initializes the random coin state with domain-separated Fiat-Shamir (DSFS) seeding,
 #! then derives trace domain parameters.
 #!
@@ -154,12 +251,19 @@ end
 #! Precondition: num_queries, query_pow_bits, deep_pow_bits, and folding_pow_bits must
 #! already be stored in memory before calling this procedure.
 #!
-#! Input: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+#! Input: [log(core_trace_length), log(chiplets_trace_length), rd0, rd1, rd2, rd3, ...]
 #! Output: [...]
 pub proc init_seed
 
-    # Save log(trace_length) in memory for later use.
-    dup exec.constants::set_trace_length_log
+    # Save per-AIR log heights, then derive and store the max (used everywhere
+    # downstream for lifted-domain math, LDE size, and trace generator).
+    dup exec.constants::set_core_trace_length_log
+    dup.1 exec.constants::set_chiplets_trace_length_log
+    dup dup.2
+    # => [log_chip, log_core, log_core, log_chip, rd0, ..., ...]
+    u32max
+    exec.constants::set_trace_length_log
+    # => [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # Initialize the zero word and buffers to zero.
     padw
@@ -167,7 +271,7 @@ pub proc init_seed
     dropw
     push.0 exec.constants::random_coin_input_len_ptr mem_store
     push.0 exec.constants::random_coin_output_len_ptr mem_store
-    #=> [log(tl), rd0, rd1, rd2, rd3, ...]
+    #=> [log_core, log_chip, rd0, rd1, rd2, rd3, ...]
 
     # ---- RELATION_DIGEST + PCS_PARAMS ----
 
@@ -176,9 +280,9 @@ pub proc init_seed
     #   R2 = [log_blowup, log_final_degree, fold_arity, 0]
     #   C  = [rd0, rd1, rd2, rd3]   (RELATION_DIGEST)
     #
-    # Drop log(tl) from the stack (saved in memory, not part of Phase 1 rate).
+    # Drop both per-AIR log heights from the stack (saved in memory above).
 
-    drop
+    drop drop
     #=> [rd0, rd1, rd2, rd3, ...]
 
     # Build R1 from security parameters stored in memory.
@@ -200,6 +304,9 @@ pub proc init_seed
     swapw
     #=> [nq, query_pow, deep_pow, folding_pow, log_blowup, log_final_deg, fold_arity, 0, rd0, rd1, rd2, rd3, ...]
     #    ^-- R1                                ^-- R2                                     ^-- C
+
+    # Bind the absorbed length (8 PCS parameters) into the first capacity element.
+    movup.8 add.8 movdn.8
 
     # Permute and store the transcript state after absorbing protocol parameters.
     exec.poseidon2::permute
@@ -234,6 +341,25 @@ pub proc init_seed
     swap
     exec.constants::get_blowup_factor_log
     add
+    #=> [log(lde_size), trace_length, ...]
+
+    ## Compute the LDE coset offset = g^(2^(TWO_ADICITY - log_lde)), with g = 7 the field
+    ## generator and TWO_ADICITY = 32, by squaring g `32 - log_lde` times. Used (with its
+    ## inverse) for the DEEP/FRI query x-coordinates.
+    dup push.32 swap sub
+    #=> [32 - log_lde, log(lde_size), trace_length, ...]
+    push.7 swap
+    #=> [count, offset = 7, log(lde_size), trace_length, ...]
+    dup push.0 neq
+    while.true
+        swap dup mul swap
+        sub.1
+        dup push.0 neq
+    end
+    drop
+    #=> [offset, log(lde_size), trace_length, ...]
+    dup exec.constants::set_domain_offset
+    inv exec.constants::set_domain_offset_inv
     #=> [log(lde_size), trace_length, ...]
 
     ## Compute size of LDE domain
@@ -273,55 +399,44 @@ pub proc init_seed
     drop drop
 end
 
-#! Observe the single AIR instance shape and discard the instance challenge.
+#! Observe the multi-AIR instance shape into the Fiat-Shamir transcript via the buffered duplex.
 #!
-#! miden-lifted-stark 0.24 observes each log(trace_length) after public inputs and then samples
-#! one extension-field instance challenge before absorbing the main trace commitment. The VM
-#! recursive verifier only supports one AIR instance, so this helper observes the stored
-#! log(trace_length), performs the partial-rate duplexing, and marks two base-field outputs as
-#! consumed without materializing the unused extension element.
+#! Mirrors the framework's `observe_shape`, which observes the instance count followed by the
+#! per-AIR log trace heights in instance order (Core, then Chiplets):
+#!   [ 2, log(core trace height), log(chiplets trace height) ].
 #!
-#! SAFETY:
-#!   1. input_len=0 (asserted).
-#!   2. The current random coin state has just absorbed the public inputs.
-#!   3. On exit: input_len=0, output_len=6.
+#! These continue the same buffered duplex begun by `process_public_inputs`, so no permutation is
+#! forced here; `reseed_main_after_shape` appends the main-trace commitment and flushes.
 #!
 #! Input: [...]
 #! Output: [...]
-pub proc observe_trace_height_and_discard_instance_challenge
-    exec.constants::random_coin_input_len_ptr mem_load
-    # => [input_len, ...]
-    assertz.err="observe_trace_height_and_discard_instance_challenge: input buffer must be empty"
-    # => [...]
+pub proc observe_instance_shape
+    push.2 exec.observe_felt
+    exec.constants::get_core_trace_length_log exec.observe_felt
+    exec.constants::get_chiplets_trace_length_log exec.observe_felt
+end
 
-    # observing clears the output buffer.
-    push.0 exec.constants::random_coin_output_len_ptr mem_store
-    # => [...]
-
-    # observe log(trace_length) into rate[0], leaving rate[1..7] and capacity unchanged.
-    exec.constants::get_trace_length_log
-    # => [log(trace_length), ...]
-    exec.constants::r1_ptr mem_store
-    # => [...]
-
-    exec.load_random_coin_state
-    # => [R1, R2, C, ...]
-    exec.poseidon2::permute
-    # => [R1', R2', C', ...]
-    exec.store_random_coin_state
-    # => [...]
-
-    push.0 exec.constants::random_coin_input_len_ptr mem_store
-    # => [...]
-    push.6 exec.constants::random_coin_output_len_ptr mem_store
-    # => [...]
+#! Observe the main-trace commitment and flush the buffered duplex.
+#!
+#! Appends the commitment word `[c0, c1, c2, c3]` to the buffered transcript stream (continuing
+#! from the instance shape) and then flushes any partial buffer, matching the DuplexChallenger's
+#! duplex at the first post-commitment sample (auxiliary randomness). On exit: output_len=8.
+#!
+#! Input: [c0, c1, c2, c3, ...]
+#! Output: [...]
+pub proc reseed_main_after_shape
+    exec.observe_felt
+    exec.observe_felt
+    exec.observe_felt
+    exec.observe_felt
+    exec.flush_buffer
 end
 
 #! Reseed with a commitment word and absorb an additional single felt, then permute.
 #!
-#! Writes the commitment word to rate[0..3] and the felt to rate[4], leaving rate[5..7]
-#! unchanged from the previous permutation, then permutes. Used in the FRI layer loop
-#! where each round absorbs a layer commitment plus a PoW nonce felt.
+#! Writes the commitment word to rate[0..3] and the felt to rate[4], zeroes rate[5..7],
+#! binds the absorbed length (5) into the capacity, then permutes. Used in the FRI layer
+#! loop where each round absorbs a layer commitment plus a PoW nonce felt.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -338,6 +453,13 @@ pub proc reseed_with_felt
     # element of R2 and need the rest from memory.
     exec.constants::r2_ptr mem_store
     # => [w0, w1, w2, w3, ...]
+
+    # Zero the unabsorbed rate slots rate[5..7] and bind the absorbed length (5)
+    # into the capacity.
+    push.0 exec.constants::r2_ptr add.1 mem_store
+    push.0 exec.constants::r2_ptr add.2 mem_store
+    push.0 exec.constants::r2_ptr add.3 mem_store
+    push.5 exec.add_absorb_length_tag
 
     # Build sponge state [R1, R2, C] on the stack directly.
     # R1 = commitment word (already on the stack).
@@ -357,9 +479,9 @@ end
 
 #! Reseed by writing a word directly to rate[0..3] and permuting.
 #!
-#! Overwrites rate[0..3] with the given word, leaves rate[4..7] unchanged from the
-#! previous permutation, then permutes. This is the standard overwrite-and-permute
-#! absorption pattern for a single word.
+#! Overwrites rate[0..3] with the given word, zeroes rate[4..7], binds the absorbed
+#! length (4) into the capacity, then permutes. This is the standard absorb-and-permute
+#! pattern for a single word.
 #!
 #! SAFETY:
 #!   1. input_len=0 (asserted).
@@ -376,7 +498,12 @@ pub proc reseed_direct
     # Write the word to rate[0..3] and consume it from the stack.
     exec.set_rate_1
 
-    # Permute (rate[4..7] and capacity from memory are unchanged).
+    # Zero the unabsorbed rate slots rate[4..7] and bind the absorbed length (4)
+    # into the capacity.
+    padw exec.set_rate_2
+    push.4 exec.add_absorb_length_tag
+
+    # Permute.
     exec.load_random_coin_state
     exec.poseidon2::permute
     exec.store_random_coin_state
@@ -491,10 +618,35 @@ pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     mem_storew_le dropw
 
-    # Sample beta (multi-AIR accumulation challenge) to keep transcript in sync.
-    # For a single AIR, beta is unused but must be sampled from the random coin.
+    # Sample β (multi-AIR accumulation challenge), then write Word 5 = β-coefficient
+    # word into the stark-vars region as [mab_core_0, mab_core_1, mab_chip_0, mab_chip_1]:
+    #   - if `core_height ≤ chiplets_height` (proof_order [Core, Chiplets]):
+    #         mab_core = β, mab_chip = 1   →  yields β·core_acc + 1·chip_acc
+    #   - else (proof_order [Chiplets, Core]):
+    #         mab_core = 1, mab_chip = β   →  yields 1·core_acc + β·chip_acc
+    # Both forms match upstream's Horner accumulation `acc[j] = acc[j-1]·β + folded[j]`.
     exec.sample_ext
-    drop drop
+    # => [β_0, β_1, ...]
+    exec.constants::get_core_trace_length_log
+    exec.constants::get_chiplets_trace_length_log
+    # => [log_chip, log_core, β_0, β_1, ...]
+    # u32lte returns 1 iff log_chip >= log_core, equivalent to log_core <= log_chip,
+    # which means Core is at proof_order position 0 (with the caller_idx=0 tiebreak).
+    u32lte
+    # => [core_first?, β_0, β_1, ...]
+    if.true
+        # core_first: word [mab_core=β, mab_chip=1] = [β_0, β_1, 1, 0]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+        movup.3 movup.3
+        # => [β_0, β_1, 1, 0, ...]
+    else
+        # chip_first: word [mab_core=1, mab_chip=β] = [1, 0, β_0, β_1]
+        push.0.1
+        # => [1, 0, β_0, β_1, ...]
+    end
+    exec.constants::auxiliary_ace_inputs_ptr add.20
+    mem_storew_le dropw
 end
 
 #! Draw deep composition polynomial random coefficient and save it at `deep_rand_coef_ptr`.
@@ -693,8 +845,9 @@ end
 
 #! Verify a proof-of-work witness given pow_bits on the stack.
 #!
-#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], permutes,
-#! and checks that the low pow_bits of the output are zero.
+#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], zeroes
+#! rate[1..7], binds the absorbed length (1) into the capacity, permutes, and checks
+#! that the low pow_bits of the output are zero.
 #! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
 #!
 #! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
@@ -714,6 +867,15 @@ proc check_pow
         exec.constants::random_coin_input_len_ptr mem_load
         assertz.err="check_pow: input buffer must be empty"
         exec.constants::r1_ptr mem_store
+
+        # Zero the unabsorbed rate slots rate[1..7] and bind the absorbed length (1)
+        # into the capacity.
+        push.0 exec.constants::r1_ptr add.1 mem_store
+        push.0 exec.constants::r1_ptr add.2 mem_store
+        push.0 exec.constants::r1_ptr add.3 mem_store
+        padw exec.set_rate_2
+        push.1 exec.add_absorb_length_tag
+
         exec.load_random_coin_state
         exec.poseidon2::permute
         exec.store_random_coin_state

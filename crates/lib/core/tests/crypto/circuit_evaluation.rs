@@ -6,13 +6,6 @@ use miden_core::{
 };
 use miden_utils_testing::rand::rand_quad_felt;
 
-/// Build the batched ACE circuit for the Miden VM ProcessorAir.
-fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
-    let air = miden_air::ProcessorAir;
-    let batch_config = miden_air::ace::logup_boundary_config();
-    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
-}
-
 #[test]
 fn circuit_evaluation_prove_verify() {
     let num_repetitions = 20;
@@ -92,22 +85,25 @@ fn circuit_evaluation_prove_verify() {
 }
 
 #[test]
-fn processor_air_eval_circuit_masm() {
+fn multi_air_eval_circuit_masm() {
+    // Exercises the combined CoreAir + ChipletsAir multi-AIR circuit. If this test
+    // passes, the codegen + MASM ACE chip are consistent for the multi-AIR shape; any
+    // failure in the recursive verifier (`test_poseidon2_prove_verify`) is then in the
+    // input plumbing (memory layout, advice ordering, transcript binding), not in the
+    // circuit.
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        is_multi_air: true,
     };
-    let circuit = build_batched_circuit(config);
+    let circuit = miden_air::ace::build_multi_air_ace_circuit::<QuadFelt>(config).unwrap();
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);
-    // The ACE output is linear in each quotient coordinate. We can zero the circuit by
-    // nudging a single quotient coordinate by delta = -root / slope.
     adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
     assert_eq!(circuit.eval(&inputs).expect("circuit eval"), QuadFelt::ZERO);
 
-    // Encode the circuit.
     let encoded = circuit.to_ace().unwrap();
     let mut memory_felts = Vec::with_capacity(inputs.len() * 2 + encoded.size_in_felt());
     for value in &inputs {
@@ -123,7 +119,6 @@ fn processor_air_eval_circuit_masm() {
     advice_builder.push_for_adv_pipe(&memory_felts);
     let adv_stack = advice_builder.build_vec_u64();
 
-    // Place the circuit in memory at a fixed address.
     let pointer = 1 << 16;
     let num_vars = encoded.num_vars();
     let num_eval = encoded.num_eval_rows();

@@ -132,7 +132,7 @@ pub fn render(snippet: &Snippet, iters: u64) -> String {
     out
 }
 
-/// Wrap a snippet fragment into a complete `begin ... end` program.
+/// Wrap a snippet fragment into a complete executable program.
 pub fn wrap_program(body: &str) -> String {
     format!("begin\n{body}end\n")
 }
@@ -194,7 +194,7 @@ mod tests {
         for snippet in SNIPPETS {
             let source = wrap_program(&render(snippet, 4));
             Assembler::default()
-                .assemble_program(&source)
+                .assemble_program("program", &source)
                 .unwrap_or_else(|e| panic!("snippet {:?} failed to assemble: {e}", snippet.name));
         }
     }

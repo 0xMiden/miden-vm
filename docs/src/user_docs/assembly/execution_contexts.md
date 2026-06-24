@@ -49,6 +49,11 @@ A _kernel_ defines a set of procedures which can be invoked from user contexts t
 
 A kernel can be defined similarly to a regular [library module](./code_organization.md#library-modules) - i.e., it can have internal and exported procedures.
 
+There are two unique properties that apply to kernel libraries:
+
+- Kernel syscalls correspond to the set of procedures exported from the root module of the kernel library, i.e. the `$kernel` module. Submodules of the kernel are pure library code, and may be invoked with `exec` just like any other library code.
+- Kernel submodules, being pure library code, are unique in that they may be used both in the implementation of the kernel itself, and to provide support functions for userspace. This is visible in the fact that kernel code can use the `caller` instruction, while userspace code cannot. However, due to the fact that procedures defined in kernel submodules can be made accessible to userspace, kernel authors should take care to ensure that use of `caller` only occurs in procedures _not_ exported to userspace. The set of submodules visible to userspace are those given `pub` visibility in the root kernel module (and any descendants which are also transitively `pub`).
+
 ### Memory layout
 
 As mentioned earlier, procedures executed within a given context can access memory only of that context. This is true for both memory reads and memory writes.

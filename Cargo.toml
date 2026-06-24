@@ -5,12 +5,14 @@ members = [
     "core",
     "crates/ace-codegen",
     "crates/assembly",
+    "crates/assembly-syntax-cst",
     "crates/assembly-syntax",
     "crates/debug-types",
     "crates/lib/core",
     "crates/mast-package",
     "crates/package-registry",
     "crates/package-registry-local",
+    "crates/miden-format",
     "crates/project",
     "crates/test-serde-macros",
     "crates/test-utils",
@@ -33,8 +35,8 @@ authors = ["Miden contributors"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
-rust-version = "1.90"
-version = "0.23.4"
+rust-version = "1.96"
+version = "0.24.0"
 
 [profile.optimized]
 inherits = "release"
@@ -48,36 +50,43 @@ debug = true
 debug-assertions = true
 overflow-checks = true
 
+# The fast processor's generated test code is large enough that optimizing it dominates CI build
+# time. Keeping this crate unoptimized gives most of the build-time win without slowing the rest
+# of the test suite enough to matter in practice.
+[profile.test-dev.package.miden-processor]
+opt-level = 0
+
 [workspace.dependencies]
 # Workspace crates
-miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.23.0", default-features = false }
-miden-air               = { path = "./air", version = "0.23.0", default-features = false }
-miden-assembly          = { path = "./crates/assembly", version = "0.23.0", default-features = false }
-miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.23.0", default-features = false }
-miden-core              = { path = "./core", version = "0.23.0", default-features = false }
-miden-debug-types       = { path = "./crates/debug-types", version = "0.23.0", default-features = false }
-miden-mast-package      = { path = "./crates/mast-package", version = "0.23.0", default-features = false }
-miden-package-registry  = { path = "./crates/package-registry", version = "0.23.0", default-features = false }
-miden-processor         = { path = "./processor", version = "0.23.0", default-features = false }
+miden-ace-codegen       = { path = "./crates/ace-codegen", version = "0.24", default-features = false }
+miden-air               = { path = "./air", version = "0.24", default-features = false }
+miden-assembly          = { path = "./crates/assembly", version = "0.24", default-features = false }
+miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.24", default-features = false }
+miden-assembly-syntax-cst = { path = "./crates/assembly-syntax-cst", version = "0.24.0", default-features = false }
+miden-core              = { path = "./core", version = "0.24", default-features = false }
+miden-debug-types       = { path = "./crates/debug-types", version = "0.24", default-features = false }
+miden-mast-package      = { path = "./crates/mast-package", version = "0.24", default-features = false }
+miden-package-registry  = { path = "./crates/package-registry", version = "0.24", default-features = false }
+miden-processor         = { path = "./processor", version = "0.24", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
-miden-project           = { path = "./crates/project", version = "0.23.0", default-features = false }
-miden-prover            = { path = "./prover", version = "0.23.0", default-features = false }
-miden-core-lib          = { path = "./crates/lib/core", version = "0.23.0", default-features = false }
-miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.23.0", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.23.0", default-features = false }
-miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.23.0", default-features = false }
-miden-utils-sync        = { path = "./crates/utils-sync", version = "0.23.0", default-features = false }
+miden-project           = { path = "./crates/project", version = "0.24", default-features = false }
+miden-prover            = { path = "./prover", version = "0.24", default-features = false }
+miden-core-lib          = { path = "./crates/lib/core", version = "0.24", default-features = false }
+miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.24", default-features = false }
+miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.24", default-features = false }
+miden-utils-indexing    = { path = "./crates/utils-indexing", version = "0.24", default-features = false }
+miden-utils-sync        = { path = "./crates/utils-sync", version = "0.24", default-features = false }
 miden-utils-testing     = { path = "./crates/test-utils", package = "miden-test-utils" }
-miden-verifier          = { path = "./verifier", version = "0.23.0", default-features = false }
+miden-verifier          = { path = "./verifier", version = "0.24", default-features = false }
 
 # Miden crates
-miden-crypto     = { version = "0.25", default-features = false }
+miden-crypto     = { version = "0.27", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-miden-lifted-stark = { version = "0.25", default-features = false }
-midenc-hir-type  = { version = "0.6.1", default-features = false }
+midenc-hir-type  = { version = "0.8", default-features = false }
 
 # Serialization
-bincode = "1.3"
+serde-wincode = { version = "0.1", default-features = false, features = ["alloc"] }
+wincode       = { version = "0.4.2", default-features = false, features = ["alloc"] }
 
 # Third-party crates
 clap            = { version = "4.5", features = ["derive"] }
@@ -99,15 +108,18 @@ tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
+trybuild        = { version = "1.0" }
+windows-sys     = { version = "0.61.2" }
 
 loom = "0.7"
 miette = { package = "miden-miette", version = "8.0", default-features = false }
 pretty_assertions = { version = "1.4", default-features = false }
 proc-macro2 = "1.0"
 quote = "1.0"
-rand_chacha = { version = "0.9", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
 rstest = "0.26"
 toml = { version = "1.0", default-features = false }
+walkdir = "2.5"
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

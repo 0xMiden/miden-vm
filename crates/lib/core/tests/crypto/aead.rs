@@ -1,5 +1,16 @@
+use std::sync::Arc;
+
 use miden_air::Felt;
-use miden_crypto::aead::aead_poseidon2::{Nonce, SecretKey};
+use miden_core_lib::handlers::aead_decrypt::AEAD_DECRYPT_EVENT_NAME;
+use miden_crypto::aead::{
+    DataType,
+    aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
+};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
@@ -286,6 +297,97 @@ fn test_decrypt_with_known_values() {
 }
 
 #[test]
+fn test_decrypt_rejects_adversarial_plaintext_for_unrelated_ciphertext() {
+    let seed = [5_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+
+    let plaintext = vec![
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+    ];
+
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("encryption failed");
+
+    let expected_tag = encrypted.auth_tag().to_elements();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let valid_ciphertext = encrypted.ciphertext();
+
+    let mut forged_ciphertext = valid_ciphertext.to_vec();
+    forged_ciphertext[0] += Felt::new_unchecked(1);
+    assert_ne!(forged_ciphertext, valid_ciphertext);
+
+    let forged_encrypted_data = EncryptedData::from_parts(
+        DataType::Elements,
+        forged_ciphertext.clone(),
+        AuthTag::new(expected_tag),
+        encrypted.nonce().clone(),
+    );
+    assert!(
+        key.decrypt_elements(&forged_encrypted_data).is_err(),
+        "reference AEAD must reject the forged ciphertext/tag pair"
+    );
+
+    let source = format!(
+        "
+    use miden::core::crypto::aead
+
+    begin
+        push.{forged_ciphertext_0:?} push.1000 mem_storew_le dropw
+        push.{forged_ciphertext_1:?} push.1004 mem_storew_le dropw
+        push.{forged_ciphertext_2:?} push.1008 mem_storew_le dropw
+        push.{forged_ciphertext_3:?} push.1012 mem_storew_le dropw
+        push.{expected_tag:?} push.1016 mem_storew_le dropw
+
+        push.1
+        push.2000
+        push.1000
+        push.{nonce_elements:?}
+        push.{key_elements:?}
+        exec.aead::decrypt
+    end
+    ",
+        forged_ciphertext_0 = &forged_ciphertext[0..4],
+        forged_ciphertext_1 = &forged_ciphertext[4..8],
+        forged_ciphertext_2 = &forged_ciphertext[8..12],
+        forged_ciphertext_3 = &forged_ciphertext[12..16],
+    );
+
+    let mut test = build_test!(source.as_str(), &[]);
+    let adversarial_plaintext = plaintext;
+    let malicious_handler: Arc<dyn EventHandler> =
+        Arc::new(move |_process: &ProcessorState| -> Result<Vec<AdviceMutation>, EventError> {
+            Ok(vec![AdviceMutation::extend_stack(adversarial_plaintext.clone())])
+        });
+
+    let decrypt_event_id = AEAD_DECRYPT_EVENT_NAME.to_event_id();
+    let mut replaced_default_handler = false;
+    for (event, handler) in &mut test.handlers {
+        if event.to_event_id() == decrypt_event_id {
+            *handler = malicious_handler.clone();
+            replaced_default_handler = true;
+        }
+    }
+    assert!(
+        replaced_default_handler,
+        "AEAD decrypt handler should be registered by build_test"
+    );
+
+    expect_assert_error_code_from_msg!(test, "AEAD ciphertext mismatch");
+}
+
+#[test]
 fn test_decrypt_with_wrong_key() {
     let seed = [4_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -373,7 +475,7 @@ fn test_encrypt_fails_on_overlap() {
     "#;
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }
 
 #[test]
@@ -450,5 +552,5 @@ fn test_decrypt_fails_on_overlap() {
     "#;
 
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test, contains "overlap");
+    expect_assert_error_code_from_msg!(test, "source and destination ranges must not overlap");
 }

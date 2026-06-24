@@ -5,19 +5,29 @@ sidebar_position: 11
 
 # Debugging
 
-To support basic debugging capabilities, Miden assembly provides a `debug` instruction. This instruction prints out the state of the VM at the time when the `debug` instruction is executed. The instruction can be parameterized as follows:
+Miden assembly provides event-based debugging procedures through the `miden::core::debug` module. These procedures emit well-known events which the host handles by printing the requested piece of VM state (operand stack, memory, advice stack, or advice map).
 
-- `debug.stack` prints out the entire contents of the stack.
-- `debug.stack.<n>` prints out the top $n$ items of the stack. When $n=0$, the entire advice stack is printed.
-- `debug.mem` prints out the entire contents of RAM.
-- `debug.mem.<n>` prints out contents of memory at address $n$.
-- `debug.mem.<n>.<m>` prints out the contents of memory starting at address $n$ and ending at address $m$ (both inclusive). $m$ must be greater or equal to $n$.
-- `debug.local` prints out the whole local memory of the currently executing procedure.
-- `debug.local.<n>` prints out contents of the local memory at index $n$ for the currently executing procedure. $n$ must be greater or equal to $0$ and smaller than $65536$.
-- `debug.local.<n>.<m>` prints out contents of the local memory starting at index $n$ and ending at index $m$ (both inclusive). $m$ must be greater or equal to $n$. $n$ and $m$ must be greater or equal to $0$ and smaller than $65536$.
-- `debug.adv_stack` prints out the entire contents of the advice stack.
-- `debug.adv_stack.<n>` prints out the top $n$ items of the advice stack. When $n=0$, the entire advice stack is printed.
+The `miden::core::debug` module provides the following procedures:
 
-Debug instructions do not affect the VM state and do not change the program hash.
+- `print_stack` prints the entire operand stack (3 cycles).
+- `print_mem` prints memory in the range `[start, end)` (5 cycles). Consumes `start` and `end` from the stack.
+- `print_mem_all` prints the full memory of the current context (3 cycles).
+- `print_adv_stack` prints the advice stack in the range `[start, end)` (5 cycles). Consumes `start` and `end` from the stack.
+- `print_adv_stack_all` prints the full advice stack (7 cycles).
+- `print_adv_map_all` prints the full advice map (3 cycles).
+- `print_adv_map_item` looks up a WORD key in the advice map and prints the associated list of field elements (7 cycles). Consumes the key from the stack.
 
-To make use of the `debug` instruction, programs must be compiled with an assembler instantiated in the debug mode. Otherwise, the assembler will simply ignore the `debug` instructions.
+These procedures emit ordinary events and print whenever invoked, regardless of whether the program was assembled in debug mode. Because they are regular procedure calls, adding them changes the program being executed. Only stack-neutral procedures preserve the operand stack; procedures that consume stack inputs change VM state by removing those inputs. Remove these calls from production programs.
+
+Default core handlers print stack and memory state. Advice stack and advice map printers require hosts to register `advice_debug_handlers()`, because they can reveal witness data.
+
+To use these procedures, import the `miden::core::debug` module and call the appropriate procedure:
+
+```masm
+use miden::core::debug
+
+begin
+    push.1.2.3
+    exec.debug::print_stack
+end
+```

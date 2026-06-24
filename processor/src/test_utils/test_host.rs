@@ -1,18 +1,13 @@
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_core::{Felt, operations::DebugOptions};
+use miden_core::Felt;
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
 use crate::{
-    BaseHost, DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState,
-    SyncHost, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, LoadedMastForest, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
+    Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -42,58 +37,42 @@ impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     }
 }
 
-/// A debug handler that collects and counts trace events from decorators.
-#[derive(Default, Debug, Clone)]
-pub struct TraceCollector {
-    /// Counts of each trace ID that has been emitted
-    trace_counts: BTreeMap<u32, u32>,
-    /// Execution order of trace events with their clock cycles
-    execution_order: Vec<(u32, u64)>,
-}
+impl ProcessorStateSnapshot {
+    /// Captures the user-visible state at an `emit` checkpoint.
+    ///
+    /// The checkpoint pattern used by tests is `push.<event> emit drop`, so the host observes the
+    /// event ID at the top of the stack. The checkpoint snapshot skips that synthetic stack item to
+    /// match the state after the trailing `drop`, and to preserve the old trace-decorator test
+    /// shape.
+    fn from_emit_checkpoint(state: &ProcessorState) -> Self {
+        let mut stack_state = state.get_stack_state();
+        if !stack_state.is_empty() {
+            stack_state.remove(0);
+        }
 
-impl TraceCollector {
-    /// Creates a new empty trace collector.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Gets the count of executions for a specific trace ID.
-    pub fn get_trace_count(&self, trace_id: u32) -> u32 {
-        self.trace_counts.get(&trace_id).copied().unwrap_or(0)
-    }
-
-    /// Gets the execution order as a reference.
-    pub fn get_execution_order(&self) -> &[(u32, u64)] {
-        &self.execution_order
-    }
-}
-
-impl DebugHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        // Count the trace event
-        *self.trace_counts.entry(trace_id).or_insert(0) += 1;
-
-        // Record the execution order with clock cycle
-        self.execution_order.push((trace_id, process.clock().into()));
-
-        Ok(())
+        ProcessorStateSnapshot {
+            clk: state.clock().into(),
+            ctx: state.ctx().into(),
+            stack_state,
+            stack_words: [
+                state.get_stack_word(1),
+                state.get_stack_word(5),
+                state.get_stack_word(9),
+                state.get_stack_word(13),
+            ],
+            mem_state: state.get_mem_state(state.ctx()),
+        }
     }
 }
 
-/// A unified testing host that combines trace collection, event handling,
-/// debug handling, and process state consistency checking.
+/// A unified testing host that combines event handling, debug handling, and external node
+/// resolution.
 #[derive(Debug, Clone)]
 pub struct TestHost<S: SourceManager = DefaultSourceManager> {
-    /// Trace collection functionality (counts and execution order)
-    trace_collector: TraceCollector,
-
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
 
-    /// List of debug command strings that have been received
-    pub debug_handler: Vec<String>,
-
-    /// Process state snapshots for consistency checking
+    /// Process state snapshots captured at emitted test checkpoints.
     snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
@@ -107,9 +86,7 @@ impl TestHost {
     /// Creates a new TestHost with minimal functionality for basic testing.
     pub fn new() -> Self {
         Self {
-            trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            debug_handler: Vec::new(),
             snapshots: BTreeMap::new(),
             store: MemMastForestStore::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
@@ -121,26 +98,14 @@ impl TestHost {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest);
         Self {
-            trace_collector: TraceCollector::new(),
             event_handler: Vec::new(),
-            debug_handler: Vec::new(),
             snapshots: BTreeMap::new(),
             store,
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 
-    /// Gets the count of executions for a specific trace ID.
-    pub fn get_trace_count(&self, trace_id: u32) -> u32 {
-        self.trace_collector.get_trace_count(trace_id)
-    }
-
-    /// Gets the execution order as a reference (with clock cycles).
-    pub fn get_execution_order(&self) -> &[(u32, u64)] {
-        self.trace_collector.get_execution_order()
-    }
-
-    /// Gets mutable access to all snapshots.
+    /// Gets the processor state snapshots captured by emitted test checkpoints.
     pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
         &self.snapshots
     }
@@ -164,39 +129,23 @@ where
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
     }
-
-    fn on_debug(
-        &mut self,
-        _process: &ProcessorState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.push(options.to_string());
-        Ok(())
-    }
-
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        // Forward to trace collector for counting and execution order tracking
-        self.trace_collector.on_trace(process, trace_id)?;
-
-        // Also collect process state snapshot for consistency checking
-        let snapshot = ProcessorStateSnapshot::from(process);
-        self.snapshots.entry(trace_id).or_default().push(snapshot);
-
-        Ok(())
-    }
 }
 
 impl<S> SyncHost for TestHost<S>
 where
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<LoadedMastForest> {
         self.store.get(node_digest)
     }
 
     fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
+        self.snapshots
+            .entry(event_id)
+            .or_default()
+            .push(ProcessorStateSnapshot::from_emit_checkpoint(process));
         Ok(Vec::new())
     }
 }

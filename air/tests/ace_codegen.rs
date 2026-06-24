@@ -6,7 +6,7 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{LiftedAir, ProcessorAir};
+use miden_air::{BaseAir, LiftedAir, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
@@ -14,21 +14,19 @@ use miden_crypto::{
 };
 
 #[test]
-fn processor_air_dag_matches_manual_eval() {
-    let air = ProcessorAir;
+fn core_air_dag_matches_manual_eval() {
+    let air = MidenAir::CORE;
     let config = AceConfig {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(
-        &LiftedAir::<Felt, QuadFelt>::periodic_columns(&air),
-        z_k,
-    );
+    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&air.periodic_columns(), z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,
@@ -59,17 +57,19 @@ fn processor_air_dag_matches_manual_eval() {
 }
 
 #[test]
-fn processor_air_dag_rejects_mismatched_layout() {
-    let air = ProcessorAir;
+fn core_air_dag_rejects_mismatched_layout() {
+    let air = MidenAir::CORE;
     let dag_config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
     let layout_config = AceConfig {
         num_quotient_chunks: 1,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        is_multi_air: false,
     };
 
     let dag = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, dag_config).unwrap().dag;
@@ -85,13 +85,13 @@ fn processor_air_dag_rejects_mismatched_layout() {
 }
 
 #[test]
-#[allow(clippy::print_stdout)]
-fn processor_air_chiplet_rows() {
-    let air = ProcessorAir;
+fn chiplets_air_ace_rows() {
+    let air = MidenAir::CHIPLETS;
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        is_multi_air: false,
     };
 
     let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
@@ -100,8 +100,8 @@ fn processor_air_chiplet_rows() {
     let eval_rows = encoded.num_eval_rows();
     let total_rows = read_rows + eval_rows;
 
-    println!(
-        "ACE chiplet rows (ProcessorAir): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
+    eprintln!(
+        "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,
         total_rows,
@@ -117,10 +117,11 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
+        is_multi_air: false,
     };
 
     let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -147,10 +148,11 @@ fn quotient_next_inputs_do_not_affect_eval() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
+        is_multi_air: false,
     };
 
     let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&MidenAir::CORE, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs: Vec<QuadFelt> = fill_inputs(&artifacts.layout);
@@ -182,4 +184,79 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
     let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero(), "quotient_next should not affect ACE eval");
+}
+
+#[test]
+fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let layout = circuit.layout();
+
+    // Combined main width is each per-AIR width aligned to LMCS rate (8 for Poseidon2)
+    // and concatenated: aligned(51) + aligned(22) = 56 + 24 = 80. Combined aux is
+    // aligned(4*2) + aligned(3*2) = 8 + 8 = 16 base coords = 8 EFs.
+    assert_eq!(
+        layout.counts.width, 80,
+        "combined main width must be sum of per-AIR LMCS-aligned widths"
+    );
+    assert_eq!(
+        layout.counts.aux_width, 8,
+        "combined aux_width = aligned(4) + aligned(3) = 8 EFs"
+    );
+    assert_eq!(layout.counts.num_aux_boundary, 2, "one boundary slot per AIR");
+
+    for key in [InputKey::MultiAirBetaCore, InputKey::MultiAirBetaChip] {
+        let idx = layout.index(key).unwrap_or_else(|| panic!("multi-air layout exposes {key:?}"));
+        assert!(idx < layout.total_inputs, "{key:?} slot must be within layout bounds");
+    }
+}
+
+#[test]
+fn multi_air_ace_circuit_emits_consistently() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    // Just check the ACE encoding is well-formed (size_in_felt is rate-aligned).
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let encoded = circuit.to_ace().expect("encoded multi-AIR circuit");
+    assert!(
+        encoded.size_in_felt().is_multiple_of(8),
+        "encoded multi-AIR circuit must be 8-felt aligned for adv_pipe"
+    );
+}
+
+#[test]
+fn multi_air_ace_circuit_evaluates_without_panic() {
+    use miden_air::ace::build_multi_air_ace_circuit;
+
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 1,
+        layout: LayoutKind::Masm,
+        is_multi_air: true,
+    };
+
+    let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
+    let layout = circuit.layout();
+
+    // Fill all input slots with deterministic non-zero values. We don't expect the
+    // circuit to evaluate to zero for arbitrary inputs — only that every slot
+    // referenced by the DAG is in-range (i.e., no `wiring bus` panic), which is the
+    // failure mode that surfaces if the chiplets-side index rewrite was wrong.
+    let inputs: Vec<QuadFelt> = fill_inputs(layout);
+    let _root = circuit.eval(&inputs).expect("multi-AIR circuit eval must not panic");
 }

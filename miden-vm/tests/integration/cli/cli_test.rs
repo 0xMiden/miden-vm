@@ -1,6 +1,11 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use assert_cmd::prelude::*;
+use miden_mast_package::Package;
 use predicates::prelude::*;
 
 fn bin_under_test() -> escargot::CargoRun {
@@ -33,10 +38,18 @@ fn bin_under_test() -> escargot::CargoRun {
         })
 }
 
+fn test_file_path(name: &str) -> PathBuf {
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("miden-vm-cli-{name}-{id}"))
+}
+
 #[test]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
-fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_run() {
     let mut cmd = bin_under_test().command();
 
     cmd.arg("run")
@@ -54,27 +67,65 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
     // However we the X and the Y can change in future versions.
     // There is no other 'steps in' in the output
     output.assert().stdout(predicate::str::contains("VM cycles"));
-
-    Ok(())
 }
 
-use miden_assembly::Library;
+#[test]
+fn run_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-run-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("run").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-run-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
+}
+
+#[test]
+fn prove_rejects_missing_inferred_inputs_file() {
+    let program_path = test_file_path("missing-prove-inputs").with_extension("masm");
+    fs::write(&program_path, "begin push.1 end").unwrap();
+
+    let mut cmd = bin_under_test().command();
+    cmd.arg("prove").arg(&program_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to open input file"))
+        .stderr(predicate::str::contains("miden-vm-cli-missing-prove-inputs-"))
+        .stderr(predicate::str::contains(".inputs"))
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    fs::remove_file(program_path).unwrap();
+}
 
 #[test]
 fn cli_bundle_debug() {
-    let output_file = std::env::temp_dir().join("cli_bundle_debug.masl");
+    let output_file = std::env::temp_dir().join("cli_bundle_debug.masp");
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
 
-    let lib = Library::deserialize_from_file(&output_file).unwrap();
-    // If there are any AssemblyOps in the forest, the bundle is in debug mode.
-    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
-    let found_one_asm_op = lib.mast_forest().debug_info().num_asm_ops() > 0;
+    let lib = Package::deserialize_from_file_trusted(&output_file).unwrap();
+    // If there are any package-owned AssemblyOps, the bundle is in debug mode.
+    let found_one_asm_op =
+        lib.debug_info()
+            .expect("package debug info should decode")
+            .is_some_and(|debug_info| {
+                debug_info
+                    .source_map()
+                    .is_some_and(|source_map| !source_map.asm_ops().is_empty())
+            });
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();
 }
@@ -82,21 +133,23 @@ fn cli_bundle_debug() {
 #[test]
 fn cli_bundle_no_exports() {
     let mut cmd = bin_under_test().command();
-    cmd.arg("bundle").arg("./tests/integration/cli/data/lib_noexports");
+    cmd.arg("bundle")
+        .arg("--namespace")
+        .arg("lib")
+        .arg("./tests/integration/cli/data/lib_noexports/mod.masm");
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("library must contain at least one exported procedure"));
+        .stderr(predicate::str::contains("package must contain at least one exported procedure"));
 }
 
 #[test]
 fn cli_bundle_kernel() {
-    let output_file = std::env::temp_dir().join("cli_bundle_kernel.masl");
+    let output_file = std::env::temp_dir().join("cli_bundle_kernel.masp");
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_main.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -106,13 +159,12 @@ fn cli_bundle_kernel() {
 /// A kernel can bundle with a library w/o exports.
 #[test]
 fn cli_bundle_kernel_noexports() {
-    let output_file = std::env::temp_dir().join("cli_bundle_kernel_noexports.masl");
+    let output_file = std::env::temp_dir().join("cli_bundle_kernel_noexports.masp");
 
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib_noexports")
-        .arg("--kernel")
         .arg("./tests/integration/cli/data/kernel_noexports.masm")
+        .arg("--kernel")
         .arg("--output")
         .arg(output_file.as_path());
     cmd.assert().success();
@@ -123,39 +175,41 @@ fn cli_bundle_kernel_noexports() {
 fn cli_bundle_output() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
-        .arg("cli_bundle_output.masl");
+        .arg("cli_bundle_output.masp");
     cmd.assert().success();
-    assert!(Path::new("cli_bundle_output.masl").exists());
-    fs::remove_file("cli_bundle_output.masl").unwrap()
+    assert!(Path::new("cli_bundle_output.masp").exists());
+    fs::remove_file("cli_bundle_output.masp").unwrap()
 }
 
-// First compile a library to a .masl file, then run a program that uses it.
+// First compile a library to a .masp file, then run a program that uses it.
 #[test]
-fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_run_with_lib() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
-        .arg("./tests/integration/cli/data/lib")
+        .arg("./tests/integration/cli/data/lib/mod.masm")
+        .arg("--namespace")
+        .arg("lib")
         .arg("--output")
-        .arg("cli_run_with_lib.masl");
+        .arg("cli_run_with_lib.masp");
     cmd.assert().success();
 
     let mut cmd = bin_under_test().command();
     cmd.arg("run")
         .arg("./tests/integration/cli/data/main.masm")
         .arg("-l")
-        .arg("./cli_run_with_lib.masl");
+        .arg("./cli_run_with_lib.masp");
     cmd.assert().success();
 
-    fs::remove_file("cli_run_with_lib.masl").unwrap();
-    Ok(())
+    fs::remove_file("cli_run_with_lib.masp").unwrap();
 }
 
 #[test]
-fn test_advmap_cli() -> Result<(), Box<dyn std::error::Error>> {
+fn test_advmap_cli() {
     let mut cmd = bin_under_test().command();
     cmd.arg("run").arg("./tests/integration/cli/data/adv_map.masm");
     cmd.assert().success();
-    Ok(())
 }

@@ -1,7 +1,8 @@
 use alloc::sync::Arc;
+use core::assert_matches;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{ONE, Word, assert_matches, program::Program};
+use miden_core::{ONE, Word, advice::AdviceMap, program::Program};
 use miden_processor::{
     ExecutionOptions, StackInputs,
     advice::{AdviceError, AdviceInputs},
@@ -19,8 +20,10 @@ fn advice_map_loaded_before_execution() {
     end";
 
     // compile and execute program
-    let program_without_advice_map: Program =
-        Assembler::default().assemble_program(source).unwrap();
+    let program_without_advice_map: Program = Assembler::default()
+        .assemble_program("program", source)
+        .unwrap()
+        .unwrap_program();
 
     // Test `miden_processor::execute_sync` fails if no advice map provided with the program
     let mut host =
@@ -50,8 +53,7 @@ fn advice_map_loaded_before_execution() {
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let value = vec![ONE, ONE];
 
-    let mut mast_forest = mast_forest;
-    mast_forest.advice_map_mut().insert(key, value);
+    let mast_forest = mast_forest.with_advice_map(AdviceMap::from_iter([(key, value)]));
     let program_with_advice_map =
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 

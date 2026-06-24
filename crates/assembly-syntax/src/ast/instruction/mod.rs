@@ -1,11 +1,10 @@
 pub mod advice;
-pub mod debug;
 mod print;
 
 use alloc::vec::Vec;
 use core::ops::Range;
 
-pub use self::{advice::SystemEventNode, debug::DebugOptions};
+pub use self::advice::SystemEventNode;
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
@@ -55,9 +54,13 @@ pub enum Instruction {
     NeqImm(ImmFelt),
     Eqw,
     Lt,
+    LtImm(ImmFelt),
     Lte,
+    LteImm(ImmFelt),
     Gt,
+    GtImm(ImmFelt),
     Gte,
+    GteImm(ImmFelt),
     IsOdd,
 
     // ----- ext2 operations ---------------------------------------------------------------------
@@ -275,13 +278,11 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
-    Debug(DebugOptions),
     DebugVar(miden_core::operations::DebugVarInfo),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
     EmitImm(ImmFelt),
-    Trace(ImmU32),
 }
 
 impl Instruction {

@@ -10,8 +10,8 @@
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainCols, MidenAirBuilder,
-    constraints::{op_flags::OpFlags, utils::BoolNot},
+    CoreCols, MidenAirBuilder,
+    constraints::{constants::F_8, op_flags::OpFlags, utils::BoolNot},
 };
 
 // ENTRY POINT
@@ -20,8 +20,8 @@ use crate::{
 /// Enforces stack operation constraints for PAD/DUP/CLK/SWAP/MOV/SWAPW/CSWAP.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainCols<AB::Var>,
-    next: &MainCols<AB::Var>,
+    local: &CoreCols<AB::Var>,
+    next: &CoreCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -103,6 +103,7 @@ pub fn enforce_main<AB>(
     let is_swapw2 = op_flags.swapw2();
     let is_swapw3 = op_flags.swapw3();
     let is_swapdw = op_flags.swapdw();
+    let is_mstream_or_pipe = op_flags.mstream() + op_flags.pipe();
 
     let is_cswap = op_flags.cswap();
     let is_cswapw = op_flags.cswapw();
@@ -261,6 +262,57 @@ pub fn enforce_main<AB>(
         builder.assert_eq(s3_next, fn_hash_3);
     }
 
+    // MSTREAM / PIPE: advance the two-word memory cursor at stack position 12.
+    builder.when(is_mstream_or_pipe).assert_eq(s12_next, s12 + F_8);
+
     // SDEPTH: push current stack depth to the top.
     builder.when(is_sdepth).assert_eq(s0_next, stack_depth);
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt,
+        field::{PrimeCharacteristicRing, QuadFelt},
+        operations::opcodes,
+    };
+
+    use super::enforce_main;
+    use crate::constraints::{
+        columns::CoreCols,
+        op_flags::{OpFlags, generate_test_row},
+        stack::test_utils::ConstraintEvalBuilder,
+    };
+
+    fn eval_stack_ops(local: &CoreCols<Felt>, next: &CoreCols<Felt>) -> Vec<QuadFelt> {
+        let mut builder = ConstraintEvalBuilder::new();
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+        enforce_main(&mut builder, local, next, &op_flags);
+        builder.evaluations
+    }
+
+    #[test]
+    fn stream_word_ops_constrain_cursor_increment() {
+        for opcode in [opcodes::MSTREAM, opcodes::PIPE] {
+            let mut local = generate_test_row(opcode.into());
+            let mut next = generate_test_row(0);
+            local.stack.top[12] = Felt::new_unchecked(19);
+
+            next.stack.top[12] = Felt::new_unchecked(27);
+            let evaluations = eval_stack_ops(&local, &next);
+            assert!(
+                evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+                "opcode {opcode} should accept the +8 cursor update"
+            );
+
+            next.stack.top[12] = Felt::new_unchecked(28);
+            let evaluations = eval_stack_ops(&local, &next);
+            assert!(
+                evaluations.iter().any(|value| *value != QuadFelt::ZERO),
+                "opcode {opcode} should reject a forged cursor update"
+            );
+        }
+    }
 }

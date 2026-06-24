@@ -1,10 +1,14 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+
 use crate::{
-    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
+    BaseHost, BreakReason, ContextId, ExecutionError, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
-    mast::{MastForest, MastNode, MastNodeId},
+    errors::PackageSourceDebugContext,
+    mast::{ExecutableMastForest, MastNode, MastNodeId},
+    operation::OperationError,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -35,13 +39,59 @@ use operations::execute_op;
 /// Note: `current_forest` is intentionally excluded from this struct. Including it would prevent
 /// passing node references (obtained from the forest) alongside `&mut ExecutionState` to
 /// functions, since both would borrow the same struct.
-pub(crate) struct ExecutionState<'a, P, H, S, T> {
+pub(crate) struct ExecutionState<'a, P, H, S, T, F> {
     pub processor: &'a mut P,
-    pub continuation_stack: &'a mut ContinuationStack,
+    pub continuation_stack: &'a mut ContinuationStack<F>,
     pub kernel: &'a Kernel,
     pub host: &'a mut H,
     pub tracer: &'a mut T,
     pub stopper: &'a S,
+    pub source_debug_info: Option<Arc<PackageDebugInfo>>,
+    pub current_source_node_id: Option<DebugSourceNodeId>,
+}
+
+impl<'a, P, H, S, T, F> ExecutionState<'a, P, H, S, T, F> {
+    pub fn current_source_node_id(&self) -> Option<DebugSourceNodeId> {
+        self.current_source_node_id
+    }
+
+    pub fn child_source_node_id(
+        &self,
+        child_index: usize,
+    ) -> Result<Option<DebugSourceNodeId>, ExecutionError> {
+        let Some(source_debug_info) = &self.source_debug_info else {
+            return Ok(None);
+        };
+        let Some(current_source_node_id) = self.current_source_node_id else {
+            return Ok(None);
+        };
+
+        Ok(source_debug_info
+            .child_source_node(current_source_node_id, child_index)
+            .map_err(|_| {
+                ExecutionError::Internal(
+                    "package debug source graph has malformed child references",
+                )
+            })?
+            .map(|(source_node_id, _)| source_node_id))
+    }
+
+    pub fn package_source_context(&self) -> Option<PackageSourceDebugContext<'_>> {
+        Some(PackageSourceDebugContext::new_optional(
+            self.source_debug_info.as_deref()?,
+            self.current_source_node_id,
+        ))
+    }
+
+    pub fn operation_error_with_current_context(&self, err: OperationError) -> ExecutionError
+    where
+        H: BaseHost,
+    {
+        match self.package_source_context() {
+            Some(context) => err.with_package_source_context(context, self.host, None),
+            None => err.with_context(),
+        }
+    }
 }
 
 // MAIN EXECUTION FUNCTION
@@ -100,7 +150,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
+///         InternalBreakReason::Emit { op_idx, continuation, source_node_id } => {
 ///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -108,7 +158,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///             // to complete the execution of the Emit operation.
 ///             finish_emit_op_execution(...);
 ///         },
-///         InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+///         InternalBreakReason::LoadMastForestFromDyn { callee_hash } => {
 ///             // load MAST forest containing the callee procedure
 ///             let (procedure_id, new_forest) = self.load_mast_forest(...);
 ///    
@@ -127,20 +177,34 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///     }
 /// }
 /// ```
-pub(crate) fn execute_impl<P, S, T>(
+pub(crate) fn execute_impl<P, S, T, F>(
     processor: &mut P,
-    continuation_stack: &mut ContinuationStack,
-    current_forest: &mut Arc<MastForest>,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
     kernel: &Kernel,
     host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
-) -> ControlFlow<InternalBreakReason>
+    source_debug_info: &mut Option<Arc<PackageDebugInfo>>,
+) -> ControlFlow<InternalBreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
+    if source_debug_info.is_none() && !continuation_stack.tracks_source_nodes() {
+        return execute_impl_pure(
+            processor,
+            continuation_stack,
+            current_forest,
+            kernel,
+            host,
+            tracer,
+            stopper,
+        );
+    };
+
     let mut state = ExecutionState {
         processor,
         continuation_stack,
@@ -148,9 +212,14 @@ where
         host,
         tracer,
         stopper,
+        source_debug_info: source_debug_info.clone(),
+        current_source_node_id: None,
     };
 
-    while let Some(continuation) = state.continuation_stack.pop_continuation() {
+    while let Some((continuation, source_node_id)) =
+        state.continuation_stack.pop_continuation_with_source_node_id()
+    {
+        state.current_source_node_id = source_node_id;
         match continuation {
             Continuation::StartNode(node_id) => {
                 let node = current_forest.get_node_by_id(node_id).unwrap();
@@ -182,10 +251,10 @@ where
                     },
                     MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
                     MastNode::External(_) => external::execute_external_node(
-                        state.processor,
                         node_id,
+                        state.current_source_node_id(),
                         current_forest,
-                        state.host,
+                        state.tracer,
                     )?,
                 }
             },
@@ -197,8 +266,8 @@ where
                 split::finish_split_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
-            Continuation::FinishLoop { node_id, was_entered } => {
-                r#loop::finish_loop_node(&mut state, was_entered, node_id, current_forest)
+            Continuation::FinishLoop(node_id) => {
+                r#loop::finish_loop_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
             },
             Continuation::FinishCall(node_id) => {
@@ -208,14 +277,6 @@ where
             Continuation::FinishDyn(node_id) => {
                 r#dyn::finish_dyn_node(&mut state, node_id, current_forest)
                     .map_break(InternalBreakReason::from)?
-            },
-            Continuation::FinishExternal(node_id) => {
-                // Execute after_exit decorators when returning from an external node
-                // Note: current_forest should already be restored by EnterForest continuation
-                state
-                    .processor
-                    .execute_after_exit_decorators(node_id, current_forest, state.host)
-                    .map_break(InternalBreakReason::from)?;
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let basic_block_node =
@@ -243,25 +304,144 @@ where
                 )?
             },
             Continuation::FinishBasicBlock(node_id) => {
+                basic_block::finish_basic_block(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::EnterForest { forest, package_debug_info } => {
+                // Restore the previous forest
+                *current_forest = forest;
+                state.source_debug_info = package_debug_info.clone();
+                *source_debug_info = package_debug_info;
+            },
+        }
+    }
+
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+fn execute_impl_pure<P, S, T, F>(
+    processor: &mut P,
+    continuation_stack: &mut ContinuationStack<F>,
+    current_forest: &mut F,
+    kernel: &Kernel,
+    host: &mut impl BaseHost,
+    tracer: &mut T,
+    stopper: &S,
+) -> ControlFlow<InternalBreakReason<F>>
+where
+    P: Processor,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
+{
+    let mut state = ExecutionState {
+        processor,
+        continuation_stack,
+        kernel,
+        host,
+        tracer,
+        stopper,
+        source_debug_info: None,
+        current_source_node_id: None,
+    };
+
+    while let Some(continuation) = state.continuation_stack.pop_continuation() {
+        match continuation {
+            Continuation::StartNode(node_id) => {
+                let node = current_forest.get_node_by_id(node_id).unwrap();
+
+                match node {
+                    MastNode::Block(basic_block_node) => {
+                        basic_block::execute_basic_block_node_from_start(
+                            &mut state,
+                            basic_block_node,
+                            node_id,
+                            current_forest,
+                        )?
+                    },
+                    MastNode::Join(join_node) => {
+                        join::start_join_node_pure(&mut state, join_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Split(split_node) => split::start_split_node_pure(
+                        &mut state,
+                        split_node,
+                        node_id,
+                        current_forest,
+                    )
+                    .map_break(InternalBreakReason::from)?,
+                    MastNode::Loop(loop_node) => {
+                        r#loop::start_loop_node_pure(&mut state, loop_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Call(call_node) => {
+                        call::start_call_node_pure(&mut state, call_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Dyn(_) => {
+                        r#dyn::start_dyn_node_pure(&mut state, node_id, current_forest)?
+                    },
+                    MastNode::External(_) => external::execute_external_node(
+                        node_id,
+                        None,
+                        current_forest,
+                        state.tracer,
+                    )?,
+                }
+            },
+            Continuation::FinishJoin(node_id) => {
+                join::finish_join_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishSplit(node_id) => {
+                split::finish_split_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishLoop(node_id) => {
+                r#loop::finish_loop_node_pure(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishCall(node_id) => {
+                call::finish_call_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishDyn(node_id) => {
+                r#dyn::finish_dyn_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let basic_block_node =
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-                basic_block::finish_basic_block(
+                basic_block::execute_basic_block_node_from_op_idx(
                     &mut state,
                     basic_block_node,
                     node_id,
+                    batch_index,
+                    op_idx_in_batch,
                     current_forest,
-                )
-                .map_break(InternalBreakReason::from)?
+                )?
             },
-            Continuation::EnterForest(previous_forest) => {
-                // Restore the previous forest
-                *current_forest = previous_forest;
+            Continuation::Respan { node_id, batch_index } => {
+                let basic_block_node =
+                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                basic_block::execute_basic_block_node_from_batch(
+                    &mut state,
+                    basic_block_node,
+                    node_id,
+                    batch_index,
+                    current_forest,
+                )?
             },
-            Continuation::AfterExitDecorators(node_id) => state
-                .processor
-                .execute_after_exit_decorators(node_id, current_forest, state.host)
-                .map_break(InternalBreakReason::from)?,
+            Continuation::FinishBasicBlock(node_id) => {
+                basic_block::finish_basic_block(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::EnterForest { forest, .. } => {
+                *current_forest = forest;
+            },
         }
     }
 
@@ -282,9 +462,9 @@ where
 /// - *Function to call after handling*: [`finish_emit_op_execution`]
 ///
 /// The `Emit` variant is used to break execution when an `Emit` operation is encountered. The
-/// associated data includes the ID of the basic block node where the `Emit` operation was executed
-/// and the continuation that should be passed to [`finish_emit_op_execution`] to resume execution
-/// after the host has processed the emitted event.
+/// associated data includes the operation index, the source node, and the continuation that should
+/// be passed to [`finish_emit_op_execution`] to resume execution after the host has processed the
+/// emitted event.
 ///
 /// Handling an `Emit` operation typically involves invoking the host environment to process the
 /// emitted event. After the host has processed the event, the processor *must* call
@@ -297,7 +477,7 @@ where
 ///
 /// The `LoadMastForestFromDyn` variant is used to break execution when `DynNode` is encountered
 /// that requires loading a MAST forest containing a given procedure. The associated data includes
-/// the ID of the dynamic node and the hash of the callee procedure to be loaded.
+/// the hash of the callee procedure to be loaded.
 ///
 /// Handling this operation typically involves loading the MAST forest from the host environment.
 /// After the MAST forest has been loaded, the processor *must* call
@@ -316,25 +496,26 @@ where
 /// After the MAST forest has been loaded, the processor *must* call
 /// [`finish_load_mast_forest_from_external`] to complete the execution of the operation and resume
 /// execution with the first operation of the called procedure.
-pub enum InternalBreakReason {
-    User(BreakReason),
+pub enum InternalBreakReason<F> {
+    User(BreakReason<F>),
     Emit {
-        basic_block_node_id: MastNodeId,
         op_idx: usize,
-        continuation: Continuation,
+        continuation: Continuation<F>,
+        source_node_id: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromDyn {
-        dyn_node_id: MastNodeId,
         callee_hash: Word,
+        source_node_id: Option<DebugSourceNodeId>,
     },
     LoadMastForestFromExternal {
         external_node_id: MastNodeId,
         procedure_hash: Word,
+        source_node_id: Option<DebugSourceNodeId>,
     },
 }
 
-impl From<BreakReason> for InternalBreakReason {
-    fn from(reason: BreakReason) -> Self {
+impl<F> From<BreakReason<F>> for InternalBreakReason<F> {
+    fn from(reason: BreakReason<F>) -> Self {
         Self::User(reason)
     }
 }
@@ -347,17 +528,18 @@ impl From<BreakReason> for InternalBreakReason {
 /// Delegates to [`finalize_clock_cycle_with_continuation`] with a continuation closure that returns
 /// no continuation.
 #[inline(always)]
-fn finalize_clock_cycle<P, S, T>(
+fn finalize_clock_cycle<P, S, T, F>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
-    continuation_stack: &ContinuationStack,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    continuation_stack: &ContinuationStack<F>,
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     finalize_clock_cycle_with_continuation(
         processor,
@@ -374,18 +556,19 @@ where
 /// Delegates to [`finalize_clock_cycle_with_continuation_and_op_helpers`] with the `Empty` variant
 /// of [`OperationHelperRegisters`].
 #[inline(always)]
-fn finalize_clock_cycle_with_continuation<P, S, T>(
+fn finalize_clock_cycle_with_continuation<P, S, T, F>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
-    continuation_stack: &ContinuationStack,
-    continuation_after_stop: impl FnOnce() -> Option<Continuation>,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    continuation_stack: &ContinuationStack<F>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceNodeId>)>,
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     finalize_clock_cycle_with_continuation_and_op_helpers(
         processor,
@@ -418,19 +601,20 @@ where
 /// before being stopped). No continuation is provided in case of error, since it is expected that
 /// execution will not be resumed.
 #[inline(always)]
-fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T>(
+fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T, F>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
-    continuation_stack: &ContinuationStack,
-    continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    continuation_stack: &ContinuationStack<F>,
+    continuation_after_stop: impl FnOnce() -> Option<(Continuation<F>, Option<DebugSourceNodeId>)>,
     op_helper_registers: OperationHelperRegisters,
-    current_forest: &Arc<MastForest>,
-) -> ControlFlow<BreakReason>
+    current_forest: &F,
+) -> ControlFlow<BreakReason<F>>
 where
     P: Processor,
-    S: Stopper<Processor = P>,
-    T: Tracer<Processor = P>,
+    S: Stopper<Processor = P, Forest = F>,
+    T: Tracer<Processor = P, Forest = F>,
+    F: ExecutableMastForest + Clone,
 {
     // Signal the end of clock cycle to tracer (before incrementing processor clock).
     tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);

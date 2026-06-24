@@ -1,7 +1,6 @@
 //! Abstract syntax tree (AST) components of Miden programs, modules, and procedures.
 
 mod advice_map_entry;
-mod alias;
 mod attribute;
 mod block;
 pub mod constants;
@@ -9,6 +8,7 @@ mod docstring;
 mod form;
 pub(crate) mod ident;
 mod immediate;
+mod import;
 mod instruction;
 mod invocation_target;
 mod item;
@@ -24,7 +24,6 @@ pub mod visit;
 
 pub use self::{
     advice_map_entry::AdviceMapEntry,
-    alias::{Alias, AliasTarget},
     attribute::{
         Attribute, AttributeSet, AttributeSetEntry, BorrowedMeta, Meta, MetaExpr, MetaItem,
         MetaKeyValue, MetaList,
@@ -35,7 +34,10 @@ pub use self::{
     form::Form,
     ident::{CaseKindError, Ident, IdentError},
     immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
-    instruction::{DebugOptions, Instruction, SystemEventNode},
+    import::{
+        Import, ImportDecl, ImportKind, ImportSpec, ItemImport, ItemImportGroup, ModuleImport,
+    },
+    instruction::{Instruction, SystemEventNode},
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     item::*,
     module::{Module, ModuleKind},
@@ -46,8 +48,6 @@ pub use self::{
     visibility::Visibility,
     visit::{Visit, VisitMut},
 };
-
-pub(crate) type SmallOpsVec = smallvec::SmallVec<[Op; 1]>;
 
 /// Maximum stack index at which a full word can start.
 pub const MAX_STACK_WORD_OFFSET: u8 = 12;

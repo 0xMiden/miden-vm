@@ -5,15 +5,11 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
-#[cfg(debug_assertions)]
-use crate::mast::MastNode;
 use crate::{
     Felt, Word,
-    mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
-    },
+    mast::{MastForest, MastForestError, MastNodeId},
     operations::opcodes,
-    prettier::{Document, PrettyPrint, const_text, nl},
+    prettier::{Document, PrettyPrint, const_text},
     utils::LookupByIdx,
 };
 
@@ -27,7 +23,6 @@ use crate::{
 pub struct DynNode {
     is_dyncall: bool,
     digest: Word,
-    decorator_store: DecoratorStore,
 }
 
 /// Constants
@@ -79,89 +74,29 @@ impl DynNode {
 // ================================================================================================
 
 impl DynNode {
-    pub(super) fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        DynNodePrettyPrint { node: self, mast_forest }
+    pub(super) fn to_display<'a>(&'a self, _mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
+        self.clone()
     }
 
     pub(super) fn to_pretty_print<'a>(
         &'a self,
-        mast_forest: &'a MastForest,
+        _mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
-        DynNodePrettyPrint { node: self, mast_forest }
+        self.clone()
     }
 }
 
-struct DynNodePrettyPrint<'a> {
-    node: &'a DynNode,
-    mast_forest: &'a MastForest,
-}
-
-impl DynNodePrettyPrint<'_> {
-    /// Concatenates the provided decorators in a single line. If the list of decorators is not
-    /// empty, prepends `prepend` and appends `append` to the decorator document.
-    fn concatenate_decorators(
-        &self,
-        decorator_ids: &[DecoratorId],
-        prepend: Document,
-        append: Document,
-    ) -> Document {
-        let decorators = decorator_ids
-            .iter()
-            .map(|&decorator_id| self.mast_forest[decorator_id].render())
-            .reduce(|acc, doc| acc + const_text(" ") + doc)
-            .unwrap_or_default();
-
-        if decorators.is_empty() {
-            decorators
-        } else {
-            prepend + decorators + append
-        }
-    }
-
-    fn single_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.before_enter(self.mast_forest),
-            Document::Empty,
-            const_text(" "),
-        )
-    }
-
-    fn single_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(
-            self.node.after_exit(self.mast_forest),
-            const_text(" "),
-            Document::Empty,
-        )
-    }
-
-    fn multi_line_pre_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.before_enter(self.mast_forest), Document::Empty, nl())
-    }
-
-    fn multi_line_post_decorators(&self) -> Document {
-        self.concatenate_decorators(self.node.after_exit(self.mast_forest), nl(), Document::Empty)
-    }
-}
-
-impl PrettyPrint for DynNodePrettyPrint<'_> {
+impl PrettyPrint for DynNode {
     fn render(&self) -> Document {
-        let dyn_text = if self.node.is_dyncall() {
+        if self.is_dyncall() {
             const_text("dyncall")
         } else {
             const_text("dyn")
-        };
-
-        let single_line = self.single_line_pre_decorators()
-            + dyn_text.clone()
-            + self.single_line_post_decorators();
-        let multi_line =
-            self.multi_line_pre_decorators() + dyn_text + self.multi_line_post_decorators();
-
-        single_line | multi_line
+        }
     }
 }
 
-impl fmt::Display for DynNodePrettyPrint<'_> {
+impl fmt::Display for DynNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pretty_print(f)
     }
@@ -174,20 +109,6 @@ impl MastNodeExt for DynNode {
     /// Returns a commitment to a Dyn node.
     fn digest(&self) -> Word {
         self.digest
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
-        #[cfg(debug_assertions)]
-        self.verify_node_in_forest(forest);
-        self.decorator_store.before_enter(forest)
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
-        #[cfg(debug_assertions)]
-        self.verify_node_in_forest(forest);
-        self.decorator_store.after_exit(forest)
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -219,49 +140,13 @@ impl MastNodeExt for DynNode {
 
     type Builder = DynNodeBuilder;
 
-    fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        // Extract decorators from decorator_store if in Owned state
-        match self.decorator_store {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                let mut builder = if self.is_dyncall {
-                    DynNodeBuilder::new_dyncall()
-                } else {
-                    DynNodeBuilder::new_dyn()
-                };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-            DecoratorStore::Linked { id } => {
-                // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.before_enter_decorators(id).to_vec();
-                let after_exit = forest.after_exit_decorators(id).to_vec();
-                let mut builder = if self.is_dyncall {
-                    DynNodeBuilder::new_dyncall()
-                } else {
-                    DynNodeBuilder::new_dyn()
-                };
-                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-                builder
-            },
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest(&self, forest: &MastForest) {
-        if let Some(id) = self.decorator_store.linked_id() {
-            // Verify that this node is the one stored at the given ID in the forest
-            let self_ptr = self as *const Self;
-            let forest_node = &forest.nodes[id];
-            let forest_node_ptr = match forest_node {
-                MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
-                _ => panic!("Node type mismatch at {id:?}"),
-            };
-            let self_as_void = self_ptr as *const ();
-            debug_assert_eq!(
-                self_as_void, forest_node_ptr,
-                "Node pointer mismatch: expected node at {id:?} to be self"
-            );
-        }
+    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
+        let builder = if self.is_dyncall {
+            DynNodeBuilder::new_dyncall()
+        } else {
+            DynNodeBuilder::new_dyn()
+        };
+        builder.with_digest(self.digest)
     }
 }
 
@@ -292,37 +177,25 @@ impl proptest::prelude::Arbitrary for DynNode {
 }
 
 // ------------------------------------------------------------------------------------------------
-/// Builder for creating [`DynNode`] instances with decorators.
+/// Builder for creating [`DynNode`] instances.
 #[derive(Debug)]
 pub struct DynNodeBuilder {
     is_dyncall: bool,
-    before_enter: Vec<DecoratorId>,
-    after_exit: Vec<DecoratorId>,
     digest: Option<Word>,
 }
 
 impl DynNodeBuilder {
     /// Creates a new builder for a DynNode representing a dynexec operation.
     pub fn new_dyn() -> Self {
-        Self {
-            is_dyncall: false,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-            digest: None,
-        }
+        Self { is_dyncall: false, digest: None }
     }
 
     /// Creates a new builder for a DynNode representing a dyncall operation.
     pub fn new_dyncall() -> Self {
-        Self {
-            is_dyncall: true,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-            digest: None,
-        }
+        Self { is_dyncall: true, digest: None }
     }
 
-    /// Builds the DynNode with the specified decorators.
+    /// Builds the DynNode.
     pub fn build(self) -> DynNode {
         // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
@@ -333,14 +206,7 @@ impl DynNodeBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
 
-        DynNode {
-            is_dyncall: self.is_dyncall,
-            digest,
-            decorator_store: DecoratorStore::new_owned_with_decorators(
-                self.before_enter,
-                self.after_exit,
-            ),
-        }
+        DynNode { is_dyncall: self.is_dyncall, digest }
     }
 }
 
@@ -355,24 +221,11 @@ impl MastForestContributor for DynNodeBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
 
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
-            .push(
-                DynNode {
-                    is_dyncall: self.is_dyncall,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
+            .push(DynNode { is_dyncall: self.is_dyncall, digest }.into())
             .map_err(|_| MastForestError::TooManyNodes)?;
 
         Ok(node_id)
@@ -380,49 +233,21 @@ impl MastForestContributor for DynNodeBuilder {
 
     fn fingerprint_for_node(
         &self,
-        forest: &MastForest,
-        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
-    ) -> Result<MastNodeFingerprint, MastForestError> {
-        // DynNode has no children, so we don't need hash_by_node_id
-        // Use the fingerprint_from_parts helper function with empty children array
-        crate::mast::node_fingerprint::fingerprint_from_parts(
-            forest,
-            _hash_by_node_id,
-            &self.before_enter,
-            &self.after_exit,
-            &[], // DynNode has no children
-            // Use the forced digest if available, otherwise use the default digest values
-            if let Some(forced_digest) = self.digest {
-                forced_digest
-            } else if self.is_dyncall {
-                DynNode::DYNCALL_DEFAULT_DIGEST
-            } else {
-                DynNode::DYN_DEFAULT_DIGEST
-            },
-        )
+        _forest: &MastForest,
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        Ok(if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else if self.is_dyncall {
+            DynNode::DYNCALL_DEFAULT_DIGEST
+        } else {
+            DynNode::DYN_DEFAULT_DIGEST
+        })
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // DynNode has no children to remap, but preserve the digest
         self
-    }
-
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.before_enter.extend(decorators);
-    }
-
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.after_exit.extend(decorators);
     }
 
     fn with_digest(mut self, digest: Word) -> Self {
@@ -454,22 +279,11 @@ impl DynNodeBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
 
-        // Determine the node ID that will be assigned
-        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
         // Create the node in the forest with Linked variant from the start
-        // Note: Decorators are already in forest.debug_info from deserialization
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
-            .push(
-                DynNode {
-                    is_dyncall: self.is_dyncall,
-                    digest,
-                    decorator_store: DecoratorStore::Linked { id: future_node_id },
-                }
-                .into(),
-            )
+            .push(DynNode { is_dyncall: self.is_dyncall, digest }.into())
             .map_err(|_| MastForestError::TooManyNodes)?;
 
         Ok(node_id)
@@ -478,50 +292,21 @@ impl DynNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for DynNodeBuilder {
-    type Parameters = DynNodeBuilderParams;
+    type Parameters = ();
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(_params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
-        (
-            any::<bool>(),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-            proptest::collection::vec(
-                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
-                0..=params.max_decorators,
-            ),
-        )
-            .prop_map(|(is_dyncall, before_enter, after_exit)| {
-                let builder = if is_dyncall {
+        any::<bool>()
+            .prop_map(|is_dyncall| {
+                if is_dyncall {
                     Self::new_dyncall()
                 } else {
                     Self::new_dyn()
-                };
-                builder.with_before_enter(before_enter).with_after_exit(after_exit)
+                }
             })
             .boxed()
-    }
-}
-
-/// Parameters for generating DynNodeBuilder instances
-#[cfg(any(test, feature = "arbitrary"))]
-#[derive(Clone, Debug)]
-pub struct DynNodeBuilderParams {
-    pub max_decorators: usize,
-    pub max_decorator_id_u32: u32,
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl Default for DynNodeBuilderParams {
-    fn default() -> Self {
-        Self {
-            max_decorators: 4,
-            max_decorator_id_u32: 10,
-        }
     }
 }
 
