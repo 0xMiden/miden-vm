@@ -38,10 +38,10 @@ const LEAF_DOMAIN = 0x13af
 #! Cycles
 #!   Leaf empty: 67 cycles
 #!   Leaf single: 162 cycles
-#!   Leaf multiple, found at first key: 255 + 253 * pair_count
-#!   Leaf multiple, found at last key: 67 + 441 * pair_count
-#!   Leaf multiple, missing before first key: 400 + 253 * pair_count
-#!   Leaf multiple, missing after last key: 193 + 441 * pair_count
+#!   Leaf multiple, found at first key: 245 + 258 * pair_count
+#!   Leaf multiple, found at last key: 57 + 446 * pair_count
+#!   Leaf multiple, missing before first key: 390 + 258 * pair_count
+#!   Leaf multiple, missing after last key: 183 + 446 * pair_count
 #!   Leaf multiple, middle keys or insertion points: between the first-key and last-key costs
 pub proc get
     # Prepare for `mtree_get`
@@ -139,14 +139,21 @@ end
 #!
 #! Cycles
 #!   Leaf empty
-#!     removal: 74 cycles
-#!     insertion: 133 cycles
+#!     no-op removal: 108 cycles
+#!     insertion: 182 cycles
 #!   Leaf single
-#!     removal: 227 cycles
-#!     insertion (leaf remains single): 205
-#!     insertion (leaf becomes multiple): X cycles
+#!     removal: 271 cycles
+#!     replacement: 296 cycles
+#!     insertion (leaf becomes multiple): 610 cycles
 #!   Leaf multiple
-#!     X cycles
+#!     removal at first key: 541 + 325 * pair_count
+#!     removal at last key: 396 + 455 * pair_count
+#!     replacement at first key: 515 + 267 * pair_count
+#!     replacement at last key: 327 + 455 * pair_count
+#!     insertion before first key: 908 + 315 * pair_count
+#!     insertion after last key: 701 + 503 * pair_count
+#!     no-op removal after last key: 265 + 446 * pair_count
+#!     middle keys or insertion points: between the first-key and last-key costs
 pub proc set
     # Prepare stack for mtree_get
     # (5 cycles)
@@ -264,10 +271,10 @@ end
 #!   Operand stack: [V, R]
 #!
 #! Cycles:
-#!  Found at first key: 191 + 253 * pair_count
-#!  Found at last key: 3 + 441 * pair_count
-#!  Missing before first key: 336 + 253 * pair_count
-#!  Missing after last key: 129 + 441 * pair_count
+#!  Found at first key: 181 + 258 * pair_count
+#!  Found at last key: 446 * pair_count - 7
+#!  Missing before first key: 326 + 258 * pair_count
+#!  Missing after last key: 119 + 446 * pair_count
 #!  Middle keys or insertion points: between the first-key and last-key costs.
 @locals(8192)
 proc get_multi_leaf_value
@@ -339,7 +346,7 @@ end
 #!
 #! Panics if:
 #! - any adjacent key pair is not strictly increasing.
-@locals(17)
+@locals(10)
 proc find_unique_multi_leaf_key
     loc_storew_le.0 dropw
     # => [start_ptr, end_ptr, ...]
@@ -351,9 +358,7 @@ proc find_unique_multi_leaf_key
     # 6: result_ptr
     # 7: is_key_found
     # 8: is_position_found
-    # 9..11: unused so previous key is word-aligned
-    # 12..15: previous key
-    # 16: has_previous_key
+    # 9: start_ptr
 
     dup.1 loc_store.4
     # => [start_ptr, end_ptr, ...]
@@ -361,29 +366,34 @@ proc find_unique_multi_leaf_key
     dup loc_store.5
     # => [start_ptr, end_ptr, ...]
 
+    dup loc_store.9
+    # => [start_ptr, end_ptr, ...]
+
     dup.1 loc_store.6
     # => [start_ptr, end_ptr, ...]
 
     push.0 loc_store.7
     push.0 loc_store.8
-    push.0 loc_store.16
     # => [start_ptr, end_ptr, ...]
 
     loc_load.5 loc_load.4 u32lt
     while.true
-        loc_load.5 padw movup.4 mem_loadw_le
-        # => [LEAF_KEY, start_ptr, end_ptr, ...]
-
         # validate that keys stay strictly sorted.
-        loc_load.16
+        loc_load.5 loc_load.9 neq
         if.true
-            dupw padw loc_loadw_le.12 swapw
-            # => [LEAF_KEY, PREVIOUS_KEY, LEAF_KEY, start_ptr, end_ptr, ...]
+            loc_load.5 sub.8 padw movup.4 mem_loadw_le
+            # => [PREVIOUS_KEY, start_ptr, end_ptr, ...]
+
+            loc_load.5 padw movup.4 mem_loadw_le
+            # => [LEAF_KEY, PREVIOUS_KEY, start_ptr, end_ptr, ...]
 
             exec.word::lt
             assert.err="invalid multi-leaf preimage: keys must be unique and sorted"
-            # => [LEAF_KEY, start_ptr, end_ptr, ...]
+            # => [start_ptr, end_ptr, ...]
         end
+
+        loc_load.5 padw movup.4 mem_loadw_le
+        # => [LEAF_KEY, start_ptr, end_ptr, ...]
 
         # compare against K until we find the matching key or insertion point.
         loc_load.8 not
@@ -413,8 +423,7 @@ proc find_unique_multi_leaf_key
         end
         # => [LEAF_KEY, start_ptr, end_ptr, ...]
 
-        loc_storew_le.12 dropw
-        push.1 loc_store.16
+        dropw
         # => [start_ptr, end_ptr, ...]
 
         loc_load.5 add.8
@@ -1076,7 +1085,7 @@ proc remove_in_multi_leaf
     dup.1 add.8
     # => [start_ptr=key_ptr+8, end_ptr=pairs_array_end, write_ptr=key_ptr, V_old, K, R]
 
-    exec.memcopy_word_range_and_advance_ptrs
+    exec.memmove_word_range_left_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
     drop loc_store.3
@@ -1101,6 +1110,54 @@ end
 
 # MEMORY HELPERS
 # =================================================================================================
+
+#! Copies a word range to an earlier overlapping memory range and returns the advanced pointers.
+#!
+#! Inputs: [read_start_ptr, read_end_ptr, write_ptr]
+#! Outputs: [read_ptr', write_ptr']
+proc memmove_word_range_left_and_advance_ptrs
+    # => [read_start_ptr, read_end_ptr, write_ptr]
+
+    dup movdn.2
+    # => [cur_read, read_end, cur_read, cur_write]
+
+    u32overflowing_sub
+    # => [ovf, read_end - cur_read, cur_read, cur_write]
+
+    dup.1 neq.0
+    # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
+
+    # fewer cycles than xor.
+    u32xor
+    # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
+
+    if.true
+        div.4 neg
+        # => [-num_words, cur_read, cur_write]
+
+        dup neq.0
+        while.true
+            padw dup.5 mem_loadw_le
+            # => [WORD, -num_words, cur_read, cur_write]
+
+            dup.6 mem_storew_le
+            # => [WORD, -num_words, cur_read, cur_write]
+
+            dropw
+            # => [-num_words, cur_read, cur_write]
+
+            add.1 movup.2 add.4 movup.2 add.4 movup.2
+            # => [-num_words+1, cur_read+4, cur_write+4]
+
+            dup neq.0
+        end
+
+        drop
+        # => [cur_read', cur_write']
+    else
+        drop
+    end
+end
 
 #! Copies from the memory range starting at `read_start_ptr` and ending at `read_end_ptr`, to
 #! memory starting at `write_ptr`, and returns updated pointers, advanced by how much data was

@@ -815,6 +815,43 @@ fn test_smt_set_remove_in_multi() {
     expect_remove(&smt, K2);
 }
 
+#[test]
+fn test_smt_set_remove_first_from_three_pair_multi_leaf() {
+    const SOURCE: &str = "
+        use miden::core::collections::smt
+        use miden::core::sys
+
+        begin
+            exec.smt::set
+            exec.sys::truncate_stack
+        end
+    ";
+
+    let entries = entries_for_leaf(3, 0x5151);
+    let smt = build_smt_from_pairs(&entries);
+    let key = smt
+        .leaves()
+        .map(|(_, leaf)| leaf.entries())
+        .find(|entries| entries.len() == 3)
+        .map(|entries| entries[0].0)
+        .unwrap();
+
+    let root = smt.root();
+    let mut initial_stack: Vec<u64> = Vec::new();
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &key);
+    push_word(&mut initial_stack, &EMPTY_WORD);
+
+    let expected_value = smt_get_value(&smt, key);
+    let mut expected_smt = smt.clone();
+    smt_insert(&mut expected_smt, key, EMPTY_WORD);
+    let expected_output = build_expected_stack(expected_value, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+        .expect_stack(&expected_output);
+}
+
 /// Tests `peek` on every key present in the SMT, as well as an empty leaf
 #[test]
 fn test_smt_peek() {
@@ -1008,6 +1045,18 @@ fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     append_word_to_vec(&mut result, word0);
     append_word_to_vec(&mut result, word1);
     result
+}
+
+fn entries_for_leaf(pair_count: usize, leaf_index: u64) -> Vec<(Word, Word)> {
+    (0..pair_count)
+        .map(|idx| {
+            let base = 101 + idx as u64 * 100;
+            (
+                word(base, base + 1, base + 2, leaf_index),
+                word(base + 3, base + 4, base + 5, base + 6),
+            )
+        })
+        .collect()
 }
 
 // RANDOMIZED ROUND-TRIP TEST
