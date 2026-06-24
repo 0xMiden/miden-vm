@@ -1119,4 +1119,90 @@ mod tests {
         assert_eq!(CurveId::from_group_ptr(99), None);
         assert!(!K1Scalar::is_canonical(&K1Scalar::MODULUS));
     }
+
+    #[test]
+    fn mul_scalar_matches_affine_double_and_add_reference() {
+        use crate::math::{ed25519_scalar::Ed25519Scalar, r1_scalar::R1Scalar};
+
+        // Faithful affine double-and-add reference, built only from the affine point addition law.
+        // This is the pre-optimization algorithm and is independent of the projective code path.
+        fn affine_mul_scalar(curve: CurveId, point: CurvePoint, scalar: Limbs) -> CurvePoint {
+            let Some(highest_limb) = scalar.iter().rposition(|&limb| limb != 0) else {
+                return CurvePoint::Identity;
+            };
+            let highest_bit =
+                highest_limb * 32 + (u32::BITS - 1 - scalar[highest_limb].leading_zeros()) as usize;
+
+            let mut acc = CurvePoint::Identity;
+            let mut base = point;
+            for bit_index in 0..=highest_bit {
+                if ((scalar[bit_index / 32] >> (bit_index % 32)) & 1) == 1 {
+                    acc = curve.add(acc, base).expect("affine add");
+                }
+                if bit_index != highest_bit {
+                    base = curve.add(base, base).expect("affine double");
+                }
+            }
+            acc
+        }
+
+        fn next_u32(state: &mut u64) -> u32 {
+            *state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (*state >> 32) as u32
+        }
+
+        let mut state: u64 = 0xdead_beef_cafe_f00d;
+        for curve in CurveId::ALL {
+            let modulus = match curve {
+                CurveId::Secp256k1 => K1Scalar::MODULUS,
+                CurveId::Secp256r1 => R1Scalar::MODULUS,
+                CurveId::Ed25519 => Ed25519Scalar::MODULUS,
+            };
+            let minus_one = match curve {
+                CurveId::Secp256k1 => K1Scalar::minus_one(),
+                CurveId::Secp256r1 => R1Scalar::minus_one(),
+                CurveId::Ed25519 => Ed25519Scalar::minus_one(),
+            };
+
+            // Valid on-curve base points: generator, [2^128]generator, and their sum. The
+            // [2^128]generator point is built through the affine reference so it stays independent
+            // of the projective `mul_scalar` under test.
+            let generator = curve.generator();
+            let generator_128 = affine_mul_scalar(curve, generator, [0, 0, 0, 0, 1, 0, 0, 0]);
+            let sum = curve.add(generator, generator_128).expect("valid point");
+            let points = [generator, generator_128, sum];
+
+            // Edge scalars exercise the empty, minimal, and maximal-canonical cases.
+            let edges = [ZERO_LIMBS, [1, 0, 0, 0, 0, 0, 0, 0], [2, 0, 0, 0, 0, 0, 0, 0], minus_one];
+
+            for point in points {
+                for scalar in edges {
+                    assert_eq!(
+                        curve.mul_scalar(point, scalar).expect("projective mul_scalar"),
+                        affine_mul_scalar(curve, point, scalar),
+                        "{curve:?} mul_scalar edge mismatch for scalar {scalar:?}",
+                    );
+                }
+
+                for _ in 0..40 {
+                    let mut scalar = [0u32; 8];
+                    for limb in scalar.iter_mut() {
+                        *limb = next_u32(&mut state);
+                    }
+                    // Force a canonical scalar: a strictly smaller top limb implies value <
+                    // modulus.
+                    scalar[7] %= modulus[7];
+                    assert!(curve.scalar_domain().is_canonical(&scalar));
+
+                    assert_eq!(
+                        curve.mul_scalar(point, scalar).expect("projective mul_scalar"),
+                        affine_mul_scalar(curve, point, scalar),
+                        "{curve:?} mul_scalar random mismatch for scalar {scalar:?}",
+                    );
+                }
+            }
+        }
+    }
 }

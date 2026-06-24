@@ -33,6 +33,10 @@ impl CurveSpec for Secp256k1 {
     fn neg(point: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         Ok(short_weierstrass::neg::<Self>(point))
     }
+
+    fn mul_scalar(point: CurvePoint, scalar: Limbs) -> Result<CurvePoint, PrecompileError> {
+        short_weierstrass::mul_scalar::<Self>(point, scalar)
+    }
 }
 
 impl ShortWeierstrassSpec for Secp256k1 {

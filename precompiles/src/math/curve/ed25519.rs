@@ -33,6 +33,10 @@ impl CurveSpec for Ed25519 {
     fn neg(point: CurvePoint) -> Result<CurvePoint, PrecompileError> {
         Ok(twisted_edwards::neg::<Self>(point))
     }
+
+    fn mul_scalar(point: CurvePoint, scalar: Limbs) -> Result<CurvePoint, PrecompileError> {
+        twisted_edwards::mul_scalar::<Self>(point, scalar)
+    }
 }
 
 impl TwistedEdwardsSpec for Ed25519 {
