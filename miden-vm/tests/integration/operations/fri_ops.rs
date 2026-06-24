@@ -8,14 +8,13 @@ fn fri_ext2fold4() {
     // create a set of random inputs
     let mut inputs =
         rand_array::<Felt, 17>().iter().map(Felt::as_canonical_u64).collect::<Vec<_>>();
-    // inputs[7] -> stack[9] = p (bit-reversed tree index).
-    // The instruction computes d_seg = p & 3 and f_pos = p >> 2.
-    // We want d_seg=2, f_pos=inputs[8], so p = 4*f_pos + 2.
-    // f_pos must fit in u32 to avoid overflow when computing p.
-    inputs[8] %= (u32::MAX as u64) >> 2;
-    inputs[7] = 4 * inputs[8] + 2;
+    // inputs[7] -> stack[9] = natural coset.
+    // With coset=1, the instruction checks the bit-reversed row at index 2.
+    inputs[8] %= u32::MAX as u64;
+    inputs[7] = 1;
 
-    // When d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
+    // With coset=1, the selected bit-reversed row is query_values[2] = (v4, v5);
+    // it must equal prev_value = (pe0, pe1).
     // After pushing 17 inputs:
     //   v4 = inputs[12] (stack[4]), v5 = inputs[11] (stack[5])
     //   pe0 = inputs[5] (stack[11]), pe1 = inputs[4] (stack[12])

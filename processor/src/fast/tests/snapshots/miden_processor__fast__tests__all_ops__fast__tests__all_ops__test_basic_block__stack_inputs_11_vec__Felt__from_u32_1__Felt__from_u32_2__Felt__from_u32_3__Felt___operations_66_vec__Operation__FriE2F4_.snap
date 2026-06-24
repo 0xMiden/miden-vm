@@ -1,5 +1,6 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 134
 expression: fast_stack_outputs
 ---
 Err(
@@ -17,7 +18,7 @@ Err(
         },
         source_file: None,
         err: FriError(
-            "domain size was 0",
+            "coset index cannot exceed 3, but was 10",
         ),
     },
 )

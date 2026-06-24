@@ -34,7 +34,7 @@ end
 proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
         adv_pipe
-        exec.random_coin::eidos_observe_piped_words
+        bcompress
     end
 end
 
@@ -42,7 +42,7 @@ end
 proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
         adv_pipe
-        exec.random_coin::eidos_observe_piped_words
+        bcompress
     end
 end
 
@@ -67,11 +67,10 @@ end
 #!
 #! Input: [...]
 #! Output: [num_fri_layers, ...]
-#! Cycles: 45
 pub proc generate_fri_parameters
     # Load FRI verifier data
     padw exec.constants::get_lde_domain_info_word
-    #=> [lde_size, log(lde_size), lde_g, 0, ...] (6 cycles)
+    #=> [lde_size, log(lde_size), lde_g, 0, ...]
 
     # Compute the number of FRI layers
     dup
@@ -89,34 +88,33 @@ pub proc generate_fri_parameters
         push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG sub
         div.2
     end
-    # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (12 cycles)
+    # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
     exec.constants::set_num_fri_layers
     div.8
     exec.constants::set_remainder_poly_size
-    # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (7 cycles)
+    # => [lde_size, lde_size, log2(lde_size), domain_gen, 0, ...]
 
     dropw
     drop
-    # => [...] (5 cycles)
+    # => [...]
 end
 
-#! Get FRI layer commitments and reseed with them in order to draw folding challenges i.e. alphas.
+#! Get FRI layer commitments and reseed with them in order to draw folding challenges.
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 21 + 225 * num_fri_layers
 pub proc load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
     padw exec.constants::get_lde_domain_info_word
     exec.constants::tmp1 mem_storew_le
-    # => [Y, ...] where `Y` is as "garbage" word
+    # => [Y, ...] where `Y` is a garbage word
 
     # Address containing the first layer commitment
     push.0.0
     exec.constants::fri_com_ptr
     exec.constants::get_num_fri_layers
-    # => [num_layers, ptr_layer, y, y, Y, ...] where `y` are considered as "garbage" values
+    # => [num_layers, ptr_layer, y, y, Y, ...] where `y` values are garbage
 
     dup
     push.0
@@ -133,15 +131,9 @@ pub proc load_fri_layer_commitments
         mem_storew_le
         #=> [COM, num_layers, ptr_layer + 4, y, y, ...]
 
-        # Reseed with commitment and absorb per-round PoW witness in one shot.
+        # Reseed with commitment, check the per-round PoW witness, and sample alpha.
         adv_push
-        exec.random_coin::reseed_with_felt
-        # => [num_layers, ptr_layer + 4, y, y, ...]
-
-        # Verify per-round FRI folding PoW and sample folding challenge in one shot.
-        # Reads folding_pow_bits from memory. Bypasses buffer API since sponge state
-        # is known after reseed_with_felt.
-        exec.random_coin::sample_folding_pow_and_ext
+        exec.random_coin::reseed_with_folding_pow_and_ext
         #=> [a0, a1, num_layers, ptr_layer + 4, y, y, ...]
         padw
         exec.constants::tmp1 mem_loadw_le
@@ -184,21 +176,13 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#!
-#! Cycles:
-#!
-#!  1- Remainder polynomial of degree less
-#!     than 64: 157
-#!  2- Remainder polynomial of degree less
-#!     than 128: 191
 pub proc load_and_verify_remainder
 
     # `adv_pipe` the remainder codeword
     ## Get the numbers of FRI layers
     exec.constants::get_num_fri_layers
-    ## Compute the correct remainder pointer, note that the remainder poly is laid out just after
-    ## the FRI layer commitments, each saved in a word, and folding challenges, also saved in
-    ## a word, and this explains the multiplication by 8
+    ## Compute the remainder pointer. The remainder polynomial is laid out after the FRI layer
+    ## commitments and folding challenges, each stored as one word; this gives 8 felts per layer.
     mul.8 exec.constants::fri_com_ptr add
     #=> [fri_com_ptr, 8 * num_fri_layers, ...]
     ## Store for later use
@@ -211,27 +195,28 @@ pub proc load_and_verify_remainder
     eq
     if.true
         # Remainder polynomial degree less than 64
-        # Keep three dummy words above the pointer for `adv_pipe`; each piped block is
-        # observed into Eidos by the loader.
-        padw padw padw
-        # => [Y, Y, Y, remainder_poly_ptr, remainder_size, y, y]
+        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw padw
+        # => [Y, Y, cv, remainder_poly_ptr, remainder_size, y, y]
 
         exec.load_fri_remainder_poly_max_degree_plus_1_half
 
-        dropw dropw dropw
-
     else
         # Remainder polynomial degree less than 128
-        # Keep three dummy words above the pointer for `adv_pipe`; each piped block is
-        # observed into Eidos by the loader.
-        padw padw padw
-        # => [Y, Y, Y, remainder_poly_ptr, remainder_size, y, y]
+        # Keep the transcript CV on stack while streaming the full remainder codeword.
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        padw padw
+        # => [Y, Y, cv, remainder_poly_ptr, remainder_size, y, y]
 
         exec.load_fri_remainder_poly_max_degree_plus_1
 
-        dropw dropw dropw
-
     end
+    swapw.2
+    exec.constants::random_coin_cv_ptr mem_storew_le
+    dropw dropw dropw
+    exec.random_coin::eidos_clear_buffer
+    exec.random_coin::eidos_enter_absorbing
     dropw dropw
     #=> [...]
 end
@@ -244,8 +229,6 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#!
-#! Cycles: 7
 pub proc compute_query_pointer
     exec.constants::fri_com_ptr
     exec.constants::get_number_queries
