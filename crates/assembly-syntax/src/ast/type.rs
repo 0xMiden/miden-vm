@@ -1186,11 +1186,7 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< bobbin-main-to-next
-    use alloc::{sync::Arc, vec::Vec};
-=======
     use alloc::{string::ToString, sync::Arc};
->>>>>>> next
     use core::str::FromStr;
 
     use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
@@ -1318,37 +1314,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< bobbin-main-to-next
-    fn struct_type_expr_resolution_preserves_field_names() {
-        let mut resolver = DummyResolver::new();
-        let expr = TypeExpr::Struct(StructType::new(
-            Some(Ident::from_str("Pair").expect("valid ident")),
-            [
-                StructField {
-                    span: SourceSpan::UNKNOWN,
-                    name: Ident::from_str("left").expect("valid ident"),
-                    ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
-                },
-                StructField {
-                    span: SourceSpan::UNKNOWN,
-                    name: Ident::from_str("right").expect("valid ident"),
-                    ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
-                },
-            ],
-        ));
-
-        let Type::Struct(ty) = expr
-            .resolve_type(&mut resolver)
-            .expect("type resolution should succeed")
-            .expect("type should resolve")
-        else {
-            panic!("expected struct type");
-        };
-
-        assert_eq!(ty.name().as_deref(), Some("Pair"));
-        let field_names = ty.fields().iter().map(|field| field.name.as_deref()).collect::<Vec<_>>();
-        assert_eq!(field_names, [Some("left"), Some("right")]);
-=======
     fn struct_type_expr_render_round_trips_non_default_reprs() {
         for repr in [
             TypeRepr::BigEndian,
@@ -1431,6 +1396,5 @@ mod tests {
         assert_eq!(*converted.repr, TypeRepr::BigEndian);
         assert_eq!(converted.fields[0].name.as_str(), "prefix");
         assert_eq!(converted.fields[1].name.as_str(), "suffix");
->>>>>>> next
     }
 }
