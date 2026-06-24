@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, Linkage, PathBuf as LibraryPath,
+    Assembler, Linkage, PathBuf as LibraryPath, ast,
     diagnostics::{IntoDiagnostic, Report},
 };
 use miden_core_lib::CoreLibrary;
@@ -17,20 +17,21 @@ pub struct BundleCmd {
     /// Disable debug symbols (release mode)
     #[arg(short = 'r', long = "release")]
     release: bool,
-    /// Path to a directory containing the `.masm` files which are part of the library.
+    /// Path to the root `.masm` file for the library
     #[arg(value_parser)]
-    dir: PathBuf,
-    /// Defines the top-level namespace, e.g. `mylib`, otherwise the directory name is used. For a
-    /// kernel library the namespace defaults to `kernel`.
+    root: PathBuf,
+    /// Defines the top-level namespace, e.g. `mylib`, otherwise a `namespace` declaration is
+    /// expected in the root module. For a kernel library the namespace defaults to `$kernel`.
     #[arg(short, long)]
     namespace: Option<String>,
     /// Version of the library, defaults to `0.1.0`.
     #[arg(short, long, default_value = "0.1.0")]
     version: String,
-    /// Build a kernel library from module `kernel` and using the library `dir` as kernel
-    /// namespace. The `kernel` file should not be in the directory `dir`.
+    /// Indicates that the artifact produced is a kernel package.
+    ///
+    /// This requires that `root` be a path to the root module of the kernel.
     #[arg(short, long)]
-    kernel: Option<PathBuf>,
+    kernel: bool,
     /// Path of the output `.masp` file.
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -44,47 +45,39 @@ impl BundleCmd {
 
         let mut assembler = Assembler::default();
 
-        if self.dir.is_file() {
-            return Err(Report::msg("`dir` must be a directory."));
+        if !self.root.is_file() {
+            return Err(Report::msg("`root` must be a '.masm' file."));
         }
-        let dir = self.dir.file_name().ok_or("`dir` cannot end with `..`.").map_err(Report::msg)?;
 
         // write the masp output
         let output_file = match &self.output {
             Some(output) => output,
             None => {
                 let parent =
-                    &self.dir.parent().ok_or("Invalid output path").map_err(Report::msg)?;
+                    &self.root.parent().ok_or("Invalid output path").map_err(Report::msg)?;
                 &parent.join("out").with_extension(Package::EXTENSION)
             },
         };
 
-        let namespace = match &self.namespace {
-            Some(namespace) => namespace.to_string(),
-            None => dir.to_string_lossy().into_owned(),
-        };
-        match &self.kernel {
-            Some(kernel) => {
-                if !kernel.is_file() {
-                    return Err(Report::msg("`kernel` must be a file"));
-                };
-                assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-                let library =
-                    assembler.assemble_kernel_from_dir(namespace, kernel, Some(&self.dir))?;
-                library.write_to_file(output_file).into_diagnostic()?;
-                println!(
-                    "Built kernel module {} with library {}",
-                    kernel.display(),
-                    self.dir.display()
-                );
-            },
-            None => {
-                let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
-                assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
-                let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
-                library.write_to_file(output_file).into_diagnostic()?;
-                println!("Built library {namespace}");
-            },
+        if self.kernel {
+            assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
+            let namespace = match self.namespace.as_deref() {
+                Some(ns) => ns,
+                None => ast::Path::KERNEL_PATH,
+            };
+            let library = assembler.assemble_kernel_from_root(namespace, &self.root)?;
+            library.write_to_file(output_file).into_diagnostic()?;
+            println!("Built kernel library {} from {}", library.name, self.root.display());
+        } else {
+            let library_namespace = match self.namespace.as_ref() {
+                Some(ns) => Some(LibraryPath::new(ns).into_diagnostic()?),
+                None => None,
+            };
+            assembler.link_package(CoreLibrary::default().package(), Linkage::Dynamic)?;
+            let library =
+                assembler.assemble_library_from_root(&self.root, library_namespace.as_deref())?;
+            library.write_to_file(output_file).into_diagnostic()?;
+            println!("Built package '{}'", library.name);
         }
 
         Ok(())

@@ -22,16 +22,15 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{AirInstance, MidenAir, PublicInputs, config};
-use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
+use miden_air::{MidenMultiAir, PublicInputs, Statement, config};
+use miden_core::{Felt, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
     stark::{
-        StarkConfig,
-        challenger::CanObserve,
-        fri::PcsTranscript,
+        StarkConfig, VerifierInstance,
         lmcs::{Lmcs, proof::BatchProofView},
-        proof::{StarkProof, StarkTranscript},
+        pcs::PcsProof,
+        proof::{StarkProof, StarkProofData},
         verifier::VerifierError as CryptoVerifierError,
     },
 };
@@ -84,52 +83,37 @@ pub fn generate_advice_inputs(
     // 1. Deserialize STARK proof bytes.
     let proof_encoding_config = wincode::config::Configuration::default()
         .with_preallocation_size_limit::<MAX_STARK_PROOF_BYTES>();
-    let proof: StarkProof<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
-        StarkProof<Felt, QuadFelt, P2Config>,
+    let proof: StarkProofData<Felt, QuadFelt, P2Config> = <serde_wincode::SerdeCompat<
+        StarkProofData<Felt, QuadFelt, P2Config>,
     > as wincode::config::Deserialize<_>>::deserialize(
         proof_bytes, proof_encoding_config
     )
     .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
 
-    // 2. Build domain-separated challenger, then observe public values.
+    // 2. Build domain-separated challenger. Statement-owned inputs (fixed public values and kernel
+    //    digests) plus the per-AIR trace heights are absorbed by the lifted verifier internally
+    //    when the transcript is parsed.
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
     let mut challenger = config.challenger();
     config::observe_protocol_params(&mut challenger);
-    challenger.observe_slice(&public_values);
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
 
-    config::observe_air_order(&mut challenger, proof.air_order());
-
-    // 3. Build AIR instances.
-    let core_air = MidenAir::CORE;
-    let chiplets_air = MidenAir::CHIPLETS;
-    let core_instance = AirInstance {
-        public_values: &public_values,
-        var_len_public_inputs: &[],
-    };
-    let chiplets_instance = AirInstance {
-        public_values: &public_values,
-        var_len_public_inputs,
-    };
+    // 3. Build the statement and verifier instance.
+    let statement = Statement::<Felt, QuadFelt, _>::new(
+        MidenMultiAir::new(),
+        public_values,
+        kernel_felts.clone(),
+    )
+    .map_err(|e| VerifierError::ProofDeserializationError(e.to_string()))?;
+    let verifier_instance = VerifierInstance::new(&config, &statement, None)
+        .expect("Miden AIRs declare no preprocessed columns");
 
     // 4. Parse STARK transcript (mirrors Fiat-Shamir protocol).
-    let (stark, _digest) = StarkTranscript::from_proof(
-        &config,
-        &[(&core_air, core_instance), (&chiplets_air, chiplets_instance)],
-        &proof,
-        challenger,
-    )?;
+    let (stark, _digest) = StarkProof::from_data(&verifier_instance, &proof, challenger)?;
 
-    // log_trace_heights is in proof_order; recover caller-order via air_order.
-    let log_trace_heights = stark.instance_shapes.log_trace_heights();
-    let air_order = stark.instance_shapes.air_order();
-    let mut per_air_log_height = [0usize; 2];
-    for (proof_pos, &caller_idx) in air_order.iter().enumerate() {
-        per_air_log_height[caller_idx as usize] = log_trace_heights[proof_pos] as usize;
-    }
-    let log_core_trace_height = per_air_log_height[0];
-    let log_chiplets_trace_height = per_air_log_height[1];
+    // Per-AIR log trace heights are in instance order: [Core, Chiplets].
+    let log_heights = stark.log_trace_heights();
+    let log_core_trace_height = log_heights[0] as usize;
+    let log_chiplets_trace_height = log_heights[1] as usize;
 
     // 5. Reconstruct kernel digests as Words for advice building.
     let kernel_digests: Vec<Word> = kernel_felts
@@ -158,13 +142,13 @@ pub fn generate_advice_inputs(
 /// in the order listed in the module doc.
 fn build_advice(
     config: &P2Config,
-    stark: &StarkTranscript<Challenge, P2Lmcs>,
+    stark: &StarkProof<Challenge, P2Lmcs>,
     log_core_trace_height: usize,
     log_chiplets_trace_height: usize,
     pub_inputs: PublicInputs,
     kernel_digests: &[Word],
 ) -> Result<VerifierData, VerifierError> {
-    let pcs = &stark.pcs_transcript;
+    let pcs = &stark.pcs_proof;
 
     // --- initial stack ---
     // `[log_core, log_chip]` with log_core on top. Security parameters are on the advice stack.
@@ -232,7 +216,7 @@ fn build_advice(
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.quotient_commit));
 
     // 9. Deep alpha (2 felts) -- the DEEP column-batching challenge.
-    let deep_alpha = pcs.deep_transcript.challenge_columns;
+    let deep_alpha = pcs.deep_proof.challenge_columns;
     let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
     advice_stack
         .extend_from_slice(&[deep_coeffs[1].as_canonical_u64(), deep_coeffs[0].as_canonical_u64()]);
@@ -241,17 +225,17 @@ fn build_advice(
     append_ood_evaluations(&mut advice_stack, pcs);
 
     // 11. DEEP PoW witness.
-    advice_stack.push(pcs.deep_transcript.pow_witness.as_canonical_u64());
+    advice_stack.push(pcs.deep_proof.pow_witness.as_canonical_u64());
 
     // 12. FRI layer commitments + per-round PoW witnesses.
-    for round in &pcs.fri_transcript.rounds {
+    for round in &pcs.fri_proof.rounds {
         advice_stack.extend_from_slice(&commitment_to_u64s(round.commitment));
         advice_stack.push(round.pow_witness.as_canonical_u64());
     }
 
     // 13. FRI remainder polynomial (already in descending degree order from the prover, matching
     //     the order observed into the Fiat-Shamir transcript).
-    let final_poly = &pcs.fri_transcript.final_poly;
+    let final_poly = &pcs.fri_proof.final_poly;
     let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
     let remainder_u64s: Vec<u64> = remainder_base.iter().map(Felt::as_canonical_u64).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
@@ -278,11 +262,11 @@ fn build_advice(
 /// The DEEP transcript contains evaluations at two points (z and z*g) for each committed
 /// matrix (main, aux, quotient). We split them into local (at z) and next (at z*g) rows,
 /// then append local followed by next.
-fn append_ood_evaluations<L>(advice_stack: &mut Vec<u64>, pcs: &PcsTranscript<Challenge, L>)
+fn append_ood_evaluations<L>(advice_stack: &mut Vec<u64>, pcs: &PcsProof<Challenge, L>)
 where
     L: Lmcs<F = Felt>,
 {
-    let evals = &pcs.deep_transcript.evals;
+    let evals = &pcs.deep_proof.evals;
     let mut local_values = Vec::new();
     let mut next_values = Vec::new();
 
@@ -315,9 +299,9 @@ where
 /// `mtree_get` to fetch authentication paths and `adv_keyval` to retrieve leaf data.
 fn build_merkle_data(
     config: &P2Config,
-    stark: &StarkTranscript<Challenge, P2Lmcs>,
+    stark: &StarkProof<Challenge, P2Lmcs>,
 ) -> Result<MerkleAdvice, VerifierError> {
-    let pcs = &stark.pcs_transcript;
+    let pcs = &stark.pcs_proof;
     let lmcs = config.lmcs();
 
     let mut partial_trees = Vec::new();

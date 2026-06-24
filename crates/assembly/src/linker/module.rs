@@ -4,13 +4,13 @@ use core::{cell::Cell, ops::Index};
 use miden_assembly_syntax::{
     Path,
     ast::{
-        AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
+        ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind, SubmoduleDecl,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
-use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
+use super::{AdviceMap, Import, LinkStatus, Symbol, SymbolResolver, namespaces::ResolvedUse};
 
 /// The source from which a [LinkModule] was derived.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -46,6 +46,10 @@ pub struct LinkModule {
     ///
     /// For modules loaded from MAST, only exported symbols will be available here.
     symbols: Vec<Symbol>,
+    /// The set of imports declared by this module.
+    imports: Vec<Import>,
+    /// The set of submodules declared by this module.
+    submodules: Vec<SubmoduleDecl>,
     /// An optional [AdviceMap] to merge into the advice data of the assembled artifact.
     ///
     /// This is only relevant for modules parsed from MASM sources.
@@ -68,6 +72,8 @@ impl LinkModule {
             source,
             path,
             symbols: Vec::default(),
+            imports: Vec::default(),
+            submodules: Vec::default(),
             advice_map: None,
         }
     }
@@ -79,6 +85,20 @@ impl LinkModule {
     #[inline]
     pub fn with_symbols(mut self, symbols: Vec<Symbol>) -> Self {
         self.symbols = symbols;
+        self
+    }
+
+    /// Load the imports declared by this module.
+    #[inline]
+    pub fn with_imports(mut self, imports: Vec<Import>) -> Self {
+        self.imports = imports;
+        self
+    }
+
+    /// Load the submodules declared by this module.
+    #[inline]
+    pub fn with_submodules(mut self, submodules: Vec<SubmoduleDecl>) -> Self {
+        self.submodules = submodules;
         self
     }
 
@@ -163,6 +183,18 @@ impl LinkModule {
         self.symbols.iter()
     }
 
+    /// Get an iterator over the imports declared by this module.
+    #[inline]
+    pub fn imports(&self) -> core::slice::Iter<'_, Import> {
+        self.imports.iter()
+    }
+
+    /// Get an iterator over the submodules declared by this module.
+    #[inline]
+    pub fn submodules(&self) -> core::slice::Iter<'_, SubmoduleDecl> {
+        self.submodules.iter()
+    }
+
     /// Get the number of symbols defined in this module.
     #[inline(always)]
     pub fn num_symbols(&self) -> usize {
@@ -173,6 +205,12 @@ impl LinkModule {
     pub fn get(&self, name: impl AsRef<str>) -> Option<&Symbol> {
         let name = name.as_ref();
         self.symbols.iter().find(|symbol| symbol.name().as_str() == name)
+    }
+
+    /// Find the [Import] named `name` in this module.
+    pub fn get_import(&self, name: impl AsRef<str>) -> Option<&Import> {
+        let name = name.as_ref();
+        self.imports.iter().find(|import| import.local_name().as_str() == name)
     }
 
     /// Resolve `name` relative to this module, using `resolver` for externally-defined symbols.
@@ -217,8 +255,8 @@ struct LinkModuleIter<'a, 'b: 'a> {
 impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
-    fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
-        let symbols = self
+    fn symbols(&self, _source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
+        let mut symbols = self
             .module
             .symbols
             .iter()
@@ -226,60 +264,52 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
             .map(|(i, symbol)| {
                 let index = ItemIndex::new(i);
                 let gid = self.module.id + index;
-                match symbol.item() {
-                    SymbolItem::Compiled(_)
-                    | SymbolItem::Procedure(_)
-                    | SymbolItem::Constant(_)
-                    | SymbolItem::Type(_) => {
-                        let path = self.module.path.join(symbol.name());
-                        LocalSymbol::Item {
-                            name: symbol.name().clone(),
-                            resolved: SymbolResolution::Exact {
-                                gid,
-                                path: Span::new(symbol.name().span(), path.into()),
-                            },
-                        }
-                    },
-                    SymbolItem::Alias { alias, resolved } => {
-                        let name = alias.name().clone();
-                        let name = Span::new(name.span(), name.into_inner());
-                        if let Some(resolved) = resolved.get() {
-                            let path = self.resolver.item_path(gid);
-                            let span = name.span();
-                            LocalSymbol::Import {
-                                name,
-                                resolution: Ok(SymbolResolution::Exact {
-                                    gid: resolved,
-                                    path: Span::new(span, path),
-                                }),
-                            }
-                        } else {
-                            match alias.target() {
-                                AliasTarget::MastRoot(root) => LocalSymbol::Import {
-                                    name,
-                                    resolution: Ok(SymbolResolution::MastRoot(*root)),
-                                },
-                                AliasTarget::Path(path) => {
-                                    let resolution = LocalSymbolResolver::expand(
-                                        |name| {
-                                            self.module.get(name).and_then(|sym| match sym.item() {
-                                                SymbolItem::Alias { alias, .. } => {
-                                                    Some(alias.target().clone())
-                                                },
-                                                _ => None,
-                                            })
-                                        },
-                                        path.as_deref(),
-                                        &source_manager,
-                                    );
-                                    LocalSymbol::Import { name, resolution }
-                                },
-                            }
-                        }
+                let path = self.module.path.join(symbol.name());
+                LocalSymbol::Item {
+                    name: symbol.name().clone(),
+                    resolved: SymbolResolution::Exact {
+                        gid,
+                        path: Span::new(symbol.name().span(), path.into()),
                     },
                 }
             })
             .collect::<Vec<_>>();
+
+        symbols.extend(self.module.imports.iter().map(|import| {
+            let local_name = import.local_name().clone();
+            let name = local_name.clone();
+            let name = Span::new(name.span(), name.into_inner());
+            if let Some(resolved) = import.resolved() {
+                let path = self.resolver.item_path(resolved);
+                let span = name.span();
+                LocalSymbol::Import {
+                    name,
+                    resolution: Ok(SymbolResolution::Exact {
+                        gid: resolved,
+                        path: Span::new(span, path),
+                    }),
+                }
+            } else if let Some(resolved) =
+                self.resolver.resolved_import(self.module.id(), local_name.as_str())
+            {
+                let span = name.span();
+                let resolution = match resolved {
+                    ResolvedUse::Module(id) => SymbolResolution::Module {
+                        id,
+                        path: Span::new(span, Arc::from(self.resolver.module_path(id))),
+                    },
+                    ResolvedUse::Item(gid) => SymbolResolution::Exact {
+                        gid,
+                        path: Span::new(span, self.resolver.item_path(gid)),
+                    },
+                };
+                LocalSymbol::Import { name, resolution: Ok(resolution) }
+            } else {
+                let resolution = Ok(SymbolResolution::External(import.target_path()));
+                LocalSymbol::Import { name, resolution }
+            }
+        }));
+
         symbols.into_iter()
     }
 

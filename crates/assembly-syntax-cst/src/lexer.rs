@@ -137,8 +137,12 @@ impl<'input> Lexer<'input> {
     fn lex_identifier(&mut self, start: usize, first: char) -> Token<'input> {
         if first == '$' {
             self.advance_char();
-            self.advance_while(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
-            return self.token(SyntaxKind::SpecialIdent, start, self.offset);
+            self.advance_while(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            let kind = match &self.input[start..self.offset] {
+                "$kernel" | "$exec" => SyntaxKind::SpecialIdent,
+                _ => SyntaxKind::Error,
+            };
+            return self.token(kind, start, self.offset);
         }
 
         self.advance_char();
@@ -391,6 +395,43 @@ mod tests {
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn rejects_unknown_special_identifiers() {
+        let tokens = tokenize_text("use $foo::bar\nexec.$kernel::bar\nexec.$exec::bar\n");
+        let actual = tokens
+            .iter()
+            .filter(|token| matches!(token.kind(), SyntaxKind::Error | SyntaxKind::SpecialIdent))
+            .map(|token| (token.kind(), token.text().to_string()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                (SyntaxKind::Error, "$foo".to_string()),
+                (SyntaxKind::SpecialIdent, "$kernel".to_string()),
+                (SyntaxKind::SpecialIdent, "$exec".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_special_identifiers_with_identifier_suffixes() {
+        let tokens = tokenize_text("exec.$execFoo::bar\nexec.$kernelFoo::bar\n");
+        let actual = tokens
+            .iter()
+            .filter(|token| matches!(token.kind(), SyntaxKind::Error | SyntaxKind::SpecialIdent))
+            .map(|token| (token.kind(), token.text().to_string()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                (SyntaxKind::Error, "$execFoo".to_string()),
+                (SyntaxKind::Error, "$kernelFoo".to_string()),
+            ]
+        );
     }
 
     #[test]

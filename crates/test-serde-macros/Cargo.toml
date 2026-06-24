@@ -20,9 +20,8 @@ proc-macro = true
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
-proptest.workspace = true
-proptest-derive.workspace = true
 
 [dev-dependencies]
 proptest = { workspace = true }
+proptest-derive = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

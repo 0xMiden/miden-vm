@@ -164,12 +164,13 @@ fn expect_non_u32_execution_error(test: Test) {
     let err = test.execute().expect_err("expected non-u32 SHA256 input to fail");
     match err {
         ExecutionError::OperationError {
-            err: OperationError::U32AssertionFailed { err_msg, invalid_values, .. },
+            err: OperationError::U32AssertionFailed { err_code, err_msg, invalid_values },
             ..
         } => assert!(
-            err_msg.as_deref() == Some(INVALID_SHA256_MESSAGE_WORD)
+            err_code == miden_core::mast::error_code_from_msg(INVALID_SHA256_MESSAGE_WORD)
+                && err_msg.is_none()
                 && invalid_values.iter().any(|value| value.as_canonical_u64() == NON_U32_WORD),
-            "expected SHA256 message word assertion for {NON_U32_WORD}, got message {err_msg:?} and values {invalid_values:?}"
+            "expected SHA256 message word assertion for {NON_U32_WORD}, got code {err_code}, message {err_msg:?}, and values {invalid_values:?}"
         ),
         err => panic!("expected SHA256 message word assertion, got {err:?}"),
     }

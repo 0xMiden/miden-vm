@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::{
-    AirWitness, MidenAir, PublicInputs, debug,
+    MidenMultiAir, ProverStatement, PublicInputs, StarkConfig, Statement, config, debug,
     trace::{MainTrace, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
@@ -325,29 +325,21 @@ impl ExecutionTrace {
         let (core_matrix, chiplets_matrix) = self.main_trace.to_core_chiplets_matrices();
 
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
-        let chiplets_var_len: &[&[Felt]] = &[&kernel_felts];
 
-        // Derive deterministic challenges by hashing public values with Poseidon2.
-        // The 4-element digest maps directly to 2 QuadFelt challenges.
-        let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
-        let challenges =
-            [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
+        let statement =
+            Statement::<Felt, QuadFelt, _>::new(MidenMultiAir::new(), public_values, kernel_felts)
+                .expect("valid statement inputs");
+        let prover_statement = ProverStatement::new(statement, vec![core_matrix, chiplets_matrix])
+            .expect("valid trace shapes");
 
-        let core_witness = AirWitness::new(&core_matrix, &public_values, &[]);
-        let chiplets_witness = AirWitness::new(&chiplets_matrix, &public_values, chiplets_var_len);
-        let core_air = MidenAir::CORE;
-        let chiplets_air = MidenAir::CHIPLETS;
-        debug::check_constraints_multi(
-            &[
-                (&core_air, core_witness, &core_air),
-                (&chiplets_air, chiplets_witness, &chiplets_air),
-            ],
-            &challenges,
-        );
+        // A deterministic challenger seeds the debug constraint check; this is a local
+        // constraint debugger, not a full proof transcript, so any fixed challenge set works.
+        let config = config::poseidon2_config(config::pcs_params());
+        debug::check_constraints(&prover_statement, config.challenger());
     }
 
     /// Splits the trace into the per-AIR `(Core, Chiplets)` matrix pair consumed by the
-    /// multi-AIR `prove_multi` path. Strips the Poseidon2 rate-alignment padding columns
+    /// multi-AIR proving path. Strips the Poseidon2 rate-alignment padding columns
     /// before returning.
     pub fn to_core_chiplets_matrices(&self) -> (RowMajorMatrix<Felt>, RowMajorMatrix<Felt>) {
         self.main_trace.to_core_chiplets_matrices()

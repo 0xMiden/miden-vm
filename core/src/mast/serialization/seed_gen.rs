@@ -86,7 +86,7 @@ fn generate_fuzz_seeds() {
         );
     }
 
-    // Seed 3: Stripped forest (no debug info)
+    // Seed 3: Normal forest
     {
         let mut forest = MastForest::new();
         let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add])
@@ -95,7 +95,7 @@ fn generate_fuzz_seeds() {
         forest.make_root(block_id);
 
         let mut bytes = Vec::new();
-        forest.write_stripped(&mut bytes);
+        forest.write_into(&mut bytes);
         write_mast_seed(
             &[
                 "mast_forest_deserialize",
@@ -104,7 +104,7 @@ fn generate_fuzz_seeds() {
                 "mast_forest_wire_view_new",
                 "basic_block_data",
             ],
-            "stripped.bin",
+            "normal.bin",
             &bytes,
         );
     }

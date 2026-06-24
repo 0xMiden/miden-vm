@@ -240,8 +240,11 @@ impl ExecutionTracer {
         let mut translated: ContinuationStack<MastForestId> = ContinuationStack::default();
         for cont in live.into_inner() {
             let translated_cont = match cont {
-                Continuation::EnterForest(forest) => {
-                    Continuation::EnterForest(self.forest_id(&forest))
+                Continuation::EnterForest { forest, package_debug_info } => {
+                    Continuation::EnterForest {
+                        forest: self.forest_id(&forest),
+                        package_debug_info,
+                    }
                 },
                 Continuation::StartNode(id) => Continuation::StartNode(id),
                 Continuation::FinishJoin(id) => Continuation::FinishJoin(id),
@@ -709,7 +712,7 @@ impl Tracer for ExecutionTracer {
                     self.pending_restore_context = true;
                 }
             },
-            Continuation::EnterForest(_) => {
+            Continuation::EnterForest { .. } => {
                 panic!("EnterForest continuations are guaranteed not to be passed here")
             },
         }
@@ -986,7 +989,7 @@ fn node_id_for_visit<F>(continuation: &Continuation<F>) -> Option<MastNodeId> {
         Continuation::ResumeBasicBlock { node_id, .. } | Continuation::Respan { node_id, .. } => {
             Some(node_id)
         },
-        Continuation::EnterForest(_) => None,
+        Continuation::EnterForest { .. } => None,
     }
 }
 

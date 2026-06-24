@@ -610,7 +610,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                EnterForest(_) => {
+                EnterForest { .. } => {
                     unreachable!(
                         "Tracer contract guarantees that EnterForest continuations do not occur here"
                     )

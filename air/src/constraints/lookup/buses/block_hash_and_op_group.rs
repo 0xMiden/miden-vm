@@ -46,7 +46,6 @@ pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 7;
 
 /// Emit the merged block-hash queue (G_block_hash) + op-group table (G_op_group) column as a
 /// single mutually-exclusive group.
-#[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,

@@ -44,7 +44,7 @@ serde = [
     "miden-debug-types/serde",
     "miden-utils-indexing/serde",
 ]
-arbitrary = ["dep:proptest", "dep:proptest-derive"]
+arbitrary = ["dep:proptest"]
 testing = ["arbitrary"]
 fuzzing = []
 
@@ -61,11 +61,15 @@ miden-utils-sync.workspace = true
 derive_more.workspace = true
 log.workspace = true
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 
 [dev-dependencies]
+# NOTE: We add miden-core as a dev-dependency with the "testing" feature to ensure that
+# testing-specific functionality is available during test runs. This is a workaround since
+# cargo doesn't currently support enabling test-related features automatically.
+# See: https://github.com/rust-lang/cargo/issues/2911#issuecomment-1483256987
+miden-core = { path = ".", default-features = false, features = ["testing"] }
 criterion = { workspace = true }
 insta.workspace = true
 miden-test-serde-macros.workspace = true
@@ -73,3 +77,4 @@ proptest.workspace = true
 rstest = { workspace = true }
 serde_json = { workspace = true }
 miden-utils-testing.workspace = true
+trybuild.workspace = true

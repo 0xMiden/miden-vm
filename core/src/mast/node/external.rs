@@ -107,13 +107,6 @@ impl MastNodeExt for ExternalNode {
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         ExternalNodeBuilder::new(self.digest)
     }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
-    }
 }
 
 // ARBITRARY IMPLEMENTATION
@@ -172,7 +165,11 @@ impl MastForestContributor for ExternalNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, _forest: &MastForest) -> Result<Word, MastForestError> {
+    fn fingerprint_for_node(
+        &self,
+        _forest: &MastForest,
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
         Ok(self.digest)
     }
 
@@ -214,12 +211,13 @@ impl ExternalNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
-    type Parameters = ();
+    type Parameters = ExternalNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
+        let _ = params;
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
                 Word::new([
@@ -233,3 +231,8 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
             .boxed()
     }
 }
+
+/// Parameters for generating ExternalNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug, Default)]
+pub struct ExternalNodeBuilderParams {}

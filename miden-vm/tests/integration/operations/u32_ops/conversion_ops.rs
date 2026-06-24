@@ -1,10 +1,15 @@
-use miden_processor::{ExecutionError, field::PrimeField64, operation::OperationError};
+use miden_processor::{ExecutionError, operation::OperationError};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::PrimeField64;
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
 use miden_utils_testing::{
-    Felt, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value,
+    Felt, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches, rand::rand_value,
 };
 
-use super::{prop_randw, test_inputs_out_of_bounds};
+#[cfg(feature = "arbitrary")]
+use super::prop_randw;
+use super::test_inputs_out_of_bounds;
 
 // U32 OPERATIONS TESTS - MANUAL - CONVERSIONS AND TESTS
 // ================================================================================================
@@ -256,6 +261,7 @@ fn u32split() {
 
 // U32 OPERATIONS TESTS - RANDOMIZED - CONVERSIONS AND TESTS
 // ================================================================================================
+#[cfg(feature = "arbitrary")]
 proptest! {
     #[test]
     fn u32test_proptest(value in any::<u64>()) {

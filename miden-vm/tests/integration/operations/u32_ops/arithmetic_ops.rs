@@ -1,7 +1,7 @@
 use miden_processor::{ExecutionError, operation::OperationError};
-use miden_utils_testing::{
-    U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
-};
+#[cfg(feature = "arbitrary")]
+use miden_utils_testing::proptest::prelude::*;
+use miden_utils_testing::{U32_BOUND, build_op_test, expect_exec_error_matches, rand::rand_value};
 
 // U32 OPERATIONS TESTS - MANUAL - ARITHMETIC OPERATIONS
 // ================================================================================================
@@ -684,6 +684,7 @@ fn u32divmod_fail() {
 
 // U32 OPERATIONS TESTS - RANDOMIZED - ARITHMETIC OPERATIONS
 // ================================================================================================
+#[cfg(feature = "arbitrary")]
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]

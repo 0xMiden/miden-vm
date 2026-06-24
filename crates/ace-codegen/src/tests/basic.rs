@@ -1,9 +1,12 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
-    stark::air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-        symbolic::{AirLayout, SymbolicAirBuilder},
+    stark::{
+        air::{
+            AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+            symbolic::{AirLayout, SymbolicAirBuilder},
+        },
+        matrix::{Matrix, RowMajorMatrix},
     },
 };
 
@@ -27,13 +30,13 @@ impl BaseAir<F> for MockAir {
     fn num_public_values(&self) -> usize {
         1
     }
-}
 
-impl LiftedAir<F, EF> for MockAir {
     fn periodic_columns(&self) -> Vec<Vec<F>> {
         vec![vec![Felt::ONE]]
     }
+}
 
+impl LiftedAir<F, EF> for MockAir {
     fn num_randomness(&self) -> usize {
         2
     }
@@ -46,8 +49,14 @@ impl LiftedAir<F, EF> for MockAir {
         1
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<F>,
+        _air_inputs: &[F],
+        _aux_inputs: &[F],
+        _challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        (RowMajorMatrix::new(vec![EF::ZERO; main.height()], 1), vec![EF::ZERO])
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {

@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::Kernel};
+use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
 
 use crate::{
     ExecutionError, FastProcessor, Stopper,
@@ -20,6 +21,7 @@ pub struct ResumeContext {
     pub(crate) current_forest: Arc<MastForest>,
     pub(crate) continuation_stack: ContinuationStack<Arc<MastForest>>,
     pub(crate) kernel: Kernel,
+    pub(crate) package_debug_info: Option<Arc<PackageDebugInfo>>,
 }
 
 impl ResumeContext {
@@ -55,7 +57,10 @@ impl Stopper for NeverStopper {
         &self,
         processor: &FastProcessor,
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
-        _continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+        _continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Arc<MastForest>>,
+            Option<DebugSourceNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
         check_if_continuation_stack_too_large(processor, continuation_stack)
@@ -75,7 +80,10 @@ impl Stopper for StepStopper {
         &self,
         processor: &FastProcessor,
         continuation_stack: &ContinuationStack<Arc<MastForest>>,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation<Arc<MastForest>>>,
+        continuation_after_stop: impl FnOnce() -> Option<(
+            Continuation<Arc<MastForest>>,
+            Option<DebugSourceNodeId>,
+        )>,
     ) -> ControlFlow<BreakReason<Arc<MastForest>>> {
         check_if_max_cycles_exceeded(processor)?;
         check_if_continuation_stack_too_large(processor, continuation_stack)?;
@@ -129,5 +137,5 @@ pub enum BreakReason<F> {
     ///
     /// If yes, then `None` should be returned. If not, then the continuation that runs the next
     /// step in `FastProcessor::execute_impl()` should be returned.
-    Stopped(Option<Continuation<F>>),
+    Stopped(Option<(Continuation<F>, Option<DebugSourceNodeId>)>),
 }

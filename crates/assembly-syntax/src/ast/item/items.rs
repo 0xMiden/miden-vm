@@ -1,36 +1,31 @@
 use alloc::string::String;
 
 use crate::{
-    ast::{
-        Alias, AttributeSet, Constant, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility,
-    },
+    ast::{AttributeSet, Constant, FunctionType, Ident, Invoke, Procedure, TypeDecl, Visibility},
     debuginfo::{SourceSpan, Span, Spanned},
 };
 
-// EXPORT
+// MODULE ITEM
 // ================================================================================================
 
 /// Represents an exportable item from a [crate::ast::Module].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Export {
+pub enum Item {
     /// A locally-defined procedure.
     Procedure(Procedure),
     /// A locally-defined constant.
     Constant(Constant),
     /// A locally-defined type.
     Type(TypeDecl),
-    /// An alias for an externally-defined item, i.e. a re-exported import.
-    Alias(Alias),
 }
 
-impl Export {
+impl Item {
     /// Adds documentation to this export.
     pub fn with_docs(self, docs: Option<Span<String>>) -> Self {
         match self {
             Self::Procedure(item) => Self::Procedure(item.with_docs(docs)),
             Self::Constant(item) => Self::Constant(item.with_docs(docs)),
             Self::Type(item) => Self::Type(item.with_docs(docs)),
-            Self::Alias(item) => Self::Alias(item.with_docs(docs)),
         }
     }
 
@@ -40,7 +35,6 @@ impl Export {
             Self::Procedure(item) => item.name().as_ref(),
             Self::Constant(item) => &item.name,
             Self::Type(item) => item.name(),
-            Self::Alias(item) => item.name(),
         }
     }
 
@@ -50,7 +44,6 @@ impl Export {
             Self::Procedure(item) => item.docs().map(Span::into_inner),
             Self::Constant(item) => item.docs().map(Span::into_inner),
             Self::Type(item) => item.docs().map(Span::into_inner),
-            Self::Alias(item) => item.docs().map(Span::into_inner),
         }
     }
 
@@ -58,7 +51,7 @@ impl Export {
     pub fn attributes(&self) -> Option<&AttributeSet> {
         match self {
             Self::Procedure(proc) => Some(proc.attributes()),
-            Self::Constant(_) | Self::Type(_) | Self::Alias(_) => None,
+            Self::Constant(_) | Self::Type(_) => None,
         }
     }
 
@@ -70,7 +63,6 @@ impl Export {
             Self::Procedure(item) => item.visibility(),
             Self::Constant(item) => item.visibility,
             Self::Type(item) => item.visibility(),
-            Self::Alias(item) => item.visibility(),
         }
     }
 
@@ -78,7 +70,7 @@ impl Export {
     pub fn signature(&self) -> Option<&FunctionType> {
         match self {
             Self::Procedure(item) => item.signature(),
-            Self::Constant(_) | Self::Type(_) | Self::Alias(_) => None,
+            Self::Constant(_) | Self::Type(_) => None,
         }
     }
 
@@ -90,7 +82,7 @@ impl Export {
     pub fn num_locals(&self) -> usize {
         match self {
             Self::Procedure(proc) => proc.num_locals() as usize,
-            Self::Constant(_) | Self::Type(_) | Self::Alias(_) => 0,
+            Self::Constant(_) | Self::Type(_) => 0,
         }
     }
 
@@ -99,14 +91,13 @@ impl Export {
         self.name().as_str() == Ident::MAIN
     }
 
-    /// Unwraps this [Export] as a [Procedure], or panic.
+    /// Unwraps this [Item] as a [Procedure], or panic.
     #[track_caller]
     pub fn unwrap_procedure(&self) -> &Procedure {
         match self {
             Self::Procedure(item) => item,
             Self::Constant(_) => panic!("attempted to unwrap constant as procedure definition"),
             Self::Type(_) => panic!("attempted to unwrap type as procedure definition"),
-            Self::Alias(_) => panic!("attempted to unwrap alias as procedure definition"),
         }
     }
 
@@ -120,29 +111,27 @@ impl Export {
         match self {
             Self::Procedure(item) if item.invoked.is_empty() => InvokedIter::Empty,
             Self::Procedure(item) => InvokedIter::NonEmpty(item.invoked.iter()),
-            Self::Constant(_) | Self::Type(_) | Self::Alias(_) => InvokedIter::Empty,
+            Self::Constant(_) | Self::Type(_) => InvokedIter::Empty,
         }
     }
 }
 
-impl crate::prettier::PrettyPrint for Export {
+impl crate::prettier::PrettyPrint for Item {
     fn render(&self) -> crate::prettier::Document {
         match self {
             Self::Procedure(item) => item.render(),
             Self::Constant(item) => item.render(),
             Self::Type(item) => item.render(),
-            Self::Alias(item) => item.render(),
         }
     }
 }
 
-impl Spanned for Export {
+impl Spanned for Item {
     fn span(&self) -> SourceSpan {
         match self {
             Self::Procedure(spanned) => spanned.span(),
             Self::Constant(spanned) => spanned.span(),
             Self::Type(spanned) => spanned.span(),
-            Self::Alias(spanned) => spanned.span(),
         }
     }
 }

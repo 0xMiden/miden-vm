@@ -6,7 +6,7 @@ use miden_ace_codegen::{
         zps_for_chunk,
     },
 };
-use miden_air::{LiftedAir, MidenAir};
+use miden_air::{BaseAir, LiftedAir, MidenAir};
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::{Field, PrimeCharacteristicRing},
@@ -26,10 +26,7 @@ fn core_air_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs: Vec<QuadFelt> = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(
-        &LiftedAir::<Felt, QuadFelt>::periodic_columns(&air),
-        z_k,
-    );
+    let periodic_values = eval_periodic_values::<Felt, QuadFelt>(&air.periodic_columns(), z_k);
 
     let air_layout = AirLayout {
         preprocessed_width: 0,
@@ -88,7 +85,6 @@ fn core_air_dag_rejects_mismatched_layout() {
 }
 
 #[test]
-#[allow(clippy::print_stdout)]
 fn chiplets_air_ace_rows() {
     let air = MidenAir::CHIPLETS;
     let config = AceConfig {
@@ -104,7 +100,7 @@ fn chiplets_air_ace_rows() {
     let eval_rows = encoded.num_eval_rows();
     let total_rows = read_rows + eval_rows;
 
-    println!(
+    eprintln!(
         "ACE chiplet rows (MidenAir::CHIPLETS): read={}, eval={}, total={}, inputs={}, constants={}, nodes={}",
         read_rows,
         eval_rows,

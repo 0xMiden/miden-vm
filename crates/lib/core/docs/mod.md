@@ -1,6 +1,6 @@
-This is the top-level module of the miden::core namespace.<br /><br />It is currently empty as we do not export any procedures from here.<br />
+This is the top-level module of the miden::core namespace.<br />
 
 
-## miden::core::mod
+## miden::core
 | Procedure | Description |
 | ----------- | ------------- |

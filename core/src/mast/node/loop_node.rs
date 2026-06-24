@@ -4,7 +4,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -131,14 +131,7 @@ impl MastNodeExt for LoopNode {
     type Builder = LoopNodeBuilder;
 
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        LoopNodeBuilder::new(self.body)
-    }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
+        LoopNodeBuilder::new(self.body).with_digest(self.digest)
     }
 }
 
@@ -203,6 +196,13 @@ impl LoopNodeBuilder {
 
         Ok(LoopNode { body: self.body, digest })
     }
+
+    pub(in crate::mast) fn build_linked(self) -> Result<LoopNode, MastForestError> {
+        Ok(LoopNode {
+            body: self.body,
+            digest: self.digest.ok_or(MastForestError::DigestRequiredForDeserialization)?,
+        })
+    }
 }
 
 impl MastForestContributor for LoopNodeBuilder {
@@ -216,14 +216,20 @@ impl MastForestContributor for LoopNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
-        Ok(if let Some(forced_digest) = self.digest {
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
             let body_hash = forest[self.body].digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
-        })
+        };
+
+        fingerprint_with_child_fingerprints(node_digest, &[self.body], forest, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -272,12 +278,18 @@ impl LoopNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for LoopNodeBuilder {
-    type Parameters = ();
+    type Parameters = LoopNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
+        let _ = params;
         any::<MastNodeId>().prop_map(Self::new).boxed()
     }
 }
+
+/// Parameters for generating LoopNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug, Default)]
+pub struct LoopNodeBuilderParams {}

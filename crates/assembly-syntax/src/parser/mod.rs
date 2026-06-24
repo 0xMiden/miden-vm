@@ -7,7 +7,7 @@ mod value;
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
-use miden_utils_diagnostics::Report;
+use miden_utils_diagnostics::{IntoDiagnostic, Report};
 
 pub use self::{
     cst::parse_inline_masm,
@@ -23,11 +23,11 @@ use crate::{Path, ast, sema};
 /// of the pieces needed to parse a [ast::Module] from source, and run semantic analysis on it.
 #[derive(Default)]
 pub struct ModuleParser {
-    /// The kind of module we're parsing.
+    /// The kind of module we're parsing, if known in advance.
     ///
     /// This is used when performing semantic analysis to detect when various invalid constructions
     /// are encountered, such as use of the `syscall` instruction in a kernel module.
-    kind: ast::ModuleKind,
+    kind: Option<ast::ModuleKind>,
     /// A set of interned strings allocated during parsing/semantic analysis.
     ///
     /// This is a very primitive and imprecise way of interning strings, but was the least invasive
@@ -51,7 +51,7 @@ pub struct ModuleParser {
 
 impl ModuleParser {
     /// Construct a new parser for the given `kind` of [ast::Module].
-    pub fn new(kind: ast::ModuleKind) -> Self {
+    pub fn new(kind: Option<ast::ModuleKind>) -> Self {
         Self {
             kind,
             interned: Default::default(),
@@ -65,62 +65,84 @@ impl ModuleParser {
     }
 
     /// Parse a [ast::Module] from `source`, and give it the provided `path`.
+    ///
+    /// If `path` is unset, then it must be derivable in one of two ways:
+    ///
+    /// 1. From a `namespace` declaration in the module source
+    /// 2. Inferred as `$exec` from the presence of a `begin .. end` block in the module source
+    ///
+    /// If neither is present, then an error will be raised. It can be fixed by simply providing
+    /// `path` explicitly.
     pub fn parse(
         &mut self,
-        path: impl AsRef<Path>,
+        path: Option<&Path>,
         source: Arc<SourceFile>,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
-        let path = path.as_ref();
-        if let Err(err) = Path::validate(path.as_str()) {
-            return Err(Report::msg(err.to_string()).with_source_code(source));
-        }
+        use alloc::borrow::Cow;
+
+        let path = match path {
+            Some(path) => Some(Arc::<Path>::from(
+                path.canonicalize()
+                    .and_then(|p| p.to_absolute().map(Cow::into_owned))
+                    .into_diagnostic()?,
+            )),
+            None => None,
+        };
         let forms = parse_forms_internal(source.clone(), &mut self.interned)?;
-        sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
-            .map_err(Report::new)
+        sema::analyze(
+            source,
+            self.kind,
+            path.as_deref(),
+            forms,
+            self.warnings_as_errors,
+            source_manager,
+        )
+        .map_err(Report::new)
     }
 
     /// Parse a [ast::Module], `name`, from `path`.
     #[cfg(feature = "std")]
-    pub fn parse_file<N, P>(
+    pub fn parse_file<P>(
         &mut self,
-        name: N,
-        path: P,
+        path: Option<&Path>,
+        file_path: P,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report>
     where
-        N: AsRef<Path>,
         P: AsRef<std::path::Path>,
     {
         use miden_debug_types::SourceManagerExt;
         use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
 
-        let path = path.as_ref();
-        let source_file = source_manager
-            .load_file(path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to load source file from '{}'", path.display()))?;
-        self.parse(name, source_file, source_manager)
+        let file_path = file_path.as_ref();
+        let source_file =
+            source_manager.load_file(file_path).into_diagnostic().wrap_err_with(|| {
+                format!("failed to load source file from '{}'", file_path.display())
+            })?;
+        self.parse(path, source_file, source_manager)
     }
 
     /// Parse a [ast::Module], `name`, from `source`.
     pub fn parse_str(
         &mut self,
-        name: impl AsRef<Path>,
+        path: Option<&Path>,
         source: impl ToString,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
         use miden_debug_types::SourceContent;
 
-        let name = name.as_ref();
-        let uri = Uri::from(name.as_str().to_string().into_boxed_str());
-        let content = SourceContent::new(
-            SourceLanguage::Masm,
-            uri.clone(),
-            source.to_string().into_boxed_str(),
-        );
-        let source_file = source_manager.load_from_raw_parts(uri, content);
-        self.parse(name, source_file, source_manager)
+        let source = source.to_string();
+        let source_file = match path {
+            Some(path) => {
+                let uri = Uri::from(path.as_str().to_string().into_boxed_str());
+                let content =
+                    SourceContent::new(SourceLanguage::Masm, uri.clone(), source.into_boxed_str());
+                source_manager.load_from_raw_parts(uri, content)
+            },
+            None => source_manager.load_anonymous(SourceLanguage::Masm, source),
+        };
+        self.parse(path, source_file, source_manager)
     }
 }
 
@@ -156,155 +178,198 @@ fn parse_forms_internal(
 ///
 /// Returns an iterator over all parsed modules.
 #[cfg(feature = "std")]
-pub fn read_modules_from_dir(
-    dir: impl AsRef<std::path::Path>,
-    namespace: impl AsRef<Path>,
+pub fn read_modules_from_root(
+    root: impl AsRef<std::path::Path>,
+    namespace: Option<Arc<Path>>,
+    kind: Option<ast::ModuleKind>,
     source_manager: Arc<dyn SourceManager>,
     warnings_as_errors: bool,
-) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
-    use std::collections::{BTreeMap, btree_map::Entry};
+) -> Result<(Box<ast::Module>, Vec<Box<ast::Module>>), Report> {
+    use miden_utils_diagnostics::report;
 
-    use miden_utils_diagnostics::{IntoDiagnostic, WrapErr, report};
-    use module_walker::{ModuleEntry, WalkModules};
+    let root = root.as_ref();
+    let root = Arc::<std::path::Path>::from(
+        root.canonicalize()
+            .map_err(|err| {
+                Report::msg(format!("invalid root module path '{}': {err}", root.display()))
+            })?
+            .into_boxed_path(),
+    );
 
-    let dir = dir.as_ref();
-    if !dir.is_dir() {
-        return Err(report!("the provided path '{}' is not a valid directory", dir.display()));
+    // Make sure the path has the right file extension
+    if root
+        .extension()
+        .is_none_or(|ext| !ext.eq_ignore_ascii_case(ast::Module::FILE_EXTENSION))
+    {
+        return Err(Report::msg(format!(
+            "invalid root module path '{}': expected a .masm file",
+            root.display()
+        )));
     }
 
-    // mod.masm is not allowed in the root directory
-    if dir.join(ast::Module::ROOT_FILENAME).exists() {
-        return Err(report!("{} is not allowed in the root directory", ast::Module::ROOT_FILENAME));
+    // Make sure it is a file
+    if !root.is_file() {
+        return Err(Report::msg(format!(
+            "invalid root module path '{}': not a file",
+            root.display()
+        )));
     }
 
-    let mut modules = BTreeMap::default();
+    // Capture the parent directory for resolving submodules
+    let root_dir = root
+        .parent()
+        .ok_or_else(|| {
+            Report::msg(format!(
+                "invalid root module path '{}': expected path to have a parent directory",
+                root.display()
+            ))
+        })?
+        .to_path_buf();
 
-    let walker = WalkModules::new(namespace.as_ref().to_path_buf(), dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to load modules from '{}'", dir.display()))?;
-    for entry in walker {
-        let ModuleEntry { mut name, source_path } = entry?;
-        if name.last().unwrap() == ast::Module::ROOT {
-            name.pop();
-        }
+    let mut seen = BTreeSet::<Arc<Path>>::new();
+    let mut modules = Vec::new();
 
-        // Parse module at the given path
-        let mut parser = ModuleParser::new(ast::ModuleKind::Library);
-        parser.set_warnings_as_errors(warnings_as_errors);
-        let ast = parser.parse_file(&name, &source_path, source_manager.clone())?;
-        match modules.entry(name) {
-            Entry::Occupied(ref entry) => {
-                return Err(report!("duplicate module '{0}'", entry.key().clone()));
-            },
-            Entry::Vacant(entry) => {
-                entry.insert(ast);
-            },
-        }
-    }
+    let mut parser = ModuleParser::new(kind);
+    parser.set_warnings_as_errors(warnings_as_errors);
+    let root_ast = parser.parse_file(namespace.as_deref(), &root, source_manager.clone())?;
 
-    Ok(modules.into_values())
+    let namespace = Arc::<Path>::from(root_ast.path().to_path_buf().into_boxed_path());
+    let submodules = root_ast.submodules().to_vec();
+    seen.insert(namespace.clone());
+    walk_module_tree(
+        namespace,
+        root,
+        root_dir,
+        submodules,
+        source_manager,
+        warnings_as_errors,
+        |module| {
+            if !seen.insert(module.path().into()) {
+                Err(report!("duplicate module '{0}'", module.path()))
+            } else {
+                modules.push(module);
+                Ok(())
+            }
+        },
+    )?;
+
+    Ok((root_ast, modules))
 }
 
 #[cfg(feature = "std")]
-mod module_walker {
-    use std::{
-        ffi::OsStr,
-        fs::{self, DirEntry, FileType},
-        io,
-        path::{Path, PathBuf},
-    };
+pub fn walk_module_tree<F>(
+    namespace: Arc<Path>,
+    root: Arc<std::path::Path>,
+    current_dir: std::path::PathBuf,
+    submodules: Vec<ast::SubmoduleDecl>,
+    source_manager: Arc<dyn SourceManager>,
+    warnings_as_errors: bool,
+    mut callback: F,
+) -> Result<(), Report>
+where
+    F: FnMut(Box<ast::Module>) -> Result<(), Report>,
+{
+    use miden_debug_types::{Spanned, Uri};
 
-    use miden_utils_diagnostics::{IntoDiagnostic, Report, report};
-
-    use crate::{Path as LibraryPath, PathBuf as LibraryPathBuf, ast::Module};
-
-    pub struct ModuleEntry {
-        pub name: LibraryPathBuf,
-        pub source_path: PathBuf,
+    struct ModuleEntry {
+        pub name: ast::Ident,
+        pub namespace: Arc<Path>,
+        pub directory: Arc<std::path::Path>,
+        pub parent: Arc<std::path::Path>,
     }
 
-    pub struct WalkModules<'a> {
-        namespace: LibraryPathBuf,
-        root: &'a Path,
-        stack: alloc::collections::VecDeque<io::Result<DirEntry>>,
-    }
+    let current_dir = Arc::<std::path::Path>::from(current_dir.into_boxed_path());
+    let mut visited = BTreeSet::<Arc<std::path::Path>>::from_iter([root.clone()]);
+    let mut worklist = submodules
+        .iter()
+        .map(|sm| ModuleEntry {
+            name: sm.name.clone(),
+            namespace: namespace.clone(),
+            directory: current_dir.clone(),
+            parent: root.clone(),
+        })
+        .collect::<Vec<_>>();
 
-    impl<'a> WalkModules<'a> {
-        pub fn new(namespace: LibraryPathBuf, path: &'a Path) -> io::Result<Self> {
-            use alloc::collections::VecDeque;
+    while let Some(entry) = worklist.pop() {
+        let basename = entry.name.replace('-', "_");
+        let mod_dir = entry.directory.join(&basename);
+        let mod_file = mod_dir.with_extension("masm");
+        let mod_dir_mod_masm = mod_dir.join("mod.masm");
 
-            let stack = VecDeque::from_iter(fs::read_dir(path)?);
-
-            Ok(Self { namespace, root: path, stack })
+        // If the parent module is at `mod_file`, then the parent module and submodule have the
+        // same name. We explicitly do not allow this, because what we should do is unclear. We
+        // could attempt to add an extra level of nesting, e.g.
+        // `<mod_dir>/<basename>/<basename>.masm` or `<mod_dir>/<basename>/<basename>/mod.masm`,
+        // but that may not be intended.
+        if mod_file.as_path() == &*entry.parent {
+            let span = entry.name.span();
+            let source_file = source_manager.get(span.source_id()).ok();
+            return Err(ParsingError::SelfReferentialSubmodule {
+                name: entry.name.clone(),
+                parent_module_uri: Uri::from(entry.parent),
+                span,
+                source_file,
+            }
+            .into());
         }
 
-        fn next_entry(
-            &mut self,
-            entry: &DirEntry,
-            ty: FileType,
-        ) -> Result<Option<ModuleEntry>, Report> {
-            if ty.is_dir() {
-                let dir = entry.path();
-                self.stack.extend(fs::read_dir(dir).into_diagnostic()?);
-                return Ok(None);
-            }
-
-            let mut file_path = entry.path();
-            let is_module = file_path
-                .extension()
-                .map(|ext| ext == AsRef::<OsStr>::as_ref(Module::FILE_EXTENSION))
-                .unwrap_or(false);
-            if !is_module {
-                return Ok(None);
-            }
-
-            // Remove the file extension and the root prefix, leaving a namespace-relative path
-            file_path.set_extension("");
-            if file_path.is_dir() {
-                return Err(report!(
-                    "file and directory with same name are not allowed: {}",
-                    file_path.display()
-                ));
-            }
-            let relative_path = file_path
-                .strip_prefix(self.root)
-                .expect("expected path to be a child of the root directory");
-
-            // Construct a [LibraryPath] from the path components, after validating them
-            let mut libpath = self.namespace.clone();
-            for component in relative_path.iter() {
-                let component = component.to_str().ok_or_else(|| {
-                    let p = entry.path();
-                    report!("{} is an invalid directory entry", p.display())
-                })?;
-                LibraryPath::validate(component).into_diagnostic()?;
-                libpath.push(component);
-            }
-            Ok(Some(ModuleEntry { name: libpath, source_path: entry.path() }))
-        }
-    }
-
-    impl Iterator for WalkModules<'_> {
-        type Item = Result<ModuleEntry, Report>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                let entry = self
-                    .stack
-                    .pop_front()?
-                    .and_then(|entry| entry.file_type().map(|ft| (entry, ft)))
-                    .into_diagnostic();
-
-                match entry {
-                    Ok((ref entry, file_type)) => {
-                        match self.next_entry(entry, file_type).transpose() {
-                            None => {},
-                            result => break result,
-                        }
-                    },
-                    Err(err) => break Some(Err(err)),
+        let actual_path = if mod_file.is_file() {
+            if mod_dir_mod_masm.is_file() {
+                let span = entry.name.span();
+                let source_file = source_manager.get(span.source_id()).ok();
+                return Err(ParsingError::AmbiguousSubmoduleLocation {
+                    name: entry.name,
+                    first: Uri::from(mod_file),
+                    second: Uri::from(mod_dir_mod_masm),
+                    span,
+                    source_file,
                 }
+                .into());
             }
+            mod_file
+        } else if mod_dir_mod_masm.is_file() {
+            mod_dir_mod_masm
+        } else {
+            let span = entry.name.span();
+            let source_file = source_manager.get(span.source_id()).ok();
+            return Err(ParsingError::UndefinedSubmodule {
+                name: entry.name,
+                basename: basename.into_boxed_str(),
+                directory: Uri::from(mod_dir),
+                span,
+                source_file,
+            }
+            .into());
+        };
+
+        let actual_path = Arc::<std::path::Path>::from(actual_path);
+        if !visited.insert(actual_path.clone()) {
+            let span = entry.name.span();
+            let source_file = source_manager.get(span.source_id()).ok();
+            return Err(ParsingError::DuplicateSubmoduleSource {
+                name: entry.name,
+                module_uri: Uri::from(actual_path.as_ref()),
+                span,
+                source_file,
+            }
+            .into());
         }
+
+        let mut parser = ModuleParser::new(Some(ast::ModuleKind::Library));
+        parser.set_warnings_as_errors(warnings_as_errors);
+        let module_path = Arc::<Path>::from(entry.namespace.join(&entry.name).into_boxed_path());
+        let ast = parser.parse_file(Some(&module_path), &actual_path, source_manager.clone())?;
+
+        let directory = Arc::<std::path::Path>::from(mod_dir);
+        worklist.extend(ast.submodules().iter().map(|sm| ModuleEntry {
+            name: sm.name.clone(),
+            namespace: module_path.clone(),
+            directory: directory.clone(),
+            parent: actual_path.clone(),
+        }));
+
+        callback(ast)?;
     }
+
+    Ok(())
 }

@@ -113,7 +113,6 @@ fn get_mast_node_ext_methods() -> Vec<&'static str> {
         "append_children_to",
         "for_each_child",
         "domain",
-        "verify_node_in_forest",
         "to_builder",
     ]
 }
@@ -173,17 +172,6 @@ fn generate_method_impl_for_trait_method(
             fn domain(&self) -> miden_crypto::Felt {
                 match self {
                     #(#enum_name::#variant_names(field) => field.domain()),*
-                }
-            }
-        },
-        "verify_node_in_forest" => quote! {
-            #[cfg(debug_assertions)]
-            fn verify_node_in_forest<F>(&self, forest: &F)
-            where
-                F: crate::mast::ExecutableMastForest + ?Sized,
-            {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.verify_node_in_forest(forest)),*
                 }
             }
         },
@@ -293,9 +281,10 @@ fn generate_mast_forest_contributor_impl(
             fn fingerprint_for_node(
                 &self,
                 forest: &crate::mast::MastForest,
+                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::Word>,
             ) -> Result<crate::Word, crate::mast::MastForestError> {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest)),*
+                    #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
                 }
             }
 

@@ -43,13 +43,13 @@ macro_rules! impl_borrow_for_chiplet_cols {
 // PERMUTATION COLUMNS
 // ================================================================================================
 
-/// Permutation chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+/// Permutation chiplet columns (19 columns), viewed from `chiplets[0..19]`.
 ///
-/// Logical overlay for permutation segment rows (`s_perm = 1`). The 3 witness columns
+/// Logical overlay for permutation segment rows (`s_00 = 1`). The 3 witness columns
 /// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
 /// and `multiplicity` shares the same physical column as the controller's `node_index`.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `ChipletCols::s_perm`) are consumed by the chiplet
+/// `s_00` and `s_01` (= `ChipletCols::s_00` and `ChipletCols::s_01`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
@@ -127,15 +127,15 @@ impl<T: Copy> PermutationCols<T> {
 // CONTROLLER COLUMNS
 // ================================================================================================
 
-/// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+/// Controller chiplet columns (19 columns), viewed from `chiplets[0..19]`.
 ///
-/// Logical overlay for controller rows (`s_ctrl = 1`). `s0` distinguishes input rows
+/// Logical overlay for controller rows (`s_01 = 1`). `s0` distinguishes input rows
 /// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
 /// [`PermutationCols`], but column names reflect the controller/permutation split.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `ChipletCols::s_perm`) are consumed by the chiplet
+/// `s_00` and `s_01` (= `ChipletCols::s_00` and `ChipletCols::s_01`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay. Because the chiplet-level
-/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl - s_perm`) and is
+/// non-hasher selector is only ever a virtual expression (`1 - s_00 - s_01`) and is
 /// never a named column or struct field, there is no name collision with the
 /// controller-internal `s0` defined here.
 ///
@@ -232,7 +232,7 @@ impl<T: Copy> ControllerCols<T> {
 // BITWISE COLUMNS
 // ================================================================================================
 
-/// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
+/// Bitwise chiplet columns (13 columns), viewed from `chiplets[1..14]`.
 ///
 /// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
 /// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
@@ -258,7 +258,7 @@ pub struct BitwiseCols<T> {
 // MEMORY COLUMNS
 // ================================================================================================
 
-/// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
+/// Memory chiplet columns (15 columns), viewed from `chiplets[2..17]`.
 ///
 /// When reading from a new word address (first access to a context/addr pair), the
 /// `values` are initialized to zero.
@@ -294,7 +294,7 @@ pub struct MemoryCols<T> {
 // ACE COLUMNS
 // ================================================================================================
 
-/// ACE chiplet columns (16 columns), viewed from `chiplets[4..20]`.
+/// ACE chiplet columns (16 columns), viewed from `chiplets[3..19]`.
 ///
 /// The ACE (Arithmetic Circuit Evaluator) chiplet evaluates arithmetic circuits over
 /// quadratic extension field elements. Each circuit evaluation consists of two phases:
@@ -462,7 +462,7 @@ const _: () = {
 // KERNEL ROM COLUMNS
 // ================================================================================================
 
-/// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
+/// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[4..9]`.
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct KernelRomCols<T> {
@@ -531,7 +531,12 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-#[allow(clippy::new_without_default)]
+impl Default for HasherPeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HasherPeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the Poseidon2 hasher chiplet.
     ///
@@ -552,7 +557,10 @@ impl HasherPeriodicCols<Vec<Felt>> {
     /// 12-14 ext6-ext8              is_ext
     /// 15   boundary                (none)
     /// ```
-    #[allow(clippy::needless_range_loop)]
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "index-based assignments mirror the documented 16-row schedule"
+    )]
     pub fn new() -> Self {
         // -------------------------------------------------------------------------
         // Selectors
@@ -623,7 +631,12 @@ impl HasherPeriodicCols<Vec<Felt>> {
     }
 }
 
-#[allow(clippy::new_without_default)]
+impl Default for BitwisePeriodicCols<Vec<Felt>> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitwisePeriodicCols<Vec<Felt>> {
     /// Generate periodic columns for the bitwise chiplet.
     pub fn new() -> Self {
@@ -706,8 +719,8 @@ const _: () = {
     assert!(size_of::<HasherPeriodicCols<u8>>() == 16);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 
-    // PermutationCols and ControllerCols overlay chiplets[1..20] (19 columns,
-    // excluding s_perm which is consumed by the chiplet selector system).
+    // PermutationCols and ControllerCols overlay chiplets[0..19] (19 columns,
+    // excluding s_00/s_01 which are consumed by the chiplet selector system).
     assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };

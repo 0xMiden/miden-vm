@@ -59,9 +59,9 @@ pub(in crate::constraints::lookup) use lookup_op_flags::LookupOpFlags;
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
 pub(crate) struct ChipletActiveFlags<E> {
-    /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
+    /// `is_active` for the hasher controller sub-chiplet (= `s_01`).
     pub controller: E,
-    /// `is_active` for the hasher permutation sub-chiplet (= `s_perm`).
+    /// `is_active` for the hasher permutation sub-chiplet (= `s_00`).
     pub permutation: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
     pub bitwise: E,
@@ -81,8 +81,8 @@ where
     ///
     /// Mirrors the active-flag block of
     /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
-    /// - `s_ctrl = chiplets[0]`, `s_perm`
-    /// - virtual `s0 = 1 - s_ctrl - s_perm`
+    /// - `s_00`, `s_01`
+    /// - virtual `s0 = 1 - s_00 - s_01`
     /// - prefix chain `s01 / s012 / s0123 / s01234`
     /// - `is_bitwise = s0 - s01`, `is_memory = s01 - s012`, `is_ace = s012 - s0123`, `is_kernel_rom
     ///   = s0123 - s01234`
@@ -91,12 +91,12 @@ where
         V: Copy,
         E: Algebra<V>,
     {
-        let s_ctrl: E = local.chiplets[0].into();
-        let s_perm: E = local.s_perm.into();
-        let s1: E = local.chiplets[1].into();
-        let s2: E = local.chiplets[2].into();
-        let s3: E = local.chiplets[3].into();
-        let s4: E = local.chiplets[4].into();
+        let s_ctrl: E = local.s_01.into();
+        let s_perm: E = local.s_00.into();
+        let s1: E = local.chiplets[0].into();
+        let s2: E = local.chiplets[1].into();
+        let s3: E = local.chiplets[2].into();
+        let s4: E = local.chiplets[3].into();
 
         // Virtual non-hasher selector and prefix products.
         let s0 = E::ONE - s_ctrl.clone() - s_perm.clone();

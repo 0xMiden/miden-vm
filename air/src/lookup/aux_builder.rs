@@ -59,7 +59,7 @@ pub(crate) const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 // TOP-LEVEL DRIVER
 // ================================================================================================
 
-/// Generic `AuxBuilder::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
+/// Generic `LiftedAir::build_aux_trace` body for any `LiftedAir + LookupAir` AIR.
 ///
 /// Sources `alpha`, `beta`, `max_message_width`, `num_bus_ids`, and periodic columns
 /// from the AIR, runs collection + accumulation, and returns `(aux_trace, vec![acc_final])`.

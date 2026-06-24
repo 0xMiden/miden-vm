@@ -138,7 +138,7 @@ pub trait PackageRegistry {
 
     /// Returns true if any version of `package` exists in the registry.
     fn is_available(&self, package: &PackageId) -> bool {
-        self.available_versions(package).is_some()
+        self.available_versions(package).is_some_and(|versions| !versions.is_empty())
     }
 
     /// Returns true if the specific `version` of `package` exists in the registry.
@@ -346,5 +346,22 @@ mod tests {
         store
             .publish_package(package)
             .expect_err("no package store should still reject publication");
+    }
+
+    #[test]
+    fn package_registry_is_available_requires_at_least_one_version() {
+        struct EmptyVersionRegistry {
+            versions: PackageVersions,
+        }
+
+        impl PackageRegistry for EmptyVersionRegistry {
+            fn available_versions(&self, _package: &PackageId) -> Option<&PackageVersions> {
+                Some(&self.versions)
+            }
+        }
+
+        let registry = EmptyVersionRegistry { versions: BTreeMap::new() };
+
+        assert!(!registry.is_available(&PackageId::from("pkg")));
     }
 }

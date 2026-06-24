@@ -1,4 +1,3 @@
-#[cfg(feature = "std")]
 mod falcon;
 
 mod aead;

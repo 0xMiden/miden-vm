@@ -410,32 +410,32 @@ impl MainTrace {
     /// [`Self::is_bitwise_row`] / [`Self::is_memory_row`] / [`Self::is_ace_row`], which
     /// short-circuit past the chiplets height.
     pub fn chiplet_selector_0(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[0]
+        self.chiplet_cols(i).s_01
     }
 
     /// Returns chiplet column number 1 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_1(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[1]
+        self.chiplet_cols(i).chiplets[0]
     }
 
     /// Returns chiplet column number 2 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_2(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[2]
+        self.chiplet_cols(i).chiplets[1]
     }
 
     /// Returns chiplet column number 3 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_3(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[3]
+        self.chiplet_cols(i).chiplets[2]
     }
 
     /// Returns chiplet column number 4 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_4(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[4]
+        self.chiplet_cols(i).chiplets[3]
     }
 
     /// Returns chiplet column number 5 at row i. See [`Self::chiplet_selector_0`] for bounds.
     pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).chiplets[5]
+        self.chiplet_cols(i).chiplets[4]
     }
 
     /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
@@ -476,14 +476,14 @@ impl MainTrace {
         self.chiplet_cols(i).controller().direction_bit
     }
 
-    /// Returns the hasher's s_perm column at row i (0=controller, 1=permutation segment).
+    /// Returns the hasher's s_00 column at row i (0=controller, 1=permutation segment).
     ///
     /// # Panics
     /// Panics if `i` is past the chiplets-AIR height. See [`Self::chiplet_selector_0`] for
     /// the contract that the four `is_*_row` classifiers short-circuit past the chiplets
     /// height, so they can be used as bound-aware filters.
     pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
-        self.chiplet_cols(i).s_perm
+        self.chiplet_cols(i).s_00
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.

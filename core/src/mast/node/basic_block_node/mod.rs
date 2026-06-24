@@ -4,10 +4,11 @@ use core::{fmt, iter::repeat_n};
 use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
-    mast::{ExecutableMastForest, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{MastForest, MastForestError, MastNode, MastNodeId},
     operations::Operation,
     prettier::PrettyPrint,
-    utils::LookupByIdx,
+    serde::Serializable,
+    utils::{LookupByIdx, bytes_to_packed_u32_elements},
 };
 
 mod op_batch;
@@ -32,6 +33,8 @@ pub const GROUP_SIZE: usize = 9;
 /// Maximum number of groups per batch.
 pub const BATCH_SIZE: usize = 8;
 const _: [(); 1] = [(); ((BATCH_SIZE & (BATCH_SIZE - 1)) == 0) as usize];
+
+const ERROR_CODE_FINGERPRINT_DOMAIN: Felt = Felt::new_unchecked(0x2473_0001);
 
 // BASIC BLOCK NODE
 // ================================================================================================
@@ -501,14 +504,6 @@ impl MastNodeExt for BasicBlockNode {
         // Use from_op_batches to avoid re-batching existing operation batches.
         BasicBlockNodeBuilder::from_op_batches(self.op_batches, self.digest)
     }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, forest: &F)
-    where
-        F: ExecutableMastForest + ?Sized,
-    {
-        let _ = forest;
-    }
 }
 
 impl PrettyPrint for BasicBlockNode {
@@ -703,6 +698,35 @@ fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
     (batches, hash)
 }
 
+fn fingerprint_basic_block_error_codes(block_digest: Word, op_batches: &[OpBatch]) -> Word {
+    let error_code_data = serialize_basic_block_error_codes(op_batches);
+    if error_code_data.is_empty() {
+        return block_digest;
+    }
+
+    let data_len = error_code_data.len() as u64;
+    let mut elements = Vec::with_capacity(7 + error_code_data.len().div_ceil(4));
+    elements.push(ERROR_CODE_FINGERPRINT_DOMAIN);
+    elements.extend_from_slice(block_digest.as_elements());
+    elements.push(Felt::from_u32(data_len as u32));
+    elements.push(Felt::from_u32((data_len >> 32) as u32));
+    elements.extend(bytes_to_packed_u32_elements(&error_code_data));
+    hasher::hash_elements(&elements)
+}
+
+fn serialize_basic_block_error_codes(op_batches: &[OpBatch]) -> Vec<u8> {
+    let mut data = Vec::new();
+
+    for (raw_op_idx, op) in op_batches.iter().flat_map(OpBatch::raw_ops).enumerate() {
+        if matches!(op, Operation::Assert(_) | Operation::U32assert2(_) | Operation::MpVerify(_)) {
+            data.extend_from_slice(&(raw_op_idx as u64).to_le_bytes());
+            op.write_into(&mut data);
+        }
+    }
+
+    data
+}
+
 /// Groups the provided operations into batches as described in the docs for this module (i.e., up
 /// to 9 operations per group, and 8 groups per batch).
 fn batch_ops(ops: &[Operation]) -> Vec<OpBatch> {
@@ -758,15 +782,27 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Creates a builder from pre-existing OpBatches.
+    /// Creates a builder from pre-existing OpBatches and a trusted digest.
     ///
-    /// This constructor is used during deserialization where operations are already batched. The
-    /// digest must also be provided.
+    /// This constructor is used when operations are already batched, such as during
+    /// deserialization. The provided digest is preserved as-is; it is not recomputed or checked
+    /// against the batches by the builder. Callers that accept untrusted input must validate the
+    /// resulting forest before use.
     pub(crate) fn from_op_batches(op_batches: Vec<OpBatch>, digest: Word) -> Self {
         Self {
             operation_data: OperationData::Batched { op_batches },
             digest: Some(digest),
         }
+    }
+
+    /// Creates a builder from already-batched operations and preserves the provided digest.
+    ///
+    /// This is used by the assembly builder when it has already formed operation batches while
+    /// pending nodes were still builder-local references. The digest is treated as trusted node
+    /// identity and is not recomputed by this builder.
+    #[doc(hidden)]
+    pub fn from_op_batches_preserving_digest(op_batches: Vec<OpBatch>, digest: Word) -> Self {
+        Self::from_op_batches(op_batches, digest)
     }
 
     /// Builds the BasicBlockNode.
@@ -888,19 +924,24 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, _forest: &MastForest) -> Result<Word, MastForestError> {
-        let digest = match &self.operation_data {
+    fn fingerprint_for_node(
+        &self,
+        _forest: &MastForest,
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let (op_batches, digest) = match &self.operation_data {
             OperationData::Raw { operations } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
-                let (_, computed_digest) = batch_and_hash_ops(operations);
-                self.digest.unwrap_or(computed_digest)
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                (op_batches, self.digest.unwrap_or(computed_digest))
             },
-            OperationData::Batched { .. } => {
-                self.digest.expect("digest must be set for batched operations")
+            OperationData::Batched { op_batches } => {
+                let digest = self.digest.expect("digest must be set for batched operations");
+                (op_batches.clone(), digest)
             },
         };
 
-        Ok(digest)
+        Ok(fingerprint_basic_block_error_codes(digest, &op_batches))
     }
 
     fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {

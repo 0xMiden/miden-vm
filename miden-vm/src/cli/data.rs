@@ -134,21 +134,20 @@ where
     pub fn read_with(path: impl AsRef<Path>, source_manager: Arc<S>) -> Result<Self, Report> {
         // parse the program into an AST
         let path = path.as_ref();
-        let mut parser = Module::parser(ModuleKind::Executable);
+        let mut parser = Module::parser(Some(ModuleKind::Executable));
         let ast = parser
-            .parse_file(LibraryPath::exec_path(), path, source_manager.clone())
+            .parse_file(Some(LibraryPath::exec_path()), path, source_manager.clone())
             .wrap_err_with(|| format!("Failed to parse program file `{}`", path.display()))?;
 
         Ok(Self { ast, source_manager })
     }
 
-    /// Compiles this program file into a [Program].
-    #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
+    /// Compiles this program file into an executable [Package].
+    #[instrument(name = "compile_package", skip_all)]
+    pub fn compile_package<I>(&self, libraries: I) -> Result<Box<Package>, Report>
     where
         I: IntoIterator<Item = Arc<Package>>,
     {
-        // compile program
         let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
             .link_package(CoreLibrary::default().package(), miden_assembly::Linkage::Dynamic)
@@ -160,12 +159,18 @@ where
                 .wrap_err("Failed to load libraries")?;
         }
 
-        let program: Program = assembler
-            .assemble_program("program", self.ast.as_ref())
-            .wrap_err("Failed to compile program")?
-            .unwrap_program();
+        assembler
+            .assemble_program("program", self.ast.clone())
+            .wrap_err("Failed to compile program")
+    }
 
-        Ok(program)
+    /// Compiles this program file into a [Program].
+    #[instrument(name = "compile_program", skip_all)]
+    pub fn compile<I>(&self, libraries: I) -> Result<Program, Report>
+    where
+        I: IntoIterator<Item = Arc<Package>>,
+    {
+        Ok(self.compile_package(libraries)?.unwrap_program())
     }
 
     /// Returns the source manager for this program file.

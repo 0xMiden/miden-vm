@@ -21,8 +21,18 @@ pub enum Op {
         /// This block will be empty if no `else` branch was present
         else_blk: Block,
     } = 0,
-    /// Represents a condition-controlled loop
+    /// Represents a head-controlled loop (`while.true`..`end`).
     While { span: SourceSpan, body: Block } = 1,
+    /// Represents a tail-controlled loop (`do`..`while`..`end`).
+    ///
+    /// The `body` always executes at least once; the `condition` block is then evaluated and must
+    /// leave a boolean on top of the stack. The loop re-iterates while that boolean is `1` and
+    /// exits when it is `0`.
+    DoWhile {
+        span: SourceSpan,
+        body: Block,
+        condition: Block,
+    } = 4,
     /// Represents a counter-controlled loop.
     ///
     /// NOTE: The iteration count must be known at compile-time, so this is _not_ used for general
@@ -46,6 +56,9 @@ impl crate::prettier::PrettyPrint for Op {
                 text("if.true") + then_blk.render() + text("else") + else_blk.render() + text("end")
             },
             Self::While { body, .. } => text("while.true") + body.render() + text("end"),
+            Self::DoWhile { body, condition, .. } => {
+                text("do") + body.render() + text("while") + condition.render() + text("end")
+            },
             Self::Repeat { count, body, .. } => {
                 display(format!("repeat.{count}")) + body.render() + text("end")
             },
@@ -61,6 +74,11 @@ impl fmt::Debug for Op {
                 f.debug_struct("If").field("then", then_blk).field("else", else_blk).finish()
             },
             Self::While { body, .. } => f.debug_tuple("While").field(body).finish(),
+            Self::DoWhile { body, condition, .. } => f
+                .debug_struct("DoWhile")
+                .field("body", body)
+                .field("condition", condition)
+                .finish(),
             Self::Repeat { count, body, .. } => {
                 f.debug_struct("Repeat").field("count", count).field("body", body).finish()
             },
@@ -80,6 +98,10 @@ impl PartialEq for Op {
             ) => lt == rt && le == re,
             (Self::While { body: lbody, .. }, Self::While { body: rbody, .. }) => lbody == rbody,
             (
+                Self::DoWhile { body: lbody, condition: lcond, .. },
+                Self::DoWhile { body: rbody, condition: rcond, .. },
+            ) => lbody == rbody && lcond == rcond,
+            (
                 Self::Repeat { count: lcount, body: lbody, .. },
                 Self::Repeat { count: rcount, body: rbody, .. },
             ) => lcount == rcount && lbody == rbody,
@@ -92,7 +114,10 @@ impl PartialEq for Op {
 impl Spanned for Op {
     fn span(&self) -> SourceSpan {
         match self {
-            Self::If { span, .. } | Self::While { span, .. } | Self::Repeat { span, .. } => *span,
+            Self::If { span, .. }
+            | Self::While { span, .. }
+            | Self::DoWhile { span, .. }
+            | Self::Repeat { span, .. } => *span,
             Self::Inst(spanned) => spanned.span(),
         }
     }

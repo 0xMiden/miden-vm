@@ -4,13 +4,11 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax_cst::{
-    SyntaxKind, SyntaxToken,
-    ast::{
-        AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
-        Import as CstImport, Item as CstItem, Procedure as CstProcedure, TypeDecl as CstTypeDecl,
-    },
-    rowan,
+use miden_assembly_syntax_cst::ast::{
+    AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
+    ExternPackage as CstExternPackage, Import as CstImport, ImportKind as CstImportKind,
+    Item as CstItem, Namespace as CstNamespace, Procedure as CstProcedure,
+    Submodule as CstSubmodule, TypeDecl as CstTypeDecl,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
@@ -18,12 +16,11 @@ use super::{
     blocks::lower_required_block,
     context::LoweringContext,
     fragments::{
-        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_constant_expr,
-        lower_enum_decl_from_body, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body, parse_numeric_token,
+        lower_advice_map_decl, lower_attribute, lower_constant_expr, lower_enum_decl_from_body,
+        lower_function_type_from_signature, lower_type_expr_from_alias_body,
     },
 };
-use crate::{Report, Word, ast, parser::ParsingError};
+use crate::{Report, ast, parser::ParsingError};
 
 /// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser
 /// pipeline.
@@ -47,6 +44,18 @@ pub(super) fn lower_source_file(
 
         match &items[index] {
             CstItem::Doc(_) => unreachable!("doc items handled above"),
+            CstItem::Namespace(namespace) => {
+                forms.push(lower_namespace(context, namespace)?);
+                index += 1;
+            },
+            CstItem::ExternPackage(extern_package) => {
+                forms.push(lower_extern_package(context, extern_package)?);
+                index += 1;
+            },
+            CstItem::Submodule(submodule) => {
+                forms.push(lower_submodule(context, submodule)?);
+                index += 1;
+            },
             CstItem::Import(import) => {
                 forms.push(lower_import(context, import)?);
                 index += 1;
@@ -187,33 +196,113 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     text
 }
 
-/// Lowers a `use` form into the alias representation.
-///
-/// Unnamed path imports derive their alias name from the final path segment, while digest imports
-/// are required to provide an explicit alias.
+/// Lowers a `namespace` declaration.
+fn lower_namespace(
+    context: &mut LoweringContext<'_>,
+    namespace: &CstNamespace,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(namespace.syntax());
+    let path = namespace.path().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a namespace path".to_string(),
+    })?;
+    Ok(ast::Form::Namespace(context.lower_path(&path)?))
+}
+
+/// Lowers an `extern package` declaration.
+fn lower_extern_package(
+    context: &mut LoweringContext<'_>,
+    extern_package: &CstExternPackage,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(extern_package.syntax());
+    let package = extern_package.package_token().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a package name".to_string(),
+    })?;
+    Ok(ast::Form::ExternPackage(context.lower_ident_or_string_token(&package)?))
+}
+
+/// Lowers a `mod` or `pub mod` declaration.
+fn lower_submodule(
+    context: &mut LoweringContext<'_>,
+    submodule: &CstSubmodule,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(submodule.syntax());
+    let visibility = context.lower_visibility(submodule.visibility());
+    let name = submodule.name_token().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected a submodule name".to_string(),
+    })?;
+
+    Ok(ast::Form::Submodule(ast::SubmoduleDecl {
+        visibility,
+        name: context.lower_ident_token(&name)?,
+    }))
+}
+
+/// Lowers a source `use` form into the explicit import representation.
 fn lower_import(
     context: &mut LoweringContext<'_>,
     import: &CstImport,
 ) -> Result<ast::Form, ParsingError> {
     let span = context.parse().span_for_node(import.syntax());
     let visibility = context.lower_visibility(import.visibility());
-    let target = lower_import_target(context, import)?;
-    let name = match import.alias_token() {
-        Some(alias) => context.lower_ident_token(&alias)?,
-        None => match &target {
-            ast::AliasTarget::MastRoot(_) => {
-                return Err(ParsingError::UnnamedReexportOfMastRoot { span });
-            },
-            ast::AliasTarget::Path(target) => {
-                let last = target
-                    .last()
-                    .expect("validated import targets should always contain at least one segment");
-                context.lower_ident_text(target.span(), last)?
-            },
-        },
-    };
 
-    Ok(ast::Form::Alias(ast::Alias::new(visibility, name, target)))
+    match import.kind() {
+        CstImportKind::Module => {
+            let module_path = import.module_path().ok_or_else(|| ParsingError::InvalidSyntax {
+                span,
+                message: "expected an import path".to_string(),
+            })?;
+            let path = context.lower_path(&module_path)?;
+            let local_name = match import.module_alias_token() {
+                Some(alias) => context.lower_ident_token(&alias)?,
+                None => {
+                    let last = module_path.segments().last().ok_or_else(|| {
+                        ParsingError::InvalidSyntax {
+                            span: path.span(),
+                            message: "expected an import path".to_string(),
+                        }
+                    })?;
+                    context.lower_ident_token(&last)?
+                },
+            };
+            Ok(ast::Form::Import(ast::ImportDecl::Module(ast::ModuleImport::new(
+                span, visibility, path, local_name,
+            ))))
+        },
+        CstImportKind::Items => {
+            let module_path = import.module_path().ok_or_else(|| ParsingError::InvalidSyntax {
+                span,
+                message: "expected a module path after `from`".to_string(),
+            })?;
+            let path = context.lower_path(&module_path)?;
+            let mut specs = Vec::new();
+            for spec in import.item_specs() {
+                let name = spec.name_token().ok_or_else(|| ParsingError::InvalidSyntax {
+                    span: context.parse().span_for_node(spec.syntax()),
+                    message: "expected an imported item name".to_string(),
+                })?;
+                let source_name = context.lower_ident_token(&name)?;
+                let local_name = match spec.alias_token() {
+                    Some(alias) => context.lower_ident_token(&alias)?,
+                    None => source_name.clone(),
+                };
+                specs.push(ast::ImportSpec::new(source_name, local_name));
+            }
+
+            if specs.is_empty() {
+                return Err(ParsingError::InvalidSyntax {
+                    span,
+                    message: "import lists must contain at least one item".to_string(),
+                });
+            }
+
+            Ok(ast::Form::Import(ast::ImportDecl::Items(ast::ItemImportGroup::new(
+                span, visibility, path, specs,
+            ))))
+        },
+    }
 }
 
 /// Lowers a constant declaration and validates its name/value pair.
@@ -551,84 +640,13 @@ fn re_span_block(span: SourceSpan, block: &ast::Block) -> ast::Block {
     ast::Block::new(span, block.iter().cloned().collect())
 }
 
-/// Lowers either a path import target or a digest import target from a `use` form.
-fn lower_import_target(
-    context: &mut LoweringContext<'_>,
-    import: &CstImport,
-) -> Result<ast::AliasTarget, ParsingError> {
-    if let Some(path) = import.path() {
-        let target = context.lower_path(&path)?;
-        if target.as_ident().is_some() {
-            return Err(ParsingError::UnqualifiedImport { span: target.span() });
-        }
-        return Ok(ast::AliasTarget::Path(target));
-    }
-
-    let target = import_target_token(import).ok_or_else(|| ParsingError::InvalidSyntax {
-        span: context.parse().span_for_node(import.syntax()),
-        message: "expected an import path or MAST root digest".to_string(),
-    })?;
-    lower_import_digest_target(context, &target)
-}
-
-/// Returns the first significant token following the `use` keyword.
-///
-/// This is used to recover digest imports, which are not represented as CST path nodes.
-fn import_target_token(import: &CstImport) -> Option<SyntaxToken> {
-    let mut seen_use = false;
-    for token in import
-        .syntax()
-        .children_with_tokens()
-        .filter_map(rowan::NodeOrToken::into_token)
-    {
-        if token.kind().is_trivia() {
-            continue;
-        }
-
-        if !seen_use {
-            seen_use = token.kind() == SyntaxKind::Ident && token.text() == "use";
-            continue;
-        }
-
-        return Some(token);
-    }
-
-    None
-}
-
-/// Lowers a digest-based import target and validates that it is a full MAST root literal.
-fn lower_import_digest_target(
-    context: &mut LoweringContext<'_>,
-    token: &SyntaxToken,
-) -> Result<ast::AliasTarget, ParsingError> {
-    let span = context.parse().span_for_token(token);
-    if token.kind() != SyntaxKind::Number {
-        return Err(ParsingError::InvalidSyntax {
-            span,
-            message: "expected an import path or MAST root digest".to_string(),
-        });
-    }
-
-    match parse_numeric_token(span, token.text())? {
-        ParsedNumeric::Word(word) => {
-            Ok(ast::AliasTarget::MastRoot(Span::new(span, Word::from(word.0))))
-        },
-        ParsedNumeric::Int(_)
-            if token.text().starts_with("0x") || token.text().starts_with("0X") =>
-        {
-            Err(ParsingError::InvalidMastRoot { span })
-        },
-        ParsedNumeric::Int(_) => Err(ParsingError::InvalidSyntax {
-            span,
-            message: "expected an import path or MAST root digest".to_string(),
-        }),
-    }
-}
-
 /// Returns the source span for any top-level CST item variant.
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {
     match item {
         CstItem::Doc(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::Namespace(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::ExternPackage(node) => context.parse().span_for_node(node.syntax()),
+        CstItem::Submodule(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Import(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Constant(node) => context.parse().span_for_node(node.syntax()),
         CstItem::TypeDecl(node) => context.parse().span_for_node(node.syntax()),

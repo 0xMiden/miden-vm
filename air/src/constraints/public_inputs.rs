@@ -39,7 +39,10 @@ where
     // First row: stack[i] == stack_inputs[i]
     {
         let builder = &mut builder.when_first_row();
-        #[allow(clippy::needless_range_loop)]
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "index-based loop keeps the stack input slot mapping explicit"
+        )]
         for i in 0..STACK_DEPTH {
             builder.assert_eq(local.stack.get(i), si[i]);
         }
@@ -48,7 +51,10 @@ where
     // Last row: stack[i] == stack_outputs[i]
     {
         let builder = &mut builder.when_last_row();
-        #[allow(clippy::needless_range_loop)]
+        #[expect(
+            clippy::needless_range_loop,
+            reason = "index-based loop keeps the stack output slot mapping explicit"
+        )]
         for i in 0..STACK_DEPTH {
             builder.assert_eq(local.stack.get(i), so[i]);
         }

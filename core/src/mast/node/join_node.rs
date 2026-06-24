@@ -4,7 +4,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt, fingerprint_with_child_fingerprints};
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -173,14 +173,7 @@ impl MastNodeExt for JoinNode {
     type Builder = JoinNodeBuilder;
 
     fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        JoinNodeBuilder::new(self.children)
-    }
-
-    #[cfg(debug_assertions)]
-    fn verify_node_in_forest<F>(&self, _forest: &F)
-    where
-        F: crate::mast::ExecutableMastForest + ?Sized,
-    {
+        JoinNodeBuilder::new(self.children).with_digest(self.digest)
     }
 }
 
@@ -249,6 +242,13 @@ impl JoinNodeBuilder {
 
         Ok(JoinNode { children: self.children, digest })
     }
+
+    pub(in crate::mast) fn build_linked(self) -> Result<JoinNode, MastForestError> {
+        Ok(JoinNode {
+            children: self.children,
+            digest: self.digest.ok_or(MastForestError::DigestRequiredForDeserialization)?,
+        })
+    }
 }
 
 impl MastForestContributor for JoinNodeBuilder {
@@ -281,15 +281,21 @@ impl MastForestContributor for JoinNodeBuilder {
         Ok(node_id)
     }
 
-    fn fingerprint_for_node(&self, forest: &MastForest) -> Result<Word, MastForestError> {
-        Ok(if let Some(forced_digest) = self.digest {
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, Word>,
+    ) -> Result<Word, MastForestError> {
+        let node_digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else {
             let left_child_hash = forest[self.children[0]].digest();
             let right_child_hash = forest[self.children[1]].digest();
 
             hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
-        })
+        };
+
+        fingerprint_with_child_fingerprints(node_digest, &self.children, forest, hash_by_node_id)
     }
 
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
@@ -341,12 +347,18 @@ impl JoinNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for JoinNodeBuilder {
-    type Parameters = ();
+    type Parameters = JoinNodeBuilderParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
 
+        let _ = params;
         any::<[MastNodeId; 2]>().prop_map(Self::new).boxed()
     }
 }
+
+/// Parameters for generating JoinNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug, Default)]
+pub struct JoinNodeBuilderParams {}

@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler,
+    Assembler, DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::Package;
@@ -127,8 +127,9 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
         },
         "masm" => {
             // Compile kernel from assembly source
-            Assembler::default()
-                .assemble_kernel("kernel", kernel_path.clone())
+            let source_manager = Arc::new(DefaultSourceManager::default());
+            Assembler::new(source_manager)
+                .assemble_kernel_from_root("kernel", kernel_path)
                 .map(Arc::<Package>::from)
                 .wrap_err_with(|| {
                     format!("Failed to compile kernel from `{}`", kernel_path.display())

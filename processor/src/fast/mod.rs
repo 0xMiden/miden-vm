@@ -133,6 +133,13 @@ pub struct FastProcessor {
     /// `system_call_state_stack`.
     stack_overflow_save_stack: Vec<Vec<Felt>>,
 
+    /// Running total of the number of field elements currently held across all suspended overflow
+    /// segments in `stack_overflow_save_stack`. Maintained in lockstep with that stack so the
+    /// aggregate operand-stack depth (active context plus all suspended overflow) can be bounded
+    /// by `ExecutionOptions::max_stack_depth()` in O(1) without summing every saved segment on
+    /// each push. See [`Self::ensure_stack_capacity_for_push`].
+    saved_overflow_len: usize,
+
     /// Options for execution, including cycle limits, stack limits, advice map limits, and the
     /// size of core trace fragments during execution.
     options: ExecutionOptions,
@@ -240,6 +247,7 @@ impl FastProcessor {
             options.max_deferred_elements(),
         )
         .expect("empty deferred registry initialization cannot fail");
+        self.memory.set_max_elements(options.max_memory_elements());
         self.options = options;
         Ok(self)
     }
@@ -274,9 +282,10 @@ impl FastProcessor {
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
             caller_hash: EMPTY_WORD,
-            memory: Memory::new(),
+            memory: Memory::new(options.max_memory_elements()),
             system_call_state_stack: Vec::new(),
             stack_overflow_save_stack: Vec::new(),
+            saved_overflow_len: 0,
             pc_transcript: PrecompileTranscript::new(),
             deferred_state: DeferredState::new(
                 Arc::new(PrecompileRegistry::new()),
@@ -300,6 +309,7 @@ impl FastProcessor {
             current_forest: program.mast_forest().clone(),
             continuation_stack: ContinuationStack::new(program),
             kernel: program.kernel().clone(),
+            package_debug_info: None,
         })
     }
 
@@ -528,9 +538,20 @@ impl FastProcessor {
     /// `SmallVec` would put a useful inline buffer inside `FastProcessor`, and preallocating the
     /// full limit would penalize ordinary programs. This policy is performance-sensitive and should
     /// be benchmarked against the fixed-buffer baseline.
+    ///
+    /// The depth that is checked is the *aggregate* operand-stack depth: the active context's depth
+    /// plus every element held in suspended overflow segments (`saved_overflow_len`). A `call`,
+    /// `dyncall`, or `syscall` context switch hides the caller's overflow in
+    /// `stack_overflow_save_stack` rather than freeing it, so checking only the active context
+    /// would let a program nest context switches to accumulate `O(call_depth *
+    /// max_stack_depth)` hidden operand-stack memory while every live frame stayed within the
+    /// limit. Because a context switch merely moves elements between the active stack and the
+    /// saved overflow (it never creates elements), the aggregate is conserved across switches
+    /// and only grows on a push, so enforcing the bound here is sufficient to cap total
+    /// operand-stack memory.
     #[inline(always)]
     fn ensure_stack_capacity_for_push(&mut self) -> Result<(), ExecutionError> {
-        let depth = self.stack_size() + 1;
+        let depth = self.stack_size() + self.saved_overflow_len + 1;
         let max = self.options.max_stack_depth();
         if depth > max {
             return Err(ExecutionError::StackDepthLimitExceeded { depth, max });
