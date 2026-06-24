@@ -18,6 +18,7 @@ bench = false
 doctest = false
 
 [features]
+concurrent = ["miden-crypto/concurrent", "miden-processor/concurrent", "std"]
 default = ["std"]
 std = ["miden-core/std", "miden-crypto/std", "miden-processor/std", "miden-utils-sync/std", "thiserror/std"]
 

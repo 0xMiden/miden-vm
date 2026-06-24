@@ -9,6 +9,10 @@ homepage.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+concurrent = ["miden-lifted-stark/parallel", "miden-air/concurrent", "miden-crypto/concurrent"]
+default = ["concurrent"]
+
 [dependencies]
 itertools.workspace = true
 miden-air = { workspace = true, features = ["std"] }
