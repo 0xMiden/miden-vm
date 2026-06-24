@@ -74,6 +74,11 @@
 - Project assembly can now be extended with support for source languages other than MASM via `ProjectSourceProvider` implementations. ([#3216](https://github.com/0xMiden/miden-vm/pull/3216))
 - Exposed a new parser function for parsing inline MASM blocks as CST or AST. ([#3211](https://github.com/0xMiden/miden-vm/pull/3211))
 
+## v0.23.4 (2026-06-23)
+
+- Preserved semantic struct and field names when emitting debug types, so debug dumps no longer fall back to anonymous struct metadata ([#3269](https://github.com/0xMiden/miden-vm/pull/3269)).
+- Fixed parallel trace generation for `while.true` loops that exit before entering the body and are followed by another block ([#3278](https://github.com/0xMiden/miden-vm/pull/3278)).
+
 ## v0.23.3 (2026-05-26)
 
 - Pure version bump to attach build artifacts to the release.
