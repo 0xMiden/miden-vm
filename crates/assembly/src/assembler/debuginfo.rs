@@ -419,7 +419,79 @@ mod tests {
     use alloc::sync::Arc;
 
     use super::*;
-    use crate::ast::types::{CallConv, FunctionType};
+    use crate::ast::types::{CallConv, EnumType, FunctionType, Variant};
+
+    #[test]
+    fn registers_c_like_enum_debug_type() {
+        let mut section = DebugTypesSection::new();
+        let enum_ty = EnumType::new(
+            Arc::from("Status"),
+            Type::U16,
+            [
+                Variant::c_like(Arc::from("Ok"), Some(200)),
+                Variant::c_like(Arc::from("NotFound"), Some(404)),
+            ],
+        )
+        .unwrap();
+        let ty = Type::Enum(Arc::new(enum_ty));
+
+        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
+
+        let DebugTypeInfo::Enum {
+            name_idx,
+            size,
+            discriminant_type_idx,
+            variants,
+        } = section.get_type(type_idx).unwrap()
+        else {
+            panic!("expected enum debug type");
+        };
+        assert_eq!(section.get_string(*name_idx).as_deref(), Some("Status"));
+        assert_eq!(*size, 2);
+        assert_eq!(
+            section.get_type(*discriminant_type_idx),
+            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U16))
+        );
+        assert_eq!(variants.len(), 2);
+        assert_eq!(section.get_string(variants[0].name_idx).as_deref(), Some("Ok"));
+        assert_eq!(variants[0].type_idx, None);
+        assert_eq!(variants[0].payload_offset, None);
+        assert_eq!(variants[0].discriminant, 200);
+        assert_eq!(section.get_string(variants[1].name_idx).as_deref(), Some("NotFound"));
+        assert_eq!(variants[1].type_idx, None);
+        assert_eq!(variants[1].payload_offset, None);
+        assert_eq!(variants[1].discriminant, 404);
+    }
+
+    #[test]
+    fn registers_payload_enum_debug_type() {
+        let mut section = DebugTypesSection::new();
+        let enum_ty = EnumType::new(
+            Arc::from("OptionU32"),
+            Type::U8,
+            [
+                Variant::c_like(Arc::from("None"), Some(0)),
+                Variant::new(Arc::from("Some"), Type::U32, Some(1)),
+            ],
+        )
+        .unwrap();
+        let ty = Type::Enum(Arc::new(enum_ty));
+
+        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
+
+        let DebugTypeInfo::Enum { variants, .. } = section.get_type(type_idx).unwrap() else {
+            panic!("expected enum debug type");
+        };
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].type_idx, None);
+        let payload_type_idx = variants[1].type_idx.expect("Some variant should have payload");
+        assert_eq!(
+            section.get_type(payload_type_idx),
+            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U32))
+        );
+        assert_eq!(variants[1].payload_offset, Some(4));
+        assert_eq!(variants[1].discriminant, 1);
+    }
 
     #[test]
     fn function_debug_types_preserve_resolved_struct_metadata() {
