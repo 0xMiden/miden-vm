@@ -38,10 +38,10 @@ const LEAF_DOMAIN = 0x13af
 #! Cycles
 #!   Leaf empty: 67 cycles
 #!   Leaf single: 162 cycles
-#!   Leaf multiple, found at first key: 245 + 258 * pair_count
-#!   Leaf multiple, found at last key: 57 + 446 * pair_count
-#!   Leaf multiple, missing before first key: 390 + 258 * pair_count
-#!   Leaf multiple, missing after last key: 183 + 446 * pair_count
+#!   Leaf multiple, found at first key: 294 + 239 * pair_count
+#!   Leaf multiple, found at last key: 242 + 291 * pair_count
+#!   Leaf multiple, missing before first key: 224 + 291 * pair_count
+#!   Leaf multiple, missing after last key: 224 + 291 * pair_count
 #!   Leaf multiple, middle keys or insertion points: between the first-key and last-key costs
 pub proc get
     # Prepare for `mtree_get`
@@ -146,13 +146,13 @@ end
 #!     replacement: 296 cycles
 #!     insertion (leaf becomes multiple): 610 cycles
 #!   Leaf multiple
-#!     removal at first key: 541 + 325 * pair_count
-#!     removal at last key: 396 + 455 * pair_count
-#!     replacement at first key: 515 + 267 * pair_count
-#!     replacement at last key: 327 + 455 * pair_count
-#!     insertion before first key: 908 + 315 * pair_count
-#!     insertion after last key: 701 + 503 * pair_count
-#!     no-op removal after last key: 265 + 446 * pair_count
+#!     removal at first key: 587 + 320 * pair_count
+#!     removal at last key: 442 + 450 * pair_count
+#!     replacement at first key: 561 + 262 * pair_count
+#!     replacement at last key: 373 + 450 * pair_count
+#!     insertion before first key: 954 + 310 * pair_count
+#!     insertion after last key: 747 + 498 * pair_count
+#!     no-op removal after last key: 311 + 441 * pair_count
 #!     middle keys or insertion points: between the first-key and last-key costs
 pub proc set
     # Prepare stack for mtree_get
@@ -271,10 +271,10 @@ end
 #!   Operand stack: [V, R]
 #!
 #! Cycles:
-#!  Found at first key: 181 + 258 * pair_count
-#!  Found at last key: 446 * pair_count - 7
-#!  Missing before first key: 326 + 258 * pair_count
-#!  Missing after last key: 119 + 446 * pair_count
+#!  Found at first key: 230 + 239 * pair_count
+#!  Found at last key: 178 + 291 * pair_count
+#!  Missing before first key: 160 + 291 * pair_count
+#!  Missing after last key: 160 + 291 * pair_count
 #!  Middle keys or insertion points: between the first-key and last-key costs.
 @locals(8192)
 proc get_multi_leaf_value
@@ -305,7 +305,7 @@ proc get_multi_leaf_value
     drop movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
-    exec.find_unique_multi_leaf_key
+    exec.find_valid_multi_leaf_key
     # => [is_key_found, key_ptr, start_ptr, end_ptr, R]
 
     if.true
@@ -346,8 +346,89 @@ end
 #!
 #! Panics if:
 #! - any adjacent key pair is not strictly increasing.
-@locals(10)
-proc find_unique_multi_leaf_key
+@locals(8)
+proc find_valid_multi_leaf_key
+    loc_storew_le.0 dropw
+    # => [start_ptr, end_ptr, ...]
+
+    # locals:
+    # 0..3: K
+    # 4: end_ptr
+    # 5: current_ptr
+    # 6: result_ptr
+    # 7: is_key_found
+
+    dup.1 loc_store.4
+    # => [start_ptr, end_ptr, ...]
+
+    dup loc_store.5
+    # => [start_ptr, end_ptr, ...]
+
+    dup.1 loc_store.6
+    # => [start_ptr, end_ptr, ...]
+
+    push.0 loc_store.7
+    # => [start_ptr, end_ptr, ...]
+
+    loc_load.5 loc_load.4 u32lt
+    while.true
+        # validate that keys stay strictly sorted.
+        loc_load.5 dup.1 neq
+        if.true
+            loc_load.5 sub.8 padw movup.4 mem_loadw_le
+            # => [PREVIOUS_KEY, start_ptr, end_ptr, ...]
+
+            loc_load.5 padw movup.4 mem_loadw_le
+            # => [LEAF_KEY, PREVIOUS_KEY, start_ptr, end_ptr, ...]
+
+            exec.word::lt
+            assert.err="invalid multi-leaf preimage: keys must be unique and sorted"
+            # => [start_ptr, end_ptr, ...]
+        end
+
+        # get only needs the matching key. Once found, keep validating order but stop comparing.
+        loc_load.7 not
+        if.true
+            loc_load.5 padw movup.4 mem_loadw_le
+            # => [LEAF_KEY, start_ptr, end_ptr, ...]
+
+            dupw padw loc_loadw_le.0
+            # => [K, LEAF_KEY, LEAF_KEY, start_ptr, end_ptr, ...]
+
+            exec.word::eq
+            # => [is_key_found, LEAF_KEY, start_ptr, end_ptr, ...]
+
+            if.true
+                loc_load.5 loc_store.6
+                push.1 loc_store.7
+            end
+            # => [LEAF_KEY, start_ptr, end_ptr, ...]
+
+            dropw
+            # => [start_ptr, end_ptr, ...]
+        end
+
+        loc_load.5 add.8
+        loc_store.5
+        # => [start_ptr, end_ptr, ...]
+
+        loc_load.5 loc_load.4 u32lt
+    end
+
+    loc_load.6 loc_load.7
+    # => [is_key_found, key_ptr, start_ptr, end_ptr, ...]
+end
+
+#! Finds a key or insertion position in a multi-leaf preimage and validates that all keys are unique
+#! and sorted.
+#!
+#! Inputs:  [K, start_ptr, end_ptr, ...]
+#! Outputs: [is_key_found, key_ptr, start_ptr, end_ptr, ...]
+#!
+#! Panics if:
+#! - any adjacent key pair is not strictly increasing.
+@locals(9)
+proc find_unique_multi_leaf_insert_position
     loc_storew_le.0 dropw
     # => [start_ptr, end_ptr, ...]
 
@@ -358,15 +439,11 @@ proc find_unique_multi_leaf_key
     # 6: result_ptr
     # 7: is_key_found
     # 8: is_position_found
-    # 9: start_ptr
 
     dup.1 loc_store.4
     # => [start_ptr, end_ptr, ...]
 
     dup loc_store.5
-    # => [start_ptr, end_ptr, ...]
-
-    dup loc_store.9
     # => [start_ptr, end_ptr, ...]
 
     dup.1 loc_store.6
@@ -379,7 +456,7 @@ proc find_unique_multi_leaf_key
     loc_load.5 loc_load.4 u32lt
     while.true
         # validate that keys stay strictly sorted.
-        loc_load.5 loc_load.9 neq
+        loc_load.5 dup.1 neq
         if.true
             loc_load.5 sub.8 padw movup.4 mem_loadw_le
             # => [PREVIOUS_KEY, start_ptr, end_ptr, ...]
@@ -395,7 +472,7 @@ proc find_unique_multi_leaf_key
         loc_load.5 padw movup.4 mem_loadw_le
         # => [LEAF_KEY, start_ptr, end_ptr, ...]
 
-        # compare against K until we find the matching key or insertion point.
+        # set needs the matching key or the first valid insertion position.
         loc_load.8 not
         if.true
             dupw padw loc_loadw_le.0
@@ -802,7 +879,7 @@ proc set_multi_leaf
     movup.13 movdn.5
     # => [K, start_ptr, end_ptr; V, K, R]
 
-    exec.find_unique_multi_leaf_key
+    exec.find_unique_multi_leaf_insert_position
     # => [is_key_found, key_ptr, start_ptr, end_ptr; V, K, R]
     if.true
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
