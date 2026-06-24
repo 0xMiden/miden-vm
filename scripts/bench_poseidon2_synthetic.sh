@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/bench_poseidon2_lib.sh"
 
 FIXTURE_ROOT=""
 SNAPSHOT="$ROOT/benches/synthetic-bench/snapshots/bench-tx.json"
-FIXTURES_CSV="create-single-p2id-note,consume-single-p2id-note,consume-two-p2id-notes,consume-claim-note-l1-to-miden,consume-claim-note-l2-to-miden,consume-b2agg-note-bridge-out"
+FIXTURES_CSV="create-single-p2id-note-ecdsa,consume-single-p2id-note-ecdsa,consume-two-p2id-notes-ecdsa"
 REPEAT=5
 WARMUP=1
 THREADS=16
@@ -23,6 +23,7 @@ Usage:
   scripts/bench_poseidon2_synthetic.sh [options]
 
 Generates Poseidon2 synthetic transaction MASM from the bench snapshot, then proves it.
+The default fixture list is the ECDSA P2ID subset.
 
 Options:
   --snapshot PATH       Synthetic bench snapshot JSON. Default: benches/synthetic-bench/snapshots/bench-tx.json
@@ -152,6 +153,7 @@ run_once() {
   local log_file="$6"
   local record="$7"
   local label="$8"
+  local env_args
 
   if [[ -n "$guard" ]] && (( guard > MAX_PADDED_ROWS )); then
     die "$fixture guard padded rows $guard exceeds max $MAX_PADDED_ROWS"

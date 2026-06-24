@@ -310,32 +310,62 @@ fn prove_recursive_case((case, mut host, hash_fn): (RecursionCase, DefaultHost, 
     black_box(proof);
 }
 
-fn profile_prove_once(case: RecursionCase, hash_fn: HashFunction) {
+fn prove_recursive_once(case: &RecursionCase, hash_fn: HashFunction) -> (f64, usize) {
+    let advice_inputs = case.advice_inputs.clone();
     let start = Instant::now();
     let mut host = recursive_host();
     let (_, proof) = prove_sync(
         &case.program,
         StackInputs::default(),
-        case.advice_inputs,
+        advice_inputs,
         &mut host,
         ExecutionOptions::default(),
         ProvingOptions::new(hash_fn),
     )
     .expect("prove recursive verifier");
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
+    let proof_bytes = proof.to_bytes().len();
+    black_box(proof);
+    (elapsed_ms, proof_bytes)
+}
+
+fn profile_prove_once(case: RecursionCase, hash_fn: HashFunction) {
+    let (elapsed_ms, proof_bytes) = prove_recursive_once(&case, hash_fn);
     eprintln!(
         "recursive_profile prove_once/{} proofs: {:.3} ms proof_bytes={}",
-        case.proof_count,
-        elapsed_ms,
-        proof.to_bytes().len(),
+        case.proof_count, elapsed_ms, proof_bytes,
     );
     println!(
         "BENCH_RECURSION_PROOF proofs={} prove_ms={:.3} proof_bytes={}",
-        case.proof_count,
-        elapsed_ms,
-        proof.to_bytes().len(),
+        case.proof_count, elapsed_ms, proof_bytes,
     );
-    black_box(proof);
+}
+
+fn profile_prove_repeated(
+    case: &RecursionCase,
+    hash_fn: HashFunction,
+    warmups: usize,
+    runs: usize,
+) {
+    for warmup_idx in 1..=warmups {
+        let (elapsed_ms, proof_bytes) = prove_recursive_once(case, hash_fn);
+        eprintln!(
+            "recursive_profile warmup {warmup_idx}/{warmups}/{} proofs: {:.3} ms proof_bytes={}",
+            case.proof_count, elapsed_ms, proof_bytes,
+        );
+    }
+
+    for run_idx in 1..=runs {
+        let (elapsed_ms, proof_bytes) = prove_recursive_once(case, hash_fn);
+        eprintln!(
+            "recursive_profile run {run_idx}/{runs}/{} proofs: {:.3} ms proof_bytes={}",
+            case.proof_count, elapsed_ms, proof_bytes,
+        );
+        println!(
+            "BENCH_RECURSION_PROOF proofs={} run={} prove_ms={:.3} proof_bytes={}",
+            case.proof_count, run_idx, elapsed_ms, proof_bytes,
+        );
+    }
 }
 
 fn print_case_shape(case: &RecursionCase) {
@@ -401,9 +431,17 @@ fn bench_recursive_verify(c: &mut Criterion) {
     if std::env::var_os("RECURSION_PROFILE_ONLY").is_some() {
         return;
     }
-    if std::env::var_os("RECURSION_PROFILE_PROVE_ONCE").is_some() {
-        for case in cases {
-            profile_prove_once(case, hash_fn);
+    if std::env::var_os("RECURSION_PROFILE_PROVE").is_some()
+        || std::env::var_os("RECURSION_PROFILE_PROVE_ONCE").is_some()
+    {
+        let runs = env_usize("RECURSION_PROFILE_PROVE_REPEATS", 1);
+        let warmups = env_usize("RECURSION_PROFILE_PROVE_WARMUPS", 0);
+        for case in &cases {
+            if runs == 1 && warmups == 0 {
+                profile_prove_once(case.clone(), hash_fn);
+            } else {
+                profile_prove_repeated(case, hash_fn, warmups, runs);
+            }
         }
         return;
     }

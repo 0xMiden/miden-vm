@@ -12,8 +12,9 @@
 //! - `SYNTH_SNAPSHOT`: path to a single producer JSON; if set, only this file is benched. Otherwise
 //!   every `snapshots/*.json` in the manifest dir is used.
 //! - `SYNTH_SCENARIO`: if set, restrict to scenarios whose slugified key contains this slugified
-//!   substring (case- and separator-insensitive; `"P2ID"`, `"p2id"`, `"P2ID note"`, and
-//!   `"p2id-note"` all match `"consume single P2ID note"`).
+//!   substring (case- and separator-insensitive; `"ECDSA"`, `"ecdsa-signing"`, and
+//!   `"single P2ID note with ECDSA"` all match
+//!   `"consume single P2ID note with ECDSA signing"`).
 //! - `SYNTH_BENCH_AXES`: comma-separated axes to run. Supported values are `exec`, `trace_prep`,
 //!   `prove`, `verify`, and `all`. Defaults to all axes.
 //! - `SYNTH_SAMPLE_SIZE`: Criterion sample size. Defaults to 30.
@@ -181,8 +182,8 @@ fn synthetic_bench(c: &mut Criterion) {
         );
     }
 
-    // Slugify the filter so substring-matching is case- and separator-insensitive
-    // (`SYNTH_SCENARIO=P2ID` matches `consume-single-p2id-note` etc.).
+    // Slugify the filter so substring matching is case- and separator-insensitive.
+    // Use a specific term such as `ecdsa` when a producer contains related scenarios.
     let scenario_filter = std::env::var("SYNTH_SCENARIO").ok().map(|s| slugify(&s));
     let mut benched_anything = false;
     for path in resolve_snapshot_paths() {

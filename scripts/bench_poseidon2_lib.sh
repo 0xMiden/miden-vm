@@ -52,23 +52,32 @@ fixture_meta() {
   local name="$2"
 
   case "$name" in
-    create-single-p2id-note|create-single-p2id)
-      echo "create-single-p2id-note|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note.masm|131072|524288"
+    create-single-p2id-note|create-single-p2id|create-single-p2id-note-falcon|create-single-p2id-falcon)
+      echo "create-single-p2id-note-falcon|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note-with-falcon-signing.masm|131072|524288"
       ;;
-    consume-single-p2id-note|consume-single-p2id)
-      echo "consume-single-p2id-note|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note.masm|131072|524288"
+    create-single-p2id-note-ecdsa|create-single-p2id-ecdsa)
+      echo "create-single-p2id-note-ecdsa|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note-with-ecdsa-signing.masm|32768|524288"
       ;;
-    consume-two-p2id-notes|consume-two-p2id)
-      echo "consume-two-p2id-notes|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes.masm|262144|524288"
+    consume-single-p2id-note|consume-single-p2id|consume-single-p2id-note-falcon|consume-single-p2id-falcon)
+      echo "consume-single-p2id-note-falcon|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm|131072|524288"
+      ;;
+    consume-single-p2id-note-ecdsa|consume-single-p2id-ecdsa)
+      echo "consume-single-p2id-note-ecdsa|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note-with-ecdsa-signing.masm|32768|524288"
+      ;;
+    consume-two-p2id-notes|consume-two-p2id|consume-two-p2id-notes-falcon|consume-two-p2id-falcon)
+      echo "consume-two-p2id-notes-falcon|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes-with-falcon-signing.masm|131072|524288"
+      ;;
+    consume-two-p2id-notes-ecdsa|consume-two-p2id-ecdsa)
+      echo "consume-two-p2id-notes-ecdsa|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes-with-ecdsa-signing.masm|32768|524288"
       ;;
     consume-claim-note-l1-to-miden|consume-claim-l1)
-      echo "consume-claim-note-l1-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l1-to-miden.masm|262144|524288"
+      echo "consume-claim-note-l1-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l1-to-miden.masm|65536|524288"
       ;;
     consume-claim-note-l2-to-miden|consume-claim-l2)
-      echo "consume-claim-note-l2-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l2-to-miden.masm|262144|1048576"
+      echo "consume-claim-note-l2-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l2-to-miden.masm|65536|524288"
       ;;
     consume-b2agg-note-bridge-out|consume-b2agg|b2agg)
-      echo "consume-b2agg-note-bridge-out|$fixture_root/synthetic_bench_bench-tx__consume-b2agg-note-bridge-out.masm|1048576|1048576"
+      echo "consume-b2agg-note-bridge-out|$fixture_root/synthetic_bench_bench-tx__consume-b2agg-note-bridge-out.masm|262144|524288"
       ;;
     *.masm)
       local abs
@@ -81,6 +90,45 @@ fixture_meta() {
   esac
 }
 
+scenario_filter_for_fixtures() {
+  local fixture_root="$1"
+  local fixtures_csv="$2"
+  local raw_fixture fixture masm_path file slug
+  local count=0
+  local first_slug=""
+  local all_ecdsa=1
+  local all_falcon=1
+
+  while IFS= read -r raw_fixture; do
+    IFS='|' read -r fixture masm_path _expected _guard <<< "$(fixture_meta "$fixture_root" "$raw_fixture")"
+    file="$(basename "$masm_path" .masm)"
+    case "$file" in
+      synthetic_bench_*__*)
+        slug="${file#*__}"
+        ;;
+      *)
+        echo ""
+        return
+        ;;
+    esac
+
+    count=$((count + 1))
+    if [[ "$count" -eq 1 ]]; then
+      first_slug="$slug"
+    fi
+    [[ "$slug" == *ecdsa-signing* ]] || all_ecdsa=0
+    [[ "$slug" == *falcon-signing* ]] || all_falcon=0
+  done < <(split_csv "$fixtures_csv")
+
+  if [[ "$count" -eq 1 ]]; then
+    echo "$first_slug"
+  elif (( all_ecdsa != 0 )); then
+    echo "ecdsa-signing"
+  elif (( all_falcon != 0 )); then
+    echo "falcon-signing"
+  fi
+}
+
 generate_poseidon2_fixtures() {
   local root="$1"
   local snapshot="$2"
@@ -89,20 +137,32 @@ generate_poseidon2_fixtures() {
   local threads="$5"
   local build_jobs="$6"
   local log_file="$7"
+  local scenario_filter
 
   [[ -f "$snapshot" ]] || die "missing synthetic snapshot: $snapshot"
   mkdir -p "$output_dir" "$(dirname "$log_file")"
 
   echo "[poseidon2-fixtures] generating MASM from $snapshot"
+  scenario_filter="$(scenario_filter_for_fixtures "$output_dir" "$fixtures_csv")"
+  if [[ -n "$scenario_filter" ]]; then
+    echo "[poseidon2-fixtures] scenario filter: $scenario_filter"
+  fi
+
+  local env_args=(
+    RAYON_NUM_THREADS="$threads"
+    CARGO_BUILD_JOBS="$build_jobs"
+    RUSTFLAGS="-C target-cpu=native"
+    SYNTH_SNAPSHOT="$snapshot"
+    SYNTH_MASM_WRITE="$output_dir"
+    SYNTH_EMIT_ONLY=1
+  )
+  if [[ -n "$scenario_filter" ]]; then
+    env_args+=(SYNTH_SCENARIO="$scenario_filter")
+  fi
+
   (
     cd "$root"
-    env \
-      RAYON_NUM_THREADS="$threads" \
-      CARGO_BUILD_JOBS="$build_jobs" \
-      RUSTFLAGS="-C target-cpu=native" \
-      SYNTH_SNAPSHOT="$snapshot" \
-      SYNTH_MASM_WRITE="$output_dir" \
-      SYNTH_EMIT_ONLY=1 \
+    env "${env_args[@]}" \
       cargo bench --profile optimized -p miden-vm-synthetic-bench --bench synthetic_bench -- --noplot
   ) 2>&1 | tee "$log_file"
 

@@ -222,39 +222,69 @@ mod tests {
     const COMMITTED_SCENARIO_EXPECTATIONS: &[CommittedScenarioExpectation] = &[
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
-            scenario_key: "consume single P2ID note",
+            scenario_key: "consume single P2ID note with Falcon signing",
             padded_core_side: 131_072,
-            padded_chiplets: 131_072,
+            padded_chiplets: 65_536,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
-            scenario_key: "consume two P2ID notes",
-            padded_core_side: 131_072,
-            padded_chiplets: 262_144,
+            scenario_key: "consume single P2ID note with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 32_768,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
-            scenario_key: "create single P2ID note",
+            scenario_key: "consume two P2ID notes with Falcon signing",
             padded_core_side: 131_072,
-            padded_chiplets: 131_072,
+            padded_chiplets: 65_536,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume two P2ID notes with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 32_768,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "create single P2ID note with Falcon signing",
+            padded_core_side: 131_072,
+            padded_chiplets: 65_536,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "create single P2ID note with ECDSA signing",
+            padded_core_side: 16_384,
+            padded_chiplets: 32_768,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume CLAIM note (L1 to Miden)",
             padded_core_side: 65_536,
-            padded_chiplets: 262_144,
+            padded_chiplets: 65_536,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume CLAIM note (L2 to Miden)",
             padded_core_side: 65_536,
-            padded_chiplets: 262_144,
+            padded_chiplets: 65_536,
         },
         CommittedScenarioExpectation {
             producer_stem: "bench-tx",
             scenario_key: "consume B2AGG note (bridge-out)",
             padded_core_side: 262_144,
-            padded_chiplets: 1_048_576,
+            padded_chiplets: 262_144,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume B2AGG note (bridge-out, 2^31 leaves)",
+            padded_core_side: 262_144,
+            padded_chiplets: 262_144,
+        },
+        CommittedScenarioExpectation {
+            producer_stem: "bench-tx",
+            scenario_key: "consume B2AGG note (bridge-out, 2^31-1 leaves)",
+            padded_core_side: 131_072,
+            padded_chiplets: 131_072,
         },
     ];
 
@@ -401,7 +431,7 @@ mod tests {
     #[test]
     fn missing_optional_fields_default_to_zero() {
         let minimal = r#"{
-            "consume single P2ID note": {
+            "consume single P2ID note with Falcon signing": {
                 "trace": {
                     "core_rows": 100,
                     "chiplets_rows": 11,
@@ -444,7 +474,7 @@ mod tests {
         // Real bench-tx.json has cycle-count siblings (prologue, epilogue, ...) the loader must
         // tolerate.
         let realistic = r#"{
-            "consume single P2ID note": {
+            "consume single P2ID note with Falcon signing": {
                 "prologue": 3501,
                 "notes_processing": 1761,
                 "epilogue": { "total": 72351 },
@@ -468,7 +498,7 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
         assert_eq!(scenarios.len(), 1);
         let (key, snap) = &scenarios[0];
-        assert_eq!(key, "consume single P2ID note");
+        assert_eq!(key, "consume single P2ID note with Falcon signing");
         assert_eq!(snap.trace.core_rows, 77_699);
         assert_eq!(snap.shape.hasher_rows, 120_352);
     }

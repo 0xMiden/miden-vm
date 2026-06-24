@@ -8,9 +8,9 @@ source "$SCRIPT_DIR/bench_poseidon2_lib.sh"
 
 FIXTURE_ROOT=""
 SNAPSHOT="$ROOT/benches/synthetic-bench/snapshots/bench-tx.json"
-FIXTURES_CSV="consume-single-p2id-note,consume-two-p2id-notes"
+FIXTURES_CSV="consume-single-p2id-note-ecdsa,consume-two-p2id-notes-ecdsa"
 PROOF_COUNTS_CSV="2,4,6"
-FRI_QUERIES="${MIDEN_BENCH_NUM_FRI_QUERIES:-28}"
+FRI_QUERIES="${MIDEN_BENCH_NUM_FRI_QUERIES:-27}"
 REPEAT=10
 WARMUP=1
 THREADS=16
@@ -26,18 +26,19 @@ Usage:
 
 Generates Poseidon2 synthetic transaction MASM from the bench snapshot, then recursively verifies
 the resulting transaction proofs.
+The default fixture list is the ECDSA P2ID subset.
 
 Options:
   --snapshot PATH       Synthetic bench snapshot JSON. Default: benches/synthetic-bench/snapshots/bench-tx.json
   --fixture-root PATH   Use an existing synthetic_bench_bench-tx__*.masm directory instead of generating.
   --fixtures LIST      Comma-separated fixture aliases.
   --proof-counts LIST  Comma-separated recursive proof counts. Default: 2,4,6
-  --fri-queries N      FRI query count. Default: 28
+  --fri-queries N      FRI query count. Default: 27
   --repeat N           Measured repetitions. Default: 10
   --warmup N           Warmup repetitions. Default: 1
   --threads N          RAYON_NUM_THREADS. Default: 16
   --build-jobs N       CARGO_BUILD_JOBS. Default: detected logical CPUs.
-  --monitor-system     Capture system snapshots around each run.
+  --monitor-system     Capture system snapshots around each fixture invocation.
   --out-root PATH      Output root. Default: bench-results/poseidon2-recursive
   -h, --help           Show this help.
 EOF
@@ -225,8 +226,10 @@ parse_run_log() {
   local proof_line
 
   grep '^BENCH_RECURSION_PROOF ' "$log_file" | while IFS= read -r proof_line; do
-    local proof_count shape_line tx_bytes
+    local proof_count proof_run_idx shape_line tx_bytes
     proof_count="$(extract_field proofs "$proof_line")"
+    proof_run_idx="$(extract_field run "$proof_line")"
+    [[ -n "$proof_run_idx" ]] || proof_run_idx="$run_idx"
     shape_line="$(grep "^BENCH_RECURSION_SHAPE proofs=${proof_count} " "$log_file" | tail -n 1 || true)"
     [[ -n "$shape_line" ]] || die "missing shape line for $fixture proof_count=$proof_count"
 
@@ -234,7 +237,7 @@ parse_run_log() {
     [[ "$tx_bytes" != "missing" ]] || die "missing transaction proof rows in $log_file"
 
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$fixture" "$run_idx" "$proof_count" \
+      "$fixture" "$proof_run_idx" "$proof_count" \
       "$(extract_field prove_ms "$proof_line")" \
       "$(extract_field proof_bytes "$proof_line")" \
       "$tx_bytes" \
@@ -280,7 +283,9 @@ run_once() {
       RECURSION_PROOF_COUNTS="$PROOF_COUNTS_CSV" \
       RECURSION_BENCH_HASH=poseidon2 \
       RECURSION_BENCH_DISTINCT_STACKS=1 \
-      RECURSION_PROFILE_PROVE_ONCE=1 \
+      RECURSION_PROFILE_PROVE=1 \
+      RECURSION_PROFILE_PROVE_REPEATS="$REPEAT" \
+      RECURSION_PROFILE_PROVE_WARMUPS="$WARMUP" \
       MIDEN_BENCH_NUM_FRI_QUERIES="$FRI_QUERIES" \
       cargo bench --profile optimized -p miden-vm-synthetic-bench --bench recursive_verify -- --noplot
   ) 2>&1 | tee "$log_file"
@@ -331,17 +336,8 @@ for raw_fixture in "${FIXTURES[@]}"; do
   [[ -f "$masm_path" ]] || die "missing fixture file: $masm_path"
   printf '%s\t%s\n' "$fixture" "$masm_path" >> "$FIXTURE_PATHS_TSV"
 
-  if (( WARMUP > 0 )); then
-    for warmup_idx in $(seq 1 "$WARMUP"); do
-      run_once "$fixture" "$masm_path" "$warmup_idx" \
-        "$RUN_DIR/logs/${fixture}_warmup${warmup_idx}.log" 0 "warmup $warmup_idx/$WARMUP"
-    done
-  fi
-
-  for run_idx in $(seq 1 "$REPEAT"); do
-    run_once "$fixture" "$masm_path" "$run_idx" \
-      "$RUN_DIR/logs/${fixture}_run${run_idx}.log" 1 "run $run_idx/$REPEAT"
-  done
+  run_once "$fixture" "$masm_path" 1 "$RUN_DIR/logs/${fixture}_runs.log" 1 \
+    "runs $REPEAT warmups $WARMUP"
 done
 
 {

@@ -105,7 +105,7 @@ breakdown. The loader checks
 
 ```json
 {
-  "consume single P2ID note": {
+  "consume single P2ID note with Falcon signing": {
     "trace": {
       "core_rows": 77699,
       "chiplets_rows": 123129,
@@ -151,11 +151,11 @@ can fail the bench are on two padded proxies:
   -- the non-chiplets side of the AIR.
 - `padded_chiplets   = max(64, next_pow2(chiplets_rows))`.
 
-These two can land in *different* brackets on the same workload --
-`consume two P2ID notes`, for example, has `padded_core_side = 131072`
-but `padded_chiplets = 262144`. Checking them independently catches a
-bracket miss on either side that a single global `padded_total` check
-would hide.
+These two can land in *different* brackets on the same workload.
+For example, `create single P2ID note with Falcon signing` has
+`padded_core_side = 131072` but `padded_chiplets = 65536`. Checking
+them independently catches a bracket miss on either side that a single
+global `padded_total` check would hide.
 
 ### Soft checks -- report, don't fail
 
@@ -213,8 +213,9 @@ Env vars:
   (instead of iterating over every `snapshots/*.json`).
 - `SYNTH_SCENARIO=<substr>` -- restrict to scenarios whose slugified
   key contains this slugified substring. Both sides are slugified
-  before comparison, so `"P2ID"`, `"p2id"`, `"P2ID note"`, and
-  `"p2id-note"` all match `"consume single P2ID note"`.
+  before comparison, so `"ECDSA"`, `"ecdsa-signing"`, and
+  `"single P2ID note with ECDSA"` all match
+  `"consume single P2ID note with ECDSA signing"`.
 - `SYNTH_MASM_WRITE=1` -- dump each emitted MASM program to
   `target/synthetic_bench_<producer-stem>__<scenario-slug>.masm` for
   inspection.
