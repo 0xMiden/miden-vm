@@ -382,17 +382,27 @@ impl From<Type> for TypeExpr {
     fn from(ty: Type) -> Self {
         match ty {
             Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
-            Type::Struct(t) => Self::Struct(StructType::new(
-                None,
-                t.fields().iter().enumerate().map(|(i, ft)| {
-                    let name = Ident::new(format!("field{i}")).unwrap();
+            Type::Struct(t) => {
+                let name = t.name().and_then(|name| Ident::new(name.as_ref()).ok());
+                let fields = t.fields().iter().enumerate().map(|(i, ft)| {
+                    let name = ft
+                        .name
+                        .as_deref()
+                        .map(Ident::new)
+                        .and_then(Result::ok)
+                        .unwrap_or_else(|| Ident::new(format!("field{i}")).unwrap());
                     StructField {
                         span: SourceSpan::UNKNOWN,
                         name,
                         ty: ft.ty.clone().into(),
                     }
-                }),
-            )),
+                });
+                Self::Struct(
+                    StructType::new(name, fields)
+                        .with_repr(Span::unknown(t.repr()))
+                        .with_span(SourceSpan::UNKNOWN),
+                )
+            },
             Type::Ptr(t) => Self::Ptr((*t).clone().into()),
             Type::Function(_) => {
                 Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
@@ -400,8 +410,6 @@ impl From<Type> for TypeExpr {
             Type::List(t) => Self::Ptr(
                 PointerType::new((*t).clone().into()).with_address_space(AddressSpace::Byte),
             ),
-            Type::I128 | Type::U128 => Self::Array(ArrayType::new(Type::U32.into(), 4)),
-            Type::I64 | Type::U64 => Self::Array(ArrayType::new(Type::U32.into(), 2)),
             Type::Unknown | Type::Never | Type::F64 => panic!("unrepresentable type value: {ty}"),
             ty => Self::Primitive(Span::unknown(ty)),
         }
@@ -644,9 +652,9 @@ impl crate::prettier::PrettyPrint for StructType {
 
         let repr = match &*self.repr {
             TypeRepr::Default => Document::Empty,
-            TypeRepr::BigEndian => const_text("@bigendian "),
+            TypeRepr::BigEndian => const_text(" @bigendian"),
             repr @ (TypeRepr::Align(_) | TypeRepr::Packed(_) | TypeRepr::Transparent) => {
-                text(format!("@{repr} "))
+                text(format!(" @{repr}"))
             },
         };
 
@@ -667,7 +675,7 @@ impl crate::prettier::PrettyPrint for StructType {
         ) + nl();
         let body = singleline_body | multiline_body;
 
-        repr + const_text("struct") + const_text(" { ") + body + const_text(" }")
+        const_text("struct") + repr + const_text(" { ") + body + const_text(" }")
     }
 }
 
@@ -1178,12 +1186,17 @@ impl crate::prettier::PrettyPrint for Variant {
 
 #[cfg(test)]
 mod tests {
+<<<<<<< bobbin-main-to-next
     use alloc::{sync::Arc, vec::Vec};
+=======
+    use alloc::{string::ToString, sync::Arc};
+>>>>>>> next
     use core::str::FromStr;
 
-    use miden_debug_types::DefaultSourceManager;
+    use miden_debug_types::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri};
 
     use super::*;
+    use crate::{ast::Form, prettier::PrettyPrint};
 
     struct DummyResolver {
         source_manager: Arc<dyn SourceManager>,
@@ -1249,6 +1262,46 @@ mod tests {
         expr
     }
 
+    fn test_source_file(source: &str) -> Arc<SourceFile> {
+        Arc::new(SourceFile::new(
+            SourceId::default(),
+            SourceLanguage::Masm,
+            Uri::new("memory:///type-expr-test.masm"),
+            source.to_string().into_boxed_str(),
+        ))
+    }
+
+    fn parse_type_alias_expr(source: &str) -> TypeExpr {
+        let mut forms =
+            crate::parser::parse_forms(test_source_file(source)).expect("type alias should parse");
+        assert_eq!(forms.len(), 1, "expected exactly one parsed form");
+        match forms.pop().expect("expected parsed form") {
+            Form::Type(alias) => alias.ty,
+            form => panic!("expected type alias form, got {form:?}"),
+        }
+    }
+
+    fn repr_round_trip_struct(repr: TypeRepr) -> TypeExpr {
+        TypeExpr::Struct(
+            StructType::new(
+                None,
+                [
+                    StructField {
+                        span: SourceSpan::UNKNOWN,
+                        name: Ident::from_str("prefix").expect("valid ident"),
+                        ty: TypeExpr::Primitive(Span::unknown(Type::Felt)),
+                    },
+                    StructField {
+                        span: SourceSpan::UNKNOWN,
+                        name: Ident::from_str("suffix").expect("valid ident"),
+                        ty: TypeExpr::Primitive(Span::unknown(Type::U32)),
+                    },
+                ],
+            )
+            .with_repr(Span::unknown(repr)),
+        )
+    }
+
     #[test]
     fn type_expr_depth_boundary() {
         let mut resolver = DummyResolver::new();
@@ -1265,6 +1318,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< bobbin-main-to-next
     fn struct_type_expr_resolution_preserves_field_names() {
         let mut resolver = DummyResolver::new();
         let expr = TypeExpr::Struct(StructType::new(
@@ -1294,5 +1348,89 @@ mod tests {
         assert_eq!(ty.name().as_deref(), Some("Pair"));
         let field_names = ty.fields().iter().map(|field| field.name.as_deref()).collect::<Vec<_>>();
         assert_eq!(field_names, [Some("left"), Some("right")]);
+=======
+    fn struct_type_expr_render_round_trips_non_default_reprs() {
+        for repr in [
+            TypeRepr::BigEndian,
+            TypeRepr::align(16),
+            TypeRepr::packed(1),
+            TypeRepr::packed(2),
+            TypeRepr::Transparent,
+        ] {
+            let rendered = repr_round_trip_struct(repr).to_pretty_string();
+            assert!(
+                rendered.starts_with("struct @"),
+                "non-default struct repr should render after `struct`: {rendered}"
+            );
+
+            let parsed = parse_type_alias_expr(&format!("type RoundTrip = {rendered}\n"));
+            let TypeExpr::Struct(parsed) = parsed else {
+                panic!("expected rendered type to parse back as a struct");
+            };
+            assert_eq!(*parsed.repr, repr);
+            assert_eq!(parsed.fields[0].name.as_str(), "prefix");
+            assert_eq!(parsed.fields[1].name.as_str(), "suffix");
+        }
+    }
+
+    #[test]
+    fn type_expr_from_type_preserves_wide_integer_primitives() {
+        for ty in [Type::I64, Type::U64, Type::I128, Type::U128] {
+            let expr = TypeExpr::from(ty.clone());
+            let TypeExpr::Primitive(actual) = expr else {
+                panic!("expected primitive type expression for {ty}, got {expr:?}");
+            };
+            assert_eq!(actual.into_inner(), ty);
+        }
+    }
+
+    #[test]
+    fn type_expr_from_type_preserves_struct_metadata() {
+        let ty = Type::Struct(Arc::new(types::StructType::from_parts(
+            Some(Arc::from("miden:base/core-types@1.0.0/account-id")),
+            TypeRepr::BigEndian,
+            [
+                (Arc::<str>::from("prefix"), Type::Felt),
+                (Arc::<str>::from("suffix"), Type::Felt),
+            ],
+        )));
+
+        let TypeExpr::Struct(actual) = TypeExpr::from(ty) else {
+            panic!("expected struct type expression");
+        };
+        assert_eq!(
+            actual.name.as_ref().map(Ident::as_str),
+            Some("miden:base/core-types@1.0.0/account-id"),
+        );
+        assert_eq!(*actual.repr, TypeRepr::BigEndian);
+        assert_eq!(actual.fields[0].name.as_str(), "prefix");
+        assert_eq!(actual.fields[1].name.as_str(), "suffix");
+    }
+
+    #[test]
+    fn parsed_struct_type_preserves_field_names_through_resolution() {
+        let expr = parse_type_alias_expr(
+            "type AccountId = struct @bigendian { prefix: felt, suffix: felt }\n",
+        );
+
+        let mut resolver = DummyResolver::new();
+        let resolved = expr
+            .resolve_type(&mut resolver)
+            .expect("struct type should resolve")
+            .expect("struct type should be concrete");
+        let Type::Struct(resolved_struct) = &resolved else {
+            panic!("expected resolved struct type, got {resolved:?}");
+        };
+        assert_eq!(resolved_struct.repr(), TypeRepr::BigEndian);
+        assert_eq!(resolved_struct.fields()[0].name.as_deref(), Some("prefix"));
+        assert_eq!(resolved_struct.fields()[1].name.as_deref(), Some("suffix"));
+
+        let TypeExpr::Struct(converted) = TypeExpr::from(resolved) else {
+            panic!("expected concrete struct to convert back to struct type expression");
+        };
+        assert_eq!(*converted.repr, TypeRepr::BigEndian);
+        assert_eq!(converted.fields[0].name.as_str(), "prefix");
+        assert_eq!(converted.fields[1].name.as_str(), "suffix");
+>>>>>>> next
     }
 }
