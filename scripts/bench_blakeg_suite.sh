@@ -7,10 +7,10 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/bench_blakeg_lib.sh"
 
 FIXTURE_ROOT="${MIDEN_BENCH_FIXTURE_ROOT:-$ROOT/bench-baselines/fixtures/bench-tx}"
-SYNTH_FIXTURES="create-single-p2id-note,consume-single-p2id-note,consume-two-p2id-notes,consume-claim-note-l1-to-miden,consume-claim-note-l2-to-miden,consume-b2agg-note-bridge-out"
-RECURSIVE_FIXTURES="consume-single-p2id-note,consume-two-p2id-notes"
+SYNTH_FIXTURES="create-single-p2id-note-ecdsa,consume-single-p2id-note-ecdsa,consume-two-p2id-notes-ecdsa"
+RECURSIVE_FIXTURES="consume-single-p2id-note-ecdsa,consume-two-p2id-notes-ecdsa"
 RECURSIVE_PROOF_COUNTS="2,4,6"
-FRI_QUERIES=28
+FRI_QUERIES=27
 SYNTH_REPEAT=5
 RECURSIVE_REPEAT=10
 WARMUP=1
@@ -27,6 +27,7 @@ Usage:
   scripts/bench_blakeg_suite.sh [options]
 
 Runs the BlakeG/Eidos synthetic prove suite and recursive verifier suite.
+The default fixture lists are the ECDSA P2ID subset.
 
 Options:
   --fixture-root PATH             Directory containing synthetic_bench_bench-tx__*.masm.
@@ -34,14 +35,14 @@ Options:
   --synth-fixtures LIST           Comma-separated synthetic fixture aliases.
   --recursive-fixtures LIST       Comma-separated recursive fixture aliases.
   --recursive-proof-counts LIST   Comma-separated proof counts. Default: 2,4,6
-  --fri-queries N                 Recursive verifier FRI query count. Default: 28
+  --fri-queries N                 Recursive verifier FRI query count. Default: 27
   --synth-repeat N                Synthetic measured repetitions. Default: 5
   --recursive-repeat N            Recursive measured repetitions. Default: 10
   --warmup N                      Warmup repetitions for both suites. Default: 1
   --threads N                     RAYON_NUM_THREADS. Default: 16
   --build-jobs N                  CARGO_BUILD_JOBS. Default: detected logical CPUs.
   --max-padded-rows N             Synthetic large-run guard. Default: 4194304
-  --monitor-recursive             Capture system snapshots around recursive runs.
+  --monitor-recursive             Capture system snapshots around recursive fixture invocations.
   --out-root PATH                 Output root. Default: bench-results/blakeg-suite
   -h, --help                      Show this help.
 EOF

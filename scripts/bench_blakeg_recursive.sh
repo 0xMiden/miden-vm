@@ -7,9 +7,9 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/bench_blakeg_lib.sh"
 
 FIXTURE_ROOT="${MIDEN_BENCH_FIXTURE_ROOT:-$ROOT/bench-baselines/fixtures/bench-tx}"
-FIXTURES_CSV="consume-single-p2id-note,consume-two-p2id-notes"
+FIXTURES_CSV="consume-single-p2id-note-ecdsa,consume-two-p2id-notes-ecdsa"
 PROOF_COUNTS_CSV="2,4,6"
-FRI_QUERIES="${MIDEN_BENCH_NUM_FRI_QUERIES:-28}"
+FRI_QUERIES="${MIDEN_BENCH_NUM_FRI_QUERIES:-27}"
 REPEAT=10
 WARMUP=1
 THREADS=16
@@ -24,18 +24,19 @@ Usage:
   scripts/bench_blakeg_recursive.sh [options]
 
 Runs recursive verifier proving over BlakeG/Eidos transaction proofs.
+The default fixture list is the ECDSA P2ID subset.
 
 Options:
   --fixture-root PATH   Directory containing synthetic_bench_bench-tx__*.masm.
   --poseidon-root PATH  Use PATH/bench-baselines/fixtures/bench-tx as fixture root.
   --fixtures LIST      Comma-separated fixture aliases.
   --proof-counts LIST  Comma-separated recursive proof counts. Default: 2,4,6
-  --fri-queries N      FRI query count. Default: 28
+  --fri-queries N      FRI query count. Default: 27
   --repeat N           Measured repetitions. Default: 10
   --warmup N           Warmup repetitions. Default: 1
   --threads N          RAYON_NUM_THREADS. Default: 16
   --build-jobs N       CARGO_BUILD_JOBS. Default: detected logical CPUs.
-  --monitor-system     Capture system snapshots around each run.
+  --monitor-system     Capture system snapshots around each fixture invocation.
   --out-root PATH      Output root. Default: bench-results/blakeg-recursive
   -h, --help           Show this help.
 EOF
@@ -145,6 +146,20 @@ shape_width() {
     "$ROOT/$file" 2>/dev/null | head -n 1
 }
 
+numeric_const() {
+  local file="$1"
+  local const_name="$2"
+  sed -n "s/^pub const ${const_name}: usize = \\([0-9][0-9]*\\);$/\\1/p" \
+    "$ROOT/$file" 2>/dev/null | head -n 1
+}
+
+chiplets_trace_width() {
+  local data_width
+  data_width="$(numeric_const air/src/trace/mod.rs CHIPLETS_DATA_WIDTH)"
+  [[ -n "$data_width" ]] || return
+  echo "$((data_width + 1))"
+}
+
 byte_pair_lookup_width() {
   awk '
     /pub struct And8LookupCols</ { in_struct = 1; next }
@@ -156,11 +171,10 @@ byte_pair_lookup_width() {
 write_air_metadata() {
   local core_width chiplets_width core_aux chiplets_aux blakeg_width blakeg_aux and8_width
   core_width="$(trace_width_from_comment core)"
-  chiplets_width="$(trace_width_from_comment chiplets)"
+  chiplets_width="$(chiplets_trace_width)"
   core_aux="$(shape_width air/src/constraints/lookup/main_air.rs MAIN_COLUMN_SHAPE)"
   chiplets_aux="$(shape_width air/src/constraints/lookup/chiplet_air.rs CHIPLET_COLUMN_SHAPE)"
-  blakeg_width="$(sed -n 's/^pub const NUM_BLAKEG_COMPRESSION_COLS: usize = \([0-9][0-9]*\);$/\1/p' \
-    "$ROOT/air/src/constraints/blakeg_compression/mod.rs" 2>/dev/null | head -n 1)"
+  blakeg_width="$(numeric_const air/src/constraints/blakeg_compression/layout.rs NUM_BLAKEG_COMPRESSION_COLS)"
   blakeg_aux="$(shape_width air/src/constraints/lookup/blakeg_compression_air.rs BLAKEG_COMPRESSION_COLUMN_SHAPE)"
   and8_width="$(byte_pair_lookup_width)"
 
@@ -228,8 +242,10 @@ parse_run_log() {
   local proof_line
 
   grep '^BENCH_RECURSION_PROOF ' "$log_file" | while IFS= read -r proof_line; do
-    local proof_count shape_line tx_bytes
+    local proof_count proof_run_idx shape_line tx_bytes
     proof_count="$(extract_field proofs "$proof_line")"
+    proof_run_idx="$(extract_field run "$proof_line")"
+    [[ -n "$proof_run_idx" ]] || proof_run_idx="$run_idx"
     shape_line="$(grep "^BENCH_RECURSION_SHAPE proofs=${proof_count} " "$log_file" | tail -n 1 || true)"
     [[ -n "$shape_line" ]] || die "missing shape line for $fixture proof_count=$proof_count"
 
@@ -237,7 +253,7 @@ parse_run_log() {
     [[ "$tx_bytes" != "missing" ]] || die "missing transaction proof rows in $log_file"
 
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$fixture" "$run_idx" "$proof_count" \
+      "$fixture" "$proof_run_idx" "$proof_count" \
       "$(extract_field prove_ms "$proof_line")" \
       "$(extract_field proof_bytes "$proof_line")" \
       "$tx_bytes" \
@@ -283,7 +299,9 @@ run_once() {
       RECURSION_PROOF_COUNTS="$PROOF_COUNTS_CSV" \
       RECURSION_BENCH_HASH=eidos \
       RECURSION_BENCH_DISTINCT_STACKS=1 \
-      RECURSION_PROFILE_PROVE_ONCE=1 \
+      RECURSION_PROFILE_PROVE=1 \
+      RECURSION_PROFILE_PROVE_REPEATS="$REPEAT" \
+      RECURSION_PROFILE_PROVE_WARMUPS="$WARMUP" \
       MIDEN_BENCH_NUM_FRI_QUERIES="$FRI_QUERIES" \
       cargo bench --profile optimized -p miden-vm-synthetic-bench --bench recursive_verify -- --noplot
   ) 2>&1 | tee "$log_file"
@@ -335,17 +353,8 @@ for raw_fixture in "${FIXTURES[@]}"; do
   candidate_path="$(write_blakeg_fixture "$fixture" "$source_path" "$RUN_DIR/candidate-fixtures")"
   printf '%s\t%s\t%s\n' "$fixture" "$source_path" "$candidate_path" >> "$FIXTURE_PATHS_TSV"
 
-  if (( WARMUP > 0 )); then
-    for warmup_idx in $(seq 1 "$WARMUP"); do
-      run_once "$fixture" "$candidate_path" "$warmup_idx" \
-        "$RUN_DIR/logs/${fixture}_warmup${warmup_idx}.log" 0 "warmup $warmup_idx/$WARMUP"
-    done
-  fi
-
-  for run_idx in $(seq 1 "$REPEAT"); do
-    run_once "$fixture" "$candidate_path" "$run_idx" \
-      "$RUN_DIR/logs/${fixture}_run${run_idx}.log" 1 "run $run_idx/$REPEAT"
-  done
+  run_once "$fixture" "$candidate_path" 1 "$RUN_DIR/logs/${fixture}_runs.log" 1 \
+    "runs $REPEAT warmups $WARMUP"
 done
 
 {

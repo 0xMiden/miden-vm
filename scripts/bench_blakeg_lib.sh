@@ -52,23 +52,32 @@ fixture_meta() {
   local name="$2"
 
   case "$name" in
-    create-single-p2id-note|create-single-p2id)
-      echo "create-single-p2id-note|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note.masm|131072|524288"
+    create-single-p2id-note|create-single-p2id|create-single-p2id-note-falcon|create-single-p2id-falcon)
+      echo "create-single-p2id-note-falcon|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note-with-falcon-signing.masm|131072|524288"
       ;;
-    consume-single-p2id-note|consume-single-p2id)
-      echo "consume-single-p2id-note|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note.masm|131072|524288"
+    create-single-p2id-note-ecdsa|create-single-p2id-ecdsa)
+      echo "create-single-p2id-note-ecdsa|$fixture_root/synthetic_bench_bench-tx__create-single-p2id-note-with-ecdsa-signing.masm|32768|524288"
       ;;
-    consume-two-p2id-notes|consume-two-p2id)
-      echo "consume-two-p2id-notes|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes.masm|262144|524288"
+    consume-single-p2id-note|consume-single-p2id|consume-single-p2id-note-falcon|consume-single-p2id-falcon)
+      echo "consume-single-p2id-note-falcon|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note-with-falcon-signing.masm|131072|524288"
+      ;;
+    consume-single-p2id-note-ecdsa|consume-single-p2id-ecdsa)
+      echo "consume-single-p2id-note-ecdsa|$fixture_root/synthetic_bench_bench-tx__consume-single-p2id-note-with-ecdsa-signing.masm|32768|524288"
+      ;;
+    consume-two-p2id-notes|consume-two-p2id|consume-two-p2id-notes-falcon|consume-two-p2id-falcon)
+      echo "consume-two-p2id-notes-falcon|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes-with-falcon-signing.masm|131072|524288"
+      ;;
+    consume-two-p2id-notes-ecdsa|consume-two-p2id-ecdsa)
+      echo "consume-two-p2id-notes-ecdsa|$fixture_root/synthetic_bench_bench-tx__consume-two-p2id-notes-with-ecdsa-signing.masm|32768|524288"
       ;;
     consume-claim-note-l1-to-miden|consume-claim-l1)
-      echo "consume-claim-note-l1-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l1-to-miden.masm|262144|524288"
+      echo "consume-claim-note-l1-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l1-to-miden.masm|65536|524288"
       ;;
     consume-claim-note-l2-to-miden|consume-claim-l2)
-      echo "consume-claim-note-l2-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l2-to-miden.masm|262144|1048576"
+      echo "consume-claim-note-l2-to-miden|$fixture_root/synthetic_bench_bench-tx__consume-claim-note-l2-to-miden.masm|65536|524288"
       ;;
     consume-b2agg-note-bridge-out|consume-b2agg|b2agg)
-      echo "consume-b2agg-note-bridge-out|$fixture_root/synthetic_bench_bench-tx__consume-b2agg-note-bridge-out.masm|4194304|4194304"
+      echo "consume-b2agg-note-bridge-out|$fixture_root/synthetic_bench_bench-tx__consume-b2agg-note-bridge-out.masm|262144|4194304"
       ;;
     *.masm)
       local abs
