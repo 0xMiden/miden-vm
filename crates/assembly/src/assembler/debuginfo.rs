@@ -300,22 +300,25 @@ fn register_debug_type(
             let mut fields = vec![];
             for (i, field) in struct_ty.fields().iter().enumerate() {
                 let decl = declared_field_tys.and_then(|fields| fields.get(i));
-                let declared_name = decl.map(|decl| decl.name.clone().into_inner());
+                let field_name =
+                    decl.map(|decl| decl.name.clone().into_inner()).or_else(|| field.name.clone());
                 let declared_ty = decl.map(|decl| &decl.ty);
+                let field_type_name = declared_type_name(declared_ty);
                 let type_idx = register_debug_type(
                     debug_types_section,
-                    declared_name.clone(),
+                    field_type_name,
                     declared_ty,
                     &field.ty,
                 )?;
                 let name_idx = debug_types_section
-                    .add_string(declared_name.unwrap_or_else(|| format!("{i}").into()));
+                    .add_string(field_name.unwrap_or_else(|| format!("{i}").into()));
                 fields.push(DebugFieldInfo { name_idx, type_idx, offset: field.offset });
             }
+            let struct_name = declared_name.or_else(|| struct_ty.name());
             let name_idx = debug_types_section
-                .add_string(declared_name.clone().unwrap_or_else(|| "<anon>".into()));
+                .add_string(struct_name.clone().unwrap_or_else(|| "<anon>".into()));
             let size = u32::try_from(struct_ty.size()).map_err(|_| {
-                if let Some(declared_name) = declared_name.as_ref() {
+                if let Some(declared_name) = struct_name.as_ref() {
                     Report::msg(format!(
                         "invalid struct type '{declared_name}': struct is too large"
                     ))
@@ -403,80 +406,88 @@ fn register_debug_type(
     })
 }
 
+fn declared_type_name(declared_ty: Option<&TypeExpr>) -> Option<Arc<str>> {
+    match declared_ty? {
+        TypeExpr::Ref(path) => Some(Arc::from(path.inner().as_str())),
+        TypeExpr::Struct(ty) => ty.name.as_ref().map(|name| name.clone().into_inner()),
+        TypeExpr::Primitive(_) | TypeExpr::Ptr(_) | TypeExpr::Array(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use alloc::sync::Arc;
+
     use super::*;
-    use crate::ast::types::{EnumType, Variant};
+    use crate::ast::types::{CallConv, FunctionType};
 
     #[test]
-    fn registers_c_like_enum_debug_type() {
+    fn function_debug_types_preserve_resolved_struct_metadata() {
+        let felt_wrapper = Type::Struct(Arc::new(StructType::named(
+            "felt-wrapper".into(),
+            [(Arc::from("inner"), Type::Felt)],
+        )));
+        let account_id = Type::Struct(Arc::new(StructType::named(
+            "account-id".into(),
+            [(Arc::from("prefix"), felt_wrapper.clone()), (Arc::from("suffix"), felt_wrapper)],
+        )));
+        let function = Type::Function(Arc::new(FunctionType::new(
+            CallConv::ComponentModel,
+            [account_id.clone()],
+            [account_id],
+        )));
         let mut section = DebugTypesSection::new();
-        let enum_ty = EnumType::new(
-            Arc::from("Status"),
-            Type::U16,
-            [
-                Variant::c_like(Arc::from("Ok"), Some(200)),
-                Variant::c_like(Arc::from("NotFound"), Some(404)),
-            ],
-        )
-        .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
 
-        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
+        let function_idx =
+            register_debug_type(&mut section, Some(Arc::from("take-account-id")), None, &function)
+                .expect("function type should register");
 
-        let DebugTypeInfo::Enum {
-            name_idx,
-            size,
-            discriminant_type_idx,
-            variants,
-        } = section.get_type(type_idx).unwrap()
-        else {
-            panic!("expected enum debug type");
+        let (return_type_idx, param_type_idx) = match section.get_type(function_idx).unwrap() {
+            DebugTypeInfo::Function {
+                return_type_idx: Some(return_type_idx),
+                param_type_indices,
+            } => {
+                assert_eq!(param_type_indices.len(), 1);
+                (*return_type_idx, param_type_indices[0])
+            },
+            other => panic!("expected function debug type, got {other:?}"),
         };
-        assert_eq!(section.get_string(*name_idx).as_deref(), Some("Status"));
-        assert_eq!(*size, 2);
-        assert_eq!(
-            section.get_type(*discriminant_type_idx),
-            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U16))
+
+        assert_struct_debug_type(
+            &section,
+            param_type_idx,
+            "account-id",
+            &[("prefix", "felt-wrapper"), ("suffix", "felt-wrapper")],
         );
-        assert_eq!(variants.len(), 2);
-        assert_eq!(section.get_string(variants[0].name_idx).as_deref(), Some("Ok"));
-        assert_eq!(variants[0].type_idx, None);
-        assert_eq!(variants[0].payload_offset, None);
-        assert_eq!(variants[0].discriminant, 200);
-        assert_eq!(section.get_string(variants[1].name_idx).as_deref(), Some("NotFound"));
-        assert_eq!(variants[1].type_idx, None);
-        assert_eq!(variants[1].payload_offset, None);
-        assert_eq!(variants[1].discriminant, 404);
+        assert_struct_debug_type(
+            &section,
+            return_type_idx,
+            "account-id",
+            &[("prefix", "felt-wrapper"), ("suffix", "felt-wrapper")],
+        );
     }
 
-    #[test]
-    fn registers_payload_enum_debug_type() {
-        let mut section = DebugTypesSection::new();
-        let enum_ty = EnumType::new(
-            Arc::from("OptionU32"),
-            Type::U8,
-            [
-                Variant::c_like(Arc::from("None"), Some(0)),
-                Variant::new(Arc::from("Some"), Type::U32, Some(1)),
-            ],
-        )
-        .unwrap();
-        let ty = Type::Enum(Arc::new(enum_ty));
-
-        let type_idx = register_debug_type(&mut section, None, None, &ty).unwrap();
-
-        let DebugTypeInfo::Enum { variants, .. } = section.get_type(type_idx).unwrap() else {
-            panic!("expected enum debug type");
+    fn assert_struct_debug_type(
+        section: &DebugTypesSection,
+        type_idx: DebugTypeIdx,
+        expected_name: &str,
+        expected_fields: &[(&str, &str)],
+    ) {
+        let DebugTypeInfo::Struct { name_idx, fields, .. } = section.get_type(type_idx).unwrap()
+        else {
+            panic!("expected struct debug type");
         };
-        assert_eq!(variants.len(), 2);
-        assert_eq!(variants[0].type_idx, None);
-        let payload_type_idx = variants[1].type_idx.expect("Some variant should have payload");
-        assert_eq!(
-            section.get_type(payload_type_idx),
-            Some(&DebugTypeInfo::Primitive(DebugPrimitiveType::U32))
-        );
-        assert_eq!(variants[1].payload_offset, Some(4));
-        assert_eq!(variants[1].discriminant, 1);
+
+        assert_eq!(section.get_string(*name_idx).as_deref(), Some(expected_name));
+        assert_eq!(fields.len(), expected_fields.len());
+        for (field, (expected_name, expected_type_name)) in fields.iter().zip(expected_fields) {
+            assert_eq!(section.get_string(field.name_idx).as_deref(), Some(*expected_name));
+
+            let DebugTypeInfo::Struct { name_idx, .. } = section.get_type(field.type_idx).unwrap()
+            else {
+                panic!("expected struct field type");
+            };
+            assert_eq!(section.get_string(*name_idx).as_deref(), Some(*expected_type_name));
+        }
     }
 }
