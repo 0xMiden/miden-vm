@@ -3,15 +3,16 @@ use miden::core::stark::constants
 #! Processes the public inputs.
 #!
 #! This is a generic dispatch procedure that calls the instance-specific implementation
-#! via `dynexec`. The instance-specific implementation loads the fixed-length public inputs
-#! and the variable-length public inputs from the advice stack, populating the caller-facing
-#! reduced-inputs block and the FLPI section of the ACE READ region, and absorbing every
-#! public input into the Fiat-Shamir transcript in a rate-aligned schedule (mirroring the
-#! Rust-side `MultiAir::observe`).
+#! via `dynexec`. The instance-specific implementation populates the FLPI section of the ACE
+#! READ region with the fixed-length public inputs and absorbs every public input into the
+#! Fiat-Shamir transcript in a rate-aligned schedule (mirroring the Rust-side `MultiAir::observe`).
+#! The reduced variable-length public inputs (the `reduced_inputs` block) are staged by the
+#! instance's `verify_proof` before the transcript starts; this procedure only absorbs them.
 #!
 #! Memory layout populated (low -> high addresses):
 #!
-#!   [..., reduced_inputs (16 felts), pi (FLPI EF, m base felts -> 2m slots),
+#!   reduced_inputs (16 felts, at a fixed standalone address, NOT in the ACE READ region)
+#!   [..., pi (FLPI EF, m base felts -> 2m slots),
 #!         beta0, beta1, alpha0, alpha1, <pad>, OOD-start, ...]
 #!
 #! where:
@@ -19,7 +20,8 @@ use miden::core::stark::constants
 #!      zero_pad (4)] — the caller-facing summary of the variable-length public inputs.
 #!      `kernel_H` is the hash of all kernel-procedure digests; `program_digest` and
 #!      `transcript_state` are passed through unchanged. The trailing pad rate-aligns the FS
-#!      observation.
+#!      observation. This block lives at a fixed standalone address (see `stark/constants.masm`),
+#!      not contiguous with `pi`.
 #!   b) `pi` holds the fixed-length public inputs (stack i/o) as extension field elements.
 #!      Each base felt sits at `pi + 2*i`, with zero in the high coordinate.
 #!   c) `[beta0, beta1, alpha0, alpha1]` is the auxiliary randomness (loaded
@@ -51,14 +53,14 @@ end
 #! Hence the address where public inputs are stored is computed using a negative offset from the
 #! address where the OOD evaluations are stored.
 #!
-#! We compute two pointers:
-#!   pi_ptr             = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
-#!   reduced_inputs_ptr = pi_ptr - 16
+#! We compute one pointer:
+#!   pi_ptr = OOD_EVALUATIONS_PTR - 8 - num_fixed_len_pi * 2
 #!
 #! The `* 2` converts the FLPI base-felt count to EF slots (each base felt is stored as
 #! `[val, 0]`). The `-8` skips the two words between FLPI and OOD: the auxiliary randomness word
-#! and the codegen alignment pad. The `-16` reserves the caller-facing reduced-inputs block,
-#! `[kernel_H | program_digest | transcript_state | pad]` (see `stark/constants.masm`).
+#! and the codegen alignment pad. The reduced-inputs block is no longer carved out of this region;
+#! it lives at the fixed standalone `REDUCED_INPUTS_PTR` (see `stark/constants.masm`), and this
+#! procedure publishes that fixed address into the reduced-inputs pointer cell.
 #!
 #! Inputs:  [num_fixed_len_pi, ...]
 #! Outputs: [...]
@@ -71,88 +73,79 @@ pub proc compute_and_store_public_inputs_address
     # => [ood_evals_ptr - 8, num_fixed_len_pi, ...]
     swap mul.2 sub
     # => [pi_ptr, ...]
-
-    # 2) reduced_inputs_ptr = pi_ptr - 16
-    dup sub.16
-    # => [reduced_inputs_ptr, pi_ptr, ...]
-
-    # 3) Store both pointers.
-    exec.constants::reduced_inputs_address_ptr mem_store
     exec.constants::public_inputs_address_ptr mem_store
+
+    # 2) Publish the fixed reduced-inputs block address into the reduced-inputs pointer cell.
+    exec.constants::reduced_inputs_ptr
+    exec.constants::reduced_inputs_address_ptr mem_store
 end
 
-#! Loads 8 base field elements from the advice stack, stores them as extension field elements
-#! in memory, and returns the original base element words in the rate positions for absorption
-#! by the caller via `poseidon2::permute`.
+#! Reads 8 base field elements from caller memory at `src`, stores them as extension field elements
+#! at `dst`, and returns the original base words in the rate positions for absorption by the caller
+#! via `poseidon2::permute`.
 #!
 #! The procedure does NOT absorb the elements into the transcript -- the caller is responsible
 #! for calling `poseidon2::permute` after this procedure to complete the absorption.
 #!
-#! Inputs:  [Y, Y, C, ptr, ...]
-#! Outputs: [A0, A1, C, ptr + 16, ..]
+#! Inputs:  [Y, Y, C, dst, src, ...]
+#! Outputs: [A0, A1, C, dst + 16, src + 8, ...]
 #!
-#! where A0 and A1 are the original base element words (from advice), positioned in the rate
-#! slots so that a subsequent `poseidon2::permute` absorbs them into the sponge state.
+#! where A0 and A1 are the original base element words (from memory), positioned in the rate slots
+#! so that a subsequent `poseidon2::permute` absorbs them into the sponge state.
 #!
 #! Invocation: exec
-pub proc load_base_store_extension_double_word
-    # 1) Load the first 4 base elements from the advice stack and save them temporarily
-    adv_loadw
+pub proc load_base_store_extension_double_word_from_mem
+    # 1) Load the first 4 base elements from `src` and save them temporarily; advance `src`.
+    dup.13 mem_loadw_le
     exec.constants::tmp1 mem_storew_le
+    movup.13 add.4 movdn.13
 
     # 2) Represent the first 4 base field elements as elements in the quadratic extension field
     swapw
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a3, a2, a1, a0, C, ptr, ...]
+    # => [0, 0, 0, 0, a3, a2, a1, a0, C, dst, src, ...]
     movdn.7
-    # => [0, 0, 0, a3, a2, a1, a0, 0, C, ptr, ...]
     movdn.5
-    # => [0, 0, a3, a2, a1, 0, a0, 0, C, ptr, ...]
     movdn.3
-    # => [0, a3, a2, 0, a1, 0, a0, 0, C, ptr, ...]
     swap
-    # => [a3, 0, a2, 0, a1, 0, a0, 0, C, ptr, ...]
+    # => [a3, 0, a2, 0, a1, 0, a0, 0, C, dst, src, ...]
 
     # 3) Save the first 2 extension field elements
     dup.12
     mem_storew_le
 
-    # 4) Load the second 4 base elements from the advice stack and save them temporarily
-    adv_loadw
+    # 4) Load the second 4 base elements from `src` and save them temporarily; advance `src`.
+    dup.13 mem_loadw_le
     exec.constants::tmp2 mem_storew_le
+    movup.13 add.4 movdn.13
     swapw
-    # => [a3, 0, a2, 0, a7, a6, a5, a4, C, ptr, ...]
+    # => [a3, 0, a2, 0, a7, a6, a5, a4, C, dst, src, ...]
 
     # 5) Save the second 2 extension field elements
     dup.12 add.4
     mem_storew_le
 
-
     # 6) Represent the second 4 base field elements as elements in the quadratic extension field
     exec.constants::zeroize_stack_word
-    # => [0, 0, 0, 0, a7, a6, a5, a4, C, ptr, ...]
     movdn.7
     movdn.5
     movdn.3
     swap
-    # => [a7, 0, a6, 0, a5, 0, a4, 0, C, ptr, ...]
+    # => [a7, 0, a6, 0, a5, 0, a4, 0, C, dst, src, ...]
 
-    # 7) Save the third 2 extension field elements
-    #    We also load the second 4 base elements into the R2 rate position.
+    # 7) Save the third 2 extension field elements; reload the second base word into R2.
     dup.12
     add.8
     mem_storew_le
     exec.constants::tmp2 mem_loadw_le
     swapw
 
-    # 8) Save the fourth 2 extension field elements
-    #    We also load the first 4 base elements into the R1 rate position and update the pointer.
-    #    This ordering (first word on top = R1, second word below = R2) matches the Rust
-    #    challenger's absorption order: first 4 elements -> rate[0..3], next 4 -> rate[4..7].
+    # 8) Save the fourth 2 extension field elements; reload the first base word into R1 and advance
+    #    `dst`. First word on top = R1, second word below = R2 (matches the challenger order).
     dup.12
     add.16 swap.13
     add.12
     mem_storew_le
     exec.constants::tmp1 mem_loadw_le
-    # => [a3, a2, a1, a0, a7, a6, a5, a4, C, ptr + 16, ...]
+    # => [a3, a2, a1, a0, a7, a6, a5, a4, C, dst + 16, src + 8, ...]
 end

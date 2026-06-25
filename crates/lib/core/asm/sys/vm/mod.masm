@@ -79,13 +79,26 @@ end
 #!   Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
 #!   is 80 for the main trace.
 #!
-#! Inputs:  [log(core_trace_length), log(chiplets_trace_length)]
+#! The kernel-procedure digests and the stack i/o (FLPI) are read from caller memory at the
+#! supplied `kernel_ptr` and `stack_io_ptr`; the program digest is supplied as an operand word; the
+#! transcript state (DEFERRED) is loaded from the advice stack. `verify_proof` stages the
+#! reduced-inputs block (kernel_H | program_digest | transcript_state | pad) before the transcript
+#! starts.
+#!
+#! Inputs:  [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3,
+#!           log(core_trace_length), log(chiplets_trace_length)]
 #! Outputs: []
 pub proc verify_proof
     # --- Load and validate security parameters from advice stack ---
 
     exec.load_security_params
     exec.assert_acceptable_options
+    # => [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0, PROG1, PROG2, PROG3,
+    #     log(core_tl), log(chiplets_tl)]
+
+    # --- Stage the reduced-inputs block from the caller-supplied operands and advice ---
+
+    exec.public_inputs::stage_reduced_inputs
     # => [log(core_tl), log(chiplets_tl)]
 
     # --- Get constants -------------------------------------------------------

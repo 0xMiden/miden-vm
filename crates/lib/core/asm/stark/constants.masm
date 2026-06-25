@@ -86,12 +86,22 @@ const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322664
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322669
 
-### Address storing a pointer to the caller-facing reduced-inputs block
-### [kernel_H | program_digest | transcript_state | zero_pad] (16 felts, just below FLPI).
+### Address storing a pointer to the reduced-inputs block
+### [kernel_H | program_digest | transcript_state | zero_pad] (16 felts). The block lives at the
+### fixed standalone address REDUCED_INPUTS_PTR; this cell holds that pointer for the readers.
 const REDUCED_INPUTS_ADDRESS_PTR = 3223322670
 
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322671
+
+### Caller-supplied base address of the kernel-procedure digests (N word-aligned digests). Persisted
+### by `verify_proof` from its operand so the step-II boundary fold can re-read the same region the
+### kernel commitment hashes.
+const KERNEL_DIGESTS_ADDRESS_PTR = 3223322706
+
+### Caller-supplied base address of the fixed-length public inputs (stack i/o, 32 base felts).
+### Persisted by `verify_proof` from its operand so `load_public_inputs` can EF-expand them.
+const STACK_IO_ADDRESS_PTR = 3223322707
 
 ### Addresses to store the state of Poseidon2-based random coin
 const C_PTR = 3223322672
@@ -154,30 +164,24 @@ const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322761
 ### smaller AIR's main block during the swap.
 const SWAP_SCRATCH_PTR = 3223322764
 
-### Scratch region for the kernel-procedure digests streamed from advice during
-### `process_public_inputs`. Holds up to `Kernel::MAX_NUM_PROCEDURES` = 255 word-aligned
-### digests (1020 felts). The verifier hashes this region with `hash_elements` to recompute
-### the kernel commitment and folds each digest into the outer-LogUp boundary correction.
-const KERNEL_DIGESTS_PTR = 3223322836
+### Fixed standalone reduced-inputs block (16 felts):
+### [kernel_H (4) | program_digest (4) | transcript_state (4) | zero_pad (4)]. The verifier writes
+### it and absorbs it into Fiat-Shamir; the ACE circuit never reads it, so it lives in the fixed
+### verifier region rather than the OOD-derived ACE READ region.
+const REDUCED_INPUTS_PTR = 3223322836
 
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward, forming the ACE READ section consumed by `eval_circuit`.
 ##
-## In the backward direction, the size is determined by the fixed-length public inputs (FLPI,
-## the 32 stack-i/o felts) and a small caller-facing block holding the reduced variable-length
-## public inputs. These regions are laid out by `compute_and_store_public_inputs_address` in
-## `stark/public_inputs.masm`.
+## In the backward direction, the size is determined solely by the fixed-length public inputs
+## (FLPI, the 32 stack-i/o felts) — the only public values the circuit references. The FLPI
+## region is laid out by `compute_and_store_public_inputs_address` in `stark/public_inputs.masm`.
 ##
 ## In the forward direction, the size is determined by the OOD evaluations, aux bus boundary
 ## values, stark variables, and circuit constants.
 ##
-## Caller-facing public-input layout (low address -> high address):
-##
-##   reduced_inputs_ptr -->  [ kernel_H          (4 felts) ]  hash of all kernel digests
-##                           [ program_digest    (4 felts) ]  natural order
-##                           [ transcript_state  (4 felts) ]  natural order
-##                           [ zero pad          (4 felts) ]  rate-aligns the FS observation
+## ACE READ layout (low address -> high address):
 ##
 ##   pi_ptr             -->  [ FLPI (m EF)               ]  fixed-length public inputs (stack i/o)
 ##
@@ -189,14 +193,16 @@ const KERNEL_DIGESTS_PTR = 3223322836
 ##                           [ constants                 ]  ACE_CIRCUIT_STREAM_PTR
 ##                                                          ... EVAL section follows ...
 ##
-## After `verify_proof` returns, the 16 felts at `reduced_inputs_ptr` together with the FLPI
-## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
-## commitment the caller can bind against.
+## The reduced-inputs block (kernel_H | program_digest | transcript_state | zero pad) is NOT part
+## of the ACE READ section: the circuit references only the stack-i/o public values. It lives at
+## the fixed standalone `REDUCED_INPUTS_PTR` above, staged by `verify_proof` and absorbed into
+## Fiat-Shamir; it is not carved out of this region.
 ##
-## The FLPI and reduced-inputs pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR and
-## REDUCED_INPUTS_ADDRESS_PTR). All other pointers are fixed constants. The reduced-inputs
-## block is NOT part of the ACE READ section — it sits just below `pi_ptr` purely as a
-## caller-facing payload (the circuit references only the stack-i/o public values).
+## After `verify_proof` returns, the 16 felts at `REDUCED_INPUTS_PTR` together with the FLPI
+## window at `pi_ptr` (read base felts at `pi_ptr + 2*i`) constitute the verified public-input
+## commitment the caller can bind against. The FLPI pointer is dynamic (stored at
+## PUBLIC_INPUTS_ADDRESS_PTR); the reduced-inputs pointer cell (REDUCED_INPUTS_ADDRESS_PTR) holds
+## the fixed `REDUCED_INPUTS_PTR`. All other pointers are fixed constants.
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
@@ -551,8 +557,16 @@ pub proc c_total_ptr
     push.C_TOTAL_PTR
 end
 
-pub proc kernel_digests_ptr
-    push.KERNEL_DIGESTS_PTR
+pub proc reduced_inputs_ptr
+    push.REDUCED_INPUTS_PTR
+end
+
+pub proc kernel_digests_address_ptr
+    push.KERNEL_DIGESTS_ADDRESS_PTR
+end
+
+pub proc stack_io_address_ptr
+    push.STACK_IO_ADDRESS_PTR
 end
 
 pub proc num_kernel_digests_ptr

@@ -6,15 +6,18 @@
 //! then packs them into the advice inputs (initial stack, advice stack, Merkle store,
 //! and advice map) that the MASM recursive verifier consumes.
 //!
-//! The advice stack ordering must match the MASM consumption order exactly:
+//! The advice stack ordering must match the MASM consumption order exactly. The kernel digests and
+//! stack i/o lead the tape because the test marshalling in `run_recursive_verifier` copies them
+//! into caller-owned memory before `verify_proof` runs:
 //!
+//!   kernel_digests -> stack i/o ->
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
-//!   num_kernel_proc_digests -> kernel_digests ->
-//!   fixed-length PI -> main commit -> aux commit ->
+//!   transcript state (DEFERRED) -> main commit -> aux commit ->
 //!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
 //!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
-//! See `build_advice` for the authoritative layout.
+//! The program digest, kernel digest count, kernel/stack-i/o pointers and per-AIR log heights are
+//! supplied on the initial operand stack instead. See `build_advice` for the authoritative layout.
 
 use alloc::{
     string::{String, ToString},
@@ -144,18 +147,46 @@ fn build_advice(
 ) -> Result<VerifierData, VerifierError> {
     let pcs = &stark.pcs_proof;
 
+    // Caller-owned memory regions consumed by the test marshalling in `run_recursive_verifier`:
+    // kernel digests at KERNEL_PTR, stack i/o at STACK_IO_PTR. These must match the constants in
+    // that MASM prologue.
+    const KERNEL_PTR: u64 = 0;
+    const STACK_IO_PTR: u64 = 4096;
+
+    let num_kernel_proc_digests = kernel_digests.len();
+    let program_digest: Word = *pub_inputs.program_info().program_hash();
+    let program_digest = program_digest.as_elements();
+
     // --- initial stack ---
-    // `[log_core, log_chip]` with log_core on top. Security parameters are on the advice stack.
-    // `StackInputs::try_from_ints` puts `vec[0]` on top.
-    let initial_stack = vec![log_core_trace_height as u64, log_chiplets_trace_height as u64];
+    // `[kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3, log_core, log_chip]` with
+    // `kernel_ptr` on top. `StackInputs::try_from_ints` puts `vec[0]` on top.
+    let initial_stack = vec![
+        KERNEL_PTR,
+        num_kernel_proc_digests as u64,
+        STACK_IO_PTR,
+        program_digest[0].as_canonical_u64(),
+        program_digest[1].as_canonical_u64(),
+        program_digest[2].as_canonical_u64(),
+        program_digest[3].as_canonical_u64(),
+        log_core_trace_height as u64,
+        log_chiplets_trace_height as u64,
+    ];
 
     // --- advice stack ---
     let mut advice_stack = Vec::new();
 
-    // 0. Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
-    //    Consumed first by load_security_params in the specific verifier. num_queries is the
-    //    configured protocol parameter, not the potentially deduplicated count (e.g.
-    //    tree_indices.len())
+    // 0. Kernel procedure digest elements (4 canonical felts per digest), copied by the test
+    //    marshalling into the caller region at KERNEL_PTR.
+    let kernel_advice = build_kernel_digest_advice(kernel_digests);
+    advice_stack.extend_from_slice(&kernel_advice);
+
+    // 1. Stack i/o (32 felts), copied by the test marshalling into the caller region at
+    //    STACK_IO_PTR.
+    advice_stack.extend_from_slice(&build_stack_io_advice(&pub_inputs));
+
+    // 2. Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
+    //    Consumed by load_security_params in the specific verifier. num_queries is the configured
+    //    protocol parameter, not the potentially deduplicated count (e.g. tree_indices.len())
     let params = config::pcs_params();
     let num_queries = params.num_queries();
     advice_stack.push(num_queries as u64);
@@ -165,18 +196,9 @@ fn build_advice(
     advice_stack.push(config::DEEP_POW_BITS as u64);
     advice_stack.push(config::FOLDING_POW_BITS as u64);
 
-    // 1. Number of kernel procedure digests.
-    let num_kernel_proc_digests = kernel_digests.len();
-    advice_stack.push(num_kernel_proc_digests as u64);
-
-    // 2. Kernel procedure digest elements (4 canonical felts per digest).
-    let kernel_advice = build_kernel_digest_advice(kernel_digests);
-    advice_stack.extend_from_slice(&kernel_advice);
-
-    // 3. Variable-length window messages and fixed-length public inputs, in the order
-    //    `process_public_inputs` consumes them: program digest, transcript state, stack i/o.
-    let fixed_len_inputs = build_fixed_len_inputs(&pub_inputs);
-    advice_stack.extend_from_slice(&fixed_len_inputs);
+    // 3. Transcript state (DEFERRED), loaded by `verify_proof::stage_reduced_inputs`.
+    advice_stack
+        .extend(pub_inputs.pc_transcript_state().as_ref().iter().map(Felt::as_canonical_u64));
 
     // 4. Main trace commitment (4 felts).
     advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
@@ -350,9 +372,9 @@ where
     Ok((vec![tree], advice_entries))
 }
 
-/// Build kernel digest advice data: 4 canonical felts per digest, in order. The MASM
-/// `stream_kernel_digests` procedure reads each digest with a single `adv_loadw` and writes
-/// it into the kernel-digest scratch region before hashing the region with `hash_elements`.
+/// Build kernel digest advice data: 4 canonical felts per digest, in order. The test marshalling
+/// copies these felts into the caller-owned kernel region at KERNEL_PTR, which `verify_proof`
+/// hashes with `hash_elements` to recompute the kernel commitment.
 fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
     let mut result = Vec::with_capacity(kernel_digests.len() * 4);
     for digest in kernel_digests {
@@ -361,12 +383,10 @@ fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
     result
 }
 
-/// Build the public-input advice tail in the order `process_public_inputs` consumes it:
-/// program digest (4), transcript state (4), stack inputs (16), stack outputs (16).
-fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
+/// Build the fixed-length public inputs (stack i/o): stack inputs (16), stack outputs (16). The
+/// test marshalling copies these 32 felts into the caller-owned region at STACK_IO_PTR.
+fn build_stack_io_advice(pub_inputs: &PublicInputs) -> Vec<u64> {
     let mut felts = Vec::<Felt>::new();
-    felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
-    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
     felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
     felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
     felts.iter().map(Felt::as_canonical_u64).collect()
