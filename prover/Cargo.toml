@@ -18,6 +18,7 @@ arbitrary = ["dep:proptest"]
 default = ["std"]
 concurrent = ["std", "miden-air/concurrent", "miden-crypto/concurrent", "miden-processor/concurrent"]
 std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies

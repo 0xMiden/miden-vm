@@ -966,10 +966,10 @@ fn sparse_reader_rejects_trailing_bytes_with_exact_prefix_budget() {
     bytes_with_trailing.push(0);
     let err = SparseMastForest::read_from_bytes_with_options(
         &bytes_with_trailing,
-        SparseMastForestReadOptions::new().with_wire_byte_budget(bytes.len()),
+        SparseMastForestReadOptions::new().with_wire_byte_budget(bytes_with_trailing.len()),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("budget is smaller than payload length"));
+    assert!(err.to_string().contains("extra bytes after SparseMastForest payload"));
 }
 
 #[test]

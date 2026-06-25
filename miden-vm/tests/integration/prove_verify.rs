@@ -443,14 +443,15 @@ mod fast_parallel {
             proving_inputs_bytes.len().checked_mul(4).expect("test input budget overflow");
         let mut proving_inputs_with_trailing_byte = proving_inputs_bytes.clone();
         proving_inputs_with_trailing_byte.push(0);
-        assert!(
-            TraceProvingInputs::read_from_bytes_with_budget(
-                &proving_inputs_with_trailing_byte,
-                proving_inputs_bytes.len(),
-            )
-            .is_err(),
-            "TraceProvingInputs should reject trailing bytes even when the budget matches the valid prefix"
-        );
+        let err = TraceProvingInputs::read_from_bytes_with_budget(
+            &proving_inputs_with_trailing_byte,
+            proving_inputs_with_trailing_byte
+                .len()
+                .checked_mul(4)
+                .expect("test input budget overflow"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("TraceProvingInputs payload has trailing bytes"));
         let restored_proving_inputs = TraceProvingInputs::read_from_bytes_with_budget(
             &proving_inputs_bytes,
             proving_inputs_budget,
