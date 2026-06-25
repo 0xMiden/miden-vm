@@ -733,7 +733,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "miden-ace-codegen"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-ace-codegen",
  "miden-core",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "itertools",
  "miden-air",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "miden-air",
  "miden-core",
