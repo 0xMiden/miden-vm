@@ -128,8 +128,12 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
         },
         DebugPrimitiveType::Bool => {
             let (head, rest) = felts.split_first()?;
-            let v = head.as_canonical_u64();
-            Some((if v == 0 { "false".into() } else { "true".into() }, rest))
+            let rendered = match head.as_canonical_u64() {
+                0 => "false".into(),
+                1 => "true".into(),
+                _ => return None,
+            };
+            Some((rendered, rest))
         },
         // Signed ints: read the limbs, then read the low `bits` bits as two's complement.
         DebugPrimitiveType::I8
@@ -137,8 +141,9 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
         | DebugPrimitiveType::I32
         | DebugPrimitiveType::I64
         | DebugPrimitiveType::I128 => {
-            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
-            Some((render_signed(value, p.size_in_bytes() * 8), rest))
+            let bits = p.size_in_bytes() * 8;
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize, bits)?;
+            Some((render_signed(value, bits), rest))
         },
         // Unsigned ints: read the limbs and print the packed value.
         DebugPrimitiveType::U8
@@ -146,15 +151,18 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
         | DebugPrimitiveType::U32
         | DebugPrimitiveType::U64
         | DebugPrimitiveType::U128 => {
-            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
-            Some((render_unsigned(value, p.size_in_bytes() * 8), rest))
+            let bits = p.size_in_bytes() * 8;
+            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize, bits)?;
+            Some((render_unsigned(value, bits), rest))
         },
         DebugPrimitiveType::F32 => {
-            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            let (value, rest) =
+                read_limbs(felts, p.size_in_felts() as usize, p.size_in_bytes() * 8)?;
             Some((f32::from_bits(value as u32).to_string(), rest))
         },
         DebugPrimitiveType::F64 => {
-            let (value, rest) = read_limbs(felts, p.size_in_felts() as usize)?;
+            let (value, rest) =
+                read_limbs(felts, p.size_in_felts() as usize, p.size_in_bytes() * 8)?;
             Some((f64::from_bits(value as u64).to_string(), rest))
         },
         // 256-bit values exceed the `u128` limb path; no typed decoding is defined for them yet.
@@ -164,9 +172,14 @@ fn decode_primitive(felts: &[Felt], p: DebugPrimitiveType) -> Option<(String, &[
 
 /// Reads `n` 32-bit limbs (low first) from the front of `felts` and packs them into a `u128`
 /// (`n` is at most 4, so 128 bits fit). This is the inverse of the encoder's `limbs_to_felts`.
-/// Returns the value and the leftover felts, or `None` if there are too few felts or a felt is
-/// bigger than 32 bits (not a valid limb).
-fn read_limbs(felts: &[Felt], n: usize) -> Option<(u128, &[Felt])> {
+/// Returns the value and the leftover felts, or `None` if there are too few felts, a felt is
+/// bigger than 32 bits (not a valid limb), or the packed value doesn't fit in `bits` bits.
+///
+/// The width check matters for types narrower than their limbs (`u8`/`u16`/`i8`/`i16`, which use
+/// one 32-bit limb): without it an out-of-range felt would be silently masked down and rendered as
+/// a valid value (e.g. a `u8` result of 300 as 44), hiding malformed output instead of falling
+/// back to raw felts.
+fn read_limbs(felts: &[Felt], n: usize, bits: u32) -> Option<(u128, &[Felt])> {
     if felts.len() < n {
         return None;
     }
@@ -178,6 +191,9 @@ fn read_limbs(felts: &[Felt], n: usize) -> Option<(u128, &[Felt])> {
             return None;
         }
         value |= (limb as u128) << (32 * i);
+    }
+    if value > max_for_bits(bits) {
+        return None;
     }
     Some((value, rest))
 }

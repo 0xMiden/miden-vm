@@ -418,6 +418,7 @@ mod tests {
 
         assert_eq!(proc.decode_result(&[felt(1)]).as_deref(), Some("bool(true)"));
         assert_eq!(proc.decode_result(&[felt(0)]).as_deref(), Some("bool(false)"));
+        assert_eq!(proc.decode_result(&[felt(2)]), None);
         assert_eq!(proc.to_string(), "take-bool(b: Bool) -> Bool");
     }
 
@@ -437,6 +438,24 @@ mod tests {
 
         assert_eq!(proc.decode_result(&[felt(4_294_967_295)]).as_deref(), Some("u32(4294967295)"));
         assert_eq!(proc.to_string(), "take-u32(n: U32) -> U32");
+    }
+
+    #[test]
+    fn sub_word_int_out_of_range_is_rejected() {
+        // Types narrower than their 32-bit limb must reject a felt that doesn't fit the declared
+        // width instead of masking it down (300 & 0xFF = 44), which would hide malformed output.
+        let u8_proc = prim_proc(DebugPrimitiveType::U8, "take-u8");
+        assert_eq!(u8_proc.decode_result(&[felt(255)]).as_deref(), Some("u8(255)"));
+        assert_eq!(u8_proc.decode_result(&[felt(300)]), None);
+
+        let i8_proc = prim_proc(DebugPrimitiveType::I8, "take-i8");
+        // 0xFF is the in-range two's-complement encoding of -1; 300 is out of range.
+        assert_eq!(i8_proc.decode_result(&[felt(0xff)]).as_deref(), Some("i8(-1)"));
+        assert_eq!(i8_proc.decode_result(&[felt(300)]), None);
+
+        let u16_proc = prim_proc(DebugPrimitiveType::U16, "take-u16");
+        assert_eq!(u16_proc.decode_result(&[felt(65_535)]).as_deref(), Some("u16(65535)"));
+        assert_eq!(u16_proc.decode_result(&[felt(65_536)]), None);
     }
 
     #[test]
