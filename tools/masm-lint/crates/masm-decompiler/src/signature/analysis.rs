@@ -90,6 +90,7 @@ impl<'a> Analysis<'a> {
                 Immediate::Constant(_) => OpResult::Unknown,
             },
             Op::While { body, .. } => self.visit_while(body, stack),
+            Op::DoWhile { .. } => OpResult::Unknown,
         }
     }
 

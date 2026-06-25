@@ -5,17 +5,15 @@ use std::{collections::HashMap, sync::Arc};
 use masm_decompiler::analysis::{SymbolPath, Workspace};
 use miden_debug_types::DefaultSourceManager;
 
-mod capability;
 pub mod lint;
 mod lint_policy;
 mod prepared;
 mod signature_mismatch;
 mod unconstrained_advice;
 
-use capability::AnalysisCapability;
 use prepared::PreparedAnalysis;
 use signature_mismatch::{SignatureMismatch, SignatureMismatchCapability};
-use unconstrained_advice::{AdviceDiagnostic, UnconstrainedAdviceCapability};
+use unconstrained_advice::AdviceDiagnostic;
 
 /// Results of running all analysis passes on a workspace.
 #[derive(Debug)]
@@ -62,7 +60,7 @@ fn run_capabilities(
     } else {
         Vec::new()
     };
-    let advice_diagnostics = UnconstrainedAdviceCapability.analyze(prepared);
+    let advice_diagnostics = unconstrained_advice::analyze(prepared);
 
     AnalysisSnapshot { signature_mismatches, advice_diagnostics }
 }

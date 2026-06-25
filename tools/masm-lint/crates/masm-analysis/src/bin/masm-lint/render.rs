@@ -160,16 +160,7 @@ fn span_display_len(span: SourceSpan, sources: &dyn SourceManager) -> usize {
 
 /// Return the number of decimal digits needed to represent `n`.
 fn decimal_width(n: usize) -> usize {
-    if n == 0 {
-        return 1;
-    }
-    let mut width = 0;
-    let mut v = n;
-    while v > 0 {
-        width += 1;
-        v /= 10;
-    }
-    width
+    n.to_string().len()
 }
 
 #[cfg(test)]

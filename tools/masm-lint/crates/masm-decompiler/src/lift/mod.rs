@@ -101,6 +101,13 @@ pub enum LiftingError {
         /// Description of the unsupported pattern.
         reason: String,
     },
+    /// Control-flow construct is not modeled by the decompiler yet.
+    UnsupportedControlFlow {
+        /// Source span of the unsupported control-flow operation.
+        span: SourceSpan,
+        /// The unsupported MASM construct.
+        construct: &'static str,
+    },
     /// An immediate still refers to a named constant instead of a resolved value.
     UnresolvedImmediateConstant {
         /// Source span of the immediate.
@@ -154,6 +161,9 @@ impl std::fmt::Display for LiftingError {
             },
             LiftingError::UnsupportedRepeatPattern { reason, .. } => {
                 write!(f, "unsupported repeat loop pattern: {reason}")
+            },
+            LiftingError::UnsupportedControlFlow { construct, .. } => {
+                write!(f, "unsupported control-flow construct `{construct}`")
             },
             LiftingError::UnresolvedImmediateConstant { name, .. } => {
                 write!(f, "unresolved immediate constant `{name}`")
@@ -285,6 +295,9 @@ fn lift_op(
             lift_repeat(op_span, count, body, stack, loop_ctx, resolver, sigs)
         },
         Op::While { body, .. } => lift_while(op_span, body, stack, loop_ctx, resolver, sigs),
+        Op::DoWhile { .. } => {
+            Err(LiftingError::UnsupportedControlFlow { span: op_span, construct: "dowhile" })
+        },
     }
 }
 

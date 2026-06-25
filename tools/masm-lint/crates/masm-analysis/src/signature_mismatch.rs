@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use masm_decompiler::analysis::{ProcSignature, SymbolPath, Workspace};
 use miden_assembly_syntax::ast::{
-    FunctionType, Module, SymbolResolutionError, TypeResolver, types::Type as AstType,
+    FunctionType, GlobalItemIndex, ItemIndex, LocalSymbolResolver, Module, SymbolResolution,
+    SymbolResolutionError, TypeResolver, types::Type as AstType,
 };
-use miden_debug_types::{DefaultSourceManager, SourceSpan, Spanned};
+use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan, Span, Spanned};
 
-use crate::{capability::AnalysisCapability, prepared::PreparedAnalysis};
+use crate::prepared::PreparedAnalysis;
 
 /// Stack-effect counts extracted from a procedure signature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,10 +70,8 @@ impl<'a> SignatureMismatchCapability<'a> {
     }
 }
 
-impl AnalysisCapability for SignatureMismatchCapability<'_> {
-    type Output = Vec<SignatureMismatch>;
-
-    fn analyze(&self, prepared: &PreparedAnalysis) -> Self::Output {
+impl SignatureMismatchCapability<'_> {
+    pub(crate) fn analyze(&self, prepared: &PreparedAnalysis) -> Vec<SignatureMismatch> {
         self.workspace
             .modules()
             .flat_map(|program| {
@@ -89,7 +88,7 @@ fn signature_mismatches_for_module(
     prepared: &PreparedAnalysis,
 ) -> Vec<SignatureMismatch> {
     let mut findings = Vec::new();
-    let Ok(mut resolver) = module.type_resolver(sources) else {
+    let Some(mut resolver) = ModuleLocalTypeResolver::new(module, sources) else {
         return findings;
     };
     for proc in module.procedures() {
@@ -127,6 +126,64 @@ fn signature_mismatches_for_module(
     }
 
     findings
+}
+
+struct ModuleLocalTypeResolver<'a> {
+    module: &'a Module,
+    resolver: LocalSymbolResolver,
+}
+
+impl<'a> ModuleLocalTypeResolver<'a> {
+    fn new(module: &'a Module, sources: Arc<DefaultSourceManager>) -> Option<Self> {
+        let resolver = LocalSymbolResolver::new(module, sources).ok()?;
+        Some(Self { module, resolver })
+    }
+
+    fn undefined(&self, span: SourceSpan) -> SymbolResolutionError {
+        let sources = self.resolver.source_manager();
+        SymbolResolutionError::undefined(span, sources.as_ref())
+    }
+}
+
+impl TypeResolver<SymbolResolutionError> for ModuleLocalTypeResolver<'_> {
+    fn source_manager(&self) -> Arc<dyn SourceManager> {
+        self.resolver.source_manager()
+    }
+
+    fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
+        err
+    }
+
+    fn get_type(
+        &mut self,
+        context: SourceSpan,
+        _gid: GlobalItemIndex,
+    ) -> Result<AstType, SymbolResolutionError> {
+        Err(self.undefined(context))
+    }
+
+    fn get_local_type(
+        &mut self,
+        context: SourceSpan,
+        id: ItemIndex,
+    ) -> Result<Option<AstType>, SymbolResolutionError> {
+        let item_name = self.resolver.get_item_name(id);
+        let Some(type_decl) = self
+            .module
+            .types()
+            .find(|type_decl| type_decl.name().as_str() == item_name.as_str())
+        else {
+            return Err(self.undefined(context));
+        };
+        type_decl.ty().resolve_type(self)
+    }
+
+    fn resolve_type_ref(
+        &mut self,
+        ty: Span<&miden_assembly_syntax::ast::Path>,
+    ) -> Result<SymbolResolution, SymbolResolutionError> {
+        self.resolver.resolve_path(ty)
+    }
 }
 
 fn signature_stack_signature<R>(
