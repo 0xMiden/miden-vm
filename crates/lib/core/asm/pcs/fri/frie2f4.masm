@@ -4,14 +4,16 @@ use miden::core::pcs::fri::helper
 
 # Initial digest used by the Eidos LMCS leaf hasher. LMCS absorbs already-aligned
 # rows and does not use the length-bound `Eidos::hash_elements` framing.
-# TODO: Fix domain separation
+# TODO(domain-separation): assign a dedicated LMCS row-hash domain.
 const FRI_ROW_HASH_INIT_CV = [4280581858871862887, 2688637133034287986, 1947077364412317696, 6620516959492505600]
+const FRI_LAYER_LEAF_DIGEST_MISMATCH = "FRI layer leaf hash mismatch"
+const FRI_REMAINDER_VALUE_MISMATCH = "FRI remainder value mismatch"
 
 #! Checks that, for a query with index p at layer i, the folding procedure to create layer (i + 1)
 #! was performed correctly. This also advances layer_ptr by 8 to point to the next query layer.
 #!
-#! Input:  [layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
-#! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
+#! Input:  [layer_ptr, layer_ptr, p, poe, e0, e1, layer_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+#! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 pub proc verify_query_layer
 
     # Load layer commitment C and [d_size, t_depth, a0, a1].
@@ -22,11 +24,10 @@ pub proc verify_query_layer
     swapw
     movup.8
     mem_loadw_le   # load C from layer_ptr
-    # => [C, d_size, t_depth, a0, a1, poe, p, e0, e1, layer_ptr, rem_ptr, ...]
+    # => [C, d_size, t_depth, a0, a1, p, poe, e0, e1, layer_ptr, rem_ptr, ...]
 
     # Verify the Merkle auth path for (index = f_pos, depth = t_depth, root = C).
-    swapw.2             # [poe, p, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
-    swap                # [p, poe, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
+    swapw.2             # [p, poe, e0, e1, d_size, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
     movup.4             # [d_size, p, poe, e0, e1, t_depth, a0, a1, C, layer_ptr, rem_ptr, ...]
 
     # The quotient is the fold-4 coset. Since `d_size` is the folded-domain size for this
@@ -47,8 +48,10 @@ pub proc verify_query_layer
     # the digest can be checked without a memory round trip.
     dropw
     push.FRI_ROW_HASH_INIT_CV
+    # => [CV, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     exec.constants::tmp3
     movdn.4
+    # => [CV, ptr, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
     padw padw
     adv_pipe
     exec.eidos::compress
@@ -59,7 +62,7 @@ pub proc verify_query_layer
     # => [v0, ..., v7, DIGEST, V, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ..]
     movupw.2
     movupw.3
-    assert_eqw
+    assert_eqw.err=FRI_LAYER_LEAF_DIGEST_MISMATCH
     # => [v0, ..., v7, f_pos, coset, poe, e0, e1, a0, a1, layer_ptr, rem_ptr, ...]
 
     # `fri_ext2fold4` takes the natural coset index and handles the bit-reversed row selection.
@@ -67,20 +70,20 @@ pub proc verify_query_layer
 
     # Fold by 4.
     fri_ext2fold4
-    # => [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne0, ne1, rem_ptr, ...]
+    # => [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, f_pos, poe^4, ne0, ne1, rem_ptr, ...]
 
     # Prepare for the next layer.
     swapdw
-    # => [x, x, layer_ptr + 8, poe^4, f_pos, ne0, ne1, rem_ptr, x, x, x, x, x, x, x, x, ...]
-    dup.2     # [layer_ptr+8, x, x, layer_ptr+8, poe^4, f_pos, ne0, ne1, rem_ptr, ]
-    movdn.7   # [x, x, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]
+    # => [x, x, layer_ptr + 8, f_pos, poe^4, ne0, ne1, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    dup.2     # [layer_ptr+8, x, x, layer_ptr+8, f_pos, poe^4, ne0, ne1, rem_ptr, ]
+    movdn.7   # [x, x, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, ...]
     drop
-    drop      # [layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]
-    dup       # [layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]
-    dup.7     # [rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]
-    dup.1     # [layer_ptr+8, rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, ...]
+    drop      # [layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, ...]
+    dup       # [layer_ptr+8, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, ...]
+    dup.7     # [rem_ptr, layer_ptr+8, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, ...]
+    dup.1     # [layer_ptr+8, rem_ptr, layer_ptr+8, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, ...]
     neq
-    # => [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [is_not_last_layer, layer_ptr+8, layer_ptr+8, f_pos, poe^4, ne0, ne1, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 end
 
 #! Verifies one FRI query.
@@ -90,11 +93,11 @@ end
 #! This procedure is exactly the same as `verify_query_128` except for the remainder polynomial check,
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
-#! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
+#! Input:  [p, poe, e0, e1, layer_ptr, rem_ptr, ...]
 #! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
 #!
-#! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.
+#! - poe is g^p for the current FRI layer.
 #! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
@@ -112,15 +115,15 @@ pub proc verify_query_64
     dup
     movup.3
     neq
-    # => [?, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
+    # => [?, layer_ptr, layer_ptr, p, poe, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
 
     # verify correctness of layer folding
     while.true
         exec.verify_query_layer
     end
-    # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, rem_ptr, f_pos, poe^(4^n), ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    movup.2
+    movup.3
     push.0.0.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
@@ -135,8 +138,8 @@ pub proc verify_query_64
 
     swapdw
     # => [ne0, ne1, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
-    movup.6 assert_eq
-    movup.5 assert_eq
+    movup.6 assert_eq.err=FRI_REMAINDER_VALUE_MISMATCH
+    movup.5 assert_eq.err=FRI_REMAINDER_VALUE_MISMATCH
     # => [X, x, x, x, x, x, x, x, x, ...]
 end
 
@@ -147,11 +150,11 @@ end
 #! This procedure is exactly the same as `verify_query_64` except for the remainder polynomial check,
 #! thus any change to one procedure will imply an equivalent change to the other one.
 #!
-#! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
+#! Input:  [p, poe, e0, e1, layer_ptr, rem_ptr, ...]
 #! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
 #!
-#! - poe is g^p for the current FRI layer.
 #! - p is a query index at the first layer.
+#! - poe is g^p for the current FRI layer.
 #! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next
 #!   layer.
@@ -169,15 +172,15 @@ pub proc verify_query_128
     dup
     movup.3
     neq
-    # => [?, layer_ptr, layer_ptr, poe, p, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
+    # => [?, layer_ptr, layer_ptr, p, poe, e0, e1, layer_ptr, rem_ptr, 0, 0, 0, 0, 0, 0, 0, 0, ...]
 
     # verify correctness of layer folding
     while.true
         exec.verify_query_layer
     end
-    # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
+    # => [rem_ptr, rem_ptr, f_pos, poe^(4^n), ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    movup.2
+    movup.3
     push.0.0.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
@@ -191,8 +194,8 @@ pub proc verify_query_128
     # => [x, x, x, x, x, x, x, x, ne0, ne1, rem_ptr, rem_ptr, P, ...]
     swapdw
     # => [ne0, ne1, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
-    movup.6 assert_eq
-    movup.5 assert_eq
+    movup.6 assert_eq.err=FRI_REMAINDER_VALUE_MISMATCH
+    movup.5 assert_eq.err=FRI_REMAINDER_VALUE_MISMATCH
     # => [X, x, x, x, x, x, x, x, x, ...]
 end
 
@@ -206,7 +209,7 @@ end
 #! Input:  [query_ptr, layer_ptr, rem_ptr, g, ...]
 #! Output: [...]
 #!
-#! - query_ptr is a pointer to a list of tuples of the form (poe, p, e0, e1) where poe is equal
+#! - query_ptr is a pointer to a list of tuples of the form (p, poe, e0, e1) where poe is equal
 #!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
 #!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
@@ -225,7 +228,7 @@ end
 #!
 #! This means for example that:
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
-#! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
+#! 2. layer_ptr - 1 points to the last (p, poe, e0, e1) tuple.
 #!
 @locals(4)
 proc verify_64
@@ -246,10 +249,10 @@ proc verify_64
     movup.4
 
     while.true
-        # Load [poe, p, e0, e1] for the next query.
+        # Load [p, poe, e0, e1] for the next query.
         movup.4
         mem_loadw_le
-        # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
+        # => [p, poe, e0, e1, layer_ptr, rem_ptr, g, ...]
 
         # Verify query p.
         exec.verify_query_64
@@ -282,7 +285,7 @@ end
 #! Input:  [query_ptr, layer_ptr, rem_ptr, g, ...]
 #! Output: [...]
 #!
-#! - query_ptr is a pointer to a list of tuples of the form (poe, p, e0, e1) where poe is equal
+#! - query_ptr is a pointer to a list of tuples of the form (p, poe, e0, e1) where poe is equal
 #!   to g^p with g being the initial FRI domain generator. p is the query index at the first layer
 #!   and (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is a pointer to the first layer commitment denoted throughout the code by C.
@@ -301,7 +304,7 @@ end
 #!
 #! This means for example that:
 #! 1. rem_ptr - 1 points to the last (alpha0, alpha1, t_depth, d_size) tuple.
-#! 2. layer_ptr - 1 points to the last (poe, p, e0, e1) tuple.
+#! 2. layer_ptr - 1 points to the last (p, poe, e0, e1) tuple.
 #!
 @locals(4)
 proc verify_128
@@ -322,10 +325,10 @@ proc verify_128
     movup.4
 
     while.true
-        # Load [poe, p, e0, e1] for the next query.
+        # Load [p, poe, e0, e1] for the next query.
         movup.4
         mem_loadw_le
-        # => [poe, p, e0, e1, layer_ptr, rem_ptr, g, ...]
+        # => [p, poe, e0, e1, layer_ptr, rem_ptr, g, ...]
 
         # Verify query p.
         exec.verify_query_128

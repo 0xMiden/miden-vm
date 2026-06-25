@@ -48,8 +48,8 @@ fn fri_ext2fold4() {
     let stack_state = test.get_last_stack_state();
     assert_eq!(stack_state[8], Felt::new_unchecked(poe).square());
     assert_eq!(stack_state[10], Felt::new_unchecked(layer_ptr + 8));
-    assert_eq!(stack_state[11], Felt::new_unchecked(poe).exp_u64(4));
-    assert_eq!(stack_state[12], Felt::new_unchecked(f_pos));
+    assert_eq!(stack_state[11], Felt::new_unchecked(f_pos));
+    assert_eq!(stack_state[12], Felt::new_unchecked(poe).exp_u64(4));
     assert_eq!(stack_state[15], Felt::new_unchecked(end_ptr));
 
     // make sure STARK proof can be generated and verified

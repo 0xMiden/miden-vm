@@ -176,16 +176,16 @@ pub proc compute_deep_query
         exec.divide_and_add
         #=> [eval0, eval1, poe, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        # 3) Store [poe, index, eval0, eval1] and prepare the stack for the next iteration.
+        # 3) Store [index, poe, eval0, eval1] for the FRI verifier.
 
-        ## a) Move poe next to the query index
-        movup.3 movup.3
-        #=> [poe, index, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
+        ## a) Move the query index and poe above the evaluation.
+        movup.2 movup.3
+        #=> [index, poe, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        ## b) Store [poe, index, eval0, eval1]
+        ## b) Store [index, poe, eval0, eval1]
         dup.4 add.4 swap.5
         mem_storew_le
-        #=> [poe, index, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
+        #=> [index, poe, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
 
         ## c) Prepare stack for next iteration
         dup.5 dup.5

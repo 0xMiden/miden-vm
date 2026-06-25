@@ -550,7 +550,7 @@ pub enum Operation {
     ///
     /// Stack transition:
     /// Input: [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, coset, poe, pe1, pe0, a1, a0, cptr, ...]
-    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+8, poe^4, f_pos, ne1, ne0,
+    /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+8, f_pos, poe^4, ne1, ne0,
     /// eptr, ...] where eptr is moved from the stack overflow table and is the address of the
     /// final FRI layer.
     FriE2F4 = opcodes::FRIE2F4,

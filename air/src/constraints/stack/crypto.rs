@@ -278,8 +278,8 @@ fn enforce_hornerext_constraints<AB>(
 ///   s'[8]      poe_sq          poe^2
 ///   s'[9]      tau_factor      tau^(-segment) for this coset
 ///   s'[10]     layer_ptr + 8   advanced layer pointer
-///   s'[11]     poe_fourth      poe^4 (for next FRI layer)
-///   s'[12]     folded_pos      copied from input
+///   s'[11]     folded_pos      copied from input
+///   s'[12]     poe_fourth      poe^4 (for next FRI layer)
 ///   s'[13..15] fold_result     final fold4 output
 ///
 /// Helper registers (nondeterministic, provided by prover):
@@ -348,7 +348,7 @@ fn enforce_frie2f4_constraints<AB>(
     //   flag0 -> 0, flag1 -> 1, flag2 -> 2, flag3 -> 3.
     // The execution op bit-reverses this value internally only for selecting the bit-reversed row
     // element used by the cross-layer consistency check.
-    let folded_pos_next = s_next[12];
+    let folded_pos_next = s_next[11];
     let expected_coset = seg_flag_1 + seg_flag_2 * F_2 + seg_flag_3 * F_3;
     builder.assert_eq(coset, expected_coset);
 
@@ -441,7 +441,7 @@ fn enforce_frie2f4_constraints<AB>(
     // Domain generator powers for the next layer: poe -> poe^2 -> poe^4.
     // Split into two squarings to keep constraint degree low.
     let poe_sq = s_next[8];
-    let poe_fourth = s_next[11];
+    let poe_fourth = s_next[12];
     builder.assert_eq(poe_sq, poe * poe);
     builder.assert_eq(poe_fourth, poe_sq * poe_sq);
 

@@ -1,5 +1,3 @@
-use miden::core::stark::random_coin
-
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the

@@ -25,7 +25,7 @@ const AND8_LDE_INDEX_MASK = 524287
 #! Computes the DEEP composition polynomial FRI queries.
 #!
 #! This procedure iterates over all FRI query indices stored in memory at `query_ptr` in
-#! a word-aligned region and overwrites each word with `[poe, index, eval0, eval1]` where:
+#! a word-aligned region and overwrites each word with `[index, poe, eval0, eval1]` where:
 #!
 #! 1. `index` is the FRI query index,
 #! 2. `poe := g^index`, with `g` being the evaluation domain generator,

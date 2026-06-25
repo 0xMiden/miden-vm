@@ -34,7 +34,7 @@ mod tests;
 /// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, coset, poe, pe0, pe1, a0, a1, cptr, ...]
 ///
 /// Output:
-/// [t0, t1, s0, s1, df3, df2, df1, df0, poe^2, f_tau, cptr+8, poe^4, f_pos, ne0, ne1, eptr, ...]
+/// [t0, t1, s0, s1, df3, df2, df1, df0, poe^2, f_tau, cptr+8, f_pos, poe^4, ne0, ne1, eptr, ...]
 ///
 /// In the above, eptr is moved from the stack overflow table and is expected to be the address
 /// of the final FRI layer.
@@ -128,8 +128,8 @@ where
     processor.stack_mut().set(8, poe2);
     processor.stack_mut().set(9, f_tau);
     processor.stack_mut().set(10, layer_ptr + EIGHT);
-    processor.stack_mut().set(11, poe4);
-    processor.stack_mut().set(12, folded_pos);
+    processor.stack_mut().set(11, folded_pos);
+    processor.stack_mut().set(12, poe4);
     processor.stack_mut().set(13, folded_value[0]);
     processor.stack_mut().set(14, folded_value[1]);
 

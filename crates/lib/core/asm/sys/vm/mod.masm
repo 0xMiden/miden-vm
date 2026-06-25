@@ -18,10 +18,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # Root of the accepted ACE circuit registry. This value is absorbed into the
 # Fiat-Shamir transcript and authenticates the ACE circuit selected by ORDER_TAG.
-const RELATION_DIGEST_0 = 3047837263413508147
-const RELATION_DIGEST_1 = 6050485309446531809
-const RELATION_DIGEST_2 = 9016097718990035522
-const RELATION_DIGEST_3 = 3464309227765634587
+const RELATION_DIGEST_0 = 3663131485924157257
+const RELATION_DIGEST_1 = 3956414906926947112
+const RELATION_DIGEST_2 = 258202875783084993
+const RELATION_DIGEST_3 = 3614315938832407169
 
 # Commitment to the canonical AND8 preprocessed table under the current LMCS setup.
 # This is trusted verifier setup, not proof data or advice.

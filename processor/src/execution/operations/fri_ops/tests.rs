@@ -151,12 +151,12 @@ proptest! {
         prop_assert_eq!(stack[9], coset_flags[2], "coset flag 2 at position 6");
         prop_assert_eq!(stack[8], coset_flags[3], "coset flag 3 at position 7");
 
-        // Check poe^2, f_tau, layer_ptr+8, poe^4, f_pos
+        // Check poe^2, f_tau, layer_ptr+8, f_pos, poe^4
         prop_assert_eq!(stack[7], poe2, "poe^2 at position 8");
         prop_assert_eq!(stack[6], f_tau, "f_tau at position 9");
         prop_assert_eq!(stack[5], layer_ptr + EIGHT, "layer_ptr+8 at position 10");
-        prop_assert_eq!(stack[4], poe4, "poe^4 at position 11");
-        prop_assert_eq!(stack[3], f_pos_felt, "f_pos at position 12");
+        prop_assert_eq!(stack[4], f_pos_felt, "f_pos at position 11");
+        prop_assert_eq!(stack[3], poe4, "poe^4 at position 12");
 
         // Check folded value
         prop_assert_eq!(stack[2], folded_value_base[0], "folded_value[0] at position 13");
