@@ -1,7 +1,7 @@
+use core::assert_matches;
 #[cfg(feature = "arbitrary")]
 use core::cmp;
 
-use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::{ExecutionError, operation::OperationError};
 #[cfg(feature = "arbitrary")]

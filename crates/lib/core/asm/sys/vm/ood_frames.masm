@@ -24,6 +24,8 @@ pub proc process_row_ood_evaluations
     repeat.28
         adv_pipe
         horner_eval_ext
+        # Bind the absorbed length (8) into the capacity before each absorb permutation.
+        movup.8 add.8 movdn.8
         exec.poseidon2::permute
     end
 end

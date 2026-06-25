@@ -2,7 +2,7 @@
 //! HasherPermLinkOutput}`).
 //!
 //! All three buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
-//! tri-state (`s_ctrl + s_perm + s0_virtual = 1`) makes ACE rows, hasher controller rows,
+//! tri-state (`s_00 + s_01 + s0_virtual = 1`) makes ACE rows, hasher controller rows,
 //! and hasher permutation rows pairwise mutually exclusive, so the simple-group
 //! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
 //! interactions fires per row, and the column's running `(V, U)` takes MAX over per-
@@ -44,15 +44,15 @@
 //! (or skip the cycle entirely). Four mutually exclusive interactions split across two
 //! domain-separated buses:
 //!
-//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`) — controller side of a
-//!   (state_in, state_out) pair. Routed to `BusId::HasherPermLinkInput`.
-//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`). Routed to
+//! - **Controller input** (`s_01 · is_input`, multiplicity `+1`) — controller side of a (state_in,
+//!   state_out) pair. Routed to `BusId::HasherPermLinkInput`.
+//! - **Controller output** (`s_01 · is_output`, multiplicity `+1`). Routed to
 //!   `BusId::HasherPermLinkOutput`.
-//! - **Permutation row 0** (`s_perm · is_init_ext`, multiplicity `−m`) — input boundary of a
+//! - **Permutation row 0** (`s_00 · is_init_ext`, multiplicity `−m`) — input boundary of a
 //!   Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant within the
 //!   cycle by [`crate::constraints::chiplets::permutation`]. Routed to
 //!   `BusId::HasherPermLinkInput`.
-//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`) — output boundary of
+//! - **Permutation row 15** (`s_00 · (1 − periodic_sum)`, multiplicity `−m`) — output boundary of
 //!   the same cycle. Routed to `BusId::HasherPermLinkOutput`.
 //!
 //! The widest perm-link contribution is `f_ctrl_output` with gate degree 3 — strictly below

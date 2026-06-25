@@ -94,8 +94,7 @@ pub struct Deg {
 /// `ExtensionBuilder` split one-for-one; `Algebra<Var>` on `Expr` lets the
 /// lookup author multiply main-trace variables with arbitrary expressions
 /// without crossing trait boundaries. `PeriodicVar` / `MainWindow` come
-/// from `PeriodicAirBuilder` / `AirBuilder` respectively and are passed
-/// through the adapter unchanged.
+/// from `AirBuilder` and are passed through the adapter unchanged.
 ///
 /// The per-column handle is a generic associated type
 /// ([`Self::Column`](Self::Column)) so that each `column(...)` call can
@@ -141,7 +140,7 @@ pub trait LookupBuilder: Sized {
     // --- auxiliary trace access types ---
 
     /// Periodic column value at the current row (copied from
-    /// `PeriodicAirBuilder::PeriodicVar`).
+    /// `AirBuilder::PeriodicVar`).
     type PeriodicVar: Into<Self::Expr> + Copy;
 
     /// Two-row window over the main trace, returned as-is from the

@@ -4,7 +4,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt::Write, str::FromStr};
+use core::{assert_matches, fmt::Write, str::FromStr};
 use std::{eprintln, sync::Arc};
 
 use miden_assembly_syntax::{
@@ -13,7 +13,7 @@ use miden_assembly_syntax::{
     diagnostics::WrapErr,
 };
 use miden_core::{
-    Felt, Word, assert_matches,
+    Felt, Word,
     events::EventId,
     field::PrimeField64,
     mast::{MastNode, MastNodeExt},
@@ -6296,6 +6296,60 @@ fn importing_private_type_from_another_module_is_rejected() -> TestResult {
     assert_diagnostic!(&err, "only public items can be referenced from another module");
 
     Ok(())
+}
+
+#[test]
+fn public_item_import_reexporting_private_signature_is_rejected() {
+    let context = TestContext::default();
+
+    let module = context
+        .parse_module(source_file!(
+            &context,
+            r#"
+                namespace cycle::module_a
+
+                type PrivateType = felt
+
+                pub use {hidden as exposed} from self
+
+                proc hidden(value: PrivateType)
+                    nop
+                end
+            "#
+        ))
+        .expect("private procedure signature should be valid before public re-export");
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("library", module, None::<Box<Module>>)
+        .expect_err("expected public re-export of private signature to be rejected");
+
+    assert_diagnostic!(&err, "private type in exported procedure signature");
+    assert_diagnostic!(&err, "exported procedure signatures may only reference public types");
+}
+
+#[test]
+fn public_item_import_reexporting_private_type_is_rejected() {
+    let context = TestContext::default();
+
+    let module = context
+        .parse_module(source_file!(
+            &context,
+            r#"
+                namespace cycle::module_a
+
+                type PrivateType = felt
+
+                pub use {PrivateType as PublicType} from self
+            "#
+        ))
+        .expect("private type should be valid before public re-export");
+
+    let err = Assembler::new(context.source_manager())
+        .assemble_library("library", module, None::<Box<Module>>)
+        .expect_err("expected public re-export of private type to be rejected");
+
+    assert_diagnostic!(&err, "private type in exported type declaration");
+    assert_diagnostic!(&err, "exported type declarations may only reference public types");
 }
 
 #[test]

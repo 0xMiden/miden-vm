@@ -30,7 +30,10 @@ pub use self::{
     ast::{Path, PathBuf, PathComponent, PathError},
     parser::{ModuleParser, ParsingError},
 };
-pub use self::{parse::Parse, sema::SemanticAnalysisError};
+pub use self::{
+    parse::Parse,
+    sema::{ExportedTypeUse, SemanticAnalysisError},
+};
 
 /// Maximum allowed iteration count for `repeat.<count>` blocks.
 pub const MAX_REPEAT_COUNT: u32 = 1_000_000;

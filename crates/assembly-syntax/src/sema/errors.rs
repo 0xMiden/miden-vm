@@ -48,6 +48,30 @@ pub struct SyntaxWarning {
     pub errors: Vec<SemanticAnalysisError>,
 }
 
+/// Identifies the exported surface where a private type was found.
+#[derive(Clone, Copy)]
+pub enum ExportedTypeUse {
+    ProcedureSignature,
+    TypeDeclaration,
+}
+
+impl ExportedTypeUse {
+    pub fn private_type_error(
+        self,
+        span: SourceSpan,
+        defined: SourceSpan,
+    ) -> SemanticAnalysisError {
+        match self {
+            Self::ProcedureSignature => {
+                SemanticAnalysisError::PrivateTypeInExportedSignature { span, defined }
+            },
+            Self::TypeDeclaration => {
+                SemanticAnalysisError::PrivateTypeInExportedType { span, defined }
+            },
+        }
+    }
+}
+
 /// Represents an error that occurs during semantic analysis
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum SemanticAnalysisError {
@@ -139,6 +163,26 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
         #[label("previously defined here")]
         prev_span: SourceSpan,
+    },
+    #[error("private type in exported procedure signature")]
+    #[diagnostic(help(
+        "exported procedure signatures may only reference public types, including nested type dependencies"
+    ))]
+    PrivateTypeInExportedSignature {
+        #[label("this exported procedure signature references a private type")]
+        span: SourceSpan,
+        #[label("this type is private")]
+        defined: SourceSpan,
+    },
+    #[error("private type in exported type declaration")]
+    #[diagnostic(help(
+        "exported type declarations may only reference public types, including nested type dependencies"
+    ))]
+    PrivateTypeInExportedType {
+        #[label("this exported type declaration references a private type")]
+        span: SourceSpan,
+        #[label("this type is private")]
+        defined: SourceSpan,
     },
     #[error("unused import")]
     #[diagnostic(severity(Warning), help("this import is never used and can be safely removed"))]

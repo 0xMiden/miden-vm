@@ -43,6 +43,8 @@ pub proc observe_aux_trace
     swapw
     exec.random_coin::get_capacity
     movdnw.2
+    # Bind the absorbed length (8: commitment word + boundary word) into the capacity.
+    movup.8 add.8 movdn.8
     exec.poseidon2::permute
     # => [R1', R2', C', ...]
 

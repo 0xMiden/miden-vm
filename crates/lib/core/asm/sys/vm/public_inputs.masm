@@ -260,6 +260,8 @@ proc absorb_public_inputs
         sub.1 movdn.13
         # => [R1, R2, C, ptr, nfb-1]
         mem_stream
+        # Bind the absorbed length (8) into the capacity before each absorb permutation.
+        movup.8 add.8 movdn.8
         exec.poseidon2::permute
         movup.13 dup push.0 neq
     end

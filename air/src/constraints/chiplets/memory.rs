@@ -256,7 +256,7 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
     };
     use miden_crypto::stark::{
-        air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder, RowWindow},
+        air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, RowWindow},
         matrix::RowMajorMatrix,
     };
 
@@ -301,6 +301,7 @@ mod tests {
         type PreprocessedWindow = RowWindow<'static, Felt>;
         type MainWindow = RowMajorMatrix<Felt>;
         type PublicVar = Felt;
+        type PeriodicVar = Felt;
 
         fn main(&self) -> Self::MainWindow {
             self.main.clone()
@@ -318,8 +319,7 @@ mod tests {
             Felt::ZERO
         }
 
-        fn is_transition_window(&self, size: usize) -> Self::Expr {
-            assert_eq!(size, 2, "memory constraints only use 2-row transition windows");
+        fn is_transition(&self) -> Self::Expr {
             Felt::ONE
         }
 
@@ -329,6 +329,10 @@ mod tests {
 
         fn public_values(&self) -> &[Self::PublicVar] {
             &[]
+        }
+
+        fn periodic_values(&self) -> &[Self::PeriodicVar] {
+            &self.periodic_values
         }
     }
 
@@ -363,14 +367,6 @@ mod tests {
         }
     }
 
-    impl PeriodicAirBuilder for ConstraintEvalBuilder {
-        type PeriodicVar = Felt;
-
-        fn periodic_values(&self) -> &[Self::PeriodicVar] {
-            &self.periodic_values
-        }
-    }
-
     fn memory_flags() -> ChipletFlags<Felt> {
         ChipletFlags {
             is_active: Felt::ONE,
@@ -382,19 +378,20 @@ mod tests {
 
     fn memory_row() -> ChipletCols<Felt> {
         ChipletCols {
-            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 2],
-            s_perm: Felt::ZERO,
+            s_00: Felt::ZERO,
+            s_01: Felt::ZERO,
             chip_clk: Felt::ONE,
+            chiplets: [Felt::ZERO; CHIPLETS_WIDTH - 3],
         }
     }
 
     fn memory_cols(row: &mut ChipletCols<Felt>) -> &mut MemoryCols<Felt> {
-        row.chiplets[3..18].borrow_mut()
+        row.chiplets[2..17].borrow_mut()
     }
 
     fn set_word_addr_limbs(row: &mut ChipletCols<Felt>, lo: u64, hi: u64) {
-        row.chiplets[18] = Felt::new_unchecked(lo);
-        row.chiplets[19] = Felt::new_unchecked(hi);
+        row.chiplets[17] = Felt::new_unchecked(lo);
+        row.chiplets[18] = Felt::new_unchecked(hi);
     }
 
     fn eval_memory_constraints(row: &ChipletCols<Felt>) -> Vec<QuadFelt> {

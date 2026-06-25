@@ -77,7 +77,7 @@ pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
 
 /// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_perm = 20.
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_00 = 20.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 5;
 
 /// Number of controller rows per permutation request (one input + one output).
