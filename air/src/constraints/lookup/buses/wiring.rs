@@ -41,7 +41,8 @@
 //! - **Merkle compression** (`s_ctrl * controller_merkle_or_padding * s0`, multiplicity `+1`):
 //!   `[block(8), fixed_merkle_cv(4), cv_out(4)]`.
 //!
-//! The BlakeG compression AIR emits the matching receive on its interface row.
+//! The BlakeG compression AIR emits the matching receive on the final footer row of the
+//! standalone block.
 //!
 //! The compression-link gate has degree `(5, 6)`, below the ACE batch's `(8, 7)`.
 //! Merging into the same group therefore leaves the column's transition at `(8, 7)`.

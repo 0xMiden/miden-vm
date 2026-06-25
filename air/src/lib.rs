@@ -36,7 +36,10 @@ pub mod logup {
 
 pub use constraints::{
     and8_lookup::columns::{And8LookupCols, And8LookupPreprocessedCols},
-    blakeg_compression::{BlakeGCompressionCols, NUM_BLAKEG_COMPRESSION_COLS},
+    blakeg_compression::{
+        air32_layout::NUM_COLS as NUM_BLAKEG_COMPRESSION_COLS,
+        air32_lookup::Air32Cols as BlakeGCompressionCols,
+    },
     chiplets::columns::{
         AceCols, AceEvalCols, AceReadCols, AeadStreamCols, AeadStreamHighFirstCols,
         AeadStreamHighSecondCols, AeadStreamLowSecondCols, AeadStreamReadCols, BitwiseCols,

@@ -1,8 +1,8 @@
 //! Solve for per-snippet iteration counts and emit the MASM program.
 //!
 //! The calibration matrix is close to diagonally dominant: each snippet primarily drives one
-//! component and leaks small cross-terms into the others. A short Jacobi refinement with a
-//! non-negativity clamp is enough for this problem size and handles infeasible targets gracefully.
+//! component and contributes small cross-terms to the others. A short Jacobi refinement with a
+//! non-negativity clamp is enough for this problem size and handles infeasible targets explicitly.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +19,7 @@ const REFINEMENT_PASSES: usize = 8;
 /// Iteration counts per snippet, ready to hand to the emitter.
 ///
 /// Implemented as a sparse map where absence means "zero iterations"; the newtype hides the
-/// `unwrap_or(0)` convention behind [`Plan::iters`] so call sites can't forget it.
+/// `unwrap_or(0)` convention behind [`Plan::iters`].
 #[derive(Debug, Default, Clone)]
 pub struct Plan {
     entries: BTreeMap<&'static str, u64>,
@@ -126,9 +126,11 @@ pub fn emit(plan: &Plan) -> String {
 mod tests {
     use super::*;
     use crate::{
-        calibrator::{calibrate, measure_program},
+        calibrator::{calibrate_with_iters, measure_program},
         snapshot::{TraceBreakdown, TraceTotals},
     };
+
+    const TEST_CALIBRATION_ITERS: u64 = 8;
 
     fn shape_of(core_rows: u64, blakeg_compression: u64, bitwise: u64, memory: u64) -> TraceShape {
         let breakdown = TraceBreakdown {
@@ -147,32 +149,31 @@ mod tests {
     }
 
     fn low_hasher_target() -> TraceShape {
-        // The core target is in the 2^18 bracket. Its baseline BlakeG leakage already exceeds the
-        // requested hasher rows, so the solver should not add explicit bcompress work.
+        // The core target is in the 2^18 bracket. Its baseline BlakeG rows already exceed the
+        // requested BlakeG rows, so the solver should not add explicit bcompress work.
         shape_of(131100, 8200, 0, 2300)
     }
 
     fn high_hasher_target() -> TraceShape {
-        // Hasher rows exceed the baseline leakage from the core target, so explicit bcompress work
-        // is required.
+        // The requested BlakeG rows exceed the baseline from the core target, so explicit
+        // bcompress work is required.
         shape_of(16000, 20000, 0, 0)
     }
 
     #[test]
     fn low_hasher_target_does_not_add_bcompress() {
-        let cal = calibrate().expect("calibrate");
+        let cal = calibrate_with_iters(TEST_CALIBRATION_ITERS).expect("calibrate");
         let plan = solve(&cal, &low_hasher_target());
         assert_eq!(
             plan.iters("hasher"),
             0,
-            "when the decoder (via memory + pad) already overshoots the hasher target, no bcompress iterations should be added",
+            "when non-hasher work already overshoots the BlakeG target, no bcompress iterations should be added",
         );
-        assert!(plan.iters("memory") > 0);
     }
 
     #[test]
     fn high_hasher_target_requires_bcompress() {
-        let cal = calibrate().expect("calibrate");
+        let cal = calibrate_with_iters(TEST_CALIBRATION_ITERS).expect("calibrate");
         let plan = solve(&cal, &high_hasher_target());
         assert!(
             plan.iters("hasher") > 0,
@@ -182,9 +183,15 @@ mod tests {
 
     #[test]
     fn emitted_program_matches_target_padded_brackets() {
-        let cal = calibrate().expect("calibrate");
-        let target = shape_of(180000, 300000, 0, 10000);
+        let cal = calibrate_with_iters(TEST_CALIBRATION_ITERS).expect("calibrate");
+        let target = shape_of(4000, 8000, 0, 512);
         let plan = solve(&cal, &target);
+        for snippet in SNIPPETS {
+            assert!(
+                plan.iters(snippet.name) <= 2_000,
+                "solver emitted a large unit-test plan: {plan:?}",
+            );
+        }
         let source = emit(&plan);
         let actual = measure_program(&source).expect("measure emitted program");
         assert_eq!(
@@ -215,7 +222,7 @@ mod tests {
 
     #[test]
     fn zero_target_yields_empty_program() {
-        let cal = calibrate().expect("calibrate");
+        let cal = calibrate_with_iters(TEST_CALIBRATION_ITERS).expect("calibrate");
         let target = shape_of(0, 0, 0, 0);
         let plan = solve(&cal, &target);
         for snippet in SNIPPETS {

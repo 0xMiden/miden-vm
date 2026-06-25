@@ -31,7 +31,10 @@ use miden_air::{
     trace::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
-        chiplets::hasher::HASH_CYCLE_LEN,
+        blakeg_compression::{
+            BLAKEG_COMPRESSION_CYCLE_LEN, NUM_BLAKEG_COMPRESSION_COLS,
+            air32::{F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL},
+        },
     },
 };
 use miden_core::{
@@ -47,9 +50,11 @@ use super::{
 use crate::operation::Operation;
 use crate::{AdviceInputs, StackInputs};
 
-const BLAKEG_ANNEX_COLUMNS: usize = 2;
 const BLAKEG_NARROW_COLUMN_CAPACITY: usize = 2;
-const BLAKEG_ANNEX_COLUMN_CAPACITY: usize = 1;
+const BLAKEG_SINGLETON_COLUMN_CAPACITY: usize = 1;
+const BLAKEG_NARROW_LOOKUP_COLUMNS: usize = 20;
+const BLAKEG_SINGLETON_LOOKUP_COLUMNS: usize = 4;
+const BLAKEG_LOOKUP_COLUMNS: usize = BLAKEG_NARROW_LOOKUP_COLUMNS + BLAKEG_SINGLETON_LOOKUP_COLUMNS;
 const AEAD_STREAM_PAYLOAD_BASE_COL: usize = 2;
 const AEAD_STREAM_MODE_COL: usize = CHIPLETS_STREAM_MODE_COL;
 const AEAD_READ_LANE_BASE_OFFSET: usize = 3;
@@ -215,7 +220,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     let (_, _, blakeg_matrix, and8_matrix) = trace.main_trace().to_air_matrices();
 
     assert_eq!(
-        blakeg_matrix.height() % HASH_CYCLE_LEN,
+        blakeg_matrix.height() % BLAKEG_COMPRESSION_CYCLE_LEN,
         0,
         "BlakeG trace height must be a whole number of compression blocks",
     );
@@ -236,21 +241,29 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     );
 
     assert_eq!(blakeg_fractions.num_rows(), blakeg_matrix.height());
-    assert_blakeg_degree3_column_shape("row-shape test", &blakeg_fractions);
+    assert_blakeg_air32_column_shape("row-shape test", &blakeg_fractions);
 
     for (row, column_counts) in
         blakeg_fractions.counts().chunks(blakeg_fractions.num_columns()).enumerate()
     {
-        let cycle_row = row % HASH_CYCLE_LEN;
+        let cycle_row = row % BLAKEG_COMPRESSION_CYCLE_LEN;
         let actual: usize = column_counts.iter().sum();
-        let expected = expected_blakeg_degree3_fraction_entry_range_at_cycle_row(cycle_row);
+        let row_start = row * NUM_BLAKEG_COMPRESSION_COLS;
+        let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
+        let compression_multiplicity =
+            blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
+        let expected = expected_blakeg_air32_fraction_entry_range_at_cycle_row(
+            cycle_row,
+            is_aead,
+            compression_multiplicity,
+        );
         assert!(
             expected.contains(&actual),
             "BlakeG lookup count mismatch at row {row} cycle row {cycle_row}",
         );
     }
 
-    let block_count = blakeg_matrix.height() / HASH_CYCLE_LEN;
+    let block_count = blakeg_matrix.height() / BLAKEG_COMPRESSION_CYCLE_LEN;
     let expected_blakeg_byte_lookup_total =
         block_count as u64 * BYTE_LOOKUP_REQUESTS_PER_BLAKEG_BLOCK;
     let mut actual_blakeg_byte_lookup_total = 0;
@@ -277,59 +290,46 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     );
 }
 
-fn expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row: usize) -> usize {
+fn expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
-        // Row 0 sends the first message words, emits A/C byte-pair lookups, and routes HIN
-        // pairs 0/1 through the annex columns.
-        0 => 22,
-        // The first B row receives HIN pairs 2/3 in otherwise idle narrow slots.
-        1 => 18,
-        // Non-first A/C rows send message words and emit byte-pair lookups.
-        2..=54 if cycle_row % 2 == 0 => 20,
-        // B/D rows use one fused byte-pair lookup per rotated byte.
-        3..=55 if cycle_row % 2 == 1 => 16,
-        // Footer rows use byte-pair folds for the compression output.
-        56..=59 => 18,
-        // The message rows receive the full message schedule and range-check the local limbs.
-        // M0 routes 4 range limbs to I; M1 routes 8.
-        // The canonicality rem-limb checks have been replaced by an inverse zero-test.
-        60 => 20,
-        61 => 16,
-        // Interface row: four paired input-word sends, 12 routed message-row range checks,
-        // and one compression-link slot.
-        62 => 18,
-        // Output row: no routed lookup traffic.
-        63 => 0,
-        _ => unreachable!("cycle row must be in 0..{HASH_CYCLE_LEN}"),
+        0 => 40,
+        1..=27 => 36,
+        28..=31 => 30,
+        _ => unreachable!("cycle row must be in 0..{BLAKEG_COMPRESSION_CYCLE_LEN}"),
     }
 }
 
-fn expected_blakeg_degree3_fraction_entry_range_at_cycle_row(
+fn expected_blakeg_air32_compression_singletons_at_cycle_row(cycle_row: usize) -> usize {
+    match cycle_row {
+        31 => 1,
+        0..=30 => 0,
+        _ => unreachable!("cycle row must be in 0..{BLAKEG_COMPRESSION_CYCLE_LEN}"),
+    }
+}
+
+fn expected_blakeg_air32_fraction_entry_range_at_cycle_row(
     cycle_row: usize,
+    is_aead: bool,
+    compression_multiplicity: Felt,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
-        56..=59 => 18..=20,
-        // Padding blocks skip the interface links because their multiplicity is zero.
-        62 => 16..=18,
+        28..=31 if is_aead => {
+            let expected = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row)
+                + if cycle_row == 31 { 3 } else { 2 };
+            expected..=expected
+        },
+        31 if compression_multiplicity != Felt::ZERO => 31..=31,
         _ => {
-            let expected = expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row);
+            let expected = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
         },
     }
 }
 
-fn blakeg_degree3_annex_interactions_at_cycle_row(cycle_row: usize) -> usize {
-    match cycle_row {
-        0 | 60 | 61 | 62 => 2,
-        1..=59 | 63 => 0,
-        _ => unreachable!("cycle row must be in 0..{HASH_CYCLE_LEN}"),
-    }
-}
-
 #[test]
-fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
+fn blakeg_air32_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
-    const CURRENT_DENOMINATORS_PER_BLOCK: usize = 1138;
+    const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1133;
 
     let trace = build_trace_from_ops(tiny_span(), &[]);
     let (_, _, blakeg_matrix, _) = trace.main_trace().to_air_matrices();
@@ -348,28 +348,26 @@ fn blakeg_degree3_routing_ledger_fits_narrow_slot_cap() {
         &challenges,
     );
     let (narrow_batch_columns, _) =
-        assert_blakeg_degree3_column_shape("routing ledger", &blakeg_fractions);
+        assert_blakeg_air32_column_shape("lookup ledger", &blakeg_fractions);
     let narrow_slot_cap = narrow_batch_columns * SLOTS_PER_BATCH_COLUMN;
+    let row_lookup_cap = narrow_slot_cap + BLAKEG_SINGLETON_LOOKUP_COLUMNS;
 
     let mut total = 0;
-    for cycle_row in 0..HASH_CYCLE_LEN {
-        let pressure = expected_blakeg_degree3_routed_interactions_at_cycle_row(cycle_row);
-        let narrow_pressure = pressure - blakeg_degree3_annex_interactions_at_cycle_row(cycle_row);
+    for cycle_row in 0..BLAKEG_COMPRESSION_CYCLE_LEN {
+        let narrow_pressure = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row);
         assert!(
             narrow_pressure <= narrow_slot_cap,
-            "cycle row {cycle_row} has narrow routed pressure {narrow_pressure}, above cap \
+            "cycle row {cycle_row} has narrow lookup pressure {narrow_pressure}, above cap \
              {narrow_slot_cap}",
         );
-        total += pressure;
+        total +=
+            narrow_pressure + expected_blakeg_air32_compression_singletons_at_cycle_row(cycle_row);
     }
 
-    assert_eq!(
-        total, CURRENT_DENOMINATORS_PER_BLOCK,
-        "routing must move lookup pressure without changing the denominator count",
-    );
+    assert_eq!(total, COMPRESSION_DENOMINATORS_PER_BLOCK);
     assert!(
-        total <= HASH_CYCLE_LEN * narrow_slot_cap,
-        "routed ledger must fit the narrow batch-2 slot cap",
+        total <= BLAKEG_COMPRESSION_CYCLE_LEN * row_lookup_cap,
+        "lookup ledger must fit the fixed per-row lookup-column capacity",
     );
 }
 
@@ -451,64 +449,55 @@ fn lookup_balance_rejects_tampered_merkle_start_flag() {
     );
 }
 
-fn assert_blakeg_degree3_column_shape(
+fn assert_blakeg_air32_column_shape(
     label: &str,
     fractions: &LookupFractions<Felt, QuadFelt>,
 ) -> (usize, usize) {
     let shape = fractions.shape();
-    let annex_columns = BLAKEG_ANNEX_COLUMNS;
-    let narrow_batch_columns = shape
-        .len()
-        .checked_sub(annex_columns)
-        .expect("annex count cannot exceed lookup width");
 
-    assert!(
-        narrow_batch_columns > 0,
-        "{label}: BlakeG lookup shape must include narrow batch columns",
-    );
-    assert!(annex_columns > 0, "{label}: BlakeG lookup shape must include annex columns",);
+    assert_eq!(shape.len(), BLAKEG_LOOKUP_COLUMNS, "{label}: BlakeG lookup aux width drifted",);
 
-    for (col, &count) in shape.iter().take(narrow_batch_columns).enumerate() {
+    for (col, &count) in shape.iter().enumerate() {
+        let expected = if col < BLAKEG_NARROW_LOOKUP_COLUMNS {
+            BLAKEG_NARROW_COLUMN_CAPACITY
+        } else {
+            BLAKEG_SINGLETON_COLUMN_CAPACITY
+        };
         assert_eq!(
-            count, BLAKEG_NARROW_COLUMN_CAPACITY,
-            "{label}: BlakeG lookup column {col} has shape {count}, expected \
-             {BLAKEG_NARROW_COLUMN_CAPACITY}",
-        );
-    }
-    for (col, &count) in shape.iter().enumerate().skip(narrow_batch_columns) {
-        assert_eq!(
-            count, BLAKEG_ANNEX_COLUMN_CAPACITY,
-            "{label}: BlakeG lookup column {col} has shape {count}, expected \
-             {BLAKEG_ANNEX_COLUMN_CAPACITY}",
+            count, expected,
+            "{label}: BlakeG lookup column {col} has shape {count}, expected {expected}",
         );
     }
 
     assert_eq!(
         fractions.num_columns(),
-        narrow_batch_columns + annex_columns,
+        BLAKEG_LOOKUP_COLUMNS,
         "{label}: BlakeG lookup aux width drifted",
     );
 
-    (narrow_batch_columns, annex_columns)
+    (BLAKEG_NARROW_LOOKUP_COLUMNS, BLAKEG_SINGLETON_LOOKUP_COLUMNS)
 }
 
-fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFractions<Felt, QuadFelt>) {
+fn assert_blakeg_air32_oracle_coverage(
+    label: &str,
+    blakeg_matrix: &RowMajorMatrix<Felt>,
+    fractions: &LookupFractions<Felt, QuadFelt>,
+) {
     assert_eq!(
-        fractions.num_rows() % HASH_CYCLE_LEN,
+        fractions.num_rows() % BLAKEG_COMPRESSION_CYCLE_LEN,
         0,
         "{label}: BlakeG trace height must be a whole number of compression blocks",
     );
 
-    let (narrow_batch_columns, annex_columns) =
-        assert_blakeg_degree3_column_shape(label, fractions);
+    let (narrow_batch_columns, singleton_columns) =
+        assert_blakeg_air32_column_shape(label, fractions);
 
-    let mut seen_cycle_rows = [false; HASH_CYCLE_LEN];
-    let mut saw_annex_row = false;
+    let mut seen_cycle_rows = [false; BLAKEG_COMPRESSION_CYCLE_LEN];
     let mut saw_narrow_only_row = false;
     let mut saw_full_narrow_pair = false;
-    let mut saw_single_narrow_slot = false;
+    let mut saw_singleton_fraction = false;
     for (row, column_counts) in fractions.counts().chunks(fractions.num_columns()).enumerate() {
-        let cycle_row = row % HASH_CYCLE_LEN;
+        let cycle_row = row % BLAKEG_COMPRESSION_CYCLE_LEN;
         seen_cycle_rows[cycle_row] = true;
 
         for (col, &count) in column_counts[..narrow_batch_columns].iter().enumerate() {
@@ -518,44 +507,30 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
                  fractions, above batch-2 capacity",
             );
             saw_full_narrow_pair |= count == 2;
-            saw_single_narrow_slot |= count == 1;
+        }
+        for (offset, &count) in column_counts[narrow_batch_columns..].iter().enumerate() {
+            assert!(
+                count <= BLAKEG_SINGLETON_COLUMN_CAPACITY,
+                "{label}: row {row} cycle row {cycle_row} singleton column {} pushed {count} \
+                 fractions, above singleton capacity",
+                narrow_batch_columns + offset,
+            );
+            saw_singleton_fraction |= count == 1;
         }
 
-        let annex_counts = &column_counts[narrow_batch_columns..];
-        assert_eq!(
-            annex_counts.len(),
-            annex_columns,
-            "{label}: row {row} cycle row {cycle_row} annex width mismatch",
-        );
-        assert!(
-            annex_counts.iter().all(|&count| count <= BLAKEG_ANNEX_COLUMN_CAPACITY),
-            "{label}: row {row} cycle row {cycle_row} annex count exceeded capacity",
-        );
-        let annex_total: usize = annex_counts.iter().sum();
-        match cycle_row {
-            0 | 60 | 61 => assert_eq!(
-                annex_total, 2,
-                "{label}: row {row} cycle row {cycle_row} must use two annex columns",
-            ),
-            56..=59 => assert!(
-                annex_total == 0 || annex_total == annex_columns,
-                "{label}: row {row} cycle row {cycle_row} footer must use either no annex \
-                 columns or both AEAD-XOF pair columns",
-            ),
-            62 => assert!(
-                annex_total <= annex_columns,
-                "{label}: row {row} cycle row {cycle_row} interface annex count exceeded capacity",
-            ),
-            _ => assert_eq!(
-                annex_total, 0,
-                "{label}: row {row} cycle row {cycle_row} must not use annex columns",
-            ),
-        }
-        saw_annex_row |= annex_total > 0;
-        saw_narrow_only_row |= annex_total == 0;
+        let singleton_total: usize = column_counts[narrow_batch_columns..].iter().sum();
+        saw_narrow_only_row |= singleton_total == 0;
 
         let actual: usize = column_counts.iter().sum();
-        let expected = expected_blakeg_degree3_fraction_entry_range_at_cycle_row(cycle_row);
+        let row_start = row * blakeg_matrix.width();
+        let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
+        let compression_multiplicity =
+            blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
+        let expected = expected_blakeg_air32_fraction_entry_range_at_cycle_row(
+            cycle_row,
+            is_aead,
+            compression_multiplicity,
+        );
         assert!(
             expected.contains(&actual),
             "{label}: BlakeG lookup count mismatch at row {row} cycle row {cycle_row}",
@@ -566,13 +541,11 @@ fn assert_blakeg_degree3_oracle_coverage(label: &str, fractions: &LookupFraction
         seen_cycle_rows.into_iter().all(|seen| seen),
         "{label}: oracle trace must exercise every BlakeG cycle row",
     );
+    assert_eq!(singleton_columns, BLAKEG_SINGLETON_LOOKUP_COLUMNS);
+    assert!(saw_narrow_only_row, "{label}: oracle trace must exercise narrow lookup rows");
     assert!(
-        saw_annex_row && saw_narrow_only_row,
-        "{label}: oracle trace must exercise both annex-active and narrow-only rows",
-    );
-    assert!(
-        saw_full_narrow_pair && saw_single_narrow_slot,
-        "{label}: oracle trace must exercise both full batch-2 pairs and single-slot fallbacks",
+        saw_full_narrow_pair && saw_singleton_fraction,
+        "{label}: oracle trace must exercise full batch-2 pairs and singleton lookup columns",
     );
 }
 
@@ -831,7 +804,7 @@ fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &Exe
         !blakeg_fractions.fractions().is_empty(),
         "no BlakeG-compression fractions collected - trace is degenerate or emitters are broken",
     );
-    assert_blakeg_degree3_oracle_coverage(label, &blakeg_fractions);
+    assert_blakeg_air32_oracle_coverage(label, &blakeg_matrix, &blakeg_fractions);
     let blakeg_aux = accumulate(&blakeg_fractions);
     let blakeg_folds = collect_column_oracle_folds(
         &MidenAir::BLAKEG_COMPRESSION,

@@ -153,6 +153,30 @@ numeric_const() {
     "$ROOT/$file" 2>/dev/null | head -n 1
 }
 
+numeric_const_any() {
+  local value
+  while (($# > 0)); do
+    value="$(numeric_const "$1" "$2" || true)"
+    if [[ -n "$value" ]]; then
+      echo "$value"
+      return
+    fi
+    shift 2
+  done
+}
+
+shape_width_any() {
+  local value
+  while (($# > 0)); do
+    value="$(shape_width "$1" "$2" || true)"
+    if [[ -n "$value" ]]; then
+      echo "$value"
+      return
+    fi
+    shift 2
+  done
+}
+
 chiplets_trace_width() {
   local data_width
   data_width="$(numeric_const air/src/trace/mod.rs CHIPLETS_DATA_WIDTH)"
@@ -174,8 +198,14 @@ write_air_metadata() {
   chiplets_width="$(chiplets_trace_width)"
   core_aux="$(shape_width air/src/constraints/lookup/main_air.rs MAIN_COLUMN_SHAPE)"
   chiplets_aux="$(shape_width air/src/constraints/lookup/chiplet_air.rs CHIPLET_COLUMN_SHAPE)"
-  blakeg_width="$(numeric_const air/src/constraints/blakeg_compression/layout.rs NUM_BLAKEG_COMPRESSION_COLS)"
-  blakeg_aux="$(shape_width air/src/constraints/lookup/blakeg_compression_air.rs BLAKEG_COMPRESSION_COLUMN_SHAPE)"
+  blakeg_width="$(numeric_const_any \
+    air/src/constraints/blakeg_compression/layout.rs NUM_BLAKEG_COMPRESSION_COLS \
+    air/src/constraints/blakeg_compression/air32_layout.rs NUM_COLS)"
+  blakeg_aux="$(shape_width_any \
+    air/src/constraints/lookup/blakeg_compression_air.rs BLAKEG_COMPRESSION_COLUMN_SHAPE)"
+  if [[ -z "$blakeg_aux" ]]; then
+    blakeg_aux="$(numeric_const air/src/constraints/blakeg_compression/air32_layout.rs AUX_COLS || true)"
+  fi
   and8_width="$(byte_pair_lookup_width)"
 
   cat > "$AIR_TSV" <<EOF

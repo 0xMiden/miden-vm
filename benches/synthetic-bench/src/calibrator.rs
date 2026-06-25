@@ -50,9 +50,8 @@ pub fn measure_program(source: &str) -> Result<TraceShape, MeasurementError> {
         blakeg_compression_rows: summary.blakeg_compression_rows() as u64,
     };
 
-    // Cross-check our derived formulas against the processor's authoritative values; a drift here
-    // means the AIR-side definitions have moved and the rest of the pipeline will silently
-    // miscalibrate.
+    // Cross-check derived formulas against the processor's trace summary. A mismatch means the
+    // AIR-side shape changed and the synthetic solver would calibrate against stale dimensions.
     let derived_chiplets = breakdown.chiplets_sum();
     if totals.chiplets_rows != derived_chiplets {
         return Err(MeasurementError::InvariantDrift {
@@ -100,8 +99,7 @@ pub enum MeasurementError {
     Execution(String),
     #[error("failed to build trace: {0}")]
     TraceBuild(String),
-    /// One of our derived formulas drifted from the processor's authoritative value; AIR-side
-    /// definitions have probably changed and the snapshot/verifier formulas need updating.
+    /// One derived formula no longer matches the processor's trace summary.
     #[error(
         "invariant drift: {quantity} from processor = {processor}, but our derivation = {derived}"
     )]
@@ -142,11 +140,17 @@ pub type Calibration = BTreeMap<&'static str, IterCost>;
 /// Run every snippet through a single-point calibration at [`CALIBRATION_ITERS`] and record
 /// per-iter cost in each component.
 pub fn calibrate() -> Result<Calibration, MeasurementError> {
+    calibrate_with_iters(CALIBRATION_ITERS)
+}
+
+pub(crate) fn calibrate_with_iters(iters: u64) -> Result<Calibration, MeasurementError> {
+    assert!(iters > 0, "calibration requires at least one iteration");
+
     let mut cal = Calibration::new();
     for snippet in SNIPPETS {
-        let source = snippets::wrap_program(&snippets::render(snippet, CALIBRATION_ITERS));
+        let source = snippets::wrap_program(&snippets::render(snippet, iters));
         let shape = measure_program(&source)?;
-        cal.insert(snippet.name, per_iter_cost(shape, CALIBRATION_ITERS));
+        cal.insert(snippet.name, per_iter_cost(shape, iters));
     }
     Ok(cal)
 }
@@ -167,13 +171,15 @@ mod tests {
 
     use super::*;
 
+    const TEST_CALIBRATION_ITERS: u64 = 64;
+
     // MEASUREMENT TESTS
     // --------------------------------------------------------------------
 
     #[test]
     fn measures_trivial_program() {
-        // `measure_program()` already cross-checks our derived totals against the processor's
-        // authoritative values; this test just smoke-checks basic measurement.
+        // `measure_program()` already cross-checks derived totals against the processor's trace
+        // summary; this test smoke-checks basic measurement.
         let shape = measure_program("begin push.1 drop end").expect("measure");
         assert!(shape.totals.core_rows > 0, "main trace should include framing rows");
         assert!(shape.totals.padded_core().is_power_of_two());
@@ -199,7 +205,7 @@ mod tests {
     // --------------------------------------------------------------------
 
     fn cal() -> Calibration {
-        calibrate().expect("calibration should succeed")
+        calibrate_with_iters(TEST_CALIBRATION_ITERS).expect("calibration should succeed")
     }
 
     #[test]
@@ -217,7 +223,7 @@ mod tests {
         let pad = c["decoder_pad"];
         assert!(
             hasher.hasher > pad.hasher * 10.0,
-            "hasher/iter ({}) not dominant over decoder_pad leak ({})",
+            "hasher/iter ({}) not dominant over decoder_pad cross-term ({})",
             hasher.hasher,
             pad.hasher,
         );

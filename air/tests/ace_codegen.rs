@@ -207,14 +207,16 @@ fn multi_air_ace_circuit_builds_and_has_multi_air_beta_slots() {
     let circuit = build_multi_air_ace_circuit::<QuadFelt>(config).expect("multi-AIR ACE circuit");
     let layout = circuit.layout();
 
-    // Combined widths concatenate each per-AIR matrix after LMCS alignment.
+    // Main-trace widths concatenate each per-AIR matrix after LMCS alignment.
     let expected_main_width = AIRS
         .iter()
         .map(|spec| <MidenAir as BaseAir<Felt>>::width(&spec.air).next_multiple_of(8))
         .sum::<usize>();
+    // Aux-trace widths concatenate each per-AIR coordinate region after LMCS
+    // alignment, then convert back to extension-field columns.
     let expected_aux_width = AIRS
         .iter()
-        .map(|spec| LiftedAir::<Felt, QuadFelt>::num_aux_values(&spec.air).next_multiple_of(8))
+        .map(|spec| (LiftedAir::<Felt, QuadFelt>::aux_width(&spec.air) * 2).next_multiple_of(8) / 2)
         .sum::<usize>();
     assert_eq!(
         layout.counts.width, expected_main_width,

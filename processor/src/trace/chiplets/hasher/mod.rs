@@ -3,11 +3,20 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use std::time::Instant;
 
 use miden_air::trace::{
-    and8_lookup::BYTE_LOOKUP_COUNT_LEN,
-    blakeg_compression::NUM_BLAKEG_COMPRESSION_COLS,
+    and8_lookup::{
+        BYTE_LOOKUP_COUNT_LEN, BYTE_LOOKUP_KIND_AND8, BYTE_LOOKUP_KIND_BLAKEG_ROT7,
+        BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
+    },
+    blakeg_compression::{
+        BLAKEG_COMPRESSION_CYCLE_LEN, NUM_BLAKEG_COMPRESSION_COLS,
+        air32::{
+            Air32ByteLookup, ByteLookupRecorder, TraceMode as Air32TraceMode,
+            write_felt_trace_block_into_zeroed_with_lookups as write_air32_felt_trace_block,
+        },
+    },
     chiplets::hasher::{
-        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, HASH_CYCLE_LEN, LINEAR_HASH,
-        MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, STATE_WIDTH, Selectors,
+        CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
+        MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, STATE_WIDTH, Selectors,
     },
 };
 use miden_core::chiplets::{blakeg, hasher::compress_state};
@@ -22,9 +31,8 @@ use super::{
 
 mod trace;
 use trace::HasherTrace;
-mod blakeg_trace;
-pub(crate) use blakeg_trace::build_and8_lookup_trace;
-use blakeg_trace::generate_compression_block;
+mod and8_trace;
+pub(crate) use and8_trace::build_and8_lookup_trace;
 
 #[cfg(test)]
 #[allow(clippy::needless_range_loop)]
@@ -66,17 +74,12 @@ fn state_to_key(state: &HasherState) -> StateKey {
     core::array::from_fn(|i| state[i].as_canonical_u64())
 }
 
-/// Reconstructs a HasherState from a StateKey.
-fn key_to_state(key: &StateKey) -> HasherState {
-    core::array::from_fn(|i| Felt::new_unchecked(key[i]))
-}
-
 /// Hash chiplet for the VM.
 ///
 /// The controller records one row per compression request. Hash rows carry
 /// `block[8] || cv_in[4]` in the state columns and `cv_out[4]` in row data; Merkle rows carry
 /// `block[8] || cv_out[4]` plus their path-index data. The standalone BlakeG compression AIR
-/// executes one 64-row block per unique input state, with multiplicity tracked by the
+/// executes one block per unique input state, with multiplicity tracked by the
 /// compression-link bus.
 #[derive(Debug, Default)]
 pub struct Hasher {
@@ -84,7 +87,7 @@ pub struct Hasher {
     /// Maps block digest -> (op_start, op_end) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps (input state, output shape) -> multiplicity for compression deduplication.
-    /// During trace generation, one 64-row BlakeG block is emitted per entry.
+    /// During trace generation, one standalone BlakeG block is emitted per entry.
     compression_request_map: BTreeMap<CompressionRequestKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
@@ -129,7 +132,7 @@ impl Hasher {
         if self.finalized {
             0
         } else {
-            self.compression_request_map.len() * HASH_CYCLE_LEN
+            self.compression_request_map.len() * BLAKEG_COMPRESSION_CYCLE_LEN
         }
     }
 
@@ -139,17 +142,17 @@ impl Hasher {
         blakeg_height: usize,
         range: &mut RangeChecker,
     ) {
-        debug_assert_eq!(blakeg_height % HASH_CYCLE_LEN, 0);
+        debug_assert_eq!(blakeg_height % BLAKEG_COMPRESSION_CYCLE_LEN, 0);
         debug_assert!(!self.finalized, "range checks must be collected before finalization");
 
-        let block_count = blakeg_height / HASH_CYCLE_LEN;
+        let block_count = blakeg_height / BLAKEG_COMPRESSION_CYCLE_LEN;
         debug_assert!(
             block_count >= self.compression_request_map.len(),
             "BlakeG height is too short for recorded compression requests",
         );
 
         for key in self.compression_request_map.keys() {
-            append_message_row_range_checks(&key_to_state(&key.state), range);
+            append_message_row_range_checks(&key.state, range);
         }
 
         append_zero_message_row_range_checks(
@@ -288,7 +291,6 @@ impl Hasher {
         path: &MerklePath,
         index: Felt,
     ) -> MerkleRootUpdate {
-        // Increment the mrupdate_id for this update operation
         self.mrupdate_id += ONE;
 
         let address = self.trace.next_row_addr();
@@ -307,7 +309,7 @@ impl Hasher {
 
     /// Finalizes and fills the controller and BlakeG-compression traces.
     ///
-    /// Finalization pads the controller region and materializes one 64-row BlakeG block
+    /// Finalization pads the controller region and materializes one BlakeG block
     /// per unique input state. Trace-height padding may append zero-multiplicity dummy blocks.
     pub(super) fn fill_trace(
         mut self,
@@ -445,8 +447,7 @@ impl Hasher {
     // COMPRESSION DEDUPLICATION
     // --------------------------------------------------------------------------------------------
 
-    /// Records a compression request for the given input state. If the same state was already
-    /// seen, increments the multiplicity counter.
+    /// Records a BlakeG request keyed by input state and output shape.
     fn record_compression_request(&mut self, state: &HasherState, output: CompressionOutput) {
         let key = CompressionRequestKey { state: state_to_key(state), output };
         *self.compression_request_map.entry(key).or_insert(0) += 1;
@@ -499,14 +500,18 @@ fn fill_blakeg_compression_trace(
     debug_assert_eq!(trace.len() % W, 0, "BlakeG trace buffer is not row-aligned");
 
     let (rows, _) = trace.as_chunks_mut::<W>();
-    debug_assert_eq!(rows.len() % HASH_CYCLE_LEN, 0, "BlakeG height must align to blocks");
+    debug_assert_eq!(
+        rows.len() % BLAKEG_COMPRESSION_CYCLE_LEN,
+        0,
+        "BlakeG height must align to blocks"
+    );
     debug_assert!(
-        compression_requests.len() * HASH_CYCLE_LEN <= rows.len(),
+        compression_requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN <= rows.len(),
         "BlakeG trace buffer is too short for compression requests",
     );
 
     let request_count = compression_requests.len();
-    let block_count = rows.len() / HASH_CYCLE_LEN;
+    let block_count = rows.len() / BLAKEG_COMPRESSION_CYCLE_LEN;
     profile_event(format_args!(
         "blakeg_compression.shape rows={} blocks={} real_blocks={} cols={W}",
         rows.len(),
@@ -515,22 +520,22 @@ fn fill_blakeg_compression_trace(
     ));
 
     let requests: Vec<_> = compression_requests.into_iter().collect();
-    let real_rows_len = requests.len() * HASH_CYCLE_LEN;
+    let real_rows_len = requests.len() * BLAKEG_COMPRESSION_CYCLE_LEN;
     let (real_rows, dummy_rows) = rows.split_at_mut(real_rows_len);
 
     let mut counts = profile_scope("blakeg_compression.real_blocks", || {
         real_rows
-            .par_chunks_mut(HASH_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
             .zip(requests.par_chunks(BLOCKS_PER_FILL_CHUNK))
             .map(|(rows_chunk, requests_chunk)| {
                 let mut local_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
-                for (block_rows, (key, multiplicity)) in
-                    rows_chunk.chunks_exact_mut(HASH_CYCLE_LEN).zip(requests_chunk.iter())
+                for (block_rows, (key, multiplicity)) in rows_chunk
+                    .chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN)
+                    .zip(requests_chunk.iter())
                 {
-                    let state = key_to_state(&key.state);
                     write_blakeg_compression_block(
                         block_rows,
-                        &state,
+                        &key.state,
                         key.output,
                         *multiplicity,
                         &mut local_counts,
@@ -538,15 +543,13 @@ fn fill_blakeg_compression_trace(
                 }
                 local_counts
             })
-            .reduce(
-                || vec![0u64; BYTE_LOOKUP_COUNT_LEN],
-                |mut left, right| {
-                    for (left, right) in left.iter_mut().zip(right) {
-                        *left += right;
-                    }
-                    left
-                },
-            )
+            .reduce_with(|mut left, right| {
+                for (left, right) in left.iter_mut().zip(right) {
+                    *left += right;
+                }
+                left
+            })
+            .unwrap_or_else(|| vec![0u64; BYTE_LOOKUP_COUNT_LEN])
     });
 
     profile_scope("blakeg_compression.dummy_blocks", || {
@@ -554,8 +557,8 @@ fn fill_blakeg_compression_trace(
             return;
         }
 
-        let zero_state = [ZERO; STATE_WIDTH];
-        let mut dummy_block = vec![[ZERO; W]; HASH_CYCLE_LEN];
+        let zero_state = [0u64; STATE_WIDTH];
+        let mut dummy_block = vec![[ZERO; W]; BLAKEG_COMPRESSION_CYCLE_LEN];
         let mut dummy_counts = vec![0u64; BYTE_LOOKUP_COUNT_LEN];
         write_blakeg_compression_block(
             &mut dummy_block,
@@ -565,15 +568,15 @@ fn fill_blakeg_compression_trace(
             &mut dummy_counts,
         );
 
-        let dummy_blocks = dummy_rows.len() / HASH_CYCLE_LEN;
+        let dummy_blocks = dummy_rows.len() / BLAKEG_COMPRESSION_CYCLE_LEN;
         for (count, dummy_count) in counts.iter_mut().zip(dummy_counts) {
             *count += dummy_count * dummy_blocks as u64;
         }
 
         dummy_rows
-            .par_chunks_mut(HASH_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
+            .par_chunks_mut(BLAKEG_COMPRESSION_CYCLE_LEN * BLOCKS_PER_FILL_CHUNK)
             .for_each(|chunk| {
-                for block_rows in chunk.chunks_exact_mut(HASH_CYCLE_LEN) {
+                for block_rows in chunk.chunks_exact_mut(BLAKEG_COMPRESSION_CYCLE_LEN) {
                     block_rows.copy_from_slice(&dummy_block);
                 }
             });
@@ -582,9 +585,8 @@ fn fill_blakeg_compression_trace(
     counts
 }
 
-fn append_message_row_range_checks(state: &HasherState, range: &mut RangeChecker) {
-    for felt in &state[..RATE_LEN] {
-        let value = felt.as_canonical_u64();
+fn append_message_row_range_checks(state: &StateKey, range: &mut RangeChecker) {
+    for &value in &state[..RATE_LEN] {
         let lo = (value & 0xffff_ffff) as u32;
         let hi = (value >> 32) as u32;
 
@@ -612,27 +614,69 @@ fn num_basic_block_hash_groups(op_batches: &[OpBatch]) -> usize {
 
 fn write_blakeg_compression_block(
     rows: &mut [[Felt; NUM_BLAKEG_COMPRESSION_COLS]],
-    input_state: &HasherState,
+    input_state: &StateKey,
     output_mode: CompressionOutput,
     multiplicity: u64,
     and8_counts: &mut [u64],
 ) {
-    let block = blakeg::unpack_block(core::array::from_fn(|i| input_state[i]));
-    let cv = Digest::new(core::array::from_fn(|i| input_state[RATE_LEN + i]));
-    let h = blakeg::unpack_word(cv);
-    let mut output_state = *input_state;
-    blakeg::compress_state(&mut output_state);
-    generate_compression_block(
-        rows,
-        0,
-        &h,
-        &block,
-        input_state,
-        &output_state,
-        output_mode,
-        multiplicity,
-        and8_counts,
+    let block = unpack_block_from_state_key(input_state);
+    let h = unpack_cv_from_state_key(input_state);
+    let trace_mode = match output_mode {
+        CompressionOutput::Packed => Air32TraceMode::CompressionWithMultiplicity { multiplicity },
+        CompressionOutput::AeadXof { clk } => {
+            debug_assert_eq!(multiplicity, 1, "AEAD XOF requests are not deduplicated by clk");
+            Air32TraceMode::AeadXof { clk: clk.as_canonical_u64() }
+        },
+    };
+
+    let mut recorder = Air32LookupCounter { counts: and8_counts };
+    write_air32_felt_trace_block(rows, block, h, trace_mode, &mut recorder);
+}
+
+fn unpack_block_from_state_key(state: &StateKey) -> [u32; RATE_LEN * 2] {
+    core::array::from_fn(|idx| {
+        let packed = state[idx / 2];
+        if idx.is_multiple_of(2) {
+            (packed & 0xffff_ffff) as u32
+        } else {
+            (packed >> 32) as u32
+        }
+    })
+}
+
+fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - RATE_LEN) * 2] {
+    core::array::from_fn(|idx| {
+        let packed = state[RATE_LEN + idx / 2];
+        if idx.is_multiple_of(2) {
+            (packed & 0xffff_ffff) as u32
+        } else {
+            (packed >> 32) as u32
+        }
+    })
+}
+
+struct Air32LookupCounter<'a> {
+    counts: &'a mut [u64],
+}
+
+impl ByteLookupRecorder for Air32LookupCounter<'_> {
+    fn record(&mut self, lookup: Air32ByteLookup, lhs: u8, rhs: u8, result: u32) {
+        let kind = match lookup {
+            Air32ByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
+            Air32ByteLookup::Rot12 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT12[byte],
+            Air32ByteLookup::Rot7 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT7[byte],
+        };
+        count_byte_lookup(self.counts, kind, lhs, rhs, result);
+    }
+}
+
+fn count_byte_lookup(counts: &mut [u64], kind: usize, lhs: u8, rhs: u8, result: u32) {
+    debug_assert_eq!(
+        byte_lookup_result(kind, lhs, rhs),
+        result,
+        "byte-pair witness does not match table row",
     );
+    counts[kind * BYTE_PAIR_ROWS + ((lhs as usize) << 8) + rhs as usize] += 1;
 }
 
 #[cfg(feature = "std")]

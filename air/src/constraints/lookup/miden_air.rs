@@ -100,11 +100,11 @@ mod tests {
         BlakeGCompressionAir, ChipletsAir, Felt, MidenAir, NUM_BLAKEG_COMPRESSION_COLS,
         NUM_PUBLIC_VALUES,
         constraints::{
+            blakeg_compression::air32_lookup::AIR32_LOOKUP_COLUMN_SHAPE,
             columns::{NUM_CHIPLETS_COLS, NUM_CORE_COLS},
             lookup::{
-                BusId, MIDEN_MAX_MESSAGE_WIDTH,
-                blakeg_compression_air::BLAKEG_COMPRESSION_COLUMN_SHAPE,
-                chiplet_air::CHIPLET_COLUMN_SHAPE, main_air::MAIN_COLUMN_SHAPE,
+                BusId, MIDEN_MAX_MESSAGE_WIDTH, chiplet_air::CHIPLET_COLUMN_SHAPE,
+                main_air::MAIN_COLUMN_SHAPE,
             },
         },
         lookup::{
@@ -209,7 +209,7 @@ mod tests {
             trace_width: NUM_BLAKEG_COMPRESSION_COLS,
             num_public_values: NUM_PUBLIC_VALUES,
             num_periodic_columns: num_periodic,
-            permutation_width: BLAKEG_COMPRESSION_COLUMN_SHAPE.len(),
+            permutation_width: AIR32_LOOKUP_COLUMN_SHAPE.len(),
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
             num_permutation_values: 1,
         };

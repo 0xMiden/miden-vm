@@ -43,8 +43,8 @@ pub struct Snippet {
     pub dominant: Component,
 }
 
-/// The full snippet catalog, in solver order: chiplet drivers first so they saturate their
-/// targets, `decoder_pad` last so it absorbs leftover main-trace budget.
+/// The full snippet catalog in stable emission order. Chiplet-dominant snippets appear before
+/// `decoder_pad`, which is the core-trace filler used after component targets are calibrated.
 pub const SNIPPETS: &[Snippet] = &[
     Snippet {
         name: "hasher",
@@ -145,8 +145,7 @@ mod tests {
 
     #[test]
     fn each_snippet_assembles_as_a_standalone_program() {
-        // Fail fast: if a snippet has malformed MASM, the calibrator will blow up at bench time.
-        // Catch it in unit tests instead.
+        // Fail fast: malformed MASM should be caught in unit tests, before calibration starts.
         for snippet in SNIPPETS {
             let source = wrap_program(&render(snippet, 4));
             Assembler::default()

@@ -55,16 +55,16 @@ pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 /// Number of transitions in one BlakeG compression trace block.
 pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 
-/// Index of the last row in a BlakeG compression trace block (0-based).
-pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
-pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
-
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// Number of rows in one BlakeG compression trace block.
-pub const HASH_CYCLE_LEN: usize = 64;
+/// Standalone BlakeG compression AIR block length.
+pub const HASH_CYCLE_LEN: usize = crate::trace::blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new_unchecked(HASH_CYCLE_LEN as u64);
+
+/// Index of the last row in a standalone BlakeG compression AIR block (0-based).
+pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
+pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new_unchecked(LAST_CYCLE_ROW as u64);
 
 /// Row alignment for the hasher controller region inside `ChipletsAir`.
 ///
