@@ -952,7 +952,7 @@ fn sparse_reader_rejects_trailing_bytes_with_exact_prefix_budget() {
     let basic_block_data = basic_block_data.finalize();
 
     let root = MastNodeId::from(0);
-    let bytes = write_sparse_test_payload(
+    let mut bytes_with_trailing = write_sparse_test_payload(
         1,
         &[root],
         &[root],
@@ -962,7 +962,6 @@ fn sparse_reader_rejects_trailing_bytes_with_exact_prefix_budget() {
         block.digest(),
     );
 
-    let mut bytes_with_trailing = bytes.clone();
     bytes_with_trailing.push(0);
     let err = SparseMastForest::read_from_bytes_with_options(
         &bytes_with_trailing,
