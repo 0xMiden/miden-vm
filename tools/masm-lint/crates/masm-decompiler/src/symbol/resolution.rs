@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use miden_assembly_syntax::{
     Path,
-    ast::{InvocationTarget, LocalSymbolResolver, Module, SymbolResolution, SymbolResolutionError},
+    ast::{
+        Import, InvocationTarget, LocalSymbolResolver, Module, SymbolResolution,
+        SymbolResolutionError,
+    },
     debuginfo::{SourceManager, Span, Spanned},
 };
 
@@ -164,6 +167,13 @@ fn resolve_path_span_to_option(
         return Ok(Some(SymbolPath::new(path.as_str())));
     }
 
+    if let Some(resolved) = resolve_module_import_path(module, path.inner()) {
+        return Ok(Some(resolved));
+    }
+    if let Some(resolved) = resolve_submodule_path(module, path.inner()) {
+        return Ok(Some(resolved));
+    }
+
     let resolution = match resolver.resolve_path(path) {
         Ok(resolution) => resolution,
         Err(source) if is_unresolved_qualified_external(path, &source) => {
@@ -178,6 +188,27 @@ fn resolve_path_span_to_option(
         },
     };
     Ok(resolution_to_path(module, resolution))
+}
+
+fn resolve_module_import_path(module: &Module, path: &Path) -> Option<SymbolPath> {
+    let (first, rest) = path.split_first()?;
+    let Import::Module(import) = module.get_import(first)? else {
+        return None;
+    };
+    let resolved = if rest.as_str().is_empty() {
+        import.module_path().inner().to_string()
+    } else {
+        import.module_path().inner().join(rest).to_string()
+    };
+    Some(SymbolPath::new(resolved))
+}
+
+fn resolve_submodule_path(module: &Module, path: &Path) -> Option<SymbolPath> {
+    let (first, _) = path.split_first()?;
+    module.submodules().iter().any(|decl| decl.name.as_str() == first).then(|| {
+        let resolved = module.path().join(path).to_string();
+        SymbolPath::new(resolved)
+    })
 }
 
 /// Returns true when `path` is an explicit multi-segment external path (e.g. `foo::bar`) that

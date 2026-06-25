@@ -342,7 +342,7 @@ fn lift_stack_inst(
             stack.reversew(span, inst.to_string())?;
             Ok(Some(Vec::new()))
         },
-        Instruction::Nop | Instruction::Debug(_) => Ok(Some(Vec::new())),
+        Instruction::Nop => Ok(Some(Vec::new())),
         _ => Ok(None),
     }
 }
@@ -989,11 +989,9 @@ fn lift_intrinsic_inst(
         Instruction::EvalCircuit => "eval_circuit".to_string(),
         Instruction::HornerBase => "horner_eval_base".to_string(),
         Instruction::HornerExt => "horner_eval_ext".to_string(),
-        Instruction::LogPrecompile => "log_precompile".to_string(),
         Instruction::Emit => "emit".to_string(),
         Instruction::EmitImm(imm) => format!("emit.{imm}"),
         Instruction::Sdepth => "sdepth".to_string(),
-        Instruction::Trace(kind) => format!("trace_{kind}"),
         _ => return Ok(None),
     };
     let effect = effect_for_inst(inst, span, resolver, sigs)?;

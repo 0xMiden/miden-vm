@@ -83,18 +83,18 @@ impl Program {
         let path = path.as_ref();
         // Most MASM files we decompile are library-style modules (no `begin/end` wrapper).
         // Prefer the library parser; fall back to executable if needed.
-        let mut parser = ModuleParser::new(ModuleKind::Library);
+        let mut parser = ModuleParser::new(Some(ModuleKind::Library));
 
         let module_name = derive_module_path(path, roots).unwrap_or_else(|_| {
             fallback_module_path(path).unwrap_or_else(|_| MasmPathBuf::absolute(Module::ROOT))
         });
 
-        let module = match parser.parse_file(&module_name, path, source_manager.clone()) {
+        let module = match parser.parse_file(Some(&module_name), path, source_manager.clone()) {
             Ok(m) => m,
             Err(_e) => {
                 // Retry as executable for files that use `begin/end` wrappers.
-                let mut exec_parser = ModuleParser::new(ModuleKind::Executable);
-                exec_parser.parse_file(&module_name, path, source_manager)?
+                let mut exec_parser = ModuleParser::new(Some(ModuleKind::Executable));
+                exec_parser.parse_file(Some(&module_name), path, source_manager)?
             },
         };
 

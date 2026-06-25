@@ -35,6 +35,10 @@ struct Cli {
     /// Group advice warnings by root-cause origin instead of listing each sink separately
     #[arg(long)]
     group_by_origin: bool,
+
+    /// Do not fail for unresolved modules under this configured namespace
+    #[arg(long = "allow-unresolved-library")]
+    allow_unresolved_libraries: Vec<String>,
 }
 
 fn main() {
@@ -79,7 +83,7 @@ fn run(cli: Cli) -> i32 {
     // Share one source manager with the analysis facade so rendered spans
     // resolve across all loaded modules.
     let sources: Arc<DefaultSourceManager> = Arc::new(DefaultSourceManager::default());
-    let report = match analyze_paths(LintPathAnalysisInput {
+    let mut report = match analyze_paths(LintPathAnalysisInput {
         inputs: cli.inputs,
         libraries: cli.libraries,
         cwd,
@@ -96,6 +100,7 @@ fn run(cli: Cli) -> i32 {
             return 2;
         },
     };
+    suppress_allowed_unresolved_libraries(&mut report, &cli.allow_unresolved_libraries);
 
     for error in &report.load_errors {
         eprintln!("masm-lint: failed to load {}: {}", error.path.display(), error.message);
@@ -191,6 +196,31 @@ fn emit_unresolved_dependency_errors(unresolved: &UnresolvedDependencyReport) {
         }
     }
     eprintln!();
+}
+
+fn suppress_allowed_unresolved_libraries(
+    report: &mut masm_analysis::lint::LintAnalysisReport,
+    allowed_namespaces: &[String],
+) {
+    if allowed_namespaces.is_empty() {
+        return;
+    }
+
+    let Some(unresolved) = &mut report.unresolved_dependencies else {
+        return;
+    };
+
+    unresolved.modules.retain(|module| {
+        let Some(configured_namespace) = module.configured_namespace.as_deref() else {
+            return true;
+        };
+
+        !allowed_namespaces.iter().any(|allowed| allowed == configured_namespace)
+    });
+
+    if unresolved.modules.is_empty() {
+        report.unresolved_dependencies = None;
+    }
 }
 
 /// Render a [`LibraryRoot`] for human-readable output.

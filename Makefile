@@ -134,6 +134,8 @@ masm-lint-core: ## Runs the MASM lint tool over the core library
 	cargo run --manifest-path $(MASM_LINT_MANIFEST) --locked -p masm-analysis --bin masm-lint -- \
 		--no-color \
 		--library miden::core=crates/lib/core/asm \
+		--library miden::precompiles=crates/lib/core/precompiles/asm \
+		--allow-unresolved-library miden::precompiles \
 		crates/lib/core/asm
 
 .PHONY: lint

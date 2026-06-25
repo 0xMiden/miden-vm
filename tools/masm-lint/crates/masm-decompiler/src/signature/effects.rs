@@ -190,7 +190,6 @@ impl From<&Instruction> for StackEffect {
             EvalCircuit => StackEffect::known(0, 0).with_required_depth(3),
             HornerBase => StackEffect::known(16, 16),
             HornerExt => StackEffect::known(16, 16),
-            LogPrecompile => StackEffect::known(12, 12).with_required_depth(12),
 
             // FRI folding
             FriExt2Fold4 => StackEffect::known(0, 0).with_required_depth(17),
@@ -238,11 +237,8 @@ impl From<&Instruction> for StackEffect {
             // Stack effects from calls are handled manually during analysis.
             Exec(_) | Call(_) | SysCall(_) | DynExec | DynCall => StackEffect::Unknown,
 
-            Debug(_) => StackEffect::known(0, 0),
-
             Emit => StackEffect::known(0, 0).with_required_depth(1),
             EmitImm(_) => StackEffect::known(0, 0),
-            Trace(_) => StackEffect::known(0, 0),
             _ => StackEffect::Unknown,
         }
     }
