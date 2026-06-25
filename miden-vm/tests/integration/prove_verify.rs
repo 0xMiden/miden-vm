@@ -82,7 +82,40 @@ fn assert_recursive_verify(
 
     let source = "
         use miden::core::sys::vm
+
+        # Copy `count` felts (a multiple of 4) from the advice tape into memory starting at `dst`.
+        #   Input:  [dst, count, ...]
+        #   Output: [...]
+        proc copy_advice_to_mem
+            dup.1 push.0 neq
+            while.true
+                # [dst, count, ...]
+                padw adv_loadw
+                # [w0, w1, w2, w3, dst, count, ...]
+                dup.4 mem_storew_le dropw
+                # [dst, count, ...]
+                add.4
+                # [dst+4, count, ...]
+                swap sub.4 swap
+                # [dst+4, count-4, ...]
+                dup.1 push.0 neq
+            end
+            drop drop
+        end
+
         begin
+            # Initial stack: [kernel_ptr, num_kernel_digests, stack_io_ptr, PROG0..3, log_core, log_chip].
+
+            # Copy kernel digests (4·num_kernel_digests felts) from advice into the caller region
+            # (kernel_ptr = 0). Build [dst=0, count=4N].
+            dup.1 mul.4 push.0
+            exec.copy_advice_to_mem
+
+            # Copy stack i/o (32 felts) from advice into the caller region (stack_io_ptr = 4096).
+            # Build [dst=4096, count=32].
+            push.32 push.4096
+            exec.copy_advice_to_mem
+
             exec.vm::verify_proof
         end
     ";
