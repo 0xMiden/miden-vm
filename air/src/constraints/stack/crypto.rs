@@ -15,14 +15,13 @@
 //! - **FRIE2F4**: Performs FRI layer folding, combining 4 extension-field query evaluations into 1,
 //!   and verifying the previous layer's folding was correct.
 
-use miden_core::{Felt, field::PrimeCharacteristicRing};
+use miden_core::Felt;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     CoreCols, MidenAirBuilder,
     constraints::{
-        constants::{F_1, F_16},
-        constants::{F_3, F_4, F_8},
+        constants::{F_1, F_2, F_3, F_8, F_16},
         ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
         op_flags::OpFlags,
     },
@@ -252,9 +251,10 @@ fn enforce_hornerext_constraints<AB>(
 ///
 /// where eval_point = alpha / domain_point, and domain_point = poe * tau_factor.
 ///
-/// The operation also verifies that the previous layer's folding was correct
-/// (prev_eval must match the query value selected by the domain segment) and
-/// advances state for the next layer (poe -> poe^4, layer pointer += 8).
+/// The operation also verifies that the previous layer's folding was correct. The input coset is
+/// natural, while the opened row is stored on the stack in bit-reversed order; the consistency
+/// check therefore compares `prev_eval` against the stack slot selected by that coset's row.
+/// Finally, the operation advances state for the next layer (poe -> poe^4, layer pointer += 8).
 ///
 /// ## Register map
 ///
@@ -264,8 +264,8 @@ fn enforce_hornerext_constraints<AB>(
 ///   s[4..6]    q1              query eval 1
 ///   s[6..8]    q3              query eval 3
 ///                              (bit-reversed stack order; see "Bit-reversal" below)
-///   s[8]       folded_pos    query position in the folded domain
-///   s[9]       tree_index    bit-reversed index: tree_index = 4*folded_pos + segment
+///   s[8]       folded_pos      query position in the folded domain
+///   s[9]       coset           natural coset index in the 4-element folded row
 ///   s[10]      poe           power of initial domain generator
 ///   s[11..13]  prev_eval     previous layer's folded value (for consistency check)
 ///   s[13..15]  (alpha0, alpha1)      verifier challenge for this FRI layer
@@ -274,12 +274,12 @@ fn enforce_hornerext_constraints<AB>(
 /// Output stack (next row - first 10 positions are degree-reduction intermediates):
 ///   s'[0..2]   fold_mid0       first fold2 intermediate result
 ///   s'[2..4]   fold_mid1       second fold2 intermediate result
-///   s'[4..8]   seg_flag[0..3]  domain segment flags (one-hot)
+///   s'[4..8]   seg_flag[0..3]  coset flags (one-hot)
 ///   s'[8]      poe_sq          poe^2
 ///   s'[9]      tau_factor      tau^(-segment) for this coset
 ///   s'[10]     layer_ptr + 8   advanced layer pointer
-///   s'[11]     poe_fourth      poe^4 (for next FRI layer)
-///   s'[12]     folded_pos      copied from input
+///   s'[11]     folded_pos      copied from input
+///   s'[12]     poe_fourth      poe^4 (for next FRI layer)
 ///   s'[13..15] fold_result     final fold4 output
 ///
 /// Helper registers (nondeterministic, provided by prover):
@@ -322,7 +322,7 @@ fn enforce_frie2f4_constraints<AB>(
     let q3 = QuadFeltExpr::new(s[6], s[7]);
 
     let folded_pos = s[8];
-    let tree_index = s[9];
+    let coset = s[9];
     let poe = s[10];
     let prev_eval = QuadFeltExpr::new(s[11], s[12]);
     let alpha = QuadFeltExpr::new(s[13], s[14]);
@@ -331,28 +331,26 @@ fn enforce_frie2f4_constraints<AB>(
     // ==========================================================================
     // Phase 1: Domain segment identification
     // ==========================================================================
-    // Determine which coset of the 4-element multiplicative subgroup this query
-    // belongs to. The segment flags are one-hot: exactly one is 1. From them we
-    // derive the segment index (for position decomposition) and the tau factor
-    // (the twiddle factor tau^(-segment) for computing the domain point).
+    // Determine which coset of the 4-element multiplicative subgroup this query belongs to. The
+    // flags are one-hot: exactly one is 1. They select both the natural coset index and the tau
+    // factor used to compute the domain point.
 
     let seg_flag_0 = s_next[4];
     let seg_flag_1 = s_next[5];
     let seg_flag_2 = s_next[6];
     let seg_flag_3 = s_next[7];
 
-    // Segment flags must be binary and exactly one must be active.
+    // Coset flags must be binary and exactly one must be active.
     builder.assert_bools([seg_flag_0, seg_flag_1, seg_flag_2, seg_flag_3]);
     builder.assert_one(seg_flag_0 + seg_flag_1 + seg_flag_2 + seg_flag_3);
 
-    // The tree_index encodes both the folded position and the domain segment:
-    //   tree_index = 4 * folded_pos + segment_index
-    // Bit-reversal mapping from flags to segment index:
-    //   flag0 -> 0, flag1 -> 2, flag2 -> 1, flag3 -> 3
-    // so segment_index = 2*flag1 + flag2 + 3*flag3.
-    let folded_pos_next = s_next[12];
-    let segment_index = seg_flag_1.into().double() + seg_flag_2 + seg_flag_3 * F_3;
-    builder.assert_eq(tree_index, folded_pos_next * F_4 + segment_index);
+    // The input coset is the natural index selected by the one-hot flags:
+    //   flag0 -> 0, flag1 -> 1, flag2 -> 2, flag3 -> 3.
+    // The execution op bit-reverses this value internally only for selecting the bit-reversed row
+    // element used by the cross-layer consistency check.
+    let folded_pos_next = s_next[11];
+    let expected_coset = seg_flag_1 + seg_flag_2 * F_2 + seg_flag_3 * F_3;
+    builder.assert_eq(coset, expected_coset);
 
     // Each segment corresponds to a power of tau^-1 (the inverse 4th root of unity).
     // The one-hot flags select the appropriate power.
@@ -428,13 +426,12 @@ fn enforce_frie2f4_constraints<AB>(
     // Phase 4: Cross-layer consistency and state updates
     // ==========================================================================
 
-    // The folded output from the previous FRI layer (prev_eval) must equal the
-    // query value at the position indicated by the domain segment. This links
-    // adjacent FRI layers: layer k's fold_result appears as one of layer k+1's
-    // four query inputs.
+    // The folded output from the previous FRI layer (prev_eval) must equal the query value selected
+    // by the natural coset. This links adjacent FRI layers: layer k's fold_result appears as one of
+    // layer k+1's four query inputs.
     //
-    // The segment flags select which query value to compare. Uses raw stack
-    // positions because the query QuadFeltExprs were consumed by fold2 above.
+    // The coset flags select which query value to compare. Uses raw stack positions because the
+    // query QuadFeltExprs were consumed by fold2 above.
     // Mapping: seg_flag_0 -> s[0,1]=q0, seg_flag_1 -> s[4,5]=q1,
     //          seg_flag_2 -> s[2,3]=q2, seg_flag_3 -> s[6,7]=q3.
     let selected_re = s[0] * seg_flag_0 + s[4] * seg_flag_1 + s[2] * seg_flag_2 + s[6] * seg_flag_3;
@@ -444,7 +441,7 @@ fn enforce_frie2f4_constraints<AB>(
     // Domain generator powers for the next layer: poe -> poe^2 -> poe^4.
     // Split into two squarings to keep constraint degree low.
     let poe_sq = s_next[8];
-    let poe_fourth = s_next[11];
+    let poe_fourth = s_next[12];
     builder.assert_eq(poe_sq, poe * poe);
     builder.assert_eq(poe_fourth, poe_sq * poe_sq);
 

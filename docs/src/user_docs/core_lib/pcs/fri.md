@@ -12,4 +12,4 @@ Module `miden::core::pcs::fri::frie2f4` contains procedures for verifying FRI pr
 
 | Procedure | Description |
 | ----------- | ------------- |
-| verify | Verifies a FRI proof where the proof was generated over the quadratic extension of the base field and layer folding was performed using folding factor 4.<br /><br />Input:  `[...]`<br />Output: `[...]`<br /><br />Cycles:<br />- Polynomial degree less than 64: `24 + num_queries * (107 + num_layers * 80)`<br />- Polynomial degree less than 128: `24 + num_queries * (140 + num_layers * 80)` |
+| verify | Verifies a FRI proof where the proof was generated over the quadratic extension of the base field and layer folding was performed using folding factor 4.<br /><br />Input:  `[...]`<br />Output: `[...]`<br /><br />Cycles:<br />- Polynomial degree less than 64: `24 + num_queries * (107 + num_layers * 79)`<br />- Polynomial degree less than 128: `24 + num_queries * (140 + num_layers * 79)` |

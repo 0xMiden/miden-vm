@@ -486,6 +486,63 @@ pub proc sample_folding_pow_and_ext
     exec.eidos_sample_ext
 end
 
+#! Observe a FRI layer commitment and folding PoW witness, then sample the folding challenge.
+#!
+#! For nonzero folding PoW this specializes the sequence:
+#! `reseed_with_felt; sample_folding_pow_and_ext`.
+#!
+#! Input: [pow_witness, commitment, ...]
+#! Output: [alpha0, alpha1, ...]
+pub proc reseed_with_folding_pow_and_ext
+    exec.constants::get_folding_pow_bits
+    dup push.0 neq
+    if.true
+        exec.eidos_enter_absorbing
+
+        # Build the absorbed block `[commitment, pow_witness, 0, 0, 0]`, keeping pow_bits below it.
+        movdn.5
+        movdn.4
+        push.0.0.0
+        movup.7
+        swapw
+
+        padw exec.constants::random_coin_cv_ptr mem_loadw_le
+        movup.3 add.6 movdn.3
+        swapw.2
+        swapw
+        bcompress
+
+        swapw.2
+        exec.constants::random_coin_output_word_ptr mem_storew_le
+        exec.constants::random_coin_cv_ptr mem_storew_le
+        dropw dropw dropw
+
+        push.0 exec.constants::random_coin_buffer_len_ptr mem_store
+        push.1 exec.constants::random_coin_counter_ptr mem_store
+        push.1 exec.constants::random_coin_output_len_ptr mem_store
+
+        # Consume output[0] for the grinding check and output[1], output[2] for alpha, leaving
+        # output[3] cached as the next transcript sample.
+        dup
+        pow2
+        u32assert u32overflowing_sub.1 assertz
+        exec.constants::random_coin_output_word_ptr mem_load
+        u32split
+        swap
+        drop
+        u32and
+        assertz.err="per-round FRI folding grinding check failed"
+        drop
+        exec.constants::random_coin_output_word_ptr add.1 mem_load
+        exec.constants::random_coin_output_word_ptr add.2 mem_load
+        swap
+    else
+        drop
+        exec.reseed_with_felt
+        exec.sample_folding_pow_and_ext
+    end
+end
+
 # COEFFICIENT GENERATION
 # =============================================================================================
 
@@ -625,6 +682,32 @@ end
 # INDEX GENERATION
 # =============================================================================================
 
+#! Store one sampled query index word and advance the query pointer.
+#!
+#! Input: [sample, query_ptr, depth, index_mask, ...]
+#! Output: [query_ptr + 4, depth, index_mask, ...]
+proc store_query_index
+    u32split swap drop
+    dup.3 u32and
+    #=> [index, query_ptr, depth, index_mask, ...]
+
+    movdn.3
+    #=> [query_ptr, depth, index_mask, index, ...]
+
+    push.0
+    dup.4
+    dup.3
+    dup.6
+    #=> [index, depth, index, 0, query_ptr, depth, index_mask, index, ...]
+
+    dup.4 mem_storew_le dropw
+    #=> [query_ptr, depth, index_mask, index, ...]
+
+    add.4
+    movup.3 drop
+    #=> [query_ptr + 4, depth, index_mask, ...]
+end
+
 #! Generate a list of `num_queries` number of random indices in the range
 #! [0, lde_size) and store it in memory starting from `query_ptr`.
 #! The list is stored as `(index, depth, index, 0)` where `index` is the sampled domain-order
@@ -641,33 +724,99 @@ pub proc generate_list_indices
     swap movup.2 swap
     #=> [query_ptr, num_queries, depth, ...]
 
+    dup.2 pow2 u32assert u32overflowing_sub.1 assertz
+    movdn.3
+    #=> [query_ptr, num_queries, depth, index_mask, ...]
+
     dup.1 push.0 neq
     while.true
-        dup.2 exec.eidos_sample_bits
-        #=> [index, query_ptr, num_queries, depth, ...]
+        exec.eidos_sample_felt
+        u32split swap drop
+        dup.4 u32and
+        #=> [index, query_ptr, num_queries, depth, index_mask, ...]
 
-        movdn.3
-        #=> [query_ptr, num_queries, depth, index, ...]
+        movdn.4
+        #=> [query_ptr, num_queries, depth, index_mask, index, ...]
 
         push.0
+        dup.5
         dup.4
-        dup.4
-        dup.6
-        #=> [index, depth, index, 0, query_ptr, num_queries, depth, index, ...]
+        dup.1
+        #=> [index, depth, index, 0, query_ptr, num_queries, depth, index_mask, index, ...]
 
         dup.4 mem_storew_le dropw
-        #=> [query_ptr, num_queries, depth, index, ...]
+        #=> [query_ptr, num_queries, depth, index_mask, index, ...]
 
         add.4
-        movup.3 drop
-        #=> [query_ptr + 4, num_queries, depth, ...]
+        movup.4 drop
+        #=> [query_ptr + 4, num_queries, depth, index_mask, ...]
 
         swap sub.1 swap
-        #=> [query_ptr + 4, num_queries - 1, depth, ...]
+        #=> [query_ptr + 4, num_queries - 1, depth, index_mask, ...]
 
         dup.1 push.0 neq
     end
 
+    drop drop drop drop
+end
+
+#! Check query PoW and generate the fixed VM query index list.
+#!
+#! The VM recursive verifier accepts 27 query repetitions with nonzero query PoW. The PoW sample
+#! and 27 query indices consume exactly seven Eidos output words:
+#!   sample 0           - query PoW check
+#!   samples 1 through 27 - query indices
+#!
+#! Input: [...]
+#! Output: [...]
+pub proc check_query_pow_and_generate_list_indices
+    exec.constants::get_query_pow_bits
+    #=> [pow_bits, ...]
+
+    adv_push
+    exec.eidos_observe_felt
+    exec.eidos_refill_output_word
+    #=> [pow_bits, ...]
+
+    dup
+    pow2
+    u32assert u32overflowing_sub.1 assertz
+    exec.constants::random_coin_output_word_ptr mem_load
+    u32split
+    swap
+    drop
+    u32and
+    assertz.err="query proof-of-work check failed"
+    drop
+    #=> [...]
+
+    exec.constants::get_fri_queries_address
+    exec.constants::get_lde_domain_depth
+    dup pow2 u32assert u32overflowing_sub.1 assertz
+    movdn.2 swap
+    #=> [query_ptr, depth, index_mask, ...]
+
+    exec.constants::random_coin_output_word_ptr add.1 mem_load
+    exec.store_query_index
+    exec.constants::random_coin_output_word_ptr add.2 mem_load
+    exec.store_query_index
+    exec.constants::random_coin_output_word_ptr add.3 mem_load
+    exec.store_query_index
+    #=> [query_ptr + 12, depth, index_mask, ...]
+
+    repeat.6
+        exec.eidos_refill_output_word
+        exec.constants::random_coin_output_word_ptr mem_load
+        exec.store_query_index
+        exec.constants::random_coin_output_word_ptr add.1 mem_load
+        exec.store_query_index
+        exec.constants::random_coin_output_word_ptr add.2 mem_load
+        exec.store_query_index
+        exec.constants::random_coin_output_word_ptr add.3 mem_load
+        exec.store_query_index
+    end
+
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
     drop drop drop
 end
 

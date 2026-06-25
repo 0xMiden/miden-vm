@@ -29,9 +29,9 @@ pub struct FriResult {
     /// query-values.
     pub advice_maps: AdvMap,
 
-    /// A vector of consecutive quadruples of the form (poe, p, e1, e0) where p is index of the
-    /// query at the first layer and (e1, e0) is its corresponding evaluation and poe is g^p with g
-    /// being the initial domain generator.
+    /// A vector of consecutive quadruples of the form (p, poe, e0, e1) where p is index of the
+    /// query at the first layer, poe is g^p with g being the initial domain generator, and
+    /// (e0, e1) is the corresponding evaluation.
     pub positions: Vec<u64>,
 
     /// A vector of tuples representing the folding challenges.

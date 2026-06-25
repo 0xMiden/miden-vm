@@ -157,23 +157,20 @@ pub proc verify
     # => [...]
 
     #============================================
-    #   5) Check FRI Queries PoW nonce
-    #============================================
-
-    exec.random_coin::check_query_pow
-    # => [...]
-
-    #============================================
-    #   6) Compute evaluations of DEEP composition
-    #   polynomial at randomly chosen query positions
+    #   5) Check FRI Queries PoW nonce and sample query indices
     #============================================
 
     # Compute the pointer to the first query using the pointer to
     # the first layer commitment and the total number of queries.
     exec.helper::compute_query_pointer
 
-    exec.random_coin::generate_list_indices
+    exec.random_coin::check_query_pow_and_generate_list_indices
     # => [...]
+
+    #============================================
+    #   6) Compute evaluations of DEEP composition
+    #   polynomial at randomly chosen query positions
+    #============================================
 
     exec.deep_queries::compute_deep_composition_polynomial_queries
     # => [...]

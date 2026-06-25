@@ -1,7 +1,7 @@
 #[cfg(test)]
 use alloc::vec::Vec;
 
-use miden_air::trace::MIN_TRACE_LEN;
+use miden_air::trace::{MIN_TRACE_LEN, blakeg_compression::BLAKEG_COMPRESSION_CYCLE_LEN};
 
 use super::chiplets::Chiplets;
 use crate::{Felt, ONE};
@@ -214,6 +214,12 @@ impl TraceLenSummary {
         self.blakeg_compression_rows
     }
 
+    /// Returns the number of BlakeG compression blocks represented by the BlakeG AIR rows.
+    pub fn blakeg_compression_count(&self) -> usize {
+        debug_assert_eq!(self.blakeg_compression_rows % BLAKEG_COMPRESSION_CYCLE_LEN, 0);
+        self.blakeg_compression_rows / BLAKEG_COMPRESSION_CYCLE_LEN
+    }
+
     /// Returns the fixed byte-pair lookup AIR rows.
     ///
     /// This table has one row per byte pair, so its row count is already its physical AIR height.
@@ -234,6 +240,24 @@ impl TraceLenSummary {
     /// Returns the padded height of the BlakeG-compression AIR.
     pub fn blakeg_compression_height(&self) -> usize {
         padded_height(self.blakeg_compression_rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_len_summary_reports_blakeg_compression_count() {
+        let summary = TraceLenSummary::new(
+            0,
+            ChipletsLengths::default(),
+            3 * BLAKEG_COMPRESSION_CYCLE_LEN,
+            0,
+        );
+
+        assert_eq!(summary.blakeg_compression_rows(), 3 * BLAKEG_COMPRESSION_CYCLE_LEN);
+        assert_eq!(summary.blakeg_compression_count(), 3);
     }
 }
 

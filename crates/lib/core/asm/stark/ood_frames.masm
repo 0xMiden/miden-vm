@@ -1,4 +1,5 @@
 use miden::core::stark::constants
+use miden::core::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
 #!
@@ -15,9 +16,9 @@ use miden::core::stark::constants
 #! 1. n, m and l are the widths of the main segment, auxiliary segment and constraint composition
 #!    traces, respectively.
 #! 2. S_i are the evaluations of columns in the main segment, auxiliary segment and constraint
-#!    composition at the the out-of-domain point z.
+#!    composition at the out-of-domain point z.
 #! 3. T_i are the evaluations of columns in the main segment, auxiliary segment and constraint
-#!    composition at the the out-of-domain point gz.
+#!    composition at the out-of-domain point gz.
 #! 4. alpha is the randomness used in order to build the DEEP polynomial.
 #!
 #! Q^z(alpha) and Q^gz(alpha) is then stored, as a word, at OOD_FIXED_TERM_HORNER_EVALS_PTR
@@ -57,18 +58,19 @@ pub proc load_and_horner_eval_ood_frames
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
     ##    and constraints polynomial evaluations. The three zero words are scratch slots; the
-    ##    concrete row processor overwrites the first two with each OOD block and keeps the
-    ##    third one as padding so the pointer and Horner accumulator stay at fixed positions.
-    padw padw padw
-    # => [0, 0, 0, ood_frame_ptr, alpha_ptr, 0, 0]
+    ##    concrete row processor overwrites the first two words with each OOD block and
+    ##    updates the transcript CV kept in the third word.
+    padw exec.constants::random_coin_cv_ptr mem_loadw_le
+    padw padw
+    # => [0, 0, cv, ood_frame_ptr, alpha_ptr, 0, 0]
 
     ### a) Process the `current` OOD evaluations
     exec.process_row_ood_evaluations
-    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
     ### b) Save -Q^z(alpha)
     swapw.3
-    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, Y, Y]
+    # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, cv, Y]
     movup.3 neg
     movup.3 neg
     push.0.0
@@ -80,19 +82,24 @@ pub proc load_and_horner_eval_ood_frames
     push.0.0
     movdn.3
     movdn.3
-    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, Y, Y]
+    # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, cv, Y]
 
     # --- Compute Q^gz(alpha) -------------------------------------------------
 
     # Load the `next` trace polynomials OOD evaluations.
     swapw.3
-    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, 0, 0]
+    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, 0, 0]
     exec.process_row_ood_evaluations
-    # => [Y, Y, Y, ood_frame_ptr, alpha_ptr, acc0, acc1]
+    # => [Y, Y, cv, ood_frame_ptr, alpha_ptr, acc0, acc1]
 
-    # Remove the row-processing scratch words.
+    # Save the transcript CV and remove the row-processing scratch words.
+    swapw.2
+    exec.constants::random_coin_cv_ptr mem_storew_le
     dropw dropw dropw
     # => [ood_frame_ptr, alpha_ptr, acc0, acc1]
+
+    exec.random_coin::eidos_clear_buffer
+    exec.random_coin::eidos_enter_absorbing
 
     # Negate Q^gz(alpha) and save it
     drop drop

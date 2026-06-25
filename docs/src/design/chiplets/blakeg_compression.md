@@ -370,11 +370,13 @@ slot = (f0, f1, f2)
 denominator = selected_bus_prefix + beta0*f0 + beta1*f1 + beta2*f2
 ```
 
-The row selector determines the bus prefix and signed multiplicity for each
-slot. The same physical slot can represent, for example, an `And8Msg` on a
-fused row, a `RangeMsg` on a footer row, or an input-CV pair on row `0`.
-Keeping the payload width fixed keeps each denominator linear before two
-fractions are batched.
+The row selector determines each slot's bus prefix and signed multiplicity.
+Most narrow lookups read a physical three-cell slot directly; the same slot
+position can be an `And8Msg` on a fused row or a `RangeMsg` on a footer row.
+Row `0` input-CV lookups use the same narrow-column bank, but derive their
+payloads from the row's packed `a` words and byte-reconstructed `b` words.
+The fixed payload width keeps denominators linear before two fractions are
+batched.
 
 For batch column `k`, the prover supplies:
 

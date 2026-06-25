@@ -183,7 +183,7 @@ mod tests {
     }
 
     /// Lookup-structure validation for `ChipletsAir`, the standalone Chiplets-half AIR.
-    /// Symmetric to `core_air_lookup_validates`: 21-col main trace, 3 LogUp accumulator
+    /// Symmetric to `core_air_lookup_validates`: 24-col main trace, 3 LogUp accumulator
     /// columns, 1 committed final, all periodic columns owned here.
     #[test]
     fn chiplets_air_lookup_validates() {

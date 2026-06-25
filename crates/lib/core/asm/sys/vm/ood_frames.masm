@@ -1,12 +1,10 @@
-use miden::core::stark::random_coin
-
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Loads one OOD row from advice, absorbs it into the Eidos transcript, and updates the
 #! Horner accumulator used by the DEEP fixed terms.
 #!
-#! Inputs:  [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0, acc1]
-#! Outputs: [scratch0, scratch1, scratch2, ptr, alpha_ptr, acc0', acc1']
+#! Inputs:  [scratch0, scratch1, cv, ptr, alpha_ptr, acc0, acc1]
+#! Outputs: [scratch0, scratch1, cv', ptr, alpha_ptr, acc0', acc1']
 pub proc process_row_ood_evaluations
     # Per-row OOD layout uses LMCS alignment 8:
     #   preprocessed: ceil(11/8)*8      = 16 EF evals
@@ -17,7 +15,6 @@ pub proc process_row_ood_evaluations
     repeat.86
         adv_pipe
         horner_eval_ext
-        exec.random_coin::eidos_absorb_block
-        padw padw
+        bcompress
     end
 end
