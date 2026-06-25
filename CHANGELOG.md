@@ -1,6 +1,8 @@
 ## 0.28.0 (TBD)
 - [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
 
+- Added a zeroizing read helper for deserializing sensitive material, fixing secret-key read buffers that were not wiped on error paths (ECDSA) or at all (Falcon, Poseidon2 AEAD) ([#1057](https://github.com/0xMiden/crypto/pull/1057)).
+
 ## 0.27.0 (2026-06-19)
 
 - [BREAKING] Upgraded the RustCrypto and dalek stack: `der`, `hkdf`, `sha2`, `sha3`, `k256`, `curve25519-dalek`, `ed25519-dalek`, and `x25519-dalek` ([#1045](https://github.com/0xMiden/crypto/pull/1045)).

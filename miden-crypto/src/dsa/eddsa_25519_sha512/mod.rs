@@ -15,7 +15,7 @@ use crate::{
     ecdh::x25519::{EphemeralPublicKey, SharedSecret},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_packed_u32_elements,
+        bytes_to_packed_u32_elements, read_sensitive_array,
         zeroize::{Zeroize, ZeroizeOnDrop},
     },
 };
@@ -515,9 +515,8 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mut bytes: [u8; SECRET_KEY_BYTES] = source.read_array()?;
+        let bytes = read_sensitive_array::<SECRET_KEY_BYTES, _>(source)?;
         let inner = ed25519_dalek::SigningKey::from_bytes(&bytes);
-        bytes.zeroize();
 
         Ok(Self { inner })
     }

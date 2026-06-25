@@ -20,8 +20,7 @@ use crate::{
     ecdh::k256::{EphemeralPublicKey, SharedSecret},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_packed_u32_elements,
-        zeroize::{Zeroize, ZeroizeOnDrop},
+        bytes_to_packed_u32_elements, read_sensitive_array, zeroize::ZeroizeOnDrop,
     },
 };
 
@@ -455,11 +454,10 @@ impl Serializable for SecretKey {
 
 impl Deserializable for SecretKey {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mut bytes: [u8; SECRET_KEY_BYTES] = source.read_array()?;
+        let bytes = read_sensitive_array::<SECRET_KEY_BYTES, _>(source)?;
 
-        let signing_key = ecdsa::SigningKey::from_slice(&bytes)
+        let signing_key = ecdsa::SigningKey::from_slice(bytes.as_slice())
             .map_err(|_| DeserializationError::InvalidValue("Invalid secret key".to_string()))?;
-        bytes.zeroize();
 
         Ok(Self { inner: signing_key })
     }
