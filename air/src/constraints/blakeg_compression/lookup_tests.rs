@@ -1,13 +1,13 @@
 use alloc::collections::BTreeMap;
 
-use super::air32_layout::*;
-use super::air32_lookup::{
-    AEAD_HIGH_OUTPUT_COLUMN, AEAD_INPUT_COLUMN, AEAD_LOW_OUTPUT_COLUMN, AIR32_LOOKUP_COLUMN_SHAPE,
-    Air32LookupAir, Air32Mode, COMPRESSION_LINK_COLUMN, LookupPlan, NARROW_BATCH_COLUMNS,
-    NarrowLookup, NarrowLookupKind, SingletonLookupKind, lookup_plan,
+use super::layout::*;
+use super::lookup::{
+    AEAD_HIGH_OUTPUT_COLUMN, AEAD_INPUT_COLUMN, AEAD_LOW_OUTPUT_COLUMN, BLAKEG_LOOKUP_COLUMN_SHAPE,
+    BlakeGCompressionLookupAir, BlakeGCompressionMode, COMPRESSION_LINK_COLUMN, LookupPlan,
+    NARROW_BATCH_COLUMNS, NarrowLookup, NarrowLookupKind, SingletonLookupKind, lookup_plan,
 };
-use super::air32_periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_air32_periodic_column_values};
-use super::air32_trace::{Air32Row, TraceMode, generate_trace_block};
+use super::periodic::{P_IS_AB, P_IS_CD, P_IS_FOOTER, get_periodic_column_values};
+use super::trace::{BlakeGRow, TraceMode, generate_trace_block};
 use crate::lookup::{Challenges, build_lookup_fractions};
 use miden_core::{
     Felt,
@@ -21,7 +21,7 @@ fn count_narrow(plan: &[NarrowLookup], kind: NarrowLookupKind, sign: i8) -> usiz
 
 fn signed_narrow_total(kind: NarrowLookupKind) -> i64 {
     (0..BLOCK_PERIOD)
-        .flat_map(|row| lookup_plan(row, Air32Mode::Compression).narrow)
+        .flat_map(|row| lookup_plan(row, BlakeGCompressionMode::Compression).narrow)
         .filter(|lookup| lookup.kind == kind)
         .map(|lookup| lookup.sign as i64)
         .sum()
@@ -65,7 +65,7 @@ fn add_payload(map: &mut BTreeMap<[u64; 3], i64>, payload: [u64; 3], sign: i64) 
     *map.entry(payload).or_default() += sign;
 }
 
-fn packed_b(row: &Air32Row, g: usize) -> u64 {
+fn packed_b(row: &BlakeGRow, g: usize) -> u64 {
     row[g_bd_rot_slot_col(g, 0, 0)]
         + (row[g_bd_rot_slot_col(g, 1, 0)] << 8)
         + (row[g_bd_rot_slot_col(g, 2, 0)] << 16)
@@ -86,7 +86,7 @@ fn lookup_challenges() -> Challenges<QuadFelt> {
     Challenges::new(QuadFelt::from_u32(7), QuadFelt::from_u32(11), 16, 39)
 }
 
-fn expected_column_counts(row: usize, mode: Air32Mode) -> [usize; AUX_COLS] {
+fn expected_column_counts(row: usize, mode: BlakeGCompressionMode) -> [usize; AUX_COLS] {
     let mut counts = [0; AUX_COLS];
     let plan = lookup_plan(row, mode);
 
@@ -101,13 +101,13 @@ fn expected_column_counts(row: usize, mode: Air32Mode) -> [usize; AUX_COLS] {
     counts
 }
 
-fn assert_lookup_fraction_counts(mode: Air32Mode, trace_mode: TraceMode) {
-    let air = Air32LookupAir;
+fn assert_lookup_fraction_counts(mode: BlakeGCompressionMode, trace_mode: TraceMode) {
+    let air = BlakeGCompressionLookupAir;
     let trace = felt_trace_matrix(trace_mode);
-    let periodic = get_air32_periodic_column_values();
+    let periodic = get_periodic_column_values();
     let fractions = build_lookup_fractions(&air, &trace, None, &periodic, &lookup_challenges());
 
-    assert_eq!(fractions.shape(), AIR32_LOOKUP_COLUMN_SHAPE);
+    assert_eq!(fractions.shape(), BLAKEG_LOOKUP_COLUMN_SHAPE);
     assert_eq!(fractions.counts().len(), BLOCK_PERIOD * AUX_COLS);
 
     for row in 0..BLOCK_PERIOD {
@@ -120,13 +120,13 @@ fn assert_lookup_fraction_counts(mode: Air32Mode, trace_mode: TraceMode) {
 #[test]
 fn lookup_plans_match_layout_pressure_helpers() {
     for row in 0..BLOCK_PERIOD {
-        let compression = lookup_plan(row, Air32Mode::Compression);
+        let compression = lookup_plan(row, BlakeGCompressionMode::Compression);
         assert_eq!(compression.narrow.len(), narrow_lookups_at(row), "row {row}");
         assert_eq!(compression.singletons.len(), common_singletons_at(row), "row {row}");
         assert!(compression.narrow_aux_columns() <= NARROW_BATCH_COLUMNS, "row {row}");
         assert!(aux_cols_at(row, false) <= AUX_COLS, "row {row}");
 
-        let aead = lookup_plan(row, Air32Mode::AeadXof);
+        let aead = lookup_plan(row, BlakeGCompressionMode::AeadXof);
         assert_eq!(aead.narrow.len(), narrow_lookups_at(row), "row {row}");
         assert_eq!(
             aead.singletons.len(),
@@ -140,14 +140,14 @@ fn lookup_plans_match_layout_pressure_helpers() {
 
 #[test]
 fn lookup_plans_fit_fixed_aux_columns() {
-    assert_eq!(AIR32_LOOKUP_COLUMN_SHAPE.len(), AUX_COLS);
+    assert_eq!(BLAKEG_LOOKUP_COLUMN_SHAPE.len(), AUX_COLS);
     assert_eq!(NARROW_BATCH_COLUMNS, 20);
     assert_eq!(COMPRESSION_LINK_COLUMN, 20);
     assert_eq!(AEAD_INPUT_COLUMN, 21);
     assert_eq!(AEAD_LOW_OUTPUT_COLUMN, 22);
     assert_eq!(AEAD_HIGH_OUTPUT_COLUMN, 23);
 
-    for mode in [Air32Mode::Compression, Air32Mode::AeadXof] {
+    for mode in [BlakeGCompressionMode::Compression, BlakeGCompressionMode::AeadXof] {
         let narrow_peak = (0..BLOCK_PERIOD)
             .map(|row| lookup_plan(row, mode).narrow_aux_columns())
             .max()
@@ -158,10 +158,10 @@ fn lookup_plans_fit_fixed_aux_columns() {
 
 #[test]
 fn lookup_plans_follow_periodic_row_families() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
 
     for row in 0..BLOCK_PERIOD {
-        let plan = lookup_plan(row, Air32Mode::Compression);
+        let plan = lookup_plan(row, BlakeGCompressionMode::Compression);
         let is_ab = columns[P_IS_AB][row].as_canonical_u64() == 1;
         let is_cd = columns[P_IS_CD][row].as_canonical_u64() == 1;
         let is_footer = columns[P_IS_FOOTER][row].as_canonical_u64() == 1;
@@ -174,19 +174,19 @@ fn lookup_plans_follow_periodic_row_families() {
 
 #[test]
 fn first_ab_row_carries_all_initial_input_pair_removals() {
-    let first = lookup_plan(0, Air32Mode::Compression);
+    let first = lookup_plan(0, BlakeGCompressionMode::Compression);
     assert_eq!(count_narrow(&first.narrow, NarrowLookupKind::InputPair, -1), 4);
     assert_eq!(count_narrow(&first.narrow, NarrowLookupKind::And8, -1), 16);
     assert_eq!(count_narrow(&first.narrow, NarrowLookupKind::Rot12, -1), 16);
     assert_eq!(count_narrow(&first.narrow, NarrowLookupKind::MessageWord, 1), 4);
 
-    let later_ab = lookup_plan(FUSED_G_ROWS_PER_ROUND, Air32Mode::Compression);
+    let later_ab = lookup_plan(FUSED_G_ROWS_PER_ROUND, BlakeGCompressionMode::Compression);
     assert_eq!(count_narrow(&later_ab.narrow, NarrowLookupKind::InputPair, -1), 0);
 }
 
 #[test]
 fn footer_rows_carry_net_hin_and_message_group() {
-    let footer = lookup_plan(FOOTER_START + 2, Air32Mode::Compression);
+    let footer = lookup_plan(FOOTER_START + 2, BlakeGCompressionMode::Compression);
 
     assert_eq!(count_narrow(&footer.narrow, NarrowLookupKind::And8, -1), 17);
     assert_eq!(count_narrow(&footer.narrow, NarrowLookupKind::InputPair, 1), 1);
@@ -261,12 +261,12 @@ fn input_pair_payloads_balance_over_generated_block() {
 
 #[test]
 fn final_footer_singletons_are_mode_specific() {
-    let compression = lookup_plan(FOOTER_START + 3, Air32Mode::Compression);
+    let compression = lookup_plan(FOOTER_START + 3, BlakeGCompressionMode::Compression);
     assert_eq!(compression.singletons.len(), 1);
     assert_eq!(compression.singletons[0].kind, SingletonLookupKind::CompressionLink);
     assert_eq!(compression.singletons[0].sign, -1);
 
-    let aead = lookup_plan(FOOTER_START + 3, Air32Mode::AeadXof);
+    let aead = lookup_plan(FOOTER_START + 3, BlakeGCompressionMode::AeadXof);
     assert_eq!(aead.singletons.len(), 3);
     assert_eq!(aead.singletons[0].kind, SingletonLookupKind::AeadInput);
     assert_eq!(aead.singletons[0].sign, -1);
@@ -287,21 +287,21 @@ fn final_footer_singletons_are_mode_specific() {
 
 #[test]
 fn batch_two_aux_columns_pair_adjacent_narrow_lookups() {
-    let plan = lookup_plan(0, Air32Mode::Compression);
+    let plan = lookup_plan(0, BlakeGCompressionMode::Compression);
     assert_eq!(plan.narrow.len(), 40);
 
     for slot in 0..plan.narrow.len() {
-        assert_eq!(super::air32_lookup::LookupPlan::narrow_aux_column(slot), slot / 2);
+        assert_eq!(super::lookup::LookupPlan::narrow_aux_column(slot), slot / 2);
     }
     assert_eq!(plan.narrow_aux_columns(), 20);
 }
 
 #[test]
 fn lookup_air_emits_expected_compression_fraction_counts() {
-    assert_lookup_fraction_counts(Air32Mode::Compression, TraceMode::Compression);
+    assert_lookup_fraction_counts(BlakeGCompressionMode::Compression, TraceMode::Compression);
 }
 
 #[test]
 fn lookup_air_emits_expected_aead_fraction_counts() {
-    assert_lookup_fraction_counts(Air32Mode::AeadXof, TraceMode::AeadXof { clk: 19 });
+    assert_lookup_fraction_counts(BlakeGCompressionMode::AeadXof, TraceMode::AeadXof { clk: 19 });
 }

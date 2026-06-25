@@ -1,57 +1,57 @@
 //! BlakeG compression AIR.
 //!
-//! The active standalone BlakeG AIR uses the 32-row layout defined in the `air32_*` modules.
-//! The public AIR wrapper in `multi_air.rs` wires these modules into main constraints, periodic
-//! columns, and LogUp lookup columns.
+//! The standalone BlakeG AIR uses a 32-row compression cycle. The public AIR wrapper in
+//! `multi_air.rs` wires this module into main constraints, periodic columns, and LogUp lookup
+//! columns.
 
-pub mod air32_layout;
-
-#[cfg(test)]
-mod air32_layout_tests;
-
-pub mod air32_lookup;
+pub mod layout;
 
 #[cfg(test)]
-mod air32_lookup_tests;
+mod layout_tests;
+
+pub mod lookup;
 
 #[cfg(test)]
-mod air32_constraints;
+mod lookup_tests;
 
 #[cfg(test)]
-mod air32_constraints_tests;
-
-pub mod air32_model;
+mod constraints;
 
 #[cfg(test)]
-mod air32_model_tests;
+mod constraints_tests;
 
-pub mod air32_periodic;
-
-#[cfg(test)]
-mod air32_periodic_tests;
-
-pub mod air32_selectors;
+pub mod model;
 
 #[cfg(test)]
-mod air32_selectors_tests;
+mod model_tests;
 
-pub mod air32_symbolic;
-
-#[cfg(test)]
-mod air32_symbolic_tests;
-
-pub mod air32_schedule;
+pub mod periodic;
 
 #[cfg(test)]
-mod air32_schedule_tests;
+mod periodic_tests;
 
-pub mod air32_trace;
-
-#[cfg(test)]
-mod air32_trace_tests;
+pub mod selectors;
 
 #[cfg(test)]
-pub mod air32_views;
+mod selectors_tests;
+
+pub mod symbolic;
 
 #[cfg(test)]
-mod air32_views_tests;
+mod symbolic_tests;
+
+pub mod schedule;
+
+#[cfg(test)]
+mod schedule_tests;
+
+pub mod trace;
+
+#[cfg(test)]
+mod trace_tests;
+
+#[cfg(test)]
+pub mod views;
+
+#[cfg(test)]
+mod views_tests;

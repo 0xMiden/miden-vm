@@ -1,18 +1,18 @@
-use super::air32_layout::*;
-use super::air32_periodic::*;
-use super::air32_schedule::fused_step_at;
+use super::layout::*;
+use super::periodic::*;
+use super::schedule::fused_step_at;
 
 #[test]
 fn periodic_columns_have_32_row_period() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
 
-    assert_eq!(columns.len(), NUM_AIR32_PERIODIC_COLUMNS);
+    assert_eq!(columns.len(), NUM_PERIODIC_COLUMNS);
     assert!(columns.iter().all(|column| column.len() == BLOCK_PERIOD));
 }
 
 #[test]
 fn fused_row_selectors_match_row_kinds() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
 
     for row in 0..BLOCK_PERIOD {
         let is_ab = columns[P_IS_AB][row];
@@ -57,7 +57,7 @@ fn fused_row_selectors_match_row_kinds() {
 
 #[test]
 fn first_and_last_fused_selectors_are_singletons() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
 
     assert_eq!(
         columns[P_IS_FIRST_FUSED].iter().filter(|&&v| v.as_canonical_u64() == 1).count(),
@@ -73,7 +73,7 @@ fn first_and_last_fused_selectors_are_singletons() {
 
 #[test]
 fn footer_selectors_are_disjoint_and_cover_footer_rows() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
     let footer_cols = [P_IS_F0, P_IS_F1, P_IS_F2, P_IS_F3];
 
     for row in 0..BLOCK_PERIOD {
@@ -86,7 +86,7 @@ fn footer_selectors_are_disjoint_and_cover_footer_rows() {
 
 #[test]
 fn sigma_periodic_columns_match_fused_schedule() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
     let sigma_cols = [P_SIGMA_MSG_0, P_SIGMA_MSG_1, P_SIGMA_MSG_2, P_SIGMA_MSG_3];
 
     for row in 0..FUSED_G_ROWS {

@@ -1,7 +1,7 @@
 //! Lookup columns for the 32-row BlakeG layout.
 
-use super::air32_layout::*;
-use super::air32_selectors::Air32Selectors;
+use super::layout::*;
+use super::selectors::BlakeGSelectors;
 #[cfg(test)]
 use alloc::vec::Vec;
 use core::borrow::Borrow;
@@ -24,7 +24,7 @@ use crate::{
 
 #[cfg(test)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Air32Mode {
+pub enum BlakeGCompressionMode {
     Compression,
     AeadXof,
 }
@@ -92,14 +92,14 @@ impl LookupPlan {
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct Air32Cols<T> {
+pub struct BlakeGCompressionCols<T> {
     pub columns: [T; NUM_COLS],
 }
 
-impl<T> Borrow<Air32Cols<T>> for [T] {
-    fn borrow(&self) -> &Air32Cols<T> {
+impl<T> Borrow<BlakeGCompressionCols<T>> for [T] {
+    fn borrow(&self) -> &BlakeGCompressionCols<T> {
         debug_assert_eq!(self.len(), NUM_COLS);
-        let (prefix, cols, suffix) = unsafe { self.align_to::<Air32Cols<T>>() };
+        let (prefix, cols, suffix) = unsafe { self.align_to::<BlakeGCompressionCols<T>>() };
         debug_assert!(prefix.is_empty());
         debug_assert!(suffix.is_empty());
         debug_assert_eq!(cols.len(), 1);
@@ -107,7 +107,7 @@ impl<T> Borrow<Air32Cols<T>> for [T] {
     }
 }
 
-pub const AIR32_LOOKUP_COLUMN_SHAPE: [usize; AUX_COLS] = [
+pub const BLAKEG_LOOKUP_COLUMN_SHAPE: [usize; AUX_COLS] = [
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, //
     1, 1, 1, 1,
@@ -144,23 +144,23 @@ fn selected_column_deg(aux_col: usize) -> Deg {
 
 #[cfg(test)]
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Air32LookupAir;
+pub struct BlakeGCompressionLookupAir;
 
-pub trait Air32LookupBuilder: LookupBuilder<F = Felt> {}
+pub trait BlakeGCompressionLookupBuilder: LookupBuilder<F = Felt> {}
 
-impl<T> Air32LookupBuilder for T where T: LookupBuilder<F = Felt> {}
+impl<T> BlakeGCompressionLookupBuilder for T where T: LookupBuilder<F = Felt> {}
 
 #[cfg(test)]
-impl<LB> LookupAir<LB> for Air32LookupAir
+impl<LB> LookupAir<LB> for BlakeGCompressionLookupAir
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        AIR32_LOOKUP_COLUMN_SHAPE.len()
+        BLAKEG_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn column_shape(&self) -> &[usize] {
-        &AIR32_LOOKUP_COLUMN_SHAPE
+        &BLAKEG_LOOKUP_COLUMN_SHAPE
     }
 
     fn accumulator_mode(&self) -> LookupAccumulatorMode {
@@ -177,29 +177,29 @@ where
 
     fn eval(&self, builder: &mut LB) {
         let main = builder.main();
-        let local: &Air32Cols<_> = main.current_slice().borrow();
+        let local: &BlakeGCompressionCols<_> = main.current_slice().borrow();
         let periodic_values: Vec<LB::Expr> =
             builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = Air32Selectors::new(&periodic_values, 0);
+        let selectors = BlakeGSelectors::new(&periodic_values, 0);
 
-        emit_air32_lookup_columns(builder, local, &selectors);
+        emit_lookup_columns(builder, local, &selectors);
     }
 }
 
-pub fn emit_air32_lookup_columns<LB>(
+pub fn emit_lookup_columns<LB>(
     builder: &mut LB,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
-    for aux_col in 0..AIR32_LOOKUP_COLUMN_SHAPE.len() {
+    for aux_col in 0..BLAKEG_LOOKUP_COLUMN_SHAPE.len() {
         let column_deg = selected_column_deg(aux_col);
         builder.next_column(
             |col| {
                 col.group(
-                    "blakeg_air32",
-                    |group| emit_air32_lookup_column::<LB, _>(group, local, selectors, aux_col),
+                    "blakeg_compression",
+                    |group| emit_lookup_column::<LB, _>(group, local, selectors, aux_col),
                     column_deg,
                 );
             },
@@ -208,13 +208,13 @@ pub fn emit_air32_lookup_columns<LB>(
     }
 }
 
-fn emit_air32_lookup_column<LB, G>(
+fn emit_lookup_column<LB, G>(
     group: &mut G,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     aux_col: usize,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     match aux_col {
@@ -228,11 +228,11 @@ fn emit_air32_lookup_column<LB, G>(
 
 fn emit_narrow_pair<LB, G>(
     group: &mut G,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     aux_col: usize,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let slot0 = 2 * aux_col;
@@ -255,11 +255,11 @@ fn emit_narrow_pair<LB, G>(
 
 fn emit_footer_singletons<LB, G>(
     group: &mut G,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     aux_col: usize,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let mode = c::<LB>(local, F_MODE_COL);
@@ -301,13 +301,13 @@ fn emit_footer_singletons<LB, G>(
 
 fn emit_aead_output_pair<LB, G>(
     group: &mut G,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     footer: usize,
     mode: LB::Expr,
     lane_offset: usize,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let values = if lane_offset == 0 {
@@ -324,9 +324,9 @@ fn emit_aead_output_pair<LB, G>(
     );
 }
 
-fn narrow_slot_multiplicity<LB>(slot: usize, selectors: &Air32Selectors<LB::Expr>) -> LB::Expr
+fn narrow_slot_multiplicity<LB>(slot: usize, selectors: &BlakeGSelectors<LB::Expr>) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     let fused = is_fused::<LB>(selectors);
     let footer = selectors.is_footer();
@@ -345,12 +345,12 @@ where
 
 fn narrow_slot_encoding<LB, G>(
     group: &G,
-    local: &Air32Cols<LB::Var>,
-    selectors: &Air32Selectors<LB::Expr>,
+    local: &BlakeGCompressionCols<LB::Var>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     slot: usize,
 ) -> G::ExprEF
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let mut encoded = G::ExprEF::ZERO;
@@ -375,9 +375,9 @@ where
     encoded
 }
 
-fn narrow_slot_activity<LB>(slot: usize, selectors: &Air32Selectors<LB::Expr>) -> LB::Expr
+fn narrow_slot_activity<LB>(slot: usize, selectors: &BlakeGSelectors<LB::Expr>) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     match slot {
         0..=29 => is_fused::<LB>(selectors) + selectors.is_footer(),
@@ -390,10 +390,10 @@ where
 fn add_footer_overlay_slot<LB, G>(
     encoded: &mut G::ExprEF,
     group: &G,
-    selectors: &Air32Selectors<LB::Expr>,
+    selectors: &BlakeGSelectors<LB::Expr>,
     slot: usize,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let branch = selectors.is_footer();
@@ -418,9 +418,9 @@ fn add_rot_bus<LB, G>(
     encoded: &mut G::ExprEF,
     group: &G,
     slot: usize,
-    selectors: &Air32Selectors<LB::Expr>,
+    selectors: &BlakeGSelectors<LB::Expr>,
 ) where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
     G: LookupGroup<Expr = LB::Expr, ExprEF = LB::ExprEF>,
 {
     let byte = slot % BYTES_PER_WORD;
@@ -444,9 +444,11 @@ where
     }
 }
 
-fn compression_link_msg<LB>(local: &Air32Cols<LB::Var>) -> HasherCompressionLinkMsg<LB::Expr>
+fn compression_link_msg<LB>(
+    local: &BlakeGCompressionCols<LB::Var>,
+) -> HasherCompressionLinkMsg<LB::Expr>
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     HasherCompressionLinkMsg {
         block: core::array::from_fn(|i| c::<LB>(local, F_R_BASE_COL + i)),
@@ -455,9 +457,9 @@ where
     }
 }
 
-fn aead_input_msg<LB>(local: &Air32Cols<LB::Var>) -> AeadBlakeGInputMsg<LB::Expr>
+fn aead_input_msg<LB>(local: &BlakeGCompressionCols<LB::Var>) -> AeadBlakeGInputMsg<LB::Expr>
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     AeadBlakeGInputMsg {
         clk: c::<LB>(local, F_CLK_COL),
@@ -472,13 +474,13 @@ where
 }
 
 fn aead_output_pair_msg<LB>(
-    local: &Air32Cols<LB::Var>,
+    local: &BlakeGCompressionCols<LB::Var>,
     footer: usize,
     lane_offset: usize,
     values: [LB::Expr; 2],
 ) -> AeadBlakeGOutputPairMsg<LB::Expr>
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     AeadBlakeGOutputPairMsg {
         clk: c::<LB>(local, F_CLK_COL),
@@ -488,9 +490,9 @@ where
     }
 }
 
-fn footer_output_word<LB>(local: &Air32Cols<LB::Var>) -> [LB::Expr; 2]
+fn footer_output_word<LB>(local: &BlakeGCompressionCols<LB::Var>) -> [LB::Expr; 2]
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     [
         footer_xor_word::<LB>(local, F_OUTPUT_EVEN_SLOT_BASE),
@@ -498,9 +500,9 @@ where
     ]
 }
 
-fn footer_high_word<LB>(local: &Air32Cols<LB::Var>) -> [LB::Expr; 2]
+fn footer_high_word<LB>(local: &BlakeGCompressionCols<LB::Var>) -> [LB::Expr; 2]
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     [
         footer_xor_word::<LB>(local, F_HIGH_EVEN_SLOT_BASE),
@@ -508,9 +510,9 @@ where
     ]
 }
 
-fn footer_xor_word<LB>(local: &Air32Cols<LB::Var>, slot_base: usize) -> LB::Expr
+fn footer_xor_word<LB>(local: &BlakeGCompressionCols<LB::Var>, slot_base: usize) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     pack4::<LB>(
         footer_xor_byte::<LB>(local, slot_base),
@@ -520,9 +522,9 @@ where
     )
 }
 
-fn footer_xor_byte<LB>(local: &Air32Cols<LB::Var>, slot: usize) -> LB::Expr
+fn footer_xor_byte<LB>(local: &BlakeGCompressionCols<LB::Var>, slot: usize) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     let base = footer_xor_slot_col(slot, 0);
     let lhs = c::<LB>(local, base);
@@ -531,9 +533,9 @@ where
     lhs + rhs - and.clone() - and
 }
 
-fn first_input_pair_fields<LB>(local: &Air32Cols<LB::Var>, pair: usize) -> [LB::Expr; 3]
+fn first_input_pair_fields<LB>(local: &BlakeGCompressionCols<LB::Var>, pair: usize) -> [LB::Expr; 3]
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     let word = |idx| {
         if idx < 4 {
@@ -551,9 +553,9 @@ where
     [expr::<LB>(pair as u64), word(2 * pair), word(2 * pair + 1)]
 }
 
-fn narrow_slot_fields<LB>(local: &Air32Cols<LB::Var>, slot: usize) -> [LB::Expr; 3]
+fn narrow_slot_fields<LB>(local: &BlakeGCompressionCols<LB::Var>, slot: usize) -> [LB::Expr; 3]
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     match slot {
         0..=35 => fields_at::<LB>(local, byte_slot_base(0, slot)),
@@ -562,24 +564,24 @@ where
     }
 }
 
-fn fields_at<LB>(local: &Air32Cols<LB::Var>, base: usize) -> [LB::Expr; 3]
+fn fields_at<LB>(local: &BlakeGCompressionCols<LB::Var>, base: usize) -> [LB::Expr; 3]
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     [c::<LB>(local, base), c::<LB>(local, base + 1), c::<LB>(local, base + 2)]
 }
 
-fn is_fused<LB>(selectors: &Air32Selectors<LB::Expr>) -> LB::Expr
+fn is_fused<LB>(selectors: &BlakeGSelectors<LB::Expr>) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     selectors.is_ab() + selectors.is_cd()
 }
 
 #[inline]
-fn c<LB>(local: &Air32Cols<LB::Var>, idx: usize) -> LB::Expr
+fn c<LB>(local: &BlakeGCompressionCols<LB::Var>, idx: usize) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     local.columns[idx].into()
 }
@@ -587,20 +589,20 @@ where
 #[inline]
 fn expr<LB>(value: u64) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     LB::Expr::from(Felt::new_unchecked(value))
 }
 
 fn pack4<LB>(b0: LB::Expr, b1: LB::Expr, b2: LB::Expr, b3: LB::Expr) -> LB::Expr
 where
-    LB: Air32LookupBuilder,
+    LB: BlakeGCompressionLookupBuilder,
 {
     b0 + expr::<LB>(256) * b1 + expr::<LB>(1 << 16) * b2 + expr::<LB>(1 << 24) * b3
 }
 
 #[cfg(test)]
-pub fn lookup_plan(row: usize, mode: Air32Mode) -> LookupPlan {
+pub fn lookup_plan(row: usize, mode: BlakeGCompressionMode) -> LookupPlan {
     let mut plan = LookupPlan {
         narrow: Vec::new(),
         singletons: Vec::new(),
@@ -629,14 +631,14 @@ fn add_fused_g_lookups(plan: &mut LookupPlan, rotation_kind: NarrowLookupKind) {
 }
 
 #[cfg(test)]
-fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: Air32Mode) {
+fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: BlakeGCompressionMode) {
     push_narrow(plan, NarrowLookupKind::And8, -1, FOOTER_AND8_LOOKUPS);
     push_narrow(plan, NarrowLookupKind::InputPair, 1, 1);
     push_narrow(plan, NarrowLookupKind::MessageWord, -7, F_MSG_WORD_SLOTS);
     push_narrow(plan, NarrowLookupKind::RangeCheck, -1, F_RANGE_SLOTS);
 
     match mode {
-        Air32Mode::Compression => {
+        BlakeGCompressionMode::Compression => {
             if footer == FOOTER_ROWS - 1 {
                 plan.singletons.push(SingletonLookup {
                     kind: SingletonLookupKind::CompressionLink,
@@ -644,7 +646,7 @@ fn add_footer_lookups(plan: &mut LookupPlan, footer: usize, mode: Air32Mode) {
                 });
             }
         },
-        Air32Mode::AeadXof => {
+        BlakeGCompressionMode::AeadXof => {
             if footer == FOOTER_ROWS - 1 {
                 plan.singletons.push(SingletonLookup {
                     kind: SingletonLookupKind::AeadInput,

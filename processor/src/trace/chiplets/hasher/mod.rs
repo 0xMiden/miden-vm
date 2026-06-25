@@ -8,11 +8,9 @@ use miden_air::trace::{
         BYTE_LOOKUP_KIND_BLAKEG_ROT12, BYTE_PAIR_ROWS, byte_lookup_result,
     },
     blakeg_compression::{
-        BLAKEG_COMPRESSION_CYCLE_LEN, NUM_BLAKEG_COMPRESSION_COLS,
-        air32::{
-            Air32ByteLookup, ByteLookupRecorder, TraceMode as Air32TraceMode,
-            write_felt_trace_block_into_zeroed_with_lookups as write_air32_felt_trace_block,
-        },
+        BLAKEG_COMPRESSION_CYCLE_LEN, BlakeGByteLookup, ByteLookupRecorder,
+        NUM_BLAKEG_COMPRESSION_COLS, TraceMode as BlakeGCompressionTraceMode,
+        write_felt_trace_block_into_zeroed_with_lookups as write_blakeg_felt_trace_block,
     },
     chiplets::hasher::{
         CONTROLLER_TRACE_ALIGNMENT, DIGEST_RANGE, HASH_ABSORB, LINEAR_HASH, MP_VERIFY,
@@ -622,15 +620,17 @@ fn write_blakeg_compression_block(
     let block = unpack_block_from_state_key(input_state);
     let h = unpack_cv_from_state_key(input_state);
     let trace_mode = match output_mode {
-        CompressionOutput::Packed => Air32TraceMode::CompressionWithMultiplicity { multiplicity },
+        CompressionOutput::Packed => {
+            BlakeGCompressionTraceMode::CompressionWithMultiplicity { multiplicity }
+        },
         CompressionOutput::AeadXof { clk } => {
             debug_assert_eq!(multiplicity, 1, "AEAD XOF requests are not deduplicated by clk");
-            Air32TraceMode::AeadXof { clk: clk.as_canonical_u64() }
+            BlakeGCompressionTraceMode::AeadXof { clk: clk.as_canonical_u64() }
         },
     };
 
-    let mut recorder = Air32LookupCounter { counts: and8_counts };
-    write_air32_felt_trace_block(rows, block, h, trace_mode, &mut recorder);
+    let mut recorder = BlakeGLookupCounter { counts: and8_counts };
+    write_blakeg_felt_trace_block(rows, block, h, trace_mode, &mut recorder);
 }
 
 fn unpack_block_from_state_key(state: &StateKey) -> [u32; RATE_LEN * 2] {
@@ -655,16 +655,16 @@ fn unpack_cv_from_state_key(state: &StateKey) -> [u32; (STATE_WIDTH - RATE_LEN) 
     })
 }
 
-struct Air32LookupCounter<'a> {
+struct BlakeGLookupCounter<'a> {
     counts: &'a mut [u64],
 }
 
-impl ByteLookupRecorder for Air32LookupCounter<'_> {
-    fn record(&mut self, lookup: Air32ByteLookup, lhs: u8, rhs: u8, result: u32) {
+impl ByteLookupRecorder for BlakeGLookupCounter<'_> {
+    fn record(&mut self, lookup: BlakeGByteLookup, lhs: u8, rhs: u8, result: u32) {
         let kind = match lookup {
-            Air32ByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
-            Air32ByteLookup::Rot12 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT12[byte],
-            Air32ByteLookup::Rot7 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT7[byte],
+            BlakeGByteLookup::And8 => BYTE_LOOKUP_KIND_AND8,
+            BlakeGByteLookup::Rot12 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT12[byte],
+            BlakeGByteLookup::Rot7 { byte } => BYTE_LOOKUP_KIND_BLAKEG_ROT7[byte],
         };
         count_byte_lookup(self.counts, kind, lhs, rhs, result);
     }

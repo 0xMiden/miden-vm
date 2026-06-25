@@ -3,19 +3,19 @@
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use super::air32_layout::*;
-use super::air32_schedule::{G_IDX_COL, G_IDX_DIAG, LaneMap};
-use super::air32_selectors::Air32Selectors;
+use super::layout::*;
+use super::schedule::{G_IDX_COL, G_IDX_DIAG, LaneMap};
+use super::selectors::BlakeGSelectors;
 
 const IV: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ];
 
-pub fn enforce_air32_fused_rows<AB>(
+pub fn enforce_fused_rows<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -24,11 +24,11 @@ pub fn enforce_air32_fused_rows<AB>(
     enforce_fused_row_transitions(builder, local, next, selectors);
 }
 
-pub fn enforce_air32_footer_rows<AB>(
+pub fn enforce_footer_rows<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -40,7 +40,7 @@ pub fn enforce_air32_footer_rows<AB>(
 fn enforce_fused_row_locals<AB>(
     builder: &mut AB,
     local: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -73,8 +73,11 @@ fn enforce_fused_row_locals<AB>(
     }
 }
 
-fn enforce_initial_iv<AB>(builder: &mut AB, local: &[AB::Var], selectors: &Air32Selectors<AB::Expr>)
-where
+fn enforce_initial_iv<AB>(
+    builder: &mut AB,
+    local: &[AB::Var],
+    selectors: &BlakeGSelectors<AB::Expr>,
+) where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let is_first = selectors.is_first_fused();
@@ -90,7 +93,7 @@ fn enforce_fused_row_transitions<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -159,7 +162,7 @@ fn enforce_last_fused_to_f0<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -182,7 +185,7 @@ fn enforce_last_fused_to_f0<AB>(
 fn enforce_footer_locals<AB>(
     builder: &mut AB,
     local: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -225,7 +228,7 @@ fn enforce_footer_locals<AB>(
 fn enforce_footer_row_locals<AB>(
     builder: &mut AB,
     local: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
     footer: usize,
     words: &FooterWords<AB::Expr>,
 ) where
@@ -319,7 +322,7 @@ fn enforce_footer_transitions<AB>(
     builder: &mut AB,
     local: &[AB::Var],
     next: &[AB::Var],
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -406,7 +409,7 @@ fn output_word<AB>(
     row: &[AB::Var],
     lane_map: &LaneMap,
     word_idx: usize,
-    selectors: &Air32Selectors<AB::Expr>,
+    selectors: &BlakeGSelectors<AB::Expr>,
 ) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
@@ -661,7 +664,7 @@ where
         .fold(AB::Expr::ZERO, |acc, byte| acc + c::<AB>(row, g_bd_rot_slot_col(g, byte, 2)))
 }
 
-fn d_new<AB>(row: &[AB::Var], g: usize, selectors: &Air32Selectors<AB::Expr>) -> AB::Expr
+fn d_new<AB>(row: &[AB::Var], g: usize, selectors: &BlakeGSelectors<AB::Expr>) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {

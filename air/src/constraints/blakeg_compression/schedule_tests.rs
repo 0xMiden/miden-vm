@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use super::air32_layout::{FUSED_G_ROWS, RowKind};
-use super::air32_schedule::*;
+use super::layout::{FUSED_G_ROWS, RowKind};
+use super::schedule::*;
 
 #[test]
 fn fused_rows_follow_column_then_diagonal_schedule() {

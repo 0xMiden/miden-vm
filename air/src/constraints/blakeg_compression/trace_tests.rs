@@ -1,11 +1,11 @@
-use super::air32_layout::*;
-use super::air32_model::{execute_fused_rounds, initial_working_state, low_output, xof_lanes};
-use super::air32_schedule::fused_step_at;
-use super::air32_trace::{
-    Air32FeltRow, TraceMode, generate_felt_trace_block, generate_trace_block, rot_contribution,
+use super::layout::*;
+use super::model::{execute_fused_rounds, initial_working_state, low_output, xof_lanes};
+use super::schedule::fused_step_at;
+use super::trace::{
+    BlakeGFeltRow, TraceMode, generate_felt_trace_block, generate_trace_block, rot_contribution,
     write_felt_trace_block,
 };
-use super::air32_views::{FooterOverlayRow, FusedGRow, LookupSlot};
+use super::views::{FooterOverlayRow, FusedGRow, LookupSlot};
 use miden_core::Felt;
 
 fn test_block() -> [u32; 16] {
@@ -73,7 +73,7 @@ fn felt_trace_writer_fills_one_block_prefix() {
     let sentinel = Felt::new_unchecked(7);
     let mut rows = [sentinel; NUM_COLS * (BLOCK_PERIOD + 1)];
     let (rows, _) = rows.as_chunks_mut::<NUM_COLS>();
-    let rows: &mut [Air32FeltRow] = rows;
+    let rows: &mut [BlakeGFeltRow] = rows;
 
     let final_v = write_felt_trace_block(rows, test_block(), test_h(), TraceMode::Compression);
     let expected = generate_felt_trace_block(test_block(), test_h(), TraceMode::Compression);

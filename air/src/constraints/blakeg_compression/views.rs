@@ -1,6 +1,6 @@
 //! Test-only typed views for the 32-row x 128-column BlakeG layout.
 
-use super::air32_layout::*;
+use super::layout::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct LookupSlot<'a, T> {

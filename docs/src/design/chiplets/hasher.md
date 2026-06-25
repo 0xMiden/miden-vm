@@ -58,15 +58,15 @@ chiplet section begins.
 ## Compute AIR
 
 `BlakeGCompressionAir` contains the BlakeG arithmetic constraints. Its trace is a
-64-row block per compression request, followed by padding blocks as needed. The
+32-row block per compression request, followed by padding blocks as needed. The
 controller/compression link is a LogUp message:
 
-- the controller row emits `[block(8), cv_in(4), cv_out(4)]`,
-- the BlakeG AIR receives the matching message, weighted by the
+- the controller row contributes `[block(8), cv_in(4), cv_out(4)]`,
+- the final BlakeG footer row contributes the matching negative side, weighted by the
   compression multiplicity.
 
-This compression-link relation is the soundness bridge between the compact controller
-rows and the standalone compression trace.
+This compression-link relation is the soundness bridge between the compact
+controller rows and the standalone compression trace.
 
 The lookup-facing BlakeG constraints are described in
 [BlakeG Compression AIR](./blakeg_compression.md).
@@ -103,7 +103,7 @@ The hasher participates in three lookup relations:
   standalone BlakeG compression constraints.
 - `air/src/constraints/lookup/buses/wiring.rs`:
   controller-side compression-link messages.
-- `air/src/constraints/lookup/blakeg_compression_air.rs`:
+- `air/src/constraints/blakeg_compression/lookup.rs`:
   BlakeG AIR lookup columns.
 - `air/src/constraints/lookup/buses/hash_kernel.rs`:
   sibling-table and precompile transcript virtual-table interactions.

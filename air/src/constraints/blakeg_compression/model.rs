@@ -1,9 +1,9 @@
 //! Execution helpers for the 32-row BlakeG schedule.
 
 #[cfg(test)]
-use super::air32_layout::FUSED_G_ROWS;
+use super::layout::FUSED_G_ROWS;
 #[cfg(test)]
-use super::air32_schedule::{G_IDX_COL, G_IDX_DIAG, SIGMA, fused_step_at};
+use super::schedule::{G_IDX_COL, G_IDX_DIAG, SIGMA, fused_step_at};
 
 const IV: [u32; 8] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,

@@ -2,21 +2,21 @@
 
 use core::array;
 
-use super::air32_periodic::{
-    NUM_AIR32_PERIODIC_COLUMNS, P_IS_AB, P_IS_CD, P_IS_DIAG, P_IS_F0, P_IS_F1, P_IS_F2, P_IS_F3,
+use super::periodic::{
+    NUM_PERIODIC_COLUMNS, P_IS_AB, P_IS_CD, P_IS_DIAG, P_IS_F0, P_IS_F1, P_IS_F2, P_IS_F3,
     P_IS_FIRST_FUSED, P_IS_FOOTER, P_IS_LAST_FUSED, P_SIGMA_MSG_0, P_SIGMA_MSG_1, P_SIGMA_MSG_2,
     P_SIGMA_MSG_3,
 };
 
 #[derive(Clone, Debug)]
-pub struct Air32Selectors<T> {
-    columns: [T; NUM_AIR32_PERIODIC_COLUMNS],
+pub struct BlakeGSelectors<T> {
+    columns: [T; NUM_PERIODIC_COLUMNS],
 }
 
-impl<T: Clone> Air32Selectors<T> {
+impl<T: Clone> BlakeGSelectors<T> {
     pub fn new(periodic_values: &[T], offset: usize) -> Self {
         assert!(
-            periodic_values.len() >= offset + NUM_AIR32_PERIODIC_COLUMNS,
+            periodic_values.len() >= offset + NUM_PERIODIC_COLUMNS,
             "not enough periodic values for 32-row BlakeG selectors",
         );
         Self {

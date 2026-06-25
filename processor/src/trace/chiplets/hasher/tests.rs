@@ -1,14 +1,14 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::trace::blakeg_compression::air32::{
-    AIR32_BLOCK_PERIOD, AIR32_NUM_COLS, F_C_BASE_COL, F_COMPRESSION_MULTIPLICITY_COL, F_D_BASE_COL,
-    F_R_BASE_COL, FOOTER_START, TraceMode as Air32TraceMode,
-    generate_felt_trace_block as generate_air32_felt_trace_block,
-    write_felt_trace_block as write_air32_felt_trace_block,
-};
 use miden_air::trace::{
-    blakeg_compression::{BLAKEG_COMPRESSION_CYCLE_LEN, NUM_BLAKEG_COMPRESSION_COLS},
+    blakeg_compression::{
+        BLAKEG_COMPRESSION_CYCLE_LEN, F_C_BASE_COL, F_COMPRESSION_MULTIPLICITY_COL, F_D_BASE_COL,
+        F_R_BASE_COL, FOOTER_START, NUM_BLAKEG_COMPRESSION_COLS,
+        TraceMode as BlakeGCompressionTraceMode,
+        generate_felt_trace_block as generate_blakeg_felt_trace_block,
+        write_felt_trace_block as write_blakeg_felt_trace_block,
+    },
     chiplets::hasher::{CONTROLLER_TRACE_ALIGNMENT, PADDING, TRACE_WIDTH},
 };
 
@@ -235,15 +235,17 @@ fn compression_segment_structure() {
 
 #[cfg(feature = "testing")]
 #[test]
-fn air32_writer_preserves_processor_blakeg_contract() {
+fn compression_writer_preserves_processor_blakeg_contract() {
     let init_state = random_state_with_packed_cv();
     let block = blakeg::unpack_block(core::array::from_fn(|i| init_state[i]));
     let cv = Digest::new(core::array::from_fn(|i| init_state[RATE_LEN + i]));
     let h = blakeg::unpack_word(cv);
 
-    let mut rows = [[ZERO; AIR32_NUM_COLS]; AIR32_BLOCK_PERIOD];
-    let final_v = write_air32_felt_trace_block(&mut rows, block, h, Air32TraceMode::Compression);
-    let expected = generate_air32_felt_trace_block(block, h, Air32TraceMode::Compression);
+    let mut rows = [[ZERO; NUM_BLAKEG_COMPRESSION_COLS]; BLAKEG_COMPRESSION_CYCLE_LEN];
+    let final_v =
+        write_blakeg_felt_trace_block(&mut rows, block, h, BlakeGCompressionTraceMode::Compression);
+    let expected =
+        generate_blakeg_felt_trace_block(block, h, BlakeGCompressionTraceMode::Compression);
 
     assert_eq!(rows, expected.rows);
     assert_eq!(final_v, expected.final_v);

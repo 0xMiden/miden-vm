@@ -1,6 +1,6 @@
 //! Fused BlakeG round schedule for the 32-row AIR.
 
-use super::air32_layout::{FUSED_G_ROWS, FUSED_G_ROWS_PER_ROUND, NUM_G, ROUNDS, RowKind};
+use super::layout::{FUSED_G_ROWS, FUSED_G_ROWS_PER_ROUND, NUM_G, ROUNDS, RowKind};
 
 pub type LaneMap = [[usize; NUM_G]; NUM_G];
 

@@ -4,8 +4,8 @@ use alloc::{vec, vec::Vec};
 
 use miden_core::Felt;
 
-use super::air32_layout::*;
-use super::air32_schedule::fused_step_at;
+use super::layout::*;
+use super::schedule::fused_step_at;
 
 pub const P_IS_AB: usize = 0;
 pub const P_IS_CD: usize = 1;
@@ -22,10 +22,10 @@ pub const P_SIGMA_MSG_1: usize = 11;
 pub const P_SIGMA_MSG_2: usize = 12;
 pub const P_SIGMA_MSG_3: usize = 13;
 
-pub const NUM_AIR32_PERIODIC_COLUMNS: usize = 14;
+pub const NUM_PERIODIC_COLUMNS: usize = 14;
 
-pub fn get_air32_periodic_column_values() -> Vec<Vec<Felt>> {
-    let mut columns = Vec::with_capacity(NUM_AIR32_PERIODIC_COLUMNS);
+pub fn get_periodic_column_values() -> Vec<Vec<Felt>> {
+    let mut columns = Vec::with_capacity(NUM_PERIODIC_COLUMNS);
 
     let mut is_ab = vec![Felt::ZERO; BLOCK_PERIOD];
     let mut is_cd = vec![Felt::ZERO; BLOCK_PERIOD];
@@ -73,6 +73,6 @@ pub fn get_air32_periodic_column_values() -> Vec<Vec<Felt>> {
         columns.push(col);
     }
 
-    debug_assert_eq!(columns.len(), NUM_AIR32_PERIODIC_COLUMNS);
+    debug_assert_eq!(columns.len(), NUM_PERIODIC_COLUMNS);
     columns
 }

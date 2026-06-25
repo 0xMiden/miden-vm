@@ -2,18 +2,18 @@ use alloc::vec::Vec;
 
 use miden_core::Felt;
 
-use super::air32_constraints::{
-    read_input_state, read_output_state, validate_air32_block, validate_air32_block_with_selectors,
-    validate_air32_row_selectors, validate_footer_block, validate_footer_row,
-    validate_footer_transition, validate_fused_g_block, validate_fused_g_row,
-    validate_fused_g_transition, validate_initial_state,
+use super::constraints::{
+    read_input_state, read_output_state, validate_block, validate_block_with_selectors,
+    validate_footer_block, validate_footer_row, validate_footer_transition, validate_fused_g_block,
+    validate_fused_g_row, validate_fused_g_transition, validate_initial_state,
+    validate_row_selectors,
 };
-use super::air32_layout::*;
-use super::air32_model::initial_working_state;
-use super::air32_periodic::{P_IS_AB, get_air32_periodic_column_values};
-use super::air32_schedule::fused_step_at;
-use super::air32_selectors::Air32Selectors;
-use super::air32_trace::{TraceMode, generate_trace_block};
+use super::layout::*;
+use super::model::initial_working_state;
+use super::periodic::{P_IS_AB, get_periodic_column_values};
+use super::schedule::fused_step_at;
+use super::selectors::BlakeGSelectors;
+use super::trace::{TraceMode, generate_trace_block};
 
 fn test_block() -> [u32; 16] {
     [
@@ -57,38 +57,38 @@ fn fused_g_constraints_accept_generated_trace() {
 }
 
 #[test]
-fn air32_constraints_accept_generated_trace() {
+fn constraints_accept_generated_trace() {
     let trace = generate_trace_block(test_block(), test_h(), TraceMode::AeadXof { clk: 19 });
 
-    validate_air32_block(&trace.rows, test_h()).unwrap();
+    validate_block(&trace.rows, test_h()).unwrap();
 }
 
 #[test]
 fn selector_dispatched_constraints_accept_generated_trace() {
     let trace = generate_trace_block(test_block(), test_h(), TraceMode::AeadXof { clk: 19 });
 
-    validate_air32_block_with_selectors(&trace.rows, test_h()).unwrap();
+    validate_block_with_selectors(&trace.rows, test_h()).unwrap();
 }
 
 #[test]
 fn selector_checks_reject_wrong_row_family() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
     let mut values = columns.iter().map(|column| column[0]).collect::<Vec<_>>();
     values[P_IS_AB] = Felt::ZERO;
 
-    let selectors = Air32Selectors::new(&values, 0);
-    let err = validate_air32_row_selectors(0, &selectors).unwrap_err();
+    let selectors = BlakeGSelectors::new(&values, 0);
+    let err = validate_row_selectors(0, &selectors).unwrap_err();
 
     assert_eq!(err.row, 0);
     assert_eq!(err.check, "selector is_ab");
 }
 
 #[test]
-fn air32_constraints_reject_bad_footer_bridge() {
+fn constraints_reject_bad_footer_bridge() {
     let mut trace = generate_trace_block(test_block(), test_h(), TraceMode::Compression);
     trace.rows[FOOTER_START][F_FUTURE_W_BASE_COL] ^= 1;
 
-    let err = validate_air32_block(&trace.rows, test_h()).unwrap_err();
+    let err = validate_block(&trace.rows, test_h()).unwrap_err();
     assert_eq!(err.row, FOOTER_START);
     assert_eq!(err.check, "footer bridge future-W");
 }

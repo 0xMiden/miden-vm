@@ -6,11 +6,11 @@ use miden_crypto::stark::{
     matrix::RowMajorMatrix,
 };
 
-use super::air32_layout::*;
-use super::air32_periodic::get_air32_periodic_column_values;
-use super::air32_selectors::Air32Selectors;
-use super::air32_symbolic::{enforce_air32_footer_rows, enforce_air32_fused_rows};
-use super::air32_trace::{TraceMode, generate_felt_trace_block};
+use super::layout::*;
+use super::periodic::get_periodic_column_values;
+use super::selectors::BlakeGSelectors;
+use super::symbolic::{enforce_footer_rows, enforce_fused_rows};
+use super::trace::{TraceMode, generate_felt_trace_block};
 use crate::Felt;
 
 struct ConstraintEvalBuilder {
@@ -153,23 +153,20 @@ fn test_h() -> [u32; 8] {
 }
 
 fn periodic_row(row_idx: usize) -> Vec<Felt> {
-    get_air32_periodic_column_values()
-        .iter()
-        .map(|column| column[row_idx])
-        .collect()
+    get_periodic_column_values().iter().map(|column| column[row_idx]).collect()
 }
 
 fn eval_fused_row(local: &[Felt; NUM_COLS], next: &[Felt; NUM_COLS], row_idx: usize) -> Vec<Felt> {
     let mut builder = ConstraintEvalBuilder::new(local, next, periodic_row(row_idx));
-    let selectors = Air32Selectors::<Felt>::new(builder.periodic_values(), 0);
-    enforce_air32_fused_rows(&mut builder, local, next, &selectors);
+    let selectors = BlakeGSelectors::<Felt>::new(builder.periodic_values(), 0);
+    enforce_fused_rows(&mut builder, local, next, &selectors);
     builder.evaluations
 }
 
 fn eval_footer_row(local: &[Felt; NUM_COLS], next: &[Felt; NUM_COLS], row_idx: usize) -> Vec<Felt> {
     let mut builder = ConstraintEvalBuilder::new(local, next, periodic_row(row_idx));
-    let selectors = Air32Selectors::<Felt>::new(builder.periodic_values(), 0);
-    enforce_air32_footer_rows(&mut builder, local, next, &selectors);
+    let selectors = BlakeGSelectors::<Felt>::new(builder.periodic_values(), 0);
+    enforce_footer_rows(&mut builder, local, next, &selectors);
     builder.evaluations
 }
 

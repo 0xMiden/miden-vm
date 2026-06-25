@@ -3,7 +3,7 @@ use miden_core::{
     chiplets::blakeg::{self, RATE_WIDTH, STATE_WIDTH},
 };
 
-use super::air32_model::{execute_fused_rounds, execute_unfused_rounds, low_output, xof_lanes};
+use super::model::{execute_fused_rounds, execute_unfused_rounds, low_output, xof_lanes};
 
 fn test_block() -> [Felt; RATE_WIDTH] {
     [

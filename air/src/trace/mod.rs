@@ -74,24 +74,17 @@ pub const CHIPLETS_CLK_COL: usize = CHIPLETS_MODE_COL + 1;
 pub const CHIPLETS_WIDTH: usize = CHIPLETS_CLK_COL + 1;
 
 pub mod blakeg_compression {
-    pub use crate::constraints::blakeg_compression::air32_layout::{
-        BLOCK_PERIOD as BLAKEG_COMPRESSION_CYCLE_LEN, NUM_COLS as NUM_BLAKEG_COMPRESSION_COLS,
+    pub use crate::constraints::blakeg_compression::layout::{
+        BLOCK_PERIOD as BLAKEG_COMPRESSION_CYCLE_LEN, BYTES_PER_WORD, F_C_BASE_COL,
+        F_COMPRESSION_MULTIPLICITY_COL, F_D_BASE_COL, F_MODE_COL, F_R_BASE_COL,
+        F_TOP_BIT_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS,
+        NUM_COLS as NUM_BLAKEG_COMPRESSION_COLS, NUM_G, RowKind, footer_xor_slot_col,
+        g_ac_byte_slot_col, g_bd_rot_slot_col, row_kind,
     };
-
-    pub mod air32 {
-        pub use crate::constraints::blakeg_compression::air32_layout::{
-            BLOCK_PERIOD as AIR32_BLOCK_PERIOD, BYTES_PER_WORD, F_C_BASE_COL,
-            F_COMPRESSION_MULTIPLICITY_COL, F_D_BASE_COL, F_MODE_COL, F_R_BASE_COL,
-            F_TOP_BIT_SLOT_BASE_COL, FOOTER_ROWS, FOOTER_START, FUSED_G_ROWS,
-            NUM_COLS as AIR32_NUM_COLS, NUM_G, RowKind, footer_xor_slot_col, g_ac_byte_slot_col,
-            g_bd_rot_slot_col, row_kind,
-        };
-        pub use crate::constraints::blakeg_compression::air32_trace::{
-            Air32ByteLookup, Air32FeltRow, ByteLookupRecorder, TraceMode,
-            generate_felt_trace_block, write_felt_trace_block,
-            write_felt_trace_block_into_zeroed_with_lookups,
-        };
-    }
+    pub use crate::constraints::blakeg_compression::trace::{
+        BlakeGByteLookup, BlakeGFeltRow, ByteLookupRecorder, TraceMode, generate_felt_trace_block,
+        write_felt_trace_block, write_felt_trace_block_into_zeroed_with_lookups,
+    };
 }
 
 pub mod and8_lookup {

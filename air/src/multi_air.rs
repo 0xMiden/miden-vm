@@ -25,13 +25,14 @@ use crate::{
     constraints::{
         self,
         blakeg_compression::{
-            air32_layout::NUM_COLS as AIR32_BLAKEG_COMPRESSION_COLS,
-            air32_lookup::{
-                AIR32_LOOKUP_COLUMN_SHAPE, Air32Cols, Air32LookupBuilder, emit_air32_lookup_columns,
+            layout::NUM_COLS as BLAKEG_COMPRESSION_COLS,
+            lookup::{
+                BLAKEG_LOOKUP_COLUMN_SHAPE, BlakeGCompressionCols, BlakeGCompressionLookupBuilder,
+                emit_lookup_columns,
             },
-            air32_periodic::get_air32_periodic_column_values,
-            air32_selectors::Air32Selectors,
-            air32_symbolic::{enforce_air32_footer_rows, enforce_air32_fused_rows},
+            periodic::get_periodic_column_values,
+            selectors::BlakeGSelectors,
+            symbolic::{enforce_footer_rows, enforce_fused_rows},
         },
     },
     logup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
@@ -238,15 +239,15 @@ pub struct BlakeGCompressionAir;
 
 impl BlakeGCompressionAir {
     fn width(self) -> usize {
-        AIR32_BLAKEG_COMPRESSION_COLS
+        BLAKEG_COMPRESSION_COLS
     }
 
     pub(crate) fn periodic_columns(self) -> Vec<Vec<Felt>> {
-        get_air32_periodic_column_values()
+        get_periodic_column_values()
     }
 
     fn aux_width(self) -> usize {
-        AIR32_LOOKUP_COLUMN_SHAPE.len()
+        BLAKEG_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn boundary_correction<EF: ExtensionField<Felt>>(
@@ -271,21 +272,21 @@ impl BlakeGCompressionAir {
         let next = main.next_slice();
         let periodic_values: Vec<AB::Expr> =
             builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = Air32Selectors::new(&periodic_values, 0);
+        let selectors = BlakeGSelectors::new(&periodic_values, 0);
 
-        enforce_air32_fused_rows(builder, local, next, &selectors);
-        enforce_air32_footer_rows(builder, local, next, &selectors);
+        enforce_fused_rows(builder, local, next, &selectors);
+        enforce_footer_rows(builder, local, next, &selectors);
 
         let mut lb = ConstraintLookupBuilder::new(builder, &MidenAir::BLAKEG_COMPRESSION);
         self.lookup_eval(&mut lb);
     }
 
     fn lookup_num_columns(self) -> usize {
-        AIR32_LOOKUP_COLUMN_SHAPE.len()
+        BLAKEG_LOOKUP_COLUMN_SHAPE.len()
     }
 
     fn lookup_column_shape(self) -> &'static [usize] {
-        &AIR32_LOOKUP_COLUMN_SHAPE
+        &BLAKEG_LOOKUP_COLUMN_SHAPE
     }
 
     fn lookup_max_message_width(self) -> usize {
@@ -296,14 +297,14 @@ impl BlakeGCompressionAir {
         BusId::COUNT
     }
 
-    fn lookup_eval<LB: Air32LookupBuilder>(self, builder: &mut LB) {
+    fn lookup_eval<LB: BlakeGCompressionLookupBuilder>(self, builder: &mut LB) {
         let main = builder.main();
-        let local: &Air32Cols<_> = main.current_slice().borrow();
+        let local: &BlakeGCompressionCols<_> = main.current_slice().borrow();
         let periodic_values: Vec<LB::Expr> =
             builder.periodic_values().iter().map(|value| (*value).into()).collect();
-        let selectors = Air32Selectors::new(&periodic_values, 0);
+        let selectors = BlakeGSelectors::new(&periodic_values, 0);
 
-        emit_air32_lookup_columns(builder, local, &selectors);
+        emit_lookup_columns(builder, local, &selectors);
     }
 
     fn lookup_eval_boundary<B: BoundaryBuilder>(self, _boundary: &mut B) {}
@@ -722,7 +723,10 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for MidenAir {
 
 impl<LB> LookupAir<LB> for MidenAir
 where
-    LB: MainLookupBuilder + ChipletLookupBuilder + Air32LookupBuilder + And8LookupBuilder,
+    LB: MainLookupBuilder
+        + ChipletLookupBuilder
+        + BlakeGCompressionLookupBuilder
+        + And8LookupBuilder,
 {
     fn num_columns(&self) -> usize {
         match self {

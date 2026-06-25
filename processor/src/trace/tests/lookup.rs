@@ -32,8 +32,8 @@ use miden_air::{
         CHIPLETS_MODE_COL, CHIPLETS_STREAM_MODE_COL,
         and8_lookup::{AND8_TABLE_ROWS, BYTE_LOOKUP_KIND_COUNT, NUM_AND8_LOOKUP_COLS},
         blakeg_compression::{
-            BLAKEG_COMPRESSION_CYCLE_LEN, NUM_BLAKEG_COMPRESSION_COLS,
-            air32::{F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL},
+            BLAKEG_COMPRESSION_CYCLE_LEN, F_COMPRESSION_MULTIPLICITY_COL, F_MODE_COL,
+            NUM_BLAKEG_COMPRESSION_COLS,
         },
     },
 };
@@ -241,7 +241,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     );
 
     assert_eq!(blakeg_fractions.num_rows(), blakeg_matrix.height());
-    assert_blakeg_air32_column_shape("row-shape test", &blakeg_fractions);
+    assert_blakeg_compression_column_shape("row-shape test", &blakeg_fractions);
 
     for (row, column_counts) in
         blakeg_fractions.counts().chunks(blakeg_fractions.num_columns()).enumerate()
@@ -252,7 +252,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
         let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
         let compression_multiplicity =
             blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
-        let expected = expected_blakeg_air32_fraction_entry_range_at_cycle_row(
+        let expected = expected_blakeg_compression_fraction_entry_range_at_cycle_row(
             cycle_row,
             is_aead,
             compression_multiplicity,
@@ -290,7 +290,7 @@ fn blakeg_lookup_row_shape_matches_expected_interactions() {
     );
 }
 
-fn expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
+fn expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         0 => 40,
         1..=27 => 36,
@@ -299,7 +299,7 @@ fn expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row: usize) -> u
     }
 }
 
-fn expected_blakeg_air32_compression_singletons_at_cycle_row(cycle_row: usize) -> usize {
+fn expected_blakeg_compression_singletons_at_cycle_row(cycle_row: usize) -> usize {
     match cycle_row {
         31 => 1,
         0..=30 => 0,
@@ -307,27 +307,27 @@ fn expected_blakeg_air32_compression_singletons_at_cycle_row(cycle_row: usize) -
     }
 }
 
-fn expected_blakeg_air32_fraction_entry_range_at_cycle_row(
+fn expected_blakeg_compression_fraction_entry_range_at_cycle_row(
     cycle_row: usize,
     is_aead: bool,
     compression_multiplicity: Felt,
 ) -> core::ops::RangeInclusive<usize> {
     match cycle_row {
         28..=31 if is_aead => {
-            let expected = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row)
+            let expected = expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row)
                 + if cycle_row == 31 { 3 } else { 2 };
             expected..=expected
         },
         31 if compression_multiplicity != Felt::ZERO => 31..=31,
         _ => {
-            let expected = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row);
+            let expected = expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row);
             expected..=expected
         },
     }
 }
 
 #[test]
-fn blakeg_air32_lookup_ledger_fits_narrow_slot_cap() {
+fn blakeg_lookup_ledger_fits_narrow_slot_cap() {
     const SLOTS_PER_BATCH_COLUMN: usize = 2;
     const COMPRESSION_DENOMINATORS_PER_BLOCK: usize = 1133;
 
@@ -348,20 +348,20 @@ fn blakeg_air32_lookup_ledger_fits_narrow_slot_cap() {
         &challenges,
     );
     let (narrow_batch_columns, _) =
-        assert_blakeg_air32_column_shape("lookup ledger", &blakeg_fractions);
+        assert_blakeg_compression_column_shape("lookup ledger", &blakeg_fractions);
     let narrow_slot_cap = narrow_batch_columns * SLOTS_PER_BATCH_COLUMN;
     let row_lookup_cap = narrow_slot_cap + BLAKEG_SINGLETON_LOOKUP_COLUMNS;
 
     let mut total = 0;
     for cycle_row in 0..BLAKEG_COMPRESSION_CYCLE_LEN {
-        let narrow_pressure = expected_blakeg_air32_narrow_interactions_at_cycle_row(cycle_row);
+        let narrow_pressure =
+            expected_blakeg_compression_narrow_interactions_at_cycle_row(cycle_row);
         assert!(
             narrow_pressure <= narrow_slot_cap,
             "cycle row {cycle_row} has narrow lookup pressure {narrow_pressure}, above cap \
              {narrow_slot_cap}",
         );
-        total +=
-            narrow_pressure + expected_blakeg_air32_compression_singletons_at_cycle_row(cycle_row);
+        total += narrow_pressure + expected_blakeg_compression_singletons_at_cycle_row(cycle_row);
     }
 
     assert_eq!(total, COMPRESSION_DENOMINATORS_PER_BLOCK);
@@ -449,7 +449,7 @@ fn lookup_balance_rejects_tampered_merkle_start_flag() {
     );
 }
 
-fn assert_blakeg_air32_column_shape(
+fn assert_blakeg_compression_column_shape(
     label: &str,
     fractions: &LookupFractions<Felt, QuadFelt>,
 ) -> (usize, usize) {
@@ -478,7 +478,7 @@ fn assert_blakeg_air32_column_shape(
     (BLAKEG_NARROW_LOOKUP_COLUMNS, BLAKEG_SINGLETON_LOOKUP_COLUMNS)
 }
 
-fn assert_blakeg_air32_oracle_coverage(
+fn assert_blakeg_compression_oracle_coverage(
     label: &str,
     blakeg_matrix: &RowMajorMatrix<Felt>,
     fractions: &LookupFractions<Felt, QuadFelt>,
@@ -490,7 +490,7 @@ fn assert_blakeg_air32_oracle_coverage(
     );
 
     let (narrow_batch_columns, singleton_columns) =
-        assert_blakeg_air32_column_shape(label, fractions);
+        assert_blakeg_compression_column_shape(label, fractions);
 
     let mut seen_cycle_rows = [false; BLAKEG_COMPRESSION_CYCLE_LEN];
     let mut saw_narrow_only_row = false;
@@ -526,7 +526,7 @@ fn assert_blakeg_air32_oracle_coverage(
         let is_aead = blakeg_matrix.values[row_start + F_MODE_COL] == Felt::ONE;
         let compression_multiplicity =
             blakeg_matrix.values[row_start + F_COMPRESSION_MULTIPLICITY_COL];
-        let expected = expected_blakeg_air32_fraction_entry_range_at_cycle_row(
+        let expected = expected_blakeg_compression_fraction_entry_range_at_cycle_row(
             cycle_row,
             is_aead,
             compression_multiplicity,
@@ -804,7 +804,7 @@ fn assert_lookup_fractions_match_constraint_path_oracle(label: &str, trace: &Exe
         !blakeg_fractions.fractions().is_empty(),
         "no BlakeG-compression fractions collected - trace is degenerate or emitters are broken",
     );
-    assert_blakeg_air32_oracle_coverage(label, &blakeg_matrix, &blakeg_fractions);
+    assert_blakeg_compression_oracle_coverage(label, &blakeg_matrix, &blakeg_fractions);
     let blakeg_aux = accumulate(&blakeg_fractions);
     let blakeg_folds = collect_column_oracle_folds(
         &MidenAir::BLAKEG_COMPRESSION,

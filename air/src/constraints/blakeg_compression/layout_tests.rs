@@ -1,4 +1,4 @@
-use super::air32_layout::*;
+use super::layout::*;
 
 fn mark_range(used: &mut [bool; NUM_COLS], range: core::ops::Range<usize>) {
     assert!(range.end <= NUM_COLS, "range {range:?} is out of bounds");
@@ -94,7 +94,7 @@ fn lookup_pressure_fits_degree_three_aux_shape() {
 }
 
 #[test]
-fn lookup_contribution_counts_match_research_model() {
+fn lookup_contribution_counts_match_layout_model() {
     let compression: usize = (0..BLOCK_PERIOD)
         .map(|row| narrow_lookups_at(row) + common_singletons_at(row))
         .sum();

@@ -1,5 +1,5 @@
-use super::air32_layout::*;
-use super::air32_views::{FooterOverlayRow, FusedGRow, LookupSlot};
+use super::layout::*;
+use super::views::{FooterOverlayRow, FusedGRow, LookupSlot};
 
 fn row() -> [usize; NUM_COLS] {
     core::array::from_fn(|idx| idx)

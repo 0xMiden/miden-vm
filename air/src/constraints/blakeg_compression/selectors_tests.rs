@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 
 use miden_core::Felt;
 
-use super::air32_layout::*;
-use super::air32_periodic::*;
-use super::air32_selectors::Air32Selectors;
+use super::layout::*;
+use super::periodic::*;
+use super::selectors::BlakeGSelectors;
 
 fn row_values(columns: &[Vec<Felt>], row: usize) -> Vec<Felt> {
     columns.iter().map(|column| column[row]).collect()
@@ -12,12 +12,12 @@ fn row_values(columns: &[Vec<Felt>], row: usize) -> Vec<Felt> {
 
 #[test]
 fn selectors_read_periodic_row_values() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
     let footer_cols = [P_IS_F0, P_IS_F1, P_IS_F2, P_IS_F3];
 
     for row in 0..BLOCK_PERIOD {
         let values = row_values(&columns, row);
-        let selectors = Air32Selectors::new(&values, 0);
+        let selectors = BlakeGSelectors::new(&values, 0);
 
         assert_eq!(selectors.is_ab(), values[P_IS_AB]);
         assert_eq!(selectors.is_cd(), values[P_IS_CD]);
@@ -37,11 +37,11 @@ fn selectors_read_periodic_row_values() {
 
 #[test]
 fn selectors_support_nonzero_periodic_offset() {
-    let columns = get_air32_periodic_column_values();
+    let columns = get_periodic_column_values();
     let mut values = vec![Felt::ZERO, Felt::ZERO];
     values.extend(row_values(&columns, 0));
 
-    let selectors = Air32Selectors::new(&values, 2);
+    let selectors = BlakeGSelectors::new(&values, 2);
 
     assert_eq!(selectors.is_ab(), Felt::ONE);
     assert_eq!(selectors.is_cd(), Felt::ZERO);

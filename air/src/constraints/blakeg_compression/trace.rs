@@ -1,12 +1,12 @@
 //! Trace writer for the 32-row BlakeG layout.
 
-use super::air32_layout::*;
-use super::air32_model::{initial_working_state, low_output};
-use super::air32_schedule::fused_step_at;
+use super::layout::*;
+use super::model::{initial_working_state, low_output};
+use super::schedule::fused_step_at;
 use miden_core::{Felt, field::batch_inversion_allow_zeros};
 
-pub type Air32Row = [u64; NUM_COLS];
-pub type Air32FeltRow = [Felt; NUM_COLS];
+pub type BlakeGRow = [u64; NUM_COLS];
+pub type BlakeGFeltRow = [Felt; NUM_COLS];
 
 const CANONICALITY_HIGH_WORD_MAX: u64 = u32::MAX as u64;
 
@@ -28,45 +28,45 @@ impl TraceMode {
 }
 
 #[cfg(test)]
-pub struct Air32TraceBlock {
-    pub rows: [Air32Row; BLOCK_PERIOD],
+pub struct BlakeGTraceBlock {
+    pub rows: [BlakeGRow; BLOCK_PERIOD],
     pub final_v: [u32; 16],
 }
 
-pub struct Air32FeltTraceBlock {
-    pub rows: [Air32FeltRow; BLOCK_PERIOD],
+pub struct BlakeGFeltTraceBlock {
+    pub rows: [BlakeGFeltRow; BLOCK_PERIOD],
     pub final_v: [u32; 16],
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Air32ByteLookup {
+pub enum BlakeGByteLookup {
     And8,
     Rot12 { byte: usize },
     Rot7 { byte: usize },
 }
 
 pub trait ByteLookupRecorder {
-    fn record(&mut self, lookup: Air32ByteLookup, lhs: u8, rhs: u8, result: u32);
+    fn record(&mut self, lookup: BlakeGByteLookup, lhs: u8, rhs: u8, result: u32);
 }
 
 struct NoopByteLookupRecorder;
 
 impl ByteLookupRecorder for NoopByteLookupRecorder {
-    fn record(&mut self, _lookup: Air32ByteLookup, _lhs: u8, _rhs: u8, _result: u32) {}
+    fn record(&mut self, _lookup: BlakeGByteLookup, _lhs: u8, _rhs: u8, _result: u32) {}
 }
 
 trait TraceRow {
     fn set_u64(&mut self, col: usize, value: u64);
 }
 
-impl TraceRow for Air32Row {
+impl TraceRow for BlakeGRow {
     #[inline]
     fn set_u64(&mut self, col: usize, value: u64) {
         self[col] = value;
     }
 }
 
-impl TraceRow for Air32FeltRow {
+impl TraceRow for BlakeGFeltRow {
     #[inline]
     fn set_u64(&mut self, col: usize, value: u64) {
         self[col] = Felt::new_unchecked(value);
@@ -74,28 +74,28 @@ impl TraceRow for Air32FeltRow {
 }
 
 #[cfg(test)]
-pub fn generate_trace_block(block: [u32; 16], h: [u32; 8], mode: TraceMode) -> Air32TraceBlock {
+pub fn generate_trace_block(block: [u32; 16], h: [u32; 8], mode: TraceMode) -> BlakeGTraceBlock {
     let mut rows = [[0u64; NUM_COLS]; BLOCK_PERIOD];
     let mut recorder = NoopByteLookupRecorder;
     let final_v = write_trace_rows(&mut rows, block, h, mode, &mut recorder);
 
-    Air32TraceBlock { rows, final_v }
+    BlakeGTraceBlock { rows, final_v }
 }
 
 pub fn generate_felt_trace_block(
     block: [u32; 16],
     h: [u32; 8],
     mode: TraceMode,
-) -> Air32FeltTraceBlock {
+) -> BlakeGFeltTraceBlock {
     let mut rows = [[Felt::ZERO; NUM_COLS]; BLOCK_PERIOD];
     let mut recorder = NoopByteLookupRecorder;
     let final_v = write_trace_rows(&mut rows, block, h, mode, &mut recorder);
 
-    Air32FeltTraceBlock { rows, final_v }
+    BlakeGFeltTraceBlock { rows, final_v }
 }
 
 pub fn write_felt_trace_block(
-    rows: &mut [Air32FeltRow],
+    rows: &mut [BlakeGFeltRow],
     block: [u32; 16],
     h: [u32; 8],
     mode: TraceMode,
@@ -109,7 +109,7 @@ pub fn write_felt_trace_block(
 }
 
 pub fn write_felt_trace_block_into_zeroed(
-    rows: &mut [Air32FeltRow],
+    rows: &mut [BlakeGFeltRow],
     block: [u32; 16],
     h: [u32; 8],
     mode: TraceMode,
@@ -119,7 +119,7 @@ pub fn write_felt_trace_block_into_zeroed(
 }
 
 pub fn write_felt_trace_block_into_zeroed_with_lookups<R>(
-    rows: &mut [Air32FeltRow],
+    rows: &mut [BlakeGFeltRow],
     block: [u32; 16],
     h: [u32; 8],
     mode: TraceMode,
@@ -278,7 +278,12 @@ fn write_footer_xor_slots<T, R>(
                 base,
                 [lhs_bytes[byte] as u64, rhs_bytes[byte] as u64, result as u64],
             );
-            recorder.record(Air32ByteLookup::And8, lhs_bytes[byte], rhs_bytes[byte], result as u32);
+            recorder.record(
+                BlakeGByteLookup::And8,
+                lhs_bytes[byte],
+                rhs_bytes[byte],
+                result as u32,
+            );
         }
     }
 }
@@ -295,7 +300,7 @@ where
         F_TOP_BIT_SLOT_BASE_COL,
         [top_byte as u64, F_TOP_BIT_MASK as u64, masked as u64],
     );
-    recorder.record(Air32ByteLookup::And8, top_byte, F_TOP_BIT_MASK, masked as u32);
+    recorder.record(BlakeGByteLookup::And8, top_byte, F_TOP_BIT_MASK, masked as u32);
 }
 
 fn write_footer_message_group<T: TraceRow>(row: &mut T, footer: usize, block: [u32; 16]) {
@@ -364,7 +369,7 @@ where
             g_ac_byte_slot_col(g, byte, 0),
             [d_bytes[byte] as u64, a_new_bytes[byte] as u64, result as u64],
         );
-        recorder.record(Air32ByteLookup::And8, d_bytes[byte], a_new_bytes[byte], result as u32);
+        recorder.record(BlakeGByteLookup::And8, d_bytes[byte], a_new_bytes[byte], result as u32);
     }
 }
 
@@ -389,8 +394,8 @@ fn write_second_half_slots<T, R>(
             [b_bytes[byte] as u64, c_new_bytes[byte] as u64, result as u64],
         );
         let lookup = match rotation {
-            12 => Air32ByteLookup::Rot12 { byte },
-            7 => Air32ByteLookup::Rot7 { byte },
+            12 => BlakeGByteLookup::Rot12 { byte },
+            7 => BlakeGByteLookup::Rot7 { byte },
             _ => panic!("unsupported BlakeG byte-rotation lookup"),
         };
         recorder.record(lookup, b_bytes[byte], c_new_bytes[byte], result);

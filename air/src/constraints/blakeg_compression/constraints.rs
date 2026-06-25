@@ -3,12 +3,12 @@
 //! These checks mirror the symbolic AIR constraints: row-local add/carry equations,
 //! lookup-backed byte XOR/rotation payloads, and row-to-row state continuity.
 
-use super::air32_layout::*;
-use super::air32_model::initial_working_state;
-use super::air32_periodic::{NUM_AIR32_PERIODIC_COLUMNS, get_air32_periodic_column_values};
-use super::air32_schedule::fused_step_at;
-use super::air32_selectors::Air32Selectors;
-use super::air32_trace::{Air32Row, rot_contribution};
+use super::layout::*;
+use super::model::initial_working_state;
+use super::periodic::{NUM_PERIODIC_COLUMNS, get_periodic_column_values};
+use super::schedule::fused_step_at;
+use super::selectors::BlakeGSelectors;
+use super::trace::{BlakeGRow, rot_contribution};
 use core::array;
 use miden_core::{Felt, field::PrimeField64};
 
@@ -35,7 +35,7 @@ struct FooterWords {
     out_odd: u32,
 }
 
-pub fn validate_air32_block(rows: &[Air32Row; BLOCK_PERIOD], h: [u32; 8]) -> ConstraintResult {
+pub fn validate_block(rows: &[BlakeGRow; BLOCK_PERIOD], h: [u32; 8]) -> ConstraintResult {
     validate_fused_g_block(rows, h)?;
 
     let final_state = read_output_state(&rows[FUSED_G_ROWS - 1], FUSED_G_ROWS - 1)?;
@@ -43,17 +43,17 @@ pub fn validate_air32_block(rows: &[Air32Row; BLOCK_PERIOD], h: [u32; 8]) -> Con
     validate_footer_block(rows)
 }
 
-pub fn validate_air32_block_with_selectors(
-    rows: &[Air32Row; BLOCK_PERIOD],
+pub fn validate_block_with_selectors(
+    rows: &[BlakeGRow; BLOCK_PERIOD],
     h: [u32; 8],
 ) -> ConstraintResult {
-    let periodic_columns = get_air32_periodic_column_values();
+    let periodic_columns = get_periodic_column_values();
 
     for row_idx in 0..BLOCK_PERIOD {
-        let periodic_values: [Felt; NUM_AIR32_PERIODIC_COLUMNS] =
+        let periodic_values: [Felt; NUM_PERIODIC_COLUMNS] =
             array::from_fn(|col| periodic_columns[col][row_idx]);
-        let selectors = Air32Selectors::new(&periodic_values, 0);
-        validate_air32_row_selectors(row_idx, &selectors)?;
+        let selectors = BlakeGSelectors::new(&periodic_values, 0);
+        validate_row_selectors(row_idx, &selectors)?;
 
         match row_kind(row_idx) {
             RowKind::Ab | RowKind::Cd | RowKind::AbDiag | RowKind::CdDiag => {
@@ -80,9 +80,9 @@ pub fn validate_air32_block_with_selectors(
     Ok(())
 }
 
-pub fn validate_air32_row_selectors(
+pub fn validate_row_selectors(
     row_idx: usize,
-    selectors: &Air32Selectors<Felt>,
+    selectors: &BlakeGSelectors<Felt>,
 ) -> ConstraintResult {
     let (is_ab, is_cd, is_diag, is_footer) = match row_kind(row_idx) {
         RowKind::Ab => (1, 0, 0, 0),
@@ -121,7 +121,7 @@ pub fn validate_air32_row_selectors(
     Ok(())
 }
 
-pub fn validate_fused_g_block(rows: &[Air32Row; BLOCK_PERIOD], h: [u32; 8]) -> ConstraintResult {
+pub fn validate_fused_g_block(rows: &[BlakeGRow; BLOCK_PERIOD], h: [u32; 8]) -> ConstraintResult {
     validate_initial_state(&rows[0], h)?;
 
     for row in 0..FUSED_G_ROWS {
@@ -134,7 +134,7 @@ pub fn validate_fused_g_block(rows: &[Air32Row; BLOCK_PERIOD], h: [u32; 8]) -> C
     Ok(())
 }
 
-pub fn validate_footer_block(rows: &[Air32Row; BLOCK_PERIOD]) -> ConstraintResult {
+pub fn validate_footer_block(rows: &[BlakeGRow; BLOCK_PERIOD]) -> ConstraintResult {
     for footer in 0..FOOTER_ROWS {
         validate_footer_row(&rows[FOOTER_START + footer], footer)?;
 
@@ -150,12 +150,12 @@ pub fn validate_footer_block(rows: &[Air32Row; BLOCK_PERIOD]) -> ConstraintResul
     Ok(())
 }
 
-pub fn validate_initial_state(row: &Air32Row, h: [u32; 8]) -> ConstraintResult {
+pub fn validate_initial_state(row: &BlakeGRow, h: [u32; 8]) -> ConstraintResult {
     let input = read_input_state(row, 0)?;
     ensure(0, "initial working state", input == initial_working_state(h))
 }
 
-pub fn validate_fused_g_row(row: &Air32Row, row_idx: usize) -> ConstraintResult {
+pub fn validate_fused_g_row(row: &BlakeGRow, row_idx: usize) -> ConstraintResult {
     let step = fused_step_at(row_idx).expect("row is a fused G row");
 
     for g in 0..NUM_G {
@@ -204,7 +204,7 @@ pub fn validate_fused_g_row(row: &Air32Row, row_idx: usize) -> ConstraintResult 
     Ok(())
 }
 
-pub fn validate_footer_row(row: &Air32Row, footer: usize) -> ConstraintResult {
+pub fn validate_footer_row(row: &BlakeGRow, footer: usize) -> ConstraintResult {
     let row_idx = FOOTER_START + footer;
     let words = validate_footer_xor_surface(row, footer)?;
 
@@ -234,8 +234,8 @@ pub fn validate_footer_row(row: &Air32Row, footer: usize) -> ConstraintResult {
 }
 
 pub fn validate_footer_transition(
-    local: &Air32Row,
-    next: &Air32Row,
+    local: &BlakeGRow,
+    next: &BlakeGRow,
     footer: usize,
 ) -> ConstraintResult {
     let row_idx = FOOTER_START + footer;
@@ -290,8 +290,8 @@ pub fn validate_footer_transition(
 }
 
 pub fn validate_fused_g_transition(
-    local: &Air32Row,
-    next: &Air32Row,
+    local: &BlakeGRow,
+    next: &BlakeGRow,
     row_idx: usize,
 ) -> ConstraintResult {
     let local_output = read_output_state(local, row_idx)?;
@@ -304,7 +304,7 @@ pub fn validate_fused_g_transition(
     Ok(())
 }
 
-pub fn read_input_state(row: &Air32Row, row_idx: usize) -> Result<[u32; 16], ConstraintViolation> {
+pub fn read_input_state(row: &BlakeGRow, row_idx: usize) -> Result<[u32; 16], ConstraintViolation> {
     let step = fused_step_at(row_idx).expect("row is a fused G row");
     let mut state = [0; 16];
 
@@ -319,7 +319,10 @@ pub fn read_input_state(row: &Air32Row, row_idx: usize) -> Result<[u32; 16], Con
     Ok(state)
 }
 
-pub fn read_output_state(row: &Air32Row, row_idx: usize) -> Result<[u32; 16], ConstraintViolation> {
+pub fn read_output_state(
+    row: &BlakeGRow,
+    row_idx: usize,
+) -> Result<[u32; 16], ConstraintViolation> {
     let step = fused_step_at(row_idx).expect("row is a fused G row");
     let mut state = read_input_state(row, row_idx)?;
 
@@ -337,7 +340,7 @@ pub fn read_output_state(row: &Air32Row, row_idx: usize) -> Result<[u32; 16], Co
     Ok(state)
 }
 
-fn validate_footer_bridge(row: &Air32Row, final_state: [u32; 16]) -> ConstraintResult {
+fn validate_footer_bridge(row: &BlakeGRow, final_state: [u32; 16]) -> ConstraintResult {
     let row_idx = FOOTER_START;
     let words = read_footer_words(row, 0)?;
 
@@ -358,7 +361,7 @@ fn validate_footer_bridge(row: &Air32Row, final_state: [u32; 16]) -> ConstraintR
 }
 
 fn validate_footer_xor_surface(
-    row: &Air32Row,
+    row: &BlakeGRow,
     footer: usize,
 ) -> Result<FooterWords, ConstraintViolation> {
     let row_idx = FOOTER_START + footer;
@@ -396,7 +399,7 @@ fn validate_footer_xor_surface(
     })
 }
 
-fn validate_footer_message_group(row: &Air32Row, footer: usize) -> ConstraintResult {
+fn validate_footer_message_group(row: &BlakeGRow, footer: usize) -> ConstraintResult {
     let row_idx = FOOTER_START + footer;
     let mut words = [0u32; F_MSG_WORD_SLOTS];
 
@@ -428,7 +431,11 @@ fn validate_footer_message_group(row: &Air32Row, footer: usize) -> ConstraintRes
     Ok(())
 }
 
-fn validate_footer_prefixes(row: &Air32Row, footer: usize, words: FooterWords) -> ConstraintResult {
+fn validate_footer_prefixes(
+    row: &BlakeGRow,
+    footer: usize,
+    words: FooterWords,
+) -> ConstraintResult {
     let row_idx = FOOTER_START + footer;
     let mut message_words = [0u32; F_MSG_WORD_SLOTS];
 
@@ -471,7 +478,7 @@ fn validate_footer_prefixes(row: &Air32Row, footer: usize, words: FooterWords) -
 }
 
 fn validate_footer_canonicality(
-    row: &Air32Row,
+    row: &BlakeGRow,
     footer: usize,
     words: FooterWords,
 ) -> ConstraintResult {
@@ -508,7 +515,7 @@ fn validate_footer_canonicality(
     )
 }
 
-fn validate_footer_future_w_tail(row: &Air32Row, footer: usize) -> ConstraintResult {
+fn validate_footer_future_w_tail(row: &BlakeGRow, footer: usize) -> ConstraintResult {
     let row_idx = FOOTER_START + footer;
 
     for idx in future_w_len(footer)..F_FUTURE_W_COLS {
@@ -518,7 +525,7 @@ fn validate_footer_future_w_tail(row: &Air32Row, footer: usize) -> ConstraintRes
     Ok(())
 }
 
-fn validate_ac_and_slots(row: &Air32Row, g: usize, row_idx: usize) -> ConstraintResult {
+fn validate_ac_and_slots(row: &BlakeGRow, g: usize, row_idx: usize) -> ConstraintResult {
     for byte in 0..BYTES_PER_WORD {
         let lhs = read_byte(row, g_ac_byte_slot_col(g, byte, 0), row_idx, "AC lhs byte")?;
         let rhs = read_byte(row, g_ac_byte_slot_col(g, byte, 1), row_idx, "AC rhs byte")?;
@@ -530,7 +537,7 @@ fn validate_ac_and_slots(row: &Air32Row, g: usize, row_idx: usize) -> Constraint
 }
 
 fn validate_bd_rotation_slots(
-    row: &Air32Row,
+    row: &BlakeGRow,
     g: usize,
     rotation: u32,
     row_idx: usize,
@@ -546,12 +553,12 @@ fn validate_bd_rotation_slots(
     Ok(())
 }
 
-fn read_footer_words(row: &Air32Row, footer: usize) -> Result<FooterWords, ConstraintViolation> {
+fn read_footer_words(row: &BlakeGRow, footer: usize) -> Result<FooterWords, ConstraintViolation> {
     validate_footer_xor_surface(row, footer)
 }
 
 fn read_footer_xor_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     slot_base: usize,
     row_idx: usize,
 ) -> Result<(u32, u32, u32), ConstraintViolation> {
@@ -572,7 +579,7 @@ fn read_footer_xor_word(
 }
 
 fn validate_canonical_pair(
-    row: &Air32Row,
+    row: &BlakeGRow,
     row_idx: usize,
     lo: u32,
     hi: u32,
@@ -600,7 +607,7 @@ fn canonicality_high_word_offset(hi: u32) -> Felt {
 }
 
 fn rotated_ac_xor_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     g: usize,
     rotation: u32,
     row_idx: usize,
@@ -617,7 +624,7 @@ fn rotated_ac_xor_word(
 }
 
 fn rotated_bd_xor_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     g: usize,
     rotation: u32,
     row_idx: usize,
@@ -639,7 +646,7 @@ fn rotated_bd_xor_word(
 }
 
 fn read_ac_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     g: usize,
     field: usize,
     row_idx: usize,
@@ -649,7 +656,7 @@ fn read_ac_word(
 }
 
 fn read_bd_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     g: usize,
     field: usize,
     row_idx: usize,
@@ -659,7 +666,7 @@ fn read_bd_word(
 }
 
 fn read_slot_word(
-    row: &Air32Row,
+    row: &BlakeGRow,
     col: impl Fn(usize) -> usize,
     row_idx: usize,
     check: &'static str,
@@ -691,7 +698,7 @@ fn pack_pair(lo: u32, hi: u32) -> u64 {
 }
 
 fn read_byte(
-    row: &Air32Row,
+    row: &BlakeGRow,
     col: usize,
     row_idx: usize,
     check: &'static str,
@@ -701,7 +708,7 @@ fn read_byte(
 }
 
 fn read_u32(
-    row: &Air32Row,
+    row: &BlakeGRow,
     col: usize,
     row_idx: usize,
     check: &'static str,
@@ -711,7 +718,7 @@ fn read_u32(
 }
 
 fn read_u16(
-    row: &Air32Row,
+    row: &BlakeGRow,
     col: usize,
     row_idx: usize,
     check: &'static str,
@@ -721,7 +728,7 @@ fn read_u16(
 }
 
 fn read_bit(
-    row: &Air32Row,
+    row: &BlakeGRow,
     col: usize,
     row_idx: usize,
     check: &'static str,
