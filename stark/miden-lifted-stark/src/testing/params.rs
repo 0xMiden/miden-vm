@@ -45,7 +45,7 @@ pub const RELATIVE_SPECS: &[&[(usize, usize)]] =
     &[&[(4, 10), (2, 100), (0, 50)], &[(4, 8), (2, 20), (0, 20)], &[(0, 16)]];
 
 /// Label for benchmark group names indicating parallelism mode.
-pub const PARALLEL_STR: &str = if cfg!(feature = "parallel") {
+pub const PARALLEL_STR: &str = if cfg!(feature = "concurrent") {
     "parallel"
 } else {
     "single"

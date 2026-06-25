@@ -8,7 +8,7 @@
 //! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench merkle_commit --features testing
 //!
 //! # With parallelism
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench merkle_commit --features testing,parallel
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench merkle_commit --features testing,concurrent
 //!
 //! # Filter by field
 //! cargo bench --bench merkle_commit --features testing -- goldilocks

@@ -1,4 +1,5 @@
 ## 0.28.0 (TBD)
+- [BREAKING] Rename miden-lifted-stark `parallel` feature to `concurrent` and make it a default one ([#1073](https://github.com/0xMiden/crypto/issues/1073)).
 
 ## 0.27.0 (2026-06-19)
 

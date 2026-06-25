@@ -57,9 +57,9 @@ criterion.workspace          = true
 tracing-subscriber.workspace = true
 
 [features]
-default  = []
-parallel = ["p3-maybe-rayon/parallel"]
-testing  = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
+concurrent = ["p3-maybe-rayon/parallel"]
+default    = ["concurrent"]
+testing    = ["dep:p3-blake3", "dep:p3-blake3-air", "dep:p3-keccak", "dep:p3-keccak-air", "dep:p3-poseidon2-air"]
 
 [[bench]]
 harness           = false

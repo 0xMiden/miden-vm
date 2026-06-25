@@ -10,22 +10,22 @@
 //!
 //! ```bash
 //! # Quick run with defaults (blake3:15 keccak:18 poseidon2:19):
-//! cargo run -p miden-bench --features parallel --release
+//! cargo run -p miden-bench --features concurrent --release
 //!
 //! # Custom traces:
-//! cargo run -p miden-bench --features parallel --release -- keccak:15 keccak:18 keccak:19
+//! cargo run -p miden-bench --features concurrent --release -- keccak:15 keccak:18 keccak:19
 //!
 //! # Full tracing tree:
-//! cargo run -p miden-bench --features parallel --release -- -v keccak:15
+//! cargo run -p miden-bench --features concurrent --release -- -v keccak:15
 //!
 //! # Multi-iteration with warm-up (reports min/median/mean/max):
-//! cargo run -p miden-bench --features parallel --release -- -n 5 keccak:15
+//! cargo run -p miden-bench --features concurrent --release -- -n 5 keccak:15
 //!
 //! # Miden-shaped AIR (auto log_blowup=3):
-//! cargo run -p miden-bench --features parallel --release -- miden:18:51 miden:19:20
+//! cargo run -p miden-bench --features concurrent --release -- miden:18:51 miden:19:20
 //!
 //! # Batch-STARK comparison:
-//! cargo run -p miden-bench --features parallel --release -- -m batch keccak:15 keccak:18
+//! cargo run -p miden-bench --features concurrent --release -- -m batch keccak:15 keccak:18
 //! ```
 
 mod batch;

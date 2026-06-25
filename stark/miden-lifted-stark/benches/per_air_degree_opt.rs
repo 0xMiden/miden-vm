@@ -21,7 +21,7 @@
 //! Run:
 //! ```bash
 //! RUSTFLAGS="-Ctarget-cpu=native" cargo bench -p miden-lifted-stark \
-//!     --bench per_air_degree_opt --features testing,parallel
+//!     --bench per_air_degree_opt --features testing,concurrent
 //! ```
 
 use std::time::Instant;

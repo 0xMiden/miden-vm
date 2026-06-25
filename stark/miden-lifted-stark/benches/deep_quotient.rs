@@ -8,7 +8,7 @@
 //! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench deep_quotient --features testing
 //!
 //! # With parallelism
-//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench deep_quotient --features testing,parallel
+//! RUSTFLAGS="-Ctarget-cpu=native" cargo bench --bench deep_quotient --features testing,concurrent
 //!
 //! # Filter by field
 //! cargo bench --bench deep_quotient --features testing -- goldilocks

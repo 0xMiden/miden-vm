@@ -52,7 +52,7 @@ make doc
 ## Run An Example
 
 ```bash
-cargo run -p miden-bench --features parallel --release -- keccak:15
+cargo run -p miden-bench --features concurrent --release -- keccak:15
 ```
 
 ## Security Disclaimer
