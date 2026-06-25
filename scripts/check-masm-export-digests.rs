@@ -151,7 +151,7 @@ fn compare_export(name: &str, previous: &ExportInfo, current: &ExportInfo) -> bo
             compare_procedure(name, previous, current)
         },
         (ExportInfo::Type(previous), ExportInfo::Type(current)) => {
-            if previous.ty == current.ty {
+            if canonicalize_type_string(&previous.ty) == canonicalize_type_string(&current.ty) {
                 false
             } else {
                 eprintln!(
@@ -183,7 +183,10 @@ fn compare_procedure(name: &str, previous: &ProcedureInfo, current: &ProcedureIn
         changed = true;
     }
 
-    if previous.signature.is_some() && previous.signature != current.signature {
+    if previous.signature.is_some()
+        && canonicalize_type_string(previous.signature.as_deref().unwrap_or(""))
+            != canonicalize_type_string(current.signature.as_deref().unwrap_or(""))
+    {
         eprintln!(
             "::error::export signature changed for {name}: previous={}, current={}",
             previous.signature.as_deref().unwrap_or("None"),
@@ -192,7 +195,8 @@ fn compare_procedure(name: &str, previous: &ProcedureInfo, current: &ProcedureIn
         changed = true;
     }
 
-    // Adding ABI metadata is non-breaking; removing or changing previously published ABI metadata is not.
+    // Adding ABI metadata is non-breaking; removing or changing previously published ABI metadata
+    // is not.
     for (attr, previous_value) in &previous.abi_attributes {
         let current_value = current.abi_attributes.get(attr).map(String::as_str).unwrap_or("None");
         if previous_value != current_value {
@@ -210,12 +214,297 @@ fn is_abi_attribute(name: &str) -> bool {
     matches!(name, "auth_script" | "callconv")
 }
 
-mod current {
+/// Compare a pretty-printed signature or type string ignoring struct field labels.
+///
+/// Struct field names are display-only metadata in Miden Assembly: they do not affect the
+/// wire/memory layout, procedure MAST roots, or operand-stack encoding of a type. Changes that
+/// only add, remove, or rename field labels are therefore non-breaking, even though the resolved
+/// `StructType` derives `PartialEq`/`Hash` over the (now populated) name field. This helper strips
+/// the `name :` prefix from each struct field so such deltas compare equal.
+///
+/// It deliberately preserves everything that *is* part of the ABI: field types, field count, field
+/// order, struct names, `repr` attributes (`@bigendian`, `@packed`, etc.), and all non-struct
+/// syntax. Only the leading `ident :` of a struct field is removed.
+fn canonicalize_type_string(value: &str) -> String {
+    normalize(&strip_field_labels(value))
+}
+
+/// Remove the `ident :` prefix from each struct field.
+///
+/// We track brace depth: inside a `{...}` struct body, an identifier immediately followed (after
+/// optional spaces) by `:` is a field label and is dropped along with the colon. Everything else
+/// is emitted verbatim. Nested structs are handled because the depth counter tracks every brace.
+fn strip_field_labels(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let chars: Vec<char> = value.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    let mut brace_depth: i32 = 0;
+    let mut at_field_start = false;
+
+    while i < n {
+        match chars[i] {
+            '{' => {
+                brace_depth += 1;
+                at_field_start = true;
+                out.push('{');
+                i += 1;
+            },
+            '}' => {
+                if brace_depth > 0 {
+                    brace_depth -= 1;
+                }
+                at_field_start = false;
+                out.push('}');
+                i += 1;
+            },
+            ',' if brace_depth > 0 => {
+                at_field_start = true;
+                out.push(',');
+                i += 1;
+            },
+            '\n' | '\r' if brace_depth > 0 => {
+                at_field_start = true;
+                out.push(chars[i]);
+                i += 1;
+            },
+            c if brace_depth > 0 && at_field_start && (c.is_alphabetic() || c == '_') => {
+                let start = i;
+                while i < n && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '-') {
+                    i += 1;
+                }
+                let ident: String = chars[start..i].iter().collect();
+                let mut j = i;
+                while j < n && (chars[j] == ' ' || chars[j] == '\t') {
+                    j += 1;
+                }
+                if j < n && chars[j] == ':' && (j + 1 == n || chars[j + 1] != ':') {
+                    i = j + 1;
+                } else {
+                    out.push_str(&ident);
+                }
+                at_field_start = false;
+            },
+            c => {
+                if brace_depth > 0 && !c.is_whitespace() {
+                    at_field_start = false;
+                }
+                out.push(c);
+                i += 1;
+            },
+        }
+    }
+
+    out
+}
+
+/// Normalize whitespace and field separators so the single-line and multi-line pretty-printed
+/// forms of the same type compare equal.
+///
+/// Inside a struct body the pretty-printer separates fields with `, ` (single-line) or a newline
+/// (multi-line). We treat both as field separators and collapse any separator to a single `,`.
+/// Outside struct bodies, whitespace runs collapse to a single space. A final pass drops spaces
+/// adjacent to structural punctuation.
+fn normalize(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let n = chars.len();
+    let is_ws = |c: char| c == ' ' || c == '\t' || c == '\n' || c == '\r';
+
+    let mut pass1 = String::with_capacity(n);
+    let mut brace_depth: i32 = 0;
+    let mut i = 0;
+    let mut pending_field_sep = false;
+    while i < n {
+        match chars[i] {
+            '{' => {
+                brace_depth += 1;
+                pass1.push('{');
+                pending_field_sep = false;
+                i += 1;
+            },
+            '}' => {
+                if brace_depth > 0 {
+                    brace_depth -= 1;
+                }
+                pass1.push('}');
+                pending_field_sep = false;
+                i += 1;
+            },
+            ',' if brace_depth > 0 => {
+                if pending_field_sep {
+                    pass1.push(',');
+                    pending_field_sep = false;
+                }
+                i += 1;
+            },
+            _ if is_ws(chars[i]) => {
+                let mut has_newline = false;
+                while i < n && is_ws(chars[i]) {
+                    has_newline |= matches!(chars[i], '\n' | '\r');
+                    i += 1;
+                }
+                if brace_depth > 0 {
+                    let next = if i < n { Some(chars[i]) } else { None };
+                    if has_newline
+                        && pending_field_sep
+                        && !matches!(next, None | Some('}' | ','))
+                    {
+                        pass1.push(',');
+                        pending_field_sep = false;
+                    } else if !pass1.is_empty() && !pass1.ends_with(' ') {
+                        pass1.push(' ');
+                    }
+                } else if !pass1.is_empty() && !pass1.ends_with(' ') {
+                    pass1.push(' ');
+                }
+            },
+            c => {
+                pass1.push(c);
+                if brace_depth > 0 {
+                    pending_field_sep = true;
+                }
+                i += 1;
+            },
+        }
+    }
+
+    let chars2: Vec<char> = pass1.chars().collect();
+    let n2 = chars2.len();
+    let is_punct = |c: char| matches!(c, '{' | '}' | '(' | ')' | ',' | ':' | '<' | '>');
+    let mut out = String::with_capacity(n2);
+    for idx in 0..n2 {
+        if chars2[idx] == ' ' {
+            let prev = if idx == 0 { None } else { Some(chars2[idx - 1]) };
+            let next = if idx + 1 == n2 { None } else { Some(chars2[idx + 1]) };
+            if matches!(prev, Some(p) if is_punct(p)) || matches!(next, Some(p) if is_punct(p)) {
+                continue;
+            }
+        }
+        out.push(chars2[idx]);
+    }
+    out.trim_end().to_string()
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalize_strips_struct_field_labels() {
+        let previous = "struct u256 {u128, u128}";
+        let current = "struct u256 {lo : u128, hi : u128}";
+        assert_eq!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_strips_field_labels_in_signature() {
+        let previous = "extern \"fast\" fn(struct u256 {u128, u128}) -> struct u256 {u128, u128}";
+        let current = "extern \"fast\" fn(struct u256 {lo : u128, hi : u128}) -> struct u256 {lo : u128, hi : u128}";
+        assert_eq!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_preserves_field_type_changes() {
+        let previous = "struct u256 {u128, u128}";
+        let current = "struct u256 {u64, u64}";
+        assert_ne!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_preserves_field_count_changes() {
+        let previous = "struct u256 {u128, u128}";
+        let current = "struct u256 {u128, u128, u128}";
+        assert_ne!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_preserves_struct_name_changes() {
+        let previous = "struct u256 {u128, u128}";
+        let current = "struct u512 {u128, u128}";
+        assert_ne!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_preserves_repr_attributes() {
+        let previous = "struct u256 {u128, u128}";
+        let current = "@packed struct u256 {u128, u128}";
+        assert_ne!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_handles_nested_structs() {
+        let previous = "struct outer {struct inner {u128}, u128}";
+        let current = "struct outer {x : struct inner {lo : u128}, y : u128}";
+        assert_eq!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_handles_multiline_signatures_from_ci() {
+        // Exact form reported by the release gate after #3269: the second struct body uses the
+        // multi-line layout with newline-separated fields and no commas.
+        let previous =
+            "extern \"fast\" fn(struct u256 {u128, u128}, struct u256 {u128, u128}) -> i1";
+        let current = "extern \"fast\" fn(struct u256 {lo : u128, hi : u128}, struct u256 {\n    lo : u128\n    hi : u128}) -> i1";
+        assert_eq!(canonicalize_type_string(previous), canonicalize_type_string(current));
+    }
+
+    #[test]
+    fn canonicalize_treats_label_renames_as_equal() {
+        let a = "struct u256 {lo : u128, hi : u128}";
+        let b = "struct u256 {low : u128, high : u128}";
+        assert_eq!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_catches_field_count_diff_in_multiline_form() {
+        let a = "struct u256 {u128, u128}";
+        let b = "struct u256 {\n    lo : u128}";
+        assert_ne!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_ignores_struct_body_padding() {
+        let a = "struct u128 {u64}";
+        let b = "struct u128 { u64 }";
+        assert_eq!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_ignores_trailing_multiline_struct_body_padding() {
+        let a = "struct u128 {u64}";
+        let b = "struct u128 {\n    u64\n}";
+        assert_eq!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_preserves_qualified_type_changes() {
+        let a = "struct wrapper {foo::T}";
+        let b = "struct wrapper {bar::T}";
+        assert_ne!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_preserves_qualified_type_changes_after_label() {
+        let a = "struct wrapper {value : foo::T}";
+        let b = "struct wrapper {value : bar::T}";
+        assert_ne!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+
+    #[test]
+    fn canonicalize_ignores_label_changes_on_qualified_types() {
+        let a = "struct wrapper {left : foo::T}";
+        let b = "struct wrapper {right : foo::T}";
+        assert_eq!(canonicalize_type_string(a), canonicalize_type_string(b));
+    }
+}
+
+mod current {
     use miden_assembly_current::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_current::prettier::PrettyPrint;
     use miden_mast_package_current::{Package, PackageExport};
     use miden_package_registry_current::InMemoryPackageRegistry;
+
+    use super::*;
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
@@ -260,11 +549,12 @@ mod current {
 }
 
 mod previous {
-    use super::*;
     use miden_assembly_previous::{Assembler, ProjectTargetSelector};
     use miden_assembly_syntax_previous::prettier::PrettyPrint;
     use miden_mast_package_previous::{Package, PackageExport};
     use miden_package_registry_previous::InMemoryPackageRegistry;
+
+    use super::*;
 
     pub fn collect_exports(input: &Path) -> Result<Exports, String> {
         let mut store = InMemoryPackageRegistry::default();
