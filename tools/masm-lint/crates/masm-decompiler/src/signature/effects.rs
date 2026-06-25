@@ -238,11 +238,8 @@ impl From<&Instruction> for StackEffect {
             // Stack effects from calls are handled manually during analysis.
             Exec(_) | Call(_) | SysCall(_) | DynExec | DynCall => StackEffect::Unknown,
 
-            Debug(_) => StackEffect::known(0, 0),
-
             Emit => StackEffect::known(0, 0).with_required_depth(1),
             EmitImm(_) => StackEffect::known(0, 0),
-            Trace(_) => StackEffect::known(0, 0),
             _ => StackEffect::Unknown,
         }
     }

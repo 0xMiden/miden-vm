@@ -891,5 +891,9 @@ fn simulate_op<S: RepeatBlockStack>(
             span: op.span(),
             reason: "repeat loop contains a while loop".to_string(),
         }),
+        Op::DoWhile { .. } => Err(LiftingError::UnsupportedRepeatPattern {
+            span: op.span(),
+            reason: "repeat loop contains a dowhile loop".to_string(),
+        }),
     }
 }

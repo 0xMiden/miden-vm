@@ -16,16 +16,11 @@ enum CallTarget {
     Opaque,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CallEdge {
-    target: CallTarget,
-}
-
 #[derive(Debug, Clone)]
 pub struct ProcNode {
     name: SymbolPath,
     module_path: SymbolPath,
-    edges: Vec<CallEdge>,
+    edges: Vec<CallTarget>,
 }
 
 impl ProcNode {
@@ -74,59 +69,23 @@ impl CallGraph {
     /// Returns an iterator that yields nodes in bottom-up order (leaves first,
     /// then nodes whose callees have all been processed, and so on).
     pub fn iter(&self) -> impl Iterator<Item = &ProcNode> + '_ {
-        CallGraphIterator::new(self)
-    }
-}
-
-fn edge_from_invoke(invoke: &Invoke, resolver: &SymbolResolver<'_>) -> CallEdge {
-    CallEdge {
-        target: resolver
-            .resolve_target(&invoke.target)
-            .ok()
-            .flatten()
-            .map(CallTarget::Direct)
-            .unwrap_or(CallTarget::Opaque),
-    }
-}
-
-/// Iterator that yields nodes in bottom-up order (leaves first, then nodes
-/// whose callees have all been processed, and so on). Non-SCC nodes are
-/// guaranteed to come before SCC nodes.
-struct CallGraphIterator<'a> {
-    graph: &'a CallGraph,
-    /// Collected nodes in bottom-up order
-    sorted_nodes: Vec<usize>,
-    /// Current index into `sorted_nodes` for iteration
-    current_index: usize,
-    /// Whether we've completed the initialization
-    initialized: bool,
-}
-
-impl<'a> CallGraphIterator<'a> {
-    fn new(graph: &'a CallGraph) -> Self {
-        CallGraphIterator {
-            graph,
-            sorted_nodes: Vec::new(),
-            current_index: 0,
-            initialized: false,
-        }
+        self.sorted_node_ids().into_iter().map(|idx| &self.nodes[idx])
     }
 
-    fn initialize(&mut self) {
+    fn sorted_node_ids(&self) -> Vec<usize> {
         // For each node, compute the set of callees
         let mut callees: HashMap<usize, HashSet<usize>> = HashMap::new();
 
-        for idx in 0..self.graph.nodes.len() {
-            let node = &self.graph.nodes[idx];
+        for idx in 0..self.nodes.len() {
+            let node = &self.nodes[idx];
             let node_callees: HashSet<usize> = node
                 .edges
                 .iter()
-                .filter_map(|e| {
-                    if let CallTarget::Direct(target) = &e.target {
-                        self.graph.name_to_id.get(target).copied()
-                    } else {
-                        None
-                    }
+                .filter_map(|target| {
+                    let CallTarget::Direct(target) = target else {
+                        return None;
+                    };
+                    self.name_to_id.get(target).copied()
                 })
                 .collect();
             callees.insert(idx, node_callees);
@@ -134,6 +93,7 @@ impl<'a> CallGraphIterator<'a> {
 
         // Process nodes level by level, starting with leaves
         let mut processed_nodes: HashSet<usize> = HashSet::new();
+        let mut sorted_nodes = Vec::new();
 
         loop {
             // Find all nodes where all callees are already processed
@@ -155,36 +115,25 @@ impl<'a> CallGraphIterator<'a> {
             new_nodes.sort();
 
             for node_index in new_nodes {
-                self.sorted_nodes.push(node_index);
+                sorted_nodes.push(node_index);
                 processed_nodes.insert(node_index);
             }
         }
 
         // Append any remaining nodes (cycles) at the end
-        let mut remaining_nodes: Vec<usize> = (0..self.graph.nodes.len())
-            .filter(|idx| !processed_nodes.contains(idx))
-            .collect();
+        let mut remaining_nodes: Vec<usize> =
+            (0..self.nodes.len()).filter(|idx| !processed_nodes.contains(idx)).collect();
         remaining_nodes.sort();
-        self.sorted_nodes.extend(remaining_nodes);
-
-        self.initialized = true;
+        sorted_nodes.extend(remaining_nodes);
+        sorted_nodes
     }
 }
 
-impl<'a> Iterator for CallGraphIterator<'a> {
-    type Item = &'a ProcNode;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.initialized {
-            self.initialize();
-        }
-
-        if self.current_index < self.sorted_nodes.len() {
-            let node_index = self.sorted_nodes[self.current_index];
-            self.current_index += 1;
-            Some(&self.graph.nodes[node_index])
-        } else {
-            None
-        }
-    }
+fn edge_from_invoke(invoke: &Invoke, resolver: &SymbolResolver<'_>) -> CallTarget {
+    resolver
+        .resolve_target(&invoke.target)
+        .ok()
+        .flatten()
+        .map(CallTarget::Direct)
+        .unwrap_or(CallTarget::Opaque)
 }

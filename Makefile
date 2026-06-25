@@ -121,7 +121,7 @@ masm-lint-core: ## Runs the MASM lint tool over the core library
 		crates/lib/core/asm
 
 .PHONY: lint
-lint: xclippy xclippy-fix format masm-lint-clippy masm-lint-format masm-lint-core ## Runs all linting tasks: check with xclippy, fix issues, then format
+lint: xclippy xclippy-fix format masm-lint-clippy masm-lint-core ## Runs all linting tasks: check with xclippy, fix issues, then format
 
 # --- docs ----------------------------------------------------------------------------------------
 
